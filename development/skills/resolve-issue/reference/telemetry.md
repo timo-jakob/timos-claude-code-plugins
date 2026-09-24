@@ -158,7 +158,7 @@ matches:**
 | on a §0b `NEEDS_REFINEMENT` | `gate-parked` |
 | on a **loop invocation that exited** `ESCALATE_*` / `BUDGET_EXHAUSTED`, with no PR (after the interactive extension, if one ran) | `escalated` |
 | with a PR opened — after either of §3.5's PR-opening terminals, or after a `--no-review` skip of the loop | `pr-opened` |
-| any other way after Step 0a: the last precheck errored (`null`, the re-verification included), a red gate was abandoned, a §2 stop on an under-specified story, a gate or loop errored, or **the round protocol stopped before any loop invocation** — a `review-dispatch.zsh plan` that exited 1, 2 or 3 (its exit 3 is the same condition the loop would have called `ESCALATE_AMBIGUOUS`, but no loop ran), an unreadable carry, or a panel that could not be dispatched | `failed` |
+| any other way after Step 0a: the last precheck errored (`null`, the re-verification included), a red gate was abandoned, a §2 stop on an under-specified story or a size pre-flight split (its own `story-preflight` record, parented to this run, carries the `parked`), a gate or loop errored, or **the round protocol stopped before any loop invocation** — a `review-dispatch.zsh plan` that exited 1, 2 or 3 (its exit 3 is the same condition the loop would have called `ESCALATE_AMBIGUOUS`, but no loop ran), an unreadable carry, or a panel that could not be dispatched | `failed` |
 
 A granted escalation that later converges ends `pr-opened`. `AWAITING_FIX` and
 `STALE_FINDINGS` are never endings. Once the row is picked, **set

@@ -5540,6 +5540,58 @@ review-loop records under the same parent, so a query joining on
 `parent_run_id` sees a story's whole review churn. The review-loop metrics above
 are unchanged: they filter `pipeline == "review-loop"`.
 
+## Story size pre-flight (#1437)
+
+`/development:resolve-issue` §2 checks the **size** of a change before
+building it, because no round budget rescues a change too large to review to a
+fixed point (#687: 49 files, nine rounds, never zero; #1435: 27 files, ten
+rounds). The session declares an inventory of the paths it intends to touch —
+a judgement written before the first edit, not a measured diff — and
+`scripts/size-preflight.zsh`, a pure function of that inventory and the
+marketplace manifest, returns `pass` (exit 0) or `stop` (exit 1) with its
+triggers; exits 2 and 3 print nothing and decide nothing — the run rewrites a
+malformed inventory once, and otherwise stops (an epic child is parked). The three triggers
+are strict comparisons: more than twenty files; any owned file outside the
+primary plugin, a tie for primary included; a bootstrap template edited
+together with an owned file outside the bootstrap skill, the templates' own
+plugin manifest excepted, since every content change bumps it. A path's owning plugin
+is its first segment when that names a marketplace plugin or a plugin the
+change creates; repo-root artifacts are unowned, counting toward the file total
+only. A repo with no marketplace manifest — every app repo — has no known
+plugins, so there only the file count can stop a story. The skill's §2 states
+the three stop terminals — a human override, an accepted split, and the
+autonomous park with the `needs-split` label that E3 children take — and the
+script's header states the ownership rules in full.
+
+**Telemetry.** Every verdict appends one `kind: "run"` record on the
+`story-preflight` pipeline — an open identifier, so no schema change — through
+the shared emitter, with `ts` stamping the pre-flight's start and `wall_s`
+measuring it, the human's answer included. A stop leaves no PR and no review loop, so a standalone run
+record is the only one that can carry it. The payload comes from
+`build-story-preflight-telemetry-record.zsh` — its state is the verdict itself —
+which owns the outcome mapping (`pass`
+and `overridden` → `success`, `stop` → `parked`) and refuses to record a pass
+as an override:
+
+| Key | Value |
+|---|---|
+| `verdict` | `pass` \| `stop` \| `overridden` — `overridden` only from an explicit human answer, never from silence, a timeout or an absent human |
+| `triggers` | the subset of `files`, `plugin`, `bootstrap-straddle` that fired |
+| `files` | the inventory's distinct file count |
+| `plugins` | the number of distinct owning plugins |
+| `override_by` | `"human"` on `overridden`, else `null` |
+
+In the Single-issue flow the record is parented to the run (`parent_run_id`)
+and sent to the run's sink. An E3 child has no run, so its record goes
+unparented to the local default sink until epic mode is instrumented. The join
+runs one way, through `parent_run_id`: the story record lists only its review
+loops, so this stream is an exception to rule 4 of *Per-pipeline telemetry
+instrumentation*. A split ends the run under its `failed` row, since the story
+record has no split outcome; the pre-flight record is where the `parked` lives.
+A stop whose human narrows the plan is followed by a second verdict for the same
+run, so count parked *runs* by the last pre-flight record under each
+`parent_run_id`.
+
 ## Review dossier + Approver re-ingest (#563)
 
 The PR is the durable audit record for why auto-merge happened, so a `CONVERGED`
