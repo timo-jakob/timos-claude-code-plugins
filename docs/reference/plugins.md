@@ -594,8 +594,8 @@ unconditionally), or HCP Terraform. A local backend, or none at all, clears
 nothing: a root on the implicit local backend owns a plaintext state file, which
 is precisely what the opinion exists to catch.
 
-Routing, with the agent names pinned by contract — **every row escalates
-today; #1161 turns them live** when it ships the agents:
+Routing, with the agent names pinned by contract — **every row routes**, to an
+agent #1161 shipped:
 
 | Finding tool | Disposition | Agent |
 |---|---|---|
@@ -609,23 +609,33 @@ rather than rewritten. They are still ordinary plan groups, though — routing
 them through the halt channel would cancel the mechanical fixes on the very
 repos that need them most.
 
-**What's built (v0.2):** the ownership boundary and the marketplace registration
+The review panel, `/development-opentofu:review`, is two agents dispatched in
+parallel — `opentofu-security-reviewer` and `opentofu-module-advisor` (module
+boundaries and output contracts, provider and version pinning, variable
+validation and typing, backend configuration, and the structural failure modes:
+a stateful resource with no lifecycle guard, a rename with no `moved` block).
+There is no reliability agent: provisioning fails structurally, not at runtime,
+so reliability folds into the module advisor. Before dispatching anyone the
+panel runs `tofu init -backend=false` and `tofu validate`: a tree that does not
+validate **fails the round**, a provider registry that cannot be reached
+**degrades** it to a source-only review that can still succeed, and a missing
+`tflint` only adds a note. The format fixer and the policy triage agent are
+maintenance-routed, not panel members.
+
+**What's built (v0.3):** the ownership boundary and the marketplace registration
 ([#1159](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1159)),
-plus the gather script, `opentofu` topic marker and maintenance dispatcher
-([#1160](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1160)).
+the gather script, `opentofu` topic marker and maintenance dispatcher
+([#1160](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1160)),
+and the four agents and the review panel
+([#1161](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1161)).
 Getting the boundary wrong is the expensive mistake, so it was settled before
 anything filled it. The rest of epic
 [#1158](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1158)
-follows: the four agents and the review panel
-([#1161](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1161)),
-the bootstrap check pipeline
+follows: the bootstrap check pipeline
 ([#1162](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1162)),
 and the self-contained test fixtures
 ([#1163](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1163)).
-**Until #1161 lands the agents, the dispatcher routes nothing** — it escalates
-every group for human action, naming the agent the group will route to, because
-naming a subagent that does not exist would look like a broken dispatcher rather
-than work waiting on a known dependency. And as with the sibling, the check
+And as with the sibling, the check
 **pipeline** will not be here — it **will ship** as a bootstrap template in the
 generic `development` plugin, the same boundary that keeps detection there.
 

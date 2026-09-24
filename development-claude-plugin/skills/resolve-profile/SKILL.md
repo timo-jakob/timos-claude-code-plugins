@@ -82,7 +82,7 @@ whatever the tiers above would say (MAINTAINING.md states the rule under that
 same name). **Membership is a condition, not a list**: any plugin whose
 `tests/<topic>-plugin-skeleton.bats` asserts a version prefix is under it, since
 that assertion is what reds when the label and the manifest disagree. Today
-those are `development-kubernetes` (`0.3.`), `development-opentofu` (`0.2.`) and
+those are `development-kubernetes` (`0.3.`), `development-opentofu` (`0.3.`) and
 `development-composition` (`0.1.`), so cutting a minor on one means moving its
 label sites in the same PR. Skip for root-only docs.
 

@@ -1634,17 +1634,10 @@ topic `plan` depends first on `human_action_required`, then on
   whenever it cannot understand the payload: a `findings_by_tool` key its
   routing table has no row for, a `dispatch_mode` outside the two-value enum,
   or `manifest_validation: false` (presence detection, so `false` means the
-  payload was not built by the orchestrator). **For `development-kubernetes`**
-  its routable groups return a real `plan` — that plugin's escalate-everything
-  override retired with #1153.
-
-  **`development-opentofu` produces the same shape as its ORDINARY case**, not
-  only on a payload it cannot understand: until #1161 ships its agents, every
-  routed group escalates rather than routing (naming a `subagent_type` that does
-  not exist would make Phase 8 fail to spawn), so a payload carrying any finding
-  comes back with an empty `plan` and one `human_action_required` entry per
-  group. Read it as work waiting on a known dependency, not as a malformed
-  payload — and never as "nothing to do".
+  payload was not built by the orchestrator). **For both IaC topics** the
+  routable groups return a real `plan` — `development-kubernetes`'s
+  escalate-everything override retired with #1153, and `development-opentofu`'s
+  with #1161.
 - else `tooling_configured` **non-empty** → "this topic is clean — its tools ran
   and found nothing" — **except** for a dispatch in AUXILIARY mode whose topic
   SKILL.md declares keys it suppresses there (`development-opentofu` omits
@@ -2833,8 +2826,7 @@ pushed fixes for — detected, never dispatched:>
    arriving `false`; it has no `manifest_validation`. Note the two senses:
    Phase 6's "presence-detected only" names the FOUR tools that do not run in
    the gather, which excludes `state_encryption`, whose finding is evaluated
-   there) AND as its ordinary case,
-   since every routed group escalates until #1161 ships its agents:>
+   there):>
   Halted — <N> group(s) need a human decision.
     <one line per entry: <reason> → <recommendation>>
   <Else if tooling_configured is EMPTY (no tools registered for this topic yet):>
@@ -2857,10 +2849,10 @@ pushed fixes for — detected, never dispatched:>
   Auxiliary scope — keys this topic suppresses in auxiliary mode were not
   considered (<name them from the topic's SKILL.md>); their findings, if any,
   were deferred, not cleared.
-  <It is a SUFFIX and not a Clean-branch qualifier because the halted branch is
-   the ordinary case today — every opentofu group escalates until #1161 ships
-   its agents — so attaching it only to "Clean" would let the deferred finding
-   vanish on exactly the path most runs take.>
+  <It is a SUFFIX and not a Clean-branch qualifier because the deferral holds
+   whatever the verdict — a run that planned groups, or halted, skipped the
+   suppressed keys just as a clean one did — so attaching it only to "Clean"
+   would let the deferred finding vanish on every other path.>
 
   <`--no-merge` is a SUFFIX on the verdict above, never a replacement for it —
    the topic WAS dispatched, so its verdict is known and must still be stated.

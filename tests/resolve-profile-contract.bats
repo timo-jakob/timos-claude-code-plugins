@@ -1371,8 +1371,8 @@ _gate_pair_violations() {
   local dims total
   dims="$(_review_dimensions)"
   total="$(printf '%s\n' "$dims" | grep -c . || true)"
-  [ "$total" -eq 13 ] || {
-    printf 'the derived dimension roster holds %s entries, expected 13:\n%s\n' \
+  [ "$total" -eq 14 ] || {
+    printf 'the derived dimension roster holds %s entries, expected 14:\n%s\n' \
       "$total" "$dims" >&2
     printf 'A panel gaining or losing a dimension moves this figure in the same PR.\n' >&2
     return 1
@@ -2352,6 +2352,9 @@ _moved_needles() {
   # breaking the `0.3.` prefix tests/kubernetes-plugin-skeleton.bats asserts.
   grep -qF -- 'shipped-slice label' "$PROFILE"
   grep -qF -- 'development-kubernetes' "$PROFILE"
+  # every labelled plugin at the prefix its own skeleton suite asserts, both sides
+  grep -qF -- '`development-opentofu` (`0.3.`)' "$PROFILE"
+  grep -qF -- '`development-opentofu` (`0.3.`)' "$REPO_ROOT/MAINTAINING.md"
   # ...and the MAINTAINING.md rule it defers to still exists under that name,
   # so the citation cannot rot into a pointer at nothing.
   grep -qF -- 'One plugin-local override' "$REPO_ROOT/MAINTAINING.md"

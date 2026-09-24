@@ -7,8 +7,8 @@
 # the dispatcher are that the directory entry exists and that the generated
 # commands page names it — both of which stay green if the routing table lost
 # `policy_tests`, if the `.language` guard became a `.topic` guard, if the three
-# advisory rows started routing to an auto-fixer, if the interim
-# escalate-until-#1161 override silently survived into #1161, or if the
+# advisory rows started routing to an auto-fixer, if the #1160-era
+# escalate-everything override came back after #1161 retired it, or if the
 # empty-array/no-group rule were dropped so every clean dispatch escalated as
 # Halted.
 #
@@ -53,14 +53,15 @@ section() {
   contains "$FRONTMATTER" 'runs no detection of its own'
 }
 
-@test "the frontmatter carries the #1161 interim caveat, not a bare routing claim (#1160)" {
+@test "the frontmatter claims routing and no longer carries the interim caveat (#1161)" {
   # this string is reproduced verbatim into the generated
   # docs/reference/commands.md and is the summary a model may see WITHOUT the
-  # body, so an uncaveated "it ROUTES to <agent>" advertises subagent_types that
-  # would fail to spawn. #1161 retires the caveat in the same PR that creates
-  # the agents.
-  contains "$FRONTMATTER" 'Until #1161 lands those agents it routes NOTHING'
-  contains "$FRONTMATTER" 'human_action_required'
+  # body. #1160 caveated it because the agents did not exist; #1161 created
+  # them, so the caveat left behind would tell a model to escalate every group
+  # of a dispatcher that now routes them.
+  contains "$FRONTMATTER" 'It ROUTES each finding group by the routing table'
+  lacks "$FRONTMATTER" 'routes NOTHING'
+  lacks "$FRONTMATTER" 'Until #1161'
 }
 
 @test "the frontmatter names the advisory route as review, never auto-fix (#1160)" {
@@ -202,28 +203,35 @@ section() {
   contains "$s" 'silently cancel'
 }
 
-@test "the #1161 interim override covers ALL THREE agent names, not just two (#1160)" {
+@test "every row routes, one plan entry per PR group, and the override is gone (#1161)" {
   local s
   s="$(section Routing)"
   [ -n "$s" ]
-  contains "$s" 'This slice ships no agents at all'
-  contains "$s" '**every** row is escalated instead of routed'
-  contains "$s" '`opentofu-security-reviewer`, and emit one `human_action_required` entry per'
+  contains "$s" '**Every row routes.**'
+  contains "$s" 'Build one plan entry per **PR group**'
+  contains "$s" 'naming the table'"'"'s agent as its `agent`'
+  # the advisory groups' contract with the orchestrator's isolation:false path:
+  # a read-only reviewer can neither commit nor open a PR
+  contains "$s" '**The advisory groups carry `"isolation": false`, and this is their case list.**'
+  contains "$s" 'carry those entries into the run summary, and open no PR'
+  # halt keeps its family-wide meaning, and nothing else
+  contains "$s" 'a genuine halt'
+  # the interim override's phrases, retired in the same PR that shipped the
+  # agents — each one surviving would tell a model to escalate a routable group
+  lacks "$s" 'This slice ships no agents at all'
+  lacks "$s" 'escalated instead of routed'
+  lacks "$s" 'outranks every other statement of routing'
+  lacks "$s" 'inert today'
+  lacks "$s" 'INERT TODAY'
 }
 
-@test "the interim override's PREMISE holds — none of the routed agents exists yet (#1160)" {
-  # THE DANGEROUS DIRECTION, and the only one nothing else guards. Every other
-  # override test asserts the override is PRESENT; none asserts it is still
-  # WARRANTED. So #1161 could ship the agent files, forget to flip the table, and
-  # this dispatcher would escalate every finding group as human_action_required
-  # forever with the whole suite green.
+@test "the routing PREMISE holds — every agent the table routes to exists (#1161)" {
+  # the #1160 suite asserted the opposite premise (none exists yet) and asked
+  # #1161 to invert it. Inverted: a table naming an agent that has no file makes
+  # Phase 8 fail to spawn, which reads as a broken dispatcher.
   #
   # Derived from the table rather than hard-coded, so it cannot fall out of step
   # with the routing rows.
-  #
-  # #1161 MUST INVERT THIS TEST in the same PR that ships the agents and retires
-  # the override — that is the point of asserting the premise rather than the
-  # conclusion.
   local agents agent
   agents="$(sed -n 's/^| `[a-z_]*` | .* | `\([a-z-]*\)` |$/\1/p' "$SKILL" | sort -u)"
   [ -n "$agents" ]
@@ -231,30 +239,26 @@ section() {
   # a plain word-split loop: this file runs under bash, where zsh's ${(f)…} is a
   # bad substitution — and the agent names contain no whitespace
   for agent in $agents; do
-    [ ! -f "$REPO_ROOT/development-opentofu/agents/$agent.md" ]
+    [ -f "$REPO_ROOT/development-opentofu/agents/$agent.md" ]
   done
 }
 
-@test "the interim override is declared to outrank every other routing statement (#1160)" {
-  # the file restates routing in three places (the table, Dispatch mode's
-  # bullets, No coverage gate); without a precedence rule a model reading only
-  # the later section emits a plan entry naming a subagent that does not exist
+@test "the module advisor is a panel member the dispatcher never routes to (#1161)" {
+  # the fourth agent exists, and the table must not grow a row for it: no gather
+  # key carries its dimension, so a row would be a route nothing ever takes
   local s
   s="$(section Routing)"
   [ -n "$s" ]
-  contains "$s" 'This override outranks every other statement of routing in this file'
-  contains "$s" 'inert today'
+  [ -f "$REPO_ROOT/development-opentofu/agents/opentofu-module-advisor.md" ]
+  contains "$s" 'this dispatcher never routes to it'
+  run -1 grep -E '^\| `[a-z_]*` \| .* \| `opentofu-module-advisor` \|$' "$SKILL"
 }
 
 @test "an empty routed array forms no group and no escalation (#1160)" {
   local s
   s="$(section Routing)"
   [ -n "$s" ]
-  # "has a row for", not "is routed" — the interim override consumes the word
-  # *routed*, so phrasing the rule that way would read as forming no groups at
-  # all today
   contains "$s" 'A group exists only for a `findings_by_tool` key THAT THIS TABLE HAS A ROW FOR, and whose array is NON-EMPTY'
-  contains "$s" 'the override changes only what is **emitted** for them'
   contains "$s" 'no `human_action_required` entry either'
   # the reason: four keys are empty on EVERY payload, so treating each key as a
   # group escalates the ordinary clean dispatch
@@ -279,11 +283,14 @@ section() {
 
 # --- dispatch mode ------------------------------------------------------------
 
-@test "Dispatch mode dispositions all seven keys, and defers to the interim override (#1160)" {
+@test "Dispatch mode dispositions all seven keys, and suppression forms no group (#1160)" {
   local s
   s="$(section "Dispatch mode")"
   [ -n "$s" ]
-  contains "$s" 'read "routed" as "routed once the agents exist"'
+  # an omitted key is neither routed nor escalated — without it a suppressed
+  # policy_tests would halt a Java- or Go-primary target over policy fixtures
+  contains "$s" 'forms no group at all, so it is neither routed nor escalated'
+  lacks "$s" 'routed once the agents exist'
   contains "$s" '`policy_tests` → **omitted entirely** in auxiliary mode'
   # the one that must NOT be suppressed, with its reason — unencrypted state is
   # a defect whatever the repo's primary language is
@@ -300,18 +307,18 @@ section() {
 
 # --- the coverage analogue ----------------------------------------------------
 
-@test "the policy_tests ordering rule carries the interim carve-out (#1160)" {
-  # THE regression this section is most likely to produce: it is the section a
-  # model consulting "what do I do with policy_tests?" reads on its own, and
-  # without the carve-out it orders a plan entry naming an agent that does not
-  # exist in this slice
+@test "the policy_tests ordering rule is live, with no interim carve-out left (#1161)" {
+  # the section a model consulting "what do I do with policy_tests?" reads on
+  # its own: it must route the group and order test-writing first, and the
+  # #1160 carve-out telling it to escalate instead must be gone
   local s
   s="$(section "No coverage gate, one analogue")"
   [ -n "$s" ]
   contains "$s" 'ordering-blocking'
-  contains "$s" 'Until #1161 lands, this group escalates like every other'
-  contains "$s" 'build **no** plan entry'
-  contains "$s" 'inert today'
+  contains "$s" 'the group is dispatched to `opentofu-policy-triage`'
+  contains "$s" 'the plan must order test-writing before any policy-driven fix'
+  lacks "$s" 'Until #1161'
+  lacks "$s" 'inert today'
 }
 
 # --- absent policies ----------------------------------------------------------
@@ -414,19 +421,17 @@ section() {
   contains "$s" 'inverting the charter'
 }
 
-@test "the advisory guardrail carries its own inert-today qualifier (#1160)" {
-  # the guardrail forbids `human_action_required` for the three advisory rows,
-  # which is the exact envelope the interim override requires TODAY. Without the
-  # qualifier IN THIS SECTION, a model consulting "what do I do with a
-  # state_encryption finding?" builds a plan entry naming an agent that does not
-  # exist and Phase 8 fails to spawn.
+@test "the advisory guardrail is live — no qualifier sends advisory rows to the halt (#1161)" {
+  # #1160 qualified this guardrail as inert while the agents were missing, and
+  # told the advisory rows to escalate. With the agents shipped, that qualifier
+  # left behind would route an unencrypted-state finding through the halt
+  # channel and cancel the format/lint fixes travelling in the same plan.
   local s
   s="$(section Routing)"
   [ -n "$s" ]
-  contains "$s" 'INERT TODAY'
-  contains "$s" 'escalate via `human_action_required` like every other row'
-  # and the override must claim the whole file, not merely what follows it
-  contains "$s" '**any other** section'
+  contains "$s" 'Do not put them in `human_action_required`'
+  lacks "$s" 'escalate via `human_action_required` like every other row'
+  lacks "$s" '**any other** section'
 }
 
 @test "Validation halts on a configured key ABSENT from findings_by_tool (#1160)" {

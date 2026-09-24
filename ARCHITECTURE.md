@@ -1788,9 +1788,8 @@ that lives only in a consumer's policy set is a rule the consumer can forget to
 write, so the plugin checks that **state encryption is configured — in whichever
 form the repo's dialect provides** — and reports its absence as a finding, under
 the gather's `state_encryption` key, which #1160 routes to an **advisory** agent
-(→ `opentofu-security-reviewer`), **never to an auto-fixer** — escalated via
-`human_action_required` until #1161 lands that agent, the same order the sibling
-took. That is the one opinion it holds, and it is held because the
+(→ `opentofu-security-reviewer`), **never to an auto-fixer** — an agent #1161
+landed. That is the one opinion it holds, and it is held because the
 failure is silent and severe.
 
 **The check is dialect-aware, because the mechanism is not.** `terraform {
@@ -2086,24 +2085,39 @@ mechanism was needed. Such a declaration is therefore no longer treated as stale
 pipeline and require its checks — so the maintenance half is live while the CI
 half is not, which is the ordinary state of a topic mid-epic, not a defect.
 
-**#1159 landed the boundary; #1160 landed the dispatch.** This plugin now ships
-its manifest, its charter, and a maintenance dispatcher fed by
-`gather-opentofu-findings.zsh` and the `opentofu` topic marker — the marker in
-three parity-pinned copies (the orchestrator recipe, the gather, and
-`detect-stack.sh`'s `is_opentofu` classification). Still to come: the four
-agents and the review panel with #1161, the bootstrap check pipeline with #1162,
-and the self-contained test fixtures with #1163. **Until #1161 lands, the
-dispatcher routes nothing** — it escalates every group via
-`human_action_required` naming the agent the group will route to, because naming
-a `subagent_type` that does not exist would make Phase 8 fail to spawn and read
-as a broken dispatcher rather than as work waiting on a known dependency. #1161
-flips **every** row to routing when it creates the agents — the four
-auto-fix/triage rows to their two fixers (`format` and `lint` to
-`opentofu-format-fixer`, `policy` and `policy_tests` to
+**#1159 landed the boundary, #1160 the dispatch, #1161 the agents.**
+This plugin now ships its manifest, its charter, a maintenance
+dispatcher fed by `gather-opentofu-findings.zsh` and the `opentofu` topic marker
+— the marker in three parity-pinned copies (the orchestrator recipe, the
+gather, and `detect-stack.sh`'s `is_opentofu` classification) — and four agents
+plus the `/development-opentofu:review` panel. Still to come: the bootstrap check
+pipeline with #1162, and the self-contained test fixtures with #1163. **Every
+dispatcher row routes**: the four auto-fix/triage rows to their two fixers
+(`format` and `lint` to `opentofu-format-fixer`, `policy` and `policy_tests` to
 `opentofu-policy-triage`), and the three advisory rows to
 `opentofu-security-reviewer` as ordinary plan groups, never as
 `human_action_required` entries (that field is the halt branch, and an advisory
-entry there would discard the plan the mechanical fixes travel in).
+entry there would discard the plan the mechanical fixes travel in). Those
+advisory groups carry `"isolation": false`: the reviewer edits nothing, so it
+reports each finding as an `actions_requiring_review` entry and no PR opens.
+
+**The review panel is two agents, not the sibling's three.** It dispatches
+`opentofu-security-reviewer` and `opentofu-module-advisor` in parallel; there is
+no Argo CD analogue, and reliability folds into the module advisor because
+provisioning fails **structurally** — a missing lifecycle rule, an unpinned
+provider — not at runtime. The fixer and the policy triage agent are
+maintenance-routed and never panel members. The panel's pre-dispatch gate is a
+script, `skills/review/scripts/tofu-review-gate.zsh`, so its three outcomes stay
+one rule rather than a judgement re-made each round: a tree that does not pass
+`tofu validate` (or fails `tofu init` for a reason of its own) **fails the
+round**; a `tofu init` that cannot reach the provider registry **degrades** it to
+a source-only review that can succeed; both passing runs the **full** review. A
+missing `tflint` only adds a note. The gate runs in a scratch copy of the tree,
+because `tofu init` writes `.terraform/` and a lock file wherever it runs and a
+review must never move the tree it reviews. Its prune set is #1160's detection
+recipe's, pinned equal by `tests/opentofu-review-gate.bats`. The panel is
+reachable standalone; `review-dispatch.zsh` selecting it for a provisioning
+repo, so the resolve-issue loop drives it, is #1806.
 Settling the boundary first is deliberate: a topic plugin that
 creeps into Dockerfiles, cluster manifests or application code contradicts
 language-first and has to be unpicked across several plugins later.
@@ -2998,12 +3012,13 @@ from the descriptor's `fix_verification_path` **or** hook mode's
 `$REVIEW_FIX_VERIFICATION`, since a hook-mode panel sees no descriptor at all
 and would otherwise declare every hook-mode round's carry absent. When neither
 names a readable carry the caller omitted `--fix-verification`, so there is
-nothing to enumerate and nothing to cite. All six panels therefore write **no findings file at all** there and
+nothing to enumerate and nothing to cite. All seven panels therefore write **no findings file at all** there and
 report the slip to the caller, naming the flag — absence of the carry is never
 evidence of an empty one, and the missing aggregate is what makes the caller's
 omission surface as a refusal instead of a silently unverified round.
 
-All six panels (`claude-plugin`, `python`, `java`, `go`, `swift`, `kubernetes`)
+All seven panels (`claude-plugin`, `python`, `java`, `go`, `swift`, `kubernetes`,
+`opentofu`)
 carry **both rules**, with the empty-scope one's two qualifications, the
 confirmation-count report and — since #1583 — the hook-mode sidecar duty (write
 the per-entry accounting to `$REVIEW_FINDINGS.carry.json`, or the loop refuses
@@ -3012,8 +3027,10 @@ invariant is the two duties, **not the bytes** — each panel spells them in its
 own scope vocabulary (the repo, the project, the rendered temp tree) and against
 its own not-applicable terminal, and `kubernetes` necessarily says more, because
 its render-first flow has a terminal that otherwise writes no findings file at
-all. Where each rule sits also varies: five panels carry the empty-scope rule in
-the scope preamble **above** `## Step 1`, `kubernetes` inside it. Read a
+all — and `opentofu` likewise, because its pre-dispatch gate has the same
+kind of terminal. Where each rule sits also varies: five panels carry the
+empty-scope rule in the scope preamble **above** `## Step 1`, `kubernetes` and
+`opentofu` inside their dispatch step. Read a
 divergence in wording or placement as adaptation, and only a **missing duty** as
 drift — normalising `kubernetes` to the generic phrasing would delete the
 temp-tree scoping and the `[]`-versus-`.failed.json` reconciliation that keep

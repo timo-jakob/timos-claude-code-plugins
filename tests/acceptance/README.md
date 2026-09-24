@@ -72,6 +72,10 @@ bats tests/acceptance/rest tests/acceptance/cli
 # drives story-telemetry.zsh and the review loop against a scratch repo
 bats tests/acceptance/cli/resolve-issue-story-telemetry.bats
 
+# development-opentofu's review panel (#1161) — 5 story cases, offline:
+# drives the pre-dispatch gate against a stubbed tofu / tflint
+bats tests/acceptance/cli/opentofu-review.bats
+
 # the org API styleguide ruleset (#689 + #944) — 40 cases:
 #   9 + 13 story, 15 clause-isolating, 2 #1330 premise, 1 seed-lint
 bats tests/acceptance/cli/api-styleguide.bats

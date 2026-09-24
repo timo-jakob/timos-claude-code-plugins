@@ -79,6 +79,8 @@ development-java/agents/java-test-reviewer.md
 development-kubernetes/agents/argocd-advisor.md
 development-kubernetes/agents/kubernetes-reliability-reviewer.md
 development-kubernetes/agents/kubernetes-security-reviewer.md
+development-opentofu/agents/opentofu-module-advisor.md
+development-opentofu/agents/opentofu-security-reviewer.md
 development-python/agents/python-bug-hunter.md
 development-python/agents/python-code-quality.md
 development-python/agents/python-performance-reviewer.md
@@ -94,7 +96,7 @@ development-swift/agents/test-reviewer.md
 development/agents/bootstrap-config-consistency.md
 development/agents/bootstrap-idempotency-reviewer.md
 development/agents/bootstrap-security-reviewer.md"
-  EXPECTED_COUNT=35
+  EXPECTED_COUNT=37
 }
 
 # Print every tracked agent file in the git work tree $1, repo-relative, sorted.

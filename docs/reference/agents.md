@@ -100,6 +100,15 @@ Every plugin's agents. Generated from each agent `.md`'s frontmatter
 | `kubernetes-reliability-reviewer` | `opus` | Read, Grep, Glob | Kubernetes reliability specialist reviewing rendered manifests for the failure modes that surface as outages rather than errors — MISCONFIGURED probes (an aggressive liveness probe that restart-loops a slow-starting pod), requests/limits that throttle or OOM-kill, no PodDisruptionBudget, single replicas for stateful paths, anti-affinity that EXISTS but does not work (wrong topologyKey, preferred where required is needed), and rollout strategies that drop capacity. Bare presence/absence checks (a probe missing entirely, no limits set, a latest tag, no anti-affinity at all) belong to kube-linter and are deliberately NOT reported here. The reliability dimension of /development-kubernetes:review. |
 | `kubernetes-security-reviewer` | `opus` | Read, Grep, Glob | Kubernetes security specialist reviewing rendered manifests for over-broad RBAC, missing or permissive security contexts, privileged and hostPath containers, secrets handled as plain env vars, and namespaces without NetworkPolicy. The security dimension of /development-kubernetes:review. |
 
+## development-opentofu
+
+| Agent | Model | Tools | Description |
+| --- | --- | --- | --- |
+| `opentofu-format-fixer` | `opus` | Read, Edit, Bash, Grep | For each format or lint finding (tofu fmt drift, autofixable tflint rules), apply the mechanical behaviour-preserving fix and verify by re-running the check; escalate anything that would change what gets provisioned. Used by development-opentofu:maintenance. |
+| `opentofu-module-advisor` | `opus` | Read, Grep, Glob | OpenTofu/Terraform module-structure specialist reviewing HCL sources for module boundaries and output contracts, provider and version pinning, variable validation and typing, backend configuration, and the structural provisioning failure modes — a stateful resource with no lifecycle guard, a rename with no moved block. The module dimension of /development-opentofu:review. |
+| `opentofu-policy-triage` | `opus` | Read, Edit, Bash, Grep | For each policy or policy_tests finding, determine whether a Conftest failure is a real violation in the HCL, a policy that is wrong or could not be evaluated, or a policy set with no tests; fix the HCL when the policy is right, write conftest verify tests when they are missing, and escalate policy changes since a policy encodes an architectural decision the consumer owns. Used by development-opentofu:maintenance. |
+| `opentofu-security-reviewer` | `opus` | Read, Grep, Glob | OpenTofu/Terraform security specialist reviewing HCL sources for over-permissive IAM, public exposure, unencrypted storage, secrets in variables or outputs, and state backend exposure — including the plugin's one first-class opinion, state encryption at rest. The security dimension of /development-opentofu:review; also the advisory agent development-opentofu:maintenance routes validate, misconfiguration and state_encryption groups to, where it describes rather than edits. |
+
 ## development-python
 
 | Agent | Model | Tools | Description |
