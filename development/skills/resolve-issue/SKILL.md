@@ -497,10 +497,101 @@ repo's conventions (`CLAUDE.md`, the surrounding code) and match them — commen
 density, naming, idioms. **Also read the issue's comments** (`gh issue view <N>
 --comments`): on a resume after a review-loop escalation (#564), the human's
 decision lives in the comment thread — treat it as authoritative implementation
-context. Make the change. This step is identical across languages because you
-read the repo, not a fixed recipe. If, on reading, the issue is genuinely
-**under-specified** or far larger than its description implies, **stop and say
-so** rather than guessing, and emit the run's record (§7) as you stop.
+context. Plan the change, run the **size pre-flight** below, then make it. This
+step is identical across languages because you read the repo, not a fixed
+recipe. If, on reading, the issue is genuinely **under-specified**, **stop and
+say so** rather than guessing, and emit the run's record (§7) as you stop.
+Whether the change is too **large** to build as one PR is not that judgement:
+the size pre-flight measures it.
+
+**Size pre-flight — split before building what cannot be reviewed to a fixed
+point (#1437).** After the plan exists and **before the first implementation
+edit**, note the time (`date +%s`) and write the change's **declared
+inventory** to `<scratch>/size-inventory.json`, in the same outside-the-repo
+scratch dir the review loop's `--work-dir` lives in — never inside the worktree,
+whose tree identity hashes untracked files:
+
+```json
+{ "files": ["development/skills/resolve-issue/SKILL.md", "tests/x.bats"],
+  "plugins": ["development"] }
+```
+
+`files` is every repo-relative path you **intend** to touch. It is a
+**judgement, not a measured diff** — not a `git diff --name-only`, which exists
+only once the expensive change does; that is the accepted cost of checking
+before the work. `plugins` may be omitted, since the script derives it; when
+given it must equal what `files` derive — a path's first segment when that names
+a plugin in `.claude-plugin/marketplace.json`, or a plugin this change creates
+by listing its `<name>/.claude-plugin/plugin.json` in `files`. In a repo with no
+marketplace manifest nothing is owned and only the file count applies. Then,
+from the repo root:
+
+```bash
+"<skill-base-dir>/scripts/size-preflight.zsh" --file <scratch>/size-inventory.json \
+  > <scratch>/size-verdict.json
+case $? in
+  0) echo "PASS" ;;  # record it, run the clear block below, continue; ask nothing
+  1) echo "STOP"; cat <scratch>/size-verdict.json ;;  # take the stop branch below
+  *) echo "size pre-flight errored — no verdict"; exit 1 ;;  # 2 usage / 3 runtime:
+     # stdout is EMPTY, which is never a pass — take the rule below, not a stop
+esac
+```
+
+**An exit 2 or 3 decides nothing, and is never recorded as a verdict.** When
+its stderr names the inventory (`malformed inventory`, `not exactly one valid
+JSON document`, an unreadable inventory), rewrite the inventory and re-run
+**once**. Anything else, or a second error, is a failure: report the stderr,
+emit the run's record (§7) and stop — never proceed to the first edit.
+
+It stops on any of three triggers: `files` — more than 20 files; `plugin` — any
+owned file outside the primary plugin, a tie for primary included;
+`bootstrap-straddle` — a bootstrap template with an owned file outside the
+bootstrap skill (its plugin's `plugin.json` excepted). **Record every verdict** as one `story-preflight` run
+record, after the human's answer on a stop, never before:
+
+```bash
+B="<skill-base-dir>/scripts/build-story-preflight-telemetry-record.zsh"
+"$B" --state <scratch>/size-verdict.json [--override human] > <scratch>/size-payload.json
+outcome="$("$B" --state <scratch>/size-verdict.json [--override human] --print-outcome)"
+"<skill-base-dir>/../../scripts/telemetry/emit-telemetry.zsh" --pipeline story-preflight \
+  --outcome "$outcome" --ts <the noted time> --wall-s <now − the noted time> --repo-dir . --issue <N> \
+  --payload <scratch>/size-payload.json <the run's loop_args>
+```
+
+`loop_args` are Step 0's (an E3 child has none). Telemetry is never fatal: a
+failure costs the record, never the run. **The stop branch has three terminals**:
+
+- **(a) The human overrides.** Interactive only: one `AskUserQuestion` naming
+  the triggers and counts (and any earlier `OVERRIDDEN` comment), answered *build it
+  as one change*. Record it with `--override human`, run the clear block, and continue
+  with the rest of Step 2. **Only that explicit answer is an override** — silence, a
+  timeout, an absent human, any other answer or an earlier run's `OVERRIDDEN` comment
+  never is: a later run asks again, or with no human takes (c).
+- **(b) The human accepts the split.** Record it (no `--override`), then park with
+  the park block: the `needs-split` label and the `SPLIT` comment, the branch **un-pushed**, **no PR**,
+  emit the run's record (§7) and stop. Point the human at
+  `/development:refine-issue`, whose `split-recommended` exit records
+  `candidate_children` and **parks — it files nothing**; filing the children
+  stays the human's job.
+- **(c) No human present** (autonomous — an E3 child included). Never prompt:
+  take (b) without the question.
+
+**Any other answer** is no override: if it narrows the plan, record this stop and
+re-run on the rewritten inventory as a new verdict; else take (b), which records it.
+
+```bash
+# park block — (b) and (c) only
+gh label create needs-split --color fbca04 \
+  --description "Stopped by the size pre-flight — split into smaller stories before implementing" \
+  2>/dev/null || true   # idempotent: ignore "already exists"
+gh issue comment <N> --body "size pre-flight: SPLIT — <triggers + counts>; see /development:refine-issue"
+gh issue edit <N> --add-label needs-split
+# clear block — a pass or (a) only, never after the park block
+gh issue comment <N> --body "size pre-flight: OVERRIDDEN by the human — <triggers + counts>"  # (a) only
+gh issue edit <N> --remove-label needs-split 2>/dev/null || true
+```
+
+**Never `blocked`** — it asserts open blockers, which this check never judges.
 
 **Sibling-sweep when you fix (#982).** When a change — or a review finding you're
 resolving — targets one instance of a repeating *pattern*, sweep the diff for
@@ -1276,8 +1367,9 @@ else**.
 
 One epic invocation drives **every** open child to completion — decompose,
 order, resolve each — not "next child, then stop". A child is halted only by a
-**typed escalation** (§#564), a §0a **dependency rejection**, or a precheck
-**tooling failure** — all three park just that child (see the triage below);
+**typed escalation** (§#564), a §0a **dependency rejection**, a precheck
+**tooling failure**, or a §2 **size pre-flight stop or error** — all four park
+just that child (see the triage below);
 the readiness pre-flight (E1b)
 already proved every child **open at pre-flight** was `READY` before the first
 one starts, so nothing else needs a human mid-run.
@@ -1331,6 +1423,16 @@ The same triage applies when a child's **dependency precheck rejects it**
 (§0a): epic-driven resolve is autonomous, so the rejection posts the child's
 `blocked` comment + label, the child is **parked** — never auto-chained past —
 and the run continues with the children that don't depend on it.
+
+So does a child whose **size pre-flight stops it** (§2). E3 cannot prompt, so
+the child takes the pre-flight's no-human terminal (c): one comment naming the
+triggers and counts, the `needs-split` label — **never** `blocked` — and the
+child is **parked**; the run continues with the children that don't depend on
+it. Never auto-chain into a split. A pre-flight **error** (exit 2 or 3 that §2's
+one re-run does not clear) is a tooling failure instead: park the child with no
+label, quote the stderr in the epic summary, and continue. The pre-flight runs
+**per child only**: an epic's aggregate size is never checked, because
+decomposing a large epic is what its children are for.
 
 **A precheck exit 1 or 2 on a child is NOT a rejection.** Nothing was decided
 and stdout is empty, so there is no `comment_md` — **never** post the `blocked`
