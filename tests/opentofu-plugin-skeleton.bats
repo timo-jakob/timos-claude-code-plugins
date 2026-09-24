@@ -90,13 +90,13 @@ setup() {
   [ "$from_marketplace" = "$from_plugin" ]
   # the shipped-slice label is pinned by VALUE in two OTHER tests in this file —
   # "the README plugin-table row states the slice HONESTLY" (README's "only in
-  # v0.2") and the plugins.md narrative test ("What's built (v0.2)") — so the
+  # v0.3") and the plugins.md narrative test ("What's built (v0.3)") — so the
   # manifests must agree with both; otherwise a PR could land a later child's
   # content and prose while leaving both manifests at 0.1.0, staying green while
   # installs never see the change. (Round 1 of #1159's review caught this
   # comment claiming the README half was covered when nothing read README.md;
   # the assertion, not the comment, is what makes it true.)
-  starts_with "$from_plugin" "0.2."
+  starts_with "$from_plugin" "0.3."
 }
 
 @test "the marketplace source resolves to the real plugin directory (#1159)" {
@@ -191,8 +191,14 @@ setup() {
   # maintenance dispatcher") were transplanted from the sibling's phrasing,
   # which this description never uses, so neither could fail under any plausible
   # rewrite and the whole slice-label guarantee rested on one `contains`.
-  contains "$desc" "This slice adds the maintenance dispatch"
-  contains "$desc" "the bootstrap check pipeline (#1162), and the self-contained test fixtures (#1163) follow."
+  # #1161 moved the label on: the agents and the review panel shipped, so the
+  # shipped-so-far enumeration names them and the future tense keeps only the
+  # two children still open
+  contains "$desc" "Shipped so far:"
+  contains "$desc" "and the four agents and the review panel (#1161)"
+  contains "$desc" "The bootstrap check pipeline (#1162) and the self-contained test fixtures (#1163) follow."
+  # and the #1160-era caveat is retired with the thing it caveated
+  lacks "$desc" "Until the agents land the dispatcher routes nothing"
   # every remaining child named, so the manifest cannot silently drop one — the
   # marketplace description is byte-equal, so an omission here reaches users
   local child
@@ -211,7 +217,7 @@ setup() {
   [ "$from_marketplace" = "$from_plugin" ]
 }
 
-@test "the plugin's entry set is exactly the manifest and the dispatcher skill (#1160)" {
+@test "the plugin's entry set is exactly the manifest, the agents and the skills (#1161)" {
   # the entry set is the one place a half-applied later child shows up, so each
   # child widens this equality in its own PR (see the note below the assertion).
   # The [ -d "$PLUGIN_DIR" ] guard matters: a mis-derived path makes `ls` fail
@@ -222,13 +228,17 @@ setup() {
   # primary level, so `.claude-plugin` would sort as `claudeplugin` and this
   # equality would flip for a maintainer running the suite in a UTF-8 locale
   entries="$(cd "$PLUGIN_DIR" && LC_ALL=C ls -A | LC_ALL=C sort | tr '\n' ' ')"
-  # #1160 added skills/ (the maintenance dispatcher). #1161 adds agents/, and
-  # must widen this equality again in the same PR — that is the point: the entry
-  # set is the one place a half-applied later child shows up.
-  [ "$entries" = ".claude-plugin skills " ]
-  # and the charter's negative half, asserted where it will still be asserted
-  # after #1161 fills agents/: no approver agent, ever
-  [ ! -e "$PLUGIN_DIR/agents/opentofu-approver.md" ]
+  # #1160 added skills/ (the maintenance dispatcher); #1161 added agents/ and
+  # the review skill — that is the point: the entry set is the one place a
+  # half-applied later child shows up.
+  [ "$entries" = ".claude-plugin agents skills " ]
+  local agents skills
+  agents="$(cd "$PLUGIN_DIR/agents" && LC_ALL=C ls -A | LC_ALL=C sort | tr '\n' ' ')"
+  [ "$agents" = "opentofu-format-fixer.md opentofu-module-advisor.md opentofu-policy-triage.md opentofu-security-reviewer.md " ]
+  skills="$(cd "$PLUGIN_DIR/skills" && LC_ALL=C ls -A | LC_ALL=C sort | tr '\n' ' ')"
+  [ "$skills" = "maintenance review " ]
+  # and the charter's negative half: no approver agent, ever — by any name
+  [ -z "$(find "$PLUGIN_DIR/agents" -iname '*approver*')" ]
 }
 
 @test "the README plugin-table row states the slice HONESTLY (#1159)" {
@@ -242,7 +252,8 @@ setup() {
   [ -n "$row" ]
   [ "$(printf '%s\n' "$row" | wc -l | tr -d ' ')" -eq 1 ]
   # the time-bounded claim a later child must retire deliberately
-  contains "$row" 'only in v0.2'
+  contains "$row" 'the agents and review panel only in v0.3'
+  lacks "$row" 'escalates every group'
   # the charter clause, restated where a user first meets the plugin
   contains "$row" 'no approver agent'
   contains "$row" 'can destroy state no rollback recovers'
@@ -451,13 +462,13 @@ setup() {
   # rewrites a consumer's backend configuration unattended.
   contains "$ARCH_FLAT" "the gather's \`state_encryption\` key"
   contains "$ARCH_FLAT" '**never to an auto-fixer**'
-  # and the ROUTING TAIL: the positive destination plus the interim escalation.
-  # The tail is a clean grammatical deletion (stop at "never to an auto-fixer"),
-  # and without it #1160 wires the finding straight at an agent file #1161 has
-  # not written yet — so the one opinion this plugin holds surfaces to nobody
-  # for the whole #1160 slice, with no human_action_required fallback.
+  # and the ROUTING TAIL: the positive destination, and — since #1161 landed
+  # that agent — no interim escalation left behind, which would send the one
+  # opinion this plugin holds through the halt channel and cancel the format and
+  # lint fixes planned beside it.
   contains "$ARCH_FLAT" 'routes to an **advisory** agent (→ `opentofu-security-reviewer`)'
-  contains "$ARCH_FLAT" 'escalated via `human_action_required` until #1161 lands that agent'
+  [ -f "$PLUGIN_DIR/agents/opentofu-security-reviewer.md" ]
+  lacks "$ARCH_FLAT" 'until #1161 lands that agent'
   contains "$ARCH_FLAT" 'the failure is silent and severe'
   # the MECHANISM sentence must state the requirement, not one dialect's
   # artifact. Stated as "checks that an `encryption` block is configured", it
@@ -759,10 +770,12 @@ setup() {
   # the slice-content claim, the ARCHITECTURE counterpart of the entry-set test
   # above — without it the section can keep describing a slice the manifest and
   # the on-disk tree contradict
-  contains "$ARCH_FLAT" '**#1159 landed the boundary; #1160 landed the dispatch.**'
+  contains "$ARCH_FLAT" '**#1159 landed the boundary, #1160 the dispatch, #1161 the agents.**'
   contains "$ARCH_FLAT" 'the marker in three parity-pinned copies'
-  # the caveat that replaces "nothing executable": routing waits on the agents
-  contains "$ARCH_FLAT" 'Until #1161 lands, the dispatcher routes nothing'
+  # #1161 retired the "routes nothing" caveat with the agents it waited on, and
+  # the routing claim that replaced it must say every row routes
+  lacks "$ARCH_FLAT" 'Until #1161 lands, the dispatcher routes nothing'
+  contains "$ARCH_FLAT" '**Every dispatcher row routes**'
   contains "$ARCH_FLAT" 'creeps into Dockerfiles, cluster manifests or application code'
   # every remaining child named here too, so ARCHITECTURE and the manifest
   # cannot enumerate different remainders — asserted against the REMAINDER
@@ -771,11 +784,12 @@ setup() {
   # stale-primary caveat), so a section-wide loop would stay green with either
   # dropped from the enumeration it is meant to gate.
   local rest child
-  rest="$(sed -n '/^\*\*#1159 landed the boundary; #1160 landed the dispatch\.\*\*/,/^$/p' "$ARCH" \
+  rest="$(sed -n '/^\*\*#1159 landed the boundary, #1160 the dispatch, #1161 the agents\.\*\*/,/^$/p' "$ARCH" \
             | tr -s '[:space:]' ' ')"
   [ -n "$rest" ]
-  # #1160 is still named here — as what LANDED rather than as a remainder — so
-  # the loop keeps its full span and the enumeration cannot silently shrink
+  # #1160 and #1161 are still named here — as what LANDED rather than as a
+  # remainder — so the loop keeps its full span and the enumeration cannot
+  # silently shrink
   for child in 1160 1161 1162 1163; do
     contains "$rest" "#$child"
   done
@@ -986,12 +1000,12 @@ setup() {
   # user decides what the plugin does
   contains "$section" 'first-class check rather than a policy: **state encryption**'
   contains "$section" 'BUSL-licensed Terraform is **supported, not endorsed**'
-  contains "$section" "**What's built (v0.2):**"
+  contains "$section" "**What's built (v0.3):**"
   # the remaining-children enumeration, swept here as at the manifest and
   # charter sites — scoped PAST the built-so-far heading because #1160 is cited
   # elsewhere in this section, so an unscoped loop would be satisfied by those
   local built child
-  built="${section#*What\'s built (v0.2):}"
+  built="${section#*What\'s built (v0.3):}"
   [ -n "$built" ]
   [ "$built" != "$section" ]
   # #1160 has landed, so it is cited in the built-so-far half rather than the
@@ -1000,15 +1014,15 @@ setup() {
     contains "$built" "issues/$child"
   done
   # the honest caveats. #1160 retired two of them by landing the marker and the
-  # dispatch — the "nothing executable yet" claim and the stale-declaration one —
-  # and replaced them with the caveat that IS now true: the dispatcher routes
-  # nothing until #1161 ships the agents. The pipeline-lands-in-`development`
-  # caveat is untouched and still a claim #1162 must retire deliberately.
-  contains "$section" 'Until #1161 lands the agents, the dispatcher routes nothing'
-  # rule AND consequence, the pairing discipline this file applies everywhere
-  # else — the premise alone leaves the user-facing page silent on what the
-  # escalation actually buys
-  contains "$section" 'naming the agent the group will route to'
+  # dispatch, and #1161 retired the "routes nothing until the agents land" one
+  # by landing them — so the routing table must now say every row routes, and
+  # the review panel's gate outcomes must be stated where a user reads them.
+  # The pipeline-lands-in-`development` caveat is untouched and still a claim
+  # #1162 must retire deliberately.
+  lacks "$section" 'the dispatcher routes nothing'
+  contains "$section" '**every row routes**'
+  contains "$section" 'a tree that does not validate **fails the round**'
+  contains "$section" '**degrades** it to a source-only review'
   contains "$section" 'it **will ship** as a bootstrap template in the generic `development` plugin'
 }
 
@@ -1151,14 +1165,13 @@ setup() {
   contains "$maint_row" '`development-opentofu`'
 }
 
-@test "the plugin is registered with the docs generator, which now emits its command but no agents (#1160)" {
+@test "the plugin is registered with the docs generator, which emits its commands and agents (#1161)" {
   # PLUGINS is hardcoded, so an unregistered plugin is SILENTLY skipped: the
   # generator never scans it, --check compares two equally incomplete files, and
   # the drift gate passes while the reference pages omit the plugin entirely.
   # The all-plugins sweep lives in the sibling suite; what is asserted here is
-  # the pair of facts that only hold at THIS slice — registered, and emitting
-  # its maintenance COMMAND (#1160 landed the skill) while the agents page must
-  # stay empty until #1161 ships them. Each half flips with its own child.
+  # the facts that hold at THIS slice — registered, emitting both commands
+  # (#1160 landed maintenance, #1161 review) and all four agents (#1161).
   local gen block commands agents
   gen="$REPO_ROOT/scripts/generate-docs-reference.py"
   [ -f "$gen" ]
@@ -1174,12 +1187,14 @@ setup() {
   # otherwise a mis-derived path makes both `lacks` trivially true
   contains "$commands" '## development-kubernetes'
   contains "$agents" '## development-kubernetes'
-  # #1160 landed the dispatcher skill, so the COMMANDS page now carries it; the
-  # agents page still must not, until #1161. Each half is asserted separately so
-  # the flip is one child at a time rather than a single blanket expectation.
   contains "$commands" '## development-opentofu'
   contains "$commands" '/development-opentofu:maintenance'
-  lacks "$agents" '## development-opentofu'
+  contains "$commands" '/development-opentofu:review'
+  contains "$agents" '## development-opentofu'
+  local a
+  for a in opentofu-security-reviewer opentofu-module-advisor opentofu-format-fixer opentofu-policy-triage; do
+    contains "$agents" "| \`$a\` |"
+  done
   # and prove that is what the generator WOULD emit, not merely what is committed
   run python3 "$gen" --check
   [ "$status" -eq 0 ]

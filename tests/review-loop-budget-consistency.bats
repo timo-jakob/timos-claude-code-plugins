@@ -454,6 +454,7 @@ grep_site() {  # grep_site <file> <fixed-string>
     "development-go/skills/review/SKILL.md" \
     "development-java/skills/review/SKILL.md" \
     "development-kubernetes/skills/review/SKILL.md" \
+    "development-opentofu/skills/review/SKILL.md" \
     "development-python/skills/review/SKILL.md" \
     "development-swift/skills/review/SKILL.md" | sort -u)"
   # roster equality FIRST: a new panel reds here before the duty checks below
@@ -464,12 +465,12 @@ grep_site() {  # grep_site <file> <fixed-string>
   # the SEVENTH site: ARCHITECTURE.md states the same invariant and hardcodes
   # the roster's size, so without these a drift there (or a seventh panel that
   # never reaches the contract doc) leaves the suite green
-  [ "${#found[@]}" -eq 6 ]
+  [ "${#found[@]}" -eq 7 ]
   # Fragments unique to the sentence each one pins — the bare descriptor tokens
   # recur in the same section's JSON sample, so they are presence checks only.
   grep_site "$ARCH_PANEL_DUTIES" 'a second injection duty'
   grep_site "$ARCH_PANEL_DUTIES" "forward both into each agent's launch prompt"
-  grep_site "$ARCH_PANEL_DUTIES" 'All six panels (`claude-plugin`'
+  grep_site "$ARCH_PANEL_DUTIES" 'All seven panels (`claude-plugin`'
   grep_site "$ARCH_PANEL_DUTIES" 'carry **both rules**'
   grep_site "$ARCH_PANEL_DUTIES" 'never a licence to'
   grep_site "$ARCH_PANEL_DUTIES" 'fix_verification_path'
@@ -560,13 +561,14 @@ grep_site() {  # grep_site <file> <fixed-string>
     grep_site "$REPO_ROOT/$panel" 'Re-raise only carried entries of your own dimension'
     grep_site "$REPO_ROOT/$panel" 'suggestions earlier rounds surfaced and the human waived'
   done
-  # the Metrics bullet of the five report-writing panels (kubernetes has no
-  # Metrics section — its Step 3 paragraph is pinned by the AC 1 sweep below):
+  # the Metrics bullet of the five report-writing panels (kubernetes and
+  # opentofu have no Metrics section — kubernetes' Step 3 paragraph is pinned by
+  # the AC 1 sweep below, opentofu's Step 4 by tests/opentofu-review-panel.bats):
   # the triple as per-entry UNION outcomes, with each reviewer's per-entry
   # lines reproduced beneath it — the lines the driving session assembles the
   # loop's --carry-accounting file from
   for panel in "${found[@]}"; do
-    case "$panel" in development-kubernetes/*) continue ;; esac
+    case "$panel" in development-kubernetes/*|development-opentofu/*) continue ;; esac
     grep_site "$REPO_ROOT/$panel" '- **Carried entries:** confirmed N / re-raised M / unconfirmed K of TOTAL'
     grep_site "$REPO_ROOT/$panel" "reproduce each reviewer's per-entry"
   done

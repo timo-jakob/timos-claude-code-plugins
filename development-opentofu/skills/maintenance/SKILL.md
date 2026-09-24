@@ -10,10 +10,7 @@ description: >
   by the routing table (format + lint → opentofu-format-fixer; policy +
   policy_tests → opentofu-policy-triage, grouped into one PR); state_encryption,
   validate and misconfiguration route to opentofu-security-reviewer as advisory
-  review, never to an auto-fixer. Until #1161 lands those agents it routes
-  NOTHING — every group is escalated via human_action_required, naming the agent
-  it will route to — because naming a subagent_type that does not exist would
-  make Phase 8 fail to spawn. A single invocation returns the plan; the
+  review, never to an auto-fixer. A single invocation returns the plan; the
   per-group work agents are the orchestrator's job. Pure function of its JSON
   input; runs no detection of its own. Ships NO approver — a provisioning change
   can destroy state no rollback recovers, so a human approves.
@@ -121,13 +118,9 @@ declares no primary at all dispatches every target as `"primary"`, so auxiliary
 is not simply the default. Disposition of all seven keys, so nothing falls
 through to a guess:
 
-Each bullet's **routing** disposition is the post-#1161 shape: today *Routing*'s
-interim override escalates every group it would have routed, so read "routed" as
-"routed once the agents exist". **Suppression rules are unaffected** — a key
-omitted in auxiliary mode forms no group at all, so it is neither routed nor
-escalated. (Without that qualifier the override would read as escalating
-`policy_tests` on an auxiliary payload, halting a Java- or Go-primary target
-over policy fixtures — the exact category error the split exists to prevent.)
+A key omitted in auxiliary mode forms no group at all, so it is neither routed
+nor escalated — never halt a Java- or Go-primary target over policy fixtures,
+the exact category error the split exists to prevent.
 
 - `format`, `lint` → routed as usual. Mechanical, always in scope.
 - `validate`, `misconfiguration` → advisory in both modes (see *Routing*).
@@ -166,7 +159,8 @@ to that object would read a repo with no Rego files as having policies
 configured, inverting the charter's central skip.
 
 This table defines the known-key universe *Validation*'s unknown-key check tests
-against, and the three agent **names** are a contract #1161 satisfies verbatim:
+against, and the three agent **names** are a contract: each is an agent file
+under `development-opentofu/agents/` (#1161), named verbatim:
 
 | Finding tool | Disposition | Agent |
 |---|---|---|
@@ -189,47 +183,24 @@ would silently cancel the `format`/`lint` fixes on the very repos that need them
 most (an unencrypted root is the ordinary case, not the exception). Advisory
 means *which agent and what it may do*, not *which envelope*.
 
-**This paragraph describes the post-#1161 shape and is INERT TODAY.** Until
-issue #1161 ships the agents, `validate`, `misconfiguration` and `state_encryption`
-escalate via `human_action_required` like every other row — see the interim
-override immediately below — and the halt is harmless there because `plan` is
-empty, so there are no `format`/`lint` fixes for it to cancel. The qualifier is
-repeated here, rather than left to the override, because this is the section a
-model consulting "what do I do with a `state_encryption` finding?" reads on its
-own, and acting on the guardrail alone would name a `subagent_type` that does
-not exist.
+**The advisory groups carry `"isolation": false`, and this is their case
+list.** `opentofu-security-reviewer` holds only `Read, Grep, Glob`: it edits
+nothing, so there is no worktree branch to push and no PR to open. It reports
+each finding it was handed as one `actions_requiring_review` entry — what is
+wrong, what it costs, and the change a human would make — and nothing else. The
+orchestrator's `isolation: false` path takes exactly that from here: carry
+those entries into the run summary, and open no PR.
 
-**This slice ships no agents at all** (#1161 lands four: the three named above,
-plus `opentofu-module-advisor`, which this dispatcher never routes to because no
-gather key carries its review dimension). Until it does,
-**every** row is escalated instead of routed: build **no** plan entry naming
-`opentofu-format-fixer`, `opentofu-policy-triage` or
-`opentofu-security-reviewer`, and emit one `human_action_required` entry per
-**PR group** — the merged unit defined below, so `format`+`lint` yield one entry
-and `policy`+`policy_tests` yield one — naming the agent the group *will* route
-to and #1161 as what unblocks it.
-Naming a `subagent_type` that does not exist would make Phase 8 fail to spawn,
-which reads as a broken dispatcher rather than as work waiting on a known
-dependency. Here the halt semantics are harmless precisely *because* `plan` is
-empty — nothing is discarded, since nothing was planned. **#1161 flips every row
-to routing** when it creates the agents; that edit is part of that story, not a
-later cleanup, and from that point `human_action_required` returns to meaning
-only what it means everywhere else in the family: a genuine halt.
-
-**This override outranks every other statement of routing in this file.** Where
-**any other** section — earlier or later, the advisory guardrail above included
-— describes a group being "dispatched to" an agent, ordered within a plan, or
-kept *out* of `human_action_required`, it is describing the post-#1161 shape and
-is **inert today**.
+**Every row routes.** Build one plan entry per **PR group** — the merged unit
+defined below, so `format`+`lint` form one group and `policy`+`policy_tests`
+one — naming the table's agent as its `agent`. `human_action_required`
+means only what it means everywhere else in the family: a genuine halt, for a
+payload this dispatcher cannot understand (*Validation*, *Dispatch mode*). The
+plugin's fourth agent, `opentofu-module-advisor`, is a review-panel member only:
+no gather key carries its dimension, so this dispatcher never routes to it.
 
 **A group exists only for a `findings_by_tool` key THAT THIS TABLE HAS A ROW FOR,
-and whose array is NON-EMPTY.** ("Has a row for", not "is routed" — the interim
-override above redefines *routed* as the thing that does not happen today, and
-reading this rule through that lens would form no groups at all and return a
-bare empty envelope for a payload carrying a real `state_encryption` finding.
-Table-row keys still form groups today; the override changes only what is
-**emitted** for them — a `human_action_required` entry instead of a plan entry.)
-A table-row key present with an **empty** array means "configured, and it found
+and whose array is NON-EMPTY.** A table-row key present with an **empty** array means "configured, and it found
 nothing" — it forms no group, no plan entry, and no `human_action_required`
 entry either. This is not a corner case: `format: []`,
 `validate: []`, `lint: []` and `misconfiguration: []` are on *every* payload
@@ -273,16 +244,6 @@ fix in it. Never drop the group IN PRIMARY MODE — auxiliary is the one
 exception, and it is a deferral with a trace rather than a drop (see *Dispatch
 mode*): dropping it would permanently preserve the untested-policy state the
 gate exists to eliminate.
-
-**Until #1161 lands, this group escalates like every other** — in primary mode —
-per *Routing*'s interim override: emit one `human_action_required` entry naming
-`opentofu-policy-triage` and #1161, and build **no** plan entry. In auxiliary
-mode the group is omitted before it is ever formed, so there is nothing to
-escalate either. The ordering
-rule in the paragraph above describes the post-#1161 shape and is **inert
-today** — following it now would name a `subagent_type` that does not exist, in
-the one section a model consulting "what do I do with `policy_tests`?" is most
-likely to read on its own.
 
 The ordering rule is also **primary-mode only** — in auxiliary mode the
 `policy_tests` group is omitted before it is ever formed (see *Dispatch mode*).
