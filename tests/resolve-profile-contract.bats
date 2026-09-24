@@ -2636,6 +2636,15 @@ _roster_sites() {
 @test "#1504 a missing profile is a one-line notice and the run CONTINUES" {
   grep -qF -- 'A missing profile is a fallback, never a refusal.' "$CONDUCTOR"
   grep -qF -- "continuing with the conductor's" "$CONDUCTOR"
+  grep -qF -- 'emit **one line** naming it' "$CONDUCTOR"
+  grep -qF -- 'and **continue**. Nothing is blocked, nothing is escalated' "$CONDUCTOR"
+  grep -qF -- 'no PR is withheld over a missing profile.' "$CONDUCTOR"
+  grep -qF -- 'no resolve-profile for repo type <repo_type>' "$CONDUCTOR"
+  # #1556: the rationale is runtime absence, stated once; the stale claim that
+  # #1505 falsified must not come back.
+  [ "$(grep -cF -- 'plugin is not installed' "$CONDUCTOR")" -eq 1 ]
+  run grep -qF -- 'Most repo types have no' "$CONDUCTOR"
+  [ "$status" -ne 0 ]
 }
 
 @test "#1504 unsupported_repo_type is not reused for a missing profile" {

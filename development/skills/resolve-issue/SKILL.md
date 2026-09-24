@@ -373,9 +373,9 @@ step is told to consult — so:
 The headings are referred to here by POSITION rather than by name on purpose —
 naming them would be the extra copy this section just said not to make.
 
-**A missing profile is a fallback, never a refusal.** Most repo types have no
-profile yet (#1505). When the skill does not exist, emit **one line** naming it
-— `no resolve-profile for repo type <repo_type>
+**A missing profile is a fallback, never a refusal.** Since #1505 every emitted `repo_type` ships a profile, so
+what remains reachable is a runtime absence — that type's plugin is not installed in the session. When the skill
+does not exist, emit **one line** naming it — `no resolve-profile for repo type <repo_type>
 (development-<repo_type>:resolve-profile); continuing with the conductor's
 generic rules` — and **continue**. Nothing is blocked, nothing is escalated, and
 no PR is withheld over a missing profile.
