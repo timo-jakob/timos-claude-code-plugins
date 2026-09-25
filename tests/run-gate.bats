@@ -408,9 +408,11 @@ EOF
   contains "$stderr" "slot registry unusable"
 }
 
-@test "shared budget: the suite runs under nice (10 above the gate's own niceness, capped at 19)" {
-  local base; base="$(ps -o nice= -p $$ | tr -d ' ')"
-  local want=$(( base + 10 )); (( want > 19 )) && want=19
+@test "shared budget: the suite runs under nice (10 above the gate's own niceness, capped at the host's maximum)" {
+  local base max; base="$(ps -o nice= -p $$ | tr -d ' ')"
+  # the host's maximum niceness (19 on Linux, 20 on macOS): nice clamps to it
+  max="$(nice -n 40 sh -c 'ps -o nice= -p $$' | tr -d ' ')"
+  local want=$(( base + 10 )); (( want > max )) && want=$max
   run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4 STUB_EXIT=0
   [ "$status" -eq 0 ]
   [ "$(cat "$BATS_TEST_TMPDIR/stub-nice")" -eq "$want" ]
