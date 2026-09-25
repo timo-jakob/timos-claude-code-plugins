@@ -110,7 +110,7 @@ file_has() {
 # scoping hole that slice exists to close.
 text_has_line() {
   _assert_args "$#" "${2-}" || return 2
-  printf '%s\n' "$1" | grep -q -e "^[[:space:]]*$2[[:space:]]*\$"
+  grep -q -e "^[[:space:]]*$2[[:space:]]*\$" <<< "$1"
 }
 
 # The `push-and-sign` job of a quality template — the ONLY job that publishes
@@ -138,7 +138,7 @@ publishing_job() {
   local slice
   slice="$(sed -n '/^  push-and-sign:/,/^  [A-Za-z0-9_-]/p' "$1")"
   [ -n "$slice" ] || return 1
-  printf '%s\n' "$slice" | tail -n 1 | grep -qE '^  [A-Za-z0-9_-]+:' || return 1
+  grep -qE '^  [A-Za-z0-9_-]+:' <<< "$(tail -n 1 <<< "$slice")" || return 1
   printf '%s\n' "$slice"
 }
 

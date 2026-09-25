@@ -136,8 +136,12 @@ _roster_hits() {
     # roster silently. That is the same collapse `prose_body` performs, and the
     # only reason `prose_gate_lines` cannot do it is that it must keep line
     # numbers, which nothing here wants.
-    sed 's/^[[:space:]]*#[[:space:]]\{0,1\}//' "$root/$f" | tr -d '*`' \
-      | tr -s '[:space:]' ' ' | grep -qaiF -e "$needle" || rc=$?
+    # captured first, then searched: GNU grep quits at the first match even
+    # when its stdout is /dev/null, so a pipe into it races the writer (#1797)
+    local flat
+    flat="$(sed 's/^[[:space:]]*#[[:space:]]\{0,1\}//' "$root/$f" | tr -d '*`' \
+      | tr -s '[:space:]' ' ')"
+    grep -qaiF -e "$needle" <<< "$flat" || rc=$?
     case "$rc" in
       0) printf '%s\n' "$f" ;;
       1) ;;

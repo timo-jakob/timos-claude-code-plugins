@@ -182,7 +182,7 @@ guard_expr() {
   # the first stage (which the stage loop below skips) or trailing after a
   # rule-matched filter (which the loop's prefix match accepts) — so without `~`
   # it reads record content with nothing to extract and nothing to notice.
-  if printf '%s' "$rest" | grep -qE '=|<|>|~'; then return 1; fi  # ARM:operator
+  if grep -qE '=|<|>|~' <<< "$rest"; then return 1; fi  # ARM:operator
 
   # --- the stream selector may only match on `job` ----------------------------
   # expr_remainder strips `{…}` before every other arm, so a matcher on a
@@ -219,7 +219,7 @@ guard_expr() {
         label="$(printf '%s' "$label" | tr -d '[:space:]')"
         if [ -z "$label" ]; then continue; fi
         if [ "$label" = "job" ]; then continue; fi
-        if ! printf '%s' "$expr" | grep -qE "[|] json [^|)]*${label}=\"${label}\""; then
+        if ! grep -qE "[|] json [^|)]*${label}=\"${label}\"" <<< "$expr"; then
           return 1  # ARM:label-list
         fi
       done <<< "$labels"
@@ -230,7 +230,7 @@ guard_expr() {
   # `label_replace(v, "dst", "$1", "repo", "(.*)")` names `repo` in a plain
   # function argument — no operator, no stage, no label list. Named explicitly
   # because there is no structural handle to allowlist it by.
-  if printf '%s' "$rest" | grep -qE 'label_replace|label_join'; then return 1; fi  # ARM:label-rewrite
+  if grep -qE 'label_replace|label_join' <<< "$rest"; then return 1; fi  # ARM:label-rewrite
 
   # Every remaining `|` stage must be one the rule can reason about. A segment
   # carries trailing query syntax (`RULEMATCHEDCMP)[$__auto]))`), so the test is
@@ -1002,7 +1002,7 @@ _mutant_for() {
     # 4 pipes = 3 cells: key | type | nullability
     [ "$(printf '%s' "$row" | tr -cd '|' | wc -c | tr -d ' ')" -eq 4 ]
     # neither trailing cell may be blank
-    run bash -c "printf '%s' \"\$1\" | grep -qE '^\| \`[^\`]+\` \| +[^ |][^|]* \| +[^ |][^|]* \|\$'" _ "$row"
+    run bash -c "grep -qE '^\| \`[^\`]+\` \| +[^ |][^|]* \| +[^ |][^|]* \|\$' <<< \"\$1\"" _ "$row"
     [ "$status" -eq 0 ]
   done <<< "$keys"
 }

@@ -1858,7 +1858,7 @@ _detect_dirstack_name() {
 # code — a control holding its own copy of the pipeline cannot see that copy
 # and the real one diverge.
 _profile_is_tracked() {
-  git -C "$REPO_ROOT" ls-files -- "$1" | grep -qxF -- "$1"
+  grep -qxF -- "$1" <<< "$(git -C "$REPO_ROOT" ls-files -- "$1")"
 }
 
 @test "detect: #1505 every emitted repo_type resolves to a shipped profile" {
@@ -1885,7 +1885,7 @@ _profile_is_tracked() {
   # Proves the join above discriminates rather than passing because `ls-files`
   # returns something for anything. `rust` is not a repo type this script emits,
   # so no profile exists for it — the exact shape a new type without a profile
-  # would have. Drives the join's OWN helper, so dropping the `| grep -qxF`
+  # would have. Drives the join's OWN helper, so dropping the `grep -qxF`
   # from it reds here too.
   run _profile_is_tracked "development-rust/skills/resolve-profile/SKILL.md"
   [ "$status" -ne 0 ]

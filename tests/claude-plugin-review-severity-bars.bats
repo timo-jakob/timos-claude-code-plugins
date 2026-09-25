@@ -592,7 +592,7 @@ _assert_file() {  # _assert_file <path> <test-expr...>
   contains "$flat" 'the reference tells the conductor to treat a `decided: "red"` carry entry as'
   # FLATTENED: the cited sentence is hard-wrapped prose, so a line-oriented grep
   # would pass or fail on where the author's wrap landed.
-  run bash -c "tr '\n' ' ' < \"\$1\" | tr -s ' ' | grep -qF 'treat the entry as a tool-verdict carry'" \
+  run bash -c "grep -qF 'treat the entry as a tool-verdict carry' <<< \"\$(tr '\n' ' ' < \"\$1\" | tr -s ' ')\"" \
     _ "$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md"
   [ "$status" -eq 0 ]
   [ -f "$REPO_ROOT/tests/reviewer-evidence-rule.bats" ]

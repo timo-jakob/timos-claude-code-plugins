@@ -620,7 +620,14 @@ check() { run bash -c "set -o pipefail; printf '%s\n' '$VALID' | jq -c '$1' | zs
   # emitter's twin guard has a test; this is its counterpart.
   { echo "$VALID" | jq -c '.outcome = "nope"'
     echo "$VALID" | jq -c '.ts = "nope"'; } > "$F"
-  run bash -c "set -o pipefail; zsh '$S' '$F' | head -0; exit \${PIPESTATUS[0]}"
+  # The pipe's read end is closed BEFORE the validator starts, so its write
+  # cannot race the reader's exit the way `| head -0` let it (#1797). SIGPIPE
+  # goes back to its default first — bats runs tests with it ignored, which
+  # would hide a missing trap behind a plain EPIPE.
+  run python3 -c 'import os, signal, sys
+r, w = os.pipe(); os.close(r); os.dup2(w, 1); os.close(w)
+signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+os.execvp(sys.argv[1], sys.argv[1:])' zsh "$S" "$F"
   [ "$status" -eq 1 ]
 
   # and with stdout hard-closed, exercising the best-effort violations print

@@ -74,10 +74,11 @@ _headings_of() {
 # and its non-vacuity control use, so the control proves the REAL detector, not
 # a paraphrase of it.
 _restated_headings() {
-  local file="$1" h
+  local file="$1" h headings
+  headings="$(_headings_of "$file")" || true
   while IFS= read -r h; do
     [ -n "$h" ] || continue
-    if _headings_of "$file" | grep -qxF -- "$h"; then
+    if grep -qxF -- "$h" <<< "$headings"; then
       printf '%s\n' "$h"
     fi
   done < <(_ref_headings)

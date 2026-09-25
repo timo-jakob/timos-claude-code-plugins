@@ -1641,7 +1641,7 @@ assert_hooks_refused() {
   if [ "$1" -ne 1 ]; then
     lacks "$stderr" 'replacing core.hooksPath'
   fi
-  starts_with "$(printf '%s\n' "$stderr" | grep '^install-iac-hooks: ' | head -n 1)" 'install-iac-hooks: '
+  starts_with "$(grep -m1 '^install-iac-hooks: ' <<< "$stderr")" 'install-iac-hooks: '
   [ "$(hooks_path "$HOOK_REPO")" = "$2" ]
 }
 

@@ -1136,14 +1136,18 @@ EOF
   [ "$status" -eq 0 ]
   contains "$output" "Pipeline: "
 
-  # The zsh-builtin `print` path (the "no records" line) against a consumer
-  # that exits WITHOUT reading. `exec true` means the same thing on GNU and
-  # BSD/macOS, unlike `head -0` (which macOS rejects outright). The write
-  # genuinely races a closed pipe because the script does several jq/mktemp
-  # invocations before it ever prints.
+  # The zsh-builtin `print` path (the "no records" line) against a pipe whose
+  # read end is closed BEFORE the script starts. A consumer that merely exits
+  # without reading (`| exec true`) raced the write (#1797): a print that won
+  # landed in the pipe buffer with no error at all. SIGPIPE goes back to its
+  # default first — bats runs tests with it ignored, which would hide a missing
+  # `trap '' PIPE` behind a plain EPIPE.
   local empty="$BATS_TEST_TMPDIR/empty-pipe.jsonl"
   : > "$empty"
-  run bash -c "zsh '$S' '$empty' | exec true; exit \${PIPESTATUS[0]}"
+  run python3 -c 'import os, signal, sys
+r, w = os.pipe(); os.close(r); os.dup2(w, 1); os.close(w)
+signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+os.execvp(sys.argv[1], sys.argv[1:])' zsh "$S" "$empty"
   [ "$status" -eq 0 ]
 }
 

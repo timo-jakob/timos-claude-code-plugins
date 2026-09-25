@@ -158,8 +158,12 @@ _roster_hits() {
     # `tr -s '[:space:]' ' '` because this asks a FILE-level question and needs
     # no line numbers: without it a mention wrapped mid-phrase across two lines
     # drops out of the roster silently.
-    sed 's/^[[:space:]]*#[[:space:]]\{0,1\}//' "$root/$f" | tr -d '*`' \
-      | tr -s '[:space:]' ' ' | grep -qaiF -e "$needle" || rc=$?
+    # captured first, then searched: GNU grep quits at the first match even
+    # when its stdout is /dev/null, so a pipe into it races the writer (#1797)
+    local flat
+    flat="$(sed 's/^[[:space:]]*#[[:space:]]\{0,1\}//' "$root/$f" | tr -d '*`' \
+      | tr -s '[:space:]' ' ')"
+    grep -qaiF -e "$needle" <<< "$flat" || rc=$?
     case "$rc" in
       0) printf '%s\n' "$f" ;;
       1) ;;

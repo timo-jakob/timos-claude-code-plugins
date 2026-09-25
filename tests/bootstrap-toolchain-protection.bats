@@ -377,10 +377,13 @@ preflight_stubs() {
 # `✓ <tool>` / `✓ <tool> (<variant>)` / `! <tool> — missing` line of the tool
 # loop, colour codes removed. A line with any other shape — `✓ gh is
 # authenticated`, which follows directly when nothing is installed — ends it.
+# A `done` flag rather than `exit`: awk keeps draining its input, so sed never
+# writes into a closed pipe (#1797).
 checked_tools() {
   printf '%s\n' "$1" | sed $'s/\e\\[[0-9;]*m//g' | awk '
+    done { next }
     /Checking required tools/ { on = 1; next }
-    on && !(($1 == "✓" || $1 == "!") && (NF == 2 || $3 ~ /^(—|\()/)) { exit }
+    on && !(($1 == "✓" || $1 == "!") && (NF == 2 || $3 ~ /^(—|\()/)) { on = 0; done = 1; next }
     on { print $2 }
   ' | LC_ALL=C sort
 }

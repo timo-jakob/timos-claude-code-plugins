@@ -218,7 +218,7 @@ _gap_line() {  # [-x] $1 = file, $2 = fixed-string needle
   if [ "$1" = "-x" ]; then mode=-xF; shift; fi
   [ "$#" -eq 2 ] || { printf '_gap_line: needs [-x] file, needle\n' >&2; return 2; }
   local n
-  n=$(grep -n "$mode" -- "$2" "$1" | head -1 | cut -d: -f1)
+  n=$(grep -n "$mode" -- "$2" "$1" | sed -n 1p | cut -d: -f1)
   [ -n "$n" ] || { printf '_gap_line: needle not found: %s\n' "$2" >&2; return 1; }
   printf '%s\n' "$n"
 }

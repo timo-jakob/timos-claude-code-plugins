@@ -181,7 +181,7 @@ findings() {
     # handing back a FULL healthy roster. The case would still red — but on the
     # checker's exit code, pointing debugging at the script instead of at the
     # stale id here.
-    printf '%s\n' "$ids" | grep -qxF -- "$omit" \
+    grep -qxF -- "$omit" <<< "$ids" \
       || { echo "findings: omit id '$omit' is not in the roster" >&2; return 1; }
     # `--`: a future omit value beginning with `-` would otherwise be parsed as
     # a grep option.

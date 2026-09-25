@@ -47,7 +47,7 @@ setup() {
 # also keeps the Model-cell check honest, since a prose line has no Model cell
 # to disagree with.
 _row_for() {
-  grep -E "^\|[[:space:]]*\`$1\`[[:space:]]*\|" "$SECTION" | head -1
+  grep -m1 -E "^\|[[:space:]]*\`$1\`[[:space:]]*\|" "$SECTION" || true
 }
 
 # The Skills-table row whose COMMAND CELL is /development-go:<name>, or empty.
@@ -67,7 +67,7 @@ _row_for() {
 # agent names are drawn from [a-z0-9-], so the negated class anchors the name
 # exactly — `approve` cannot be satisfied by `approver`.
 _skill_row_for() {
-  grep -E "^\|[^|]*\|[[:space:]]*\`/development-go:$1([^a-z0-9-]|\$)" "$SECTION" | head -1
+  grep -m1 -E "^\|[^|]*\|[[:space:]]*\`/development-go:$1([^a-z0-9-]|\$)" "$SECTION" || true
 }
 
 # The body of a `## <heading>` section of a markdown file, terminated by the
