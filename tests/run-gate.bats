@@ -38,6 +38,8 @@ setup() {
   STUB="$BATS_TEST_TMPDIR/bats-stub.sh"
   cat > "$STUB" <<'EOF'
 #!/usr/bin/env bash
+# the signal the gate forwards to its suite (#1848)
+trap 'echo TERM > "$BATS_TEST_TMPDIR/stub-sig"; exit 143' TERM
 echo "call" >> "$CALLS"
 printf '%s\n' "$*" > "$ARGV"
 # what the suite saw while it ran: its niceness, and the slot registry
@@ -47,7 +49,9 @@ echo $$ > "$BATS_TEST_TMPDIR/stub-pid"
 # the gate is the grandparent: gate -> the suite's subshell -> (nice exec) stub
 ps -o ppid= -p "$PPID" | tr -d ' ' > "$BATS_TEST_TMPDIR/stub-gate-pid"
 cat "$TAPFIX"
-[[ -n "${STUB_SLEEP:-}" ]] && sleep "$STUB_SLEEP"
+# in the background: bash runs a trap only between commands, so a foreground
+# sleep would hold the TERM until it ended
+[[ -n "${STUB_SLEEP:-}" ]] && { sleep "$STUB_SLEEP" & wait; }
 exit "${STUB_EXIT:-0}"
 EOF
   chmod +x "$STUB"
@@ -449,6 +453,7 @@ signal_gate() {
   [ "$gate_rc" -eq 143 ]
   [ ! -e "$GATE_SLOTS_DIR/$gate_pid" ]
   run ! kill -0 "$suite_pid"
+  [ "$(cat "$BATS_TEST_TMPDIR/stub-sig")" = TERM ]
   # at once — not after the 60 s suite would have finished by itself
   [ "$SECONDS" -lt 30 ]
 }
@@ -459,6 +464,7 @@ signal_gate() {
   [ "$gate_rc" -eq 130 ]
   [ ! -e "$GATE_SLOTS_DIR/$gate_pid" ]
   run ! kill -0 "$suite_pid"
+  [ "$(cat "$BATS_TEST_TMPDIR/stub-sig")" = TERM ]
   [ "$SECONDS" -lt 30 ]
 }
 
@@ -468,6 +474,7 @@ signal_gate() {
   [ "$gate_rc" -eq 129 ]
   [ ! -e "$GATE_SLOTS_DIR/$gate_pid" ]
   run ! kill -0 "$suite_pid"
+  [ "$(cat "$BATS_TEST_TMPDIR/stub-sig")" = TERM ]
   [ "$SECONDS" -lt 30 ]
 }
 
