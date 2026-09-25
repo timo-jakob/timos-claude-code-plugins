@@ -40,9 +40,14 @@ These are the §3 rules for this repo type. The conductor's generic bullet says
   command. A run that reports **zero** tests is forced to a non-zero (red) exit
   — never a false green. A run that exits **129/130/143** (a signal) or
   **137** (a kill), a tool timeout say, was cut short before any summary and is
-  no verdict: never read it as red. Re-run it detached or with a timeout longer
-  than the suite, never the identical call; if that is cut short too, stop
-  retrying and report that no gate verdict exists. Never hand-roll a `bats … | grep -c` that runs the
+  no verdict: never read it as red. Re-run it detached, never under a tool
+  timeout: the job count shared with other live gates (#1798) makes the suite's
+  runtime unpredictable from any earlier run, so a timeout sized to a previous
+  run can cut it short again. Launch it out of band exactly as §3.5 requires —
+  *The round boundary is concurrent*, step 2, whose shape names the launches
+  that die with the turn — and take the verdict from the exit status and JSON
+  summary that launch records. Never re-run the identical call; if that is cut
+  short too, stop retrying and report that no gate verdict exists. Never hand-roll a `bats … | grep -c` that runs the
   suite twice to count.
   - **Capture the gate attestation (#981).** On a **green** `run-gate.zsh`,
     keep its stdout `"tree"` field — the working-tree identity it just gated. On
