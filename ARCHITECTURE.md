@@ -4606,6 +4606,19 @@ weakens, only the provably-redundant re-run is elided. It applies only where
 `--test-cmd` *is* the attested `run-gate.zsh` (plugin repos); other stacks emit
 no `tree`, pass no `--gate-attest`, and are unchanged.
 
+**The gate's job count is shared across concurrent gates (#1798).** Sessions run
+in parallel, and a `run-gate.zsh` that gave every gate every core drove a
+10-core host to load 70–130, which surfaced timing races. So each live gate
+holds one slot in a per-user registry (`${TMPDIR:-/tmp}/run-gate-slots.$UID`, a file
+per gate named by its PID and holding that process's start time), and runs at
+`--jobs` = max(1, ⌊CPUs ÷ live gates, itself included⌋) under `nice -n 10`. The
+share is fixed at start and reported as the summary's `jobs` field, and a gate
+**never waits** for a slot. A slot whose PID is gone, or was reused (the start
+time differs), is an orphan: it is not counted and is removed. A gate removes
+its own slot on exit, and on SIGTERM, SIGINT or SIGHUP, which it also passes to
+its suite as SIGTERM. With no other gate live the job count is the CPU count, as
+before. It is derived, not tuned: there is still no knob.
+
 **The loop is resumable (#902).** `--resume` continues a prior run from its
 `--work-dir` (the work-dir *is* the state): it reads the last completed round
 from `history.jsonl`, seeds the prior changelist so non-convergence detection

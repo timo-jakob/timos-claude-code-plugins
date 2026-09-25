@@ -9,8 +9,9 @@
 # violating "read bats' real exit, not the pipe's". This helper fixes both:
 #   * it runs the suite EXACTLY ONCE, tees the TAP to a file, and reports the
 #     ok/not-ok counts AND bats' real exit code (never a pipe's);
-#   * it parallelises via bats' `--jobs` (GNU parallel) at jobs = CPU count, so
-#     the same full suite finishes in a fraction of the sequential wall-clock.
+#   * it parallelises via bats' `--jobs` (GNU parallel) at its share of the CPUs
+#     (below), so the same full suite finishes in a fraction of the sequential
+#     wall-clock.
 #
 # Quality guardrail (epic #979): the WHOLE suite still runs every round. The
 # speedup is parallelism + never double-running — NEVER subsetting or skipping.
@@ -23,7 +24,19 @@
 #
 # Job count is derived from CPUs at runtime — no tuning knob (bats tests are
 # process-spawn/I/O heavy, so jobs = cores is the one good default, per the
-# minimize-options policy): jobs = getconf _NPROCESSORS_ONLN, floor 1.
+# minimize-options policy) — and SHARED across concurrent gates (#1798). Several
+# sessions each claiming every core drove a 10-core host to load 70–130 and
+# surfaced timing races, yet serialising gates is not an option. So each live
+# gate holds one slot in a per-user registry directory, and a gate's job count is
+#   jobs = max(1, floor(getconf _NPROCESSORS_ONLN / live gates, itself included))
+# fixed once at start. A gate NEVER waits for a slot — it starts at whatever
+# share it computed. A slot is a file named by the gate's PID holding that
+# process's start time; an entry whose PID is gone (or was reused by another
+# process — the start time no longer matches) is an orphan: not counted, removed.
+# A gate removes its own slot on exit, and on SIGTERM/SIGINT/SIGHUP, which it
+# also forwards to the suite it started. The suite runs under `nice` so
+# interactive work stays responsive. An unusable registry is not fatal: the gate
+# takes every core, as before the registry existed, and says so on stderr.
 #
 # Usage:
 #   run-gate.zsh [--tests-dir DIR] [--tap-out FILE]
@@ -46,8 +59,10 @@
 # Exit codes:
 #   run-gate.zsh EXITS WITH THE SUITE'S REAL EXIT CODE (0 green, non-zero red),
 #   so it drops in as a --test-cmd. Its own errors are distinct:
-#     2    usage error (bad flag, missing/unwritable path)
+#     2    usage error (bad flag, missing/unwritable path, no temp file)
 #     127  the bats binary is not found
+#     129/130/143  the gate got SIGHUP/SIGINT/SIGTERM: its slot is removed and
+#          its suite TERMed — the run is not a verdict
 #   A run that reports ZERO tests is FORCED to a non-zero exit — a gate that ran
 #   no tests must never read green (an empty/wrong --tests-dir is a red gate, not
 #   a pass): if bats exited 0 but total==0, run-gate exits 1 with a loud error.
@@ -65,11 +80,18 @@
 #                      still resolves `parallel` from PATH): point it at a missing
 #                      name to force degraded mode, or at a stub whose `--version`
 #                      prints "GNU parallel" to force parallel mode.
-#   GATE_NPROC         overrides the derived CPU/job count (test job derivation
-#                      without depending on the host's core count).
+#   GATE_NPROC         overrides the derived CPU count the job share is taken
+#                      from (test job derivation without depending on the host's
+#                      core count).
+#   GATE_SLOTS_DIR     overrides the slot registry directory (default:
+#                      ${TMPDIR:-/tmp}/run-gate-slots.$UID), so a test can
+#                      register "other live gates" without running any.
 
 emulate -L zsh
 setopt nounset pipefail
+# The suite runs as a background job (below); zsh's default BG_NICE would add
+# its own +5 on top of the explicit `nice -n 10`.
+setopt no_bg_nice
 
 local self_dir="${0:A:h}"
 
@@ -91,10 +113,66 @@ command -v "$bats_bin" >/dev/null 2>&1 \
 
 [[ -d "$tests_dir" ]] || die_usage "tests dir not found: $tests_dir"
 
-# --- job count: cores, floor 1, no knob --------------------------------------
-local jobs="${GATE_NPROC:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)}"
-[[ "$jobs" == <-> ]] || jobs=1     # non-numeric -> 1
+# --- cleanup: our slot, the rc file, and the suite on a signal ---------------
+# Set BEFORE the slot exists, so no window leaves a slot behind. zsh defers a
+# trap until a FOREGROUND child exits, so the suite runs as a background job the
+# script `wait`s on (below) — that is what lets a signal act immediately.
+local slot="" slot_tmp="" rc_file=""
+cleanup() { local f; for f in "$slot" "$slot_tmp" "$rc_file"; do [[ -n "$f" ]] && rm -f -- "$f" 2>/dev/null; done; return 0 }
+# TERM every descendant, collected in full BEFORE any is signalled: a killed
+# parent's children re-parent away and could no longer be found. Always TERM,
+# whatever the gate received — a background job starts with SIGINT ignored, so
+# forwarding an INT would leave the suite running.
+signal_suite() {
+  local -a queue=($$) tree=()
+  local p c
+  while (( ${#queue} )); do
+    p=${queue[1]}; shift queue
+    for c in ${(f)"$(pgrep -P "$p" 2>/dev/null)"}; do
+      [[ "$c" == <-> ]] && { tree+=($c); queue+=($c) }
+    done
+  done
+  (( ${#tree} )) && kill -TERM -- "${tree[@]}" 2>/dev/null
+}
+on_signal() { trap - EXIT; signal_suite; cleanup; exit "$1" }
+trap 'cleanup' EXIT
+trap 'on_signal 143' TERM
+trap 'on_signal 130' INT
+trap 'on_signal 129' HUP
+
+# --- job count: this gate's share of the cores, floor 1, no knob -------------
+local cpus="${GATE_NPROC:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)}"
+[[ "$cpus" == <-> ]] || cpus=1     # non-numeric -> 1
+(( cpus < 1 )) && cpus=1
+
+# A process's start time — the half of a slot's identity that survives PID reuse.
+# UTC, so gates with different TZ settings print one process's start identically.
+start_time() { TZ=UTC LC_ALL=C ps -o lstart= -p "$1" 2>/dev/null }
+
+# Register first, then count: two gates starting together each see the other.
+# The slot is written under a name the <-> glob never matches and renamed into
+# place, so no gate ever reads it half-written (empty) and prunes it as an orphan.
+local slots_dir="${GATE_SLOTS_DIR:-${TMPDIR:-/tmp}/run-gate-slots.$UID}"
+local others=0 me_start entry
+me_start="$(start_time $$)"
+slot_tmp="$slots_dir/.$$"
+if [[ -n "$me_start" ]] && mkdir -p -m 700 -- "$slots_dir" 2>/dev/null \
+   && print -r -- "$me_start" 2>/dev/null >| "$slot_tmp" \
+   && slot="$slots_dir/$$" && mv -f -- "$slot_tmp" "$slot" 2>/dev/null; then
+  for entry in "$slots_dir"/<->(N); do
+    [[ "${entry:t}" == "$$" ]] && continue
+    if [[ -n "$(start_time "${entry:t}")" && "$(start_time "${entry:t}")" == "$(<"$entry")" ]]; then
+      (( others++ ))
+    else
+      rm -f -- "$entry"    # orphan: its gate is gone (or its PID was reused)
+    fi
+  done
+else
+  print -u2 -- "run-gate: slot registry unusable ('$slots_dir') — taking all ${cpus} cores, unshared (#1798)"
+fi
+local jobs=$(( cpus / (others + 1) ))
 (( jobs < 1 )) && jobs=1
+(( others > 0 )) && print -u2 -- "run-gate: ${others} other live gate(s) — sharing ${cpus} cores, jobs=${jobs} (#1798)"
 
 # --- parallel? decide the mode -----------------------------------------------
 # GNU-ness probe, not a bare `command -v`: a non-GNU `parallel` (moreutils)
@@ -106,25 +184,28 @@ if command -v "$parallel_bin" >/dev/null 2>&1 \
   have_parallel=1
 fi
 
-# Mode matrix, decided jobs-first so a 1-core host is plain `sequential` (the
+# Mode matrix, decided cores-first so a 1-core host is plain `sequential` (the
 # optimum — nothing to parallelise) and NEVER the loud `sequential-degraded`
-# nag: only a MULTI-core host with no GNU parallel is genuinely degraded.
+# nag: only a MULTI-core host with no GNU parallel is genuinely degraded. A share
+# of one job on a multi-core host with GNU parallel is plain `sequential` too.
 local mode bats_args=()
-if (( jobs <= 1 )); then
+if (( cpus <= 1 )); then
   mode="sequential"
-elif (( have_parallel )); then
-  mode="parallel"
-  bats_args=(--jobs "$jobs")
-else
+elif (( ! have_parallel )); then
   # multi-core but GNU parallel absent: run sequentially, at identical rigor,
   # but LOUDLY — this is the only case the calling skill relays to the user.
   mode="sequential-degraded"
   print -u2 -- "############################################################"
   print -u2 -- "DEGRADED: GNU parallel not found — running the full bats suite"
   print -u2 -- "SEQUENTIALLY. Expect a multiple-times-longer gate (roughly"
-  print -u2 -- "${jobs}x slower on this ${jobs}-core machine). Rigor is UNCHANGED"
+  print -u2 -- "${cpus}x slower on this ${cpus}-core machine). Rigor is UNCHANGED"
   print -u2 -- "— the whole suite still runs. Fix: brew install parallel"
   print -u2 -- "############################################################"
+elif (( jobs > 1 )); then
+  mode="parallel"
+  bats_args=(--jobs "$jobs")
+else
+  mode="sequential"
 fi
 
 # --- working-tree identity for gate attestation (#981) -----------------------
@@ -147,7 +228,7 @@ if [[ -z "$tap_out" ]]; then
   # NB: the X's MUST be trailing — BSD/macOS mktemp rejects a mid-string
   # template (e.g. run-gate.XXXXXX.tap), unlike GNU mktemp.
   tap_out="$(mktemp "${TMPDIR:-/tmp}/run-gate-tap.XXXXXX")" \
-    || { print -u2 -- "run-gate: could not create a TAP temp file"; exit 127 }
+    || die_usage "could not create a TAP temp file"
 else
   # --tap-out must be a REGULAR file. A device (e.g. /dev/null) is writable but
   # would swallow the TAP so the counts read 0 — misfiring the zero-tests guard
@@ -161,10 +242,18 @@ else
 fi
 
 # TAP (bats stdout) is tee'd to the file AND mirrored to stderr so the user sees
-# live progress, leaving OUR stdout clean for the single JSON summary. `pipestatus[1]`
-# is bats' real exit — never tee's.
-"$bats_bin" "${bats_args[@]}" "$tests_dir" | tee "$tap_out" >&2
-local rc=${pipestatus[1]}
+# live progress, leaving OUR stdout clean for the single JSON summary. The suite
+# is a background job so a signal's trap runs at once (see cleanup above); a
+# background pipeline's `wait` status is tee's, so bats' REAL exit — never tee's
+# — travels through $rc_file instead. A missing one (the subshell itself died)
+# reads red, never green.
+rc_file="$(mktemp "${TMPDIR:-/tmp}/run-gate-rc.XXXXXX")" \
+  || die_usage "could not create an exit-code temp file"
+{ nice -n 10 "$bats_bin" "${bats_args[@]}" "$tests_dir"; print -r -- $? >| "$rc_file" } \
+  | tee "$tap_out" >&2 &
+wait
+local rc="$(<"$rc_file")"
+[[ "$rc" == <-> ]] || rc=1
 
 # --- counts from the TAP (single source, no second run) ----------------------
 # `grep -c` already prints 0 (and exits 1) when nothing matches; a `|| echo 0`

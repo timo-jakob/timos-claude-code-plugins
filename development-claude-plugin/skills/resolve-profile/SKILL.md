@@ -29,13 +29,20 @@ These are the §3 rules for this repo type. The conductor's generic bullet says
 - **Run the blessed single-run parallel gate rather than bare `bats`:**
   `<resolve-issue skill-base-dir>/scripts/run-gate.zsh --tests-dir tests` (#980)
   — it runs the whole `bats tests` suite **exactly once**, parallelised via
-  `--jobs` = CPU count on a multi-core host with GNU `parallel`, and run
+  `--jobs` on a multi-core host with GNU `parallel` — a job count **shared
+  across the machine's concurrent gates** (each live gate takes an equal share
+  of the CPUs, fixed at its start and reported as the summary's `jobs`; it never
+  waits for a slot, #1798) — and run
   sequentially otherwise — loudly (a degraded warning) only on a multi-core host
   missing GNU `parallel`, quietly on a single-core host where there is nothing to
   parallelise — prints the ok/not-ok counts plus bats' **real** exit code (a JSON
   summary on stdout), and exits with that code, so it drops in as the gate
   command. A run that reports **zero** tests is forced to a non-zero (red) exit
-  — never a false green. Never hand-roll a `bats … | grep -c` that runs the
+  — never a false green. A run that exits **129/130/143** (a signal) or
+  **137** (a kill), a tool timeout say, was cut short before any summary and is
+  no verdict: never read it as red. Re-run it detached or with a timeout longer
+  than the suite, never the identical call; if that is cut short too, stop
+  retrying and report that no gate verdict exists. Never hand-roll a `bats … | grep -c` that runs the
   suite twice to count.
   - **Capture the gate attestation (#981).** On a **green** `run-gate.zsh`,
     keep its stdout `"tree"` field — the working-tree identity it just gated. On
