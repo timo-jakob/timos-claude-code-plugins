@@ -40,10 +40,23 @@ setup() {
 #!/usr/bin/env bash
 echo "call" >> "$CALLS"
 printf '%s\n' "$*" > "$ARGV"
+# what the suite saw while it ran: its niceness, and the slot registry
+ps -o nice= -p $$ | tr -d ' ' > "$BATS_TEST_TMPDIR/stub-nice"
+ls "${STUB_LS_DIR:-${GATE_SLOTS_DIR:-}}" > "$BATS_TEST_TMPDIR/stub-slots" 2>/dev/null
+echo $$ > "$BATS_TEST_TMPDIR/stub-pid"
+# the gate is the grandparent: gate -> the suite's subshell -> (nice exec) stub
+ps -o ppid= -p "$PPID" | tr -d ' ' > "$BATS_TEST_TMPDIR/stub-gate-pid"
 cat "$TAPFIX"
+[[ -n "${STUB_SLEEP:-}" ]] && sleep "$STUB_SLEEP"
 exit "${STUB_EXIT:-0}"
 EOF
   chmod +x "$STUB"
+
+  # The slot registry (#1798) is injected per test: the real one is shared by
+  # every gate on the host — including the gate that may be running THIS suite,
+  # whose own slot would otherwise halve every jobs assertion below.
+  export GATE_SLOTS_DIR="$BATS_TEST_TMPDIR/slots"
+  LIVE_PIDS=()
 
   # A "GNU parallel present" seam target: its --version says so.
   PAR_GNU="$BATS_TEST_TMPDIR/parallel-gnu"
@@ -82,6 +95,37 @@ run_gate() {  # extra env pairs precede the fixed ones
 
 calls() { wc -l < "$CALLS" | tr -d ' '; }
 
+teardown() {
+  (( ${#LIVE_PIDS[@]} )) && kill "${LIVE_PIDS[@]}" 2>/dev/null
+  return 0
+}
+
+# Print the PID of a running process for the teardown to kill — the CALLER
+# records it in LIVE_PIDS, since `$(spawn_live)` runs in a subshell. Spawned
+# inside that substitution so it is not this shell's job (no "Terminated" noise
+# when teardown kills it); its fds are closed so neither the substitution nor
+# bats (fd 3) waits on it.
+spawn_live() {
+  (sleep 300 </dev/null >/dev/null 2>&1 3>&- & echo $!)
+}
+
+# Register one "other live gate": a real, running process (so its PID is alive)
+# whose slot records its true start time — exactly what a live gate writes.
+live_slot() {
+  mkdir -p "$GATE_SLOTS_DIR"
+  local p; p="$(spawn_live)"
+  LIVE_PIDS+=("$p")    # spawn_live ran in a subshell: record the PID here
+  TZ=UTC LC_ALL=C ps -o lstart= -p "$p" > "$GATE_SLOTS_DIR/$p"
+}
+
+# A slot whose gate is gone: its PID names no running process.
+dead_pid() {
+  sleep 0 3>&- &
+  local p=$!
+  wait "$p"
+  echo "$p"
+}
+
 # ---- usage / preconditions --------------------------------------------------
 
 @test "usage: unknown flag exits 2" {
@@ -101,6 +145,20 @@ calls() { wc -l < "$CALLS" | tr -d ' '; }
     GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4 \
     zsh "$S" --tests-dir "$TESTS_DIR" --tap-out "$BATS_TEST_TMPDIR/nodir/x.tap"
   [ "$status" -eq 2 ]
+}
+
+@test "usage: no TAP temp file (unusable TMPDIR) exits 2, not the bats-missing 127" {
+  run_gate TMPDIR="$BATS_TEST_TMPDIR/no-such-dir" GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4
+  [ "$status" -eq 2 ]
+  contains "$stderr" "could not create a TAP temp file"
+}
+
+@test "usage: no exit-code temp file (unusable TMPDIR, --tap-out given) exits 2" {
+  run --separate-stderr env GATE_BATS_BIN="$STUB" CALLS="$CALLS" ARGV="$ARGV" TAPFIX="$TAPFIX" \
+    GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4 TMPDIR="$BATS_TEST_TMPDIR/no-such-dir" \
+    zsh "$S" --tests-dir "$TESTS_DIR" --tap-out "$BATS_TEST_TMPDIR/out.tap"
+  [ "$status" -eq 2 ]
+  contains "$stderr" "could not create an exit-code temp file"
 }
 
 @test "missing bats binary exits 127 — fail-fast, with the install hint and no summary" {
@@ -224,6 +282,215 @@ EOF
   run ! grep -q -- '--jobs' "$ARGV"
   # a 1-core host must NOT emit the degraded nag
   run ! grep -q 'DEGRADED' <<< "$err"
+}
+
+# ---- shared CPU budget across concurrent gates (#1798) ----------------------
+# The CPU count (GATE_NPROC) and the slot registry (GATE_SLOTS_DIR) are injected;
+# "other live gates" are real sleeping processes with correctly-stamped slots,
+# so no second gate ever runs.
+
+@test "shared budget: no other live gate -> jobs = CPU count, summary keys unchanged" {
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=6 STUB_EXIT=0
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.mode=="parallel" and .jobs==6'
+  grep -q -- '--jobs 6' "$ARGV"
+  # the machine summary is exactly today's — no field added or dropped
+  echo "$output" | jq -e 'keys == (["exit","jobs","mode","not_ok","ok","tap","total","tree"])'
+  # a lone gate prints no sharing note
+  run ! grep -q 'other live gate' <<< "$stderr"
+}
+
+@test "shared budget: the gate holds its own slot while the suite runs, and removes it on a normal exit" {
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=6 STUB_EXIT=0
+  [ "$status" -eq 0 ]
+  # the stub saw exactly one slot (the gate's own) while it ran ...
+  [ "$(wc -l < "$BATS_TEST_TMPDIR/stub-slots" | tr -d ' ')" -eq 1 ]
+  grep -qE '^[0-9]+$' "$BATS_TEST_TMPDIR/stub-slots"
+  # ... and none is left behind
+  [ -z "$(ls -A "$GATE_SLOTS_DIR")" ]
+}
+
+@test "shared budget: a red suite still removes the gate's own slot" {
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=6 STUB_EXIT=1
+  [ "$status" -eq 1 ]
+  [ -z "$(ls -A "$GATE_SLOTS_DIR")" ]
+}
+
+@test "shared budget: 3 other live gates on 10 CPUs -> jobs = floor(10/4) = 2, reported in the summary" {
+  live_slot; live_slot; live_slot
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=10 STUB_EXIT=0
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.mode=="parallel" and .jobs==2'
+  grep -q -- '--jobs 2' "$ARGV"
+  contains "$stderr" "3 other live gate(s)"
+  # live gates' slots are theirs — never pruned
+  [ "$(ls "$GATE_SLOTS_DIR" | wc -l | tr -d ' ')" -eq 3 ]
+}
+
+@test "shared budget: 1 other live gate on 7 CPUs -> jobs = floor(7/2) = 3 (floor, not round)" {
+  live_slot
+  # a non-UTC zone for the gate: its slot comparison must not depend on TZ
+  run_gate TZ=Pacific/Auckland GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=7 STUB_EXIT=0
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.jobs==3'
+  grep -q -- '--jobs 3' "$ARGV"
+}
+
+@test "shared budget: more live gates than CPUs -> jobs floored to 1, sequential, and the gate never waits" {
+  live_slot; live_slot; live_slot; live_slot; live_slot
+  SECONDS=0
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=2 STUB_EXIT=0
+  [ "$SECONDS" -lt 10 ]
+  [ "$status" -eq 0 ]
+  # it ran the suite at once, at a share of one job — no slot to wait for
+  [ "$(calls)" -eq 1 ]
+  echo "$output" | jq -e '.jobs==1 and .mode=="sequential" and .ok==3'
+  run ! grep -q -- '--jobs' "$ARGV"
+}
+
+@test "shared budget: a one-job share on a multi-core host without GNU parallel is still DEGRADED" {
+  live_slot; live_slot; live_slot
+  run_gate GATE_PARALLEL_BIN="no-such-parallel-xyz" GATE_NPROC=2 STUB_EXIT=0
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.jobs==1 and .mode=="sequential-degraded"'
+  # the slowdown is the CPU count's, not the one-job share's
+  contains "$stderr" "2x slower on this 2-core machine"
+}
+
+@test "shared budget: an orphaned slot (dead PID) is NOT counted and is removed" {
+  mkdir -p "$GATE_SLOTS_DIR"
+  local dead; dead="$(dead_pid)"
+  echo "Thu Jan  1 00:00:00 1970" > "$GATE_SLOTS_DIR/$dead"
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=8 STUB_EXIT=0
+  [ "$status" -eq 0 ]
+  # counting the orphan would halve the share to 4
+  echo "$output" | jq -e '.jobs==8'
+  [ ! -e "$GATE_SLOTS_DIR/$dead" ]
+}
+
+@test "shared budget: a slot whose PID was REUSED (start time differs) is an orphan too" {
+  mkdir -p "$GATE_SLOTS_DIR"
+  local p; p="$(spawn_live)"
+  LIVE_PIDS+=("$p")
+  # a live PID, but not the process that wrote this slot
+  echo "Thu Jan  1 00:00:00 1970" > "$GATE_SLOTS_DIR/$p"
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=8 STUB_EXIT=0
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.jobs==8'
+  [ ! -e "$GATE_SLOTS_DIR/$p" ]
+}
+
+@test "shared budget: a live gate beside an orphan counts once — the orphan is pruned, the live slot kept" {
+  live_slot
+  local live="${LIVE_PIDS[0]}" dead; dead="$(dead_pid)"
+  echo "Thu Jan  1 00:00:00 1970" > "$GATE_SLOTS_DIR/$dead"
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=8 STUB_EXIT=0
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.jobs==4'
+  [ -e "$GATE_SLOTS_DIR/$live" ]
+  [ ! -e "$GATE_SLOTS_DIR/$dead" ]
+}
+
+@test "shared budget: a non-PID file in the registry is neither counted nor removed" {
+  mkdir -p "$GATE_SLOTS_DIR"
+  echo x > "$GATE_SLOTS_DIR/README"
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=8 STUB_EXIT=0
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.jobs==8'
+  [ -e "$GATE_SLOTS_DIR/README" ]
+}
+
+@test "shared budget: an unusable registry is not fatal — all CPUs, unshared, said on stderr" {
+  echo "not a dir" > "$BATS_TEST_TMPDIR/slotfile"
+  run_gate GATE_SLOTS_DIR="$BATS_TEST_TMPDIR/slotfile" GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=6 STUB_EXIT=0
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.jobs==6 and .ok==3'
+  contains "$stderr" "slot registry unusable"
+}
+
+@test "shared budget: the suite runs under nice (10 above the gate's own niceness, capped at 19)" {
+  local base; base="$(ps -o nice= -p $$ | tr -d ' ')"
+  local want=$(( base + 10 )); (( want > 19 )) && want=19
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4 STUB_EXIT=0
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/stub-nice")" -eq "$want" ]
+}
+
+# Start a gate in the background whose suite blocks, wait until the suite runs,
+# send $1, and leave $gate_rc / $gate_pid / $suite_pid for the caller to assert.
+signal_gate() {
+  env -u GATE_NPROC -u GATE_PARALLEL_BIN \
+    GATE_BATS_BIN="$STUB" CALLS="$CALLS" ARGV="$ARGV" TAPFIX="$TAPFIX" \
+    GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4 STUB_SLEEP=60 \
+    zsh "$S" --tests-dir "$TESTS_DIR" >/dev/null 2>&1 3>&- &
+  gate_pid=$!
+  local i
+  for i in $(seq 1 100); do
+    [ -s "$BATS_TEST_TMPDIR/stub-pid" ] && break
+    sleep 0.1
+  done
+  suite_pid="$(cat "$BATS_TEST_TMPDIR/stub-pid")"
+  [ -e "$GATE_SLOTS_DIR/$gate_pid" ]     # registered while the suite runs
+  kill -"$1" "$gate_pid"
+  gate_rc=0
+  wait "$gate_pid" || gate_rc=$?
+  # the suite was forwarded the signal; give it a moment to go
+  for i in $(seq 1 50); do
+    kill -0 "$suite_pid" 2>/dev/null || break
+    sleep 0.1
+  done
+}
+
+@test "shared budget: SIGTERM removes the gate's own slot at once and stops its suite" {
+  SECONDS=0
+  signal_gate TERM
+  [ "$gate_rc" -eq 143 ]
+  [ ! -e "$GATE_SLOTS_DIR/$gate_pid" ]
+  run ! kill -0 "$suite_pid"
+  # at once — not after the 60 s suite would have finished by itself
+  [ "$SECONDS" -lt 30 ]
+}
+
+@test "shared budget: SIGINT removes the gate's own slot at once and stops its suite" {
+  SECONDS=0
+  signal_gate INT
+  [ "$gate_rc" -eq 130 ]
+  [ ! -e "$GATE_SLOTS_DIR/$gate_pid" ]
+  run ! kill -0 "$suite_pid"
+  [ "$SECONDS" -lt 30 ]
+}
+
+@test "shared budget: SIGHUP removes the gate's own slot at once and stops its suite" {
+  SECONDS=0
+  signal_gate HUP
+  [ "$gate_rc" -eq 129 ]
+  [ ! -e "$GATE_SLOTS_DIR/$gate_pid" ]
+  run ! kill -0 "$suite_pid"
+  [ "$SECONDS" -lt 30 ]
+}
+
+@test "shared budget: the default registry is TMPDIR's per-user run-gate-slots.<uid>" {
+  local tmp="$BATS_TEST_TMPDIR/tmp"
+  GATE_SLOTS_DIR="$tmp/run-gate-slots.$(id -u)"
+  live_slot
+  run --separate-stderr env -u GATE_SLOTS_DIR -u GATE_NPROC -u GATE_PARALLEL_BIN TMPDIR="$tmp" \
+    GATE_BATS_BIN="$STUB" CALLS="$CALLS" ARGV="$ARGV" TAPFIX="$TAPFIX" \
+    GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=8 STUB_EXIT=0 \
+    zsh "$S" --tests-dir "$TESTS_DIR"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.jobs==4'
+  contains "$stderr" "1 other live gate(s)"
+}
+
+@test "shared budget: with TMPDIR unset the registry falls back to /tmp/run-gate-slots.<uid>" {
+  run --separate-stderr env -u GATE_SLOTS_DIR -u TMPDIR -u GATE_NPROC -u GATE_PARALLEL_BIN \
+    GATE_BATS_BIN="$STUB" CALLS="$CALLS" ARGV="$ARGV" TAPFIX="$TAPFIX" \
+    STUB_LS_DIR="/tmp/run-gate-slots.$(id -u)" \
+    GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4 STUB_EXIT=0 \
+    zsh "$S" --tests-dir "$TESTS_DIR"
+  [ "$status" -eq 0 ]
+  # the gate's own slot was in /tmp's registry while its suite ran
+  grep -qx "$(cat "$BATS_TEST_TMPDIR/stub-gate-pid")" "$BATS_TEST_TMPDIR/stub-slots"
 }
 
 # ---- degraded mode (GNU parallel absent / non-GNU) --------------------------
