@@ -325,16 +325,31 @@ pid_gone() { ! kill -0 "$1" 2>/dev/null; }
   [ "$(cat "$STUB/argv")" = "--jobs 4 --tap $A" ]
 }
 
+# The help is the header and only the header (#1839): its first and last lines
+# with the `# ` stripped, no shebang, no code from below it, no comment prefix
+# left in — a lone `#` included, and grep must answer "no match", not fail.
+prints_header_only() {
+  local rc=0
+  [ "${lines[0]}" = "flake-hunt.zsh — reproduce load-dependent bats failures on demand (#1796)." ]
+  [ "${lines[${#lines[@]}-1]}" = "  FLAKE_HUNT_NPROC         the CPU count (burner count and --jobs base)" ]
+  lacks "$output" '#!/usr/bin/env zsh'
+  lacks "$output" '-h|--help)'
+  grep -q '^#' <<< "$output" || rc=$?
+  [ "$rc" -eq 1 ]
+}
+
 @test "flake-hunt: --help prints the usage" {
   run --separate-stderr zsh "$HUNT" --help
   [ "$status" -eq 0 ]
   contains "$output" "--job-multiplier M"
+  prints_header_only
 }
 
 @test "flake-hunt: -h prints the usage" {
   run --separate-stderr zsh "$HUNT" -h
   [ "$status" -eq 0 ]
   contains "$output" "--job-multiplier M"
+  prints_header_only
 }
 
 @test "flake-hunt: a work directory that cannot be created exits 3 before any run" {
