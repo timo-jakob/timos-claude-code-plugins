@@ -244,17 +244,45 @@ def words_of(s):
 SED_ADDR = re.compile(
     r"\s*(\d+|\$\{[^}]*\}|\$\d+|\$|/(?:[^/\\]|\\.)*/)"
     r"(\s*,\s*(\d+|\$\{[^}]*\}|\$\d+|\$|/(?:[^/\\]|\\.)*/))?\s*!?\s*")
+SED_WS = re.compile(r"\s*")
+SED_SEP = re.compile(r"[;\n{}]")
 
 
 def sed_quits(script):
-    # blank every /…/ span first, so a `;` inside an address regex is not a
-    # command separator
-    flat = re.sub(r"/(?:[^/\\\n]|\\.)*/", lambda m: "/" + "x" * (len(m.group(0)) - 2) + "/", script)
-    for cmd in re.split(r"[;\n{}]", flat):
-        m = SED_ADDR.match(cmd)
-        rest = cmd[m.end():] if m else cmd.strip()
-        if re.fullmatch(r"[qQ]\s*\d*\s*", rest):
+    # walk the script one command at a time, left to right: skip an address or
+    # range and its `!`, then read the command letter. Only an `s` or `y` that
+    # IS the command letter has its delimited parts consumed, so a `;` or `q`
+    # inside them is never a command, and neither is an `s` inside an address
+    # regex. Separators are `;`, newline, `{` and `}`.
+    n, i = len(script), 0
+
+    def past(j, d):
+        # index just past the next unescaped d at or after j
+        while j < n and script[j] != d:
+            j += 2 if script[j] == "\\" else 1
+        return j + 1
+
+    while i < n:
+        i = (SED_ADDR.match(script, i) or SED_WS.match(script, i)).end()
+        if i >= n:
+            break
+        c = script[i]
+        if c in ";\n{}":
+            i += 1
+        elif c in "qQ" and re.match(r"[qQ]\s*\d*\s*(?:[;\n}]|$)", script[i:]):
             return True
+        elif c in "sy" and i + 1 < n:
+            d = script[i + 1]
+            i = past(past(i + 2, d), d)
+            if c == "s":
+                flags = re.match(r"[A-Za-z0-9]*", script[i:]).group(0)
+                i += len(flags)
+                if "w" in flags or "W" in flags:
+                    k = script.find("\n", i)
+                    i = n if k < 0 else k
+        else:
+            k = SED_SEP.search(script, i)
+            i = n if k is None else k.start()
     return False
 
 
@@ -585,6 +613,7 @@ LC_ALL=C head -n 1
 sed q
 sed 2q
 sed -n '/x/{p;q;}'
+sed -n '/x/{p;q}'
 sed -n '/a;b/q'
 sed "${n}q"
 sed '$q'
@@ -592,6 +621,11 @@ sed '/x/!q'
 sed "$1q"
 sed '/x/q5'
 sed -n -e p -e '/x/Q'
+sed 's/a/b/;/x/q'
+sed -n 's/^## //;/^---/q;p'
+sed '/is/p;/as/q'
+sed 's|a|b|;q'
+sed 'y/abc/xyz/;q'
 awk '{ print; exit }'
 EOF
   run guard_report "$root" ""
@@ -617,6 +651,12 @@ printf x | grep -e -q x
 printf x | tail -n 1
 printf x | sed -n 1p
 printf x | sed 's/q/Q/'
+printf x | sed 's/x/q/'
+printf x | sed 's/a;q/b/'
+printf x | sed 's/;q;/x/'
+printf x | sed 'y/a;q;/bcde/'
+printf x | sed 's/\/x/;q;/'
+printf x | sed 's/a/b/w out;q'
 printf x | awk '{ print $1 }'
 grep -q x <<< "$v"
 head -1 <<< "$v"
@@ -626,6 +666,30 @@ EOF
   run guard_report "$root" ""
   [ "$status" -eq 0 ]
   [ -z "$output" ] || { printf '%s\n' "$output" >&2; return 1; }
+}
+
+@test "#1841 a newline inside a sed script separates its commands, before a q and after one" {
+  local root="$BATS_TEST_TMPDIR/r"
+  fixture_suite "$root" tests/multiline-sed.bats <<'EOF'
+#!/usr/bin/env bats
+h() {
+  printf x | sed '/x/q
+p'
+}
+g() {
+  printf x | sed -n 'p
+q'
+}
+EOF
+  local expected
+  IFS= read -r -d '' expected <<'EOF' || true
+tests/multiline-sed.bats:3: printf x | sed '/x/q p'
+tests/multiline-sed.bats:7: printf x | sed -n 'p q'
+EOF
+  expected="${expected%$'\n'}"
+  run guard_report "$root" ""
+  [ "$status" -eq 0 ]
+  [ "$output" = "$expected" ]
 }
 
 @test "#1797 BOUNDARY: a @test-body pipeline, not on a run line, in a file without pipefail is not flagged" {
