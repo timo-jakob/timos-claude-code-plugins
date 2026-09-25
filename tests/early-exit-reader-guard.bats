@@ -500,11 +500,15 @@ guard_run() {
 }
 
 # A throwaway git repo holding one suite, read from stdin, at <root>/<rel>.
+# Fixture heredocs spell a test opener `%test`, mapped back to `@test` here:
+# bats' preprocessor rewrites a line-start `@test "…" {` into a function even
+# inside a heredoc on some platforms (Linux CI), which would turn every
+# fixture @test body into a helper and flag it.
 fixture_suite() {
   local root="$1" rel="$2"
   [ -d "$root/.git" ] || git -C "$(mkdir -p "$root" && cd "$root" && pwd)" init -q
   mkdir -p "$root/$(dirname "$rel")"
-  cat > "$root/$rel"
+  sed 's/^\([[:blank:]]*\)%test /\1@test /' > "$root/$rel"
   git -C "$root" add -- "$rel"
 }
 
@@ -628,7 +632,7 @@ EOF
   local root="$BATS_TEST_TMPDIR/r"
   fixture_suite "$root" tests/boundary.bats <<'EOF'
 #!/usr/bin/env bats
-@test "reads its own pipe" {
+%test "reads its own pipe" {
   printf 'a\nb\n' | grep -q b
 }
 EOF
@@ -648,7 +652,7 @@ one_liner() { printf 'a\nb\n' | grep -q b; }
 function keyword_form {
   printf 'a\nb\n' |& grep -q b
 }
-@test "calls the helpers, then reads its own pipe" {
+%test "calls the helpers, then reads its own pipe" {
   has_b
   printf 'a\nb\n' | grep -q b
 }
@@ -665,7 +669,7 @@ tests/helper.bats:7: printf 'a\nb\n' |& grep -q b" ]
   local root="$BATS_TEST_TMPDIR/r"
   fixture_suite "$root" tests/run-line.bats <<'EOF'
 #!/usr/bin/env bats
-@test "runs a pipe" {
+%test "runs a pipe" {
   run bash -c "seq 1 100000 | grep -q 5"
   [ "$status" -eq 0 ]
 }
@@ -679,7 +683,7 @@ EOF
   local root="$BATS_TEST_TMPDIR/r" where
   fixture_suite "$root" tests/quoted.bats <<'EOF'
 #!/usr/bin/env bats
-@test "a pipefail that is someone else's shell code" {
+%test "a pipefail that is someone else's shell code" {
   bash -c "set -o pipefail; true"
   bash -c 'set -euo pipefail; true'
   printf 'a\nb\n' | grep -q b
@@ -722,7 +726,7 @@ EOF
   local root="$BATS_TEST_TMPDIR/r"
   fixture_suite "$root" tests/strict-body.bats <<'EOF'
 #!/usr/bin/env bats
-@test "its own strict shell" {
+%test "its own strict shell" {
   bash -c "set -o pipefail; seq 1 100000 | grep -q 5"
   bash -c "seq 1 100000 | grep -q 5"
 }
@@ -758,7 +762,7 @@ b
 DOC
     grep -q b
 }
-@test "a quoted body still open at the line's end" {
+%test "a quoted body still open at the line's end" {
   run bash -c "true
     seq 1 100000 | grep -q 5"
 }
@@ -786,7 +790,7 @@ EOF
 h() {
   # a path like C:\
 }
-@test "after the helper closed" {
+%test "after the helper closed" {
   printf 'a\nb\n' | grep -q b
 }
 EOF
@@ -802,7 +806,7 @@ EOF
 h() {
   first="$(printf 'a\nb\n' | head -n "$n")"
 }
-@test "a heredoc captured in a quoted substitution" {
+%test "a heredoc captured in a quoted substitution" {
   expected="$(cat <<'EOF'
 it's ) not the end
 set -o pipefail
@@ -907,7 +911,7 @@ tests/other.bats:3: printf x | grep -q x" ] \
 h() {
   true
 }
-@test "an unflagged pipe" {
+%test "an unflagged pipe" {
   printf x | grep -q x
 }
 EOF
