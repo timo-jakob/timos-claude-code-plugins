@@ -512,6 +512,35 @@ _profile_section() {
   ' "$1"
 }
 
+# Every way profile $1's Gate breaks the cut-short retry rule (#1846), one per
+# line, read from the whitespace-normalised `## Gate` section so a reflow cannot
+# unpin it. The retry is detached-only: the job count shared with other live
+# gates (#1798) makes a timeout sized to an earlier run unsafe. The real
+# assertion and its non-vacuity control both go through this.
+_cut_short_retry_violations() {
+  local flat needle
+  flat="$(_profile_section "$1" "Gate" | tr '\n' ' ' | tr -s ' ')"
+  case "$flat" in *"with a timeout longer than the suite"*|*"detached or with a timeout"*)
+    echo "the Gate still offers a timeout-bounded re-run" ;; esac
+  for needle in \
+    'Re-run it detached, never under a tool timeout' \
+    'the job count shared with other live gates (#1798)' \
+    'as §3.5 requires — *The round boundary is concurrent*, step 2' \
+    'take the verdict from the exit status and JSON summary that launch records' \
+    '**129/130/143** (a signal) or **137** (a kill)' \
+    'was cut short before any summary and is no verdict: never read it as red'; do
+    case "$flat" in *"$needle"*) : ;; *) printf 'the Gate lost <<%s>>\n' "$needle" ;; esac
+  done
+  # the whole clause, so its one-retry bound is pinned too; case-insensitive,
+  # since #1846 it opens its own sentence
+  needle='never re-run the identical call; if that is cut short too, stop retrying and report that no gate verdict exists'
+  grep -qiF -- "$needle" <<< "$flat" || printf 'the Gate lost <<%s>>\n' "$needle"
+  # it points at §3.5 for HOW to launch, and restates none of it
+  case "$flat" in *nohup*|*setsid*|*setpgrp*|*run_in_background*)
+    echo "the Gate restates launch mechanics §3.5 owns" ;; esac
+  return 0
+}
+
 # The profiles with NO attestable single-run runner — derived from the Gate's
 # own content, never a hand-written list. That is the real reason the rule
 # splits: `--gate-attest` (#981) carries a tree identity a runner produced, so a
@@ -2717,4 +2746,21 @@ _roster_sites() {
   # into a typed refusal — the single most likely regression here.
   grep -qF -- '`unsupported_repo_type` is not reused here.' "$CONDUCTOR"
   grep -qF -- "exit-3 condition" "$CONDUCTOR"
+}
+
+@test "#1846 the claude-plugin Gate's cut-short retry is detached-only, never under a tool timeout" {
+  local bad
+  bad="$(_cut_short_retry_violations "$PROFILE")"
+  [ -z "$bad" ] || { printf '%s\n' "$bad" >&2; return 1; }
+}
+
+@test "#1846 non-vacuity: the old timeout-bounded retry wording reds the guard" {
+  # Planted inside the Gate section, before the next heading, so the control
+  # proves the section read reaches it rather than passing on an empty section.
+  local planted="$BATS_TEST_TMPDIR/profile.md" bad
+  awk '/^## Version bump$/ { print "Re-run it detached or with a timeout longer"; print "than the suite, never the identical call."; print "" } { print }' \
+    "$PROFILE" > "$planted"
+  bad="$(_cut_short_retry_violations "$planted")"
+  [ "$bad" = "the Gate still offers a timeout-bounded re-run" ] \
+    || { printf 'got [%s]\n' "$bad" >&2; return 1; }
 }
