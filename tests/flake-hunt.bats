@@ -102,8 +102,10 @@ teardown() {
   [ -s "$STUB/load.pgid" ] && kill -KILL -- "-$(cat "$STUB/load.pgid")" 2>/dev/null
   pids="$(pgrep -f -- "$BATS_TEST_TMPDIR" || true)"
   [ -n "$pids" ] || return 0
-  for g in $(ps -A -o ppid=,pgid=,command= | awk -v ps=" $(echo $pids) " \
-      'index(ps, " " $1 " ") && /flake-hunt-load/ { print $2 }' | sort -u); do
+  # only a load leader's group: one still held before its setpgrp shares the
+  # harness's group, which is this test's own, so it is ended by pid below
+  for g in $(ps -A -o pid=,ppid=,pgid=,command= | awk -v ps=" $(echo $pids) " \
+      'index(ps, " " $2 " ") && $1 == $3 && /flake-hunt-load/ { print $3 }' | sort -u); do
     kill -KILL -- "-$g" 2>/dev/null || true
   done
   for p in $pids; do kill -KILL "$p" 2>/dev/null || true; done
@@ -542,4 +544,103 @@ interrupt_mid_run() {
   group_gone "$lpg"
   group_gone "$bpg"
   pid_gone "$own"
+}
+
+# A PATH-first perl that holds one launch in the window between the harness's
+# fork and perl's setpgrp, where the child is still in the harness's own group
+# and a group signal cannot reach it (#1838). STUB_PERL_PAUSE=load|bats picks
+# the launch: the load group's argv names flake-hunt-load, the bats run's names
+# the stub bats. It records its pid (the launch's $!), writes a ready marker,
+# then waits (at most 30s) for a release file before exec'ing the real perl.
+# While held it ignores TERM, so only the harness's KILL can end it. Every other
+# call is the real perl at once.
+signal_in_launch_window() {
+  local real_perl i
+  real_perl="$(command -v perl)"
+  mkdir -p "$BATS_TEST_TMPDIR/perlbin"
+  cat > "$BATS_TEST_TMPDIR/perlbin/perl" <<EOF
+#!/bin/bash
+case "\${STUB_PERL_PAUSE:-}:\$*" in
+load:*flake-hunt-load*|bats:*'$STUB/bats'*)
+  trap '' TERM
+  echo "\$\$" > '$STUB/perl.tmp'; mv '$STUB/perl.tmp' '$STUB/perl.pid'
+  : > '$STUB/perl.ready'
+  for i in \$(seq 300); do [ -e '$STUB/perl.release' ] && break; sleep 0.1; done
+  trap - TERM ;;
+esac
+exec '$real_perl' "\$@"
+EOF
+  chmod +x "$BATS_TEST_TMPDIR/perlbin/perl"
+  STUB_PERL_PAUSE="$1" perl -e '$SIG{INT} = $SIG{TERM} = $SIG{HUP} = "DEFAULT"; exec @ARGV' \
+    env PATH="$BATS_TEST_TMPDIR/perlbin:$PATH" zsh "$HUNT" --iterations 1 "$A" 2>/dev/null &
+  hunt=$!
+  for i in $(seq 100); do [ -e "$STUB/perl.ready" ] && break; sleep 0.1; done
+  [ -e "$STUB/perl.ready" ]
+  held="$(cat "$STUB/perl.pid")"
+  kill "-$2" "$hunt"
+  for i in $(seq 100); do pid_gone "$hunt" && break; sleep 0.1; done
+  rc=hung
+  if pid_gone "$hunt"; then wait "$hunt" && rc=0 || rc=$?; fi
+}
+
+@test "flake-hunt: a bats leader already reaped is never signalled by pid" {
+  # the harness reads $ZDOTDIR/.zshenv, so a kill() defined there logs every kill
+  mkdir -p "$BATS_TEST_TMPDIR/zdot"
+  echo 'kill() { print -r -- "$*" >> "$KILL_LOG"; builtin kill "$@"; }' > "$BATS_TEST_TMPDIR/zdot/.zshenv"
+  KILL_LOG="$BATS_TEST_TMPDIR/kill.log" ZDOTDIR="$BATS_TEST_TMPDIR/zdot" \
+    run --separate-stderr zsh "$HUNT" --iterations 1 "$A"
+  [ "$status" -eq 0 ]
+  bpid="$(cat "$STUB/bats.pid")"
+  # its group was signalled after the reap; its free pid must not be
+  grep -qxF -- "-TERM -- -$bpid" "$BATS_TEST_TMPDIR/kill.log"
+  run ! grep -qxF -- "-TERM $bpid" "$BATS_TEST_TMPDIR/kill.log"
+  run ! grep -qxF -- "-KILL $bpid" "$BATS_TEST_TMPDIR/kill.log"
+}
+
+@test "flake-hunt: INT before the load group's setpgrp still ends its leader, exit 130" {
+  signal_in_launch_window load INT
+  [ "$rc" = 130 ]
+  pid_gone "$held"
+  group_gone "$held"
+}
+
+@test "flake-hunt: TERM before the load group's setpgrp still ends its leader, exit 143" {
+  signal_in_launch_window load TERM
+  [ "$rc" = 143 ]
+  pid_gone "$held"
+  group_gone "$held"
+}
+
+@test "flake-hunt: HUP before the load group's setpgrp still ends its leader, exit 129" {
+  signal_in_launch_window load HUP
+  [ "$rc" = 129 ]
+  pid_gone "$held"
+  group_gone "$held"
+}
+
+@test "flake-hunt: INT before a bats run's setpgrp still ends its leader, exit 130" {
+  signal_in_launch_window bats INT
+  [ "$rc" = 130 ]
+  pid_gone "$held"
+  group_gone "$held"
+}
+
+@test "flake-hunt: TERM before a bats run's setpgrp still ends its leader, exit 143" {
+  # the kill() logger of the reaped-leader test: the held leader gets both halves
+  mkdir -p "$BATS_TEST_TMPDIR/zdot"
+  echo 'kill() { print -r -- "$*" >> "$KILL_LOG"; builtin kill "$@"; }' > "$BATS_TEST_TMPDIR/zdot/.zshenv"
+  export KILL_LOG="$BATS_TEST_TMPDIR/kill.log" ZDOTDIR="$BATS_TEST_TMPDIR/zdot"
+  signal_in_launch_window bats TERM
+  [ "$rc" = 143 ]
+  pid_gone "$held"
+  group_gone "$held"
+  grep -qxF -- "-TERM $held" "$KILL_LOG"
+  grep -qxF -- "-KILL $held" "$KILL_LOG"
+}
+
+@test "flake-hunt: HUP before a bats run's setpgrp still ends its leader, exit 129" {
+  signal_in_launch_window bats HUP
+  [ "$rc" = 129 ]
+  pid_gone "$held"
+  group_gone "$held"
 }

@@ -188,6 +188,10 @@ walk_groups() {
 }
 # End group $1, the groups below it now, and any groups named after it (ones
 # sampled earlier, whose parents may since have exited) — each only while ours.
+# The leader $1 is also signalled by pid while it is still our unreaped job: a
+# signal that lands between the launch's fork and perl's setpgrp finds a group
+# with no members yet, and the child would otherwise go on to exec its command
+# while `wait` below blocks on it for ever.
 end_group() {
   local pg="$1" n=0 g
   [[ -n "$pg" ]] || return 0
@@ -196,11 +200,13 @@ end_group() {
   groups=("${walked[@]}" "${@:2}")
   for g in "${(u)groups[@]}"; do ours "$g" && mine+=("$g"); done
   for g in "${mine[@]}"; do kill -TERM -- "-$g" 2>/dev/null; done
+  job_alive "$pg" && kill -TERM "$pg" 2>/dev/null
   # TERM is honoured by a busy loop, bats and parallel; KILL what is left after ~2s.
   while (( ${#mine} )) && groups_alive "${mine[@]}" && (( n++ < 20 )); do sleep 0.1; done
   walk_groups "$pg"
   groups=("${mine[@]}" "${walked[@]}")
   for g in "${(u)groups[@]}"; do ours "$g" && kill -KILL -- "-$g" 2>/dev/null; done
+  job_alive "$pg" && kill -KILL "$pg" 2>/dev/null
   wait "$pg" 2>/dev/null
   return 0
 }
