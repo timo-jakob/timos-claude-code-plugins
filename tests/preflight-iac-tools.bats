@@ -116,10 +116,13 @@ EOF
 
 # The tools a preflight run CHECKED, one per line, sorted: the name on each
 # `✓ <tool>` / `! <tool> — missing` line of the tool loop, colour codes removed.
+# A `done` flag rather than `exit`: awk keeps draining its input, so sed never
+# writes into a closed pipe (#1797).
 checked_tools() {
   printf '%s\n' "$1" | sed $'s/\e\\[[0-9;]*m//g' | awk '
+    done { next }
     /Checking required tools/ { on = 1; next }
-    on && !($1 == "✓" || $1 == "!") { exit }
+    on && !($1 == "✓" || $1 == "!") { on = 0; done = 1; next }
     on { print $2 }
   ' | LC_ALL=C sort
 }

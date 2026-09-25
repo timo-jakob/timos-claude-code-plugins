@@ -680,7 +680,7 @@ skill_step7_code() {
   # shape assertions: a closing fence with trailing whitespace would defeat the
   # range and silently drag the PROSE bullets in — re-opening the very hole this
   # helper exists to close.
-  [ "$(printf '%s\n' "$out" | head -1)" = '```bash' ] \
+  [ "$(head -1 <<< "$out")" = '```bash' ] \
     && [ "$(printf '%s\n' "$out" | tail -1)" = '```' ] \
     || { echo "Step 7's bash fence is not cleanly delimited" >&2; return 1; }
   printf '%s\n' "$out"
@@ -692,8 +692,10 @@ skill_step0_code() {
   # inside the bullet) and stop at its first close, or the range concatenates
   # the others and an assertion can resolve against the wrong one.
   # awk, not sed: BSD sed rejects `q` inside a brace block, and we need to stop
-  # at the FIRST close so the other fences are not concatenated in.
-  out="$(skill_step0 | awk '/^  ```bash/{f=1} f{print} f&&/^  ```$/&&!/bash/{exit}')"
+  # at the FIRST close so the other fences are not concatenated in. A `done`
+  # flag rather than `exit`: awk keeps draining its input, so the producer
+  # never writes into a closed pipe (#1797).
+  out="$(skill_step0 | awk 'd{next} /^  ```bash/{f=1} f{print} f&&/^  ```$/&&!/bash/{f=0; d=1}')"
   [ -n "$out" ] || { echo "Step 0 stamp fence not found in SKILL.md" >&2; return 1; }
   case "$out" in
     *'T0='*) ;;

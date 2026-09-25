@@ -180,8 +180,8 @@ _flag_placeholder() {
   [ "$#" -eq 4 ] || { printf '_flag_placeholder: needs file, line, span, flag\n' >&2; return 2; }
   [ -n "$4" ] || { printf '_flag_placeholder: empty flag\n' >&2; return 2; }
   local tok
-  tok="$(sed -n "$2,$(($2 + $3))p" "$1" | grep -oE -- "$4 [^] ]+" | head -1 \
-    | awk '{print $2}')"
+  tok="$(sed -n "$2,$(($2 + $3))p" "$1" | grep -oE -- "$4 [^] ]+" \
+    | awk 'NR == 1 {print $2}')"
   [ -n "$tok" ] || return 1
   printf '%s\n' "$tok"
 }
@@ -220,8 +220,12 @@ _roster_hits() {
     # no line numbers: without it the needle has to fall inside one physical
     # line, and a mention wrapped mid-phrase across two lines — the likeliest
     # shape for a mid-sentence one — drops out of the roster silently.
-    sed 's/^[[:space:]]*#[[:space:]]\{0,1\}//' "$root/$f" | tr -d '*`' \
-      | tr -s '[:space:]' ' ' | grep -qaiF -e "$needle" || rc=$?
+    # captured first, then searched: GNU grep quits at the first match even
+    # when its stdout is /dev/null, so a pipe into it races the writer (#1797)
+    local flat
+    flat="$(sed 's/^[[:space:]]*#[[:space:]]\{0,1\}//' "$root/$f" | tr -d '*`' \
+      | tr -s '[:space:]' ' ')"
+    grep -qaiF -e "$needle" <<< "$flat" || rc=$?
     case "$rc" in
       0) printf '%s\n' "$f" ;;
       1) ;;

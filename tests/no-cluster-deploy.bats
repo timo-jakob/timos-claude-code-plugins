@@ -2776,7 +2776,9 @@ guarded_creator_gated() {
   local f
   for f in "$@"; do
     [ -f "$f" ] && [ -r "$f" ] || { printf 'guarded_creator_gated: unreadable site %s\n' "$f" >&2; return 2; }
-    if guarded_creator_gate_lines "$f" | grep -q .; then
+    local lines
+    lines="$(guarded_creator_gate_lines "$f")" || true
+    if grep -q . <<< "$lines"; then
       printf '%s\n' "$f"
     fi
   done

@@ -150,7 +150,7 @@ carriers_in() {
   exempt="$(exempt_agents_in "$root")"
   while IFS= read -r a; do
     [ -n "$a" ] || continue
-    printf '%s\n' "$exempt" | grep -qxF -- "$a" && continue
+    grep -qxF -- "$a" <<< "$exempt" && continue
     printf '%s\n' "$a"
   done < <(read_only_agents_in "$root")
 }
@@ -184,7 +184,7 @@ exemption_problems_in() {
     reason="${line#* | }"
     reason="$(printf '%s' "$reason" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
     [ -n "$reason" ] || printf 'no reason given: %s\n' "$path"
-    printf '%s\n' "$roster" | grep -qxF -- "$path" \
+    grep -qxF -- "$path" <<< "$roster" \
       || printf 'not a derived read-only agent: %s\n' "$path"
     if [ -f "$root/$path" ] && grep -qF -- "$HEADING" "$root/$path"; then
       printf 'exempt but carries the rule: %s\n' "$path"

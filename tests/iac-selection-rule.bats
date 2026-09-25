@@ -167,12 +167,17 @@ selection_gated() {
   local f
   for f in "$@"; do
     [ -f "$f" ] && [ -r "$f" ] || { printf 'selection_gated: unreadable site %s\n' "$f" >&2; return 2; }
-    # `grep -q` inside an `if` is errexit-exempt. The plain assignment this
+    # `grep` inside an `if` is errexit-exempt. The plain assignment this
     # replaces took its status from `grep -c`, which exits 1 on a zero count;
     # harmless at today's call sites (a command in a pipeline but the last is
     # exempt too, which is why the suite was green either way) but a trap for
     # the next caller who does not pipe, and one that would truncate silently.
-    if selection_gate_lines "$f" | grep -q .; then
+    # The lines are captured first and searched from a here-string: a pipe
+    # into grep lets it quit on the first match (GNU grep does even with its
+    # stdout on /dev/null) while the producer is still writing (#1797).
+    local lines
+    lines="$(selection_gate_lines "$f")" || true
+    if grep -q . <<< "$lines"; then
       printf '%s\n' "$f"
     fi
   done

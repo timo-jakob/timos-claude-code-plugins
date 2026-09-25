@@ -28,7 +28,7 @@ refute_grep() {  # refute_grep <grep args...> ; fails if grep matches
   return 0
 }
 refute_flat() {  # refute_flat <ERE> <file> ; newline-collapsed; fails on match
-  if tr '\n' ' ' < "$2" | grep -Eqi "$1"; then return 1; fi
+  if grep -qEi "$1" <<< "$(tr '\n' ' ' < "$2")"; then return 1; fi
   return 0
 }
 

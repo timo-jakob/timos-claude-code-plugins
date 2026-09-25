@@ -420,6 +420,11 @@ scripts/flake-hunt.zsh --iterations 20 tests/reference-pointer-sweeps.bats
 scripts/flake-hunt.zsh --iterations 3            # the whole suite: slow
 ```
 
+The `producer | grep -q` race itself is also guarded statically:
+`tests/early-exit-reader-guard.bats` reds on a producer piped into an
+early-exit reader wherever the race can fail a test, and its header states the
+rule, the closed reader set, the fixes and the exception list (#1797).
+
 **Reading a hunt.** Decide by the exit status first. Only `0` (nothing failed)
 and `1` (the report lists what failed) mean the hunt finished. Any other status
 means it did not finish, even when stdout is empty, so it tells you nothing: fix
@@ -445,7 +450,7 @@ the same hunt on a checkout of `origin/main` and compare the two:
 - **the branch fails more than `origin/main`** — the change caused it. Rework
   the change;
 - **they fail alike** — the test was already broken or flaky before the change.
-  Record it on the flake-fix list (#1797) with both hunts' lines, and do not
+  Record it on the flake-fix epic (#1795) with both hunts' lines, and do not
   rework the change for it;
 - **undecided** — post both hunts' lines on the change's issue and ask a human
   whether to merge.

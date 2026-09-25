@@ -1190,8 +1190,17 @@ EOF
 @test "a pipe that closes early exits 3 and leaves no record in the sink" {
   # Asserting only "no record" would pass on ANY failure — including the 141 the
   # `trap '"'"''"'"' PIPE` exists to prevent — so propagate the emitter's own status.
-  run bash -c "set -o pipefail; zsh '$S' --repo-dir '$RD' --telemetry-file '$SINK' \
-    --pipeline p --outcome success --wall-s 1 | head -0; exit \${PIPESTATUS[0]}"
+  # The pipe's read end is closed BEFORE the emitter starts: `| head -0` let the
+  # write race the reader's exit (#1797), and a write that won landed in the pipe
+  # buffer with no error at all. SIGPIPE goes back to its default first — bats
+  # runs tests with it ignored, which would hide a missing trap behind a plain
+  # EPIPE.
+  run python3 -c 'import os, signal, sys
+r, w = os.pipe(); os.close(r); os.dup2(w, 1); os.close(w)
+signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+os.execvp(sys.argv[1], sys.argv[1:])' \
+    zsh "$S" --repo-dir "$RD" --telemetry-file "$SINK" \
+    --pipeline p --outcome success --wall-s 1
   [ "$status" -eq 3 ]                       # not 141 => the trap is still installed
   contains "$output" "failed to write the record to stdout"
   [ ! -s "$SINK" ]

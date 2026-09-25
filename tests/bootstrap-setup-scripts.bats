@@ -799,7 +799,7 @@ trigger_holds() {
   k="$(printf '%s' "$t" | sed -nE 's/^`([a-z_]+)` is `([a-z]+)`.*/\1/p')"
   v="$(printf '%s' "$t" | sed -nE 's/^`([a-z_]+)` is `([a-z]+)`.*/\2/p')"
   [ -n "$k" ] || { echo "unknown trigger: $t" >&2; return 2; }
-  printf '%s\n' "$RESOLVED" | grep -qx "$k=$v"
+  grep -qx "$k=$v" <<< "$RESOLVED"
 }
 
 # The Step 4.5 scripts that run for a visibility and toolchain, one per line.

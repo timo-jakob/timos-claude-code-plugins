@@ -153,12 +153,12 @@ _panel_restatements() {
     sec="$(_profile_section "$root/$p" "Panel")"
     while IFS= read -r d; do
       [ -n "$d" ] || continue
-      if printf '%s' "$sec" | grep -qiwF -- "$d"; then
+      if grep -qiwF -- "$d" <<< "$sec"; then
         printf "%s: Panel names the dimension '%s'\n" "$p" "$d"
       fi
     done < <(_review_dimensions)
     # the other half of what every profile promises: no severity bar either
-    if printf '%s' "$sec" | grep -qwE -- 'CRITICAL|WARNING|SUGGESTION'; then
+    if grep -qwE -- 'CRITICAL|WARNING|SUGGESTION' <<< "$sec"; then
       printf '%s: Panel restates a severity bar\n' "$p"
     fi
   done < <(_profiles)
@@ -408,7 +408,7 @@ _gate_clause_violations() {
     profile="$root/development-$type/skills/resolve-profile/SKILL.md"
     [ -f "$profile" ] || { printf '%s: no profile at %s\n' "$type" "$profile"; continue; }
     sec="$(_profile_section "$profile" "Gate")"
-    printf '%s' "$sec" | grep -qF -- "$needle" \
+    grep -qF -- "$needle" <<< "$sec" \
       || printf '%s: Gate lost <<%s>>\n' "$type" "$needle"
   done < <("$rows")
   return 0   # status-clean on a clean tree — see _panel_restatements
@@ -424,12 +424,12 @@ _gate_clause_violations() {
 # conditional paragraph would satisfy a bare presence test — while §4's reader,
 # going top-down, meets the bump first.
 _version_bump_violations() {
-  local root="${1:-$REPO_ROOT}" p sec first
+  local root="${1:-$REPO_ROOT}" p sec first above
   while IFS= read -r p; do
     [ -n "$p" ] || continue
     [ -r "$root/$p" ] || continue
     sec="$(_profile_section "$root/$p" "Version bump")"
-    first="$(printf '%s\n' "$sec" | grep -m1 -- '^\*\*' || true)"
+    first="$(grep -m1 -- '^\*\*' <<< "$sec" || true)"
     case "$first" in
       '**none'*) : ;;
       *) printf '%s: Version bump does not OPEN with **none (got: %s)\n' \
@@ -449,21 +449,21 @@ _version_bump_violations() {
     # and let a plain-prose prepend ship green. The same substitution, for the
     # same reason, is why tests/go-docs-parity.bats spells its own needle this
     # way.
-    if printf '%s\n' "$sec" | sed -n '/^\*\*/q;p' \
-         | grep -qiE -- '^[[:space:]]*bump([^[:alnum:]]|$)|plugin\.json|marketplace\.json'; then
+    above="$(sed -n '/^\*\*/q;p' <<< "$sec")"
+    if grep -qiE -- '^[[:space:]]*bump([^[:alnum:]]|$)|plugin\.json|marketplace\.json' <<< "$above"; then
       printf '%s: Version bump states a directive ABOVE its **none rule\n' "$p"
       continue
     fi
     case "$p" in
       development-kubernetes/*)
-        printf '%s' "$sec" | grep -qF -- 'cluster-definition repo' \
+        grep -qF -- 'cluster-definition repo' <<< "$sec" \
           || printf '%s: Version bump does not say WHY none holds here\n' "$p" ;;
       *)
-        printf '%s' "$sec" | grep -qF -- 'unless this repo also ships installable plugin content' \
+        grep -qF -- 'unless this repo also ships installable plugin content' <<< "$sec" \
           || printf '%s: Version bump is not the CONDITIONAL none\n' "$p"
-        printf '%s' "$sec" | grep -qF -- '.claude-plugin/marketplace.json' \
+        grep -qF -- '.claude-plugin/marketplace.json' <<< "$sec" \
           || printf "%s: Version bump does not name the floor's marketplace half\n" "$p"
-        printf '%s' "$sec" | grep -qF -- 'supersede' \
+        grep -qF -- 'supersede' <<< "$sec" \
           || printf '%s: Version bump does not say it must not supersede the floor\n' "$p" ;;
     esac
   done < <(_profiles_without_runner)
@@ -530,7 +530,7 @@ _profiles_without_runner() {
   while IFS= read -r p; do
     [ -n "$p" ] || continue
     sec="$(_profile_section "$REPO_ROOT/$p" "Gate")"
-    printf '%s' "$sec" | grep -qF -- 'run-gate.zsh --tests-dir' \
+    grep -qF -- 'run-gate.zsh --tests-dir' <<< "$sec" \
       || printf '%s\n' "$p"
   done < <(_profiles)
   return 0   # status-clean on a clean tree — see _panel_restatements

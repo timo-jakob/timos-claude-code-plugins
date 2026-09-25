@@ -397,7 +397,7 @@ port_is_closed() {
 # checker indents and column-aligns its report, and pinning that alignment would
 # red this suite on a cosmetic change to the checker's output.
 checker_passed() {
-  printf '%s\n' "$1" | grep -qE "^[[:space:]]*$2[[:space:]]+PASS([[:space:]]|\$)"
+  grep -qE "^[[:space:]]*$2[[:space:]]+PASS([[:space:]]|\$)" <<< "$1"
 }
 
 # checker_failed <checker-output> <reason-substring> — the checker rejected the
@@ -412,7 +412,7 @@ checker_passed() {
 # Matched LITERALLY (grep -F): the checker's messages carry quotes, parentheses
 # and slashes, all of which a regex would reinterpret.
 checker_failed() {
-  printf '%s\n' "$1" | grep -qF -- "$2"
+  grep -qF -- "$2" <<< "$1"
 }
 
 # require_port_free <port> <what-binds-it> — fail with an ENVIRONMENT diagnosis

@@ -151,7 +151,7 @@ step2_target_problems_in() {
   # each needle is the arm's own title, unique in the span — a bare
   # `STALE_FINDINGS` would be satisfied by the span's passing mentions
   for needle in 'NOT APPLICABLE on a full round' '**`STALE_FINDINGS` (exit 2'; do
-    printf '%s' "$span" | grep -qF -- "$needle" \
+    grep -qF -- "$needle" <<< "$span" \
       || printf 'step-2 span lacks the arm: %s\n' "$needle"
   done
 }
@@ -164,7 +164,7 @@ route_problem_in() {
     on && (/^### / || /^## /) { exit }
     on { print }' "$1/$SKILL_REL")"
   [ -n "$section" ] || { printf 'SKILL.md has no `### 3.5 ` section\n'; return 0; }
-  printf '%s' "$section" | grep -qF -- "$ROUTE" \
+  grep -qF -- "$ROUTE" <<< "$section" \
     || printf 'SKILL.md `### 3.5` no longer carries the route: %s\n' "$ROUTE"
 }
 
@@ -222,15 +222,15 @@ artifact_problems_in() {
   exc="$(recorded_exceptions_in "$root")"
   while IFS=$'\t' read -r f s; do
     [ -n "$s" ] || continue
-    printf '%s\n' "$script" | grep -qxF -- "$s" && continue
-    printf '%s\n' "$exc" | grep -qxF -- "$s" && continue
+    grep -qxF -- "$s" <<< "$script" && continue
+    grep -qxF -- "$s" <<< "$exc" && continue
     printf '%s: <work-dir>/%s is not a stem resolve-story-loop.zsh writes\n' "$f" "$s"
   done <<< "$prose"
   while IFS= read -r s; do
     [ -n "$s" ] || continue
-    printf '%s\n' "$prose" | cut -f2 | grep -qxF -- "$s" \
+    grep -qxF -- "$s" <<< "$(cut -f2 <<< "$prose")" \
       || printf 'recorded exception %s has no prose site\n' "$s"
-    printf '%s\n' "$script" | grep -qxF -- "$s" \
+    grep -qxF -- "$s" <<< "$script" \
       && printf 'recorded exception %s is a script stem, not session-written\n' "$s"
   done <<< "$exc"
   return 0
@@ -242,7 +242,7 @@ artifact_problems_in() {
 
 # The figure preceding $3 in the MAINTAINING.md row labelled $2 of work tree $1.
 row_figure() {
-  grep -F -- "$2" "$1/MAINTAINING.md" | grep -oE "[0-9]+ $3" | head -n1 | grep -oE '^[0-9]+' || true
+  grep -F -- "$2" "$1/MAINTAINING.md" | grep -oE "[0-9]+ $3" | sed -n 1p | grep -oE '^[0-9]+' || true
 }
 
 # Build a throwaway git work tree under $1 holding every swept file that carries
