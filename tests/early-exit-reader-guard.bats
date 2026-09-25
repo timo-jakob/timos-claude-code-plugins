@@ -241,9 +241,12 @@ def words_of(s):
     return words
 
 
+# an address, then an optional second address: a line number, `first~step`
+# (first address only), `$`, `$N`, `${…}`, a `/re/` with GNU's `I`/`M` flags,
+# or GNU's relative `+N` / `~N` (second address only)
 SED_ADDR = re.compile(
-    r"\s*(\d+|\$\{[^}]*\}|\$\d+|\$|/(?:[^/\\]|\\.)*/)"
-    r"(\s*,\s*(\d+|\$\{[^}]*\}|\$\d+|\$|/(?:[^/\\]|\\.)*/))?\s*!?\s*")
+    r"\s*(\d+~\d+|\d+|\$\{[^}]*\}|\$\d+|\$|/(?:[^/\\]|\\.)*/[IM]*)"
+    r"(\s*,\s*(\d+|\$\{[^}]*\}|\$\d+|\$|/(?:[^/\\]|\\.)*/[IM]*|[+~]\d+))?\s*!?\s*")
 SED_WS = re.compile(r"\s*")
 SED_SEP = re.compile(r"[;\n{}]")
 
@@ -626,6 +629,21 @@ sed -n 's/^## //;/^---/q;p'
 sed '/is/p;/as/q'
 sed 's|a|b|;q'
 sed 'y/abc/xyz/;q'
+sed '/x/Iq'
+sed '/x/Mq'
+sed -n '/x/I{p;q}'
+sed '1~2q'
+sed '0~3q'
+sed '1,+3q'
+sed '/a/,~4q'
+sed '10~20q'
+sed '1,+10q'
+sed '/a/,~12q'
+sed '/a/,/b/Iq'
+sed '/a/,/b/Mq'
+sed '/x/IMq'
+sed '/a/,/b/MIq'
+sed '0,/x/q'
 awk '{ print; exit }'
 EOF
   run guard_report "$root" ""
@@ -657,6 +675,18 @@ printf x | sed 's/;q;/x/'
 printf x | sed 'y/a;q;/bcde/'
 printf x | sed 's/\/x/;q;/'
 printf x | sed 's/a/b/w out;q'
+printf x | sed -n '/x/Ip'
+printf x | sed -n '1~2p'
+printf x | sed -n '/a/,+2p'
+printf x | sed '/x/Is/;q;/y/'
+printf x | sed '/x/Ms/;q;/y/'
+printf x | sed '1~2s/;q;/y/'
+printf x | sed '1,+2s/;q;/y/'
+printf x | sed '/a/,~4y/;q;/abc/'
+printf x | sed '/a/,/b/Is/;q;/y/'
+printf x | sed '10~20s/;q;/y/'
+printf x | sed '1,+10s/;q;/y/'
+printf x | sed '/a/,~12s/;q;/y/'
 printf x | awk '{ print $1 }'
 grep -q x <<< "$v"
 head -1 <<< "$v"
