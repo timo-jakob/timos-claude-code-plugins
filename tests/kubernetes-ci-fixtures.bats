@@ -154,6 +154,15 @@ setup() {
   : > "$CALLS"
 }
 
+# Every test, green or red, ends by looking for a Go runtime abort in the last
+# `run`'s $output (#1873). bats prints a test's stderr only when it fails, so on
+# a green the block is invisible, and on a red whose last `run` was `run
+# run_gate` the report names the binary behind the abort. The helper returns 0
+# and leaves $status and $output alone, so it can never change a verdict.
+teardown() {
+  go_abort_attribution
+}
+
 # ---------------------------------------------------------------------------
 # Driving the gate
 # ---------------------------------------------------------------------------
@@ -256,6 +265,105 @@ diagnostic_lines() {
 expected_all_ok() {
   printf '%s\n' 'gate: render ok' 'gate: schema ok' 'gate: lint ok' \
     'gate: policy ok' 'gate: config-scan ok' 'gate: argocd ok'
+}
+
+# Name the binary behind a Go runtime abort in $output (#1873).
+#
+# Under several concurrent gates, one of the pinned Go tools has crashed with a
+# heap-corruption dump (`runtime: marked free object in span …`). The assertion
+# helpers in assertions.bash cut their haystack at 400 characters, so the red
+# showed the first lines of the dump and none of the stack frames, whose module
+# paths are what name the binary. This prints, to stderr and on lines of its
+# own, what attributes the abort:
+#   - the first line starting `fatal error: ` or `runtime: `;
+#   - the last `gate: ` verdict line before it, which places the crash in a
+#     stage, or a statement that none preceded it;
+#   - the distinct `goroutine N [...]:` headers after it (a recent Go runtime
+#     writes `gp=`, `m=` and `mp=` address fields before the `[...]` on a fatal
+#     error, so headers are compared and printed without them);
+#   - the distinct Go module-path roots of its stack frames, in order of first
+#     appearance (`helm.sh/helm`, `sigs.k8s.io/kustomize`, …).
+# A root is a frame's first two path segments, or three when the host puts the
+# repository third (github.com/<org>/<repo>, golang.org/x/<repo>). A frame whose
+# first segment has no dot is the standard library (`net/http`, `runtime.throw`)
+# and names no binary, so it is skipped.
+#
+# It reads $output through a here-string, not a pipe: a producer piped into a
+# reader inside a helper is the race tests/early-exit-reader-guard.bats bans.
+#
+# The block is at most 40 lines: the goroutine headers and the module roots are
+# each capped at 15, and a cap that cut anything says how many it left out.
+# With no abort marker in $output it prints nothing. It reads $output and
+# nothing else, sets no variable, and returns 0 whatever it finds — a helper that
+# could fail, or rewrite $status, could turn a red test into a green one.
+go_abort_attribution() {
+  awk '
+    function module_root(tok,   n, parts, k, i, seg, r) {
+      n = split(tok, parts, "/")
+      if (n < 2 || index(parts[1], ".") == 0) return ""
+      k = 2
+      if (parts[1] == "github.com" || parts[1] == "golang.org") k = 3
+      if (k > n) k = n
+      r = parts[1]
+      for (i = 2; i <= k; i++) {
+        seg = parts[i]
+        # the LAST segment carries the function name (`kyverno.main`)
+        if (i == n) sub(/\..*$/, "", seg)
+        r = r "/" seg
+      }
+      return r
+    }
+    !found && (/^fatal error: / || /^runtime: /) { found = 1; abort = $0; next }
+    !found { if (/^gate: /) verdict = $0; next }
+    # DISTINCT headers: every tool the gate calls twice (helm, once to build
+    # dependencies and once to template) repeats its whole dump when it aborts
+    /^goroutine [0-9]+ .*\[.*\]:$/ {
+      key = $0
+      gsub(/ (gp|m|mp)=[^ ]*/, "", key)
+      if (key in gseen) next
+      gseen[key] = 1
+      ng++
+      g[ng] = key
+      next
+    }
+    # a frame names its function on an unindented line; its file:line is the
+    # tab-indented line under it
+    /^[ \t]/ { next }
+    /^created by / {
+      # `created by <function> in goroutine N`: no argument list, so the
+      # function is the first word after the prefix
+      tok = substr($0, 12)
+      sub(/ .*$/, "", tok)
+    }
+    !/^created by / {
+      p = index($0, "(")
+      if (p == 0) next
+      tok = substr($0, 1, p - 1)
+      # prose (`runtime: marked free object in span …`), not a frame
+      if (tok ~ /[ \t]/) next
+    }
+    {
+      r = module_root(tok)
+      if (r == "" || (r in seen)) next
+      seen[r] = 1
+      nr++
+      m[nr] = r
+    }
+    END {
+      if (!found) exit 0
+      print "--- Go runtime abort in the gate output (#1873) ---"
+      print "abort: " abort
+      if (verdict != "") print "last gate verdict before the abort: " verdict
+      else print "no gate verdict preceded the abort"
+      print "goroutine headers (" ng + 0 "):"
+      for (i = 1; i <= ng && i <= 15; i++) print "  " g[i]
+      if (ng > 15) print "  ... " ng - 15 " more not shown"
+      print "module roots, in order of first appearance (" nr + 0 "):"
+      for (i = 1; i <= nr && i <= 15; i++) print "  " m[i]
+      if (nr > 15) print "  ... " nr - 15 " more not shown"
+      print "--- end of abort attribution ---"
+    }' <<< "${output:-}" >&2 || true
+  return 0
 }
 
 # Every regular file under a directory, with a checksum, paths relative to the
@@ -1655,4 +1763,175 @@ EOF
   contains "$output" 'gate: policy FAILED'
   contains "$output" 'no Policy/ClusterPolicy document the kyverno CLI'
   lacks "$output" 'gate: policy skipped'
+}
+
+# ---------------------------------------------------------------------------
+# Attributing a Go runtime abort (#1873)
+# ---------------------------------------------------------------------------
+
+@test "a Go runtime abort in the gate is attributed to its binary and stage, and still reds (#1873)" {
+  # A stub helm, first on PATH, that aborts the way a Go binary does on heap
+  # corruption. To STDERR: the gate sends `helm dependency build`'s stdout to
+  # /dev/null and `helm template`'s into the render file, so only stderr can
+  # reach $output. Two goroutines and several module roots pin that EVERY
+  # header and every root is kept, in order; the `net/http.` frame pins that
+  # the standard library names no module. Goroutine 7's header carries the
+  # `gp=` address a recent Go runtime prints, and it differs between the two
+  # helm calls (`$$`), so the header is listed once only if the address is
+  # ignored.
+  prepare kubernetes-repo
+  local stub="$BATS_TEST_TMPDIR/stub-bin"
+  mkdir -p "$stub"
+  cat > "$stub/helm" <<'EOF'
+#!/bin/sh
+cat >&2 <<DUMP
+fatal error: found bad pointer in Go heap (incorrect use of unsafe or cgo?)
+runtime: pointer github.com/acme/tool.F to unallocated span (see above)
+runtime: marked free object in span 0x103cf23f8, elemsize=208 freeindex=35 (bad use of unsafe.Pointer or having race conditions? try -d=checkptr or -race)
+0x140002da000 alloc unmarked
+
+goroutine 1 [running]:
+runtime.throw({0x1031c2b5e?, 0x0?})
+	/usr/local/go/src/runtime/panic.go:1023 +0x40
+helm.sh/helm/v3/pkg/chartutil.ReadValues({0x14000418000, 0x1b4, 0x200})
+	/home/runner/work/helm/helm/pkg/chartutil/values.go:120 +0x1c
+github.com/spf13/cobra.(*Command).execute(0x140001f2608, {0x140001b6060, 0x2, 0x2})
+	/home/runner/go/pkg/mod/github.com/spf13/cobra@v1.8.1/command.go:985 +0x834
+main.main()
+	/home/runner/work/helm/helm/cmd/helm/helm.go:83 +0x2a8
+
+goroutine 7 gp=0x14000$$ m=nil [chan receive]:
+net/http.(*conn).serve(0x1400020a000, {0x103d1e2a8, 0x140003c6000})
+	/usr/local/go/src/net/http/server.go:2039 +0x6c
+golang.org/x/net/http2.(*Framer).ReadFrame(0x140004b0000)
+	/home/runner/go/pkg/mod/golang.org/x/net@v0.33.0/http2/frame.go:506 +0x7c
+helm.sh/helm/v3/pkg/kube.(*Client).Wait(0x1400012a000)
+	/home/runner/work/helm/helm/pkg/kube/client.go:310 +0x98
+created by k8s.io/klog/v2.init.0 in goroutine 1
+	/home/runner/go/pkg/mod/k8s.io/klog/v2@v2.130.1/klog.go:420 +0x114
+DUMP
+exit 2
+EOF
+  chmod +x "$stub/helm"
+  GATE_PATH_PREFIX="$stub"
+  run run_gate
+  # the gate still reds: the helper attributes, it never rescues
+  [ "$status" -eq 1 ]
+  contains "$output" 'gate: render FAILED'
+  local gate_status="$status" gate_output="$output"
+  local out="$BATS_TEST_TMPDIR/attribution.out" err="$BATS_TEST_TMPDIR/attribution.err"
+  local rc=0
+  go_abort_attribution > "$out" 2> "$err" || rc=$?
+  [ "$rc" -eq 0 ]
+  # it reads $status and $output, and changes neither
+  [ "$status" = "$gate_status" ]
+  [ "$output" = "$gate_output" ]
+  # the block goes to stderr only, on lines of its own
+  [ ! -s "$out" ]
+  [ "$(wc -l < "$err")" -le 40 ]
+  run cat "$err"
+  [ "$status" -eq 0 ]
+  contains "$output" 'abort: fatal error: found bad pointer in Go heap (incorrect use of unsafe or cgo?)'
+  # render is the first stage, so the abort came before any verdict
+  contains "$output" 'no gate verdict preceded the abort'
+  contains "$output" 'helm.sh/helm'
+  # the goroutine headers, EXACTLY: both of them, each once, although the gate
+  # calls helm twice and so carries the dump twice
+  [ "$(sed -n '/^goroutine headers/,/^module roots/p' "$err" | sed '1d;$d')" = "$(printf '%s\n' \
+    '  goroutine 1 [running]:' '  goroutine 7 [chan receive]:')" ]
+  # the module roots, EXACTLY and in order, klog from a `created by` line;
+  # never `net/http`, `runtime` or `main`
+  [ "$(sed -n '/^module roots/,/^---/p' "$err" | sed '1d;$d')" = "$(printf '%s\n' \
+    '  helm.sh/helm' '  github.com/spf13/cobra' '  golang.org/x/net' '  k8s.io/klog')" ]
+  # and every test in the file runs the helper, through its teardown, onto
+  # stderr where a failing test's report shows it
+  output='fatal error: through teardown'
+  teardown 2> "$err"
+  [ "$(grep -c '^abort: fatal error: through teardown$' "$err")" -eq 1 ]
+}
+
+@test "an abort in a later stage names the last verdict before it, and a runtime: line is an abort (#1873)" {
+  # kube-linter runs in the lint stage, after render and schema passed. The
+  # dump opens with `runtime: ` and has no `fatal error: ` line at all.
+  prepare kubernetes-repo
+  local stub="$BATS_TEST_TMPDIR/stub-bin"
+  mkdir -p "$stub"
+  cat > "$stub/kube-linter" <<'EOF'
+#!/bin/sh
+cat >&2 <<'DUMP'
+runtime: marked free object in span 0x103cf23f8, elemsize=208 freeindex=35 (bad use of unsafe.Pointer or having race conditions? try -d=checkptr or -race)
+0x140002da000 alloc unmarked
+
+goroutine 1 gp=0x140000021c0 m=0 mp=0x1042e8f40 [running]:
+golang.stackrox.io/kube-linter/pkg/run.Run(0x14000480000)
+	/home/runner/work/kube-linter/kube-linter/pkg/run/run.go:64 +0x2c
+DUMP
+exit 2
+EOF
+  chmod +x "$stub/kube-linter"
+  GATE_PATH_PREFIX="$stub"
+  run run_gate
+  [ "$status" -eq 1 ]
+  contains "$output" 'gate: lint FAILED'
+  local err="$BATS_TEST_TMPDIR/attribution.err"
+  go_abort_attribution 2> "$err"
+  run cat "$err"
+  [ "$status" -eq 0 ]
+  contains "$output" 'abort: runtime: marked free object in span 0x103cf23f8'
+  # the LAST verdict, not the first
+  contains "$output" 'last gate verdict before the abort: gate: schema ok'
+  lacks "$output" 'gate: render ok'
+  contains "$output" '  goroutine 1 [running]:'
+  contains "$output" '  golang.stackrox.io/kube-linter'
+}
+
+@test "the abort block caps goroutine headers and module roots at 15 each, within 40 lines (#1873)" {
+  # a synthetic $output, no gate run: 16 distinct headers and 16 distinct roots, one past each cap
+  local i text='fatal error: synthetic'
+  for i in $(seq 1 16); do
+    text="$text"$'\n'"goroutine $i [running]:"$'\n'"example$i.com/m.F()"
+  done
+  output="$text"
+  local err="$BATS_TEST_TMPDIR/attribution.err"
+  go_abort_attribution 2> "$err"
+  [ "$(wc -l < "$err")" -le 40 ]
+  [ "$(sed -n '/^goroutine headers/,/^module roots/p' "$err" | sed '1d;$d' | grep -c '^  goroutine ')" -eq 15 ]
+  [ "$(sed -n '/^module roots/,/^---/p' "$err" | sed '1d;$d' | grep -c '^  example')" -eq 15 ]
+  [ "$(grep -c '^  \.\.\. 1 more not shown$' "$err")" -eq 2 ]
+  run cat "$err"
+  contains "$output" 'goroutine headers (16):'
+  contains "$output" 'module roots, in order of first appearance (16):'
+  # and exactly AT the cap nothing was cut, so no note
+  output="$(printf '%s\n' "$text" | sed '$d' | sed '$d')"
+  go_abort_attribution 2> "$err"
+  [ "$(grep -c 'more not shown' "$err")" -eq 0 ]
+}
+
+@test "the abort helper is silent on a red with no abort marker, and returns 0 (#1873)" {
+  # an ordinary helm error, carrying both marker texts MID-line: only a line
+  # that STARTS with one is an abort
+  prepare kubernetes-repo
+  local stub="$BATS_TEST_TMPDIR/stub-bin"
+  mkdir -p "$stub"
+  cat > "$stub/helm" <<'EOF'
+#!/bin/sh
+echo 'Error: template: app/templates/configmap.yaml:3: runtime: not an abort' >&2
+echo 'Error: a chart said fatal error: in its values, which is not an abort' >&2
+exit 1
+EOF
+  chmod +x "$stub/helm"
+  GATE_PATH_PREFIX="$stub"
+  run run_gate
+  [ "$status" -eq 1 ]
+  contains "$output" 'gate: render FAILED'
+  contains "$output" 'runtime: not an abort'
+  local gate_status="$status" gate_output="$output"
+  local out="$BATS_TEST_TMPDIR/attribution.out" err="$BATS_TEST_TMPDIR/attribution.err"
+  local rc=0
+  go_abort_attribution > "$out" 2> "$err" || rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$status" = "$gate_status" ]
+  [ "$output" = "$gate_output" ]
+  [ ! -s "$out" ]
+  [ ! -s "$err" ]
 }
