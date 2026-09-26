@@ -789,7 +789,7 @@ EOF
   [ "$status" -eq 0 ]
   [ -z "$output" ] || { printf 'a quoted pipefail flagged the file:\n%s\n' "$output" >&2; return 1; }
 
-  local all='top setup helper test euo split oneliner tail'
+  local all='top setup helper test euo split oneliner tail semi and or paren then do else'
   for where in $all; do
     : > "$BATS_TEST_TMPDIR/head.bash"
     : > "$BATS_TEST_TMPDIR/tail.bash"
@@ -801,6 +801,14 @@ EOF
       euo)      printf 'set -euo pipefail\n' ;;
       split)    printf 'set -e -o pipefail\n' ;;
       oneliner) printf 'setup() { set -o pipefail; }\n' ;;
+      # one per PIPEFAIL prefix alternative: only that alternative precedes `set`
+      semi)     printf 'true; set -o pipefail\n' ;;
+      and)      printf 'true && set -o pipefail\n' ;;
+      or)       printf 'false || set -o pipefail\n' ;;
+      paren)    printf '( set -o pipefail )\n' ;;
+      then)     printf 'if true; then set -o pipefail; fi\n' ;;
+      do)       printf 'for _ in 1; do set -o pipefail; done\n' ;;
+      else)     printf 'if false; then :; else set -o pipefail; fi\n' ;;
     esac > "$BATS_TEST_TMPDIR/head.bash"
     # the statement AFTER the pipeline it makes unsafe: condition 3 is file-wide
     [ "$where" != tail ] || printf 'teardown() {\n  set -o pipefail\n}\n' > "$BATS_TEST_TMPDIR/tail.bash"
@@ -815,7 +823,7 @@ EOF
     grep -q "^tests/pf-$where\.bats:[0-9]*: printf \"a\\\\nb\\\\n\" | grep -q b\$" <<< "$output" \
       || { printf 'pipefail in %s did not flag its file:\n%s\n' "$where" "$output" >&2; return 1; }
   done
-  [ "$(grep -c '' <<< "$output")" -eq 8 ]
+  [ "$(grep -c '' <<< "$output")" -eq 15 ]
 }
 
 @test "#1797 MUTATION: a quoted body that sets pipefail itself is flagged even off a run line" {
