@@ -531,10 +531,21 @@ _cut_short_retry_violations() {
     'was cut short before any summary and is no verdict: never read it as red'; do
     case "$flat" in *"$needle"*) : ;; *) printf 'the Gate lost <<%s>>\n' "$needle" ;; esac
   done
-  # the whole clause, so its one-retry bound is pinned too; case-insensitive,
-  # since #1846 it opens its own sentence
-  needle='never re-run the identical call; if that is cut short too, stop retrying and report that no gate verdict exists'
-  grep -qiF -- "$needle" <<< "$flat" || printf 'the Gate lost <<%s>>\n' "$needle"
+  # the one-retry rule, clause by clause, so its bound is pinned too (#1861):
+  # which call is banned, that the retry holds even after a detached first run,
+  # and what "that retry" counts against. Case-insensitive, since each clause
+  # can open its own sentence.
+  for needle in \
+    'never re-run the identical call — the timeout-bounded one that was cut short' \
+    'the one retry is the §3.5 detached launch' \
+    'even when the cut-short run was already that detached launch' \
+    'if that retry is cut short too, stop retrying and report that no gate verdict exists'; do
+    grep -qiF -- "$needle" <<< "$flat" || printf 'the Gate lost <<%s>>\n' "$needle"
+  done
+  # the pre-#1861 form, whose ban read as forbidding the only permitted retry
+  # when the cut-short run was already the detached launch
+  grep -qiF -- 'never re-run the identical call; if that is cut short too' <<< "$flat" \
+    && echo "the Gate still carries the ambiguous identical-call ban"
   # it points at §3.5 for HOW to launch, and restates none of it
   case "$flat" in *nohup*|*setsid*|*setpgrp*|*run_in_background*)
     echo "the Gate restates launch mechanics §3.5 owns" ;; esac
@@ -2763,4 +2774,24 @@ _roster_sites() {
   bad="$(_cut_short_retry_violations "$planted")"
   [ "$bad" = "the Gate still offers a timeout-bounded re-run" ] \
     || { printf 'got [%s]\n' "$bad" >&2; return 1; }
+}
+
+@test "#1861 non-vacuity: the pre-fix ambiguous identical-call sentence reds the guard" {
+  # Swap the shipped sentence back to the pre-#1861 one in a copy of the
+  # profile. The swap is matched across the source's line wrap, and the copy
+  # is checked to differ, so the control cannot pass on a swap that never
+  # happened.
+  local planted="$BATS_TEST_TMPDIR/profile.md" bad expected
+  perl -0pe 's/Never\s+re-run\s+the\s+identical\s+call\s+—\s+the\s+timeout-bounded\s+one\s+that\s+was\s+cut\s+short\.\s+The\s+one\s+retry\s+is\s+the\s+§3\.5\s+detached\s+launch,\s+even\s+when\s+the\s+cut-short\s+run\s+was\s+already\s+that\s+detached\s+launch;\s+if\s+that\s+retry\s+is\s+cut\s+short\s+too,\s+stop\s+retrying\s+and\s+report\s+that\s+no\s+gate\s+verdict\s+exists\./Never re-run the identical call; if that is cut short too, stop retrying and report that no gate verdict exists./' \
+    "$PROFILE" > "$planted"
+  run cmp -s "$PROFILE" "$planted"
+  [ "$status" -eq 1 ]
+  bad="$(_cut_short_retry_violations "$planted")"
+  expected="$(printf '%s\n' \
+    'the Gate lost <<never re-run the identical call — the timeout-bounded one that was cut short>>' \
+    'the Gate lost <<the one retry is the §3.5 detached launch>>' \
+    'the Gate lost <<even when the cut-short run was already that detached launch>>' \
+    'the Gate lost <<if that retry is cut short too, stop retrying and report that no gate verdict exists>>' \
+    'the Gate still carries the ambiguous identical-call ban')"
+  [ "$bad" = "$expected" ] || { printf 'got [%s]\n' "$bad" >&2; return 1; }
 }
