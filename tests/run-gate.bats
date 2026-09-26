@@ -48,6 +48,11 @@ ls "${STUB_LS_DIR:-${GATE_SLOTS_DIR:-}}" > "$BATS_TEST_TMPDIR/stub-slots" 2>/dev
 echo $$ > "$BATS_TEST_TMPDIR/stub-pid"
 # the gate is the grandparent: gate -> the suite's subshell -> (nice exec) stub
 ps -o ppid= -p "$PPID" | tr -d ' ' > "$BATS_TEST_TMPDIR/stub-gate-pid"
+# the gate's own slot CONTENT, and the gate's true start time stamped the way a
+# reader compares it — so a test can pin the writer half of the slot format (#1847)
+gatepid="$(cat "$BATS_TEST_TMPDIR/stub-gate-pid")"
+cat "${STUB_LS_DIR:-${GATE_SLOTS_DIR:-}}/$gatepid" > "$BATS_TEST_TMPDIR/stub-slot-content" 2>/dev/null
+TZ=UTC LC_ALL=C ps -o lstart= -p "$gatepid" > "$BATS_TEST_TMPDIR/stub-gate-lstart"
 cat "$TAPFIX"
 # in the background: bash runs a trap only between commands, so a foreground
 # sleep would hold the TERM until it ended
@@ -305,11 +310,20 @@ EOF
 }
 
 @test "shared budget: the gate holds its own slot while the suite runs, and removes it on a normal exit" {
-  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=6 STUB_EXIT=0
+  # a non-UTC zone, so a writer that stops normalising to UTC fails on every
+  # host — the UTC CI runner included — not only on a non-UTC one
+  run_gate TZ=Pacific/Auckland GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=6 STUB_EXIT=0
   [ "$status" -eq 0 ]
   # the stub saw exactly one slot (the gate's own) while it ran ...
   [ "$(wc -l < "$BATS_TEST_TMPDIR/stub-slots" | tr -d ' ')" -eq 1 ]
   grep -qE '^[0-9]+$' "$BATS_TEST_TMPDIR/stub-slots"
+  # ... named for the gate itself, and holding exactly the start time another
+  # gate reads back for that PID — else each concurrent gate would prune the
+  # other's slot as an orphan and take every core (#1847). -s first: cmp on two
+  # empty files would pass on a slot the stub never managed to read.
+  grep -qx "$(cat "$BATS_TEST_TMPDIR/stub-gate-pid")" "$BATS_TEST_TMPDIR/stub-slots"
+  [ -s "$BATS_TEST_TMPDIR/stub-gate-lstart" ]
+  cmp "$BATS_TEST_TMPDIR/stub-gate-lstart" "$BATS_TEST_TMPDIR/stub-slot-content"
   # ... and none is left behind
   [ -z "$(ls -A "$GATE_SLOTS_DIR")" ]
 }
