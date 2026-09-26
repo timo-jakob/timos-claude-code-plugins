@@ -1886,24 +1886,54 @@ EOF
 }
 
 @test "the abort block caps goroutine headers and module roots at 15 each, within 40 lines (#1873)" {
-  # a synthetic $output, no gate run: 16 distinct headers and 16 distinct roots, one past each cap
-  local i text='fatal error: synthetic'
-  for i in $(seq 1 16); do
+  # a synthetic $output, no gate run, in four runs of headers and roots: 17/16 and
+  # 16/17 put both lists past the cap by a DIFFERENT count, each list exactly one
+  # past it in one run and the smaller list in one run; 16/15 and 15/16 put ONE
+  # list past the cap and the other at it. So a note or a total that counts the
+  # other list, a note guarded by the other list or by `> 16`, and a note in the
+  # other list's section all red (#1880)
+  local i text ng nr pair headers roots
+  local err="$BATS_TEST_TMPDIR/attribution.err"
+  for pair in '17 16' '16 17' '16 15' '15 16'; do
+    ng="${pair% *}" nr="${pair#* }"
+    text='fatal error: synthetic'
+    for i in $(seq 1 17); do
+      if [ "$i" -le "$ng" ]; then text="$text"$'\n'"goroutine $i [running]:"; fi
+      if [ "$i" -le "$nr" ]; then text="$text"$'\n'"example$i.com/m.F()"; fi
+    done
+    output="$text"
+    go_abort_attribution 2> "$err"
+    [ "$(wc -l < "$err")" -le 40 ]
+    headers="$(sed -n '/^goroutine headers/,/^module roots/p' "$err" | sed '1d;$d')"
+    roots="$(sed -n '/^module roots/,/^---/p' "$err" | sed '1d;$d')"
+    [ "$(grep -c '^  goroutine ' <<< "$headers")" -eq 15 ]
+    [ "$(grep -c '^  example' <<< "$roots")" -eq 15 ]
+    # each note in its own section, counting its own list, only when its own
+    # list was cut, and nowhere else
+    if [ "$ng" -gt 15 ]; then
+      [ "$(grep -c '^  \.\.\. ' <<< "$headers")" -eq 1 ]
+      [ "$(grep -c "^  \\.\\.\\. $((ng - 15)) more not shown\$" <<< "$headers")" -eq 1 ]
+    else
+      [ "$(grep -c '^  \.\.\. ' <<< "$headers")" -eq 0 ]
+    fi
+    if [ "$nr" -gt 15 ]; then
+      [ "$(grep -c '^  \.\.\. ' <<< "$roots")" -eq 1 ]
+      [ "$(grep -c "^  \\.\\.\\. $((nr - 15)) more not shown\$" <<< "$roots")" -eq 1 ]
+    else
+      [ "$(grep -c '^  \.\.\. ' <<< "$roots")" -eq 0 ]
+    fi
+    [ "$(grep -c "^goroutine headers ($ng):\$" "$err")" -eq 1 ]
+    [ "$(grep -c "^module roots, in order of first appearance ($nr):\$" "$err")" -eq 1 ]
+  done
+  # and exactly AT the cap, 15 of each, nothing was cut, so no note
+  text='fatal error: synthetic'
+  for i in $(seq 1 15); do
     text="$text"$'\n'"goroutine $i [running]:"$'\n'"example$i.com/m.F()"
   done
   output="$text"
-  local err="$BATS_TEST_TMPDIR/attribution.err"
   go_abort_attribution 2> "$err"
-  [ "$(wc -l < "$err")" -le 40 ]
-  [ "$(sed -n '/^goroutine headers/,/^module roots/p' "$err" | sed '1d;$d' | grep -c '^  goroutine ')" -eq 15 ]
-  [ "$(sed -n '/^module roots/,/^---/p' "$err" | sed '1d;$d' | grep -c '^  example')" -eq 15 ]
-  [ "$(grep -c '^  \.\.\. 1 more not shown$' "$err")" -eq 2 ]
-  run cat "$err"
-  contains "$output" 'goroutine headers (16):'
-  contains "$output" 'module roots, in order of first appearance (16):'
-  # and exactly AT the cap nothing was cut, so no note
-  output="$(printf '%s\n' "$text" | sed '$d' | sed '$d')"
-  go_abort_attribution 2> "$err"
+  [ "$(grep -c '^goroutine headers (15):$' "$err")" -eq 1 ]
+  [ "$(grep -c '^module roots, in order of first appearance (15):$' "$err")" -eq 1 ]
   [ "$(grep -c 'more not shown' "$err")" -eq 0 ]
 }
 
