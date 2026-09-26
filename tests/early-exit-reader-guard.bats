@@ -767,12 +767,15 @@ tests/helper.bats:7: printf 'a\nb\n' |& grep -q b" ]
 #!/usr/bin/env bats
 %test "runs a pipe" {
   run bash -c "seq 1 100000 | grep -q 5"
+  true && run bash -c "seq 1 100000 | grep -q 5"
   [ "$status" -eq 0 ]
 }
 EOF
   run guard_report "$root" ""
   [ "$status" -eq 0 ]
-  [ "$output" = 'tests/run-line.bats:3: run bash -c "seq 1 100000 | grep -q 5"' ]
+  # line 4's run sits mid-line, after `&&`: a RUN anchored at the line start misses it
+  [ "$output" = 'tests/run-line.bats:3: run bash -c "seq 1 100000 | grep -q 5"
+tests/run-line.bats:4: true && run bash -c "seq 1 100000 | grep -q 5"' ]
 }
 
 @test "#1797 condition 3: pipefail inside a quoted bash -c string does not make a pipefail file; a statement in the file's own code does" {
