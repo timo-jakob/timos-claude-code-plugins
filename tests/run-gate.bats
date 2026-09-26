@@ -54,6 +54,8 @@ gatepid="$(cat "$BATS_TEST_TMPDIR/stub-gate-pid")"
 cat "${STUB_LS_DIR:-${GATE_SLOTS_DIR:-}}/$gatepid" > "$BATS_TEST_TMPDIR/stub-slot-content" 2>/dev/null
 TZ=UTC LC_ALL=C ps -o lstart= -p "$gatepid" > "$BATS_TEST_TMPDIR/stub-gate-lstart"
 cat "$TAPFIX"
+# kill the suite's subshell, the one that writes bats' exit code, before it can
+[[ -n "${STUB_KILL_PARENT:-}" ]] && kill -9 "$PPID"
 # in the background: bash runs a trap only between commands, so a foreground
 # sleep would hold the TERM until it ended
 [[ -n "${STUB_SLEEP:-}" ]] && { sleep "$STUB_SLEEP" & wait; }
@@ -641,6 +643,18 @@ EOF
     GATE_BATS_BIN="$STUB" CALLS="$CALLS" ARGV="$ARGV" TAPFIX="$TAPFIX" \
     zsh "$S" --tests-dir tests
   [ "$status" -ne 0 ]
+  [ "$(echo "$output" | jq -r '.tree')" = "" ]
+}
+
+@test "a suite whose subshell died before writing its exit code reads RED, even on a green TAP" {
+  mk_gitproj
+  cd "$proj"
+  run --separate-stderr env -u GATE_NPROC -u GATE_PARALLEL_BIN \
+    GATE_BATS_BIN="$STUB" CALLS="$CALLS" ARGV="$ARGV" TAPFIX="$TAPFIX" \
+    STUB_KILL_PARENT=1 \
+    zsh "$S" --tests-dir tests
+  [ "$status" -ne 0 ]
+  echo "$output" | jq -e '.ok==3 and .exit!=0'
   [ "$(echo "$output" | jq -r '.tree')" = "" ]
 }
 
