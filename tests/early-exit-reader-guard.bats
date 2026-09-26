@@ -752,13 +752,22 @@ function keyword_form {
   has_b
   printf 'a\nb\n' | grep -q b
 }
+nested_group() {
+  [ -n "$x" ] || {
+    echo
+  }
+  printf x | grep -q x
+}
 EOF
   run guard_report "$root" ""
   [ "$status" -eq 0 ]
-  # the @test-body line (11) is past every closed helper, so it stays unflagged
+  # the @test-body line (11) is past every closed helper, so it stays unflagged;
+  # line 17 follows a nested group's deeper-indented `}`, which must not end
+  # nested_group() early (#1844)
   [ "$output" = "tests/helper.bats:3: printf 'a\nb\n' | grep -q b
 tests/helper.bats:5: one_liner() { printf 'a\nb\n' | grep -q b; }
-tests/helper.bats:7: printf 'a\nb\n' |& grep -q b" ]
+tests/helper.bats:7: printf 'a\nb\n' |& grep -q b
+tests/helper.bats:17: printf x | grep -q x" ]
 }
 
 @test "#1797 MUTATION: a run bash -c \"producer | grep -q x\" line in a @test body of a file without pipefail reds" {
