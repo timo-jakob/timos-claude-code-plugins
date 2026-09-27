@@ -1,0 +1,9 @@
+# Declares this repo's PRIMARY type for /development:maintenance.
+# The primary stack gets the full pipeline; everything else detected is AUXILIARY and gets a
+# mechanical/lint-level treatment only. See ARCHITECTURE.md "Primary / auxiliary model" in the
+# development plugin family.
+#
+# A composition repo has no application language: .claude-workspace.yaml is its content, and
+# development-composition is its primary. (Dispatch keyed on it arrives with #1747; until then this
+# declaration is recorded but selects nothing.)
+primary: composition

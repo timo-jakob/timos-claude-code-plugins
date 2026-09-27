@@ -1,0 +1,98 @@
+name: promote-to-prod
+# Promotion for this constellation (scaffolded by development-composition, #1745). Two triggers, two jobs, one
+# script: a merge to main promotes `staging`; only a manual workflow_dispatch on main promotes `production`, on a job
+# bound to the `production` GitHub Environment so its protection rules (required reviewers) gate the run.
+#
+# Every run publishes promotion-<env>.json — each member as image:tag@sha256:… plus the commit SHA — as an
+# artifact and in the job summary. Deployment is keyed on the environment's deploy_target in
+# .claude-workspace.yaml; while that is `none` (no renderer until #719/#720), staging records and says nothing was
+# deployed, and a production dispatch records and then FAILS. No run reports a deploy that did not happen.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  promote-staging:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: staging
+    # one promotion per environment at a time, never cancelled half-way. Set per job, not per workflow, so a run
+    # whose job is skipped never takes — or cancels — a slot
+    concurrency:
+      group: promote-staging
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      # scripts/promote.zsh is `#!/usr/bin/env zsh`, and ubuntu-latest ships no zsh. yq is pinned rather than taken
+      # from the runner image, whose version moves on GitHub's schedule.
+      - name: install zsh and yq
+        run: |
+          set -euo pipefail
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends zsh
+          sudo curl -sSfLo /usr/local/bin/yq \
+            "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64"
+          sudo chmod +x /usr/local/bin/yq
+        env:
+          YQ_VERSION: 4.44.3
+      # reading a private ghcr.io image's digest needs a token; members on another registry need their own login
+      # step here
+      - name: log in to ghcr.io
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_ACTOR: ${{ github.actor }}
+      - name: promote staging
+        run: zsh scripts/promote.zsh --env staging --mode push --sha "$GITHUB_SHA"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: ${{ !cancelled() }}
+        with:
+          name: promotion-staging
+          path: promotion-staging.json
+          if-no-files-found: ignore
+
+  promote-production:
+    # only main is ever promoted to production: a dispatch on another branch would record a commit that was never
+    # merged or staged
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    concurrency:
+      group: promote-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: install zsh and yq
+        run: |
+          set -euo pipefail
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends zsh
+          sudo curl -sSfLo /usr/local/bin/yq \
+            "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64"
+          sudo chmod +x /usr/local/bin/yq
+        env:
+          YQ_VERSION: 4.44.3
+      - name: log in to ghcr.io
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_ACTOR: ${{ github.actor }}
+      - name: promote production
+        run: zsh scripts/promote.zsh --env production --mode dispatch --sha "$GITHUB_SHA"
+      # the record is published even when the hand-off fails: it is what was promoted, not what was deployed
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: ${{ !cancelled() }}
+        with:
+          name: promotion-production
+          path: promotion-production.json
+          if-no-files-found: ignore
