@@ -127,6 +127,12 @@ Supported flags:
 
 ## Step 1: Detect Repo State
 
+**A composition repo is its own path — read §3m first.** When the user asks to
+bootstrap a **composition repo** (one repo per constellation, pinning its
+members' published images), §3m says which of the steps below still apply;
+detection does not recognise one yet (#1747), so only the user's request routes
+a run there.
+
 Run the stack detection script and capture its JSON output:
 
 ```bash
@@ -4118,6 +4124,126 @@ For each target file path:
 3. If file exists and differs → show the user a diff, ask: overwrite, skip, or
    merge manually. Default to **skip** if the user does not answer clearly.
 4. Never delete files the user has.
+
+### 3m. Composition repos (a constellation's deployment repo) — #1745
+
+A composition repo is one small repo per constellation: it holds no application
+code, pins its members' **published images** in `.claude-workspace.yaml`
+(`claude-workspace/v1`, ARCHITECTURE.md) and owns their promotion. The
+`development-composition` plugin owns the skeleton; this path runs that
+plugin's scaffold in place of the rest of Step 3.
+
+**Entry is the user's request, never detection.** `detect-stack.sh` has no
+composition marker yet (#1747), so take this path only when the user asks for a
+composition repo. Still run Step 1's detection, and when it reports any
+language, `is_kubernetes: true` or `is_opentofu: true`, **stop the run** — do not
+fall back to the language or §3l path — and report what was detected: a
+composition repo holds no application code or infrastructure-as-code.
+
+**An existing `.maintenance.yml` that does not record `primary: composition` —
+another primary, or none — is a conflict: ask before the plan, never resolve it
+silently.** The scaffold keeps an existing `.maintenance.yml` as it is. **Agree**
+→ list the edit in the plan, and set `primary: composition` only after the
+scaffold exits `0`, so a refused scaffold leaves the file untouched too.
+**Decline, or no answer** → stop: do not run the scaffold, and report the
+conflict.
+
+**The steps this path runs, in order — every other step is skipped:**
+
+1. From Step 1: `detect-stack.sh` (for the stop above) and the decision tree
+   only as far as the repository itself — States A and B, State C's
+   `gh auth login`, and State D's steps 1–2 — asking Q1, Q2 and Q3 only.
+   State D's later steps (toolchain gate, gap-fill, drift check), Q3a–Q6,
+   *After the decision tree*'s language, toolchain and Docker requirements, and
+   *Resolve the toolchain* do not apply: this path has none of those values.
+2. The members (below), gathered **before** the plan, so the user approves the
+   values the scaffold will write.
+3. Step 2, presenting this plan and nothing from the generic template — the
+   plan is the consent gate, so it promises only what this path does:
+
+   ```text
+   Primary type: composition        Languages: none
+   Members:      <name> <image:tag> — one line per member
+   Files:        the six files the scaffold writes (below)
+   Finish:       commit, then a bot-authored PR; auto-merge is attempted, and
+                 with no branch protection it merges without review wherever
+                 the repository allows auto-merge
+   ```
+
+4. This section, in place of the rest of Step 3.
+5. Step 4d (initial commit), then Step 4e (the finishing flow) and Step 4g
+   where it applies. Step 4f does not apply: a composition repo has no Approver.
+
+Steps 2.4–2.5, 3.5–3.6, 4a–4c, 4.5 and 5 key on a language, a toolchain or a
+gate command this repo does not have, and this section's report replaces Step
+5's checklist. **Branch protection (4b) is not applied on this path yet** — the
+skeleton renders no check to require. **Report the arming outcome open-pr
+actually returned** — on a failure, that the PR needs a manual
+merge; on a success, that auto-merge is armed on an unprotected branch — and
+never point the user at `branch-protection.sh` here, which would require
+contexts no composition workflow reports.
+
+**The members.** When `.claude-workspace.yaml` does not exist yet, ask for each
+member's `name`, source `repo`, `role`, published `contract` path and `image`
+pinned as `image:tag` (an `@sha256:` suffix may follow; `:latest` and other
+floating tags are refused by the contract), and pass them verbatim — never
+invent a member or a tag. **When it already exists, do not ask**: run the
+scaffold without `--member`, which refuses one there. Adding or changing a
+member is an edit to the manifest, not something this run does.
+
+**Run the scaffold** from the installed `development-composition` plugin — the
+highest-versioned directory (`sort -V`) under
+`~/.claude/plugins/cache/<marketplace>/development-composition/`. If the plugin
+is not installed, or that directory has no `scripts/scaffold-composition.zsh`
+(a version older than #1745), stop and ask the user to install or update it:
+bootstrap does not carry a copy of the skeleton.
+
+```bash
+zsh "<development-composition-root>/scripts/scaffold-composition.zsh" --repo . \
+  --member "name=orders-ui,repo=acme/orders-ui,role=web-ui,contract=contracts/v1/openapi.yaml,image=ghcr.io/acme/orders-ui:2.3.1" \
+  --member "name=orders-api,repo=acme/orders-api,role=rest-api,contract=contracts/v1/openapi.yaml,image=ghcr.io/acme/orders-api:1.5.0"
+```
+
+It writes exactly `.claude-workspace.yaml` (the members, plus `staging` and
+`production` at `deploy_target: none`), `.github/workflows/promote-to-prod.yml`,
+`scripts/promote.zsh`, `deploy/README.md`, `e2e/README.md` and
+`.maintenance.yml` (`primary: composition`) — **no** compose or Kubernetes
+manifest, **no** E2E harness and **no** validator workflow. It judges the
+manifest with `validate-workspace.zsh` **before** writing anything, so a
+refused manifest leaves the repo untouched. A kept manifest must also declare
+`staging` (from nothing) and `production` (from `staging`), each with the
+`github_environment` of the same name — the two GitHub Environments the workflow
+binds. It keeps any file that already exists and says so; the
+idempotency rules above decide what to do about a kept file that differs from
+its template, under `<development-composition-root>/templates/`. A kept manifest
+has no template: the checks above are what judge it.
+
+**Exit with the verdict**, typed as ARCHITECTURE.md's *Bootstrap's branch*
+states. A refusal names the manifest as `new` (the members the user gave) or
+`kept` (the repository's own file):
+
+| Exit | What the run does |
+| --- | --- |
+| `0` | the scaffold is complete and valid — continue |
+| `1` | **fail the run**, quoting the named error — for a `new` manifest the members given were refused; for a `kept` one the user's manifest violates the contract or does not declare the staging → production chain |
+| `4` | **fail the run** — the validator could not read the manifest: a scaffold bug for a `new` one, the file's own mode for a `kept` one |
+| `2` | your own malformed invocation: fix the command and re-run **once**; a second `2` is reported as a failure |
+| `3` | the environment failed — escalate it, quoting the message: a missing or non-mikefarah `yq`, a missing `jq`, the validator unable to run, or a file that could not be written (the message says whether the manifest had been judged and what is already on disk) |
+| any other | treat as `3` |
+
+Never continue past a non-zero exit, and never report a scaffold as complete
+without the exit `0` that judged it.
+
+**The report names** what was written and what was kept, the validator's verdict
+line, that `renovate.json` (image-tag bumps) is not scaffolded yet (#1746), that
+branch protection was not applied and the arming outcome, and the manual steps:
+create the GitHub Environments `staging` and `production` the workflow binds,
+with required reviewers on `production` and its deployments restricted to
+`main`; and, for any member
+whose image is private, grant this repository read access to that package (or
+add a login step for its registry) — the workflow's own token cannot read
+another repository's private image, and the first merge would otherwise fail to
+resolve a digest.
 
 ## Step 3.5: Post-Write Validation
 

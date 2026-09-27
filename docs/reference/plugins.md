@@ -665,12 +665,12 @@ and the run's summary notes the declaration — the same sequence
 
 **What's built (v0.1):** the ownership boundary, the `claude-workspace/v1`
 contract, and the validator that enforces it
-([#1744](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1744)).
+([#1744](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1744));
+and the bootstrap scaffold with its promote-to-prod workflow
+([#1745](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1745)).
 The rest of epic
 [#687](https://github.com/timo-jakob/timos-claude-code-plugins/issues/687)
-follows: the bootstrap scaffold and the promote-to-prod workflow
-([#1745](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1745)),
-the Renovate image-tag configuration
+follows: the Renovate image-tag configuration
 ([#1746](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1746)),
 the maintenance dispatch
 ([#1747](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1747)),
@@ -678,8 +678,32 @@ the injection-hardened bump-triage agent
 ([#1748](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1748)),
 and the how-to
 ([#1749](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1749)).
-So the plugin ships **no skills and no agents yet** — it ships one script, and
-the two callers that will run it are still open.
+So the plugin ships **no skills and no agents yet** — it ships two scripts and
+the templates the scaffold copies. Bootstrap is the validator's first caller;
+the maintenance gather, its second, is still open.
+
+### The scaffold and promote-to-prod
+
+`/development:bootstrap` takes its composition path (§3m) when the user asks
+for a composition repo, and runs `scaffold-composition.zsh` with the members
+they name. It writes exactly `.claude-workspace.yaml` (the members, plus
+`staging` and `production`, both at `deploy_target: none`),
+`.github/workflows/promote-to-prod.yml`, `scripts/promote.zsh`, `deploy/` and
+`e2e/` as documented empty sockets, and `.maintenance.yml` with
+`primary: composition` — judging the manifest with the validator before it
+writes anything. Bootstrap never reports the scaffold complete without that
+verdict's exit `0`.
+
+The workflow promotes `staging` on every merge to `main`, and `production` only
+on a manual `workflow_dispatch` from `main`, in a job bound to the `production`
+GitHub Environment so its required reviewers gate it. `promote.zsh` refuses an
+undeclared environment or an untagged member before it contacts any registry,
+resolves each tag to its digest (a member already pinned by digest keeps that
+one digest, and is refused if its tag has since moved), and publishes
+`promotion-<env>.json` — every member as `image:tag@sha256:…` plus the commit —
+as an artifact and in the job summary. With `deploy_target: none` a merge
+records and says *nothing deployed*, and a production dispatch records and then
+fails, naming the missing renderer.
 
 ### `claude-workspace/v1` and its validator
 

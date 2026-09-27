@@ -37,6 +37,13 @@ ARG YQ_VERSION=4.44.3
 RUN curl -sSfLo /usr/local/bin/yq \
       "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64" \
  && chmod +x /usr/local/bin/yq
+# actionlint: tests/composition-scaffold.bats (#1745) lints the promote-to-prod
+# workflow template with it, unguarded. Debian has no package, so it is pinned
+# from upstream like yq, for the image's own architecture.
+ARG ACTIONLINT_VERSION=1.7.12
+RUN url="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}" \
+ && curl -sSfL "$url/actionlint_${ACTIONLINT_VERSION}_linux_$(dpkg --print-architecture).tar.gz" \
+    | tar -xz -C /usr/local/bin actionlint
 # The IaC gate real-tool harness (tests/kubernetes-ci-fixtures.bats, #1199,
 # #1603) needs helm, kustomize, kubeconform, kube-linter, kyverno, trivy and yq
 # — and they are deliberately NOT installed here. Two reasons, both about
@@ -59,7 +66,8 @@ RUN curl -sSfLo /usr/local/bin/yq \
 # yamllint: tests/bootstrap-iac-pipeline.bats (#1154) lints the kubernetes-ci
 # workflow template with the repo's strict yamllint config, and
 # tests/no-cluster-deploy.bats (#1206) lints the no-cluster-deploy workflow
-# template the same way; both call it unguarded, so the documented local run
+# template the same way, as tests/composition-scaffold.bats (#1745) does the
+# promote-to-prod template; all call it unguarded, so the documented local run
 # needs it present. yq is installed
 # above from upstream for the reason given there.
 

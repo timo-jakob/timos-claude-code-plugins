@@ -193,7 +193,8 @@ jobs:
           # parallel: GNU parallel is bats' `--jobs` backend, which run-gate.zsh
           # uses to parallelise the suite (#980).
           # yamllint: tests/bootstrap-iac-pipeline.bats (#1154) lints the
-          # kubernetes-ci workflow template with the repo's own strict config.
+          # kubernetes-ci workflow template with the repo's own strict config, and
+          # tests/composition-scaffold.bats (#1745) the promote-to-prod template.
           # Called unguarded on purpose — a skip would silently drop the only
           # structural coverage that template has — so it is a declared dependency.
           # python3-venv + python3-pip: Debian/Ubuntu split `venv` and `pip` out
@@ -217,8 +218,15 @@ jobs:
           sudo curl -sSfLo /usr/local/bin/yq \
             "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64"
           sudo chmod +x /usr/local/bin/yq
+          # actionlint: tests/composition-scaffold.bats (#1745) lints the
+          # promote-to-prod workflow template with it, unguarded. Pinned from
+          # upstream — Ubuntu's apt has no actionlint package.
+          url="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
+          curl -sSfL "$url/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin actionlint
         env:
           YQ_VERSION: 4.44.3
+          ACTIONLINT_VERSION: 1.7.12
       - name: Install test dependencies (macOS)
         if: runner.os == 'macOS'
         # brew's `yq` IS mikefarah's, so the macOS leg needs no special case.
@@ -227,7 +235,7 @@ jobs:
         # cases, satisfied here by the runner image rather than by brew — the
         # exemption is recorded rather than implied, since the Linux leg declares
         # the same toolchain explicitly (#1360).
-        run: brew install bats-core jq shellcheck node parallel yamllint yq
+        run: brew install bats-core jq shellcheck node parallel yamllint yq actionlint
       # The pinned IaC toolchain the real-tool harness executes the bootstrapped
       # gate script with (tests/kubernetes-ci-fixtures.bats, #1199, #1603): helm,
       # kustomize, kubeconform, kube-linter, kyverno, trivy and yq.

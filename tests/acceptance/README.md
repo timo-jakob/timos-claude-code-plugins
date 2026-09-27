@@ -76,6 +76,10 @@ bats tests/acceptance/cli/resolve-issue-story-telemetry.bats
 # drives the pre-dispatch gate against a stubbed tofu / tflint
 bats tests/acceptance/cli/opentofu-review.bats
 
+# the composition scaffold + promote-to-prod (#1745) — 6 story cases, offline:
+# scaffolds an empty repo, then drives promote.zsh against a stubbed `docker`
+bats tests/acceptance/cli/composition-scaffold.bats
+
 # the org API styleguide ruleset (#689 + #944) — 40 cases:
 #   9 + 13 story, 15 clause-isolating, 2 #1330 premise, 1 seed-lint
 bats tests/acceptance/cli/api-styleguide.bats
@@ -89,6 +93,10 @@ exact version rather than the shipped job's floating `@6`, because an upstream
 minor can retire an inherited `spectral:oas` rule and change these fixtures'
 verdicts with no change in this repo. Note that the `bats tests/acceptance/cli`
 invocation above also runs it.
+
+**The composition suite stands up no service or registry.** It needs `zsh`,
+`jq`, mikefarah `yq` and `actionlint`, and resolves digests through a stubbed
+`docker`, so it runs offline.
 
 **The story-telemetry suite stands up no service either.** It needs only `zsh`,
 `jq` and `git`, runs fully offline against a scratch repo (detection stubbed,

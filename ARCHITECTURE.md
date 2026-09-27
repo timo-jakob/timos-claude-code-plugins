@@ -2223,14 +2223,31 @@ inherits: **no run ever reports a deploy that did not happen**. A promotion with
 no renderer still records what it promoted — it just never claims it deployed
 it.
 
-**What is shipped today is the contract and its validator.** #1744 landed this
-boundary, the `claude-workspace/v1` specification below and
-`development-composition/scripts/validate-workspace.zsh`. Nothing calls that
-validator yet: bootstrap's scaffold and the promote-to-prod workflow are #1745,
-the Renovate image-tag configuration #1746, the topic marker, gather and
-dispatch #1747, the injection-hardened bump-triage agent #1748, and the
-how-to #1749. The validator has exactly **two** intended callers — bootstrap, on
-the repo it has just scaffolded, and the composition maintenance gather.
+**What is shipped today is the contract, its validator and the scaffold.** #1744
+landed this boundary, the `claude-workspace/v1` specification below and
+`development-composition/scripts/validate-workspace.zsh`. #1745 landed
+`scaffold-composition.zsh` — the skeleton bootstrap's §3m writes once the
+validator has accepted its manifest — and the promote-to-prod workflow and `promote.zsh` it
+copies from `development-composition/templates/`. Still open: the Renovate
+image-tag configuration #1746, the topic marker, gather and dispatch #1747, the
+injection-hardened bump-triage agent #1748, and the how-to #1749. The validator
+has exactly **two** intended callers — bootstrap, on the repo it has just
+scaffolded, and the composition maintenance gather (not yet built).
+
+**Promotion records; it never deploys in this release.** `promote.zsh` promotes
+one environment per run: it refuses an undeclared environment or an untagged
+member **before** any registry lookup, resolves each member's tag to its digest
+(a member already pinned `image:tag@sha256:…` is recorded with that one digest,
+and **refused** when its tag now resolves elsewhere — a re-pushed tag is not
+guessed past), and publishes `promotion-<env>.json` with `deployed: false`. The
+hand-off to `deploy/` is keyed on `deploy_target`; with `none`, a merge-triggered
+`staging` run exits `0` with a *nothing deployed* notice so `main` is not red on
+every merge, and a manual `production` dispatch exits non-zero naming #719/#720,
+because a request to deploy that cannot be honoured must not look like success.
+The workflow promotes `production` only from `main`. **`promotes_from` is not
+read yet**: each environment resolves its tags afresh, so a production record is
+not checked against the digests `staging` recorded — a digest pin is what holds
+an image fixed across environments until #1884 adds that check.
 
 **What the gather files is keyed on WHICH failure, never on "non-zero".** The
 exits are typed (below) precisely so the two defects a caller would otherwise
@@ -2248,15 +2265,17 @@ throw that away on its first use:
 
 **Bootstrap's branch is the mirror image**, and is owed the same explicitness:
 exit `0` completes the scaffold; exit `1` **fails the bootstrap run**, quoting
-the named error, because the scaffold it just wrote is the thing that is wrong;
-exit `4` is a bootstrap bug — per the row above, `manifest not found` means the
-scaffold did not write the manifest and `manifest not readable` that it wrote
-it unreadably; exits `2`
-and `3` are the run's own invocation and environment, escalated, never reported
-as a bad scaffold; **any other status is treated as `3`** — the manifest was
-never judged, so the run escalates the environment failure. What it must never
-do is complete the scaffold and report success for a manifest no run judged,
-whether or not an error was printed.
+the named error — the manifest is what is wrong, and whose it is (the members
+just given, or the repository's own kept file) is named in the error; exit `4`
+fails it too, as a scaffold bug for a manifest it rendered and as the file's
+own mode for a kept one; the validator's exits `2` and `3` are the run's own
+invocation and environment, escalated as `3`, never reported as a bad scaffold;
+**any other status is treated as `3`** — the manifest was never judged, so the
+run escalates the environment failure. The scaffold judges before it writes, so
+a refused manifest leaves the repository untouched. What it must never do is
+complete the scaffold and report success for a manifest no run judged, whether
+or not an error was printed. `scaffold-composition.zsh`'s header and bootstrap's
+§3m carry the full table, including the scaffold's own usage exit.
 
 **No validator CI job is ever rendered into a composition repo**; that is epic #687's stated boundary, and a later child
 adding one would be widening the epic rather than completing it.

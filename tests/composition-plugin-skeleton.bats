@@ -230,7 +230,7 @@ YAML
   # caveat would send a repo author to write a declaration that selects nothing
   readme_table="$(grep -E '^\| \*\*development' "$REPO_ROOT/README.md")"
   contains "$readme_table" 'once #1747 registers the marker'
-  contains "$readme_table" 'nothing calls the validator until the bootstrap scaffold lands'
+  contains "$readme_table" 'the bootstrap scaffold with its promote-to-prod workflow'
   contains "$readme_table" 'accepts only `none`'
 
   # the docs-reference generator hardcodes its plugin list, so an unregistered
@@ -1713,14 +1713,15 @@ YAML
   contains "$desc" "#1744"
 }
 
-@test "the plugin ships exactly the skeleton this slice claims — no skills, no agents (#1744)" {
-  # the charter and plugins.md both say so; without this the claim is prose only
+@test "the plugin ships exactly the skeleton this slice claims — no skills, no agents (#1744, #1745)" {
+  # the charter and plugins.md both say so; without this the claim is prose only.
+  # templates/ is the skeleton the #1745 scaffold copies into a composition repo
   local entries
   # .DS_Store is filtered, not asserted against: Finder drops one into any
   # directory a macOS working copy opens, and an OS artifact must not red a
   # claim about which plugin content ships
   entries="$(ls -A "$PLUGIN_DIR" | grep -v '^\.DS_Store$' | LC_ALL=C sort | tr '\n' ' ')"
-  [ "$entries" = ".claude-plugin scripts " ]
+  [ "$entries" = ".claude-plugin scripts templates " ]
   [ ! -d "$PLUGIN_DIR/skills" ]
   [ ! -d "$PLUGIN_DIR/agents" ]
   # …so the generated reference pages carry no section for it yet, and the
