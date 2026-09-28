@@ -1059,3 +1059,69 @@ sweepable() {
   grep -qF "$heading" "$REPO_ROOT/docs/explanation/review-loop.md" || {
     echo "the explanation page no longer points at residue.md's #1571 section"; return 1; }
 }
+
+@test "#1920 reference/residue.md states the risk-threshold procedure, by content" {
+  # The procedure lives OUTSIDE the frozen residue-branch span, so nothing that
+  # verifies the span guards it. Each needle is one clause a session at the
+  # residue terminal must meet: the pointer that makes it read the section at
+  # all, how to read the variable and its three states, both probability
+  # definitions, all four impact anchors, the keep rule, every amendment to the
+  # frozen steps, and the fixed PR paragraph that overrides the dossier claim of
+  # filing.
+  local t; t="$(flat "$RI_REF/residue.md")"
+  local -a needles=(
+    'read § *Risk threshold — assess before filing (#1920)* at the end of this file FIRST'
+    'printenv corner_case_risk_threshold'
+    'Skip the rest of this section: make no assessment, pass no new flag'
+    'say so in the PR Summary in one line naming the value'
+    'you misread the state: go back to step 1 below, assess, and re-run the builder'
+    'the probability that a plausible future change breaks exactly that unpinned behaviour'
+    'the probability that the described input or state actually arises'
+    '| `1.0` | a false result that is trusted'
+    '| `0.7` | a hang, runaway resource use'
+    '| `0.4` | degraded or misleading output'
+    '| `0.1` | cosmetic'
+    '**Risk** is `p × impact`. A finding is **kept** (filed) when `risk >= threshold`'
+    'A finding you leave out is **kept**'
+    'to **both** invocations, the real plan and the `--dry-run`'
+    'It is never "file everything" or "file nothing".'
+    'None of them is the `--status` arm, so none of them stops the run with no PR'
+    'with the variable **blanked for those two calls only**'
+    '**`threshold_state` is `ignored`**'
+    '**A dropped finding an EARLIER run already filed is not dropped.**'
+    'takes **step 3'"'"'s arm 2**'
+    'read it as that set **minus the records that stay dropped** after the settling above'
+    'take the arms **in order; the first arm that settles a record settles it**'
+    'Run the repo-wide listing **once, on its own**'
+    '**a lookup that did not happen** — a read this record needed exited non-zero'
+    '→ it **stays dropped**, and the Summary says in one line that its earlier-run status could not be checked'
+    'Step 3'"'"'s read-failed arm (*count the builder-filtered set as filed*) does **not** apply here'
+    'found nowhere, both reads having succeeded → it **stays dropped**'
+    'the dropped record'"'"'s `dropped` array is **non-empty** — the builder dropped at least one finding'
+    'an all-filed rejoin is the **all** row'
+    'With an **empty** `dropped` array, an empty dry-run is still that anomaly arm'
+    'matched against `<scratch>/residue-listing.json`, never by running the listing again'
+    'present in the repo-wide listing but not settled by arm 1 (absent from step 2'"'"'s read, or that read failed)'
+    'settle it by **all** of that arm'"'"'s own sub-arms'
+    'A `--child` read that fails never sends a listing-matched record to the arm below'
+    'exited non-zero: **only** step 2'"'"'s `sub_issues` read, or (for a record absent from it) the repo-wide listing; the `--child` read belongs to the arm above and is settled there'
+    '**because every candidate was dropped** only when both hold'
+    'whether it stays dropped or rejoined, as filed or as untracked'
+    'This overrides the frozen *dry-run list is itself EMPTY* arm'
+    'is vacuously true of no candidates'
+    '**An EMPTY remainder takes no remainder-rule row.**'
+    '**They were NOT filed** — each one'
+    '**each staying-dropped record'"'"'s `row`, pasted as it is** — never re-rendered'
+    'state the three numbers — filed, dropped, and (if any) untracked'
+  )
+  local n
+  for n in "${needles[@]}"; do
+    grep -qF -- "$n" <<< "$t" || { echo "residue.md lost the #1920 clause: $n"; return 1; }
+  done
+  # ...and the heading the pointer above names. The pointer is prose, not a
+  # `see reference/X.md §` pointer, so no pointer sweep checks it; the
+  # ARCHITECTURE.md section and the how-to page name the same heading.
+  grep -qxF '## Risk threshold — assess before filing (#1920)' "$RI_REF/residue.md" || {
+    echo "residue.md renamed the #1920 section heading that its pointer, ARCHITECTURE.md and the how-to name"
+    return 1; }
+}

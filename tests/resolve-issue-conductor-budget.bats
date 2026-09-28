@@ -261,9 +261,14 @@ _all_raw_pointer_count() {
   # EIGHT since #1226: the new reference/telemetry.md declares ONE `##` section,
   # *Story telemetry (#1226)*. Its #1226 correction notes in promotion.md,
   # interactive.md and review-loop.md are PARAGRAPHS, for the reason above.
+  #
+  # NINE since #1920: residue.md gained ONE `##` section, *Risk threshold —
+  # assess before filing (#1920)*, which amends the frozen residue branch from
+  # outside it. Its sub-steps are `###` headings, which this roster does not
+  # count, and its pointer at the top of the file is a PARAGRAPH.
   local n
   n="$(_ref_headings | grep -c .)"
-  [ "$n" -eq 8 ]
+  [ "$n" -eq 9 ]
 }
 
 # --- pointers resolve -------------------------------------------------------

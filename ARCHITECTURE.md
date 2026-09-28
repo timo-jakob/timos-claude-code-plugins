@@ -6929,6 +6929,53 @@ so a broken hook degrades to "no switching", never to "wrong model everywhere".
 User-facing docs: [how-to: switch fable agents to
 opus](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/docs/how-to/switch-fable-agents-to-opus.md).
 
+## Runtime setting: `corner_case_risk_threshold` (#1920)
+
+The second maintainer-set runtime switch beside `switch_fable_to_opus`, and like
+it read from the environment so it needs no file edit. It sets a **floor on the
+risk of a review-residue follow-up**: on a `CONVERGED_WITH_RESIDUE` ending,
+every residual blocker used to become a `review-residue` issue however unlikely
+or harmless its scenario, and each of those runs its own review loop that can
+file more (epic #1795: 3 children became 21).
+
+- **Value:** a decimal in [0, 1] with at most three decimals (`0.05`, `.05`,
+  `1`). Unset, `""` and any spelling of zero (`0`, `0.0`) are **off** — today's
+  behaviour, byte-for-byte: no assessment is made and
+  `build-residue-issues.zsh`'s stdout is unchanged. A value the rule does not
+  admit (`30`, `1.5`, `-0.1`, `0.0005`, `abc`) is **ignored** — it behaves as off
+  — and is announced once, on stderr and in the PR Summary, so a percent-style
+  value fails safe to "file everything" and the maintainer still hears about it.
+- **The assessment is the conductor's; the arithmetic is the builder's.** Before
+  building the plan the conductor records, per residual blocker, a probability
+  `p` (two decimals; defined per finding kind — test-strength for the `tests`
+  dimension, defect otherwise) and an impact from four anchors (`1.0` trusted
+  false result / data loss / security, `0.7` hang, runaway resources or wrong
+  shipped behaviour, `0.4` degraded output or a manual retry, `0.1` cosmetic),
+  each with a rationale, keyed by the loop-wide `{file, line, dimension, title}`
+  identity. `build-residue-issues.zsh --risk FILE --dropped-file FILE` computes
+  `risk = p × impact` in integer thousandths and keeps a finding when `risk >=
+  threshold`. A finding with no assessment is **kept**; a malformed assessment is
+  exit 2 naming the entry, never drop-all or keep-all. `--risk` without
+  `--dropped-file` (or the reverse) is refused on the arguments alone.
+- **Nothing is dropped silently.** Whenever `--dropped-file` is passed (the
+  procedure passes it only when the threshold is on) the builder writes the
+  dropped record, whatever state it parsed, listing each dropped finding with p,
+  impact, risk, both rationales, the `issue_title` an issue for it would carry —
+  so a finding an earlier run already filed is recognised and classified like
+  any builder-filtered candidate, not dropped — and a `row`, the PR table row
+  pre-rendered with its untrusted text neutralised. The PR Summary pastes those
+  rows under a fixed paragraph above
+  the dossier, whose residue wording is gated on the status alone and would
+  otherwise claim they were filed. The dossier contract itself is unchanged, so
+  its hidden block's `open` still counts dropped findings; #1921 owns that.
+- **Scope:** residue filing only. The review loop's own blocking decision is
+  untouched; extending the floor to it is #1921.
+
+The procedure is `development/skills/resolve-issue/reference/residue.md`,
+§ *Risk threshold — assess before filing (#1920)*, which amends the frozen
+residue branch without editing it. User-facing docs: [how-to: set a corner-case
+risk threshold](docs/how-to/set-a-corner-case-risk-threshold.md).
+
 ## Worktree pattern for parallel work
 
 The Agent tool natively supports `isolation: "worktree"`. The runtime

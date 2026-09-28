@@ -70,7 +70,13 @@ EOF
 # read the parent (the FAIL-OPEN path, which several fixtures below deliberately
 # take), and a merged stream would put that warning ahead of the JSON contract
 # on stdout — every `jq` here would then parse a prose line.
-build() { run --separate-stderr env GH_BIN="$BATS_TEST_TMPDIR/gh" zsh "$S" --status "$ST" --changelist "$CL" "$@"; }
+# The risk threshold (#1920) is removed from the environment: a maintainer who
+# sets it in their settings runs this suite with it inherited, and every case
+# below pins today's behaviour, which is the OFF state.
+build() {
+  run --separate-stderr env -u corner_case_risk_threshold GH_BIN="$BATS_TEST_TMPDIR/gh" \
+    zsh "$S" --status "$ST" --changelist "$CL" "$@"
+}
 
 @test "#1435 tc-happy-residue-issues-built: one entry per residual blocker, both labels, nothing created" {
   stub_fail
@@ -1091,4 +1097,357 @@ EOF
   contains "$(cat "$LOG")" 'if type == "object"'
   contains "$(cat "$LOG")" '.name'
   contains "$(cat "$LOG")" 'title'
+}
+
+# --- the risk threshold (#1920) ----------------------------------------------
+# corner_case_risk_threshold drops residual blockers whose risk (p x impact) is
+# below it. The fixture below is the boundary set the story pins: three assessed
+# candidates at risk 0.049, 0.05 and 0.42, plus one with no assessment at all.
+
+risk_fixture() {
+  cat > "$CL" <<'EOF'
+{"round":5,"blocking":[
+ {"file":"a.zsh","line":1,"dimension":"tests","title":"just below","priority":"High"},
+ {"file":"b.zsh","line":2,"dimension":"bugs","title":"exactly at","priority":"High"},
+ {"file":"c.zsh","line":null,"dimension":"prose_logic","title":"well above","priority":"High"},
+ {"file":"d.zsh","line":4,"dimension":"tests","title":"never assessed","priority":"High"}]}
+EOF
+  RISK="$BATS_TEST_TMPDIR/risk.json"
+  DROPPED="$BATS_TEST_TMPDIR/dropped.json"
+  cat > "$RISK" <<'EOF'
+[{"file":"a.zsh","line":1,"dimension":"tests","title":"just below",
+  "p":0.07,"p_why":"needs a rare input","impact":0.7,"impact_why":"a hang"},
+ {"file":"b.zsh","line":2,"dimension":"bugs","title":"exactly at",
+  "p":0.05,"p_why":"uncommon","impact":1.0,"impact_why":"a false green gate"},
+ {"file":"c.zsh","line":null,"dimension":"prose_logic","title":"well above",
+  "p":0.6,"p_why":"the normal path","impact":0.7,"impact_why":"a skill doing the wrong thing"}]
+EOF
+}
+
+# run the builder with the threshold SET to the first argument, the rest passed through
+build_thr() {
+  local thr="$1"; shift
+  run --separate-stderr env GH_BIN="$BATS_TEST_TMPDIR/gh" corner_case_risk_threshold="$thr" \
+    zsh "$S" --status "$ST" --changelist "$CL" "$@"
+}
+# ...and with the variable removed from the environment entirely
+build_unset() {
+  run --separate-stderr env -u corner_case_risk_threshold GH_BIN="$BATS_TEST_TMPDIR/gh" \
+    zsh "$S" --status "$ST" --changelist "$CL" "$@"
+}
+
+@test "#1920 threshold OFF (unset or 0): byte-identical plan, --risk ignored and never read" {
+  stub_fail
+  risk_fixture
+  build_unset --issue 1920 --dry-run
+  [ "$status" -eq 0 ]
+  local baseline="$output"
+  [ "$(echo "$baseline" | jq 'length')" -eq 4 ]
+  # a nonexistent --risk path proves the file is never opened while the threshold is off
+  build_unset --issue 1920 --dry-run --risk "$BATS_TEST_TMPDIR/does-not-exist" --dropped-file "$DROPPED"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$baseline" ]
+  [ "$(jq -r .threshold_state "$DROPPED")" = "off" ]
+  [ "$(jq '.dropped | length' "$DROPPED")" -eq 0 ]
+  [ "$(jq -r .threshold "$DROPPED")" = "null" ]
+  # every spelling of zero, and the empty string, is OFF and silent
+  local v
+  for v in 0 0.0 .000 ""; do
+    build_thr "$v" --issue 1920 --dry-run --risk "$BATS_TEST_TMPDIR/does-not-exist" --dropped-file "$DROPPED"
+    [ "$status" -eq 0 ] || { echo "threshold [$v] read --risk"; return 1; }
+    [ "$output" = "$baseline" ]
+    [ "$(jq -r .threshold_state "$DROPPED")" = "off" ]
+    lacks "$stderr" "IGNORED"
+  done
+}
+
+@test "#1920 threshold 0.05: 0.049 dropped, the exact-boundary 0.05 and 0.42 kept, unassessed kept" {
+  stub_fail
+  risk_fixture
+  build_thr 0.05 --issue 1920 --dry-run --risk "$RISK" --dropped-file "$DROPPED"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c '[.[].title]')" = \
+    '["review residue: exactly at — b.zsh:2 [bugs]","review residue: well above — c.zsh [prose_logic]","review residue: never assessed — d.zsh:4 [tests]"]' ]
+  # the dropped record names the finding with every value a PR body has to show
+  [ "$(jq -c '[.dropped[] | {title, file, line, dimension, p, impact, risk, risk_thousandths, p_why, impact_why}]' "$DROPPED")" = \
+    '[{"title":"just below","file":"a.zsh","line":1,"dimension":"tests","p":0.07,"impact":0.7,"risk":0.049,"risk_thousandths":49,"p_why":"needs a rare input","impact_why":"a hang"}]' ]
+  # ...and the exact title an issue for it would carry, so the caller can find
+  # one an earlier run filed: the same string the OFF plan renders for it
+  [ "$(jq -r '.dropped[0].issue_title' "$DROPPED")" = "review residue: just below — a.zsh:1 [tests]" ]
+  [ "$(jq -c '[.kept[].title]' "$DROPPED")" = '["exactly at","well above"]' ]
+  [ "$(jq -c '.unassessed' "$DROPPED")" = '["never assessed"]' ]
+  [ "$(jq -r '.threshold, .threshold_state, .threshold_thousandths' "$DROPPED" | tr '\n' ' ')" = "0.05 on 50 " ]
+  contains "$stderr" "1 residual blocker(s) dropped below it"
+  contains "$stderr" "NOT filed"
+}
+
+@test "#1920 the live run drops the same set as --dry-run, so their length diff still measures only the idempotency filter" {
+  stub_replay '[]'
+  risk_fixture
+  build_thr 0.05 --issue 1920 --dry-run --risk "$RISK" --dropped-file "$DROPPED"
+  [ "$status" -eq 0 ]
+  local dry="$output"
+  build_thr 0.05 --issue 1920 --risk "$RISK" --dropped-file "$DROPPED"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$dry" ]
+  [ "$(echo "$output" | jq 'length')" -eq 3 ]
+}
+
+@test "#1920 the boundary comparison is integer, not float: 0.3 vs 0.30, p 0.29 dropped and p 0.30 kept" {
+  stub_fail
+  cat > "$CL" <<'EOF'
+{"round":5,"blocking":[
+ {"file":"a.zsh","line":1,"dimension":"bugs","title":"p 0.29","priority":"High"},
+ {"file":"b.zsh","line":2,"dimension":"bugs","title":"p 0.30","priority":"High"}]}
+EOF
+  RISK="$BATS_TEST_TMPDIR/risk.json"; DROPPED="$BATS_TEST_TMPDIR/dropped.json"
+  cat > "$RISK" <<'EOF'
+[{"file":"a.zsh","line":1,"dimension":"bugs","title":"p 0.29","p":0.29,"p_why":"x","impact":1.0,"impact_why":"y"},
+ {"file":"b.zsh","line":2,"dimension":"bugs","title":"p 0.30","p":0.3,"p_why":"x","impact":1.0,"impact_why":"y"}]
+EOF
+  # 0.29 x 100 is 28.999... in floating point, so a float product would misplace it
+  local thr
+  for thr in 0.3 0.30 .3 0.300; do
+    build_thr "$thr" --issue 1920 --dry-run --risk "$RISK" --dropped-file "$DROPPED"
+    [ "$status" -eq 0 ]
+    [ "$(echo "$output" | jq -c '[.[].title]')" = '["review residue: p 0.30 — b.zsh:2 [bugs]"]' ]
+    [ "$(jq -r '.dropped[0].risk_thousandths' "$DROPPED")" = "290" ]
+  done
+}
+
+@test "#1920 an invalid threshold is treated as unset and announced once as IGNORED" {
+  stub_fail
+  risk_fixture
+  build_unset --issue 1920 --dry-run
+  local baseline="$output"
+  local v
+  # a NONEXISTENT --risk path: an ignored threshold must never open the file,
+  # so a run that read it would exit 2 here rather than 0
+  for v in 30 -0.1 1.5 0.0005 abc . 1. 5%; do
+    build_thr "$v" --issue 1920 --dry-run --risk "$BATS_TEST_TMPDIR/does-not-exist" --dropped-file "$DROPPED"
+    [ "$status" -eq 0 ] || { echo "threshold $v read --risk"; return 1; }
+    [ "$output" = "$baseline" ] || { echo "threshold $v changed the plan"; return 1; }
+    [ "$(jq -r .threshold_state "$DROPPED")" = "ignored" ]
+    [ "$(jq -r .threshold "$DROPPED")" = "$v" ]
+    [ "$(jq -r .threshold_thousandths "$DROPPED")" = "null" ]
+    [ "$(grep -c IGNORED <<< "$stderr")" -eq 1 ]
+    lacks "$stderr" "dropped below it"
+  done
+}
+
+@test "#1920 every valid spelling of the threshold is accepted, up to and including 1" {
+  stub_fail
+  risk_fixture
+  # at 1 every ASSESSED finding is below it (max risk here is 0.42); the unassessed one stays
+  local v
+  for v in 1 1.0 1.000; do
+    build_thr "$v" --issue 1920 --dry-run --risk "$RISK" --dropped-file "$DROPPED"
+    [ "$status" -eq 0 ]
+    [ "$(jq -r .threshold_state "$DROPPED")" = "on" ]
+    [ "$(echo "$output" | jq -c '[.[].title]')" = '["review residue: never assessed — d.zsh:4 [tests]"]' ]
+  done
+  build_thr .05 --issue 1920 --dry-run --risk "$RISK" --dropped-file "$DROPPED"
+  [ "$(jq -r .threshold_thousandths "$DROPPED")" = "50" ]
+  # the smallest ON value: one thousandth is ON, not rounded down to OFF
+  build_thr 0.001 --issue 1920 --dry-run --risk "$RISK" --dropped-file "$DROPPED"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.threshold_state, .threshold_thousandths' "$DROPPED" | tr '\n' ' ')" = "on 1 " ]
+  [ "$(jq '.dropped | length' "$DROPPED")" -eq 0 ]
+}
+
+@test "#1920 a finding with no assessment entry is kept at any threshold, and a mistyped identity is reported" {
+  stub_fail
+  risk_fixture
+  # the entry for a.zsh names the wrong line, so it assesses nothing
+  jq '.[0].line = 99' "$RISK" > "$RISK.tmp" && mv "$RISK.tmp" "$RISK"
+  build_thr 1 --issue 1920 --dry-run --risk "$RISK" --dropped-file "$DROPPED"
+  [ "$status" -eq 0 ]
+  contains "$output" "just below"
+  contains "$output" "never assessed"
+  [ "$(jq -c '.unassessed' "$DROPPED")" = '["just below","never assessed"]' ]
+  [ "$(jq -c '.unmatched_assessments' "$DROPPED")" = '["just below"]' ]
+  contains "$stderr" "matched no residual blocker"
+}
+
+@test "#1920 a malformed assessment is exit 2 naming the file and the entry, never drop-all or keep-all" {
+  stub_fail
+  risk_fixture
+  local bad="$BATS_TEST_TMPDIR/bad.json" expr msg
+  # each row: a jq edit of the valid fixture, then the text the refusal must carry
+  while IFS='|' read -r expr msg; do
+    jq "$expr" "$RISK" > "$bad"
+    build_thr 0.05 --issue 1920 --dry-run --risk "$bad" --dropped-file "$DROPPED"
+    [ "$status" -eq 2 ] || { echo "not refused: $expr"; return 1; }
+    [ -z "$output" ] || { echo "printed a plan for: $expr"; return 1; }
+    contains "$stderr" "$bad"
+    contains "$stderr" "$msg"
+  done <<'ROWS'
+.[1].p = 1.2|entry 1 (exactly at): p must be a number in [0, 1]
+.[1].p = -0.1|entry 1 (exactly at): p must be a number in [0, 1]
+.[1].p = 0.055|entry 1 (exactly at): p must be a number in [0, 1] with at most two decimals
+.[1].p = "0.05"|entry 1 (exactly at): p must be a number
+.[2].impact = 0.5|entry 2 (well above): impact must be one of 0.1, 0.4, 0.7, 1.0
+.[2].impact = 0.75|entry 2 (well above): impact must be one of 0.1, 0.4, 0.7, 1.0
+.[2].impact = 0.71|entry 2 (well above): impact must be one of 0.1, 0.4, 0.7, 1.0
+.[2].impact = 0.69|entry 2 (well above): impact must be one of 0.1, 0.4, 0.7, 1.0
+del(.[0].p_why)|entry 0 (just below): p_why must be a non-empty rationale
+.[0].impact_why = "  "|entry 0 (just below): impact_why must be a non-empty rationale
+del(.[2].title)|entry 2 (<no title>): title must be a string
+.[0].line = "1"|entry 0 (just below): line must be a number or null
+.[0].file = 5|entry 0 (just below): file must be a string
+del(.[1].dimension)|entry 1 (exactly at): dimension must be a string
+.[1] = 42|entry 1: not an object
+. + [.[0]]|entry 3 duplicates the identity of entry 0
+ROWS
+  # not JSON, and a JSON value that is not an array
+  printf 'not json\n' > "$bad"
+  build_thr 0.05 --issue 1920 --dry-run --risk "$bad" --dropped-file "$DROPPED"
+  [ "$status" -eq 2 ]
+  contains "$stderr" "--risk is not exactly one JSON array: $bad"
+  printf '{"p":0.1}\n' > "$bad"
+  build_thr 0.05 --issue 1920 --dry-run --risk "$bad" --dropped-file "$DROPPED"
+  [ "$status" -eq 2 ]
+  contains "$stderr" "not exactly one JSON array"
+  # two arrays back to back: a reader that took only the first would keep every
+  # finding the second one assessed, so it is refused, never half-read
+  jq -c '., .' "$RISK" > "$bad"
+  build_thr 0.05 --issue 1920 --dry-run --risk "$bad" --dropped-file "$DROPPED"
+  [ "$status" -eq 2 ]
+  contains "$stderr" "not exactly one JSON array: $bad"
+  # a missing file, an empty one and a directory are refused too, each by name,
+  # but only while the threshold is on
+  build_thr 0.05 --issue 1920 --dry-run --risk "$BATS_TEST_TMPDIR/nope.json" --dropped-file "$DROPPED"
+  [ "$status" -eq 2 ]
+  contains "$stderr" "--risk file missing, unreadable or empty: $BATS_TEST_TMPDIR/nope.json"
+  : > "$bad"
+  build_thr 0.05 --issue 1920 --dry-run --risk "$bad" --dropped-file "$DROPPED"
+  [ "$status" -eq 2 ]
+  contains "$stderr" "--risk file missing, unreadable or empty: $bad"
+  build_thr 0.05 --issue 1920 --dry-run --risk "$BATS_TEST_TMPDIR" --dropped-file "$DROPPED"
+  [ "$status" -eq 2 ]
+  contains "$stderr" "--risk is a directory: $BATS_TEST_TMPDIR"
+}
+
+@test "#1920 the inclusive p bounds and all four impact anchors are accepted, with exact risk" {
+  stub_fail
+  cat > "$CL" <<'EOF'
+{"round":5,"blocking":[
+ {"file":"a.zsh","line":1,"dimension":"bugs","title":"p zero","priority":"High"},
+ {"file":"b.zsh","line":2,"dimension":"bugs","title":"p one","priority":"High"},
+ {"file":"c.zsh","line":3,"dimension":"bugs","title":"impact 0.1","priority":"High"},
+ {"file":"d.zsh","line":4,"dimension":"bugs","title":"impact 0.4","priority":"High"}]}
+EOF
+  RISK="$BATS_TEST_TMPDIR/risk.json"; DROPPED="$BATS_TEST_TMPDIR/dropped.json"
+  cat > "$RISK" <<'EOF'
+[{"file":"a.zsh","line":1,"dimension":"bugs","title":"p zero","p":0,"p_why":"x","impact":1.0,"impact_why":"y"},
+ {"file":"b.zsh","line":2,"dimension":"bugs","title":"p one","p":1,"p_why":"x","impact":0.7,"impact_why":"y"},
+ {"file":"c.zsh","line":3,"dimension":"bugs","title":"impact 0.1","p":0.5,"p_why":"x","impact":0.1,"impact_why":"y"},
+ {"file":"d.zsh","line":4,"dimension":"bugs","title":"impact 0.4","p":0.5,"p_why":"x","impact":0.4,"impact_why":"y"}]
+EOF
+  build_thr 0.05 --issue 1920 --dry-run --risk "$RISK" --dropped-file "$DROPPED"
+  [ "$status" -eq 0 ]
+  # risk: 0, 700, 50, 200 thousandths — only p zero falls below 50
+  [ "$(jq -c '[.dropped[] | [.title, .risk_thousandths]]' "$DROPPED")" = '[["p zero",0]]' ]
+  [ "$(jq -c '[.kept[] | [.title, .risk_thousandths]]' "$DROPPED")" = \
+    '[["p one",700],["impact 0.1",50],["impact 0.4",200]]' ]
+}
+
+@test "#1920 a dropped finding carries the title the OFF plan renders for it, null line and long path included" {
+  stub_fail
+  local long; long="development/$(printf 'deep/%.0s' {1..30})x.zsh"
+  cat > "$CL" <<EOF
+{"round":5,"blocking":[
+ {"file":"c.zsh","line":null,"dimension":"prose_logic","title":"no line here","priority":"High"},
+ {"file":"$long","line":7,"dimension":"script_quality","title":"$(printf 'word %.0s' {1..40})","priority":"High"}]}
+EOF
+  RISK="$BATS_TEST_TMPDIR/risk.json"; DROPPED="$BATS_TEST_TMPDIR/dropped.json"
+  jq '[.blocking[] | {file, line, dimension, title, p: 0, p_why: "x", impact: 0.1, impact_why: "y"}]' \
+    "$CL" > "$RISK"
+  build_unset --issue 1920 --dry-run
+  [ "$status" -eq 0 ]
+  local off_titles="$(echo "$output" | jq -c '[.[].title]')"
+  build_thr 1 --issue 1920 --dry-run --risk "$RISK" --dropped-file "$DROPPED"
+  [ "$status" -eq 0 ]
+  [ "$output" = "[]" ]
+  [ "$(jq -c '[.dropped[].issue_title]' "$DROPPED")" = "$off_titles" ]
+}
+
+@test "#1920 each dropped record carries a PR table row that untrusted text cannot break" {
+  # A finding title with a backtick and a pipe, a path with a pipe, a null
+  # line, and rationales carrying a pipe, a backtick and a newline: the shapes
+  # script findings ordinarily have, each of which would otherwise split a cell,
+  # close a code span or end the row.
+  stub_fail
+  cat > "$CL" <<'EOF'
+{"round":5,"blocking":[
+ {"file":"a|b.zsh","line":null,"dimension":"tests","title":"`|| true` swallows\nthe exit","priority":"High"},
+ {"file":"c.zsh","line":9,"dimension":"bugs","title":"plain","priority":"High"}]}
+EOF
+  RISK="$BATS_TEST_TMPDIR/risk.json"; DROPPED="$BATS_TEST_TMPDIR/dropped.json"
+  jq '[.blocking[] | {file, line, dimension, title, p: 0.05, p_why: "rare | odd `x`", impact: 0.4, impact_why: "retry\nneeded"}]' \
+    "$CL" > "$RISK"
+  build_thr 1 --issue 1920 --dry-run --risk "$RISK" --dropped-file "$DROPPED"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.dropped[0].row' "$DROPPED")" = \
+    '| `\|\| true swallows the exit` — `a\|b.zsh` | 0.05 | 0.4 | 0.02 | rare \| odd x; retry needed |' ]
+  [ "$(jq -r '.dropped[1].row' "$DROPPED")" = \
+    '| `plain` — `c.zsh:9` | 0.05 | 0.4 | 0.02 | rare \| odd x; retry needed |' ]
+  # one physical line each, and exactly six unescaped pipes: five cells
+  local row
+  for row in "$(jq -r '.dropped[0].row' "$DROPPED")" "$(jq -r '.dropped[1].row' "$DROPPED")"; do
+    [ "$(printf '%s\n' "$row" | wc -l | tr -d ' ')" -eq 1 ]
+    [ "$(printf '%s' "$row" | sed 's/\\|//g' | tr -cd '|' | wc -c | tr -d ' ')" -eq 6 ]
+  done
+}
+
+@test "#1920 an unwritable --dropped-file is exit 1 with no plan, and the temp changelist is cleaned up" {
+  stub_fail
+  risk_fixture
+  mkdir -p "$BATS_TEST_TMPDIR/t"
+  run --separate-stderr env GH_BIN="$BATS_TEST_TMPDIR/gh" corner_case_risk_threshold=0.05 \
+    TMPDIR="$BATS_TEST_TMPDIR/t" zsh "$S" --status "$ST" --changelist "$CL" --issue 1920 \
+    --dry-run --risk "$RISK" --dropped-file "$BATS_TEST_TMPDIR/no-such-dir/dropped.json"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  contains "$stderr" "could not write --dropped-file: $BATS_TEST_TMPDIR/no-such-dir/dropped.json"
+  # the filtered changelist the ON path wrote is removed on exit, success or not
+  [ -z "$(ls -A "$BATS_TEST_TMPDIR/t")" ]
+  run --separate-stderr env GH_BIN="$BATS_TEST_TMPDIR/gh" corner_case_risk_threshold=0.05 \
+    TMPDIR="$BATS_TEST_TMPDIR/t" zsh "$S" --status "$ST" --changelist "$CL" --issue 1920 \
+    --dry-run --risk "$RISK" --dropped-file "$DROPPED"
+  [ "$status" -eq 0 ]
+  [ -z "$(ls -A "$BATS_TEST_TMPDIR/t")" ]
+}
+
+@test "#1920 a dangling --risk or --dropped-file is a usage error, exit 2" {
+  stub_fail
+  risk_fixture
+  build_unset --issue 1920 --dry-run --dropped-file "$DROPPED" --risk
+  [ "$status" -eq 2 ]
+  contains "$stderr" "--risk requires a value"
+  build_unset --issue 1920 --dry-run --risk "$RISK" --dropped-file
+  [ "$status" -eq 2 ]
+  contains "$stderr" "--dropped-file requires a value"
+}
+
+@test "#1920 --risk and --dropped-file travel together, refused on the arguments alone" {
+  stub_fail
+  risk_fixture
+  build_unset --issue 1920 --dry-run --risk "$RISK"
+  [ "$status" -eq 2 ]
+  contains "$stderr" "--risk requires --dropped-file"
+  build_unset --issue 1920 --dry-run --dropped-file "$DROPPED"
+  [ "$status" -eq 2 ]
+  contains "$stderr" "--dropped-file requires --risk"
+}
+
+@test "#1920 threshold on with no --risk: nothing dropped, and it says so" {
+  stub_fail
+  risk_fixture
+  build_unset --issue 1920 --dry-run
+  local baseline="$output"
+  build_thr 0.05 --issue 1920 --dry-run
+  [ "$status" -eq 0 ]
+  [ "$output" = "$baseline" ]
+  contains "$stderr" "no --risk assessment was given"
 }
