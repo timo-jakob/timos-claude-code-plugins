@@ -1,0 +1,14 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Member image pins in the claude-workspace/v1 constellation manifest (development-composition)",
+      "managerFilePatterns": ["/(^|/)\\.claude-workspace\\.yaml$/"],
+      "matchStrings": [
+        "(?m:^)[ \\t]*(?:-[ \\t]+)?image:[ \\t]*[\"']?(?<depName>[^\\s\"'#@]+):(?<currentValue>\\w[\\w.-]*)(?:@(?<currentDigest>sha256:[a-f0-9]{64}))?[\"']?(?:[ \\t\\r]|(?m:$))"
+      ],
+      "datasourceTemplate": "docker"
+    }
+  ]
+}

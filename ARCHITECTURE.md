@@ -2228,9 +2228,22 @@ landed this boundary, the `claude-workspace/v1` specification below and
 `development-composition/scripts/validate-workspace.zsh`. #1745 landed
 `scaffold-composition.zsh` — the skeleton bootstrap's §3m writes once the
 validator has accepted its manifest — and the promote-to-prod workflow and `promote.zsh` it
-copies from `development-composition/templates/`. Still open: the Renovate
-image-tag configuration #1746, the topic marker, gather and dispatch #1747, the
-injection-hardened bump-triage agent #1748, and the how-to #1749. The validator
+copies from `development-composition/templates/`. #1746 added the scaffolded
+`renovate.json`: one `regex` custom manager scoped by `managerFilePatterns` to
+`.claude-workspace.yaml`, with the `docker` datasource, whose pattern reads every
+block-style member `image:` line — host with a port, `@sha256:` digest, quoted
+value and trailing comment included, a commented-out line never — so tag bumps
+need no hand-written Renovate config. A flow-style member (`- {name: …, image:
+…}`) is not read; the scaffold never writes one. It carries no `hostRules`:
+registry access is the consuming repo's, and the acceptance dry-run's
+plain-http rule for its local registry lives in that test's fixture only. An
+existing `renovate.json` is kept like any other scaffolded file, and none is
+written when the repository already configures Renovate under another file name
+(or a `package.json` `renovate` key) or runs Dependabot — one Renovate config,
+one dependency bot. The pattern anchors with RE2's scoped `(?m:^)` / `(?m:$)`, so
+a match never consumes the newline the next line's anchor needs. Still open: the
+topic marker, gather and dispatch #1747, the injection-hardened bump-triage
+agent #1748, and the how-to #1749. The validator
 has exactly **two** intended callers — bootstrap, on the repo it has just
 scaffolded, and the composition maintenance gather (not yet built).
 

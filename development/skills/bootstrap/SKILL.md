@@ -4164,11 +4164,20 @@ conflict.
    ```text
    Primary type: composition        Languages: none
    Members:      <name> <image:tag> — one line per member
-   Files:        the six files the scaffold writes (below)
+   Files:        the seven files the scaffold writes (below)
    Finish:       commit, then a bot-authored PR; auto-merge is attempted, and
                  with no branch protection it merges without review wherever
                  the repository allows auto-merge
    ```
+
+   **Promise `renovate.json` only where the scaffold will write it.** Check,
+   before the plan, the places the scaffold checks: `renovate.json5`,
+   `.github/renovate.json(5)`, `.gitlab/renovate.json(5)`, `.renovaterc`,
+   `.renovaterc.json(5)`, a `renovate` key in `package.json`, and
+   `.github/dependabot.y(a)ml`. When any exists (and `renovate.json` itself does
+   not), the plan lists the other six files plus `renovate.json: skipped — <the
+   file> already configures Renovate / Dependabot`, and for Dependabot says the
+   member pins will not be bumped until the repository moves to Renovate.
 
 4. This section, in place of the rest of Step 3.
 5. Step 4d (initial commit), then Step 4e (the finishing flow) and Step 4g
@@ -4195,8 +4204,10 @@ member is an edit to the manifest, not something this run does.
 highest-versioned directory (`sort -V`) under
 `~/.claude/plugins/cache/<marketplace>/development-composition/`. If the plugin
 is not installed, or that directory has no `scripts/scaffold-composition.zsh`
-(a version older than #1745), stop and ask the user to install or update it:
-bootstrap does not carry a copy of the skeleton.
+(a version older than #1745) or no `templates/renovate.json` (older than #1746,
+whose scaffold writes one file fewer than the plan above promises), stop and ask
+the user to install or update it: bootstrap does not carry a copy of the
+skeleton.
 
 ```bash
 zsh "<development-composition-root>/scripts/scaffold-composition.zsh" --repo . \
@@ -4206,14 +4217,18 @@ zsh "<development-composition-root>/scripts/scaffold-composition.zsh" --repo . \
 
 It writes exactly `.claude-workspace.yaml` (the members, plus `staging` and
 `production` at `deploy_target: none`), `.github/workflows/promote-to-prod.yml`,
-`scripts/promote.zsh`, `deploy/README.md`, `e2e/README.md` and
-`.maintenance.yml` (`primary: composition`) — **no** compose or Kubernetes
+`scripts/promote.zsh`, `deploy/README.md`, `e2e/README.md`,
+`.maintenance.yml` (`primary: composition`) and `renovate.json` (a regex custom
+manager over the manifest's member `image:` pins, #1746) — **no** compose or Kubernetes
 manifest, **no** E2E harness and **no** validator workflow. It judges the
 manifest with `validate-workspace.zsh` **before** writing anything, so a
 refused manifest leaves the repo untouched. A kept manifest must also declare
 `staging` (from nothing) and `production` (from `staging`), each with the
 `github_environment` of the same name — the two GitHub Environments the workflow
-binds. It keeps any file that already exists and says so; the
+binds. It skips `renovate.json` — and says so, exit `0` — when the repository
+already configures Renovate under another file name or runs Dependabot, so it
+never overrides a Renovate config or starts a second dependency bot. It keeps
+any file that already exists and says so; the
 idempotency rules above decide what to do about a kept file that differs from
 its template, under `<development-composition-root>/templates/`. A kept manifest
 has no template: the checks above are what judge it.
@@ -4234,16 +4249,31 @@ states. A refusal names the manifest as `new` (the members the user gave) or
 Never continue past a non-zero exit, and never report a scaffold as complete
 without the exit `0` that judged it.
 
-**The report names** what was written and what was kept, the validator's verdict
-line, that `renovate.json` (image-tag bumps) is not scaffolded yet (#1746), that
-branch protection was not applied and the arming outcome, and the manual steps:
+**The report names** what was written, what was kept and what was skipped, the
+validator's verdict line, that branch protection was not applied and the arming
+outcome, and the manual steps:
 create the GitHub Environments `staging` and `production` the workflow binds,
 with required reviewers on `production` and its deployments restricted to
-`main`; and, for any member
+`main`; **when the scaffold printed `wrote renovate.json` or `kept renovate.json`**,
+enable Renovate on the repository (the Renovate GitHub App or a self-hosted
+runner), without which `renovate.json` proposes nothing — never when it
+**skipped** the file, which the last sentence below covers; and, for any member
 whose image is private, grant this repository read access to that package (or
 add a login step for its registry) — the workflow's own token cannot read
 another repository's private image, and the first merge would otherwise fail to
-resolve a digest.
+resolve a digest — **and** give Renovate its own credentials for that registry,
+since the scaffold writes no `hostRules` and Renovate's lookups do not use the
+workflow's token. When the scaffold **skipped** `renovate.json` (its line says
+why), say that the member pins will not be bumped until: for another **Renovate**
+config, the image custom manager from
+`<development-composition-root>/templates/renovate.json` is added to it (Renovate
+is already set up — do not tell the user to enable it); for **Dependabot**, the
+repository moves to Renovate — remove the Dependabot config, then enable
+Renovate and add that custom manager, since Dependabot cannot read
+`.claude-workspace.yaml`. **Whatever the scaffold printed for `renovate.json`** —
+a kept one beside `.github/dependabot.y(a)ml` included — never tell the user to
+enable Renovate while a Dependabot config stays: that is two dependency bots, so
+tell them to remove the Dependabot config first.
 
 ## Step 3.5: Post-Write Validation
 

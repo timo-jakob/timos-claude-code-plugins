@@ -569,9 +569,12 @@ if [[ "$java_in_langs" == "true" ]]; then
 	# (bootstrap, maintenance) can route: "kotlin" → proceed; "groovy" →
 	# needs conversion; "" → not Gradle (Maven/none). A `.kts` anywhere wins
 	# (a repo with both is treated as Kotlin — that's the one we maintain).
+	# A here-string, never `printf … | grep -q`: grep -q exits on its first
+	# match, printf's next write then fails with EPIPE, and pipefail turns the
+	# match into a miss — a repo with both DSLs was reported "groovy" under load.
 	java_gradle_dsl=""
 	if [[ "$java_build_system" == "gradle" ]]; then
-		if printf '%s\n' "$gradle_files" "$gradle_settings" | grep -q '\.kts$'; then
+		if grep -q '\.kts$' <<<"$gradle_files"$'\n'"$gradle_settings"; then
 			java_gradle_dsl="kotlin"
 		elif [[ -n "$gradle_files" || -n "$gradle_settings" ]]; then
 			java_gradle_dsl="groovy"
@@ -1409,7 +1412,7 @@ candidate_paths=($(printf '%s\n' "${candidate_paths[@]}" | awk '!seen[$0]++'))
 # never appearing as phantom gaps on a repo that legitimately has no docs tree).
 # When in scope, the C4 pages are unconditionally-expected gaps (not held out), so
 # a docs repo missing them is flagged for adoption.
-if printf '%s\n' "${candidate_paths[@]}" | grep -qx 'docs/architecture/index.md'; then
+if grep -qx 'docs/architecture/index.md' <<<"$(printf '%s\n' "${candidate_paths[@]}")"; then
 	candidate_paths+=("docs/architecture/c4-context.md" "docs/architecture/c4-container.md")
 fi
 

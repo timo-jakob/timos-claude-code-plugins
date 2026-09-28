@@ -666,13 +666,13 @@ and the run's summary notes the declaration — the same sequence
 **What's built (v0.1):** the ownership boundary, the `claude-workspace/v1`
 contract, and the validator that enforces it
 ([#1744](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1744));
-and the bootstrap scaffold with its promote-to-prod workflow
-([#1745](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1745)).
+the bootstrap scaffold with its promote-to-prod workflow
+([#1745](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1745));
+and the scaffolded Renovate image-tag configuration
+([#1746](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1746)).
 The rest of epic
 [#687](https://github.com/timo-jakob/timos-claude-code-plugins/issues/687)
-follows: the Renovate image-tag configuration
-([#1746](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1746)),
-the maintenance dispatch
+follows: the maintenance dispatch
 ([#1747](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1747)),
 the injection-hardened bump-triage agent
 ([#1748](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1748)),
@@ -689,10 +689,27 @@ for a composition repo, and runs `scaffold-composition.zsh` with the members
 they name. It writes exactly `.claude-workspace.yaml` (the members, plus
 `staging` and `production`, both at `deploy_target: none`),
 `.github/workflows/promote-to-prod.yml`, `scripts/promote.zsh`, `deploy/` and
-`e2e/` as documented empty sockets, and `.maintenance.yml` with
-`primary: composition` — judging the manifest with the validator before it
-writes anything. Bootstrap never reports the scaffold complete without that
-verdict's exit `0`.
+`e2e/` as documented empty sockets, `.maintenance.yml` with
+`primary: composition`, and `renovate.json` — judging the manifest with the
+validator before it writes anything. Bootstrap never reports the scaffold
+complete without that verdict's exit `0`.
+
+`renovate.json` is what keeps the pins moving. Renovate has no native manager
+for `.claude-workspace.yaml`, so the scaffold ships one: a single `regex`
+custom manager, scoped to the manifest with `managerFilePatterns`, reading
+every block-style member `image:` line with the `docker` datasource — a plain
+`registry/owner/name:tag`, a registry host with a port, an `@sha256:` digest
+suffix, a quoted value, or a line with a trailing comment (a commented-out
+`# image:` line is never read, and neither is a flow-style `{…}` member). When
+`orders-api` publishes `1.5.1`, Renovate proposes `1.5.0 → 1.5.1` in the
+manifest; a digest-pinned member gets the new tag **and** its new digest. A
+repository that already has a `renovate.json` keeps it untouched, like every
+other existing file. One that configures Renovate under another name, or runs
+Dependabot, gets no `renovate.json` at all, and the scaffold says so: add the
+custom manager to the existing Renovate config yourself, or — since Dependabot
+cannot read the manifest — move a Dependabot repository to Renovate first.
+Renovate must be enabled on the repository, and authentication for a private
+registry is not scaffolded.
 
 The workflow promotes `staging` on every merge to `main`, and `production` only
 on a manual `workflow_dispatch` from `main`, in a job bound to the `production`

@@ -11,12 +11,16 @@
 #     one command it resolves digests with. The stub answers only the documented
 #     invocation and logs every call, so a case can prove the lookup's shape and
 #     that no lookup happened at all;
+#   * templates/renovate.json (#1746) — its shape, and its regex EXECUTED by
+#     python3 against sample `image:` lines, so the default gate proves the match
+#     without Docker (the real Renovate dry-run is acceptance-only);
 #   * bootstrap's §3m, pinned where it routes a run to the scaffold.
 #
 # The acceptance cases for the story's test_cases[] live in
-# tests/acceptance/cli/composition-scaffold.bats; this is the always-on gate.
+# tests/acceptance/cli/composition-scaffold.bats and (#1746)
+# composition-renovate.bats; this is the always-on gate.
 #
-# yq and actionlint are called unguarded and are declared dependencies in
+# yq, actionlint and python3 are called unguarded and are declared dependencies in
 # .github/workflows/script-tests.yml and tests/Dockerfile: an absent one should
 # fail these red rather than skip the only coverage the templates have.
 
@@ -102,11 +106,11 @@ stub_path_with() {
   [ "$status" -eq 0 ]
   local files s="scaffold-composition.zsh"
   files="$(cd "$REPO" && find . -type f | LC_ALL=C sort | tr '\n' ' ')"
-  [ "$files" = "./.claude-workspace.yaml ./.github/workflows/promote-to-prod.yml ./.maintenance.yml ./deploy/README.md ./e2e/README.md ./scripts/promote.zsh " ]
+  [ "$files" = "./.claude-workspace.yaml ./.github/workflows/promote-to-prod.yml ./.maintenance.yml ./deploy/README.md ./e2e/README.md ./renovate.json ./scripts/promote.zsh " ]
   [ -x "$REPO/scripts/promote.zsh" ]
   # one line per file in write order, then the validator's own success line —
   # naming the manifest, not the temporary file it judged
-  [ "$output" = "$s: wrote .claude-workspace.yaml"$'\n'"$s: wrote .github/workflows/promote-to-prod.yml"$'\n'"$s: wrote scripts/promote.zsh"$'\n'"$s: wrote deploy/README.md"$'\n'"$s: wrote e2e/README.md"$'\n'"$s: wrote .maintenance.yml"$'\n'"$s: claude-workspace/v1: $REPO/.claude-workspace.yaml is valid (2 members, 2 environments)" ]
+  [ "$output" = "$s: wrote .claude-workspace.yaml"$'\n'"$s: wrote .github/workflows/promote-to-prod.yml"$'\n'"$s: wrote scripts/promote.zsh"$'\n'"$s: wrote deploy/README.md"$'\n'"$s: wrote e2e/README.md"$'\n'"$s: wrote .maintenance.yml"$'\n'"$s: wrote renovate.json"$'\n'"$s: claude-workspace/v1: $REPO/.claude-workspace.yaml is valid (2 members, 2 environments)" ]
   # mktemp's 0600 is not carried onto the manifest
   [ "$(ls -l "$REPO/.claude-workspace.yaml" | cut -c1-10)" = "-rw-r--r--" ]
 }
@@ -416,6 +420,224 @@ stub_failing() {
 }
 
 # ---------------------------------------------------------------------------
+# The Renovate config (#1746)
+# ---------------------------------------------------------------------------
+
+# Every match the shipped matchStrings[0] makes over file $2, one line each:
+# `depName currentValue [currentDigest]`. Run over the WHOLE file, as Renovate
+# scans it, never line by line, with no global flags — Renovate compiles with
+# `g` alone, so the pattern's line anchoring comes from its own scoped
+# `(?m:…)` groups. python3's `re` stands in for Renovate's RE2 here because it
+# reads those scoped groups on every supported runner (the node an Ubuntu apt
+# installs predates them); its one spelling difference, `(?P<name>` for a named
+# group, is translated. $1 is the renovate.json to read the pattern from.
+renovate_matches() {
+  python3 -c '
+import json, re, sys
+pattern = json.load(open(sys.argv[1]))["customManagers"][0]["matchStrings"][0]
+for m in re.finditer(pattern.replace("(?<", "(?P<"), open(sys.argv[2]).read()):
+    print(" ".join(g for g in (m["depName"], m["currentValue"], m["currentDigest"]) if g))' "$1" "$2"
+}
+
+@test "renovate.json is one regex customManager over .claude-workspace.yaml, docker datasource, no fileMatch or hostRules" {
+  run scaffold --member "$MEMBER_UI" --member "$MEMBER_API"
+  [ "$status" -eq 0 ]
+  local r="$REPO/renovate.json"
+  cmp -s "$r" "$TEMPLATES/renovate.json"
+  jq -e . "$r" >/dev/null
+  # the EXACT key sets, so a key that switches Renovate off (`enabled: false`,
+  # a disabling packageRules entry) cannot ride along unnoticed
+  [ "$(jq -c 'keys' "$r")" = '["$schema","customManagers"]' ]
+  [ "$(jq -c '.customManagers[0] | keys' "$r")" \
+    = '["customType","datasourceTemplate","description","managerFilePatterns","matchStrings"]' ]
+  [ "$(jq -c '.customManagers | length' "$r")" = "1" ]
+  [ "$(jq -r '.customManagers[0] | [.customType, .datasourceTemplate, (.matchStrings | length | tostring)] | join(" ")' "$r")" \
+    = "regex docker 1" ]
+  [ "$(jq -c '.customManagers[0].managerFilePatterns' "$r")" = '["/(^|/)\\.claude-workspace\\.yaml$/"]' ]
+  # Renovate 44 scopes with managerFilePatterns; fileMatch is the retired key.
+  # The plain-http rule for a local registry belongs to a test fixture only.
+  [ "$(jq -r '[.. | objects | keys[]] | map(select(. == "fileMatch" or . == "hostRules")) | length' "$r")" = "0" ]
+}
+
+@test "renovate.json's managerFilePatterns selects the manifest at any depth, and nothing named like it" {
+  local pat
+  pat="$(jq -r '.customManagers[0].managerFilePatterns[0]' "$TEMPLATES/renovate.json")"
+  run python3 -c '
+import re, sys
+pattern = re.compile(sys.argv[1][1:-1])
+for p in sys.argv[2:]:
+    print(p, "true" if pattern.search(p) else "false")' "$pat" \
+    .claude-workspace.yaml envs/eu/.claude-workspace.yaml \
+    x.claude-workspace.yaml .claude-workspace.yaml.bak .claude-workspace.yml
+  [ "$status" -eq 0 ]
+  [ "$output" = ".claude-workspace.yaml true"$'\n'"envs/eu/.claude-workspace.yaml true"$'\n'"x.claude-workspace.yaml false"$'\n'".claude-workspace.yaml.bak false"$'\n'".claude-workspace.yml false" ]
+}
+
+@test "the regex matches the scaffolded image: lines, capturing depName and currentValue" {
+  scaffold --member "$MEMBER_UI" --member "$MEMBER_API" >/dev/null
+  run renovate_matches "$REPO/renovate.json" "$REPO/.claude-workspace.yaml"
+  [ "$status" -eq 0 ]
+  [ "$output" = "ghcr.io/acme/orders-ui 2.3.1"$'\n'"ghcr.io/acme/orders-api 1.5.0" ]
+}
+
+@test "the regex matches every image: line form — plain, host:port, digest, quoted, trailing comment, adjacent" {
+  local m="$BATS_TEST_TMPDIR/forms.yaml" d="sha256:$(printf 'b%.0s' {1..64})"
+  cat >"$m" <<EOF
+members:
+  - name: plain
+    image: ghcr.io/acme/orders-ui:2.3.1
+  - name: port
+    image: localhost:5000/acme/orders-api:1.5.0
+  - name: digest
+    image: localhost:5000/acme/orders-api:1.5.0@$d
+  - name: double-quoted
+    image: "localhost:5000/acme/orders-api:1.5.0"
+  - name: single-quoted
+    image: 'ghcr.io/acme/orders-ui:2.3.1'
+  - name: commented
+    image: localhost:5000/acme/orders-api:1.5.0  # pinned by hand
+  - name: quoted-digest-commented
+    image: "ghcr.io/acme/orders-api:1.5.0@$d" # both
+  - name: image-last
+    image: ghcr.io/acme/orders-ui:2.3.1
+  - image: ghcr.io/acme/orders-api:1.5.1
+    name: image-first-right-after
+EOF
+  run renovate_matches "$TEMPLATES/renovate.json" "$m"
+  [ "$status" -eq 0 ]
+  # neither quote nor comment is ever captured; the port is part of depName;
+  # and an image: line directly after another is read too — a match never
+  # consumes the newline the next line's anchor needs
+  [ "$output" = "ghcr.io/acme/orders-ui 2.3.1"$'\n'"localhost:5000/acme/orders-api 1.5.0"$'\n'"localhost:5000/acme/orders-api 1.5.0 $d"$'\n'"localhost:5000/acme/orders-api 1.5.0"$'\n'"ghcr.io/acme/orders-ui 2.3.1"$'\n'"localhost:5000/acme/orders-api 1.5.0"$'\n'"ghcr.io/acme/orders-api 1.5.0 $d"$'\n'"ghcr.io/acme/orders-ui 2.3.1"$'\n'"ghcr.io/acme/orders-api 1.5.1" ]
+}
+
+@test "the regex reads CRLF manifests, capturing no carriage return" {
+  local m="$BATS_TEST_TMPDIR/crlf.yaml"
+  printf 'members:\r\n  - name: orders-api\r\n    image: ghcr.io/acme/orders-api:1.5.0\r\n' >"$m"
+  run renovate_matches "$TEMPLATES/renovate.json" "$m"
+  [ "$status" -eq 0 ]
+  [ "$output" = "ghcr.io/acme/orders-api 1.5.0" ]
+}
+
+@test "the regex never reads a registry port as a tag, a commented-out pin, or a key that only ends in image" {
+  local m="$BATS_TEST_TMPDIR/near-misses.yaml"
+  cat >"$m" <<'EOF'
+members:
+  - name: untagged
+    image: localhost:5000/acme/orders-api
+  - name: other-key
+    base_image: ghcr.io/acme/base:1.0.0
+  - name: hyphenated-key
+    base-image: ghcr.io/acme/base:1.0.0
+  - name: commented-out
+    # image: ghcr.io/acme/old:1.0.0
+  - name: in-a-value
+    note: "image: ghcr.io/acme/old:1.0.0"
+  - name: short-digest
+    image: ghcr.io/acme/orders-api:1.0.0@sha256:abc
+EOF
+  run renovate_matches "$TEMPLATES/renovate.json" "$m"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "the regex uses nothing RE2 refuses — no lookaround, no backreference" {
+  # Renovate compiles matchStrings with RE2, which python3's re above is more
+  # permissive than: a lookahead would pass every python3 case and be refused by
+  # Renovate itself, which only the Docker-backed acceptance dry-run would see.
+  local re
+  re="$(jq -r '.customManagers[0].matchStrings[0]' "$TEMPLATES/renovate.json")"
+  [ -n "$re" ]
+  run grep -E '\(\?(=|!|<=|<!)|\\[1-9]|\\k<' <<<"$re"
+  [ "$status" -eq 1 ]
+}
+
+# A skip is one line in place of renovate.json's, and nothing else changes: the
+# rest of the skeleton is written and the validator's verdict still closes the
+# output. $1 is the exact skip line expected.
+assert_skipped_run() {
+  local s="scaffold-composition.zsh"
+  [ "$status" -eq 0 ] || return 1
+  [ "$output" = "$s: wrote .claude-workspace.yaml"$'\n'"$s: wrote .github/workflows/promote-to-prod.yml"$'\n'"$s: wrote scripts/promote.zsh"$'\n'"$s: wrote deploy/README.md"$'\n'"$s: wrote e2e/README.md"$'\n'"$s: wrote .maintenance.yml"$'\n'"$1"$'\n'"$s: claude-workspace/v1: $REPO/.claude-workspace.yaml is valid (1 members, 2 environments)" ] || return 1
+  [ ! -e "$REPO/renovate.json" ] || return 1
+  [ -x "$REPO/scripts/promote.zsh" ]
+}
+
+@test "renovate.json is skipped, never written, beside a Renovate config under another name" {
+  local other
+  for other in renovate.json5 .github/renovate.json .github/renovate.json5 .gitlab/renovate.json \
+               .gitlab/renovate.json5 .renovaterc .renovaterc.json .renovaterc.json5; do
+    rm -rf "$REPO" && mkdir -p "$(dirname "$REPO/$other")"
+    printf '{ "extends": ["config:recommended"] }\n' >"$REPO/$other"
+    run scaffold --member "$MEMBER_API"
+    assert_skipped_run "scaffold-composition.zsh: skipped renovate.json (Renovate is configured in $other — add the image customManager from $TEMPLATES/renovate.json there)"
+    [ "$(cat "$REPO/$other")" = '{ "extends": ["config:recommended"] }' ]
+  done
+}
+
+@test "renovate.json is skipped beside a package.json that carries a renovate key, and only then" {
+  printf '{ "name": "x", "renovate": { "extends": ["config:recommended"] } }\n' >"$REPO/package.json"
+  run scaffold --member "$MEMBER_API"
+  assert_skipped_run "scaffold-composition.zsh: skipped renovate.json (Renovate is configured in package.json — add the image customManager from $TEMPLATES/renovate.json there)"
+  # a package.json WITHOUT the key configures nothing, so the file is written
+  rm -rf "$REPO" && mkdir -p "$REPO"
+  printf '{ "name": "x" }\n' >"$REPO/package.json"
+  run scaffold --member "$MEMBER_API"
+  [ "$status" -eq 0 ]
+  contains "$output" "wrote renovate.json"
+}
+
+@test "renovate.json is skipped, never written, in a repo that runs Dependabot" {
+  local dep
+  for dep in .github/dependabot.yml .github/dependabot.yaml; do
+    rm -rf "$REPO" && mkdir -p "$REPO/.github"
+    printf 'version: 2\nupdates: []\n' >"$REPO/$dep"
+    run scaffold --member "$MEMBER_API"
+    assert_skipped_run "scaffold-composition.zsh: skipped renovate.json (Dependabot is configured in $dep — one dependency bot per repo; Dependabot cannot read .claude-workspace.yaml)"
+  done
+}
+
+@test "a repo with both a Renovate config and Dependabot reports the Renovate config, once" {
+  mkdir -p "$REPO/.github"
+  printf '{}\n' >"$REPO/.github/renovate.json"
+  printf 'version: 2\nupdates: []\n' >"$REPO/.github/dependabot.yml"
+  run scaffold --member "$MEMBER_API"
+  assert_skipped_run "scaffold-composition.zsh: skipped renovate.json (Renovate is configured in .github/renovate.json — add the image customManager from $TEMPLATES/renovate.json there)"
+  [ "$(grep -c 'skipped renovate.json' <<<"$output")" = "1" ]
+}
+
+@test "an existing renovate.json is kept, never skipped, beside Dependabot or another Renovate config" {
+  # kept wins over both skip reasons: the file is on disk, so §3m's report sees
+  # `kept`, never `skipped` (beside Dependabot it says to remove Dependabot
+  # before enabling Renovate)
+  local other
+  for other in .github/dependabot.yml .renovaterc; do
+    rm -rf "$REPO" && mkdir -p "$REPO/.github"
+    printf '{ "extends": ["config:recommended"] }\n' >"$REPO/renovate.json"
+    case "$other" in
+      .renovaterc) printf '{ "extends": ["config:recommended"] }\n' >"$REPO/$other" ;;
+      *) printf 'version: 2\nupdates: []\n' >"$REPO/$other" ;;
+    esac
+    cp "$REPO/renovate.json" "$BATS_TEST_TMPDIR/before.json"
+    run scaffold --member "$MEMBER_API"
+    [ "$status" -eq 0 ]
+    contains "$output" "scaffold-composition.zsh: kept renovate.json (exists)"
+    lacks "$output" "skipped renovate.json"
+    cmp -s "$REPO/renovate.json" "$BATS_TEST_TMPDIR/before.json"
+  done
+}
+
+@test "an existing renovate.json is kept byte-identical, reported as kept, and the scaffold exits 0" {
+  printf '{ "extends": ["config:recommended"] }\n' >"$REPO/renovate.json"
+  cp "$REPO/renovate.json" "$BATS_TEST_TMPDIR/before.json"
+  run scaffold --member "$MEMBER_UI" --member "$MEMBER_API"
+  [ "$status" -eq 0 ]
+  contains "$output" "scaffold-composition.zsh: kept renovate.json (exists)"
+  lacks "$output" "wrote renovate.json"
+  cmp -s "$REPO/renovate.json" "$BATS_TEST_TMPDIR/before.json"
+}
+
+# ---------------------------------------------------------------------------
 # The workflow
 # ---------------------------------------------------------------------------
 
@@ -513,7 +735,7 @@ stub_failing() {
   [ "$status" -eq 0 ]
   contains "$output" "nothing deployed —"
   # the record, and nothing else, is added to the repository
-  [ "$(cd "$REPO" && find . -type f | LC_ALL=C sort | tr '\n' ' ')" = "./.claude-workspace.yaml ./.github/workflows/promote-to-prod.yml ./.maintenance.yml ./deploy/README.md ./e2e/README.md ./promotion-staging.json ./scripts/promote.zsh " ]
+  [ "$(cd "$REPO" && find . -type f | LC_ALL=C sort | tr '\n' ' ')" = "./.claude-workspace.yaml ./.github/workflows/promote-to-prod.yml ./.maintenance.yml ./deploy/README.md ./e2e/README.md ./promotion-staging.json ./renovate.json ./scripts/promote.zsh " ]
 }
 
 @test "production in dispatch mode writes its record, then fails naming #719/#720" {
@@ -861,6 +1083,18 @@ section_3m() {
   contains "$s" '| `2` | your own malformed invocation: fix the command and re-run **once**'
   contains "$s" '| `3` | the environment failed — escalate it'
   contains "$s" '| any other | treat as `3` |'
+  # #1746: the Renovate config is in the promised file set, and an install
+  # too old to write it is refused rather than run
+  contains "$s" '`.maintenance.yml` (`primary: composition`) and `renovate.json` (a regex custom manager'
+  contains "$s" 'no `templates/renovate.json` (older than #1746'
+  contains "$s" 'the seven files the scaffold writes'
+  # …and the plan and report never promise or enable what the scaffold skipped
+  contains "$s" '**Promise `renovate.json` only where the scaffold will write it.**'
+  contains "$s" '**when the scaffold printed `wrote renovate.json` or `kept renovate.json`**'
+  contains "$s" 'never tell the user to enable Renovate while a Dependabot config stays'
+  # …in EVERY case, a kept renovate.json beside Dependabot included — not only
+  # inside the skipped-file branch
+  contains "$s" '**Whatever the scaffold printed for `renovate.json`** — a kept one beside `.github/dependabot.y(a)ml` included — never tell the user'
   contains "$s" "never report a scaffold as complete without the exit \`0\` that judged it"
   contains "$s" "Entry is the user's request, never detection"
   contains "$s" "**When it already exists, do not ask**"
