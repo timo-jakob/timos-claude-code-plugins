@@ -22,7 +22,7 @@ development-docs         ← topic: documentation (C4 architecture docs; marker 
 development-react        ← topic: React framework (composes with development-javascript)
 development-kubernetes   ← topic: infrastructure-as-code (manifests, Helm, Kustomize, Argo CD; may be primary)
 development-opentofu     ← topic: infrastructure-as-code (cloud provisioning; OpenTofu + Terraform-compatible HCL; may be primary)
-development-composition  ← topic: composition repo type (constellation manifest + promotion; marker .claude-workspace.yaml registered with #1747; may be primary)
+development-composition  ← topic: composition repo type (constellation manifest + promotion; marker .claude-workspace.yaml, #1747; may be primary)
 development-…            ← future topics: …
 ```
 
@@ -35,7 +35,7 @@ There are **three categories** of plugin:
 | --- | --- | --- | --- |
 | **Generic** | Orchestrator + shared scripts + policy | Always (entry point) | `development` |
 | **Language** | Language-specific idioms + tooling | Project uses that language (`pyproject.toml`, `package.json`, `go.mod`, `Package.swift`, `build.gradle`, …) | `development-python`, `development-java`, `development-javascript`, `development-swift`, `development-go` |
-| **Topic** | Cross-language concern in a specialized domain | Project has the topic marker (Dockerfile, k8s manifests, .tf files, `.claude-plugin/plugin.json`, an `org.springframework.boot` plugin, a `docs/architecture/` directory, `react` in a `package.json`'s runtime dependencies, a `.claude-workspace.yaml` constellation manifest, …) | `development-claude-plugin`, `development-spring`, `development-docs`, `development-react`, `development-kubernetes`, `development-opentofu`, `development-composition` (marker registration lands with #1747), future: `development-container` |
+| **Topic** | Cross-language concern in a specialized domain | Project has the topic marker (Dockerfile, k8s manifests, .tf files, `.claude-plugin/plugin.json`, an `org.springframework.boot` plugin, a `docs/architecture/` directory, `react` in a `package.json`'s runtime dependencies, a `.claude-workspace.yaml` constellation manifest, …) | `development-claude-plugin`, `development-spring`, `development-docs`, `development-react`, `development-kubernetes`, `development-opentofu`, `development-composition`, future: `development-container` |
 
 Language plugins and topic plugins share the **same dispatch contract**
 (same JSON schema, same response shape, same agent + worktree
@@ -1606,9 +1606,8 @@ consumer. Patterns we lean on, ranked by leverage:
    `claude-workspace/v1` contract* — with one placement rule that the
    generic description above leaves open: the manifest lives in the
    **composition repo**, never in a member repo, and its presence there
-   *is* the composition topic marker (**registered with #1747**; until that
-   lands nothing detects it). Once registered, a member repo carrying one
-   would be detected as a composition repo. `claude-workspace/v1` realizes the
+   *is* the composition topic marker (**registered with #1747**), so a
+   member repo carrying one would be detected as a composition repo. `claude-workspace/v1` realizes the
    constellation and promotion halves; consumer-propagation checking is
    not part of it.
 4. **MCP server for cross-repo indexing.** Indexes contracts across the
@@ -2386,15 +2385,16 @@ Like [`development-kubernetes` owns](#development-kubernetes-owns) and
 [`development-opentofu` owns](#development-opentofu-owns), it **can be
 primary**: a composition repo has no application language of its own, and the
 primary/auxiliary model already permits a topic to hold that slot, so no new
-mechanism is needed. **It is not primary-capable yet, and the difference is not
-cosmetic.** The marker (`.claude-workspace.yaml`), the gather script and the
-dispatcher are #1747's work; until they land, `composition` is not in the
-detected+supported set, so a `.maintenance.yml` declaring `primary: composition`
-today is a **stale declaration** in the sense of `dispatch_mode` below — it
-selects nothing, every target dispatches as `"primary"`, and the Phase 9 summary
-notes the declaration. Once #1747 registers the marker it selects this plugin
-like any other. That is the same sequence `primary: kubernetes` and
-`primary: opentofu` each passed through.
+mechanism is needed. **It is primary-capable since #1747**, which registered the
+marker (`.claude-workspace.yaml`), the gather script and the dispatcher: a
+`.maintenance.yml` declaring `primary: composition` now selects this plugin in
+full mode, like any other primary. On a repo **without** the manifest the same
+declaration is a **stale declaration** in the sense of `dispatch_mode` below —
+`composition` is not in the detected+supported set, so it selects nothing, every
+target dispatches as `"primary"`, and the Phase 9 summary notes the
+declaration. That is the sequence `primary: kubernetes` and `primary: opentofu`
+each passed through before their markers landed. How the topic is detected,
+gathered and routed is *Composition maintenance* below.
 
 **Deployment is deliberately absent, and says so rather than pretending.**
 `deploy_target` accepts exactly one value, `none`, until the compose (#719) and
@@ -2425,11 +2425,12 @@ existing `renovate.json` is kept like any other scaffolded file, and none is
 written when the repository already configures Renovate under another file name
 (or a `package.json` `renovate` key) or runs Dependabot — one Renovate config,
 one dependency bot. The pattern anchors with RE2's scoped `(?m:^)` / `(?m:$)`, so
-a match never consumes the newline the next line's anchor needs. Still open: the
-topic marker, gather and dispatch #1747, the injection-hardened bump-triage
-agent #1748, and the how-to #1749. The validator
-has exactly **two** intended callers — bootstrap, on the repo it has just
-scaffolded, and the composition maintenance gather (not yet built).
+a match never consumes the newline the next line's anchor needs. #1747 added the
+topic marker, the gather and the dispatcher (*Composition maintenance* below).
+Still open: the injection-hardened bump-triage agent #1748, and the
+how-to #1749. The validator has exactly **two** intended callers — bootstrap, on the
+repo it has just scaffolded, and the composition maintenance gather
+(`gather-composition-findings.zsh`, #1747).
 
 **Promotion records; it never deploys in this release.** `promote.zsh` promotes
 one environment per run: it refuses an undeclared environment or an untagged
@@ -2476,6 +2477,68 @@ or not an error was printed. `scaffold-composition.zsh`'s header and bootstrap's
 
 **No validator CI job is ever rendered into a composition repo**; that is epic #687's stated boundary, and a later child
 adding one would be widening the epic rather than completing it.
+
+### Composition maintenance: marker, gather keys and routing (#1747)
+
+**The marker** is a `.claude-workspace.yaml` **file at the repo root** — a
+single `test -f`, stated three times: the orchestrator's `composition-marker`
+recipe (`development/skills/maintenance/SKILL.md`), `detect-stack.sh`'s
+`is-composition-marker` block (emitted as `is_composition`), and the gather's
+own `gather-composition-marker` block. `tests/composition-topic-marker.bats`
+derives the operator and the path from all three and requires them to agree,
+as the kubernetes and opentofu parity suites do. Root only, per the placement
+rule of leverage-stack item 3: a nested manifest does not make a composition
+repo. The topic requires no language, so a composition repo with
+`primary: composition` dispatches it full, and any other detected topic — `docs`,
+say — auxiliary.
+
+**The gather**, `development/skills/maintenance/scripts/gather-composition-findings.zsh`,
+emits two tool keys in the topic-gather finding shape:
+
+- **`workspace_validation`** runs `validate-workspace.zsh` (found in the repo
+  layout or, installed, the highest-versioned `development-composition` in the
+  plugin cache) and maps its exit per the table in *`development-composition`
+  owns* above: `1` becomes a `contract` finding carrying the member or
+  environment the validator named and its error line; `4` becomes a
+  `manifest_missing` / `manifest_unreadable` finding; `2`, `3` and any other
+  status are **not** manifest findings — `tooling_configured.workspace_validation`
+  is `false` and the validator's stderr goes into the gather's `notes`.
+- **`tag_bump`** lists open Renovate PRs with `gh pr list --author app/renovate
+  --state open --limit 1000 --json number,title,body,headRefName,files` and
+  keeps those touching the root `.claude-workspace.yaml`. The limit is explicit
+  because `gh`'s default is 30, and a listing that fills it carries a note that
+  it may be truncated. Each bump becomes a finding naming the PR number, the
+  member and its from->to tag — one finding per member when several pin the
+  same image. The member is resolved from the repo's **own** manifest (a
+  `member_resolved: false` finding says the members could not be read, so an
+  unattributed bump is never worded as "no member pins it"); the from->to comes
+  from Renovate's change table (or, failing that, its title), held to an
+  image/tag character set. The PR's
+  title and body are carried **verbatim and untrimmed**, per the maintenance
+  no-trim contract, and are **data**: nothing in the pipeline acts on them. A
+  `gh` that is absent or fails leaves `tag_bump` unconfigured with a note — a
+  listing that never ran is not "no open bumps".
+
+**The routing**, owned by `development-composition/skills/maintenance/` — whose
+`scripts/plan-dispatch.zsh` computes the response as a pure function of the
+payload, so it is tested rather than re-derived by a model:
+
+| Finding tool | Disposition |
+| --- | --- |
+| `workspace_validation` | escalated via `human_action_required`, one entry per finding — a member's pin is a human decision, and no fixer agent exists |
+| `tag_bump` | escalated via `human_action_required`, one entry per bump naming the PR by number, the member and its from->to tag — **interim**, until the bump-triage agent `timo-jakob/timos-claude-code-plugins#1748` ships |
+| a key `tooling_configured` reports `false` | escalated, citing the gather's `notes` for that key (topic payloads carry `notes`, *JSON schema (v2)*) |
+| both keys `false` with a `composition:` note | one entry: the gather found no marker, so nothing was inspected |
+
+Every entry names the bump-triage issue (child 5 of epic #687) as the fully qualified
+`timo-jakob/timos-claude-code-plugins#1748`, never a bare `#1748`: the
+escalation is read inside the product repo, where a bare number links to that
+repo's own issue. The plan is always empty in this version, so an escalation
+halts nothing that was routed. Payload-shape breaks — a key the routing table
+has no row for, in `findings_by_tool` or `tooling_configured`, a configured key
+absent from `findings_by_tool`, findings under a key not reported configured, a
+`dispatch_mode` outside the enum — halt with one entry, as the other topic
+dispatchers do.
 
 ### The `claude-workspace/v1` contract
 
@@ -2950,12 +3013,19 @@ dispatches as `"primary"` and the Phase 9 summary notes the stale
 declaration (`development/skills/maintenance/SKILL.md`). That is the case
 a repo hits when it declares a primary the orchestrator cannot yet
 dispatch, e.g. `primary: kubernetes` before #1152 registered the marker,
-and `primary: opentofu` before #1160 registered its own.
+`primary: opentofu` before #1160 registered its own, and `primary: composition`
+before #1747 — or, since then, on a repo with no `.claude-workspace.yaml`.
 
 In `"auxiliary"` mode a language plugin runs only its
 mechanical fixers and **skips its app-grade gates** (coverage
 pre-flight, dependency upgrades) — a policy override, not a separate
 code path per tool.
+
+**`notes` is carried on topic payloads only** (#1747): the topic gather's
+`notes` array, copied untrimmed. A topic dispatcher may read it to say *why* a
+tool it sees as `configured: false` could not run — `development-composition`
+cites it in the `human_action_required` entry for that tool. Language payloads
+do not carry it; their notes are pooled into the run summary only.
 
 **`tooling_configured` covers tools the language plugin cares about,
 including ones that aren't set up for this project.** When

@@ -995,7 +995,7 @@ _fake_tree() {  # $1.. = ops major dirs; "vN" -> openapi.yaml, "vN:tmpl" -> open
   out=$(bash "$DETECT" 2>/dev/null)
   echo "$out" | jq -e . >/dev/null
   for k in git_initialized has_github_remote languages has_dockerfile interfaces language_meta \
-           is_claude_plugin is_kubernetes is_opentofu existing_artifacts missing_artifacts github_state containers \
+           is_claude_plugin is_kubernetes is_opentofu is_composition existing_artifacts missing_artifacts github_state containers \
            detection_confidence contracts; do
     [ "$(jq --arg k "$k" 'has($k)' <<<"$out")" = "true" ]
   done

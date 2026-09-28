@@ -226,10 +226,11 @@ YAML
   # whole-line, not substring: "## development" is satisfied by any sibling
   grep -qx "## development-composition" "$REPO_ROOT/docs/reference/plugins.md"
 
-  # the README row's HONESTY clause, not just its name: dropping the marker
-  # caveat would send a repo author to write a declaration that selects nothing
+  # the README row's HONESTY clauses, not just its name: what the primary
+  # declaration is, and what maintenance does with a finding today (#1747)
   readme_table="$(grep -E '^\| \*\*development' "$REPO_ROOT/README.md")"
-  contains "$readme_table" 'once #1747 registers the marker'
+  contains "$readme_table" '(*primary*-eligible: `primary: composition`)'
+  contains "$readme_table" 'manifest findings and Renovate bumps escalated to a human'
   contains "$readme_table" 'the bootstrap scaffold with its promote-to-prod workflow'
   contains "$readme_table" 'accepts only `none`'
 
@@ -251,7 +252,7 @@ YAML
   contains "$flat" 'is read like `3`'
   contains "$flat" 'two intended callers'
   contains "$flat" 'no validator CI job is ever rendered into a composition repo'
-  contains "$flat" 'no skills and no agents yet'
+  contains "$flat" 'ships **one skill and no agents**'
   # …and the clauses a reader IMPLEMENTS against, each with a needle of its
   # own: the framing sentences above would survive any rewrite of these
   contains "$flat" '`1` a contract violation'
@@ -394,16 +395,16 @@ YAML
   contains "$flat" '**fails the bootstrap run**'
 }
 
-@test "the charter states primary-capability as PENDING the marker, not as current (#1744)" {
-  # a `.maintenance.yml` declaring `primary: composition` today is a stale
-  # declaration under the dispatch_mode contract — it selects nothing. Claiming
-  # otherwise would send a repo author to write a declaration that silently does
-  # nothing, the same sequence kubernetes and opentofu each passed through.
+@test "the charter states primary-capability as current, stale only without a manifest (#1744, #1747)" {
+  # #1747 registered the marker, so `primary: composition` selects this plugin —
+  # but on a repo with no manifest the declaration is still stale under the
+  # dispatch_mode contract, and the charter must keep saying so
   local flat
   flat="$(printf '%s' "$OWNS_SECTION" | tr -s '[:space:]' ' ')"
-  contains "$flat" 'It is not primary-capable yet'
+  contains "$flat" '**It is primary-capable since #1747**'
+  contains "$flat" 'On a repo **without** the manifest'
   contains "$flat" '**stale declaration**'
-  contains "$flat" 'Once #1747 registers the marker'
+  lacks "$flat" 'It is not primary-capable yet'
 }
 
 @test "the contract states the chain, empty-value and uniqueness rules (#1744)" {
@@ -1713,20 +1714,21 @@ YAML
   contains "$desc" "#1744"
 }
 
-@test "the plugin ships exactly the skeleton this slice claims — no skills, no agents (#1744, #1745)" {
+@test "the plugin ships exactly what it claims — one skill, no agents (#1744, #1745, #1747)" {
   # the charter and plugins.md both say so; without this the claim is prose only.
-  # templates/ is the skeleton the #1745 scaffold copies into a composition repo
+  # templates/ is the skeleton the #1745 scaffold copies into a composition repo;
+  # skills/maintenance is the #1747 dispatcher
   local entries
   # .DS_Store is filtered, not asserted against: Finder drops one into any
   # directory a macOS working copy opens, and an OS artifact must not red a
   # claim about which plugin content ships
   entries="$(ls -A "$PLUGIN_DIR" | grep -v '^\.DS_Store$' | LC_ALL=C sort | tr '\n' ' ')"
-  [ "$entries" = ".claude-plugin scripts templates " ]
-  [ ! -d "$PLUGIN_DIR/skills" ]
+  [ "$entries" = ".claude-plugin scripts skills templates " ]
+  [ "$(ls -A "$PLUGIN_DIR/skills" | grep -v '^\.DS_Store$' | tr '\n' ' ')" = "maintenance " ]
   [ ! -d "$PLUGIN_DIR/agents" ]
-  # …so the generated reference pages carry no section for it yet, and the
-  # child that lands the first skill must retire this line deliberately
-  run -1 grep -qx "## development-composition" "$REPO_ROOT/docs/reference/commands.md"
+  # …so the generated commands page carries its section, and the agents page
+  # none until the bump-triage agent (#1748) lands
+  run -0 grep -qx "## development-composition" "$REPO_ROOT/docs/reference/commands.md"
   run -1 grep -qx "## development-composition" "$REPO_ROOT/docs/reference/agents.md"
 }
 

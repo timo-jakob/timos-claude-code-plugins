@@ -129,9 +129,17 @@ Supported flags:
 
 **A composition repo is its own path — read §3m first.** When the user asks to
 bootstrap a **composition repo** (one repo per constellation, pinning its
-members' published images), §3m says which of the steps below still apply;
-detection does not recognise one yet (#1747), so only the user's request routes
-a run there.
+members' published images), §3m says which of the steps below still apply.
+Only the user's request routes a run there: `detect-stack.sh` reports
+`is_composition` since #1747, but bootstrap does not route on it.
+
+**It does guard on it.** When the user did **not** ask for a composition repo
+but `is_composition: true` or `.maintenance.yml` records `primary: composition`,
+this is a repo §3m already scaffolded: do **not** ask Q4, do **not** take §3l's
+conflict branch, and **never** offer to change the recorded primary. Report
+that this is a composition repo, ask whether to re-run §3m, and stop — the
+generic path would otherwise ask for a language a composition repo never holds,
+or offer to rewrite `primary: composition` to `kubernetes`.
 
 Run the stack detection script and capture its JSON output:
 
@@ -197,6 +205,12 @@ On a zero exit the script reports:
   so this key is EMITTED ONLY — nothing reads it yet, here or in the
   maintenance orchestrator (which re-derives the topic from its own marker
   recipe), and it is deliberately absent from every branch below
+- `is_composition` — whether the repo carries the **composition topic marker**
+  (a `.claude-workspace.yaml` at the repo root, #1747). Bootstrap does not
+  **route** on it — §3m is entered on the user's request — but Step 1 **guards**
+  on it: `true` on a run the user did not ask to be a composition run stops
+  before Q4 and §3l. The maintenance orchestrator re-derives the topic from its
+  own marker recipe
 - `interfaces` — the runtime interface(s) a deployed build is exercised through,
   each with its detection evidence: `[{"interface": "...", "evidence": "..."}]`,
   `interface ∈ {cli, rest, web-ui, library}` (issue #242). This is the signal that
@@ -4404,7 +4418,9 @@ recorded primary on its own. **Both answers have a defined outcome:**
   user to either change the record or name the language the repo will hold (the
   same halt Q4 takes for "none" with `is_kubernetes=false`). The one exception
   is a recorded `primary: claude-plugin`, which needs no language — continue on
-  the plugin-repo path. Say which outcome you took in the report.
+  the plugin-repo path. (A recorded `primary: composition` never reaches this
+  branch: Step 1's composition guard stops the run first.) Say which outcome
+  you took in the report.
 
 **On this path** — and only here, never on the conflict path just described —
 emit `templates/iac/.github/workflows/kubernetes-ci.yml.tmpl` as
@@ -4548,9 +4564,10 @@ code, pins its members' **published images** in `.claude-workspace.yaml`
 `development-composition` plugin owns the skeleton; this path runs that
 plugin's scaffold in place of the rest of Step 3.
 
-**Entry is the user's request, never detection.** `detect-stack.sh` has no
-composition marker yet (#1747), so take this path only when the user asks for a
-composition repo. Still run Step 1's detection, and when it reports any
+**Entry is the user's request, never detection.** `detect-stack.sh` reports
+`is_composition` (#1747) for maintenance's sake, but take this path only when
+the user asks for a composition repo — `is_composition: true` on a re-run is the
+repo this path already scaffolded, not a reason to enter it. Still run Step 1's detection, and when it reports any
 language, `is_kubernetes: true` or `is_opentofu: true`, **stop the run** — do not
 fall back to the language or §3l path — and report what was detected: a
 composition repo holds no application code or infrastructure-as-code.
