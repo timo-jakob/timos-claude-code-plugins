@@ -17,8 +17,16 @@ FROM debian:stable-slim
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       bats jq shellcheck zsh python3 python3-venv python3-pip git ca-certificates \
-      nodejs yamllint curl make procps \
+      nodejs npm yamllint curl make procps \
  && rm -rf /var/lib/apt/lists/*
+# typescript: tests/mfe-contract.bats (#1123) type-checks the mfe-contract
+# template's worked examples with `tsc --noEmit --strict`, and proves its
+# `@ts-expect-error` pins are live. EXACT-pinned, and to the same version as
+# .github/workflows/script-tests.yml — the suite asserts the two pins agree and
+# that the `tsc` on PATH is that version, because what a type-checker rejects
+# moves between releases. npm (above) is declared for this install alone.
+ARG TYPESCRIPT_VERSION=7.0.2
+RUN npm install -g "typescript@${TYPESCRIPT_VERSION}"
 # mikefarah yq, NOT Debian's `yq` apt package (which is kislyuk's python-yq, a
 # different query language): the suite and the shipped kubernetes-ci template
 # both use `-o=json` and rely on YAML 1.2 semantics, neither of which python-yq

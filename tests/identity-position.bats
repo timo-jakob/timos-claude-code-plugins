@@ -459,9 +459,11 @@ raw_identity_section() {
   # the count claim over the seven children listed in the four bullets above
   # (#1321-#1324 share one bullet) — deletable today without this pin
   contains "$section" 'Six realization children and one enforcement child'
-  # the MFE contract must resolve to something a reader can OPEN: this document
-  # defines no `mfe-contract/v1` section, unlike every other versioned contract
-  # it names, so a bare version token would send an implementer inventing a shape
+  # the MFE contract must resolve to something a reader can OPEN: the bullet
+  # points at this document's `mfe-contract/v1` section (#1123) AND still cites
+  # the design doc that section keeps as its rationale record. The section
+  # pointer is pinned by tests/mfe-contract.bats; the spec citation is pinned
+  # here, with the file's existence,
   # both halves from one string, same rule as the reviewer citations: a bare
   # prose pin would let the spec be renamed and leave ARCHITECTURE citing a dead
   # path with this suite green — the defect the round-1 fix removed

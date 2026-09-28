@@ -886,6 +886,112 @@ either decision can be re-evaluated on its merits rather than rediscovered.
 Building any of this is the MFE composition epic's job, not this section's:
 these are the positions the machinery is built *to*.
 
+### The `mfe-contract/v1` contract (#1123)
+
+This section is the **normative home** of the shell↔remote mount contract that
+the Browser UI position above names. It is the boundary every other child of the
+MFE composition epic (#1122) compiles against: a shell must be able to load a
+remote it was not built with, and a remote must be able to redeploy without the
+shell changing. The design doc,
+[`docs/superpowers/specs/2026-07-27-mfe-app-family-design.md`](docs/superpowers/specs/2026-07-27-mfe-app-family-design.md),
+its sections 3 and 3.1, is the dated rationale record; where the two differ, this section
+wins.
+
+**The artifact.** A **types-only** npm package, `@<scope>/mfe-contract`, whose
+source ships as a bootstrap template under
+[`development/skills/bootstrap/templates/languages/javascript/mfe-contract/`](development/skills/bootstrap/templates/languages/javascript/mfe-contract/).
+It publishes `index.d.ts`, `package.json` and `README.md` and nothing else, and its
+`package.json` declares `types` and `files: ["index.d.ts"]` with no `main`, no
+runtime `exports` and no `dependencies`. *Rationale:* types-only keeps it a
+build-time dependency, so it satisfies the rule that no repo depends on another
+repo while still giving both sides one definition. The template's `examples/`
+directory — a shell, a page remote, a widget remote, and a deliberately
+non-conforming remote pinned with `// @ts-expect-error` — is type-checked by
+`tests/mfe-contract.bats` and is neither published nor rendered. The org's
+composition repo (#1891) is the publisher; rendering the template there and the
+publish workflow are #1899, and bootstrap's gap-fill never offers it to any
+other repo.
+
+**The scope-derivation rule.** `<scope>` — the template's `{{NPM_SCOPE}}` — is
+the **owner** part of `{{PROJECT_SLUG}}`, **lowercased**, because an npm scope is
+lowercase only: the owner `Acme-Corp` publishes `@acme-corp/mfe-contract`.
+
+**The types.** One `MfeModule` serves both admitted remote shapes, and a
+remote's entry-module **namespace** is its `MfeModule`: `mount`, `unmount` and a
+widget's `manifest` are **named** exports, read from what `import()` resolves
+to, never from a default export. The `kind` discriminant lets a remote narrow
+its context with no cast:
+
+```ts
+interface MfeModule {
+  mount(el: HTMLElement, ctx: PageContext | WidgetContext): void | Promise<void>;
+  unmount(el: HTMLElement): void | Promise<void>;
+  manifest?: WidgetManifest;                 // widgets only
+}
+interface MfeContext { auth: AuthContext; flags: FlagContext; theme: ThemeTokens; signal: AbortSignal }
+interface PageContext extends MfeContext { kind: 'page'; basePath: string; onNavigate(path: string): void }
+interface WidgetContext extends MfeContext {
+  kind: 'widget';
+  config: unknown;                           // host-validated against manifest.configSchema, opaque to the host
+  size: GridSize;
+  onResize(cb: (size: GridSize) => void): () => void;   // returns the unsubscribe function
+}
+interface GridSize { cols: number; rows: number }        // integer grid units, never pixels
+interface WidgetManifest {
+  id: string; contractMajor: number; configSchema: object;  // configSchema is a JSON Schema
+  size: { min: GridSize; max: GridSize; default: GridSize };
+}
+interface FlagContext { isEnabled(key: string): boolean; variant(key: string): string | undefined }
+type ThemeTokens = Readonly<Record<string, string>>;     // CSS custom-property values
+interface AuthContext { getAccessToken(): Promise<string>; readonly claims: AuthClaims }
+interface AuthClaims { readonly sub: string; readonly displayName: string; readonly tenantId: string }
+```
+
+Flags and theming are **capabilities the host satisfies**: no vendor SDK type
+appears anywhere in the package. `index.d.ts` is the compiled statement of these
+types and carries each decision below on the type it governs.
+
+**The three decisions.**
+
+1. **`AuthContext` exposes an async `getAccessToken()` and display-only claims —
+   `sub`, `displayName`, `tenantId` — and no token field, no roles and no
+   permissions.** *Rationale:* it follows the identity position below (#1186).
+   The shell owns auth acquisition (#1326) and holds the token in memory only,
+   so an async accessor lets the shell refresh behind it without handing a
+   remote anything it could persist. Claims are the server's authorization
+   input and never drive a client-side authorization decision, so the claims a
+   remote could gate UI on are deliberately absent.
+2. **The shell always calls `unmount(el)` after any `mount` attempt** — whether
+   it settled, rejected, or was aborted through `signal`, and it calls it once
+   that `mount` has settled. `unmount` is therefore idempotent and safe on a
+   partial mount, and `mount` must stop its work and settle once it observes the
+   abort. *Rationale:* on fast route or slot changes, a mount that
+   never completed has still attached DOM and subscriptions. A rule under which
+   the shell skipped `unmount` for an unsettled mount would leak exactly those,
+   so cleanup belongs to the one call that always runs.
+3. **A widget's manifest is published as a module export, `MfeModule.manifest`.**
+   *Rationale:* the manifest stays in lockstep with the code it describes, and
+   there is no second artifact that can drift. The accepted cost is that a
+   gallery loads each widget's entry module to list it. That cost is bounded by
+   a rule on every entry module: evaluating it has no side effect beyond
+   defining its exports, so loading one to read its manifest never mounts
+   anything.
+
+**The versioning rule.** The package's semver **major** is the `v1` in
+`mfe-contract/v1`, and it is the shell↔remote compatibility boundary. A shell
+declares the major it implements, and a remote declares the major it targets —
+a widget also through `WidgetManifest.contractMajor`. Adding an **optional**
+member is a **minor** bump; adding a **required** member or **narrowing** a type
+is a **major** bump, and so is **any other change to a declared type** —
+removing a member, widening a type, adding a `kind`. Only an added optional
+member is minor.
+
+**What this section does not build.** The shell and remote implementations —
+including the shell side of the abort rule and the widget gallery — are #1124
+and #1125, and runtime and CI conformance enforcement is #1126. Until #1126
+lands, nothing checks a shell or remote against this contract except its own
+compiler.
+
 ### React bootstrap overlay — React composes onto the javascript tier (#957)
 
 What every React repo shares, whatever its UI shape, is scaffolded by one
@@ -1319,9 +1425,11 @@ enforcement child are filed under epic #1058:
   claim-based local authorization decision.
 - **#1326** — the SPA shell owns session and auth acquisition for the whole
   page, so a remote never runs its own login flow; the shell↔remote context
-  object's own shape stays the MFE contract's concern, defined in
-  `docs/superpowers/specs/2026-07-27-mfe-app-family-design.md` and built by
-  #1123, not here.
+  object's own shape stays the MFE contract's concern — normatively the
+  *The `mfe-contract/v1` contract (#1123)* section above, whose `AuthContext`
+  applies this position, with
+  `docs/superpowers/specs/2026-07-27-mfe-app-family-design.md` as its rationale
+  record — not here.
 - **#1327** — the single enforcement child, which deepens the existing
   **`security`** dimension in four reviewers:
   `development-go/agents/go-security-reviewer.md`,

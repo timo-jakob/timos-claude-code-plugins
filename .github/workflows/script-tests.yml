@@ -207,7 +207,13 @@ jobs:
           # IaC Makefile itself — declared, not left to the runner image.
           sudo apt-get install -y --no-install-recommends \
             bats jq shellcheck zsh python3 python3-venv python3-pip \
-            nodejs parallel make yamllint
+            nodejs npm parallel make yamllint
+          # typescript: tests/mfe-contract.bats (#1123) type-checks the
+          # mfe-contract template's worked examples with tsc and proves their
+          # `@ts-expect-error` pins are live. EXACT-pinned, to the same version
+          # as tests/Dockerfile — the suite asserts the two pins agree and that
+          # the tsc on PATH is that version. npm is declared above for this alone.
+          sudo npm install -g "typescript@${TYPESCRIPT_VERSION}"
           # yq deliberately NOT from apt: Debian/Ubuntu's `yq` package is
           # kislyuk's python-yq, a different query language from mikefarah's Go
           # yq that the suite (and the shipped kubernetes-ci template) are
@@ -227,6 +233,7 @@ jobs:
         env:
           YQ_VERSION: 4.44.3
           ACTIONLINT_VERSION: 1.7.12
+          TYPESCRIPT_VERSION: 7.0.2
       - name: Install test dependencies (macOS)
         if: runner.os == 'macOS'
         # brew's `yq` IS mikefarah's, so the macOS leg needs no special case.
@@ -235,7 +242,13 @@ jobs:
         # cases, satisfied here by the runner image rather than by brew — the
         # exemption is recorded rather than implied, since the Linux leg declares
         # the same toolchain explicitly (#1360).
-        run: brew install bats-core jq shellcheck node parallel yamllint yq actionlint
+        # typescript comes from npm, not brew, so it can be exact-pinned to the
+        # Linux leg's version (tests/mfe-contract.bats, #1123).
+        run: |
+          brew install bats-core jq shellcheck node parallel yamllint yq actionlint
+          npm install -g "typescript@${TYPESCRIPT_VERSION}"
+        env:
+          TYPESCRIPT_VERSION: 7.0.2
       # The pinned IaC toolchain the real-tool harness executes the bootstrapped
       # gate script with (tests/kubernetes-ci-fixtures.bats, #1199, #1603): helm,
       # kustomize, kubeconform, kube-linter, kyverno, trivy and yq.
