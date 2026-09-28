@@ -357,16 +357,15 @@ module — **Module Federation is rejected**, with the reasoning recorded so it 
 be argued with. Design:
 [`docs/superpowers/specs/2026-07-27-mfe-app-family-design.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/docs/superpowers/specs/2026-07-27-mfe-app-family-design.md).
 
-**What's built (v0.1):** the composition wiring and nothing else
+**What the plugin itself ships (v0.1):** the composition wiring and nothing else
 ([#956](https://github.com/timo-jakob/timos-claude-code-plugins/issues/956)). The
 tool universe is deliberately **empty** — the gather (`gather-react-findings.zsh`)
 is real but reports no tools, which is precisely what moves `react` into
 `supported_topics` and proves the dispatch path end-to-end. A marker without a
 gather would be detected but never dispatched, leaving the foundation unverified.
 Tools arrive with the rest of epic
-[#686](https://github.com/timo-jakob/timos-claude-code-plugins/issues/686): bootstrap
-templates ([#957](https://github.com/timo-jakob/timos-claude-code-plugins/issues/957)),
-the React Query + MSW API binding
+[#686](https://github.com/timo-jakob/timos-claude-code-plugins/issues/686): the React
+Query + MSW API binding
 ([#958](https://github.com/timo-jakob/timos-claude-code-plugins/issues/958)), the
 review panel
 ([#959](https://github.com/timo-jakob/timos-claude-code-plugins/issues/959)), and
@@ -374,11 +373,24 @@ a11y / Playwright / Lighthouse budgets
 ([#960](https://github.com/timo-jakob/timos-claude-code-plugins/issues/960)). CI
 remediation reuses `development-javascript`'s `js-ci-fixer`.
 
+**Bootstrap overlay
+([#957](https://github.com/timo-jakob/timos-claude-code-plugins/issues/957)).**
+When the React marker matches, `/development:bootstrap` layers the common React
+configuration onto an app created with
+`npm create vite@latest <app> -- --template react-ts` — bootstrap never creates
+the app itself. It installs the test pyramid (Vitest, jsdom, testing-library),
+renders a React `vitest.config.ts` and `eslint.config.js` (the rules of hooks,
+react-refresh, browser globals), a testing-library setup module and one example
+component test. On a repo that also consumes an API contract, the React configs
+keep the contract-consumer wiring — the ACL boundary rule and MSW — rather than
+replacing it. The templates live with every other bootstrap template, in
+`development`.
+
 **Skills:**
 
 | Skill | Command | Description |
 | ------- | --------- | ------------- |
-| Maintenance dispatcher | (dispatch target of `/development:maintenance`) | Topic dispatcher for React findings. Validates the v2 payload and returns a plan. Empty tool universe in v0.1 — always an empty plan until [#957](https://github.com/timo-jakob/timos-claude-code-plugins/issues/957)–[#960](https://github.com/timo-jakob/timos-claude-code-plugins/issues/960) register tools. |
+| Maintenance dispatcher | (dispatch target of `/development:maintenance`) | Topic dispatcher for React findings. Validates the v2 payload and returns a plan. Empty tool universe in v0.1 — always an empty plan until [#958](https://github.com/timo-jakob/timos-claude-code-plugins/issues/958)–[#960](https://github.com/timo-jakob/timos-claude-code-plugins/issues/960) register tools. |
 
 ## development-kubernetes
 

@@ -1773,7 +1773,13 @@ For each detected language, merge in the appropriate config from
   customized it — see §3k for the full rule). Rendering the base here first is
   intentional and load-bearing: if §3k does not complete (not a consumer, or
   activation fails after seeding), the base configs are already in place, so the
-  repo is **never left config-less**.
+  repo is **never left config-less**. A React app then takes one more layer on
+  top — §3k.5 renders last and keeps every layer beneath it. **When the React
+  overlay applies** (§3k.5's *Does the overlay apply?* check), §3d leaves an
+  on-disk unmodified create-vite `eslint.config.js` (the fingerprint §3k.5
+  states) or plain React template untouched, without a prompt: §3k.5 owns those
+  files and replaces them itself. When the overlay does not apply they are
+  ordinary on-disk files and take rule 3 as usual.
 
 ### 3e. Claude Approver artifacts (when `--claude-approver true`)
 
@@ -3881,7 +3887,14 @@ The installed set (all committed together, once generation succeeds):
   **overwrites** the base `eslint.config.js` §3d rendered — an explicit upgrade,
   stronger than idempotency rule 3's default-skip: default to **overwrite** when
   the on-disk file matches the base template, and fall back to rule 3's prompt
-  only if the user has customized it. **If that prompt resolves to skip** (or the
+  only if the user has customized it. **When the React overlay applies**
+  (§3k.5's *Does the overlay apply?* check), §3k **defers the pair**: it writes
+  **neither** `eslint.config.js` nor `vitest.config.ts` — whatever each file on
+  disk is — and completes everything else, and §3k.5 renders the consumer+React
+  pair over both itself. When a deferred §3k does not end with that pair on disk
+  (§3k.5's install fails, or its rule-3 prompt on either file resolves to skip),
+  §3k.5 aborts this scaffold as the skip below does (see §3k.5). No prompt here,
+  and no abort of its own. **If rule 3's prompt resolves to skip** (or the
   no-answer default), do **not** proceed with §3k at all: committing the ACL/MSW
   scaffold beside the un-superseded base config would ship a red tree (no boundary
   gate, no MSW `setupFiles`). Treat it like the activation-failure abort above —
@@ -3914,12 +3927,233 @@ offer it in the plan and complete it (seed, render, generate + commit) exactly a
 a fresh bootstrap would. Such a repo already has the **base**
 `eslint.config.js`/`vitest.config.ts` on disk from its original bootstrap; the
 consumer variants **overwrite** them per the installed-set rule above (default
-overwrite when the on-disk file matches the base template, rule-3 prompt only if
-customized) — never commit the ACL scaffold alongside a kept base config, which
+overwrite when the on-disk file matches the base template — and, when the React
+overlay applies, defer the pair to §3k.5 as above — rule-3 prompt only if
+customized) — never commit the
+ACL scaffold alongside a kept base config, which
 would drop the boundary gate and the MSW wiring: if the prompt resolves to skip,
 abort §3k's scaffold exactly as the installed-set rule directs. A repo that
 already has the machinery present is not a gap; one whose generation previously
-failed (Step-5 follow-up pending) is re-completed once the spec resolves.
+failed (Step-5 follow-up pending) is re-completed once the spec resolves, and so
+is one whose scaffold an earlier run aborted — a seeded `orval.config.ts` with the
+ACL/MSW scaffold absent is an adoption gap too.
+
+### 3k.5. React overlay (a JS/TS repo carrying the React marker — #957)
+
+The **common React overlay**: what every React repo the family bootstraps
+shares, whatever its UI shape — the test pyramid (Vitest + jsdom +
+testing-library), the rules-of-hooks ESLint layer, and the rule for layering
+React config onto the javascript tier without clobbering it. Shell- and
+remote-specific templates are the MFE composition epic's (#1122), and the React
+Query binding over §3k's client is #958 — neither is rendered here.
+
+**Trigger.** Run this step when `javascript` is detected **and** the React
+marker matches — the `react` row of the maintenance orchestrator's topic table,
+whose recipe (`react` in the runtime `dependencies` of any `package.json`) is
+stated once, in `development/skills/maintenance/SKILL.md` § *Topics* between the
+`react-marker:begin`/`:end` sentinels (#956). Evaluate that recipe; do not
+restate or loosen it here. Its three outcomes:
+
+- **exit 0** (a match) → run this step;
+- **exit 1** (no match) → No marker → skip this step entirely (the common case);
+- **exit 2** (`react-marker: UNEVALUATED`, `jq` not on PATH) → **not** a
+  no-match: nothing was decided. Skip the step and record a Step 5 item saying
+  the React overlay was not evaluated and why.
+
+`detect-stack.sh` carries no React field, so, like §3k, this detection happens
+outside it. In State D a marker match is an **adoption gap** when any of these
+holds: `src/test/setup.ts` is missing, or the on-disk `eslint.config.js` or
+`vitest.config.ts` is not the React variant the selection table below picks (for
+example it is still a known predecessor). Offer it in the plan and complete it
+as a fresh bootstrap would.
+
+**Prerequisite — bootstrap augments a Vite app, it never creates one.** The
+blessed entry point is
+
+```bash
+npm create vite@latest <app> -- --template react-ts
+```
+
+and bootstrap layers the family's configuration on top. Vite owns
+`index.html`, `vite.config.ts`, `src/main.tsx`, `src/App.tsx`, `tsconfig*.json`
+and the dependency manifest; this step never writes any of them, and ships no
+`package.json`. The step works on the **repository root** only. Skip it, and
+record a Step 5 item naming the `npm create vite` prerequisite, when either of
+these holds:
+
+- the root has **no Vite config** — none of `vite.config.ts`, `vite.config.mts`,
+  `vite.config.js` or `vite.config.mjs` (the React `vitest.config.ts` imports
+  `./vite.config`, which resolves any of them). That includes a monorepo whose
+  React app lives in a sub-package: the marker matched there, but the overlay's
+  root configs have nothing to merge over, so say so in the item rather than
+  rendering;
+- the Vite config **exports a function** (`defineConfig(({ mode }) => …)`)
+  rather than an object — `mergeConfig` refuses a callback, so the rendered
+  `vitest.config.ts` would fail at startup. Name the file in the item.
+
+**Does the overlay apply?** It applies exactly when the marker recipe exits 0
+**and** neither skip above holds. Decide it once, in Step 2, **before §3d
+renders anything**: §3d reads the answer to decide whether it leaves the React
+predecessors (the stock create-vite `eslint.config.js`, the plain React pair)
+alone, and §3k to decide whether it defers its whole config pair to this step.
+When it does not apply, nothing is deferred and those files are ordinary on-disk
+files to every step.
+
+**Plan (Step 2).** List the overlay in the plan with its conditional variant —
+*consumer+React if §3k's machinery will be present, else plain React* — and the
+devDependencies the install below adds. The install edits `package.json` and
+the lockfile, a §4c-class change the plan approval covers.
+
+**Install first, render second.** The configs this step renders import packages
+that may not be installed yet, so install **before** rendering anything — and
+first **snapshot `package.json` and the lockfile**, since §3k's own
+`npm i -D orval msw` may have edited them earlier in this run. Like
+§3k's `npm i -D orval msw`, the step installs its devDependencies rather than
+shipping a manifest:
+
+```text
+npm i -D vitest jsdom @testing-library/react @testing-library/dom @testing-library/jest-dom
+# only the ones package.json does not already list (create-vite 8 and earlier
+# provide them; 9+ does not):
+npm i -D eslint-plugin-react-hooks eslint-plugin-react-refresh globals
+```
+
+`@testing-library/dom` is a required peer of `@testing-library/react` 16.x, so it
+is never optional. `eslint-plugin-react-hooks`, `eslint-plugin-react-refresh` and
+`globals` are installed **only if absent** from `package.json`'s dependencies
+and devDependencies, so a create-vite app keeps its own pins. **If either
+`npm i -D` exits non-zero**, render nothing from this step: restore
+`package.json` and the lockfile **from that snapshot** (never from `HEAD`, which
+would also drop §3k's edits), leave the `eslint.config.js` and `vitest.config.ts`
+already on disk untouched, and record a Step 5 checklist item quoting the failed
+command. If §3k deferred its pair to this step, abort §3k's scaffold as the
+next paragraph says. Once the user has fixed the cause, a re-run of
+`/development:bootstrap` sees the adoption gaps — §3k's and this step's — and
+adds the whole overlay.
+
+**When a deferred §3k does not get its pair.** §3k writes neither config when the
+overlay applies (it *defers the pair*), so this step is what wires §3k's ACL/MSW
+scaffold. Resolve both files' rule-3 prompts (below) **before** rendering either.
+If §3k deferred and this step will not end with the consumer+React pair on disk
+for **both** files — an install failed, or either prompt resolved to skip — abort
+§3k's scaffold exactly as §3k's own overwrite-skip abort does: discard the
+ACL/MSW files and workflows, commit the seeded `orval.config.ts` and its
+transformer, and name the abort in the Step 5 item. §3k's machinery is then
+absent, so if the install succeeded, render the **plain React** pair under the
+same rules instead. Because §3k wrote neither config, no committed config names
+the discarded `src/test/msw-setup.ts`. The prompt answers given against the
+consumer+React diff do **not** carry over to the plain pair: a file whose prompt
+resolved to skip **stays skipped**, with its skip consequences below (for
+`vitest.config.ts`, `src/test/setup.ts` and the example test withheld); a file
+whose prompt resolved to overwrite gets a **fresh** rule-3 prompt showing the
+plain React diff, since that consent was for different content; a known
+predecessor of the plain variant is overwritten without a prompt.
+
+**Variant selection — by what is on disk.** Pick the pair from whether §3k's
+consumer machinery is present once §3k has run — this run's or an earlier
+one's — which `orval.config.ts` and `src/test/msw-setup.ts` **both** on disk
+show (a hand-written MSW setup alone is not §3k's machinery):
+
+| §3k machinery on disk | Render (source → target) |
+|---|---|
+| present (`orval.config.ts` and `src/test/msw-setup.ts` exist) | `react/contract-consumer/eslint.config.js` → `eslint.config.js`, `react/contract-consumer/vitest.config.ts` → `vitest.config.ts` |
+| absent (§3k skipped, stopped, aborted, or not a consumer) | `react/eslint.config.js` → `eslint.config.js`, `react/vitest.config.ts` → `vitest.config.ts` |
+
+Both variants also render `react/src/test/setup.ts` → `src/test/setup.ts` (the
+testing-library setup module) and `react/src/Greeting.test.tsx` →
+`src/Greeting.test.tsx` (one self-contained example component test). None
+carries a `{{…}}` placeholder; `render.zsh`'s leftover check proves it:
+
+```bash
+# §3k machinery present → the consumer+React pair
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  --project-name "<name>" --default-branch "<branch>" \
+  languages/javascript/react/contract-consumer/eslint.config.js \
+  languages/javascript/react/contract-consumer/vitest.config.ts \
+  languages/javascript/react/src/test/setup.ts \
+  languages/javascript/react/src/Greeting.test.tsx
+
+# §3k machinery absent → the plain React pair
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  --project-name "<name>" --default-branch "<branch>" \
+  languages/javascript/react/eslint.config.js \
+  languages/javascript/react/vitest.config.ts \
+  languages/javascript/react/src/test/setup.ts \
+  languages/javascript/react/src/Greeting.test.tsx
+```
+
+**Layer ordering — React composes, it does not clobber.** Four layers can own
+`eslint.config.js` and `vitest.config.ts`: create-vite's own ESLint config, §3d's
+base, §3k's consumer variant, and this step. **This step renders last, and its
+output keeps every earlier family layer**: each React variant is the full file —
+the base (or consumer) config **plus** the React lint layer (the rules of hooks,
+the `react-refresh` fast-refresh boundary, browser `globals`) **plus** React's
+own test wiring (`environment: "jsdom"`, the setup module). Of create-vite's
+layer it keeps those three things, stated as explicit rules rather than
+`reactHooks.configs.flat.recommended`, whose rule set moves between
+`eslint-plugin-react-hooks` majors — so overwriting a stock create-vite config
+replaces that preset with the family's explicit rules. The consumer+React pair
+keeps the ACL `no-restricted-imports` block, the `@typescript-eslint/no-deprecated`
+block, `./src/test/msw-setup.ts` in `setupFiles` **before** the React setup
+module, and the `src/api/generated/**` coverage exclude — dropping any of them
+would silently disable the MSW wiring #958 depends on. Both `vitest.config.ts`
+variants `mergeConfig` over `./vite.config`, because Vitest gives
+`vitest.config.ts` priority over `vite.config.ts` and `@vitejs/plugin-react`
+would otherwise not apply under test.
+
+**The known-predecessor overwrite rule.** Overwrite the on-disk
+`eslint.config.js` / `vitest.config.ts` without a prompt **only when it is a
+known predecessor of the variant being rendered**:
+
+- for **either** variant: the §3d base template **byte for byte**, or (for
+  `eslint.config.js`) an **unmodified create-vite `eslint.config.js`** as
+  fingerprinted below;
+- for the **consumer+React** variant only, additionally: the §3k consumer
+  template or the plain React template, byte for byte. The plain React variant
+  never overwrites the consumer template — that is the one overwrite that
+  would drop the ACL and MSW wiring.
+
+A file already byte-identical to the variant being rendered is idempotency
+rule 2 (skip silently).
+
+**The create-vite fingerprint** — stated once here, and the definition §3d and
+§3k point at. An **unmodified create-vite `eslint.config.js`** is the stock
+file create-vite 8 and earlier generate for `react-ts`, recognised by content
+and compared ignoring whitespace and quote style. It carries **no** family
+header comment (the `// Flat ESLint config` banner every family variant opens
+with), it imports `eslint-plugin-react-refresh`, and it consists of exactly
+these elements and nothing else:
+
+- imports of `@eslint/js`, `globals`, `eslint-plugin-react-hooks`,
+  `eslint-plugin-react-refresh`, `typescript-eslint`, and `defineConfig` +
+  `globalIgnores` from `eslint/config`;
+- `export default defineConfig([...])` holding `globalIgnores(['dist'])` and
+  one block with `files: ['**/*.{ts,tsx}']`, whose `extends` lists
+  `js.configs.recommended`, `tseslint.configs.recommended`,
+  `reactHooks.configs.flat.recommended` and `reactRefresh.configs.vite`, and
+  whose `languageOptions` are `ecmaVersion: 2020` and `globals: globals.browser`.
+
+Anything else — a file the user customised — goes through **idempotency rule
+3's diff prompt**, never a blind overwrite. If the prompt for `eslint.config.js`
+resolves to skip (or the no-answer default), keep the user's file and record a
+Step 5 item naming the React layers it lacks. If the prompt for
+`vitest.config.ts` resolves to skip, keep the user's file **and render neither
+`src/test/setup.ts` nor the example test** — without jsdom and the setup module
+the example cannot run — and record a Step 5 item naming the missing React test
+wiring and the two files withheld. Otherwise `src/test/setup.ts` and the example
+test follow the ordinary idempotency rules.
+
+create-vite 9 and later ship **oxlint** (`.oxlintrc.json`, a `lint: oxlint`
+script) instead of an ESLint config, so on such an app the on-disk
+`eslint.config.js` is §3d's base and the overwrite is the byte-for-byte case.
+The family's lint gate is ESLint (the pre-commit hook); leave the oxlint files
+in place — rule 4, never delete what the user has.
+
+Really building the rendered tree — running the example test green, and
+passing ESLint + Prettier at 120 — is not asserted in this repo's suite; it is
+the render-and-build smoke check's job (#1063).
 
 ### 3l. Infrastructure-as-code repos (no application language) — #1154
 

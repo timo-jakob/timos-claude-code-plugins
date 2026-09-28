@@ -98,8 +98,8 @@ extract() {
 # --- the authoritative record ------------------------------------------------
 
 # The Browser UI section's end anchor is the section that FOLLOWS it, which is
-# the Deployment position (#1189) rather than the Cross-repo Claude section it
-# used to abut.
+# the React bootstrap overlay (#957) — before it, the Deployment position
+# (#1189), and before that the Cross-repo Claude section it used to abut.
 #
 # The end ADDRESS is the generic `^### `, not that specific heading. A specific
 # address catches a renamed or deleted anchor but NOT an inserted one: a section
@@ -108,11 +108,12 @@ extract() {
 # two sections' worth of prose — including the `lacks … 'development-angular'`
 # pin, which would then be scoped to text it was never meant to cover. That is
 # exactly what happened here when #1189 inserted the Deployment section, and it
-# required this hand repoint. With the generic address the range always ends at
+# required this hand repoint (and again when #957 inserted the React bootstrap
+# overlay section). With the generic address the range always ends at
 # whatever `###` actually follows, and the `ends_with` pin below names the
 # heading that follows TODAY — so the next insertion reds loudly instead of
 # widening quietly. Same idiom as tests/deployment-position.bats.
-ARCH_END='### Deployment — GitOps promotion and immutable references (#1189)'
+ARCH_END='### React bootstrap overlay — React composes onto the javascript tier (#957)'
 
 arch_section() {
   extract "$ARCH" '^### Browser UI' '^### '
@@ -378,9 +379,10 @@ spec2_section() {
   # the range's terminating heading, asserted so an unterminated `extract` (which
   # would run to EOF and let any needle below match from anywhere in the file)
   # is distinguishable from a correctly scoped one. It tracks whichever `###`
-  # follows §3k — #1154 inserted §3l between it and the idempotency rules — so
-  # the guard is about TERMINATION, never about §3k being the last subsection.
-  ends_with "$section" '### 3l. Infrastructure-as-code repos (no application language) — #1154'
+  # follows §3k — #1154 inserted §3l between it and the idempotency rules, and
+  # #957 inserted the React overlay §3k.5 before §3l — so the guard is about
+  # TERMINATION, never about which subsection happens to follow §3k.
+  ends_with "$section" '### 3k.5. React overlay (a JS/TS repo carrying the React marker — #957)'
   contains "$section" 'single browser-UI default (#1059)'
   contains "$section" 'no second binding to own'
   # §3k is the executable-skill restatement: an Angular `HttpClient` binding

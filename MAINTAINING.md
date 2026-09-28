@@ -404,6 +404,44 @@ If the manual cadence ever starts feeling tedious, revisit the
 self-hosted-updater option. Until then, this checklist is the cheapest
 path.
 
+## When you change a javascript config template: keep the React overlay in step
+
+The React overlay (#957) lives at
+`development/skills/bootstrap/templates/languages/javascript/react/` and holds
+**full copies** of the configs beneath it, not patches: `react/eslint.config.js`
+and `react/vitest.config.ts` are the base javascript configs plus React, and the
+`react/contract-consumer/` pair is the contract-consumer configs plus React.
+Bootstrap renders them **last** (SKILL.md §3k.5) and they replace the file on
+disk, so the rule is **React composes, it does not clobber** — every earlier
+layer must survive in the React variant. ARCHITECTURE.md's *React bootstrap
+overlay* section states the layer-ordering rule and why.
+
+- **A change to `languages/javascript/eslint.config.js` or `vitest.config.ts`**
+  (the base) must be repeated in `react/` — and, through the consumer variant,
+  in `react/contract-consumer/`.
+- **A change to `contract-consumer/eslint.config.js` or `vitest.config.ts`**
+  must be repeated in `react/contract-consumer/`. Dropping the ACL
+  `no-restricted-imports` block, the `no-deprecated` block, the
+  `./src/test/msw-setup.ts` setup file (listed **before** the React setup
+  module) or the `src/api/generated/**` coverage exclude silently disables the
+  MSW wiring #958 depends on.
+
+`tests/react-templates.bats` checks the load-bearing tokens of each layer
+against that layer's own template, so a forgotten copy usually reds there — but
+it checks tokens, not whole files, so read the diff side by side as well.
+
+**No npm version is pinned in the overlay**, so the quarterly refresh above has
+nothing to bump for it. It ships no `package.json`: bootstrap installs the test
+pyramid with `npm i -D`, and the app itself comes from
+`npm create vite@latest <app> -- --template react-ts` (the prerequisite §3k.5
+names), which owns the React dependency set. What **can** go stale is the
+**create-vite fingerprint** in §3k.5's known-predecessor rule — the stock
+`eslint.config.js` content it recognises as safe to overwrite. When create-vite
+changes its react-ts template, re-check that rule against the new release.
+create-vite 9 already replaced ESLint with oxlint, which is why the step also
+installs `eslint-plugin-react-hooks`, `eslint-plugin-react-refresh` and
+`globals` when the app does not list them.
+
 ## Hunting load-dependent flakes
 
 Some bats tests pass on a quiet host and fail only when it is busy — typically a
