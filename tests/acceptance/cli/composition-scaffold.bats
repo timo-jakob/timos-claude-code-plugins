@@ -23,9 +23,9 @@
 # digests with, since no registry is reachable offline. The default gate's
 # tests/composition-scaffold.bats covers the same criteria clause by clause.
 #
-# #929's shape also names renovate.json, which child 3 (#1746) scaffolds. Its
-# case here asserts the skeleton THIS story owns; #1746 extends the expected set
-# with renovate.json, and #929 closes with whichever of the two merges last.
+# #929's shape also names renovate.json, which child 3 (#1746) scaffolds: its
+# case here asserts the full skeleton, renovate.json included. #1746's own cases
+# — the Renovate config and its dry-run — live in composition-renovate.bats.
 
 bats_require_minimum_version 1.5.0
 load ../../assertions
@@ -71,7 +71,7 @@ promote() {
   [ "$status" -eq 0 ]
   contains "$output" "is valid (2 members, 2 environments)"
   [ "$(cd "$REPO" && find . -type f | LC_ALL=C sort | tr '\n' ' ')" \
-    = "./.claude-workspace.yaml ./.github/workflows/promote-to-prod.yml ./.maintenance.yml ./deploy/README.md ./e2e/README.md ./scripts/promote.zsh " ]
+    = "./.claude-workspace.yaml ./.github/workflows/promote-to-prod.yml ./.maintenance.yml ./deploy/README.md ./e2e/README.md ./renovate.json ./scripts/promote.zsh " ]
   grep -qx 'primary: composition' "$REPO/.maintenance.yml"
   # zero compose/k8s manifests, zero Playwright files, no validator workflow
   [ -z "$(cd "$REPO" && find . \( -name 'docker-compose*' -o -name 'compose.y*ml' -o -name 'kustomization.y*ml' \

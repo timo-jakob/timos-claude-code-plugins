@@ -66,6 +66,8 @@ three apart without matching on wording.)
 
 ```bash
 # the Node ops-api payload (#936) — 15 story cases + 2 harness cases
+# (this runs every cli/ suite below too — composition-renovate.bats's Docker
+# dry-runs included, which pull ~1 GB on a host with Docker)
 bats tests/acceptance/rest tests/acceptance/cli
 
 # resolve-issue story-mode telemetry (#1226) — 13 story cases, offline:
@@ -79,6 +81,11 @@ bats tests/acceptance/cli/opentofu-review.bats
 # the composition scaffold + promote-to-prod (#1745) — 6 story cases, offline:
 # scaffolds an empty repo, then drives promote.zsh against a stubbed `docker`
 bats tests/acceptance/cli/composition-scaffold.bats
+
+# the composition scaffold's Renovate config (#1746) — 7 story cases; three
+# run the PINNED renovate/renovate image against a local registry:3.1.2 (Docker,
+# ~1 GB on first pull) and SKIP without a usable Docker
+bats tests/acceptance/cli/composition-renovate.bats
 
 # the org API styleguide ruleset (#689 + #944) — 40 cases:
 #   9 + 13 story, 15 clause-isolating, 2 #1330 premise, 1 seed-lint
@@ -97,6 +104,17 @@ invocation above also runs it.
 **The composition suite stands up no service or registry.** It needs `zsh`,
 `jq`, mikefarah `yq` and `actionlint`, and resolves digests through a stubbed
 `docker`, so it runs offline.
+
+**The composition Renovate suite is the one that needs Docker.** Its dry-run
+cases start the pinned `registry:3.1.2`, push one or two tags to it with `curl`, and
+run the pinned `renovate/renovate:44.115.13` with `--platform=local
+--dry-run=full` inside the registry's network namespace, judging Renovate's JSON
+update records. Without a usable Docker those three cases skip with one agreed
+reason — a deliberate exception to the fail-loudly rule below, which the story
+(#1746) chose so the suite still runs its Docker-free cases anywhere — and
+`tc-error-docker-absent` pins that skip so it can never pass silently. It also
+needs `zsh`, `jq`, mikefarah `yq`, `python3`, `curl` and `sha256sum` or
+`shasum`.
 
 **The story-telemetry suite stands up no service either.** It needs only `zsh`,
 `jq` and `git`, runs fully offline against a scratch repo (detection stubbed,

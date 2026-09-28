@@ -12,6 +12,13 @@
 #   deploy/README.md                     documented empty socket (#719/#720)
 #   e2e/README.md                        documented empty socket (#719/#720)
 #   .maintenance.yml                     `primary: composition`
+#   renovate.json                        a regex customManager over the manifest's
+#                                        member `image:` pins, so Renovate proposes
+#                                        tag bumps with no hand-written config (#1746)
+#
+# renovate.json is SKIPPED — reported, exit 0 — when the repository already
+# configures Renovate under another file name, or runs Dependabot: it would
+# otherwise override that config, or start a second dependency bot.
 #
 # No compose or Kubernetes manifest, no E2E harness and no validator workflow:
 # those are epic #687's stated boundary, not omissions.
@@ -44,7 +51,8 @@
 # two GitHub Environments; any other valid shape is refused rather than
 # scaffolded next to a workflow that cannot run, or runs ungated.
 #
-# Output: one `wrote <path>` or `kept <path> (exists)` line per file, then the
+# Output: one `wrote <path>`, `kept <path> (exists)` or (renovate.json only)
+# `skipped renovate.json (<why>)` line per file, then the
 # validator's verdict line. A refusal names the manifest as `new` (the members
 # given) or `kept` (the repository's own file) — whose manifest it is about.
 #
@@ -70,7 +78,16 @@ readonly TEMPLATES="${HERE:h}/templates"
 readonly VALIDATOR="$HERE/validate-workspace.zsh"
 readonly -a MEMBER_KEYS=(name repo role contract image)
 readonly -a FIXED_FILES=(.github/workflows/promote-to-prod.yml scripts/promote.zsh
-                         deploy/README.md e2e/README.md .maintenance.yml)
+                         deploy/README.md e2e/README.md .maintenance.yml renovate.json)
+# Every other file Renovate reads its config from — plus, checked separately, a
+# `renovate` key in package.json. `renovate.json` is first in Renovate's own
+# search order, so writing it beside one of these would silently override the
+# repository's real config. A Renovate config wins over Dependabot when a repo
+# carries both, since it is the one renovate.json would override.
+readonly -a OTHER_RENOVATE_CONFIGS=(renovate.json5 .github/renovate.json .github/renovate.json5
+                                    .gitlab/renovate.json .gitlab/renovate.json5
+                                    .renovaterc .renovaterc.json .renovaterc.json5)
+readonly -a DEPENDABOT_CONFIGS=(.github/dependabot.yml .github/dependabot.yaml)
 
 die()   { print -r -u2 -- "$SELF: $1"; exit "${2:-1}"; }
 usage() { die "$1 — usage: $SELF --repo <dir> --member name=…,repo=…,role=…,contract=…,image=… [--member …]" 2; }
@@ -200,6 +217,29 @@ for rel in $FIXED_FILES; do
     if [[ -e "$target" ]]; then
         print -r -- "$SELF: kept $rel (exists)"
         continue
+    fi
+    if [[ "$rel" == renovate.json ]]; then
+        # one dependency bot, one Renovate config: never add a second of either
+        found=""
+        for other in $OTHER_RENOVATE_CONFIGS; do
+            [[ -e "$repo/$other" ]] && { found="$other"; break; }
+        done
+        # the last place Renovate looks: a `renovate` key in package.json
+        if [[ -z "$found" && -f "$repo/package.json" ]] \
+            && jq -e 'type == "object" and has("renovate")' "$repo/package.json" >/dev/null 2>&1; then
+            found="package.json"
+        fi
+        if [[ -n "$found" ]]; then
+            print -r -- "$SELF: skipped renovate.json (Renovate is configured in $found — add the image customManager from $TEMPLATES/renovate.json there)"
+            continue
+        fi
+        for other in $DEPENDABOT_CONFIGS; do
+            [[ -e "$repo/$other" ]] && { found="$other"; break; }
+        done
+        if [[ -n "$found" ]]; then
+            print -r -- "$SELF: skipped renovate.json (Dependabot is configured in $found — one dependency bot per repo; Dependabot cannot read .claude-workspace.yaml)"
+            continue
+        fi
     fi
     after="the manifest was judged valid and is on disk; the files before this one were written"
     mkdir -p "${target:h}" 2>/dev/null || die "could not create ${rel:h}/ in $repo — $after" 3
