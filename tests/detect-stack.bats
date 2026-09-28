@@ -1384,6 +1384,15 @@ _fake_tree() {  # $1.. = ops major dirs; "vN" -> openapi.yaml, "vN:tmpl" -> open
   [ "$(jq -r '.languages | index("typescript")' <<<"$out")" = "null" ]
 }
 
+@test "detect-stack #1123: a javascript repo is never missing the mfe-contract package" {
+  printf '{ "name": "x", "version": "0.1.0" }\n' > package.json
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.languages | index("javascript")' <<<"$out")" != "null" ]
+  # the template ships beside the javascript fragments, but only the composition
+  # repo renders it (#1899), so no gap-fill may ever write it
+  [ "$(jq -r '[.missing_artifacts[] | select(startswith("mfe-contract/"))] | length' <<<"$out")" -eq 0 ]
+}
+
 @test "detect-stack #729: tsconfig.json alone also detects javascript (never typescript)" {
   printf '{ "compilerOptions": {} }\n' > tsconfig.json
   out=$(bash "$DETECT" 2>/dev/null); rc=$?

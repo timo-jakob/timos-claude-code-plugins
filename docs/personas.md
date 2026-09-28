@@ -57,7 +57,8 @@ non-author lens on the schemas.
   his own words, since this repo is public and the docs it distils are not
 - **Failure costs:** a stranger ships without a practice the family *means to deliver* and never learns it was missing —
   automated but not taught; a position that reads as guidance while delivering none (whitelabelling is one theme-token
-  field in the unbuilt mfe-contract design #1123; I18n has no position, no template, no agent and **no open issue naming
+  field in the mfe-contract/v1 template #1123, which no repo renders yet (#1899); I18n has no position, no template, no
+  agent and **no open issue naming
   it**, so it is missing from the backlog as well as the code); #640, where a run leaked three raw `ghs_` tokens into
   the transcript and every approver subagent prompt; and a security posture shipped by omission, since whatever this
   family does with untrusted upstream text becomes the practice every adopter inherits
@@ -108,12 +109,12 @@ non-author lens on the schemas.
 - **Failure costs:** **silent omission** — she ships without a practice the family *intends to deliver* and never finds
   out: no error, no warning, no diff, nothing to search for later. Guidance is this family's declared purpose, so that
   is a broken promise, not a scope limit. The gap between position and delivery lands on her: I18n has no template,
-  agent or issue; whitelabelling is one theme-token field in an unbuilt contract; MFE is stated at #1059 with the epic
-  unbuilt. Her no-server path gets least of all — the Swift templates now carry the ops-api payload (#937), but it
-  installs only for a runnable *service*, so her client repo still gets `swift-format` + SwiftLint only (#1146 and
-  #1259 remain open) and interface detection is Python-owned, so no acceptance stage renders. She also inherits the
-  family's *posture* wholesale, including what it does with untrusted upstream text, because a toolchain shipped as
-  teaching teaches by what it does.
+  agent or issue; whitelabelling is one theme-token field in a contract no repo renders yet; MFE is stated at #1059,
+  with the epic's contract defined (#1123) and its shell, remote and conformance halves unbuilt. Her no-server path
+  gets least of all — the Swift templates now carry the ops-api payload (#937), but it installs only for a runnable
+  *service*, so her client repo still gets `swift-format` + SwiftLint only (#1146 and #1259 remain open) and interface
+  detection is Python-owned, so no acceptance stage renders. She also inherits the family's *posture* wholesale,
+  including what it does with untrusted upstream text, because a toolchain shipped as teaching teaches by what it does.
   Retrofitting any of it later is a rewrite of the surface
 - **Proficiency:** competent developer, novice at this toolchain; will not read ARCHITECTURE.md; learns only from what a
   command prints at her
@@ -238,8 +239,8 @@ non-author lens on the schemas.
   "schema": "personas/v1",
   "provenance": {
     "generated_by": "persona-definer via /development:define-personas",
-    "generated_at": "2026-08-13T00:00:00Z",
-    "prose_sha256": "c69a760c354f6ae6ac5b362e6bb74abf85b1af13e07bd1bb6fb9297b994584c7"
+    "generated_at": "2026-09-27T21:08:01Z",
+    "prose_sha256": "01b1386708ee0317d67f310766316bda368762f825c37a0bbb86c6086c3fed4d"
   },
   "personas": [
     {
@@ -256,7 +257,7 @@ non-author lens on the schemas.
       ],
       "failure_costs": [
         "a stranger ships on this toolchain without a practice the family means to deliver and never learns it was missing — the family automated but did not teach",
-        "a position that reads as guidance while delivering none: whitelabelling exists only as one theme-token field in the unbuilt mfe-contract design (#1123), and I18n has zero footprint anywhere — no ARCHITECTURE position, no template, no agent, and no open issue naming it, so it is missing from the backlog as well as from the code",
+        "a position that reads as guidance while delivering none: whitelabelling exists only as one theme-token field in the mfe-contract/v1 template (#1123), which no repo renders yet (#1899), and I18n has zero footprint anywhere — no ARCHITECTURE position, no template, no agent, and no open issue naming it, so it is missing from the backlog as well as from the code",
         "#640 — a maintenance run leaked three raw ghs_ tokens into the session transcript and every approver subagent prompt: the family's own machinery harmed the repo it was serving",
         "a security posture he ships by omission: the family is consumed as guidance, so whatever it does with untrusted upstream text becomes the practice every adopter inherits"
       ],
@@ -341,7 +342,7 @@ non-author lens on the schemas.
       ],
       "failure_costs": [
         "silent omission — she ships without a practice the family intends to deliver (I18n, whitelabelling, MFE, resilience) and never finds out: no error, no warning, no diff, nothing to search for later. Guidance is the family's declared purpose, so this is a broken promise, not a scope limit",
-        "the gap between position and delivery lands on her, not on its author: I18n has no template, no agent and no open issue; whitelabelling is one theme-token field in the unbuilt mfe-contract design; MFE is stated at ARCHITECTURE #1059 with the epic (#1122/#1123/#1126/#1128) unbuilt and development-react shipping a single maintenance SKILL.md",
+        "the gap between position and delivery lands on her, not on its author: I18n has no template, no agent and no open issue; whitelabelling is one theme-token field in an mfe-contract/v1 template no repo renders yet; MFE is stated at ARCHITECTURE #1059 with the epic's contract defined (#1123) but its shell, remote and conformance halves (#1124/#1125/#1126) unbuilt and development-react shipping a single maintenance SKILL.md",
         "her no-server app gets least of all: the Swift bootstrap templates now carry the ops-api payload (#937 landed) but it installs only for a runnable SERVICE, so her client repo still gets swift-format + swiftlint only (resilience #1146 and contract-consumer #1259 both still open), and interface detection in detect-stack.sh is Python-owned, so no acceptance stage renders for her at all",
         "she inherits the family's posture wholesale — including what it does with untrusted upstream text — because a toolchain shipped as teaching teaches by what it does, not by what it says",
         "retrofitting any of these after launch is a rewrite of the surface, not an addition"

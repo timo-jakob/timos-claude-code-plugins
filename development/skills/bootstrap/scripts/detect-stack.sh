@@ -1339,6 +1339,10 @@ collect_from() {
 		# scaffold seed (rendered to src/api/<vN>/… once per OLD major by SKILL
 		# §3j), not a fixed 1:1 artifact — never a gap-fill candidate.
 		[[ "$rel" == src/api/* ]] && continue
+		# The mfe-contract/v1 package (#1123) is published by the org's
+		# composition repo, which renders it (#1899) — never an artifact an
+		# ordinary JavaScript repo is missing.
+		[[ "$rel" == mfe-contract/* ]] && continue
 		candidate_paths+=("$rel")
 	done < <(find "$dir" -type f 2>/dev/null)
 }

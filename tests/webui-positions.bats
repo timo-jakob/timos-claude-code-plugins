@@ -98,8 +98,9 @@ extract() {
 # --- the authoritative record ------------------------------------------------
 
 # The Browser UI section's end anchor is the section that FOLLOWS it, which is
-# the React bootstrap overlay (#957) — before it, the Deployment position
-# (#1189), and before that the Cross-repo Claude section it used to abut.
+# the `mfe-contract/v1` contract (#1123) — before it the React bootstrap overlay
+# (#957), before that the Deployment position (#1189), and before that the
+# Cross-repo Claude section it used to abut.
 #
 # The end ADDRESS is the generic `^### `, not that specific heading. A specific
 # address catches a renamed or deleted anchor but NOT an inserted one: a section
@@ -109,11 +110,11 @@ extract() {
 # pin, which would then be scoped to text it was never meant to cover. That is
 # exactly what happened here when #1189 inserted the Deployment section, and it
 # required this hand repoint (and again when #957 inserted the React bootstrap
-# overlay section). With the generic address the range always ends at
+# overlay section, and #1123 the `mfe-contract/v1` contract). With the generic address the range always ends at
 # whatever `###` actually follows, and the `ends_with` pin below names the
 # heading that follows TODAY — so the next insertion reds loudly instead of
 # widening quietly. Same idiom as tests/deployment-position.bats.
-ARCH_END='### React bootstrap overlay — React composes onto the javascript tier (#957)'
+ARCH_END='### The `mfe-contract/v1` contract (#1123)'
 
 arch_section() {
   extract "$ARCH" '^### Browser UI' '^### '
