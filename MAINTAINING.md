@@ -426,6 +426,23 @@ overlay* section states the layer-ordering rule and why.
   module) or the `src/api/generated/**` coverage exclude silently disables the
   MSW wiring #958 depends on.
 
+- **A change to `contract-consumer/src/api/index.ts`** (the ACL barrel) must be
+  repeated in `react/src/api/index.ts`, the third compose-don't-clobber file: the
+  React barrel (#958, SKILL.md §3k.6) keeps every export of the consumer barrel
+  and adds `export * from "./hooks"`. A rename of the illustrative `orders`
+  target in `client.ts` or `msw-setup.ts` must reach `react/src/api/hooks.ts`
+  and `hooks.test.tsx` too.
+
+**The React Query binding** (§3k.6) is the one place a caller changes what the
+shared seeder writes: `seed-orval-targets.zsh --client react-query`, passed by
+§3k.6 alone and only on a fresh seed. Keep the seeder's default `fetch` — the
+Angular and plain-TS consumers depend on it — and keep `hooks.ts` a list of
+`export { … } from "./generated/…"` re-exports: a wrapper function would hide a
+deprecated operation's `@deprecated` JSDoc from `no-deprecated`. Its
+prerequisites are two installs, `npm i @tanstack/react-query` and
+`npm i -D @testing-library/react`, plus the confirmed `QueryClientProvider` edit
+in `src/main.tsx`; none is pinned here.
+
 `tests/react-templates.bats` checks the load-bearing tokens of each layer
 against that layer's own template, so a forgotten copy usually reds there — but
 it checks tokens, not whole files, so read the diff side by side as well.

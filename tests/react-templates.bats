@@ -27,14 +27,27 @@ setup() {
   mkdir -p "$OUT"
 }
 
-# The six template sources, repo-relative to the react/ overlay.
+# The ten template sources, repo-relative to the react/ overlay: #957's six and
+# the four React Query binding files (#958, SKILL.md §3k.6).
 REACT_FILES=(
   contract-consumer/eslint.config.js
   contract-consumer/vitest.config.ts
   eslint.config.js
   src/Greeting.test.tsx
+  src/api/hooks.test.tsx
+  src/api/hooks.ts
+  src/api/index.ts
+  src/test/query-wrapper.tsx
   src/test/setup.ts
   vitest.config.ts
+)
+
+# The binding set, as §3k.6 renders it.
+BINDING_FILES=(
+  src/api/hooks.ts
+  src/api/index.ts
+  src/api/hooks.test.tsx
+  src/test/query-wrapper.tsx
 )
 
 # Render one variant exactly as §3k.5 lists it: "consumer" or "plain".
@@ -68,7 +81,7 @@ has() {
   grep -qF -- "$2" "$1" || { echo "missing in ${1#"$REPO_ROOT"/}: $2"; return 1; }
 }
 
-@test "react: the template tree contains exactly the six blessed files" {
+@test "react: the template tree contains exactly the ten blessed files" {
   local expected actual
   expected="$(printf '%s\n' "${REACT_FILES[@]}")"
   # .DS_Store is Finder litter, not a template (the kubernetes skeleton false red)
@@ -218,7 +231,7 @@ react_step() {
   sed -n '/^### 3k\.5\. React overlay/,/^### /p' "$SKILL" | tr -s '[:space:]' ' '
 }
 
-STEP_END='### 3l. Infrastructure-as-code repos (no application language) — #1154 '
+STEP_END='### 3k.6. React Query binding (a React repo consuming a spec — #958) '
 
 @test "react: SKILL.md carries the React step right after §3k, gated on the #956 marker" {
   local section k r l
@@ -339,4 +352,188 @@ section_between() {
   contains "$k" '**When the React overlay applies** (§3k.5'"'"'s *Does the overlay apply?* check), §3k **defers the pair**: it writes **neither** `eslint.config.js` nor `vitest.config.ts` — whatever each file on disk is — and completes everything else, and §3k.5 renders the consumer+React pair over both itself. When a deferred §3k does not end with that pair on disk (§3k.5'"'"'s install fails, or its rule-3 prompt on either file resolves to skip), §3k.5 aborts this scaffold as the skip below does (see §3k.5). No prompt here, and no abort of its own.'
   contains "$k" 'when the React overlay applies, defer the pair to §3k.5 as above'
   contains "$k" 'a seeded `orval.config.ts` with the ACL/MSW scaffold absent is an adoption gap too.'
+}
+
+# --- the React Query binding (#958, SKILL.md §3k.6) -----------------------------
+
+@test "binding: all four binding templates exist at their react/ relpaths and render unchanged" {
+  local f args=()
+  for f in "${BINDING_FILES[@]}"; do
+    [ -f "$RX/$f" ] || { echo "missing: react/$f"; false; }
+    args+=("languages/javascript/react/$f")
+  done
+  run zsh "$RENDER" --templates "$TEMPLATES" --out "$OUT/binding" \
+    --project-name "Demo" --default-branch "main" "${args[@]}"
+  [ "$status" -eq 0 ] || { echo "render: $output"; false; }
+  for f in "${BINDING_FILES[@]}"; do
+    cmp -s "$OUT/binding/languages/javascript/react/$f" "$RX/$f" || { echo "$f differs from source"; false; }
+  done
+}
+
+@test "binding: the React barrel composes over #727's — keeps ./client, adds ./hooks, no generated import" {
+  local f="$RX/src/api/index.ts" line trimmed n=0
+  grep -qxF 'export * from "./client";' "$f"
+  grep -qxF 'export * from "./hooks";' "$f"
+  # every code line of the consumer barrel survives in the React one
+  while IFS= read -r line; do
+    trimmed="${line#"${line%%[![:space:]]*}"}"
+    case "$trimmed" in '' | '//'*) continue ;; esac
+    n=$((n + 1))
+    grep -qxF -- "$line" "$f" || { echo "MISSING: $line"; false; }
+  done < "$JS/contract-consumer/src/api/index.ts"
+  [ "$n" -ge 1 ]
+  run grep -qE 'from "[^"]*generated' "$f"
+  [ "$status" -eq 1 ]
+}
+
+@test "binding: hooks.ts re-exports the generated hooks and declares no wrapping hook" {
+  local f="$RX/src/api/hooks.ts"
+  # exactly the hook the example test imports, from client.ts's generated module
+  grep -qxF 'export { useGetOrders } from "./generated/orders/orders";' "$f"
+  # every generated module client.ts reads, so a target rename reaches both
+  local p n=0
+  while IFS= read -r p; do
+    n=$((n + 1))
+    grep -qF -- "$p" "$f" || { echo "hooks.ts lacks the client.ts import $p"; false; }
+  done < <(grep -oE 'from "\./generated/[^"]+"' "$JS/contract-consumer/src/api/client.ts")
+  # an import-style change in client.ts must not turn the loop vacuous
+  [ "$n" -ge 2 ]
+  # the one domain-mapped seam §3k.6 documents, a `select` mapper rather than a hook
+  grep -qE '^export function selectOrderSummaries\(' "$f"
+  # a wrapper, exported inline or by name, would swallow the @deprecated warning
+  run grep -qE '^(export )?(default )?(async )?(function|const|let|var) use' "$f"
+  [ "$status" -eq 1 ]
+}
+
+@test "binding: the no-wrapper check reds on a wrapping hook (non-vacuity)" {
+  local f="$BATS_TEST_TMPDIR/hooks.ts"
+  cp "$RX/src/api/hooks.ts" "$f"
+  printf 'function useOrders() {\n  return useGetOrders();\n}\nexport { useOrders };\n' >> "$f"
+  run grep -qE '^(export )?(default )?(async )?(function|const|let|var) use' "$f"
+  [ "$status" -eq 0 ]
+  cp "$RX/src/api/hooks.ts" "$f"
+  printf 'export default function useOrders() {\n  return useGetOrders();\n}\n' >> "$f"
+  run grep -qE '^(export )?(default )?(async )?(function|const|let|var) use' "$f"
+  [ "$status" -eq 0 ]
+}
+
+@test "binding: the test QueryClient disables retries behind a QueryClientProvider" {
+  local f="$RX/src/test/query-wrapper.tsx"
+  has "$f" 'import { QueryClient, QueryClientProvider } from "@tanstack/react-query";'
+  has "$f" '<QueryClientProvider client={client}>'
+  grep -qE '^export function QueryWrapper\(' "$f"
+  # one client per render, so no cached data leaks between tests
+  has "$f" 'const [client] = useState(createTestQueryClient);'
+  grep -qxF '      queries: { retry: false, refetchOnWindowFocus: false },' "$f"
+}
+
+@test "binding: the example test drives a hook through the ACL barrel, never the generated client" {
+  local t="$RX/src/api/hooks.test.tsx"
+  grep -qE '^import \{[^}]*\buseGetOrders\b[^}]*\} from "\./index";$' "$t"
+  has "$t" 'import { QueryWrapper } from "../test/query-wrapper";'
+  has "$t" '{ wrapper: QueryWrapper }'
+  has "$t" '{ query: { select: selectOrderSummaries } }'
+  has "$t" 'expect(await screen.findByRole("status")).toHaveTextContent(/^\d+ orders$/);'
+  run grep -qE 'from "[^"]*generated' "$t"
+  [ "$status" -eq 1 ]
+  # the harness it relies on is #727's MSW setup, which fails unmocked requests,
+  # started by the consumer+React vitest config
+  has "$JS/contract-consumer/src/test/msw-setup.ts" 'onUnhandledRequest: "error"'
+  has "$RX/contract-consumer/vitest.config.ts" './src/test/msw-setup.ts'
+}
+
+# §3k.6's text, whitespace-collapsed and bounded by the next ### heading, whose
+# terminator every caller asserts (see react_step).
+binding_step() {
+  sed -n '/^### 3k\.6\. React Query binding/,/^### /p' "$SKILL" | tr -s '[:space:]' ' '
+}
+
+BINDING_END='### 3l. Infrastructure-as-code repos (no application language) — #1154 '
+
+@test "binding: SKILL.md carries the §3k.6 step after §3k and §3k.5, rendering all four relpaths" {
+  local section k r b l f
+  section="$(binding_step)"
+  ends_with "$section" "$BINDING_END"
+  k="$(grep -n '^### 3k\. ' "$SKILL" | cut -d: -f1)"
+  r="$(grep -n '^### 3k\.5\. ' "$SKILL" | cut -d: -f1)"
+  b="$(grep -n '^### 3k\.6\. ' "$SKILL" | cut -d: -f1)"
+  l="$(grep -n '^### 3l\. ' "$SKILL" | cut -d: -f1)"
+  matches "$k" '^[0-9]+$'
+  matches "$r" '^[0-9]+$'
+  matches "$b" '^[0-9]+$'
+  matches "$l" '^[0-9]+$'
+  [ "$k" -lt "$r" ]
+  [ "$r" -lt "$b" ]
+  [ "$b" -lt "$l" ]
+  contains "$section" '"<skill-base-dir>/scripts/render.zsh"'
+  for f in "${BINDING_FILES[@]}"; do
+    contains "$section" "languages/javascript/react/$f"
+  done
+}
+
+@test "binding: SKILL.md's §3k.6 trigger is the React marker AND a §3k seeder exit 0, passing --client react-query" {
+  local section
+  section="$(binding_step)"
+  ends_with "$section" "$BINDING_END"
+  contains "$section" '**Trigger — a conjunction.** Run this step only when **both** hold:'
+  contains "$section" 'the **React marker** (#956) matches and the overlay applies — §3k.5'"'"'s *Does the overlay apply?* check, decided once in Step 2'
+  contains "$section" 'the **§3k seeder exited 0** — the repo is a contract consumer'
+  contains "$section" 'seed-orval-targets.zsh" --plan --client react-query "<repo-path>"'
+  contains "$section" 'seed-orval-targets.zsh" --client react-query "<repo-path>"'
+  contains "$section" '**Only this step passes it**: Angular and plain-TS consumers keep the seeder'"'"'s default `client: "fetch"`.'
+  # its two skips: silent when either half is simply absent, reported when §3k fell short
+  contains "$section" 'skips the step entirely: there are no generated hooks to bind, and it is **not an error** — no Step 5 item.'
+  contains "$section" 'Skip it too, **with** a Step 5 item naming what is missing, when §3k'"'"'s machinery is absent after all'
+  # §3k's own seeder runs point here, so the flag is not stated only downstream
+  local k
+  k="$(section_between '^### 3k\. ' '^### 3k\.5\. ')"
+  ends_with "$k" '### 3k.5. React overlay (a JS/TS repo carrying the React marker — #957) '
+  contains "$k" 'add `--client react-query` to this run **and** to the Step 3 run below'
+}
+
+@test "binding: SKILL.md installs react-query in §3k's activation and names §3k.6's State-D adoption gap" {
+  local section k
+  section="$(binding_step)"
+  ends_with "$section" "$BINDING_END"
+  k="$(section_between '^### 3k\. ' '^### 3k\.5\. ')"
+  ends_with "$k" '### 3k.5. React overlay (a JS/TS repo carrying the React marker — #957) '
+  # before `npm run generate`, so a failed install takes §3k's own abort
+  contains "$k" 'npm i @tanstack/react-query # React overlay applies only — §3k.6'"'"'s binding'
+  contains "$k" '**If an `npm i`, `npm ci` or `npm run generate` fails**'
+  contains "$k" 'Record a **prominent Step 5 follow-up** quoting the command that failed; when it is the spec package that cannot be resolved'
+  contains "$k" '§3k.6 applies the same rewrite to its binding files'
+  contains "$section" 'In State D the binding is an **adoption gap** when the trigger holds, every `orval.config.ts` target is `client: "react-query"`, and `src/api/hooks.ts` is missing'
+  contains "$section" 'snapshot `package.json`, the lockfile and `src/api/generated/` as §3k.5 snapshots its install, install `@tanstack/react-query` when `package.json` lacks it, then `npm ci && npm run generate` and commit its output with the binding; if either fails, restore all three from that snapshot (never from `HEAD`), render nothing, and record a Step 5 item quoting the failed command.'
+}
+
+@test "binding: SKILL.md's §3k.6 documents the prerequisites, the provider edit and the idempotency caveat" {
+  local section
+  section="$(binding_step)"
+  ends_with "$section" "$BINDING_END"
+  contains "$section" 'npm i @tanstack/react-query # runtime: the binding itself'
+  contains "$section" 'npm i -D @testing-library/react # the component/hook test harness'
+  contains "$section" '**The app-level provider — a §4c-class confirmed edit in `src/main.tsx`.**'
+  contains "$section" '<QueryClientProvider client={queryClient}><App /></QueryClientProvider>'
+  contains "$section" '**Idempotent skip** when `src/main.tsx` already mounts a `QueryClientProvider`.'
+  contains "$section" '**Confirm before editing**: show the diff and ask; the plan approval alone does not cover it.'
+  contains "$section" 'restore the pre-edit snapshot and record a Step 5 TODO'
+  contains "$section" '**Idempotency caveat — the flag only shapes a fresh seed.**'
+  contains "$section" 'if any target is not `"react-query"`, render **nothing** from this step'
+  contains "$section" '*flip `client:` to `"react-query"` by hand in each target of `orval.config.ts`, re-run `npm run generate`'
+  contains "$section" '`null` when an existing config is left untouched'
+  contains "$section" 'and the JSON `"client"` is then `null`'
+  contains "$section" 'Outside State D'"'"'s adoption gap (above), this step installs neither.'
+  contains "$section" 're-export (and import in the test) the hook orval generated for the operation `client.ts`'"'"'s seam calls, and keep `selectOrderSummaries` in step with that seam'
+  contains "$section" '**Layer ordering — `src/api/index.ts` joins the compose-don'"'"'t-clobber list.**'
+  contains "$section" 'Overwrite the on-disk `src/api/index.ts` without a prompt only when it is §3k'"'"'s barrel template byte for byte'
+  contains "$section" 'keep the user'"'"'s barrel, **withhold `src/api/hooks.test.tsx`** (it imports the hook through the barrel)'
+}
+
+@test "binding: SKILL.md's §3k.6 states the deprecation pass condition and defers its execution to #1063" {
+  local section
+  section="$(binding_step)"
+  ends_with "$section" "$BINDING_END"
+  contains "$section" '`hooks.ts` **re-exports** that hook'
+  contains "$section" '`npx eslint src` reports `@typescript-eslint/no-deprecated` on the line in the component that calls `useGetOrders()`'
+  contains "$section" 'It is **executed under #1063**.'
 }

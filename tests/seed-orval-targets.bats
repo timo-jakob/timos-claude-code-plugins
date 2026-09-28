@@ -79,6 +79,7 @@ pkg() { printf '%s' "$1" > "$WORK/package.json"; }
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.planned == true' >/dev/null
   echo "$output" | jq -e '.seeded == false' >/dev/null
+  echo "$output" | jq -e '.client == "fetch"' >/dev/null
   # the targets that WOULD be seeded are reported…
   [ "$(jq -r '.targets[0].name' <<<"$output")" = "orders" ]
   # …but no file was written (the pre-approval safety guarantee)
@@ -96,7 +97,7 @@ pkg() { printf '%s' "$1" > "$WORK/package.json"; }
   pkg '{ "name": "x", "dependencies": { "react": "^18.0.0" } }'
   run zsh "$SEED" "$WORK"
   [ "$status" -eq 3 ]
-  echo "$output" | jq -e '.seeded == false' >/dev/null
+  echo "$output" | jq -e '.seeded == false and .client == "fetch"' >/dev/null
   [ "$(jq -r '.targets | length' <<<"$output")" = "0" ]
   [ ! -f "$WORK/orval.config.ts" ]
 }
@@ -212,9 +213,106 @@ pkg() { printf '%s' "$1" > "$WORK/package.json"; }
   printf '// hand-edited config\n' > "$WORK/orval.config.ts"
   run zsh "$SEED" "$WORK"
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.seeded == false' >/dev/null
+  # a mode the seeder never wrote is withheld, not guessed
+  echo "$output" | jq -e '.seeded == false and .client == null' >/dev/null
   contains "$output" "left untouched"
   # still the user's file, and it still lists the target it detected
   [ "$(cat "$WORK/orval.config.ts")" = "// hand-edited config" ]
   [ "$(jq -r '.targets | length' <<<"$output")" = "1" ]
+}
+
+# --- the --client flag (#958) -------------------------------------------------
+# The React binding step (SKILL.md §3k.6) passes --client react-query so orval
+# also generates the TanStack Query hooks; every other caller keeps the
+# framework-agnostic default.
+
+@test "seed-orval: --client react-query on a fresh seed -> EVERY target renders client: \"react-query\"" {
+  pkg '{ "name": "x", "dependencies": { "@acme/orders-api-spec": "2.4.0", "billing-api-spec": "1.0.0" } }'
+  run zsh "$SEED" --client react-query "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^      client: "react-query",$' "$WORK/orval.config.ts")" -eq 2 ]
+  run ! grep -qF 'client: "fetch",' "$WORK/orval.config.ts"
+}
+
+@test "seed-orval: no --client flag -> every target still renders client: \"fetch\" (the default is untouched)" {
+  pkg '{ "name": "x", "dependencies": { "@acme/orders-api-spec": "2.4.0", "billing-api-spec": "1.0.0" } }'
+  run zsh "$SEED" "$WORK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.client' <<<"$output")" = "fetch" ]
+  [ "$(grep -c '^      client: "fetch",$' "$WORK/orval.config.ts")" -eq 2 ]
+  run ! grep -qF 'react-query' "$WORK/orval.config.ts"
+}
+
+@test "seed-orval: an explicit --client fetch is accepted and renders client: \"fetch\"" {
+  pkg '{ "name": "x", "dependencies": { "orders-api-spec": "1.0.0" } }'
+  run zsh "$SEED" --client fetch "$WORK"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.seeded == true and .client == "fetch"' >/dev/null
+  grep -qxF '      client: "fetch",' "$WORK/orval.config.ts"
+}
+
+@test "seed-orval: --client bogus -> exit 2 and nothing written" {
+  pkg '{ "name": "x", "dependencies": { "orders-api-spec": "1.0.0" } }'
+  run zsh "$SEED" --client bogus "$WORK"
+  [ "$status" -eq 2 ]
+  contains "$output" "unknown --client 'bogus'"
+  contains "$output" "usage: seed-orval-targets.zsh"
+  [ ! -f "$WORK/orval.config.ts" ]
+}
+
+@test "seed-orval: a trailing --client with no value -> usage exit 2" {
+  run zsh "$SEED" --client
+  [ "$status" -eq 2 ]
+  contains "$output" "usage: seed-orval-targets.zsh"
+}
+
+@test "seed-orval: a misordered '<repo> --client react-query' is rejected (exit 2), NOT a silent fetch seed" {
+  pkg '{ "name": "x", "dependencies": { "orders-api-spec": "1.0.0" } }'
+  run zsh "$SEED" "$WORK" --client react-query
+  [ "$status" -eq 2 ]
+  contains "$output" "usage: seed-orval-targets.zsh"
+  [ ! -f "$WORK/orval.config.ts" ]
+}
+
+@test "seed-orval: --plan carries \"client\" with the flags in either order, and writes nothing" {
+  pkg '{ "name": "x", "dependencies": { "orders-api-spec": "1.0.0" } }'
+  run zsh "$SEED" --client react-query --plan "$WORK"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.planned == true and .client == "react-query"' >/dev/null
+  run zsh "$SEED" --plan --client react-query "$WORK"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.planned == true and .client == "react-query"' >/dev/null
+  [ ! -f "$WORK/orval.config.ts" ]
+}
+
+@test "seed-orval: a real seed carries \"client\" in its JSON summary" {
+  pkg '{ "name": "x", "dependencies": { "orders-api-spec": "1.0.0" } }'
+  run zsh "$SEED" --client react-query "$WORK"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.seeded == true and .client == "react-query"' >/dev/null
+}
+
+@test "seed-orval: an existing config is never rewritten by a different --client, in --plan or real runs" {
+  pkg '{ "name": "x", "dependencies": { "orders-api-spec": "1.0.0" } }'
+  printf '// hand-edited config\n      client: "fetch",\n' > "$WORK/orval.config.ts"
+  # neither run claims a mode for the file it left alone (SKILL.md §3k.6's caveat)
+  run zsh "$SEED" --plan --client react-query "$WORK"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.planned == true and .seeded == false and .client == null' >/dev/null
+  contains "$(jq -r .reason <<<"$output")" "would be left untouched"
+  run zsh "$SEED" --client react-query "$WORK"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.seeded == false and .client == null' >/dev/null
+  [ "$(cat "$WORK/orval.config.ts")" = "$(printf '// hand-edited config\n      client: "fetch",')" ]
+}
+
+@test "seed-orval: a non-consumer still exits 3 under --client, carrying \"client\" and writing nothing" {
+  pkg '{ "name": "x", "dependencies": { "react": "^18.0.0" } }'
+  run zsh "$SEED" --plan --client react-query "$WORK"
+  [ "$status" -eq 3 ]
+  echo "$output" | jq -e '.seeded == false and .client == "react-query"' >/dev/null
+  run zsh "$SEED" --client react-query "$WORK"
+  [ "$status" -eq 3 ]
+  echo "$output" | jq -e '.seeded == false and .client == "react-query"' >/dev/null
+  [ ! -f "$WORK/orval.config.ts" ]
 }
