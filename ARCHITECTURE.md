@@ -996,12 +996,14 @@ compiler.
 
 What every React repo shares, whatever its UI shape, is scaffolded by one
 bootstrap overlay; the shell- and remote-specific templates are the MFE
-composition epic's (#1122), and the React Query binding is #958.
+composition epic's (#1122), and the React Query binding over the contract
+consumer's generated client is its own sub-tier (#958, below).
 
 - **Template tree.** `development/skills/bootstrap/templates/languages/javascript/react/`
   is an overlay sub-tier under the `javascript` language templates, the same
   shape as the `contract-consumer/` overlay (#727), and owned by `development`
-  like every template. It holds exactly six files: `eslint.config.js` and
+  like every template. It holds ten files: the four of the React Query binding
+  sub-tier (below), and the six of the common overlay — `eslint.config.js` and
   `vitest.config.ts` (the plain React pair), `contract-consumer/eslint.config.js`
   and `contract-consumer/vitest.config.ts` (the consumer+React pair),
   `src/test/setup.ts` (registers the jest-dom matchers) and `src/Greeting.test.tsx`
@@ -1036,10 +1038,35 @@ composition epic's (#1122), and the React Query binding is #958.
   Anything customised goes through idempotency rule 3's prompt. *Rationale:* a
   blind overwrite by the last layer would silently drop the ACL boundary and the
   MSW wiring #958's no-backend test story depends on.
+- **The React Query binding sub-tier (#958).** On a repo that is both React
+  (the overlay applies) and a contract consumer (§3k's seeder exits 0),
+  bootstrap's §3k.6 binds TanStack Query over the generated client. The
+  mechanism is an **opt-in flag on the shared seeder**:
+  `seed-orval-targets.zsh --client <fetch|react-query>`, default `fetch`, sets
+  every target's `client:` in a **fresh** `orval.config.ts` and is echoed as
+  `"client"` in its JSON summary. Only §3k.6 passes `react-query`, to both the
+  plan and the real run, so orval **generates** the hooks beside the operation
+  functions and MSW handlers; Angular and plain-TS consumers keep `fetch`, and
+  the seeder stays framework-agnostic. An existing `orval.config.ts` is never
+  rewritten, so an already-seeded repo flips `client:` by hand and regenerates.
+  Four templates: `src/api/hooks.ts` **re-exports** the generated hooks (plus one
+  `select` mapping seam), `src/api/index.ts` supersedes §3k's ACL barrel **by
+  composition** (keeps `./client`, adds `./hooks`, the third file on the
+  compose-don't-clobber list above), `src/api/hooks.test.tsx` drives a hook
+  through the barrel against §3k's MSW handlers, and `src/test/query-wrapper.tsx`
+  is a test `QueryClientProvider` with `retry: false`. Prerequisites are
+  installed, not shipped — `npm i @tanstack/react-query` and
+  `npm i -D @testing-library/react` — and one app-level `QueryClientProvider` is
+  a confirmed edit to Vite-owned `src/main.tsx`. *Rationale:* a re-export keeps
+  the generated hook's `@deprecated` JSDoc on the symbol app code calls, so
+  `@typescript-eslint/no-deprecated` warns at the component's call site; a
+  hand-written wrapper would swallow it.
 - **Verified statically here, built elsewhere.** `tests/react-templates.bats`
-  pins the file set, each variant's kept and added content, and the 120-column
-  width; really building, linting and running a rendered tree is the
-  render-and-build smoke check's job (#1063).
+  pins the file set, each variant's kept and added content, the binding's
+  re-export and barrel invariants, and the 120-column width, and
+  `tests/seed-orval-targets.bats` pins the `--client` flag; really building,
+  linting and running a rendered tree — including the deprecation warning at a
+  real call site — is the render-and-build smoke check's job (#1063).
 
 ### Deployment — GitOps promotion and immutable references (#1189)
 

@@ -4,7 +4,7 @@
 # Slice 2 (#727) of the #683 development-javascript epic.
 #
 # Usage:
-#   seed-orval-targets.zsh [--plan] <repo_path>
+#   seed-orval-targets.zsh [--plan] [--client <fetch|react-query>] <repo_path>
 #
 # It is BOTH the detector and the seeder for the contract-consumer machinery
 # (§3k of the bootstrap SKILL): the bootstrap flow runs it on every javascript
@@ -22,11 +22,23 @@
 #         seeded) and write no file. Use this during Step 2 planning; run
 #         without --plan in Step 3, after the user approves the plan.
 #
+# --client <fetch|react-query>
+#         The orval client mode written into EVERY target's `client:` field
+#         (default `fetch`, the framework-agnostic client Angular and plain-TS
+#         consumers keep). Only the bootstrap SKILL's React binding step (§3k.6,
+#         #958) passes `react-query`, so orval also generates the TanStack Query
+#         hooks. It only shapes a FRESH seed: an existing orval.config.ts is never
+#         rewritten, whatever the flag says. An unknown value exits 2.
+#
+# Flags precede the repo path, in either order; anything after it exits 2.
+#
 # It emits a JSON summary on stdout so the caller can report what was seeded:
 #   {
 #     "seeded": true|false,       # true only when this run WROTE the file
 #     "planned": true,            # present ONLY in --plan mode (nothing written)
 #     "config_path": "…/orval.config.ts",
+#     "client": "fetch"|"react-query"|null, # the --client mode (default fetch);
+#                                           # null when an existing config is left untouched
 #     "targets": [ { "name", "package", "input", "output" } ],
 #     "reason": "…"               # why nothing was seeded, when applicable
 #   }
@@ -40,19 +52,41 @@
 emulate -L zsh
 set -euo pipefail
 
+usage() {
+	print -u2 "usage: seed-orval-targets.zsh [--plan] [--client <fetch|react-query>] <repo_path>"
+	exit 2
+}
+
 plan_only="false"
-if [[ "${1:-}" == "--plan" ]]; then
-	plan_only="true"
-	shift
-fi
+client="fetch"
+while (($# > 0)); do
+	case "$1" in
+		--plan)
+			plan_only="true"
+			shift
+			;;
+		--client)
+			(($# >= 2)) || usage
+			case "$2" in
+				fetch | react-query) client="$2" ;;
+				*)
+					print -u2 "seed-orval-targets: unknown --client '$2' (expected fetch or react-query)."
+					usage
+					;;
+			esac
+			shift 2
+			;;
+		*) break ;;
+	esac
+done
 
 repo="${1:-}"
 # Reject an unknown flag, a missing/extra argument, or a non-directory. Without
-# the `--*` / arg-count guards, a misordered `<repo> --plan` would silently
-# discard the flag and fall through to a real (pre-approval) write.
+# the `--*` / arg-count guards, a misordered `<repo> --plan` or
+# `<repo> --client react-query` would silently discard the flag and fall through
+# to a real (pre-approval) write, or to a `fetch` seed the caller did not ask for.
 if [[ -z "$repo" || "$repo" == --* || $# -gt 1 || ! -d "$repo" ]]; then
-	print -u2 "usage: seed-orval-targets.zsh [--plan] <repo_path>"
-	exit 2
+	usage
 fi
 
 pkg_json="$repo/package.json"
@@ -91,7 +125,7 @@ done < <(jq -r '
 ' "$pkg_json" | sort -u)
 
 if ((${#specs[@]} == 0)); then
-	jq -n '{seeded: false, config_path: null, targets: [],
+	jq -n --arg client "$client" '{seeded: false, config_path: null, client: $client, targets: [],
 		reason: "no *-api-spec dependency in package.json — repo is not a contract consumer"}'
 	exit 3
 fi
@@ -135,11 +169,11 @@ config_path="$repo/orval.config.ts"
 if [[ "$plan_only" == "true" ]]; then
 	if [[ -f "$config_path" ]]; then
 		jq -n --arg cp "$config_path" --argjson targets "$targets_json" \
-			'{seeded: false, planned: true, config_path: $cp, targets: $targets,
+			'{seeded: false, planned: true, config_path: $cp, client: null, targets: $targets,
 			  reason: "orval.config.ts already present — would be left untouched"}'
 	else
-		jq -n --arg cp "$config_path" --argjson targets "$targets_json" \
-			'{seeded: false, planned: true, config_path: $cp, targets: $targets, reason: null}'
+		jq -n --arg cp "$config_path" --arg client "$client" --argjson targets "$targets_json" \
+			'{seeded: false, planned: true, config_path: $cp, client: $client, targets: $targets, reason: null}'
 	fi
 	exit 0
 fi
@@ -147,7 +181,7 @@ fi
 # --- render orval.config.ts (unless one already exists) ---------------------
 if [[ -f "$config_path" ]]; then
 	jq -n --arg cp "$config_path" --argjson targets "$targets_json" \
-		'{seeded: false, config_path: $cp, targets: $targets,
+		'{seeded: false, config_path: $cp, client: null, targets: $targets,
 		  reason: "orval.config.ts already present — left untouched (edit it directly)"}'
 	exit 0
 fi
@@ -182,7 +216,7 @@ trap 'rm -f "$tmp_config"' EXIT
 		print -r -- '    output: {'
 		print -r -- '      mode: "tags-split",'
 		print -r -- "      target: \"${t_output}\","
-		print -r -- '      client: "fetch",'
+		print -r -- "      client: \"${client}\","
 		print -r -- '      mock: true,'
 		print -r -- '      clean: true,'
 		print -r -- '      baseUrl: "/api",'
@@ -199,5 +233,5 @@ trap 'rm -f "$tmp_config"' EXIT
 mv -- "$tmp_config" "$config_path"
 trap - EXIT
 
-jq -n --arg cp "$config_path" --argjson targets "$targets_json" \
-	'{seeded: true, config_path: $cp, targets: $targets, reason: null}'
+jq -n --arg cp "$config_path" --arg client "$client" --argjson targets "$targets_json" \
+	'{seeded: true, config_path: $cp, client: $client, targets: $targets, reason: null}'

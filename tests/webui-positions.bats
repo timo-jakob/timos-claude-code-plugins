@@ -375,7 +375,8 @@ spec2_section() {
 
 @test "bootstrap SKILL.md §3k states the single-binding consequence of the React default (#1059)" {
   local section
-  section="$(extract "$BOOTSTRAP_SKILL" '^### 3k\.' '^### ')"
+  # the space pins §3k itself: bare `3k\.` also starts a second range at §3k.6
+  section="$(extract "$BOOTSTRAP_SKILL" '^### 3k\. ' '^### ')"
   [ -n "$section" ]
   # the range's terminating heading, asserted so an unterminated `extract` (which
   # would run to EOF and let any needle below match from anywhere in the file)

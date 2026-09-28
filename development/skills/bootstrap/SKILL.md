@@ -3727,6 +3727,10 @@ slots into the Step 1→2→2.5→3 pipeline like every other artifact:
   #       and note the skipped machinery in the Step 5 checklist.
   ```
 
+  In a React app (§3k.5's overlay applies) add `--client react-query` to this
+  run **and** to the Step 3 run below — §3k.6 states why and what it changes.
+  The flag never changes the exit code.
+
   §3d renders the **base** javascript configs unconditionally; §3k (below)
   *overwrites* `eslint.config.js`/`vitest.config.ts` with the consumer variants
   when it completes. There is no ordering dependency between §3d and this plan
@@ -3743,6 +3747,7 @@ slots into the Step 1→2→2.5→3 pipeline like every other artifact:
 
   ```bash
   "<skill-base-dir>/scripts/seed-orval-targets.zsh" "<repo-path>"
+  # React overlay applies → add --client react-query here too (§3k.6)
   ```
 
   **Re-check this run's exit code.** The real run is as fallible as the plan run
@@ -3790,7 +3795,8 @@ and `msw-setup.ts` hardcode an illustrative `orders` target
 (`./generated/orders/…`, `getOrdersMock`). The seeder derives target names from
 the repo's **actual** specs (e.g. `billing-api-spec` → `billing`), so after
 rendering, **rewrite `orders` to the target name** — **in `client.ts` and
-`msw-setup.ts` only** (for a single spec, its name; for multiple, one ACL seam +
+`msw-setup.ts` only** (§3k.6 applies the same rewrite to its binding files; for
+a single spec, its name; for multiple, one ACL seam +
 one `setupServer(...)` spread per target). Take the name from the seeded
 `targets[].name` on the `seeded:true` path; on `seeded:false` take it from the
 **existing** `orval.config.ts`'s actual targets (its `output` dirs under
@@ -3809,6 +3815,7 @@ scaffold. After approval, in Step 3:
 
 ```text
 npm i -D orval msw                       # the generator + the mock library
+npm i @tanstack/react-query              # React overlay applies only — §3k.6's binding
 # add "generate": "orval" to package.json "scripts" (a §4c-class confirmed edit)
 npm ci && npm run generate               # produce src/api/generated/
 # commit src/api/generated/ ALONGSIDE the scaffold
@@ -3817,7 +3824,7 @@ npm ci && npm run generate               # produce src/api/generated/
 The committed tree then compiles, the MSW suite is green, and the drift gate
 passes — a clean bootstrap PR.
 
-**If `npm ci` or `npm run generate` fails** — e.g. the pinned `*-api-spec`
+**If an `npm i`, `npm ci` or `npm run generate` fails** — e.g. the pinned `*-api-spec`
 package can't be resolved (a private registry isn't configured, or the producer
 hasn't published the version yet) — **do NOT commit a partial scaffold.** The
 ACL/MSW files and the drift workflow are all red without a generated client, and
@@ -3836,7 +3843,8 @@ disposition is explicit** — do not leave it to inference:
   (§3k only overwrites them on completion), so the repo keeps working configs —
   it is never left config-less by an abort.
 
-Record a **prominent Step 5 follow-up**: "this repo pins `<spec-pkg>` but it
+Record a **prominent Step 5 follow-up** quoting the command that failed; when it
+is the spec package that cannot be resolved, it reads: "this repo pins `<spec-pkg>` but it
 isn't installable yet; once it resolves, re-run `/development:bootstrap` to
 scaffold + generate the contract-consumer machinery." Nothing else §3k lands
 until generation succeeds.
@@ -3945,7 +3953,7 @@ shares, whatever its UI shape — the test pyramid (Vitest + jsdom +
 testing-library), the rules-of-hooks ESLint layer, and the rule for layering
 React config onto the javascript tier without clobbering it. Shell- and
 remote-specific templates are the MFE composition epic's (#1122), and the React
-Query binding over §3k's client is #958 — neither is rendered here.
+Query binding over §3k's client is §3k.6 (#958) — neither is rendered here.
 
 **Trigger.** Run this step when `javascript` is detected **and** the React
 marker matches — the `react` row of the maintenance orchestrator's topic table,
@@ -4154,6 +4162,179 @@ in place — rule 4, never delete what the user has.
 Really building the rendered tree — running the example test green, and
 passing ESLint + Prettier at 120 — is not asserted in this repo's suite; it is
 the render-and-build smoke check's job (#1063).
+
+### 3k.6. React Query binding (a React repo consuming a spec — #958)
+
+The **framework binding** over §3k's generated client: TanStack Query (React
+Query) hooks reached through the `src/api/` anti-corruption layer, tested with
+vitest against the MSW handlers §3k already registers — so a bootstrapped React
+consumer's suite runs **with no backend anywhere**. orval **generates** the
+hooks (`useGetOrders`) alongside the operation functions and the `*.msw.ts`
+handlers; nothing here hand-writes a hook.
+
+**Trigger — a conjunction.** Run this step only when **both** hold:
+
+- the **React marker** (#956) matches and the overlay applies — §3k.5's *Does
+  the overlay apply?* check, decided once in Step 2; **and**
+- the **§3k seeder exited 0** — the repo is a contract consumer — on this run's
+  Step 2 `--plan` run, and §3k's machinery is on disk once §3k has run (this
+  run's or an earlier one's), read the way §3k.5's variant table reads it.
+
+React without a spec dependency, or a spec dependency without React, skips the
+step entirely: there are no generated hooks to bind, and it is **not an error**
+— no Step 5 item. Skip it too, **with** a Step 5 item naming what is missing,
+when §3k's machinery is absent after all (§3k stopped or aborted its scaffold)
+or §3k.5 did not end with the consumer+React pair on disk: the binding's example
+test needs `src/test/msw-setup.ts` and the React test wiring.
+
+**Plan (Step 2) and State D.** List the four files below, the
+`@tanstack/react-query` install and the `src/main.tsx` edit (confirmed on its
+own, below); on the idempotency caveat's path, list the skip and its reason
+instead. In State D the binding is an **adoption gap** when the trigger holds,
+every `orval.config.ts` target is `client: "react-query"`, and
+`src/api/hooks.ts` is missing — offer it in the plan and complete it as a fresh
+bootstrap would. §3k's own real seeder run does not have to happen in that run,
+so neither does its activation: snapshot `package.json`, the lockfile and
+`src/api/generated/` as §3k.5 snapshots its install, install
+`@tanstack/react-query` when `package.json` lacks it, then
+`npm ci && npm run generate` and commit its output with the binding; if either
+fails, restore all three from that snapshot (never from `HEAD`), render nothing,
+and record a Step 5 item quoting the failed command.
+
+**The seeder's client mode — `--client react-query`, on both runs.** When the
+React half of the trigger holds, both of §3k's seeder runs take the flag
+(flags precede the repo path):
+
+```bash
+"<skill-base-dir>/scripts/seed-orval-targets.zsh" --plan --client react-query "<repo-path>"   # Step 2
+"<skill-base-dir>/scripts/seed-orval-targets.zsh" --client react-query "<repo-path>"          # Step 3
+```
+
+It sets every target's `client:` to `"react-query"`, so orval also generates the
+hooks, and the JSON summary echoes it as `"client"` — `null` when an existing
+config is left untouched (the caveat below).
+Passing the same flag to both runs is what keeps the presented plan and the
+written config from disagreeing. The flag never changes the exit code, so the
+plan run's exit is still the §3k verdict this step's trigger reads. **Only this
+step passes it**: Angular and plain-TS consumers keep the seeder's default
+`client: "fetch"`. The seeder stays framework-agnostic; the caller is what is
+React-aware.
+
+**Idempotency caveat — the flag only shapes a fresh seed.** §3k never clobbers
+an existing `orval.config.ts` (stronger than idempotency rule 3), so
+`--client react-query` changes nothing in an already-seeded repo, and the JSON
+`"client"` is then `null`. Read the existing config's `client:` values: if any target is not `"react-query"`,
+render **nothing** from this step — `hooks.ts` would re-export hooks generation
+never produced — and record a Step 5 item saying exactly this: *flip `client:`
+to `"react-query"` by hand in each target of `orval.config.ts`, re-run
+`npm run generate`, then re-run `/development:bootstrap` to add the binding.*
+That re-run finds the State-D adoption gap above.
+
+**Prerequisites — installed before anything is rendered.** Mirroring §3k's
+`npm i -D orval msw`, the binding installs rather than ships a manifest:
+
+```text
+npm i @tanstack/react-query        # runtime: the binding itself
+npm i -D @testing-library/react    # the component/hook test harness
+```
+
+Outside State D's adoption gap (above), this step installs neither. `@tanstack/react-query` is installed in
+**§3k's activation**, beside `npm i -D orval msw` and before
+`npm run generate`, because a `react-query` client imports it and cannot
+compile without it. A failed install is therefore §3k's own activation failure:
+§3k aborts its scaffold, and §3k.5 then finds the machinery absent and renders
+the plain React pair — so no committed config names a discarded file.
+`@testing-library/react` is §3k.5's install. Bootstrap still **writes no
+`package.json` and scaffolds no app** — it only edits.
+
+**Render the binding set.** None carries a `{{…}}` placeholder:
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  --project-name "<name>" --default-branch "<branch>" \
+  languages/javascript/react/src/api/hooks.ts \
+  languages/javascript/react/src/api/index.ts \
+  languages/javascript/react/src/api/hooks.test.tsx \
+  languages/javascript/react/src/test/query-wrapper.tsx
+```
+
+- `react/src/api/hooks.ts` → `src/api/hooks.ts` — the binding module, **inside**
+  the ACL: it **re-exports** the generated hooks (`export { useGetOrders } from
+  "./generated/orders/orders";`) and adds one domain-mapped seam,
+  `selectOrderSummaries`, passed as a query's `select`.
+- `react/src/api/index.ts` → `src/api/index.ts` — the React ACL barrel,
+  superseding §3k's (below).
+- `react/src/api/hooks.test.tsx` → `src/api/hooks.test.tsx` — the green example
+  test: a component calling the hook through the barrel, against §3k's MSW
+  handlers.
+- `react/src/test/query-wrapper.tsx` → `src/test/query-wrapper.tsx` — a
+  test-only `QueryClientProvider` whose `QueryClient` sets `retry: false` (and
+  no refetch on window focus), so an MSW error handler fails a test at once.
+
+**Retarget the illustrative `orders` scaffold** in `hooks.ts` and
+`hooks.test.tsx` exactly as §3k's adaptation step does for `client.ts` and
+`msw-setup.ts`; re-export (and import in the test) the hook orval generated for
+the operation `client.ts`'s seam calls, and keep `selectOrderSummaries` in step
+with that seam. #727's ESLint boundary already exempts `src/api/**` and `src/test/**`, so no
+config layer changes here.
+
+**Layer ordering — `src/api/index.ts` joins the compose-don't-clobber list.**
+§3d base javascript → §3k contract-consumer → §3k.5 React overlay → **this
+step**. Beside `eslint.config.js` and `vitest.config.ts`, the React barrel is the
+third file a React layer supersedes by **composition**: it keeps
+`export * from "./client"` (§3k's ACL seam) and **adds**
+`export * from "./hooks"` — never replaces it, and never imports from
+`generated/`. Overwrite the on-disk `src/api/index.ts` without a prompt only
+when it is §3k's barrel template byte for byte (its known predecessor); a file
+already identical to the React barrel is idempotency rule 2. Anything else takes
+**idempotency rule 3's diff prompt**; if it resolves to skip, keep the user's
+barrel, **withhold `src/api/hooks.test.tsx`** (it imports the hook through the
+barrel), and record a Step 5 item asking for `export * from "./hooks"` to be
+added.
+
+**The app-level provider — a §4c-class confirmed edit in `src/main.tsx`.** The
+hooks need one `QueryClientProvider` above them. Vite owns `src/main.tsx`, so
+this is an **edit**, never a render:
+
+```tsx
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+
+const queryClient = new QueryClient();
+// …wrap the rendered tree:
+//   <QueryClientProvider client={queryClient}><App /></QueryClientProvider>
+```
+
+- **Idempotent skip** when `src/main.tsx` already mounts a
+  `QueryClientProvider`.
+- **Confirm before editing**: show the diff and ask; the plan approval alone
+  does not cover it.
+- **Snapshot `src/main.tsx` first.** On a failed edit, a decline, no answer, or
+  no `<App />` to wrap, restore the pre-edit snapshot and record a Step 5 TODO
+  naming the provider to mount by hand. The rest of the binding stays — the
+  example test brings its own provider.
+
+**Why the hooks are re-exported, not wrapped — the deprecation pass
+condition.** With `useDeprecatedOperations: true` and #707's input transformer
+in `orval.config.ts`, an operation the spec marks `deprecated: true` renders a
+`@deprecated` JSDoc on the generated hook itself. `hooks.ts` **re-exports** that
+hook, so the symbol — and its JSDoc — survives into app code; a wrapper
+function would swallow the warning into its own body. **Pass condition:** given
+a spec with a `deprecated: true` operation, `npx eslint src` reports
+`@typescript-eslint/no-deprecated` on the line in the component that calls
+`useGetOrders()` — and with the bootstrapped pre-commit hook's
+`--max-warnings=0`, that fails the commit. It is **executed under #1063**.
+
+**One thing #1063 must confirm first.** #727's `src/api/client.ts` imports the
+operation function (`getOrders`) directly, and orval's `react-query` client
+emits it alongside the hook, so that ACL seam should still resolve. If it ever
+does not, the fix is local to `client.ts` — route its seam through the hook's
+query function — not to this step.
+
+Verification here is **structural** (`tests/react-templates.bats`); really
+rendering, installing, generating and running the tree — the example test green
+with no backend, the deprecation warning at the call site — is the
+render-and-build smoke check's job (#1063).
 
 ### 3l. Infrastructure-as-code repos (no application language) — #1154
 
