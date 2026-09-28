@@ -1,7 +1,8 @@
 #!/usr/bin/env bats
 #
 # The `persona_derivations` story-spec field and the corner-case derivation it
-# records (#1361, slice 1 of epic #1266), plus the `ux` slice (#1362, slice 2).
+# records (#1361, slice 1 of epic #1266), plus the `ux` slice (#1362, slice 2)
+# and the `consistency` slice (#1363, slice 3).
 #
 # WHY THIS FILE EXISTS: the whole deliverable of #1361 is PROSE — a field added
 # to ARCHITECTURE.md's *Story-spec contract* and a derivation section added to
@@ -281,13 +282,20 @@ json_after() {
 }
 
 
-@test "contract: the staged rollout is stated — corner-cases and ux ship, consistency is reserved" {
+@test "contract: the staged rollout is stated — corner-cases, ux and consistency all ship" {
   run -0 extract "$ARCH" "$DERIV_START" "$SECTION_END_3"
   contains "$output" '**Staged rollout.**'
   contains "$output" '#1361 shipped the `corner-cases` slice and #1362 the `ux` slice'
-  contains "$output" 'landed as an `acceptance_criteria[]` entry'
+  contains "$output" '`failure_costs` and landed as an `acceptance_criteria[]` entry'
+  contains "$output" '`read-prior-story-specs.zsh` and landed as an `acceptance_criteria[]` entry once the human accepts it'
   contains "$output" 'a UI/UX consequence the human accepted, derived from a persona'"'"'s `role`, `context`, `proficiency` or `failure_costs`'
-  contains "$output" '`consistency` is reserved for #1363'
+  contains "$output" '#1363 shipped the `consistency` slice'
+  contains "$output" 'Its `persona` is `null` where no single persona drives it'
+  contains "$output" 'read from their own `story-spec/v1` blocks by `read-prior-story-specs.zsh`'
+  contains "$output" 'its `basis` names the precedent rather than a persona field (`precedent — #1201, #1244`)'
+  contains "$output" 'All three values are now produced.'
+  # The un-reserving is the deliverable (#1363 AC 11): the old sentence must go.
+  lacks "$output" 'is reserved for #1363'
 }
 
 @test "contract: the subsection ends where it does today, so an inserted section reds loudly" {
@@ -330,11 +338,18 @@ json_after() {
   contains "$output" 'Its `ref` points *into the same block*'
 }
 
-@test "parity: the producer states the slice boundary, so #1363 must edit it deliberately" {
-  file_has "$REFINER" 'You produce two `slice` values today:'
-  file_has "$REFINER" '`corner-cases` (targeting `test_cases`) and `ux` (#1362, targeting'
-  file_has "$REFINER" '`acceptance_criteria`, recorded only for a consequence the human accepted);'
-  file_has "$REFINER" '`consistency` arrives with #1363.'
+@test "parity: the producer states all three slices, consistency landed with #1363" {
+  file_has "$REFINER" 'You produce all three `slice` values:'
+  file_has "$REFINER" '`corner-cases` (targeting `test_cases`), `ux` (#1362, targeting'
+  file_has "$REFINER" '`acceptance_criteria`, recorded only for a consequence the human accepted) and'
+  file_has "$REFINER" '`consistency` (#1363, targeting `acceptance_criteria`, recorded only for a'
+  file_has "$REFINER" '`precedent — #<n>, #<n>`).'
+  run grep -qF '`consistency` arrives with #1363' "$REFINER"
+  [ "$status" -eq 1 ]
+}
+
+@test "parity: the contract states the consistency basis form the producer writes" {
+  file_has "$ARCH" 'for `consistency`, the prior issues, e.g. `precedent — #1201, #1244`'
 }
 
 # ---------------------------------------------------------------------------
@@ -682,9 +697,9 @@ json_after() {
   [ "$status" -eq 0 ]
 }
 
-@test "example: the producer's derivations use only the slices shipped today (corner-cases, ux)" {
+@test "example: the producer's derivations use only the closed slice vocabulary" {
   json_after "$REFINER" '^## Output — one JSON object only' > "$BATS_TEST_TMPDIR/refiner.json"
-  run jq -e 'all(.proposed_story_spec.persona_derivations[]; .slice == "corner-cases" or .slice == "ux")' "$BATS_TEST_TMPDIR/refiner.json"
+  run jq -e 'all(.proposed_story_spec.persona_derivations[]; .slice == "corner-cases" or .slice == "ux" or .slice == "consistency")' "$BATS_TEST_TMPDIR/refiner.json"
   [ "$status" -eq 0 ]
 }
 
@@ -793,7 +808,7 @@ UX_START='^## UI/UX consequences from a persona'
 
 @test "ux: the section ends where it does today, so an inserted section reds loudly" {
   run -0 extract "$REFINER" "$UX_START" "$SECTION_END_2"
-  ends_with "$output" '## Output — one JSON object only'
+  ends_with "$output" '## Cross-feature consistency from prior story-specs (#1363)'
 }
 
 @test "ux: the turn and the repo-mining steps both point at the persona's conditions" {
@@ -908,4 +923,121 @@ UX_START='^## UI/UX consequences from a persona'
   json_after "$REFINER" '^## Output — one JSON object only' > "$BATS_TEST_TMPDIR/refiner.json"
   run jq -e '[.proposed_story_spec.persona_derivations[] | select(.slice == "ux")] | length > 0 and all(.[]; .target == "acceptance_criteria")' "$BATS_TEST_TMPDIR/refiner.json"
   [ "$status" -eq 0 ]
+}
+
+
+# ---------------------------------------------------------------------------
+# Slice 3 (#1363) — cross-feature consistency from prior story-specs
+# ---------------------------------------------------------------------------
+#
+# The deliverable is prose again, plus the reader (tests/read-prior-story-specs.bats
+# pins the script). The objection is pinned hardest for the same reason as the
+# UI/UX one: it BLOCKS, so its fixed wording and its human-keyed waiver are what
+# keep the loop convergent.
+
+CONS_START='^## Cross-feature consistency from prior story-specs'
+
+@test "consistency: the section ends where it does today, so an inserted section reds loudly" {
+  run -0 extract "$REFINER" "$CONS_START" "$SECTION_END_2"
+  ends_with "$output" '## Output — one JSON object only'
+}
+
+@test "consistency: the turn and the repo-mining steps both point at the prior stories" {
+  file_has "$REFINER" '6. **Check the story against its predecessors on the same surface** (below):'
+  file_has "$REFINER" '- **Read the prior stories on each classified surface**'
+}
+
+@test "consistency: the reader runs once per classified surface, deduplicated, silent on no surface (AC 6)" {
+  run -0 extract "$REFINER" "$CONS_START" "$SECTION_END_2"
+  contains "$output" 'zsh <resolved path> --repo <input repo> --surface <surface>'
+  contains "$output" 'For **each** surface in the `interface_surfaces` you classify for the story this turn, run the reader through `Bash`, read-only'
+  contains "$output" '**deduplicate by issue number**'
+  contains "$output" '**Classify no surface (`interface_surfaces: []`) and skip the slice silently**'
+  contains "$output" 'no reader call, no recommendation, no objection'
+  contains "$output" 'The slice does **not** need a persona: it reads precedent, not a registry.'
+  contains "$output" 'against the input `repo` and nothing else — a convention from another repo is not this repo'"'"'s convention'
+}
+
+@test "consistency: the reader is located in the installed plugin, highest version, and reads completed stories only" {
+  run -0 extract "$REFINER" "$CONS_START" "$SECTION_END_2"
+  contains "$output" '/plugins/cache/*/development/*/skills/refine-issue/scripts/read-prior-story-specs.zsh(N.nOn[1])'
+  contains "$output" 'drawn only from stories closed as completed'
+  contains "$output" 'An empty result means no installed copy; when the target repo is this plugin'"'"'s own repo, its working-tree copy at'
+}
+
+@test "consistency: every reader exit has its own branch" {
+  run -0 extract "$REFINER" "$CONS_START" "$SECTION_END_2"
+  contains "$output" 'Its stderr skip lines (a prior issue with no usable block) are informational, not a problem to report.'
+  contains "$output" '- **`1`** — no completed refined story on that surface among the 30 newest closed issues: the normal early state.'
+  contains "$output" '- **`2`** — your own malformed invocation: fix it and re-run once; a second `2` is a `3`.'
+  contains "$output" '**`3`**, any other exit, or a reader you cannot find — say in a `recommendations` entry that the precedent could not be read, quoting its stderr, and skip the slice.'
+}
+
+@test "consistency: newest wins among disagreeing predecessors, and only touched decisions are weighed" {
+  run -0 extract "$REFINER" "$CONS_START" "$SECTION_END_2"
+  contains "$output" 'When the prior blocks disagree among themselves, the **newest** block'"'"'s choice is the settled one'
+  contains "$output" 'only the blocks that agree with it settle it'
+  contains "$output" 'never import a predecessor'"'"'s unrelated criteria'
+  contains "$output" 'A prior block settles a decision through its `acceptance_criteria[]`'
+  contains "$output" 'when it makes, or leaves open, a choice on the same question'
+}
+
+@test "consistency: the settled choice is proposed as a recommendation naming the prior issues (AC 7)" {
+  run -0 extract "$REFINER" "$CONS_START" "$SECTION_END_2"
+  contains "$output" '**Propose the settled choice** as a `recommendations` entry'
+  contains "$output" '**naming the prior issue numbers** it came from'
+  contains "$output" '**Never land it unilaterally**'
+}
+
+@test "consistency: a contradiction is a resolved:false objection in one fixed wording (AC 8)" {
+  run -0 extract "$REFINER" "$CONS_START" "$SECTION_END_2"
+  contains "$output" '`Consistency: this story re-opens "<criterion>", which #<n>[, #<n>…] settled; conform, or state the divergence.`'
+  contains "$output" 'append a `resolved_objections` entry with `resolved: false`'
+  contains "$output" '`<criterion>` is copied **verbatim** from the **newest** settling prior block'"'"'s `acceptance_criteria[]` entry'
+  contains "$output" 'prior block that settles it, in **ascending** order'
+  contains "$output" 'unless that exact string already arrives in your input `objections`'
+  contains "$output" 'makes a different choice on the settled question'
+  contains "$output" 'One entry per contradicted criterion.'
+  contains "$output" 'An input `Consistency:` objection that this turn does not raise again is reported `resolved: true` with a note saying why'
+  contains "$output" 'the string that supersedes it, the precedent no longer settling it, or the story no longer touching its surface'
+  contains "$output" 'A read that failed supersedes no `Consistency:` objection on its surface.'
+}
+
+@test "consistency: conforming resolves it with a note saying how (AC 8)" {
+  run -0 extract "$REFINER" "$CONS_START" "$SECTION_END_2"
+  contains "$output" '**Conforms** — the story now makes the settled choice'
+  contains "$output" 'Report the entry `resolved: true` with a note saying how'
+}
+
+@test "consistency: a chosen divergence waives it for the session, keyed on the human's words (AC 8)" {
+  run -0 extract "$REFINER" "$CONS_START" "$SECTION_END_2"
+  contains "$output" "**the human's divergence reason as the \`note\`**"
+  contains "$output" 'in `human_reply` or in any human turn of `conversation`, that this story deliberately diverges'
+
+  contains "$output" '**Raised at most once per session, with no refiner memory**'
+  contains "$output" "the waiver is the **human's** words, and the conductor's \`conversation\` is cumulative"
+  contains "$output" 'Never report it `resolved: false` again in that session.'
+}
+
+@test "consistency: an empty reader result is stated, never filled with an invented convention (AC 9)" {
+  run -0 extract "$REFINER" "$CONS_START" "$SECTION_END_2"
+  contains "$output" 'no prior story-specs were found for the `<surface>` surface, so cross-feature consistency was skipped'
+  contains "$output" 'Never invent a convention from nothing.'
+  contains "$output" 'A failed read is never evidence that there is no convention.'
+}
+
+@test "consistency: an accepted choice lands with a consistency record; nothing else yields one (AC 10)" {
+  run -0 extract "$REFINER" "$CONS_START" "$SECTION_END_2"
+  contains "$output" '`slice: "consistency"`'
+  contains "$output" '`persona: null` where no single persona drives it'
+  contains "$output" '`basis` naming the prior issues as `precedent — #<n>, #<n>` (ascending)'
+  contains "$output" '`target: "acceptance_criteria"`'
+  contains "$output" '`ref` the criterion **verbatim**'
+  contains "$output" 'A recommendation or an objection on its own yields **no** record'
+  contains "$output" 'a chosen divergence yields none either: the waiver `note` is its record'
+}
+
+@test "consistency: the output rules name the consistency objection as a new-blocker case" {
+  file_has "$REFINER" 'The consistency objection'
+  file_has "$REFINER" '(#1363) is another, in its own fixed wording; a chosen divergence resolves it'
 }

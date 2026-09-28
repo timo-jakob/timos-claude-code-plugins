@@ -63,7 +63,10 @@ Your prompt gives you **one JSON object**:
 5. **Derive the UI/UX consequences of each referenced persona's conditions**
    (below), and challenge a story that ignores one — the step most often
    forgotten, which is why it is a step and not an afterthought.
-6. **Ask only what's still genuinely open** — never re-ask something the reply
+6. **Check the story against its predecessors on the same surface** (below):
+   propose the choices the last five refined stories already settled, and
+   challenge a story that re-opens one without saying so.
+7. **Ask only what's still genuinely open** — never re-ask something the reply
    or the repo already answered.
 
 ## Repo mining — ground the outside-in draft
@@ -97,6 +100,11 @@ authoring it. Draft it from real evidence (`Read`/`Grep`/`Glob`; `Bash` for
   `context`, `proficiency` and `failure_costs` (all required `personas/v1`
   fields). `data_traits` say what the persona *types*; these say what the surface
   is *used under*, and they drive the UI/UX section below (#1362).
+- **Read the prior stories on each classified surface** — the `story-spec/v1`
+  blocks of the newest completed refined stories that declare it, via
+  `read-prior-story-specs.zsh` (#1363). Those blocks record the decisions a new
+  story on the same surface should not re-decide, and they drive the
+  cross-feature consistency section below.
 
 ## Corner cases from `data_traits` — enumerate, don't invent (#1361)
 
@@ -326,6 +334,128 @@ requires it); when it no longer arrives, omit it. Never report it
 referenced id that does not resolve, the `/development:define-personas`
 recommendation above is the whole response: there are no conditions to read.
 
+## Cross-feature consistency from prior story-specs (#1363)
+
+Slices 1 and 2 make one story reason from its persona. Neither makes story *N*
+look like stories *N-1 … N-5*. The decisions that get re-explained are the ones
+already made and already landed — the error-body shape, the pagination
+convention, how a list endpoint filters, what a validation failure returns,
+where the idempotency key goes — and each is recorded in a prior story's
+`story-spec/v1` block. A feature built inconsistently with its predecessors
+costs a rewrite, not a fix; raise it here, where it is still a sentence.
+
+**Read the predecessors — once per classified surface.** For **each** surface in
+the `interface_surfaces` you classify for the story this turn, run the reader
+through `Bash`, read-only, against the input `repo` and nothing else — a
+convention from another repo is not this repo's convention:
+
+```bash
+zsh <resolved path> --repo <input repo> --surface <surface>
+```
+
+It ships in this plugin, not in the target repo, so resolve its path with one
+`Bash` call — a zsh glob that sorts the installed versions numerically and takes
+the highest:
+
+```bash
+zsh -c 'print -r -- ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/cache/*/development/*/skills/refine-issue/scripts/read-prior-story-specs.zsh(N.nOn[1])'
+```
+
+An empty result means no installed copy; when the target repo is this plugin's
+own repo, its working-tree copy at
+`development/skills/refine-issue/scripts/read-prior-story-specs.zsh` serves
+instead. It prints up to five `{"issue": <n>, "spec": <block>}` JSON Lines,
+newest first, drawn only from stories closed as completed — a story closed as
+not planned or as a duplicate settled nothing. When a multi-surface story yields the same prior issue on two
+surfaces, **deduplicate by issue number** — one prior story is one precedent.
+Branch on its exit:
+
+- **`0`** — the records are your precedent. Its stderr skip lines (a prior issue
+  with no usable block) are informational, not a problem to report.
+- **`1`** — no completed refined story on that surface among the 30 newest
+  closed issues: the normal early state.
+  Say so in a `recommendations` entry — *no prior story-specs were found for the
+  `<surface>` surface, so cross-feature consistency was skipped* — and skip this
+  slice for that surface. Never invent a convention from nothing.
+- **`2`** — your own malformed invocation: fix it and re-run once; a second `2`
+  is a `3`.
+- **`3`**, any other exit, or a reader you cannot find — say in a `recommendations` entry that
+  the precedent could not be read, quoting its stderr, and skip the slice. A
+  failed read is never evidence that there is no convention.
+
+**Classify no surface (`interface_surfaces: []`) and skip the slice silently** —
+no reader call, no recommendation, no objection — exactly as slices 1 and 2 say
+nothing for a no-surface story. The slice does **not** need a persona: it reads
+precedent, not a registry.
+
+**Find the decisions the story re-opens.** A prior block settles a decision
+through its `acceptance_criteria[]` — the part `resolve-issue` binds a build to,
+so the part that actually landed. The story **re-opens** a settled decision when
+it makes, or leaves open, a choice on the same question: an error-body shape of
+its own, a different pagination scheme, a validation failure it words
+differently. Weigh only the decisions the story actually touches; never import a
+predecessor's unrelated criteria. When the prior blocks disagree among
+themselves, the **newest** block's choice is the settled one — a later story
+that diverged by choice moved the convention — and only the blocks that agree
+with it settle it.
+
+**Propose the settled choice** as a `recommendations` entry: the choice worded as
+a ready-to-adopt acceptance criterion, **naming the prior issue numbers** it came
+from, so the human can check the precedent rather than take it on faith.
+**Never land it unilaterally** — a criterion the human never agreed to would
+bind at build time just the same, so it reaches the block only once accepted.
+
+### The consistency objection — divergence is chosen, never defaulted into (#1363)
+
+When the story **contradicts** a settled convention — the human-authored
+`issue.body`, or an `acceptance_criteria[]` entry in the block you are emitting,
+makes a different choice on the settled question — and the human has neither
+**conformed** nor **waived** it, append a `resolved_objections` entry with
+`resolved: false`, with the proposal above as its matching recommendation — per
+the new-blocker rule in the output section — unless that exact string already
+arrives in your input `objections`, where the verbatim-echo rule already reports
+it. One entry per contradicted criterion.
+
+Word the entry's `objection` in one fixed form, so the same contradiction yields
+the same string on every turn — the conductor correlates objections by exact
+string, as it does the UI/UX objection:
+`Consistency: this story re-opens "<criterion>", which #<n>[, #<n>…] settled; conform, or state the divergence.`
+`<criterion>` is copied **verbatim** from the **newest** settling prior block's
+`acceptance_criteria[]` entry, never paraphrased; the issue numbers are **every**
+prior block that settles it, in **ascending** order, comma-separated. An input
+`Consistency:` objection that this turn does not raise again is reported
+`resolved: true` with a note saying why — the string that supersedes it, the
+precedent no longer settling it, or the story no longer touching its surface.
+A read that failed supersedes no `Consistency:` objection on its surface.
+
+- **Conforms** — the story now makes the settled choice (the human accepted the
+  proposal, or edited the body). Report the entry `resolved: true` with a note
+  saying how.
+- **Waives** — the human has said, in `human_reply` or in any human turn of
+  `conversation`, that this story deliberately diverges. Report the entry
+  `resolved: true` with **the human's divergence reason as the `note`** (their
+  own words, when they gave no reason). Divergence is a legitimate answer: the
+  goal is that it be **chosen**, not defaulted into.
+
+**Raised at most once per session, with no refiner memory** — for the same
+reason as the UI/UX objection: the waiver is the **human's** words, and the
+conductor's `conversation` is cumulative, so a waived contradiction can never
+trigger again. After the waiver, echo the entry `resolved: true` with the same
+note whenever it still arrives in your input `objections`; when it no longer
+arrives, omit it. Never report it `resolved: false` again in that session.
+
+**Land an accepted settled choice in `acceptance_criteria[]`, and tag it.** Once
+the human has accepted it — in `human_reply`, or in an earlier human turn of
+`conversation` — every block you emit from then on carries it as an
+`acceptance_criteria[]` entry (in the human's wording, when they reworded it) and
+a matching `persona_derivations[]` record: `slice: "consistency"`,
+`persona: null` where no single persona drives it (the driving persona's id when
+one does), `basis` naming the prior issues as `precedent — #<n>, #<n>` (ascending),
+`target: "acceptance_criteria"`, and `ref` the criterion **verbatim**. A
+recommendation or an objection on its own yields **no** record — neither is in
+the block, so a record could not resolve — and a chosen divergence yields none
+either: the waiver `note` is its record.
+
 ## Output — one JSON object only
 
 Emit exactly one fenced `json` block and no other prose. Shape:
@@ -413,27 +543,32 @@ Rules for the payload:
   approved prose is authoritative). Emit `null` for the whole field until the
   story is settled enough to summarise.
 - **`proposed_story_spec.persona_derivations`** (#1361) — one record per entry
-  **you** derived from a persona, so a later reader can tell persona reasoning
-  from what the human authored. Five fields, uniform across every slice:
+  **you** derived from a persona — or, for `consistency`, from a prior story's
+  precedent — so a later reader can tell persona reasoning from what the human
+  authored. Five fields, uniform across every slice:
   `slice` (`corner-cases` | `ux` | `consistency`), `persona` (the registry id, or
-  `null` when no single persona drives it), `basis` (what in the persona drove
-  it — name the field, e.g. `data_traits.site_name — unicode + ampersands`),
+  `null` when no single persona drives it), `basis` (what drove it — for a
+  persona, name the field, e.g. `data_traits.site_name — unicode + ampersands`),
   `target` (`test_cases` | `acceptance_criteria`), and `ref` — a
   `test_cases[].id` when `target` is `test_cases`, else the
   `acceptance_criteria` string **verbatim**. Every `ref` must resolve to an entry
   **in the same block**; never record a derivation for something you did not
   emit. Emit `[]` when you derived nothing — it is optional by contract, so a
-  consumer that ignores it stays correct. You produce two `slice` values today:
-  `corner-cases` (targeting `test_cases`) and `ux` (#1362, targeting
-  `acceptance_criteria`, recorded only for a consequence the human accepted);
-  `consistency` arrives with #1363.
+  consumer that ignores it stays correct. You produce all three `slice` values:
+  `corner-cases` (targeting `test_cases`), `ux` (#1362, targeting
+  `acceptance_criteria`, recorded only for a consequence the human accepted) and
+  `consistency` (#1363, targeting `acceptance_criteria`, recorded only for a
+  settled choice the human accepted, with `basis` naming the precedent as
+  `precedent — #<n>, #<n>`).
 - **`resolved_objections`** — one entry per **input objection** (its `objection`
   field echoing the input string **verbatim**, as in `explanation`), with
   `resolved` (bool) and a one-line `note`. If you surface a **new** blocker this
   turn (a gap the gate didn't name), append it here as a `resolved: false` entry
   too — not *only* to `questions` — so it forces another loop. The UI/UX
   objection (#1362) is one such blocker, in its fixed wording; its waiver
-  resolves it with the human's reason as the `note`. This drives the
+  resolves it with the human's reason as the `note`. The consistency objection
+  (#1363) is another, in its own fixed wording; a chosen divergence resolves it
+  the same way. This drives the
   conductor's control flow: the skill **converges only when every
   `resolved_objections` entry is `resolved: true` AND `questions` is `[]`**;
   otherwise it **loops**.

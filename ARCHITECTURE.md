@@ -6226,7 +6226,7 @@ One fenced `json` object inside the `<details>`. Shape:
 | `use_case` | object | `{ actor, goal, data_sketch }` — concrete enough to derive realistic test data |
 | `personas` | string[] | persona ids referencing the target repo's `personas/v1` registry (#665). **Advisory; may be `[]`** |
 | `test_cases` | object[] | outside-in cases: `id`, `kind` (`happy` \| `corner` \| `error`), `shape` (given/when/then or request→expected), `tooling` (`curl` \| `grpcurl` \| `playwright` \| `cli`), and `issue` (the linked test-case issue number after spin-out #671, else `null`) |
-| `persona_derivations` | object[] | **Optional (#1361)** — which entries persona reasoning produced: `slice` (`corner-cases` \| `ux` \| `consistency`), `persona` (a `personas/v1` id, or `null`), `basis` (the persona field it came from, with the shape that made it a corner — e.g. `data_traits.site_name — unicode + ampersands`; for `ux`, the condition, e.g. `context — spotty 3G`), `target` (`test_cases` \| `acceptance_criteria`), `ref` (a `test_cases[].id`, or the `acceptance_criteria` string verbatim). `[]` or absent when nothing was derived |
+| `persona_derivations` | object[] | **Optional (#1361)** — which entries persona reasoning produced: `slice` (`corner-cases` \| `ux` \| `consistency`), `persona` (a `personas/v1` id, or `null`), `basis` (the persona field it came from, with the shape that made it a corner — e.g. `data_traits.site_name — unicode + ampersands`; for `ux`, the condition, e.g. `context — spotty 3G`; for `consistency`, the prior issues, e.g. `precedent — #1201, #1244`), `target` (`test_cases` \| `acceptance_criteria`), `ref` (a `test_cases[].id`, or the `acceptance_criteria` string verbatim). `[]` or absent when nothing was derived |
 | `provenance` | object | `{ generated_by, generated_at, prose_sha256 }` — as below |
 
 **No `dependencies` field — deliberately (#583).** Dependencies live in
@@ -6243,7 +6243,8 @@ demonstrate. That placement is what gives the reasoning force, and it needs no
 new consumer.
 
 `persona_derivations[]` exists alongside it for a different job: telling a later
-reader **which entries came from a persona** rather than from the human. Its
+reader **which entries came from a persona** — or, for `consistency`, from a
+prior story's precedent — rather than from the human. Its
 `ref` points *into the same block* — a `test_cases[].id`, or an
 `acceptance_criteria` string verbatim.
 
@@ -6268,8 +6269,13 @@ explicit, recorded here so a later editor does not read it as drift and "fix" it
 **Staged rollout.** #1361 shipped the `corner-cases` slice and #1362 the `ux`
 slice — a UI/UX consequence the human accepted, derived from a persona's `role`,
 `context`, `proficiency` or `failure_costs` and landed as an
-`acceptance_criteria[]` entry. `consistency` is reserved for #1363, so a consumer
-will not see that value until the slice lands.
+`acceptance_criteria[]` entry. #1363 shipped the `consistency` slice — a choice
+the newest completed refined stories on the same surface already settled, read from
+their own `story-spec/v1` blocks by `read-prior-story-specs.zsh` and landed as an
+`acceptance_criteria[]` entry once the human accepts it. Its `persona` is `null`
+where no single persona drives it, and its `basis` names the precedent rather
+than a persona field (`precedent — #1201, #1244`). All three values are now
+produced.
 
 ### Provenance and staleness (shared with `personas/v1`)
 
