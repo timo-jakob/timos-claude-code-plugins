@@ -172,6 +172,89 @@ PAIRS
   done
 }
 
+@test "the IaC gate pair's OWN marker decides ownership, never the workflow's presence (#1633)" {
+  # bootstrap-idempotency-reviewer decides these paths by the file's own iac/
+  # marker; the detector must agree, or a repo with a hand-authored
+  # kubernetes-ci.yml gets told to re-bootstrap its own core.hooksPath hook
+  local target tpl shebang
+  mkdir -p "$REPO/scripts" "$REPO/hooks"
+  write_unmarked_pair() {
+    printf '#!/bin/sh\nmake lint\n' > "$REPO/hooks/pre-push"
+    printf '#!/usr/bin/env zsh\nexit 0\n' > "$REPO/scripts/k8s-gate.zsh"
+  }
+  assert_no_pair_finding() {
+    for target in scripts/k8s-gate.zsh hooks/pre-push; do
+      [ -z "$(printf '%s' "$output" | jq -c --arg t "$target" '.[] | select(.file == $t)')" ]
+    done
+  }
+
+  # (2) an UNMARKED workflow beside the consumer's own unmarked pair: no finding
+  # for the pair (the workflow itself keeps its unknown_provenance — out of scope)
+  printf 'name: kubernetes-ci\n' > "$REPO/.github/workflows/kubernetes-ci.yml"
+  printf '#!/usr/bin/env zsh\nexit 0\n' > "$REPO/scripts/check-no-cluster-deploy.zsh"
+  write_unmarked_pair
+  run env TEMPLATE_CHANGELOG="$CL" zsh "$DRIFT" "$REPO"
+  [ "$status" -eq 0 ]
+  assert_no_pair_finding
+  # ...and the silent skip is the PAIR's alone: the unmarked workflow and the
+  # unmarked sibling under scripts/ are still reported, as every other unmarked
+  # tracked path is
+  for target in .github/workflows/kubernetes-ci.yml scripts/check-no-cluster-deploy.zsh; do
+    [ "$(printf '%s' "$output" | jq -r --arg t "$target" '.[] | select(.file == $t) | .severity')" \
+      = "unknown_provenance" ]
+  done
+  rm "$REPO/scripts/check-no-cluster-deploy.zsh"
+
+  # (3) a MARKED workflow does not make an unmarked pair ours either
+  printf '# claude-bootstrap: rendered from %s @ v0.1.0 sha256:deadbeefdeadbeef\nname: kubernetes-ci\n' \
+    "iac/.github/workflows/kubernetes-ci.yml.tmpl" > "$REPO/.github/workflows/kubernetes-ci.yml"
+  run env TEMPLATE_CHANGELOG="$CL" zsh "$DRIFT" "$REPO"
+  [ "$status" -eq 0 ]
+  assert_no_pair_finding
+
+  # a marker naming a template OUTSIDE iac/ is not ours either — only iac/
+  # renders these two paths
+  printf '#!/bin/sh\n# claude-bootstrap: rendered from common/hooks/pre-push.tmpl @ v0.1.0 sha256:deadbeefdeadbeef\nmake lint\n' \
+    > "$REPO/hooks/pre-push"
+  printf '#!/usr/bin/env zsh\n# claude-bootstrap: rendered from common/scripts/k8s-gate.zsh.tmpl @ v0.1.0 sha256:deadbeefdeadbeef\nexit 0\n' \
+    > "$REPO/scripts/k8s-gate.zsh"
+  run env TEMPLATE_CHANGELOG="$CL" zsh "$DRIFT" "$REPO"
+  [ "$status" -eq 0 ]
+  assert_no_pair_finding
+
+  # (5) NO workflow, but a marked, stale pair: still ours, still drifted
+  rm "$REPO/.github/workflows/kubernetes-ci.yml"
+  while IFS='|' read -r target tpl shebang; do
+    printf '%s\n# claude-bootstrap: rendered from %s @ v0.1.0 sha256:deadbeefdeadbeef\nmake lint\n' \
+      "$shebang" "$tpl" > "$REPO/$target"
+  done <<'PAIRS'
+scripts/k8s-gate.zsh|iac/scripts/k8s-gate.zsh.tmpl|#!/usr/bin/env zsh
+hooks/pre-push|iac/hooks/pre-push.tmpl|#!/bin/sh
+PAIRS
+  run env TEMPLATE_CHANGELOG="$CL" zsh "$DRIFT" "$REPO"
+  [ "$status" -eq 0 ]
+  local f
+  for target in scripts/k8s-gate.zsh hooks/pre-push; do
+    f="$(printf '%s' "$output" | jq -c --arg t "$target" '.[] | select(.file == $t)')"
+    [ -n "$f" ]
+    [ "$(printf '%s' "$f" | jq -r '.severity')" = "drifted" ]
+  done
+
+  # each file is judged by ITS OWN marker: a mixed pair splits, in both
+  # directions — marked half drifted, unmarked half no finding at all
+  local marked unmarked
+  for marked in scripts/k8s-gate.zsh hooks/pre-push; do
+    unmarked=hooks/pre-push; [ "$marked" = hooks/pre-push ] && unmarked=scripts/k8s-gate.zsh
+    write_unmarked_pair
+    printf '#!/bin/sh\n# claude-bootstrap: rendered from iac/%s.tmpl @ v0.1.0 sha256:deadbeefdeadbeef\nmake lint\n' \
+      "$marked" > "$REPO/$marked"
+    run env TEMPLATE_CHANGELOG="$CL" zsh "$DRIFT" "$REPO"
+    [ "$status" -eq 0 ]
+    [ "$(printf '%s' "$output" | jq -r --arg t "$marked" '.[] | select(.file == $t) | .severity')" = "drifted" ]
+    [ -z "$(printf '%s' "$output" | jq -c --arg t "$unmarked" '.[] | select(.file == $t)')" ]
+  done
+}
+
 # --- #689/#1358: the stamp table and the drift array must name the same files -
 #
 # Two lists, one invariant, in different files: SKILL.md Step 3.6's table drives
