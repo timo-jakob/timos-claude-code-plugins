@@ -123,11 +123,17 @@ for target_rel in "${tracked[@]}"; do
   if [[ ! -f "$target_abs" ]]; then
     continue
   fi
-  # the IaC gate pair is bootstrap's only on the §3l path (#1604); elsewhere a
-  # hooks/pre-push is the repo's own core.hooksPath hook, not ours to track
+  # the IaC gate pair (#1604) is ours only when the file carries its OWN
+  # `# claude-bootstrap: rendered from iac/` marker — bootstrap-idempotency-reviewer's
+  # rule for these paths, where an UNMARKED file is the consumer's own (#1633). An
+  # unmarked copy is skipped silently, with no unknown_provenance: both first became
+  # bootstrap artifacts in #1604 and are stamped at Step 3.6, so an unmarked
+  # bootstrap-rendered copy cannot exist. Whether a kubernetes-ci.yml exists does
+  # not decide it either way.
   case "$target_rel" in
     hooks/pre-push|scripts/k8s-gate.zsh)
-      [[ -f "${repo}/.github/workflows/kubernetes-ci.yml" ]] || continue ;;
+      [[ -n "$(head -10 "$target_abs" | grep "^# claude-bootstrap: rendered from iac/" || true)" ]] \
+        || continue ;;
   esac
 
   marker_line=$(head -10 "$target_abs" | grep "^# claude-bootstrap: rendered from " | head -1 || true)
