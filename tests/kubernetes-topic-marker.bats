@@ -1121,10 +1121,10 @@ chart() {
   # keeps the key but drops the coupling warning, which is the edit that breaks
   # the dispatch
   contains "$tp" 'contractual, not informational'
-  # #1160 added a SECOND validating dispatcher, so the rule now names both —
-  # the blast radius of a `.language` rename is two topics, not one, and a
-  # needle on the singular phrasing would understate it
-  contains "$tp" '`development-kubernetes` and `development-opentofu` both do'
+  # #1160 added a SECOND validating dispatcher and #1747 a THIRD, so the rule
+  # names all three — the blast radius of a `.language` rename is three topics,
+  # and a needle on a shorter list would understate it
+  contains "$tp" '`development-kubernetes`, `development-opentofu` and `development-composition` all do'
   contains "$tp" 'never null it, normalise it, or move the topic name to a new key'
   contains "$tp" '`unsupported_topics` as `dispatch failed`'
 }

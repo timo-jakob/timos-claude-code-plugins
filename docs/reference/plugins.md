@@ -672,35 +672,63 @@ boundary is what a composition repo can see, and a composition repo depends on
 constellation testable when a member repo is unavailable or simply not checked
 out.
 
-Like `development-kubernetes` and `development-opentofu`, it **will be able to
-be primary**: a composition repo has no application language of its own, and the
-primary/auxiliary model already allows a topic that slot. It is not there yet —
-the marker (`.claude-workspace.yaml`), the gather script and the dispatcher land
-with
-[#1747](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1747).
-Until they do, `primary: composition` in a `.maintenance.yml` is a **stale
-declaration**: it selects nothing, every detected target dispatches as primary,
-and the run's summary notes the declaration — the same sequence
-`primary: kubernetes` and `primary: opentofu` each passed through.
+Like `development-kubernetes` and `development-opentofu`, it **can be
+primary**: a composition repo has no application language of its own, and the
+primary/auxiliary model already allows a topic that slot. `primary: composition`
+in a `.maintenance.yml` dispatches this plugin in full mode, and every other
+detected topic — `docs`, say — as auxiliary. On a repo **without** a
+`.claude-workspace.yaml` the declaration is **stale**: it selects nothing, every
+detected target dispatches as primary, and the run's summary notes the
+declaration.
 
 **What's built (v0.1):** the ownership boundary, the `claude-workspace/v1`
 contract, and the validator that enforces it
 ([#1744](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1744));
 the bootstrap scaffold with its promote-to-prod workflow
 ([#1745](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1745));
-and the scaffolded Renovate image-tag configuration
-([#1746](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1746)).
+the scaffolded Renovate image-tag configuration
+([#1746](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1746));
+and the topic marker, maintenance gather and dispatcher
+([#1747](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1747)).
 The rest of epic
 [#687](https://github.com/timo-jakob/timos-claude-code-plugins/issues/687)
-follows: the maintenance dispatch
-([#1747](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1747)),
-the injection-hardened bump-triage agent
+follows: the injection-hardened bump-triage agent
 ([#1748](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1748)),
 and the how-to
 ([#1749](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1749)).
-So the plugin ships **no skills and no agents yet** — it ships two scripts and
-the templates the scaffold copies. Bootstrap is the validator's first caller;
-the maintenance gather, its second, is still open.
+So the plugin ships **one skill and no agents** — the maintenance dispatcher —
+plus its scripts and the templates the scaffold copies. Bootstrap is the
+validator's first caller; the maintenance gather is its second.
+
+### Maintenance
+
+`/development:maintenance` detects a composition repo by a
+`.claude-workspace.yaml` **at the repo root** (its own marker recipe; detect-stack
+also emits it as `is_composition`, which nothing reads yet), runs
+`gather-composition-findings.zsh`, and dispatches
+`/development-composition:maintenance`. The gather emits two tool keys:
+
+- **`workspace_validation`** — the validator's verdict on the manifest. A
+  contract violation (`1`) is a finding naming the member or environment and
+  quoting the validator's error; a missing or unreadable manifest (`4`) is a
+  finding of its own. A validator that could not judge the manifest (`2`, `3`
+  or any other status) is **not** a finding — the tool is reported unconfigured
+  and its stderr goes into the gather's notes.
+- **`tag_bump`** — every open Renovate PR (`gh pr list --author app/renovate`,
+  up to 1000, with a note if the listing is full) that touches
+  `.claude-workspace.yaml`, one finding per bump and member naming the PR
+  number, the member and its from->to tag, with the PR's title and body carried
+  verbatim as data. Nothing acts on that text.
+
+| Finding tool | Routed to |
+| --- | --- |
+| `workspace_validation` | escalated to a human (`human_action_required`) — a member's pin is a human decision |
+| `tag_bump` | escalated to a human until the bump-triage agent (`timo-jakob/timos-claude-code-plugins#1748`) ships |
+| a tool that could not run | escalated, quoting the gather's note |
+
+The escalation names the bump-triage issue fully qualified, never as a bare
+number, because it is read inside the composition repo, where a bare `#` number
+links to that repo's own issues.
 
 ### The scaffold and promote-to-prod
 

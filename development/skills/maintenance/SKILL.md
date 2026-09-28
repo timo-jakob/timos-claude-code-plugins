@@ -203,7 +203,7 @@ Validate from `detect.json` (only after a zero exit):
   into Phase 2 and let its Proceed/halt gate decide, because that gate is the
   single halting authority and it halts only when **both** `supported` and
   `supported_topics` are empty. A language-less repo is not necessarily an
-  unworkable one: `claude-plugin`, `docs`, `kubernetes` and `opentofu` are all registered *language-agnostic*
+  unworkable one: `claude-plugin`, `docs`, `kubernetes`, `opentofu` and `composition` are all registered *language-agnostic*
   (Required language `none`), and a GitOps repo with no application language is
   precisely the case the kubernetes topic exists for — halting on it here would
   make that topic permanently undispatchable. **Phase 2 owns the message**; it is
@@ -291,6 +291,7 @@ manifest. Known topics:
 | `react` | `react` in the **`dependencies`** (runtime, **not** `devDependencies`) of **any** `package.json`, monorepo-aware, under `detect_lang`'s prune set (`node_modules`, `.git`, `vendor`, `.build`, `dist`, `templates`). Requires `jq`; **requires language `javascript`** | `gather-react-findings.zsh` |
 | `kubernetes` | a Helm `Chart.yaml`, a Kustomize manifest (`kustomization.yaml`, `kustomization.yml` or `Kustomization` — all three spellings kustomize accepts), **or** a file containing `argoproj.io` — language-agnostic, so it composes with any language, or none | `gather-kubernetes-findings.zsh` |
 | `opentofu` | any `*.tf`, pruning `.terraform/` (the provider cache) and vendored trees — language-agnostic, so it composes with any language, or none. `.tf.json` is owned by the charter but deliberately **not** matched; ARCHITECTURE.md records why | `gather-opentofu-findings.zsh` |
+| `composition` | a `.claude-workspace.yaml` **file at the repo root** (the `claude-workspace/v1` constellation manifest, #1747) — language-agnostic, and in practice alone, since a composition repo holds no application code | `gather-composition-findings.zsh` |
 
 **Detecting a marker — use these exact recipes, don't improvise.** A
 *file-presence* marker (the `claude-plugin` dir) is robust to test with
@@ -444,6 +445,14 @@ else
   false
 fi
 # opentofu-marker:end
+
+# composition marker (file presence at the repo root — robust, #1747).
+# A PREDICATE like every recipe above: its exit status is the verdict. One
+# `test -f` on one path reads no tree, so there is no search that could fail
+# to complete and no third status to signal.
+# composition-marker:begin
+test -f .claude-workspace.yaml
+# composition-marker:end
 ```
 
 `( exit 2 )` rather than a bare `exit 2`: the recipe is a **predicate**, and an
@@ -477,6 +486,17 @@ the other two reject. What is deliberately NOT shared: detect-stack's copy also 
 `cd`/`exit 125` branches, which must never be pasted into the recipe above —
 `$cwd` does not exist there and a bare `exit` would kill the orchestrator's
 shell, which is what the `( exit 2 )` note exists to prevent.
+
+**The `composition-marker:begin`/`:end` sentinels are load-bearing** in the
+same way, and pin a **3-way parity**: `tests/composition-topic-marker.bats`
+executes this recipe and derives the test operator (`-f`) and the path
+(`.claude-workspace.yaml`, root only) from it, from
+`gather-composition-findings.zsh`'s `gather-composition-marker` block and from
+`development/skills/bootstrap/scripts/detect-stack.sh`'s
+`is-composition-marker` block, and requires all three to agree. Root only is
+deliberate: the manifest's placement rule puts it at a composition repo's root
+and never in a member repo (ARCHITECTURE.md, *Workspace manifest*), so a nested
+copy — a test fixture, say — is not a composition repo.
 
 **The `react-marker:begin`/`:end` sentinels are load-bearing**, not decoration:
 `tests/react-topic-marker.bats` extracts exactly the text between them and executes
@@ -698,6 +718,7 @@ marker prose and then quietly skipped:
 | `docs` | none |
 | `kubernetes` | none |
 | `opentofu` | none |
+| `composition` | none |
 | `spring` | `java` |
 | `react` | `javascript` |
 
@@ -1272,12 +1293,12 @@ differences:
 - `language`: the **topic name** (e.g. `"claude-plugin"`) — it identifies the
   dispatch target. Most topic dispatchers don't branch on it, but the value is
   **contractual, not informational**: a topic dispatcher MAY validate it, and
-  `development-kubernetes` and `development-opentofu` both do — each errors and
-  stops when `.language` is not its own topic name, because the v2 payload has no
-  `topic` key for them to check instead. So never null it, normalise it, or move
-  the topic name to a new key without updating the topic dispatchers in the same
-  change: every kubernetes **and** opentofu dispatch would land in
-  `unsupported_topics` as `dispatch failed`.
+  `development-kubernetes`, `development-opentofu` and `development-composition`
+  all do — each errors and stops when `.language` is not its own topic name,
+  because the v2 payload has no `topic` key for them to check instead. So never
+  null it, normalise it, or move the topic name to a new key without updating the
+  topic dispatchers in the same change: every kubernetes, opentofu **and**
+  composition dispatch would land in `unsupported_topics` as `dispatch failed`.
 - `dispatch_mode`: `"primary"` if this topic == the declared `primary` (or no
   declaration); else `"auxiliary"` — same rule as language payloads (Phase 1).
 - `language_meta`: `{ "version": null, "manifests": ["<the topic marker>"] }` —
@@ -1436,6 +1457,11 @@ differences:
 
 - `coverage`: `null` (the topic gather already emits `null`).
 - `tooling_configured` / `findings_by_tool`: straight from `findings-<topic>.json`.
+- `notes`: straight from `findings-<topic>.json` too — **topic payloads only**,
+  and still pooled into Phase 9 as before. A topic dispatcher MAY read them:
+  `development-composition` does, to name *why* a tool it reports unconfigured
+  could not run (the validator's stderr, a failed `gh pr list`) in the
+  `human_action_required` entry it returns (#1747). Never trim them.
 - `policy`, `worktree`: same as language payloads.
 - `dispatch_filter`: **omit for topics.** `--tool` / `--concern` scope the
   *language* tool set (ruff, semgrep, …) and don't name topic tools, so a scoped
@@ -1555,9 +1581,14 @@ The dispatcher's plan response is Phase 8's **input** — and it is
 checkpointed (`phase6-plan`, below, #517), so an interrupted Phase 8
 resumes with the same plan instead of re-dispatching; persistence changes
 nothing about turn flow.
-The only events that end a turn before Phase 9 are (a) `human_action_required`,
-(b) all Phase 8 stages complete + Phase 9 summary printed, or (c) the user
-explicitly says "stop".
+The only events that end a turn are (a) all Phase 8 stages complete + Phase 9
+summary printed, or (b) the user explicitly says "stop". **A
+`human_action_required` response is not one of them**: per Phase 7 it ends only
+*that* dispatch target's phases — every other target still proceeds, and the
+turn still ends in Phase 9, which prints the halted target's entries. This is
+the ordinary path, not a corner: `development-composition` escalates every
+finding this way (#1747), so a composition repo with one open bump returns it on
+an ordinary run.
 
 **The language plugin does NOT spawn the per-group work agents** in
 either phase. Work agents are spawned per-group in Phase 8 below so that

@@ -88,6 +88,17 @@
 #                                  dual-marker repo — is #1162's, which is why
 #                                  `iac_only` below still keys on is_kubernetes
 #                                  alone.
+#   is_composition        bool     repo carries the composition TOPIC marker — a
+#                                  `.claude-workspace.yaml` at the repo root
+#                                  (#1747). Kept identical — test operator and
+#                                  path — to the orchestrator's topic-marker
+#                                  recipe and gather-composition-findings.zsh;
+#                                  tests/composition-topic-marker.bats derives
+#                                  all three. Bootstrap never ROUTES on it —
+#                                  its composition path is entered on the
+#                                  user's request — but its Step 1 GUARDS on
+#                                  it: `true` on a run not asked to be a
+#                                  composition run stops before Q4 and §3l.
 #   existing_artifacts    object   path -> true for files we would otherwise generate
 #   missing_artifacts     []string templates expected under THIS repo's conditions
 #                                  (resolved toolchain/languages/bot path) that are absent —
@@ -1616,6 +1627,16 @@ elif [[ "$tofu_find_rc" -ne 0 || "$tofu_filter_rc" -ge 2 ]]; then
 	exit 2
 fi
 # is-opentofu-marker:end
+# The `is-composition-marker:begin`/`:end` sentinels are load-bearing too:
+# tests/composition-topic-marker.bats derives the test operator and the path
+# from this block, from SKILL.md's `composition-marker` recipe and from
+# gather-composition-findings.zsh's own block, and requires all three to agree.
+# One file test at the repo root, so there is no search that could fail to
+# complete and no third state to report.
+# is-composition-marker:begin
+is_composition="false"
+if test -f "$cwd/.claude-workspace.yaml"; then is_composition="true"; fi
+# is-composition-marker:end
 # The infrastructure-as-code tree (SKILL.md §3l, #1154): the kubernetes topic
 # marker with no application language. `.github/workflows/kubernetes-ci.yml`
 # becomes a candidate there — and only there. Without it the one workflow that
@@ -2074,6 +2095,7 @@ cat <<EOF
   "is_claude_plugin": $(json_bool "$is_claude_plugin"),
   "is_kubernetes": $(json_bool "$is_kubernetes"),
   "is_opentofu": $(json_bool "$is_opentofu"),
+  "is_composition": $(json_bool "$is_composition"),
   "existing_artifacts": $artifacts_json,
   "missing_artifacts": $missing_json,
   "github_state": $github_state

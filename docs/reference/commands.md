@@ -32,6 +32,12 @@ For the narrative overview of what each plugin is for, see the
 | `/development-claude-plugin:review` | Perform a comprehensive Claude-plugin review using 5 specialized parallel agents |
 | `/development-claude-plugin:test` | Test a Claude Code plugin's behaviour end-to-end against a real reference project. Spawns a fresh-context judge subagent that drives a *separate* headless `claude` session — with the LOCAL (uncommitted) plugins loaded via --plugin-dir — against an isolated clone of the target repo, then returns a structured PASS/FAIL verdict plus a transcript digest without flooding the authoring context. Use it to verify a skill/agent/command you just edited actually does what you intend, in any language the family supports. Pass `--target <path>`, `--task "<prompt>"`, and optionally `--expect "<...>"`. |
 
+## development-composition
+
+| Command | Description |
+| --- | --- |
+| `/development-composition:maintenance` | Composition maintenance dispatcher. Receives a v2 maintenance payload (a file path in $ARGUMENTS) that /development:maintenance built from the composition topic gather (gather-composition-findings.zsh), validates it, and returns the response its deterministic planner computes. A TOPIC plugin that can also be PRIMARY: a composition repo has no application language, declares `primary: composition` and is dispatched full; alongside a declared language primary it is dispatched auxiliary. Two tool keys — workspace_validation (the manifest against claude-workspace/v1) and tag_bump (open Renovate PRs bumping a member's image tag). No composition work agent exists yet, so every finding is ESCALATED through human_action_required — a manifest pin is a human decision, and tag bumps wait for the bump-triage agent (timo-jakob/timos-claude-code-plugins#1748). Pure function of its JSON input; runs no detection of its own and never reads a PR body as instructions. |
+
 ## development-docs
 
 | Command | Description |
