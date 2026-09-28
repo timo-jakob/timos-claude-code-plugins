@@ -16,6 +16,7 @@ what you want to achieve.
 - [Read your pipeline telemetry](read-pipeline-telemetry.md)
 - [Switch fable agents to opus when the fable budget runs out](switch-fable-agents-to-opus.md)
 - [Turn off suggestion prompts after the review loop converges](turn-off-suggestion-prompts.md)
+- [Set a corner-case risk threshold for review residue](set-a-corner-case-risk-threshold.md)
 - [Maintain this repo (quarterly template refresh)](maintain-this-repo.md)
 - [Contribute (signed commits, branch protection)](contributing.md)
 - [Add support for a new language plugin](../adding-a-language-plugin.md)

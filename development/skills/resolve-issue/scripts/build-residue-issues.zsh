@@ -16,7 +16,7 @@
 #
 # Usage:
 #   build-residue-issues.zsh --status FILE --changelist FILE --issue N
-#                            [--epic N] [--dry-run]
+#                            [--epic N] [--dry-run] [--risk FILE --dropped-file FILE]
 #     --status      the loop status JSON (resolve-story-loop.zsh) — supplies the
 #                   run context each body carries (status, rounds). It must be a
 #                   `CONVERGED_WITH_RESIDUE` run, and specifically the BLOCKING
@@ -39,11 +39,39 @@
 #                   nothing" means here. The plan may therefore contain a
 #                   candidate a live run would have suppressed — that is the
 #                   point of the flag, and it says so on stderr.
+#     --risk        the conductor's risk assessment (#1920): a JSON array of
+#                   { file, line, dimension, title,       ← the finding identity
+#                     p, p_why, impact, impact_why }      ← the assessment
+#                   Read ONLY when the risk threshold (below) is active; with it
+#                   off the flag is accepted and ignored, file unread
+#     --dropped-file  where the DROPPED record is written. Required with --risk:
+#                   a finding the threshold drops must land somewhere the PR body
+#                   can name it, never only in a stream nobody keeps
+#
+# RISK THRESHOLD (#1920): the environment variable `corner_case_risk_threshold`,
+# a decimal in [0, 1] with at most three decimals (`0.05`, `.05`, `1`, `1.0`).
+# Three states. OFF — unset, empty, or any spelling of zero (`0`, `0.0`, `.000`):
+# today's behaviour byte-for-byte, silently. IGNORED — set to anything the rule
+# does not admit (`30`, `1.5`, `-0.1`, `0.0005`, `abc`): behaves exactly like
+# OFF, but is announced once on stderr and in the dropped record. ON — any other
+# value, up to and including 1.
+# When ON, every blocker with an assessment gets
+#   risk = p × impact, compared in INTEGER THOUSANDTHS — p in hundredths times
+#   impact in tenths — against the threshold in thousandths,
+# so no floating-point rounding can move a finding across the boundary: a risk
+# EQUAL to the threshold is kept, one below it is dropped from the plan and
+# written to --dropped-file — with the `issue_title` a filed issue for it would
+# carry, so the caller can tell a dropped finding that an EARLIER run already
+# filed from one that was never filed. A blocker with NO assessment entry is kept — a
+# missing judgement never drops anything. The filter runs BEFORE the plan is
+# built, so --dry-run and the live run drop the same set and their length diff
+# still measures only the idempotency filter.
 #
 # Output (stdout): a JSON array, one object per residual blocking finding:
 #   { title, body, labels: ["review-residue","needs-refinement"], parent }
 # `[]` is a legitimate, successful answer — it means every candidate is already
-# filed (or the changelist has no blockers left).
+# filed (or the changelist has no blockers left, or the risk threshold dropped
+# every one of them — see --dropped-file).
 #
 # LABELS — both, always. `review-residue` is the pinned half of the idempotency
 # key below. `needs-refinement` is load-bearing rather than decoration: linking
@@ -95,14 +123,16 @@
 #           `gh` resolves those placeholders from the repository in the working
 #           directory, which is why this script needs no --repo of its own.
 #
-# Exit codes: 0 ok (including an empty plan) · 2 usage · 1 internal (unreadable
-#             or invalid --status / --changelist, missing jq)
+# Exit codes: 0 ok (including an empty plan) · 2 usage, including a malformed
+#             --risk file while the threshold is on (the message names the file
+#             and the entry) · 1 internal (unreadable or invalid --status /
+#             --changelist, missing jq, an unwritable --dropped-file)
 
 emulate -L zsh
 setopt nounset pipefail
 
 local gh_bin="${GH_BIN:-gh}"
-local usage="usage: build-residue-issues.zsh --status FILE --changelist FILE --issue N [--epic N] [--dry-run]"
+local usage="usage: build-residue-issues.zsh --status FILE --changelist FILE --issue N [--epic N] [--dry-run] [--risk FILE --dropped-file FILE]"
 
 # A value flag with no value, one whose value is the NEXT FLAG, or an explicitly
 # empty one are all caller mistakes that would otherwise surface as something
@@ -116,13 +146,15 @@ _need_val() {  # $1 = flag, $2 = remaining arg count, $3 = candidate value
   [[ -n "$3" ]] || { print -u2 -- "build-residue-issues: $1 requires a non-empty value"; exit 2 }
 }
 
-local status_file="" changelist="" issue="" epic="" dry_run=0
+local status_file="" changelist="" issue="" epic="" dry_run=0 risk_file="" dropped_file=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
   --status) _need_val "$1" $# "${2:-}"; status_file="$2"; shift 2 ;;
   --changelist) _need_val "$1" $# "${2:-}"; changelist="$2"; shift 2 ;;
   --issue) _need_val "$1" $# "${2:-}"; issue="$2"; shift 2 ;;
   --epic) _need_val "$1" $# "${2:-}"; epic="$2"; shift 2 ;;
+  --risk) _need_val "$1" $# "${2:-}"; risk_file="$2"; shift 2 ;;
+  --dropped-file) _need_val "$1" $# "${2:-}"; dropped_file="$2"; shift 2 ;;
   --dry-run) dry_run=1; shift ;;
   -h|--help) print -r -- "$usage"; exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
@@ -130,6 +162,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ -n "$status_file" && -n "$changelist" && -n "$issue" ]] || { print -u2 -- "$usage"; exit 2 }
+# The pair travels together, checked on the ARGUMENTS alone so the refusal does
+# not depend on the environment: --risk without somewhere to write what it drops
+# would make a dropped finding vanish, and --dropped-file alone has nothing to
+# record — a caller who passes it believes a filter ran.
+[[ -z "$risk_file" || -n "$dropped_file" ]] || {
+  print -r -u2 -- "build-residue-issues: --risk requires --dropped-file (a dropped finding must be written somewhere the PR body can name it)"; exit 2 }
+[[ -z "$dropped_file" || -n "$risk_file" ]] || {
+  print -r -u2 -- "build-residue-issues: --dropped-file requires --risk"; exit 2 }
 
 # Both numbers reach jq as RAW JSON via --argjson and GitHub as a URL path
 # segment, so validate the shape here rather than letting a junk value fail
@@ -214,6 +254,204 @@ if [[ -n "$cl_round" && -n "$st_rounds" && "$cl_round" != "$st_rounds" ]]; then
   exit 2
 fi
 
+# --- the rendered issue title --------------------------------------------------
+# ONE definition, prepended to every jq program that needs it: the plan below
+# titles the issues it files with it, and the risk split titles the findings it
+# drops with it, so a dropped finding carries exactly the title an issue for it
+# would have — the only way a caller can tell whether an EARLIER run filed it.
+#
+# The ASSEMBLED title is capped, not just its title component: the file (a
+# reviewer-reported path) and the dimension are unbounded, and a deep plugin path
+# plus a long dimension clears the 256-character GitHub issue-title limit on its
+# own. Over the limit `gh issue create` 422s, and a caller who recovers by
+# shortening the title creates an issue that the key lookup on the next run
+# cannot match — so the re-run duplicates it.
+#
+# But the cap must never eat the TAIL. `<file><linepart> [<dimension>]` is what
+# makes two findings at different places distinguishable, and a naive `[0:250]`
+# truncates from the right — dimension first, then line, then the path — so two
+# findings differing ONLY in dimension (two reviewers on one spot through
+# different lenses: the ordinary case) would render the same string. So the tail
+# is built first and the reviewer text is capped against whatever budget is left,
+# with a floor so the title never becomes only a path.
+#
+# The tail COMPONENTS are bounded first, so the floor can never be reached and
+# the final slice can never fire. Without that, a tail over ~206 characters makes
+# the floor outrank the budget, and the closing `[0:250]` truncates from the
+# right again — eating dimension, then line, then path. The pinned IDEMPOTENCY
+# key is the rendered title: two entries with identical titles mean a
+# partially-failed first run has BOTH filtered out as already-filed on the
+# re-run, and the residual blocker is never filed at all. The bound copies are
+# for the TITLE only — the body still renders the full path and dimension, since
+# it has no length contract to keep.
+local title_defs='
+  # NB: no apostrophes in these definitions — they are single-quoted.
+  def safe: (. // "") | tostring | gsub("[\r\n`]"; " ") | gsub(" +"; " ")
+            | sub("^ +"; "") | sub(" +$"; "");
+  def linepart: if (.line | type) == "number" then ":\(.line)" else "" end;
+  def issue_title:
+    ((.title | safe)[0:120]) as $t
+    | (((.file // "") | safe)[0:120]) as $flt
+    | (((.dimension // "") | safe)[0:40]) as $dimt
+    | ("\($flt)\(linepart) [\($dimt)]") as $tail
+    | ((230 - ($tail | length)) as $budget
+       | "review residue: \($t[0:(if $budget < 24 then 24 else $budget end)]) — \($tail)")
+    # belt and braces only: with the tail bounded above this is a no-op
+    | .[0:250];
+'
+
+# --- the risk threshold (#1920) ---------------------------------------------
+# Parsed ONCE, into integer thousandths, and into one of three states. `off` and
+# `ignored` both leave the plan path below exactly as it was — the byte-identity
+# promise the whole option rests on — and differ only in whether a set value is
+# announced as ignored.
+local thr_raw="${corner_case_risk_threshold-}" thr_state="off" thr_milli=0
+if [[ -n "$thr_raw" ]]; then
+  # One leading digit at most (0 or 1), then up to three decimals. The digit
+  # class is what refuses `30` and `-0.1`; the decimal cap refuses `0.0005`; the
+  # range check below refuses `1.5`, which the shape alone would admit.
+  if [[ "$thr_raw" =~ '^([01]?)(\.([0-9]{1,3}))?$' && "$thr_raw" != "." ]]; then
+    local thr_int="${match[1]:-0}" thr_frac="${match[3]-}"
+    thr_frac="${(r:3::0:)thr_frac}"
+    thr_milli=$(( 10#$thr_int * 1000 + 10#$thr_frac ))
+    if (( thr_milli > 1000 )); then
+      thr_state="ignored"
+    elif (( thr_milli > 0 )); then
+      thr_state="on"
+    fi
+  else
+    thr_state="ignored"
+  fi
+fi
+if [[ "$thr_state" == "ignored" ]]; then
+  thr_milli=0
+  print -r -u2 -- "build-residue-issues: corner_case_risk_threshold='${thr_raw}' is not a decimal in [0, 1] with at most three decimals — IGNORED, so no residue is dropped (e.g. 0.05, not 5 or 30)"
+fi
+
+# The changelist the plan is built from. OFF (or ON with no assessment given) it
+# is the caller's file untouched; ON with an assessment it is a filtered copy
+# whose `.blocking` has lost exactly the dropped findings, order preserved.
+local plan_changelist="$changelist" filtered_cl=""
+_cleanup_filtered() { [[ -n "$filtered_cl" && -e "$filtered_cl" ]] && rm -f -- "$filtered_cl" }
+trap _cleanup_filtered EXIT
+
+# The dropped record, written whenever --dropped-file is given — in every state,
+# so the conductor always holds a statement of what the threshold did (including
+# "it was ignored") rather than inferring it from a file that may not exist.
+local record=""
+record=$(jq -cn --arg raw "$thr_raw" --arg state "$thr_state" --argjson milli "$thr_milli" '
+  { threshold: (if $raw == "" then null else $raw end), threshold_state: $state,
+    threshold_thousandths: (if $state == "on" then $milli else null end),
+    dropped: [], kept: [], unassessed: [], unmatched_assessments: [] }') || {
+  print -r -u2 -- "build-residue-issues: could not build the dropped record"; exit 1 }
+
+if [[ "$thr_state" == "on" && -z "$risk_file" ]]; then
+  print -r -u2 -- "build-residue-issues: corner_case_risk_threshold is set but no --risk assessment was given — nothing is dropped"
+elif [[ "$thr_state" == "on" ]]; then
+  # Every assessment problem is exit 2 and names the file: the assessment is the
+  # conductor's own output, so a bad one is a caller mistake to fix and re-run —
+  # and it must never be read as "drop everything" or "keep everything".
+  [[ ! -d "$risk_file" ]] || { print -r -u2 -- "build-residue-issues: --risk is a directory: $risk_file"; exit 2 }
+  [[ -r "$risk_file" && -s "$risk_file" ]] || {
+    print -r -u2 -- "build-residue-issues: --risk file missing, unreadable or empty: $risk_file"; exit 2 }
+  jq -e -s 'length == 1 and (.[0] | type == "array")' "$risk_file" >/dev/null 2>&1 || {
+    print -r -u2 -- "build-residue-issues: --risk is not exactly one JSON array: $risk_file"; exit 2 }
+
+  # The first defect found, or nothing. `p` is checked for at most two decimals
+  # and `impact` for one of the four anchors by ROUNDING a scaled value and
+  # comparing, never by float equality — 0.29 * 100 is 28.999… in jq.
+  local risk_err=""
+  risk_err=$(jq -r '
+    # NB: no apostrophes in this program — it is single-quoted.
+    def scaled_ok($x; $k): (($x * $k) as $v | ((($v | round) - $v) | fabs) < 0.000001);
+    def nonblank: type == "string" and (gsub("\\s"; "") | length) > 0;
+    def ident: [(.file // ""), (.line // null), (.dimension // ""), (.title // "")];
+    def entry_name($i): "entry \($i) (\((.title // "<no title>") | tostring | .[0:80]))";
+    [ to_entries[] | .key as $i | .value as $e
+      | if ($e | type) != "object" then "entry \($i): not an object"
+        else ($e | entry_name($i)) as $l
+        | if ($e.file | type) != "string" then "\($l): file must be a string"
+          elif ($e.dimension | type) != "string" then "\($l): dimension must be a string"
+          elif ($e.title | type) != "string" then "\($l): title must be a string"
+          elif ((($e.line // null) | type) | . != "number" and . != "null") then "\($l): line must be a number or null"
+          elif ($e.p | type) != "number" or $e.p < 0 or $e.p > 1 or (scaled_ok($e.p; 100) | not)
+            then "\($l): p must be a number in [0, 1] with at most two decimals (got \($e.p | tojson))"
+          elif ($e.impact | type) != "number" or (scaled_ok($e.impact; 10) | not)
+               or ([1, 4, 7, 10] | index($e.impact * 10 | round)) == null
+            then "\($l): impact must be one of 0.1, 0.4, 0.7, 1.0 (got \($e.impact | tojson))"
+          elif ($e.p_why | nonblank | not) then "\($l): p_why must be a non-empty rationale"
+          elif ($e.impact_why | nonblank | not) then "\($l): impact_why must be a non-empty rationale"
+          else empty end
+        end ]
+    + ( [ to_entries[] | select(.value | type == "object") | {i: .key, k: (.value | ident)} ]
+        | group_by(.k) | map(select(length > 1))
+        | map("entry \(.[1].i) duplicates the identity of entry \(.[0].i) — one assessment per finding") )
+    | .[0] // empty' "$risk_file" 2>/dev/null) || {
+    print -r -u2 -- "build-residue-issues: could not validate --risk: $risk_file"; exit 2 }
+  [[ -z "$risk_err" ]] || { print -r -u2 -- "build-residue-issues: malformed --risk $risk_file: $risk_err"; exit 2 }
+
+  # The split. Identity is the loop-wide {file, line, dimension, title} key the
+  # consolidator already uses for --promote and --adjudicated, matched on the
+  # RAW values — the same fields the plan below renders its title from.
+  local split=""
+  split=$(jq -c --argjson milli "$thr_milli" --slurpfile a "$risk_file" "$title_defs"'
+    def ident: [(.file // ""), (.line // null), (.dimension // ""), (.title // "")];
+    # The PR-body table row for a dropped finding, rendered HERE rather than by
+    # the caller: finding titles and rationales are untrusted text, and a
+    # backtick, a pipe or a newline in one would otherwise break the very table
+    # that tells the maintainer what was not filed. safe strips newlines and
+    # backticks; a pipe is escaped, which GitHub honours inside a table cell,
+    # code span included. A null line renders no line part.
+    def cell: safe | gsub("\\|"; "\\|");
+    def table_row($e; $r):
+      "| `\((.title | cell)[0:120])` — `\(((.file // "") | cell)[0:120])\(linepart)`"
+      + " | \($e.p) | \($e.impact) | \($r / 1000) | \($e.p_why | cell); \($e.impact_why | cell) |";
+    ($a[0] | map({k: ident, v: .})) as $as
+    | (.blocking // []) as $b
+    | [ $b[] | . as $f | (ident) as $k
+        | ([ $as[] | select(.k == $k) | .v ] | first) as $e
+        | if $e == null then {f: $f, keep: true, assessed: false}
+          else (($e.p * 100 | round) * ($e.impact * 10 | round)) as $r
+          | {f: $f, keep: ($r >= $milli), assessed: true,
+             rec: { title: ($f.title // ""), issue_title: ($f | issue_title),
+                    file: ($f.file // ""), line: ($f.line // null),
+                    dimension: ($f.dimension // ""), p: $e.p, p_why: $e.p_why,
+                    impact: $e.impact, impact_why: $e.impact_why,
+                    risk: ($r / 1000), risk_thousandths: $r,
+                    row: ($f | table_row($e; $r)) } }
+          end ] as $d
+    | { changelist: (. + {blocking: [ $d[] | select(.keep) | .f ]}),
+        dropped: [ $d[] | select(.keep | not) | .rec ],
+        kept: [ $d[] | select(.keep and .assessed) | .rec ],
+        unassessed: [ $d[] | select(.assessed | not) | (.f.title // "") ],
+        unmatched_assessments: [ $as[] | . as $x
+          | select(any($b[]; ident == $x.k) | not) | ($x.v.title // "") ] }' \
+    -- "$changelist") || { print -r -u2 -- "build-residue-issues: could not apply the risk threshold to $changelist"; exit 1 }
+
+  filtered_cl=$(mktemp "${TMPDIR:-/tmp}/residue-cl.XXXXXX") || {
+    print -r -u2 -- "build-residue-issues: could not create a temp file"; exit 1 }
+  print -r -- "$split" | jq -c '.changelist' > "$filtered_cl" || {
+    print -r -u2 -- "build-residue-issues: could not write the filtered changelist"; exit 1 }
+  plan_changelist="$filtered_cl"
+  record=$(jq -cn --argjson r "$record" --argjson s "$split" \
+    '$r + ($s | {dropped, kept, unassessed, unmatched_assessments})') || {
+    print -r -u2 -- "build-residue-issues: could not build the dropped record"; exit 1 }
+
+  local n_dropped="" n_unmatched=""
+  n_dropped=$(print -r -- "$record" | jq '.dropped | length')
+  n_unmatched=$(print -r -- "$record" | jq '.unmatched_assessments | length')
+  print -r -u2 -- "build-residue-issues: risk threshold ${thr_raw}: ${n_dropped} residual blocker(s) dropped below it — listed in ${dropped_file}, NOT filed"
+  # An entry that matches nothing is a mistyped identity, and its finding is
+  # therefore KEPT — the safe direction, but the conductor meant to drop it and
+  # should know why it was not.
+  (( n_unmatched == 0 )) || print -r -u2 -- "build-residue-issues: ${n_unmatched} --risk entr(y/ies) matched no residual blocker (identity is file + line + dimension + title, exactly) — those findings were not assessed and are kept"
+fi
+
+if [[ -n "$dropped_file" ]]; then
+  print -r -- "$record" > "$dropped_file" || {
+    print -r -u2 -- "build-residue-issues: could not write --dropped-file: $dropped_file"; exit 1 }
+fi
+
 # The parent: the epic when the story has one, else the story itself. Residue
 # belongs to the work it came out of, and an epic that exists is the closer
 # match for "the thing whose next walk must stop and refine this".
@@ -228,11 +466,7 @@ local parent="${epic:-$issue}"
 # title and part of an equality test.
 local plan=""
 plan=$(jq -c --argjson issue "$issue" --argjson parent "$parent" \
-  --slurpfile st "$status_file" '
-  # NB: no apostrophes in this program — it is single-quoted.
-  def safe: (. // "") | tostring | gsub("[\r\n`]"; " ") | gsub(" +"; " ")
-            | sub("^ +"; "") | sub(" +$"; "");
-  def linepart: if (.line | type) == "number" then ":\(.line)" else "" end;
+  --slurpfile st "$status_file" "$title_defs"'
   ($st[0] // {}) as $s
   | [ (.blocking // [])[]
       | . as $f
@@ -241,41 +475,9 @@ plan=$(jq -c --argjson issue "$issue" --argjson parent "$parent" \
       | ((.dimension // "") | safe) as $dim
       | ((.class // "unclassified") | safe) as $cls
       | ((.priority // "High") | safe) as $sev
-      # The ASSEMBLED title is capped, not just its title component: `$fl` (a
-      # reviewer-reported path) and `$dim` are unbounded, and a deep plugin path
-      # plus a long dimension clears the 256-character GitHub issue-title limit
-      # on its own. Over the limit `gh issue create` 422s, and a caller who
-      # recovers by shortening the title creates an issue that the key lookup on
-      # the next run cannot match — so the re-run duplicates it.
-      #
-      # But the cap must never eat the TAIL. `\($fl)\(linepart) [\($dim)]` is
-      # what makes two findings at different places distinguishable, and a naive
-      # `[0:250]` truncates from the right — dimension first, then line, then the
-      # path — so two findings differing ONLY in dimension (two reviewers on one
-      # spot through different lenses: the ordinary case) would render the same
-      # string. So the tail is built first and the reviewer text is capped
-      # against whatever budget is left, with a floor so the title never becomes
-      # only a path.
-      # (NB: no apostrophes in this block — the jq program is single-quoted.)
-      # The tail COMPONENTS are bounded first, so the floor below can never be
-      # reached and the final slice can never fire. Without that, a tail over ~206
-      # characters (`$fl` is an unbounded reviewer-reported path, `$dim` unbounded
-      # too) makes the floor outrank the budget, and the closing `[0:250]`
-      # truncates from the right again — eating dimension, then line, then path.
-      # The consequence is no longer a silent intra-plan drop (`dedupe_key` is the
-      # raw identity now), but the pinned IDEMPOTENCY key is the rendered title:
-      # two entries with identical titles mean a partially-failed first run has
-      # BOTH filtered out as already-filed on the re-run, and the residual blocker
-      # is never filed at all.
-      # bound copies for the TITLE only — the body still renders the full path
-      # and dimension, since it has no length contract to keep
-      | (($fl)[0:120]) as $flt
-      | (($dim)[0:40]) as $dimt
-      | ("\($flt)\($f | linepart) [\($dimt)]") as $tail
-      | ((230 - ($tail | length)) as $budget
-         | "review residue: \($t[0:(if $budget < 24 then 24 else $budget end)]) — \($tail)") as $ttl0
-      # belt and braces only: with the tail bounded above this is a no-op
-      | ($ttl0[0:250]) as $ttl
+      # the rendered title — the idempotency key; issue_title (above) says how
+      # it is capped
+      | ($f | issue_title) as $ttl
       | { title: $ttl,
           body: ( "Left open by the review loop when it ended `\($s.status // "CONVERGED_WITH_RESIDUE")`"
                   + " after \($s.rounds // 0) round(s) on story #\($issue).\n\n"
@@ -320,7 +522,7 @@ plan=$(jq -c --argjson issue "$issue" --argjson parent "$parent" \
   | reduce .[] as $e ({seen: [], out: []};
       if (.seen | index($e.dedupe_key)) != null then .
       else { seen: (.seen + [$e.dedupe_key]), out: (.out + [$e]) } end)
-  | [ .out[] | del(.dedupe_key) ]' -- "$changelist") || {
+  | [ .out[] | del(.dedupe_key) ]' -- "$plan_changelist") || {
   print -u2 -- "build-residue-issues: could not build the plan from $changelist"; exit 1 }
 
 # --- idempotency: drop what the parent already carries ----------------------

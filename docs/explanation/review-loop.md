@@ -292,6 +292,12 @@ the finding's file, line, dimension, severity and *class* — whether it is a
 fresh defect, an incomplete propagation of the last fix, or a test assertion
 that has not caught up.
 
+Not every remaining blocker has to become an issue. With
+[`corner_case_risk_threshold`](../how-to/set-a-corner-case-risk-threshold.md)
+set, the run first assesses each one's probability and impact, and a blocker
+whose risk falls below the floor is listed in the PR — with the assessment
+behind it — instead of filed. Unset, every remaining blocker is filed.
+
 Those issues are attached as **native sub-issues** of the story's epic (or of
 the story itself when there is no epic), and every one is labelled
 `needs-refinement`. What happens next depends on which of those two it was.
