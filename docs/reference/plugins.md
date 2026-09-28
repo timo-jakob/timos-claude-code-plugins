@@ -28,6 +28,14 @@ of this plugin):
 | `PostToolUse` / `Bash` | `skills/cleanup/scripts/cleanup-hook.sh` | After any Bash command containing `gh pr merge` that exits 0 — switches to main, pulls, prunes, deletes merged branches |
 | `PreToolUse` / `Agent` | `hooks/switch-fable-to-opus.zsh` | Only when `switch_fable_to_opus` is truthy — redirects dispatches whose effective model is fable to opus ([how-to](https://timo-jakob.github.io/timos-claude-code-plugins/how-to/switch-fable-agents-to-opus/)) |
 
+**Settings** (environment variables set in the `env` block of your Claude Code
+`settings.json`; nothing else to install):
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `switch_fable_to_opus` | off | `1`, `true` or `yes` turn it on: agents that would run on fable dispatch on opus instead ([how-to](../how-to/switch-fable-agents-to-opus.md)) |
+| `enable_suggestions` | on | `0`, `false`, `no` or `off` turn it off: `/development:resolve-issue` no longer stops after its review loop converges to offer the waived suggestions for promotion. It waives them all and goes straight on to the PR ([how-to](../how-to/turn-off-suggestion-prompts.md)) |
+
 **Skills:**
 
 | Skill | Command | Description |

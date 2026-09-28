@@ -4776,6 +4776,21 @@ round 1) is load-bearing: an overlay applied only once would drop the promoted
 item back to `Low` on round 2 and the phase would converge without doing the
 work.
 
+**The `enable_suggestions` setting turns the promotion offer off.** Whether the
+phase is offered at all is the conductor's decision, not the loop's: the loop
+only ever sees a `--promote` it was handed. The conductor offers it on an
+interactive run with a non-empty waived set **and** the `enable_suggestions`
+environment variable not off — read by `scripts/suggestions-enabled.zsh`, which
+prints `on` or `off`. The default is on, and the truthiness rule is the mirror
+of `switch_fable_to_opus`: `0` / `false` / `no` / `off` in any case are off;
+unset, `""` and every other value are on, so a typo keeps the prompt rather than
+silently waiving what a human meant to see. Off makes an interactive run behave
+like an autonomous one at this gate: no prompt, no `--promote`, no
+`suggestion_promotion` enrichment record, every suggestion waived, and the run
+continues to the PR without stopping. The loop's own behaviour is unchanged.
+User-facing docs: [how-to: turn off suggestion
+prompts](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/docs/how-to/turn-off-suggestion-prompts.md).
+
 **Gate attestation — one full-gate run per round (#981).** On `--resume` the
 loop re-runs `--test-cmd` first to gate the previous round's in-session fix
 (above) — but the driving session has *just* run that identical full suite green

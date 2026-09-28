@@ -774,7 +774,8 @@ The loop consolidates each round (`consolidate-findings.zsh`, §#561) and exits
 with a status JSON + code:
 
 - **`CONVERGED`** (exit 0) → on an **interactive** run with at least one waived
-  suggestion, first offer the **suggestion promotion** phase below (#994) —
+  suggestion, first offer the **suggestion promotion** phase below (#994) — its
+  gate also reads the `enable_suggestions` setting, and skips the phase when off —
   unless this loop *is* the promotion sub-loop, which never re-offers it (the
   phase runs once per story); then proceed to **§4 (Version bump)**. **Keep the
   loop's status JSON**

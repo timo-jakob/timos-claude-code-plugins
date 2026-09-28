@@ -412,6 +412,10 @@ A few properties worth knowing:
 - **Unattended runs are untouched.** An autonomous or headless run is never
   prompted, passes no promoted set, and converges with its suggestions waived —
   behaviour identical to before this existed.
+- **You can switch the offer off.** Set `enable_suggestions` to `0` in your
+  settings and an interactive run behaves like an unattended one here: no
+  prompt, every suggestion waived, straight on to the PR (see
+  [Turn off suggestion prompts](../how-to/turn-off-suggestion-prompts.md)).
 - **The list is every suggestion the run logged**, not just the last round's.
   A suggestion raised in round 1 and never repeated is still un-actioned work,
   so it is still offered.
