@@ -886,6 +886,55 @@ either decision can be re-evaluated on its merits rather than rediscovered.
 Building any of this is the MFE composition epic's job, not this section's:
 these are the positions the machinery is built *to*.
 
+### React bootstrap overlay — React composes onto the javascript tier (#957)
+
+What every React repo shares, whatever its UI shape, is scaffolded by one
+bootstrap overlay; the shell- and remote-specific templates are the MFE
+composition epic's (#1122), and the React Query binding is #958.
+
+- **Template tree.** `development/skills/bootstrap/templates/languages/javascript/react/`
+  is an overlay sub-tier under the `javascript` language templates, the same
+  shape as the `contract-consumer/` overlay (#727), and owned by `development`
+  like every template. It holds exactly six files: `eslint.config.js` and
+  `vitest.config.ts` (the plain React pair), `contract-consumer/eslint.config.js`
+  and `contract-consumer/vitest.config.ts` (the consumer+React pair),
+  `src/test/setup.ts` (registers the jest-dom matchers) and `src/Greeting.test.tsx`
+  (one self-contained example component test). It ships **no** `package.json`
+  and no `package.json.deps`: bootstrap's §3k.5 installs the test pyramid with
+  `npm i -D`, as §3k installs orval and msw.
+- **Prerequisite — bootstrap augments a Vite app, it never creates one.** The
+  entry point is `npm create vite@latest <app> -- --template react-ts`. Vite owns
+  `index.html`, `vite.config.ts`, `src/main.tsx`, `src/App.tsx`, `tsconfig*.json`
+  and the dependency manifest; the overlay owns only the test pyramid and the
+  React config Vite does not provide. *Rationale:* duplicating Vite's scaffold
+  would make this repo pin and renovate the whole React dependency set, a cost
+  the family has never taken on.
+- **Layer-ordering rule — React renders last and keeps every earlier layer.**
+  Four layers can own `eslint.config.js` and `vitest.config.ts`: create-vite's
+  own ESLint config, the base javascript configs (§3d), the contract-consumer
+  variants (§3k) and React (§3k.5). Each React variant is a **full** file — the
+  base or consumer config plus the React lint layer (the rules of hooks,
+  `react-refresh`, browser globals) plus React's own test wiring
+  (`environment: "jsdom"`, the setup module, `mergeConfig` over `./vite.config`).
+  The step installs its devDependencies first and renders nothing if an install
+  fails. It picks the consumer+React pair whenever §3k's machinery is on disk,
+  and overwrites the on-disk file only when it is a **known predecessor of that
+  variant**: the base template byte for byte or an unmodified create-vite
+  `eslint.config.js` (recognised by content) for either variant, plus the
+  consumer and plain React templates for the consumer+React variant — never the
+  consumer template under the plain variant. When the overlay applies, §3d
+  leaves a stock create-vite config or the plain React pair alone and §3k defers
+  its whole config pair to §3k.5, which aborts §3k's scaffold if it cannot finish
+  the consumer+React pair — so no step strips a React layer that a later skip
+  would fail to restore, and no committed config names a discarded file.
+  Anything customised goes through idempotency rule 3's prompt. *Rationale:* a
+  blind overwrite by the last layer would silently drop the ACL boundary and the
+  MSW wiring #958's no-backend test story depends on.
+- **Verified statically here, built elsewhere.** `tests/react-templates.bats`
+  pins the file set, each variant's kept and added content, and the 120-column
+  width; really building, linting and running a rendered tree is the
+  render-and-build smoke check's job (#1063).
+
 ### Deployment — GitOps promotion and immutable references (#1189)
 
 A deployable reaching a cluster is the last link in the polyrepo chain above,
