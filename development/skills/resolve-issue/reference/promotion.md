@@ -4,7 +4,7 @@ On-demand reference for `development/skills/resolve-issue/SKILL.md` — read it 
 step that points here is reached, never up front.
 
 It carries the phase offered on a convergence of an interactive run that
-waived at least one suggestion.
+waived at least one suggestion, unless the `enable_suggestions` setting is off.
 
 Every `<!-- moved: … -->` block below is byte-identical to the text it was
 carved out of; `scripts/verify-reference-move.zsh` proves that against the
@@ -18,6 +18,32 @@ pinned pre-move commit, and is what keeps this file honest.
 > its `--telemetry-file`, where the text below says to pass no
 > `--telemetry-dir`. And every sub-loop invocation of step 4 carries the run's
 > `loop_args`.
+
+**A third gate condition — the `enable_suggestions` setting.** The frozen text
+below says *both conditions*; there are now three. Before offering the phase,
+run:
+
+```bash
+"<skill-base-dir>/scripts/suggestions-enabled.zsh"
+```
+
+It prints `on` or `off` from the `enable_suggestions` environment variable,
+which a human sets in the `env` block of their Claude Code settings. It is on by
+default — unset, `""`, and any unrecognised value are `on`; `0`, `false`, `no`
+and `off`, in any case, are `off`. Take its word; do not judge the variable
+yourself.
+
+- **`on`** → the gate is unchanged: offer the phase when the run is interactive
+  and the waived set is non-empty.
+- **`off`** → **skip the phase entirely**, exactly as an autonomous run does:
+  present no prompt, pass no `--promote`, emit **no** step 3 enrichment record
+  (nothing was offered, so nothing was declined), and converge with every
+  suggestion waived. Say so in one line in the conversation — "suggestion
+  promotion skipped: `enable_suggestions` is off; N suggestion(s) waived" — and
+  continue to the version bump (§4), via the **residue branch** first when the
+  blocking phase ended `CONVERGED_WITH_RESIDUE`. The waived suggestions still
+  land in the dossier's *Waived suggestions* list, as on any run that promotes
+  nothing.
 
 <!-- moved: suggestion-promotion -->
 Low suggestions never block, so every one the panel raises is **waived** the

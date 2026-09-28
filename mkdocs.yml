@@ -96,6 +96,7 @@ nav:
       - Adopt the API styleguide: how-to/adopt-the-api-styleguide.md
       - Read your pipeline telemetry: how-to/read-pipeline-telemetry.md
       - Switch fable agents to opus: how-to/switch-fable-agents-to-opus.md
+      - Turn off suggestion prompts: how-to/turn-off-suggestion-prompts.md
       - Maintain this repo: how-to/maintain-this-repo.md
       - Contribute: how-to/contributing.md
       - Add a language plugin: adding-a-language-plugin.md
