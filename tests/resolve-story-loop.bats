@@ -1688,7 +1688,7 @@ seed_exhausted_wd() {
   local f
   for f in --repo --base --review-cmd --fix-cmd --test-cmd --gate-attest \
            --findings-file --max-rounds --status-file --work-dir --issue --telemetry-file \
-           --carry-accounting; do
+           --carry-accounting --risk; do
     run zsh "$S" "$f"
     [ "$status" -eq 2 ] || { echo "$f dangling: want exit 2, got $status"; return 1; }
     contains "$output" "$f requires a value" || {
@@ -1714,7 +1714,7 @@ seed_exhausted_wd() {
   local f
   for f in --repo --base --review-cmd --fix-cmd --test-cmd \
            --findings-file --max-rounds --status-file --work-dir --issue --telemetry-file \
-           --carry-accounting; do
+           --carry-accounting --risk; do
     run zsh "$S" "$f" "" --no-review
     [ "$status" -eq 2 ] || { echo "$f empty: want exit 2, got $status"; return 1; }
     contains "$output" "$f requires a non-empty value" || {

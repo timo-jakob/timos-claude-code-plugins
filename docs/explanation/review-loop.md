@@ -298,7 +298,15 @@ set, the run first assesses each one's probability and impact, and a blocker
 whose risk falls below the floor is listed in the PR — with the assessment
 behind it — instead of filed. Unset, every remaining blocker is filed.
 
-Those issues are attached as **native sub-issues** of the story's epic (or of
+The same floor also works earlier, inside the loop itself. Each round, the run
+assesses the reviewers' blocking findings. A non-critical one whose risk falls
+below the floor — unless you promoted it or a tool confirmed it — is **demoted
+to a suggestion**: logged in the round's progress
+and in the PR, but not fixed. That keeps the fix pass from spending round after
+round on corner cases nobody would hit. You can still promote any demoted
+finding back at convergence.
+
+The follow-up issues a residue run files are attached as **native sub-issues** of the story's epic (or of
 the story itself when there is no epic), and every one is labelled
 `needs-refinement`. What happens next depends on which of those two it was.
 

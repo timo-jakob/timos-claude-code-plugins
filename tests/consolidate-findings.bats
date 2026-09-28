@@ -9,6 +9,7 @@
 # `run -1` (used by several refusal cases here) needs the 1.5.0 contract
 # declared, or bats warns BW02 on every one of them.
 bats_require_minimum_version 1.5.0
+load assertions
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -1561,4 +1562,346 @@ EOF
   [ "$(echo "$output" | jq -r '.blocking[0].decided')" = "green" ]
   # and the #1435 class stamp rides alongside it
   [ "$(echo "$output" | jq -r '.blocking[0].class')" = "under_assertion" ]
+}
+
+# --- #1921: the risk demotion ------------------------------------------------
+# corner_case_risk_threshold (#1920) applied to every blocking finding the loop
+# consolidates. The conductor's assessment arrives as --risk; the consolidator
+# stamps each assessed item and demotes a WARNING whose risk is below the
+# threshold to a logged suggestion.
+
+# A --risk file for risk-findings.json: one entry per blocking finding, each at
+# a risk that the 0.05 threshold used below would demote were it on.
+_risk_for_fixture() {
+  cat > "$BATS_TEST_TMPDIR/risk.json" <<'EOF'
+[
+ {"file":"development/skills/resolve-issue/scripts/run-gate.zsh","line":40,"dimension":"bugs","title":"exit status lost in a pipeline","p":0.01,"p_why":"only under set +o pipefail","impact":1.0,"impact_why":"a red suite reads green"},
+ {"file":"development/skills/resolve-issue/scripts/run-gate.zsh","line":40,"dimension":"bugs","title":"gate exit status lost in a pipeline","p":0.01,"p_why":"only under set +o pipefail","impact":1.0,"impact_why":"a red suite reads green"},
+ {"file":"development/skills/resolve-issue/scripts/size-preflight.zsh","line":12,"dimension":"performance","title":"rescans the manifest once per file","p":0.02,"p_why":"inventories are small","impact":0.4,"impact_why":"a slower pre-flight"},
+ {"file":"tests/size-preflight.bats","line":88,"dimension":"tests","title":"mutation drops the trailing newline check","p":0.07,"p_why":"the newline rule is rarely edited","impact":0.4,"impact_why":"a malformed line reaches the log"}
+]
+EOF
+}
+
+@test "#1921 AC1 threshold off or ignored: output is byte-identical to the pre-#1921 engine, with or without --risk" {
+  # The golden was captured by running the PRE-#1921 engine — this story's base,
+  # `c664c4e4` — against the same fixture (`--round 2`); the SHA is recorded so
+  # a later editor re-derives it rather than regenerating it from the current
+  # engine, which would only prove the engine agrees with itself.
+  golden="$REPO_ROOT/tests/fixtures/consolidate-findings/risk-changelist.golden.json"
+  fixture="$REPO_ROOT/tests/fixtures/consolidate-findings/risk-findings.json"
+  old_golden="$REPO_ROOT/tests/fixtures/consolidate-findings/no-decided-changelist.golden.json"
+  old_fixture="$REPO_ROOT/tests/fixtures/consolidate-findings/no-decided-findings.json"
+  # SELF-GUARDS: neither golden may carry a #1921 key, and the new fixture must
+  # still exercise dedup (6 findings -> 5 items), a conflict pair, blocking with
+  # both WARNING and CRITICAL, and suggestions.
+  for g in "$golden" "$old_golden"; do
+    run grep -cE 'risk_assessment|demoted|risk_demoted' "$g"
+    [ "$output" = "0" ]
+  done
+  [ "$(jq 'length' "$fixture")" -eq 6 ]
+  [ "$(jq '.blocking | length' "$golden")" -eq 3 ]
+  [ "$(jq '.summary.critical' "$golden")" -ge 1 ]
+  [ "$(jq '.summary.high' "$golden")" -ge 1 ]
+  [ "$(jq '.suggestions | length' "$golden")" -eq 2 ]
+  [ "$(jq '.conflicts | length' "$golden")" -eq 1 ]
+  _risk_for_fixture
+
+  local v
+  for v in UNSET "" 0 0.0 30 1.5 -0.1 0.0005 abc; do
+    for pair in "$fixture:$golden" "$old_fixture:$old_golden"; do
+      if [ "$v" = UNSET ]; then
+        run -0 env -u corner_case_risk_threshold zsh "$S" --findings "${pair%%:*}" --round 2
+        printf '%s\n' "$output" > "$BATS_TEST_TMPDIR/a.json"
+        cmp "${pair##*:}" "$BATS_TEST_TMPDIR/a.json"
+        run -0 env -u corner_case_risk_threshold zsh "$S" --findings "${pair%%:*}" --round 2 --risk "$BATS_TEST_TMPDIR/risk.json"
+      else
+        run -0 env corner_case_risk_threshold="$v" zsh "$S" --findings "${pair%%:*}" --round 2
+        printf '%s\n' "$output" > "$BATS_TEST_TMPDIR/a.json"
+        cmp "${pair##*:}" "$BATS_TEST_TMPDIR/a.json"
+        run -0 --separate-stderr env corner_case_risk_threshold="$v" zsh "$S" --findings "${pair%%:*}" --round 2 --risk "$BATS_TEST_TMPDIR/risk.json"
+      fi
+      printf '%s\n' "$output" > "$BATS_TEST_TMPDIR/b.json"
+      cmp "${pair##*:}" "$BATS_TEST_TMPDIR/b.json"
+    done
+  done
+}
+
+@test "#1921 AC1 threshold off: --risk is accepted and never read (a malformed or missing file is not an error)" {
+  cp "$REPO_ROOT/tests/fixtures/consolidate-findings/risk-findings.json" "$F"
+  echo 'not json' > "$BATS_TEST_TMPDIR/bad.json"
+  run -0 env -u corner_case_risk_threshold zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/bad.json"
+  run -0 env corner_case_risk_threshold=abc zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/does-not-exist.json"
+}
+
+@test "#1921 AC2 demotion at the boundary: 0.049 demoted, 0.05 and 0.42 kept, unassessed kept" {
+  cat > "$F" <<'EOF'
+[
+ {"severity":"WARNING","dimension":"tests","file":"tests/a.bats","line":10,"title":"mutation drops the trailing newline check","description":"d","reviewer":"t"},
+ {"severity":"WARNING","dimension":"code_quality","file":"src/b.zsh","line":20,"title":"exactly at the threshold","description":"d","reviewer":"q"},
+ {"severity":"WARNING","dimension":"bugs","file":"src/c.zsh","line":30,"title":"well above the threshold","description":"d","reviewer":"b"},
+ {"severity":"WARNING","dimension":"bugs","file":"src/d.zsh","line":40,"title":"never assessed","description":"d","reviewer":"b"}
+]
+EOF
+  cat > "$BATS_TEST_TMPDIR/r.json" <<'EOF'
+[
+ {"file":"tests/a.bats","line":10,"dimension":"tests","title":"mutation drops the trailing newline check","p":0.07,"p_why":"rarely edited","impact":0.7,"impact_why":"a shipped skill misbehaves"},
+ {"file":"src/b.zsh","line":20,"dimension":"code_quality","title":"exactly at the threshold","p":0.05,"p_why":"rare","impact":1.0,"impact_why":"a false green"},
+ {"file":"src/c.zsh","line":30,"dimension":"bugs","title":"well above the threshold","p":0.6,"p_why":"common input","impact":0.7,"impact_why":"a hang"}
+]
+EOF
+  run -0 env corner_case_risk_threshold=0.05 zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/r.json"
+  [ "$(echo "$output" | jq '.summary.risk_demoted')" -eq 1 ]
+  [ "$(echo "$output" | jq '.summary.blocking')" -eq 3 ]
+  [ "$(echo "$output" | jq -c '[.blocking[].title] | sort')" = '["exactly at the threshold","never assessed","well above the threshold"]' ]
+  # the demoted item, with its whole record
+  [ "$(echo "$output" | jq '.suggestions | length')" -eq 1 ]
+  echo "$output" | jq -e '.suggestions[0] | .title == "mutation drops the trailing newline check"
+    and .severity == "SUGGESTION" and .priority == "Low" and .blocking == false and .demoted == true
+    and .risk_assessment == {p: 0.07, p_why: "rarely edited", impact: 0.7, impact_why: "a shipped skill misbehaves",
+                             risk: 0.049, risk_thousandths: 49, threshold: "0.05", threshold_thousandths: 50}' >/dev/null
+  # kept assessed blockers carry the stamp and no demoted key; the unassessed one neither
+  echo "$output" | jq -e '.blocking[] | select(.title == "exactly at the threshold")
+    | (.risk_assessment.risk_thousandths == 50) and (has("demoted") | not)' >/dev/null
+  echo "$output" | jq -e '.blocking[] | select(.title == "well above the threshold")
+    | (.risk_assessment.risk_thousandths == 420) and (has("demoted") | not)' >/dev/null
+  echo "$output" | jq -e '.blocking[] | select(.title == "never assessed")
+    | (has("risk_assessment") | not) and (has("demoted") | not)' >/dev/null
+}
+
+@test "#1921 AC2 a demoted item never counts as a surviving blocker in the next round" {
+  cat > "$F" <<'EOF'
+[{"severity":"WARNING","dimension":"tests","file":"tests/a.bats","line":10,"title":"mutation drops the trailing newline check","description":"d","reviewer":"t"}]
+EOF
+  cat > "$BATS_TEST_TMPDIR/r.json" <<'EOF'
+[{"file":"tests/a.bats","line":10,"dimension":"tests","title":"mutation drops the trailing newline check","p":0.01,"p_why":"rare","impact":0.1,"impact_why":"cosmetic"}]
+EOF
+  # round 1 carried it as a blocker; round 2 demotes it — it must not escalate
+  echo '{"blocking":[{"file":"tests/a.bats","dimension":"tests","line":10,"title":"mutation drops the trailing newline check"}]}' > "$BATS_TEST_TMPDIR/prev.json"
+  run -0 env corner_case_risk_threshold=0.05 zsh "$S" --findings "$F" --round 2 --prev "$BATS_TEST_TMPDIR/prev.json" --risk "$BATS_TEST_TMPDIR/r.json"
+  [ "$(echo "$output" | jq '.summary.blocking')" -eq 0 ]
+  [ "$(echo "$output" | jq '.non_converging')" = "false" ]
+  [ "$(echo "$output" | jq -c '.escalation_reasons')" = "[]" ]
+  # control: without the assessment the same round escalates as a survivor
+  run -0 env corner_case_risk_threshold=0.05 zsh "$S" --findings "$F" --round 2 --prev "$BATS_TEST_TMPDIR/prev.json"
+  [ "$(echo "$output" | jq '.non_converging')" = "true" ]
+}
+
+@test "#1921 AC3 never demoted: CRITICAL at p 0, a promoted item, and a tool-red item" {
+  cat > "$F" <<'EOF'
+[
+ {"severity":"CRITICAL","dimension":"security","file":"src/e.zsh","line":50,"title":"token written to the log","description":"d","reviewer":"s"},
+ {"severity":"SUGGESTION","dimension":"code_quality","file":"src/f.zsh","line":60,"title":"rename the helper","description":"d","reviewer":"q"},
+ {"severity":"WARNING","dimension":"contract","file":"docs/g.md","line":70,"title":"MD013 line too long","description":"decides: pre-commit run markdownlint","reviewer":"c","decided":"red"}
+]
+EOF
+  echo '[{"file":"src/f.zsh","line":60,"dimension":"code_quality","title":"rename the helper"}]' > "$BATS_TEST_TMPDIR/promote.json"
+  cat > "$BATS_TEST_TMPDIR/r.json" <<'EOF'
+[
+ {"file":"src/e.zsh","line":50,"dimension":"security","title":"token written to the log","p":0,"p_why":"never reached","impact":0.1,"impact_why":"cosmetic"},
+ {"file":"docs/g.md","line":70,"dimension":"contract","title":"MD013 line too long","p":0,"p_why":"lint only","impact":0.1,"impact_why":"cosmetic"}
+]
+EOF
+  run -0 env corner_case_risk_threshold=1 zsh "$S" --findings "$F" --promote "$BATS_TEST_TMPDIR/promote.json" --risk "$BATS_TEST_TMPDIR/r.json"
+  [ "$(echo "$output" | jq '.summary.blocking')" -eq 3 ]
+  [ "$(echo "$output" | jq '.summary.risk_demoted')" -eq 0 ]
+  echo "$output" | jq -e '.blocking[] | select(.title == "token written to the log")
+    | .severity == "CRITICAL" and .risk_assessment.risk_thousandths == 0 and (has("demoted") | not)' >/dev/null
+  echo "$output" | jq -e '.blocking[] | select(.title == "rename the helper") | .promoted == true and (has("demoted") | not)' >/dev/null
+  echo "$output" | jq -e '.blocking[] | select(.title == "MD013 line too long")
+    | .decided == "red" and .risk_assessment.risk_thousandths == 0 and (has("demoted") | not)' >/dev/null
+}
+
+@test "#1921 AC3 a red anywhere in the dedup group also exempts the merged item" {
+  # the red member is neither the representative nor same-titled, so the merged
+  # item carries no `decided` — the exemption must read the group verdict
+  cat > "$F" <<'EOF'
+[
+ {"severity":"WARNING","dimension":"contract","file":"docs/g.md","line":70,"title":"MD013 line too long","description":"decides: pre-commit run markdownlint","reviewer":"c","decided":"red"},
+ {"severity":"WARNING","dimension":"contract","file":"docs/g.md","line":70,"title":"the page names a retired flag","description":"a considerably longer and more detailed description of a different claim","reviewer":"p"}
+]
+EOF
+  cat > "$BATS_TEST_TMPDIR/r.json" <<'EOF'
+[
+ {"file":"docs/g.md","line":70,"dimension":"contract","title":"MD013 line too long","p":0,"p_why":"lint only","impact":0.1,"impact_why":"cosmetic"},
+ {"file":"docs/g.md","line":70,"dimension":"contract","title":"the page names a retired flag","p":0,"p_why":"never read","impact":0.1,"impact_why":"cosmetic"}
+]
+EOF
+  run -0 env corner_case_risk_threshold=0.05 zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/r.json"
+  [ "$(echo "$output" | jq '.summary.blocking')" -eq 1 ]
+  echo "$output" | jq -e '.blocking[0] | (has("decided") | not) and (has("demoted") | not) and (has("group_red") | not)' >/dev/null
+}
+
+@test "#1921 AC4 dedup group: demoted only when every WARNING member is assessed and the riskiest is below" {
+  cat > "$F" <<'EOF'
+[
+ {"severity":"WARNING","dimension":"bugs","file":"src/h.zsh","line":80,"title":"quoted glob","description":"short","reviewer":"a"},
+ {"severity":"WARNING","dimension":"bugs","file":"src/h.zsh","line":80,"title":"unquoted glob expands","description":"a considerably longer description","reviewer":"b"}
+]
+EOF
+  # both assessed, highest 0.04 (0.1 x 0.4) < 0.05 -> demoted, carrying that member
+  cat > "$BATS_TEST_TMPDIR/both-low.json" <<'EOF'
+[
+ {"file":"src/h.zsh","line":80,"dimension":"bugs","title":"quoted glob","p":0.01,"p_why":"low","impact":0.1,"impact_why":"cosmetic"},
+ {"file":"src/h.zsh","line":80,"dimension":"bugs","title":"unquoted glob expands","p":0.1,"p_why":"higher","impact":0.4,"impact_why":"a retry"}
+]
+EOF
+  run -0 env corner_case_risk_threshold=0.05 zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/both-low.json"
+  [ "$(echo "$output" | jq '.summary.blocking')" -eq 0 ]
+  echo "$output" | jq -e '.suggestions[0] | .demoted == true and .risk_assessment.risk_thousandths == 40 and .risk_assessment.p_why == "higher"' >/dev/null
+
+  # one member unassessed -> stays blocking (still stamped from the assessed one)
+  jq '[.[0]]' "$BATS_TEST_TMPDIR/both-low.json" > "$BATS_TEST_TMPDIR/one.json"
+  run -0 env corner_case_risk_threshold=0.05 zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/one.json"
+  [ "$(echo "$output" | jq '.summary.blocking')" -eq 1 ]
+  echo "$output" | jq -e '.blocking[0] | (has("demoted") | not) and .risk_assessment.risk_thousandths == 1' >/dev/null
+
+  # the riskier member AT the threshold -> stays blocking
+  cat > "$BATS_TEST_TMPDIR/at.json" <<'EOF'
+[
+ {"file":"src/h.zsh","line":80,"dimension":"bugs","title":"quoted glob","p":0.01,"p_why":"low","impact":0.1,"impact_why":"cosmetic"},
+ {"file":"src/h.zsh","line":80,"dimension":"bugs","title":"unquoted glob expands","p":0.05,"p_why":"higher","impact":1.0,"impact_why":"a false green"}
+]
+EOF
+  run -0 env corner_case_risk_threshold=0.05 zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/at.json"
+  [ "$(echo "$output" | jq '.summary.blocking')" -eq 1 ]
+  echo "$output" | jq -e '.blocking[0] | (has("demoted") | not) and .risk_assessment.risk_thousandths == 50' >/dev/null
+}
+
+@test "#1921 AC5 a malformed --risk is exit 2 naming the file and the entry, while the threshold is on" {
+  cp "$REPO_ROOT/tests/fixtures/consolidate-findings/risk-findings.json" "$F"
+  local ok='{"file":"a","line":1,"dimension":"bugs","title":"t","p":0.1,"p_why":"w","impact":0.4,"impact_why":"w"}'
+  local -a bad=(
+    'not json'
+    '{"an":"object"}'
+    "[$ok] [$ok]"
+    '[{"file":"a","line":1,"dimension":"bugs","title":"t","p":1.5,"p_why":"w","impact":0.4,"impact_why":"w"}]'
+    '[{"file":"a","line":1,"dimension":"bugs","title":"t","p":0.125,"p_why":"w","impact":0.4,"impact_why":"w"}]'
+    '[{"file":"a","line":1,"dimension":"bugs","title":"t","p":0.1,"p_why":"w","impact":0.5,"impact_why":"w"}]'
+    '[{"file":"a","line":1,"dimension":"bugs","title":"t","p":0.1,"p_why":"  ","impact":0.4,"impact_why":"w"}]'
+    '[{"file":"a","line":1,"dimension":"bugs","title":"t","p":0.1,"p_why":"w","impact":0.4,"impact_why":""}]'
+    "[$ok, $ok]"
+  )
+  local b
+  for b in "${bad[@]}"; do
+    printf '%s\n' "$b" > "$BATS_TEST_TMPDIR/bad.json"
+    run -2 --separate-stderr env corner_case_risk_threshold=0.05 zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/bad.json"
+    contains "$stderr" "$BATS_TEST_TMPDIR/bad.json"
+    [ -z "$output" ]
+  done
+  # the entry is named: index and title
+  printf '%s\n' '[{"file":"a","line":1,"dimension":"bugs","title":"the named one","p":0.1,"p_why":"w","impact":0.5,"impact_why":"w"}]' > "$BATS_TEST_TMPDIR/bad.json"
+  run -2 --separate-stderr env corner_case_risk_threshold=0.05 zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/bad.json"
+  contains "$stderr" "entry 0 (the named one): impact must be one of 0.1, 0.4, 0.7, 1.0"
+  # a missing file too
+  run -2 --separate-stderr env corner_case_risk_threshold=0.05 zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/nope.json"
+  contains "$stderr" "missing, unreadable or empty"
+}
+
+@test "#1921 an ignored threshold with --risk is announced on stderr and demotes nothing" {
+  cp "$REPO_ROOT/tests/fixtures/consolidate-findings/risk-findings.json" "$F"
+  _risk_for_fixture
+  run -0 --separate-stderr env corner_case_risk_threshold=30 zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/risk.json"
+  contains "$stderr" "corner_case_risk_threshold='30' is not a decimal in [0, 1] with at most three decimals — IGNORED"
+  [ "$(echo "$output" | jq '.summary | has("risk_demoted")')" = "false" ]
+}
+
+@test "#1921 an entry matching no blocking finding is named on stderr and changes nothing" {
+  cp "$REPO_ROOT/tests/fixtures/consolidate-findings/risk-findings.json" "$F"
+  printf '%s\n' '[{"file":"nowhere.zsh","line":1,"dimension":"bugs","title":"typo","p":0.01,"p_why":"w","impact":0.1,"impact_why":"w"}]' > "$BATS_TEST_TMPDIR/r.json"
+  run -0 --separate-stderr env corner_case_risk_threshold=0.05 zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/r.json"
+  contains "$stderr" "1 --risk entr(y/ies) matched no CRITICAL or WARNING finding"
+  [ "$(echo "$output" | jq '.summary.blocking')" -eq 3 ]
+  [ "$(echo "$output" | jq '.summary.risk_demoted')" -eq 0 ]
+}
+
+@test "#1921 identity matching normalises a ./ path and a digit-string line on both sides" {
+  cat > "$F" <<'EOF'
+[{"severity":"WARNING","dimension":"tests","file":"./tests/a.bats","line":"10","title":"weak assertion","description":"d","reviewer":"t"}]
+EOF
+  printf '%s\n' '[{"file":"tests/a.bats","line":10,"dimension":"tests","title":"weak assertion","p":0.01,"p_why":"w","impact":0.1,"impact_why":"w"}]' > "$BATS_TEST_TMPDIR/r.json"
+  run -0 env corner_case_risk_threshold=0.05 zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/r.json"
+  [ "$(echo "$output" | jq '.summary.risk_demoted')" -eq 1 ]
+}
+
+@test "#1921 AC4 an unassessed SUGGESTION member does not keep a demotable group blocking" {
+  # only the blocking members are assessed, so only they count toward `all`
+  cat > "$F" <<'EOF'
+[
+ {"severity":"WARNING","dimension":"bugs","file":"src/h.zsh","line":80,"title":"unquoted glob expands","description":"a considerably longer description","reviewer":"a"},
+ {"severity":"SUGGESTION","dimension":"bugs","file":"src/h.zsh","line":80,"title":"prefer a named array","description":"short","reviewer":"b"}
+]
+EOF
+  printf '%s\n' '[{"file":"src/h.zsh","line":80,"dimension":"bugs","title":"unquoted glob expands","p":0.01,"p_why":"w","impact":0.1,"impact_why":"w"}]' > "$BATS_TEST_TMPDIR/r.json"
+  run -0 env corner_case_risk_threshold=0.05 zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/r.json"
+  [ "$(echo "$output" | jq '.summary.blocking')" -eq 0 ]
+  [ "$(echo "$output" | jq '.summary.risk_demoted')" -eq 1 ]
+  echo "$output" | jq -e '.suggestions[0].demoted == true' >/dev/null
+}
+
+@test "#1921 a finding the human promoted back stays blocking when the reviewer re-raises it at WARNING" {
+  # the promotion sub-loop: the human picked a demoted finding, the panel raises
+  # it again at its own bar, and the conductor assesses it low again — the pick
+  # must win, not the assessment
+  cat > "$F" <<'EOF'
+[{"severity":"WARNING","dimension":"tests","file":"tests/a.bats","line":10,"title":"mutation drops the trailing newline check","description":"d","reviewer":"t"}]
+EOF
+  printf '%s\n' '[{"file":"tests/a.bats","line":10,"dimension":"tests","title":"mutation drops the trailing newline check"}]' > "$BATS_TEST_TMPDIR/promote.json"
+  printf '%s\n' '[{"file":"tests/a.bats","line":10,"dimension":"tests","title":"mutation drops the trailing newline check","p":0.01,"p_why":"w","impact":0.1,"impact_why":"w"}]' > "$BATS_TEST_TMPDIR/r.json"
+  run -0 env corner_case_risk_threshold=0.05 zsh "$S" --findings "$F" --promote "$BATS_TEST_TMPDIR/promote.json" --risk "$BATS_TEST_TMPDIR/r.json"
+  [ "$(echo "$output" | jq '.summary.blocking')" -eq 1 ]
+  [ "$(echo "$output" | jq '.summary.risk_demoted')" -eq 0 ]
+  echo "$output" | jq -e '.blocking[0] | .promoted == true and .severity == "WARNING"' >/dev/null
+  echo "$output" | jq -e '.blocking[0] | (has("demoted") | not) and .risk_assessment.risk_thousandths == 1' >/dev/null
+  # control: without the pick the same assessment demotes it
+  run -0 env corner_case_risk_threshold=0.05 zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/r.json"
+  [ "$(echo "$output" | jq '.summary.risk_demoted')" -eq 1 ]
+}
+
+@test "#1921 a demoted finding is never dropped as an adjudicated re-raise" {
+  cat > "$F" <<'EOF'
+[{"severity":"WARNING","dimension":"tests","file":"tests/a.bats","line":10,"title":"mutation drops the trailing newline check","description":"d","reviewer":"t"}]
+EOF
+  printf '%s\n' '[{"file":"tests/a.bats","line":10,"dimension":"tests","title":"mutation drops the trailing newline check"}]' > "$BATS_TEST_TMPDIR/adj.json"
+  printf '%s\n' '[{"file":"tests/a.bats","line":10,"dimension":"tests","title":"mutation drops the trailing newline check","p":0.01,"p_why":"w","impact":0.1,"impact_why":"w"}]' > "$BATS_TEST_TMPDIR/r.json"
+  run -0 env corner_case_risk_threshold=0.05 zsh "$S" --findings "$F" --adjudicated "$BATS_TEST_TMPDIR/adj.json" --risk "$BATS_TEST_TMPDIR/r.json"
+  [ "$(echo "$output" | jq '.summary.adjudicated_dropped')" -eq 0 ]
+  echo "$output" | jq -e '.suggestions[0].demoted == true' >/dev/null
+}
+
+@test "#1921 an assessment spelled with ./ matches the finding it names, and is not reported unmatched" {
+  cat > "$F" <<'EOF'
+[{"severity":"WARNING","dimension":"tests","file":"tests/a.bats","line":10,"title":"weak assertion","description":"d","reviewer":"t"}]
+EOF
+  printf '%s\n' '[{"file":"./tests/a.bats","line":10,"dimension":"tests","title":"weak assertion","p":0.01,"p_why":"w","impact":0.1,"impact_why":"w"}]' > "$BATS_TEST_TMPDIR/r.json"
+  run -0 --separate-stderr env corner_case_risk_threshold=0.05 zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/r.json"
+  [ "$(echo "$output" | jq '.summary.risk_demoted')" -eq 1 ]
+  lacks "$stderr" "matched no CRITICAL or WARNING finding"
+}
+
+@test "#1921 two spellings of one identity (./ or not) are one duplicate assessment, exit 2" {
+  cp "$REPO_ROOT/tests/fixtures/consolidate-findings/risk-findings.json" "$F"
+  printf '%s\n' '[{"file":"a.zsh","line":1,"dimension":"bugs","title":"t","p":0.1,"p_why":"w","impact":0.4,"impact_why":"w"},{"file":"./a.zsh","line":1,"dimension":"bugs","title":"t","p":0.9,"p_why":"w","impact":1.0,"impact_why":"w"}]' > "$BATS_TEST_TMPDIR/bad.json"
+  run -2 --separate-stderr env corner_case_risk_threshold=0.05 zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/bad.json"
+  contains "$stderr" "entry 1 duplicates the identity of entry 0"
+}
+
+@test "#1921 an entry naming a SUGGESTION assesses nothing and is reported unmatched" {
+  # only CRITICAL and WARNING findings are assessed
+  cp "$REPO_ROOT/tests/fixtures/consolidate-findings/risk-findings.json" "$F"
+  printf '%s\n' '[{"file":"docs/how-to/set-a-corner-case-risk-threshold.md","line":3,"dimension":"contract","title":"link the explanation page","p":0.01,"p_why":"w","impact":0.1,"impact_why":"w"}]' > "$BATS_TEST_TMPDIR/r.json"
+  run -0 --separate-stderr env corner_case_risk_threshold=0.05 zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/r.json"
+  contains "$stderr" "1 --risk entr(y/ies) matched no CRITICAL or WARNING finding"
+  echo "$output" | jq -e '[.suggestions[] | select(.title == "link the explanation page")] | length == 1' >/dev/null
+  echo "$output" | jq -e '.suggestions[] | select(.title == "link the explanation page") | has("risk_assessment") | not' >/dev/null
+}
+
+@test "#1921 --risk is a guarded value flag: dangling, flag-shaped and empty values are usage errors" {
+  cp "$REPO_ROOT/tests/fixtures/consolidate-findings/risk-findings.json" "$F"
+  run -2 zsh "$S" --findings "$F" --risk
+  contains "$output" "--risk requires a value"
+  run -2 zsh "$S" --findings "$F" --risk --round 2
+  contains "$output" "--risk requires a value (got the flag --round)"
+  run -2 zsh "$S" --findings "$F" --risk ''
+  contains "$output" "--risk requires a non-empty value"
 }

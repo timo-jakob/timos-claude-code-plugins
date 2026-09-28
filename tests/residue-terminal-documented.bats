@@ -1125,3 +1125,58 @@ sweepable() {
     echo "residue.md renamed the #1920 section heading that its pointer, ARCHITECTURE.md and the how-to name"
     return 1; }
 }
+
+@test "#1921 AC10 reference/residue.md assesses only unstamped residual blockers, and passes [] when none" {
+  # the in-loop stamp is reused, never re-assessed — the residue step's half of
+  # "assessed once between the loop and residue"
+  local t; t="$(flat "$RI_REF/residue.md")"
+  local -a needles=(
+    '**Assess only what the loop has not already assessed (#1921).**'
+    'A residual blocker that carries that stamp is **not assessed again**'
+    '(its dropped record says `assessed_in: "loop"`)'
+    'a `--risk` entry naming a stamped finding is exit 2 (*already assessed in the loop*)'
+    'when there are none you still pass `--risk`, holding `[]`'
+    'For each **unstamped** finding in the BLOCKING phase'
+    'Carrying a dropped count in the dossier is the follow-up story (#1932).'
+  )
+  local n
+  for n in "${needles[@]}"; do
+    grep -qF -- "$n" <<< "$t" || { echo "residue.md lost the #1921 clause: $n"; return 1; }
+  done
+  # the pre-#1921 claim that the loop is untouched, and #1921 as future work, are gone
+  lacks "$t" 'what the loop fixes before it gets there, and the dossier itself'
+  lacks "$t" 'are the follow-up story (#1921)'
+}
+
+@test "#1921 AC11 reference/review-loop.md states the risk pass after the decided pass, by content" {
+  local f="$RI_REF/review-loop.md"
+  local decided risk carry
+  decided=$(grep -nxF '### The decided pass — run every `decides:` command before consolidating (#1584)' "$f" | cut -d: -f1)
+  risk=$(grep -nxF '### The risk pass — assess every blocking finding before consolidating (#1921)' "$f" | cut -d: -f1)
+  carry=$(grep -nxF '### Carry accounting — confirmed, re-raised, unconfirmed (#1583)' "$f" | cut -d: -f1)
+  [ -n "$decided" ]
+  [ -n "$risk" ]
+  [ -n "$carry" ]
+  [ "$decided" -lt "$risk" ]
+  [ "$risk" -lt "$carry" ]
+  local t; t="$(flat "$f")"
+  local -a needles=(
+    'printenv corner_case_risk_threshold'
+    '**Off** (unset, empty, any spelling of zero): skip this pass.'
+    '**Ignored** (not a decimal in [0, 1] with at most three decimals): behave as off'
+    'whose severity is `CRITICAL` or `WARNING` after the decided pass'
+    'Use the definitions `residue.md` § *1. Assess every residual blocker* gives'
+    '**Severity and impact are independent.**'
+    '**Assess afresh every round.** A finding re-raised in a later round is assessed again'
+    '`<work-dir>/risk-<R>.json`'
+    '--risk <work-dir>/risk-<R>.json'
+    '**Never demoted**, at any threshold or risk: a `CRITICAL` item, a human-promoted item (`promoted: true`), and an item a tool decided red'
+    'A dedup group is demoted only when every `WARNING` member was assessed and its **highest** member risk is below the threshold.'
+    'A demoted finding never disappears.'
+    'The residue branch reuses the final round'"'"'s stamp instead of assessing a blocker a second time'
+  )
+  local n
+  for n in "${needles[@]}"; do
+    grep -qF -- "$n" <<< "$t" || { echo "review-loop.md lost the #1921 clause: $n"; return 1; }
+  done
+}

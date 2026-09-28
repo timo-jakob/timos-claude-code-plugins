@@ -1243,3 +1243,253 @@ EOF
   [ "$status" -eq 0 ]
   echo "$output" | grep -q 'BUDGET_EXHAUSTED'
 }
+
+# --- #1921: risk-demoted findings in the PR body --------------------------------
+
+# a two-round status whose rounds demote findings: the same identity in both
+# rounds (the later record must win), one only in round 1, one ordinary waived
+# suggestion, and a title carrying a pipe, a backtick and a newline
+demoted_status() {
+  cat > "$ST" <<'EOF'
+{"status":"CONVERGED","rounds":2,"max_rounds":5,"repo_type":"claude-plugin",
+ "round_changelists":[
+   {"round":1,"summary":{"critical":0,"high":0,"low":3,"blocking":0,"conflicts":0,"risk_demoted":2},
+    "blocking":[],
+    "suggestions":[
+      {"priority":"Low","dimension":"tests","file":"tests/a.bats","line":10,"title":"mutation drops the check","demoted":true,
+       "risk_assessment":{"p":0.07,"p_why":"round-one view","impact":0.7,"impact_why":"a hang","risk":0.049,"risk_thousandths":49,"threshold":"0.05","threshold_thousandths":50}},
+      {"priority":"Low","dimension":"bugs","file":"src/b.zsh","line":5,"title":"a | pipe, a `tick`\nand a forged line","demoted":true,
+       "risk_assessment":{"p":0.01,"p_why":"rare | really","impact":1.0,"impact_why":"a false `green`","risk":0.01,"risk_thousandths":10,"threshold":"0.05","threshold_thousandths":50}},
+      {"priority":"Low","dimension":"code_quality","file":"src/c.zsh","line":9,"title":"rename var","reviewers":["claude-plugin-prose-logic"]}]},
+   {"round":2,"summary":{"critical":0,"high":0,"low":1,"blocking":0,"conflicts":0,"risk_demoted":1},
+    "blocking":[],
+    "suggestions":[
+      {"priority":"Low","dimension":"tests","file":"tests/a.bats","line":10,"title":"mutation drops the check","demoted":true,
+       "risk_assessment":{"p":0.04,"p_why":"round-two view","impact":0.7,"impact_why":"a hang","risk":0.028,"risk_thousandths":28,"threshold":"0.05","threshold_thousandths":50}}]}
+ ],
+ "final_changelist":{"summary":{"critical":0,"high":0,"low":1,"blocking":0,"conflicts":0},"blocking":[],"suggestions":[]}}
+EOF
+}
+
+@test "#1921 AC9 demoted findings get their own paragraph and table above the waived list" {
+  demoted_status
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qxF -- "**Demoted by the risk threshold (\`corner_case_risk_threshold\` = \`0.05\`):** these findings cleared a reviewer's blocking bar, but each one's risk (probability × impact) is below the threshold, so the loop logged them as suggestions and did not fix them. Promote any of them if you disagree with its assessment."
+  echo "$output" | grep -qxF -- '| finding | round | p | impact | risk | why |'
+  # one row per identity, the LATEST round's record winning
+  [ "$(echo "$output" | grep -c -- '^| `mutation drops the check`')" -eq 1 ]
+  echo "$output" | grep -qxF -- '| `mutation drops the check` — `tests/a.bats:10` | 2 | 0.04 | 0.7 | 0.028 | round-two view; a hang |'
+  # untrusted text is neutralised: newline and backticks stripped, pipes escaped
+  echo "$output" | grep -qxF -- '| `a \| pipe, a tick and a forged line` — `src/b.zsh:5` | 1 | 0.01 | 1.0 | 0.01 | rare \| really; a false green |'
+  [ "$(echo "$output" | grep -c '^and a forged line')" -eq 0 ]
+  # the table sits above the waived list, which no longer lists a demoted finding
+  local tline wline
+  tline=$(echo "$output" | grep -n -- '^\*\*Demoted by the risk threshold' | cut -d: -f1)
+  wline=$(echo "$output" | grep -n -- '^\*\*Waived suggestions\*\*' | cut -d: -f1)
+  [ "$tline" -lt "$wline" ]
+  echo "$output" | grep -qE '^- .src/c\.zsh:9. \[code_quality\] rename var'
+  [ "$(echo "$output" | grep -cE '^- `(tests/a\.bats|src/b\.zsh):')" -eq 0 ]
+}
+
+@test "#1921 AC9 the hidden block carries risk_demoted, and its waived_low still holds the demoted findings for the Approver" {
+  demoted_status
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  [ "$(hidden_json | jq -c '.risk_demoted')" = \
+    '[{"file":"tests/a.bats","line":10,"dimension":"tests","title":"mutation drops the check","round":2,"p":0.04,"impact":0.7,"risk_thousandths":28},{"file":"src/b.zsh","line":5,"dimension":"bugs","title":"a | pipe, a `tick`\nand a forged line","round":1,"p":0.01,"impact":1.0,"risk_thousandths":10}]' ]
+  # the Approver folds waived_low into its risk register, so a demoted finding
+  # must not leave it; only the RENDERED waived list omits it (tested above)
+  [ "$(hidden_json | jq -c '[.waived_low[].title] | sort')" = \
+    '["a | pipe, a `tick`\nand a forged line","mutation drops the check","rename var"]' ]
+}
+
+@test "#1921 AC9 without a demoted item the dossier is byte-identical — stamps alone change nothing" {
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  local plain="$output"
+  jq '.round_changelists[0].blocking[0].risk_assessment = {p: 0.5, impact: 0.7, risk: 0.35, risk_thousandths: 350, threshold: "0.05", threshold_thousandths: 50}
+      | .round_changelists[0].summary.risk_demoted = 0
+      | .round_changelists[0].suggestions[0].demoted = false' "$ST" > "$BATS_TEST_TMPDIR/stamped.json"
+  run zsh "$S" --status "$BATS_TEST_TMPDIR/stamped.json"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$plain" ]
+  hidden_json | jq -e 'has("risk_demoted") | not' >/dev/null
+}
+
+@test "#1921 AC9 a finding whose LATEST occurrence is not demoted is not listed — here, kept blocking in a later round" {
+  demoted_status
+  # round 2 re-raises "mutation drops the check" and it is kept blocking this time
+  jq '.round_changelists[1].suggestions = []
+      | .round_changelists[1].blocking = [{"priority":"High","dimension":"tests","file":"tests/a.bats","line":10,
+          "title":"Mutation drops the  check","risk_assessment":{"p":0.6,"impact":0.7,"risk":0.42,"risk_thousandths":420,"threshold":"0.05","threshold_thousandths":50}}]' \
+    "$ST" > "$BATS_TEST_TMPDIR/st.json"
+  run zsh "$S" --status "$BATS_TEST_TMPDIR/st.json"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | grep -c -- '^| `mutation drops the check`')" -eq 0 ]
+  [ "$(hidden_json | jq -c '[.risk_demoted[].title]')" = '["a | pipe, a `tick`\nand a forged line"]' ]
+}
+
+@test "#1921 AC9 the promotion phase's rounds are read too, and its record is the latest" {
+  demoted_status
+  cat > "$BATS_TEST_TMPDIR/pst.json" <<'EOF'
+{"status":"CONVERGED","rounds":1,"repo_type":"claude-plugin",
+ "round_changelists":[
+   {"round":1,"summary":{"critical":0,"high":1,"low":1,"blocking":1,"conflicts":0,"risk_demoted":1},
+    "blocking":[{"priority":"High","dimension":"code_quality","file":"src/c.zsh","line":9,"title":"rename var","promoted":true}],
+    "suggestions":[
+      {"priority":"Low","dimension":"docs","file":"docs/x.md","line":2,"title":"a promotion-phase demotion","demoted":true,
+       "risk_assessment":{"p":0.02,"p_why":"promo why","impact":0.4,"impact_why":"a retry","risk":0.008,"risk_thousandths":8,"threshold":"0.02","threshold_thousandths":20}}]}],
+ "final_changelist":{"summary":{"blocking":0},"blocking":[],"suggestions":[]}}
+EOF
+  printf '%s\n' '[{"file":"src/c.zsh","line":9,"dimension":"code_quality","title":"rename var"}]' > "$BATS_TEST_TMPDIR/promoted.json"
+  run zsh "$S" --status "$ST" --promotion-status "$BATS_TEST_TMPDIR/pst.json" --promoted "$BATS_TEST_TMPDIR/promoted.json"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qxF -- '| `a promotion-phase demotion` — `docs/x.md:2` | 1 | 0.02 | 0.4 | 0.008 | promo why; a retry |'
+  hidden_json | jq -e '.risk_demoted | any(.title == "a promotion-phase demotion")' >/dev/null
+  # the heading names the threshold of the LATEST record, which is the promotion phase's
+  echo "$output" | grep -qF -- '(`corner_case_risk_threshold` = `0.02`)'
+}
+
+@test "#1921 AC9 blocking in round 1, demoted in round 2: counted a suggestion, kept in waived_low; a same-titled finding at another line stays apart" {
+  cat > "$BATS_TEST_TMPDIR/st.json" <<'EOF'
+{"status":"CONVERGED","rounds":2,"repo_type":"claude-plugin",
+ "round_changelists":[
+   {"round":1,"summary":{"blocking":1,"low":1,"conflicts":0},
+    "blocking":[{"priority":"High","dimension":"bugs","file":"a.zsh","line":10,"title":"unquoted expansion"}],
+    "suggestions":[{"priority":"Low","dimension":"bugs","file":"a.zsh","line":50,"title":"unquoted expansion"}]},
+   {"round":2,"summary":{"blocking":0,"low":1,"conflicts":0},"blocking":[],
+    "suggestions":[{"priority":"Low","dimension":"bugs","file":"a.zsh","line":10,"title":"unquoted expansion","demoted":true,
+      "risk_assessment":{"p":0.01,"p_why":"w","impact":0.4,"impact_why":"w","risk":0.004,"risk_thousandths":4,"threshold":"0.05","threshold_thousandths":50}}]}],
+ "final_changelist":{"summary":{"blocking":0},"blocking":[],"suggestions":[]}}
+EOF
+  run zsh "$S" --status "$BATS_TEST_TMPDIR/st.json"
+  [ "$status" -eq 0 ]
+  [ "$(hidden_json | jq '.dimensions.bugs.blocking')" -eq 0 ]
+  [ "$(hidden_json | jq -c '[.waived_low[].line] | sort')" = '[10,50]' ]
+  [ "$(hidden_json | jq -c '[.risk_demoted[].line]')" = '[10]' ]
+  # the line-50 waived suggestion is not hidden by the line-10 demotion
+  echo "$output" | grep -qE '^- `a\.zsh:50` \[bugs\] unquoted expansion'
+}
+
+@test "#1921 AC9 a demoted finding followed a few lines later: a moved promotion clears it, and demoted-then-kept-blocking counts as fixed" {
+  # (a) demoted at line 10, raised by the promotion phase at line 12 after a fix
+  # moved it: the same finding, so it is no longer listed as not fixed
+  cat > "$BATS_TEST_TMPDIR/st.json" <<'EOF'
+{"status":"CONVERGED","rounds":1,"repo_type":"claude-plugin",
+ "round_changelists":[{"round":1,"summary":{"blocking":0,"low":1,"conflicts":0},"blocking":[],
+   "suggestions":[{"priority":"Low","dimension":"tests","file":"tests/a.bats","line":10,"title":"weak assertion","demoted":true,
+     "risk_assessment":{"p":0.01,"p_why":"w","impact":0.4,"impact_why":"w","risk":0.004,"risk_thousandths":4,"threshold":"0.05","threshold_thousandths":50}}]}],
+ "final_changelist":{"summary":{"blocking":0},"blocking":[],"suggestions":[]}}
+EOF
+  cat > "$BATS_TEST_TMPDIR/pst.json" <<'EOF'
+{"status":"CONVERGED","rounds":1,"repo_type":"claude-plugin",
+ "round_changelists":[{"round":1,"summary":{"blocking":1,"low":0,"conflicts":0},
+   "blocking":[{"priority":"High","dimension":"tests","file":"tests/a.bats","line":12,"title":"weak assertion","promoted":true}],"suggestions":[]}],
+ "final_changelist":{"summary":{"blocking":0},"blocking":[],"suggestions":[]}}
+EOF
+  printf '%s\n' '[{"file":"tests/a.bats","line":10,"dimension":"tests","title":"weak assertion"}]' > "$BATS_TEST_TMPDIR/promoted.json"
+  run zsh "$S" --status "$BATS_TEST_TMPDIR/st.json" --promotion-status "$BATS_TEST_TMPDIR/pst.json" --promoted "$BATS_TEST_TMPDIR/promoted.json"
+  [ "$status" -eq 0 ]
+  hidden_json | jq -e 'has("risk_demoted") | not' >/dev/null
+  [ "$(echo "$output" | grep -c 'Demoted by the risk threshold')" -eq 0 ]
+
+  # (b) demoted in round 1, re-assessed above the threshold and kept blocking at
+  # the same line in round 2, then fixed: counted as blocking found & fixed
+  cat > "$BATS_TEST_TMPDIR/st2.json" <<'EOF'
+{"status":"CONVERGED","rounds":2,"repo_type":"claude-plugin",
+ "round_changelists":[
+   {"round":1,"summary":{"blocking":0,"low":1,"conflicts":0},"blocking":[],
+    "suggestions":[{"priority":"Low","dimension":"bugs","file":"a.zsh","line":10,"title":"unquoted expansion","demoted":true,
+      "risk_assessment":{"p":0.01,"p_why":"w","impact":0.4,"impact_why":"w","risk":0.004,"risk_thousandths":4,"threshold":"0.05","threshold_thousandths":50}}]},
+   {"round":2,"summary":{"blocking":1,"low":0,"conflicts":0},"suggestions":[],
+    "blocking":[{"priority":"High","dimension":"bugs","file":"a.zsh","line":10,"title":"unquoted expansion"}]}],
+ "final_changelist":{"summary":{"blocking":0},"blocking":[],"suggestions":[]}}
+EOF
+  run zsh "$S" --status "$BATS_TEST_TMPDIR/st2.json"
+  [ "$status" -eq 0 ]
+  [ "$(hidden_json | jq '.dimensions.bugs.blocking')" -eq 1 ]
+  [ "$(hidden_json | jq '.waived_low | length')" -eq 0 ]
+}
+
+# One status JSON from a list of rounds, each round a JSON array of items written
+# compactly as {l: line, t: title, pri: "High"|"Low", dem: true} — every item in
+# file a.zsh, dimension bugs. A demoted item carries a risk stamp.
+window_status() {  # $@ = one JSON array per round
+  local rounds="[]" r n=0
+  for r in "$@"; do
+    n=$(( n + 1 ))
+    rounds=$(jq -c --argjson rs "$rounds" --argjson n "$n" '
+      [ .[] | { priority: .pri, dimension: "bugs", file: "a.zsh", line: .l, title: (.t // "unquoted expansion") }
+              + (if .dem then { demoted: true, risk_assessment: { p: 0.01, p_why: "w", impact: 0.4,
+                   impact_why: "w", risk: 0.004, risk_thousandths: 4, threshold: "0.05",
+                   threshold_thousandths: 50 } } else {} end) ] as $its
+      | $rs + [ { round: $n, summary: { blocking: 0, low: 0, conflicts: 0 },
+                  blocking: [ $its[] | select(.priority == "High") ],
+                  suggestions: [ $its[] | select(.priority == "Low") ] } ]' <<< "$r")
+  done
+  jq -n --argjson rs "$rounds" '{status: "CONVERGED", rounds: ($rs | length), repo_type: "claude-plugin",
+    round_changelists: $rs, final_changelist: {summary: {blocking: 0}, blocking: [], suggestions: []}}' \
+    > "$BATS_TEST_TMPDIR/ws.json"
+}
+
+@test "#1921 AC9 following a demoted finding across rounds: null-line wildcard, nearest record, the 10-line boundary, one count per finding" {
+  # the row format: rounds (one JSON array each, joined by @@) => jq assertion on the hidden block
+  local rows=(
+    # a null line on either side continues the record: demoted then kept blocking and fixed
+    '[{"l":null,"pri":"Low","dem":true}]@@[{"l":null,"pri":"High"}] => (has("risk_demoted") | not) and .dimensions.bugs.blocking == 1'
+    # exactly 10 lines on continues it; 11 does not
+    '[{"l":10,"pri":"Low","dem":true}]@@[{"l":20,"pri":"High"}] => (has("risk_demoted") | not) and .dimensions.bugs.blocking == 1'
+    '[{"l":10,"pri":"Low","dem":true}]@@[{"l":21,"pri":"High"}] => [.risk_demoted[].line] == [10]'
+    # moved within the window: ONE finding, counted once, as its latest occurrence
+    '[{"l":10,"pri":"Low","dem":true}]@@[{"l":13,"pri":"High"}] => .dimensions.bugs.blocking == 1 and .dimensions.bugs.suggestions == 0'
+    # drift in in-window steps past 10 lines in total: still one finding
+    '[{"l":10,"pri":"High"}]@@[{"l":18,"pri":"High"}]@@[{"l":26,"pri":"Low","dem":true}] => .dimensions.bugs.blocking == 0 and ([.waived_low[].line] == [26])'
+    # the NEAREST record is continued: 22 continues 25 (3 away), not the demoted 15 (7 away)
+    '[{"l":15,"pri":"Low","dem":true},{"l":25,"pri":"Low"}]@@[{"l":22,"pri":"High"}] => [.risk_demoted[].line] == [15]'
+    # one exact identity in two records: two findings, two entries
+    '[{"l":10,"pri":"Low","dem":true}]@@[{"l":15,"pri":"High"},{"l":10,"pri":"Low","dem":true}] => .dimensions.bugs.blocking == 1 and .dimensions.bugs.suggestions == 1'
+    # ...and when the second record was never demoted, it is not lost either
+    '[{"l":10,"pri":"Low","dem":true}]@@[{"l":5,"pri":"High"},{"l":10,"pri":"High"}] => .dimensions.bugs.blocking == 2'
+  )
+  local row spec want
+  for row in "${rows[@]}"; do
+    want="${row##* => }"
+    spec="${row%% => *}"
+    local -a parts=()
+    IFS=$'\n' read -r -d '' -a parts < <(printf '%s' "${spec//@@/$'\n'}"; printf '\0') || true
+    window_status "${parts[@]}"
+    run zsh "$S" --status "$BATS_TEST_TMPDIR/ws.json"
+    [ "$status" -eq 0 ]
+    hidden_json | jq -e "$want" >/dev/null || { echo "row failed: $row"; hidden_json | jq -c '{dimensions, waived_low, risk_demoted}'; return 1; }
+  done
+}
+
+@test "#1921 AC9 a demoted finding respelled in a later round, in place or moved, is listed once — in the demoted table, never also as waived" {
+  local rounds
+  for rounds in \
+    '[{"l":10,"t":"Weak assertion","pri":"Low","dem":true}]@@[{"l":10,"t":"weak assertion","pri":"Low","dem":true}]' \
+    '[{"l":10,"t":"Weak assertion","pri":"Low","dem":true}]@@[{"l":13,"t":"weak  assertion","pri":"Low","dem":true}]'; do
+    window_status "${rounds%%@@*}" "${rounds##*@@}"
+    run zsh "$S" --status "$BATS_TEST_TMPDIR/ws.json"
+    [ "$status" -eq 0 ]
+    [ "$(echo "$output" | grep -c '^| `.*` — `a\.zsh:')" -eq 1 ]
+    [ "$(echo "$output" | grep -c '^- `a\.zsh:')" -eq 0 ]
+    [ "$(hidden_json | jq '.risk_demoted | length')" -eq 1 ]
+    [ "$(hidden_json | jq -c '[.waived_low[] | [.line, .title]] == [.risk_demoted[] | [.line, .title]]')" = "true" ]
+  done
+}
+
+@test "#1921 AC9 a demoted finding the human promoted and the sub-loop fixed past the window is neither waived nor listed as demoted" {
+  window_status '[{"l":10,"t":"weak assertion","pri":"Low","dem":true}]'
+  cp "$BATS_TEST_TMPDIR/ws.json" "$BATS_TEST_TMPDIR/blocking.json"
+  window_status '[{"l":25,"t":"weak assertion","pri":"High"}]'
+  jq '.round_changelists[0].blocking[0].promoted = true' "$BATS_TEST_TMPDIR/ws.json" > "$BATS_TEST_TMPDIR/promo.json"
+  printf '%s\n' '[{"file":"a.zsh","line":10,"dimension":"bugs","title":"weak assertion"}]' > "$BATS_TEST_TMPDIR/promoted.json"
+  run zsh "$S" --status "$BATS_TEST_TMPDIR/blocking.json" --promotion-status "$BATS_TEST_TMPDIR/promo.json" --promoted "$BATS_TEST_TMPDIR/promoted.json"
+  [ "$status" -eq 0 ]
+  [ "$(hidden_json | jq '.waived_low | length')" -eq 0 ]
+  [ "$(hidden_json | jq '.dimensions.bugs.suggestions')" -eq 0 ]
+  hidden_json | jq -e 'has("risk_demoted") | not' >/dev/null
+  [ "$(echo "$output" | grep -c 'Demoted by the risk threshold')" -eq 0 ]
+}

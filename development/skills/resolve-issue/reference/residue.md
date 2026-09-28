@@ -615,9 +615,24 @@ filed.
 
 ### 1. Assess every residual blocker — before step 1
 
-For each finding in the BLOCKING phase's final changelist `.blocking` (the same
-file step 1 passes as `--changelist`), record two values, each with a one-line
-rationale:
+**Assess only what the loop has not already assessed (#1921).** With the
+threshold on, the loop's risk pass (`review-loop.md` § *The risk pass*) assessed
+every blocking finding afresh each round, and the consolidator stamped each
+one's changelist entry with `risk_assessment` — so the final changelist carries
+the final round's judgement. A residual blocker that carries that stamp is **not
+assessed again**: the builder reuses the stamp's `p` and `impact` against the
+current threshold (its dropped record says `assessed_in: "loop"`), and a
+`--risk` entry naming a stamped finding is exit 2 (*already assessed in the
+loop*). A stamp below its own recorded threshold marks a blocker the loop kept
+on purpose — a `CRITICAL`, a tool red, a human pick, a partly assessed group —
+and the builder keeps it too. So the set to assess here is the residual
+blockers **without** a stamp — typically none in step mode — and when there are
+none you still pass `--risk`, holding `[]`, so the builder applies the stamps
+and writes the dropped record.
+
+For each **unstamped** finding in the BLOCKING phase's final changelist
+`.blocking` (the same file step 1 passes as `--changelist`), record two values,
+each with a one-line rationale:
 
 **Probability `p`** — a decimal in [0, 1] with at most two decimals. Which
 definition applies follows the finding's `dimension`:
@@ -672,7 +687,8 @@ finding).
   either is built, so step 2's length diff still measures only the idempotency
   filter. An **exit 2** naming `--risk` is your own malformed assessment (a `p`
   with three decimals, an impact off the four anchors, a blank rationale, a
-  duplicate identity) — the message names the entry; fix it and re-run. It is
+  duplicate identity, an entry for a finding the loop already stamped) — the
+  message names the entry; fix it and re-run. It is
   never "file everything" or "file nothing".
 - **Step 1's exit-1 handling** — the builder has exit-1 causes that name
   neither `--status` nor `--changelist`: `could not write --dropped-file`,
@@ -783,9 +799,14 @@ finding).
   sum to `open`.
 
 What this section does **not** change: which runs reach the residue terminal,
-what the loop fixes before it gets there, and the dossier itself. The dossier's
-hidden block still counts a dropped finding in its `open`, which
+and the dossier's residue counts. What the loop fixes before it gets there is
+now shaped by the same threshold — a `WARNING` below it is demoted to a
+suggestion in the round that raises it (#1921, `review-loop.md` § *The risk
+pass*), so it never reaches this section as residue at all; the blockers the
+loop never demotes reach it with their stamp, and section 1 says what happens
+to them. The dossier's
+hidden block still counts a finding dropped **here** in its `open`, which
 `approver-policy-core` reads as tracked risk; step 5's paragraph is the only
 place that says otherwise, so a reader of the hidden block alone over-counts
-what is tracked. Carrying a dropped count in the dossier, and applying the
-threshold to review findings inside the loop, are the follow-up story (#1921).
+what is tracked. Carrying a dropped count in the dossier is the follow-up story
+(#1932).
