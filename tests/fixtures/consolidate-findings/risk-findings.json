@@ -1,0 +1,8 @@
+[
+ {"severity":"WARNING","dimension":"bugs","file":"development/skills/resolve-issue/scripts/run-gate.zsh","line":40,"title":"exit status lost in a pipeline","description":"the pipe hides the suite exit","reviewer":"claude-plugin-script-reviewer"},
+ {"severity":"CRITICAL","dimension":"bugs","file":"development/skills/resolve-issue/scripts/run-gate.zsh","line":40,"title":"gate exit status lost in a pipeline","description":"the pipe into tee hides the suite exit status, so a red suite reports green to every caller","reviewer":"claude-plugin-prose-logic"},
+ {"severity":"WARNING","dimension":"performance","file":"development/skills/resolve-issue/scripts/size-preflight.zsh","line":12,"title":"rescans the manifest once per file","description":"jq is spawned per inventory path","reviewer":"claude-plugin-script-reviewer"},
+ {"severity":"SUGGESTION","dimension":"code_quality","file":"development/skills/resolve-issue/scripts/size-preflight.zsh","line":12,"title":"extract the manifest read into a helper","description":"readability","reviewer":"claude-plugin-prose-logic"},
+ {"severity":"WARNING","dimension":"tests","file":"tests/size-preflight.bats","line":88,"title":"mutation drops the trailing newline check","description":"deleting the newline assertion still passes","reviewer":"claude-plugin-test-reviewer"},
+ {"severity":"SUGGESTION","dimension":"contract","file":"docs/how-to/set-a-corner-case-risk-threshold.md","line":3,"title":"link the explanation page","description":"cross-link","reviewer":"claude-plugin-contract-integrity"}
+]

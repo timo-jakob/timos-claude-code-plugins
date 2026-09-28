@@ -27,6 +27,11 @@
 # whenever the round HAS blockers and every one of them carries the
 # consolidator's `class` stamp, so the human watching the tail can see whether a
 # round is finding fresh defects or re-reading the last fix pass's own edits.
+# Since #1921 a round whose suggestions hold risk-demoted findings (`demoted:
+# true`, stamped by consolidate-findings.zsh --risk) carries a
+# `- demoted by risk threshold (corner_case_risk_threshold = V): N` line and one
+# `- demoted suggestion:` line per finding with its p × impact = risk — only
+# when N > 0, so a run with the threshold off is byte-identical.
 #
 # The new/carried split (and everything derived from it: fixed-since, the
 # escalating possible-false-trip lines) is rendered ONLY when every blocker
@@ -175,6 +180,14 @@ jq -r --arg ts "$(date +%H:%M:%S)" --argjson r "$round" --arg v "$verdict" \
   # information. NB: no apostrophes in this block — the program is
   # single-quoted.
   | (if (($blk | length) > 0) and ([ $blk[] | has("class") ] | all) then $blk else null end) as $classed
+  # risk-demoted findings (#1921): Warnings the conductor assessed below
+  # corner_case_risk_threshold, logged as suggestions instead of fixed. They sit
+  # in suggestions, not blocking, so without these lines the human would read a
+  # blocker that vanished as a fixed one. A direct per-item flag with NO stamp
+  # gate, rendered only when the count is non-zero — so a run with the
+  # threshold off is byte-identical to before the flag existed. NB: no
+  # apostrophes in this block — the program is single-quoted.
+  | ([ (.suggestions // [])[] | select(.demoted == true) ]) as $demoted
   | "## Round \($r) — \(if (.summary.blocking // 0) == 0 then "no blockers" else "blockers remain" end) (\($ts))",
     ("- blockers: \(.summary.blocking // 0)"
      + (if (.summary.blocking // 0) > 0 then " (critical: \(.summary.critical // 0), warning: \(.summary.high // 0)"
@@ -220,6 +233,11 @@ jq -r --arg ts "$(date +%H:%M:%S)" --argjson r "$round" --arg v "$verdict" \
     (if (.summary.adjudicated_dropped // 0) > 0 then
        "- adjudicated re-raises dropped: \(.summary.adjudicated_dropped)"
      else empty end),
+    (if ($demoted | length) > 0 then
+       "- demoted by risk threshold (corner_case_risk_threshold = \($demoted[0].risk_assessment.threshold // "?" | safe)): \($demoted | length)"
+     else empty end),
+    ($demoted[] | "- demoted suggestion: `\(.file | safe)\(if (.line | type) == "number" then ":\(.line)" else "" end)` [\(.dimension | dimlabel)] \"\(.title | safe)\""
+       + " — p \(.risk_assessment.p) × impact \(.risk_assessment.impact) = risk \(.risk_assessment.risk) < \(.risk_assessment.threshold // "?" | safe)"),
     ($promoted[] | "- promoted suggestion: `\(.file | safe)\(if (.line | type) == "number" then ":\(.line)" else "" end)` [\(.dimension | dimlabel)] \"\(.title | safe)\""
        + " — raised from Suggestion by the human at convergence; blocking until cleared"),
     # ...and since #1498 the SAME set renders one of two ways, decided by the

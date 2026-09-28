@@ -823,3 +823,48 @@ EOF
   [ -z "$output" ]
   contains "$stderr" "render-progress-block: --prev requires a value (got the flag --history)"
 }
+
+# --- #1921: risk-demoted findings in the round block ---------------------------
+
+@test "#1921 AC8 demoted suggestions render a count line and one line per finding" {
+  cat > "$CL" <<'EOF'
+{"round":2,"summary":{"critical":0,"high":1,"low":3,"blocking":1,"conflicts":0,"risk_demoted":2},
+ "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"kept","non_converging":false,
+   "risk_assessment":{"p":0.5,"impact":0.7,"risk":0.35,"threshold":"0.05"}}],
+ "suggestions":[
+   {"file":"tests/a.bats","line":10,"dimension":"tests","title":"mutation drops the `newline` check","demoted":true,
+    "risk_assessment":{"p":0.07,"p_why":"w","impact":0.7,"impact_why":"w","risk":0.049,"risk_thousandths":49,"threshold":"0.05","threshold_thousandths":50}},
+   {"file":"src/b.zsh","line":null,"dimension":"code_quality","title":"line-less\nforged: line","demoted":true,
+    "risk_assessment":{"p":0.01,"p_why":"w","impact":1.0,"impact_why":"w","risk":0.01,"risk_thousandths":10,"threshold":"0.05","threshold_thousandths":50}},
+   {"file":"c.zsh","line":3,"dimension":"docs","title":"an ordinary suggestion"}],
+ "conflicts":[],"non_converging":false}
+EOF
+  run zsh "$S" --changelist "$CL" --round 2 --verdict "awaiting fix"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | grep -c -- '^- demoted by risk threshold (corner_case_risk_threshold = 0.05): 2$')" -eq 1 ]
+  echo "$output" | grep -qxF -- '- demoted suggestion: `tests/a.bats:10` [tests] "mutation drops the  newline  check" — p 0.07 × impact 0.7 = risk 0.049 < 0.05'
+  # a null line renders no line part, and a newline in the title cannot forge a line
+  echo "$output" | grep -qxF -- '- demoted suggestion: `src/b.zsh` [code_quality] "line-less forged: line" — p 0.01 × impact 1.0 = risk 0.01 < 0.05'
+  [ "$(echo "$output" | grep -c '^forged')" -eq 0 ]
+  # an ordinary suggestion is not listed
+  lacks "$output" "an ordinary suggestion"
+}
+
+@test "#1921 AC8 with no demoted item the block is byte-identical — stamps alone render nothing" {
+  cat > "$CL" <<'EOF'
+{"round":1,"summary":{"critical":0,"high":1,"low":1,"blocking":1,"conflicts":0},
+ "blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"kept","non_converging":false}],
+ "suggestions":[{"file":"c.zsh","line":3,"dimension":"docs","title":"an ordinary suggestion"}],
+ "conflicts":[],"non_converging":false}
+EOF
+  jq '.summary.risk_demoted = 0
+      | .blocking[0].risk_assessment = {p: 0.5, impact: 0.7, risk: 0.35, threshold: "0.05"}
+      | .suggestions[0].demoted = false' "$CL" > "$BATS_TEST_TMPDIR/stamped.json"
+  run zsh "$S" --changelist "$CL" --round 1 --verdict "v"
+  [ "$status" -eq 0 ]
+  local plain="${output#*$'\n'}"   # drop the heading line, which carries a clock time
+  run zsh "$S" --changelist "$BATS_TEST_TMPDIR/stamped.json" --round 1 --verdict "v"
+  [ "$status" -eq 0 ]
+  [ "${output#*$'\n'}" = "$plain" ]
+  lacks "$output" "demoted"
+}

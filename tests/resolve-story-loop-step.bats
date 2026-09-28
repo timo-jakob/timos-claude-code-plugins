@@ -3727,3 +3727,124 @@ carry_record() {  # carry_record <confirmed[]> <re_raised[]> <unconfirmed[]>
   grep -qF -- 'a\cb.json, which is missing or empty' "$WD/progress.md"
   [ ! -e "$WD/verify-3.json" ]
 }
+
+# --- #1921: --risk, the round's risk assessment -------------------------------
+
+WARN_APP='[{"severity":"WARNING","dimension":"bugs","file":"app.py","line":1,"title":"print without flush","description":"d","reviewer":"r"}]'
+RISK_APP='[{"file":"app.py","line":1,"dimension":"bugs","title":"print without flush","p":0.01,"p_why":"stdout is line-buffered here","impact":0.4,"impact_why":"a delayed log line"}]'
+
+@test "#1921 AC6 --risk is forwarded to the consolidator: the round's changelist carries the stamp and the demotion" {
+  export corner_case_risk_threshold=0.05
+  printf '%s' "$WARN_APP" > "$F"
+  printf '%s' "$RISK_APP" > "$BATS_TEST_TMPDIR/risk-1.json"
+  step --risk "$BATS_TEST_TMPDIR/risk-1.json"
+  # the only blocker was demoted, so the full round has zero blockers
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  jq -e '.summary.risk_demoted == 1 and .summary.blocking == 0
+         and (.suggestions[0] | .demoted == true and .risk_assessment.risk_thousandths == 4)' \
+    "$WD/changelist-1.json" >/dev/null
+}
+
+@test "#1921 AC6 --risk applies to its own round only — a later --resume without it stamps nothing" {
+  export corner_case_risk_threshold=0.05
+  printf '%s' "$CRIT" > "$F"
+  printf '%s' '[{"file":"app.py","line":1,"dimension":"bugs","title":"T","p":0.5,"p_why":"common","impact":1.0,"impact_why":"a false green"}]' \
+    > "$BATS_TEST_TMPDIR/risk-1.json"
+  step --risk "$BATS_TEST_TMPDIR/risk-1.json"
+  [ "$status" -eq 20 ]
+  jq -e '.blocking[0].risk_assessment.risk_thousandths == 500' "$WD/changelist-1.json" >/dev/null
+  # the in-session fix, then round 2 with a new, unassessed WARNING and no --risk
+  echo "print(2)" > "$R/app.py"
+  printf '%s' "$WARN_APP" > "$F"
+  step --resume
+  [ -f "$WD/changelist-2.json" ]
+  jq -e '[.blocking[], .suggestions[]] | all(has("risk_assessment") | not)' "$WD/changelist-2.json" >/dev/null
+  jq -e '.summary | has("risk_demoted") | not' "$WD/changelist-2.json" >/dev/null
+}
+
+@test "#1921 AC5 a malformed --risk is exit 2 with the consolidator's message, before any round state is written" {
+  export corner_case_risk_threshold=0.05
+  printf '%s' "$WARN_APP" > "$F"
+  printf '%s' '[{"file":"app.py","line":1,"dimension":"bugs","title":"print without flush","p":0.1,"p_why":"w","impact":0.5,"impact_why":"w"}]' \
+    > "$BATS_TEST_TMPDIR/bad.json"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" --risk "$BATS_TEST_TMPDIR/bad.json"
+  [ "$status" -eq 2 ]
+  [ "$stderr" = "resolve-story-loop: malformed --risk $BATS_TEST_TMPDIR/bad.json: entry 0 (print without flush): impact must be one of 0.1, 0.4, 0.7, 1.0 (got 0.5)" ]
+  # the consolidator says the same thing after its own prefix
+  run --separate-stderr env corner_case_risk_threshold=0.05 zsh "$REPO_ROOT/development/skills/resolve-issue/scripts/consolidate-findings.zsh" \
+    --findings "$F" --risk "$BATS_TEST_TMPDIR/bad.json"
+  [ "$status" -eq 2 ]
+  [ "$stderr" = "consolidate-findings: malformed --risk $BATS_TEST_TMPDIR/bad.json: entry 0 (print without flush): impact must be one of 0.1, 0.4, 0.7, 1.0 (got 0.5)" ]
+  # nothing of the round was written, so a corrected re-invocation runs round 1
+  [ ! -e "$WD/changelist-1.json" ]
+  [ ! -e "$WD/history.jsonl" ]
+  [ ! -e "$WD/changelists.jsonl" ]
+  printf '%s' "$RISK_APP" > "$BATS_TEST_TMPDIR/risk-1.json"
+  step --risk "$BATS_TEST_TMPDIR/risk-1.json"
+  [ "$(echo "$output" | jq '.rounds')" -eq 1 ]
+  [ -f "$WD/changelist-1.json" ]
+}
+
+@test "#1921 AC6 --risk beside --no-review or --review-cmd is a usage error" {
+  printf '%s' "$RISK_APP" > "$BATS_TEST_TMPDIR/risk-1.json"
+  run zsh "$LOOP_REAL" --no-review --risk "$BATS_TEST_TMPDIR/risk-1.json"
+  [ "$status" -eq 2 ]
+  contains "$output" '--risk is step-mode only'
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$LOOP_REAL" --repo "$R" --base main --work-dir "$WD" --review-cmd true --fix-cmd true \
+    --risk "$BATS_TEST_TMPDIR/risk-1.json"
+  [ "$status" -eq 2 ]
+  contains "$output" '--risk is step-mode only'
+}
+
+@test "#1921 AC6 threshold off: a round with --risk writes a changelist byte-identical to the same round without it" {
+  printf '%s' "$WARN_APP" > "$F"
+  printf '%s' "$RISK_APP" > "$BATS_TEST_TMPDIR/risk-1.json"
+  local v
+  for v in UNSET 0 abc; do
+    rm -rf "$WD" "$BATS_TEST_TMPDIR/wd-plain"
+    if [ "$v" = UNSET ]; then unset corner_case_risk_threshold; else export corner_case_risk_threshold="$v"; fi
+    step --risk "$BATS_TEST_TMPDIR/risk-1.json"
+    [ "$status" -eq 20 ]
+    step --work-dir "$BATS_TEST_TMPDIR/wd-plain"
+    [ "$status" -eq 20 ]
+    cmp "$WD/changelist-1.json" "$BATS_TEST_TMPDIR/wd-plain/changelist-1.json"
+  done
+}
+
+@test "#1921 a repo-internal --risk is loop state: never charged to the fix pass" {
+  # --risk joined the loop-internal exclusion list; an assessment written inside
+  # the repo must not appear in the fix-touched set as the fix pass's own edit
+  local RK="$R/risk-2.json"
+  local WDO="$BATS_TEST_TMPDIR/wd-rk"
+  echo "v0" > "$R/touched.py"
+  residue_findings 1 touched.py > "$F"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WDO" --findings-file "$F" --max-rounds 3
+  [ "$status" -eq 20 ]
+  echo "v1" > "$R/touched.py"
+  printf '[]\n' > "$RK"
+  residue_findings 2 touched.py > "$F"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WDO" --findings-file "$F" --resume --max-rounds 3 \
+    --risk "$RK"
+  [ "$status" -eq 20 ]
+  run -1 grep -qxF 'risk-2.json' "$WDO/fix-touched-1.txt"
+  grep -qxF 'touched.py' "$WDO/fix-touched-1.txt"
+}
+
+@test "#1921 AC6 threshold off or ignored: the loop never reads --risk, so a malformed file is no error" {
+  printf '%s' "$WARN_APP" > "$F"
+  printf 'not json\n' > "$BATS_TEST_TMPDIR/bad.json"
+  local v
+  for v in UNSET abc; do
+    rm -rf "$WD" "$BATS_TEST_TMPDIR/wd-plain"
+    if [ "$v" = UNSET ]; then unset corner_case_risk_threshold; else export corner_case_risk_threshold="$v"; fi
+    step --risk "$BATS_TEST_TMPDIR/bad.json"
+    [ "threshold $v: $status" = "threshold $v: 20" ]
+    step --work-dir "$BATS_TEST_TMPDIR/wd-plain"
+    [ "$status" -eq 20 ]
+    cmp "$WD/changelist-1.json" "$BATS_TEST_TMPDIR/wd-plain/changelist-1.json"
+  done
+}

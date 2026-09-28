@@ -376,13 +376,15 @@
 #       [--max-rounds N] [--status-file PATH] [--work-dir DIR] \
 #       [--issue N] [--telemetry-file PATH] [--telemetry-dir DIR] \
 #       [--parent-run-id ID] [--gate-attest TREE_ID] \
-#       [--findings-tree TREE_ID] [--carry-accounting FILE] [--promote FILE]  # step mode
+#       [--findings-tree TREE_ID] [--carry-accounting FILE] [--promote FILE] \
+#       [--risk FILE]                                                   # step mode
 #   resolve-story-loop.zsh --repo PATH [--base REF] \
 #       --review-cmd CMD --fix-cmd CMD [--test-cmd CMD] \
 #       [--promote FILE] ...                                      # hook mode
 #   resolve-story-loop.zsh --no-review   # skip the loop entirely (fast path;
-#                                        # refused together with --promote or
-#                                        # --carry-accounting, #1583)
+#                                        # refused together with --promote,
+#                                        # --carry-accounting (#1583) or
+#                                        # --risk (#1921))
 #
 # Exit codes (also carried as `status` in the JSON on stdout / --status-file):
 #   0   CONVERGED (or SKIPPED with --no-review)
@@ -453,7 +455,7 @@ local TREE_ID="${self_dir}/git-tree-id.zsh"
 local repo="" base="origin/main" review_cmd="" fix_cmd="" test_cmd="" findings_file=""
 local max_rounds=$MAX_REVIEW_ROUNDS status_file="" work_dir="" no_review=0
 local issue="" telemetry_file="" resume=0 gate_attest="" findings_tree="" promote=""
-local carry_accounting="" parent_run_id="" telemetry_dir=""
+local carry_accounting="" parent_run_id="" telemetry_dir="" risk=""
 
 # A value flag with no value, or one whose value is the NEXT FLAG, is a caller
 # mistake — and both are silent disasters here. Under `nounset` a dangling
@@ -521,6 +523,13 @@ while [[ $# -gt 0 ]]; do
   # mid-round as a bare exit 1 that writes no status JSON (#912), and without the
   # canonicalisation the persisted state is cwd-relative.
   --promote) _need_val "$1" $# "${2:-}"; promote="$2"; shift 2 ;;
+  # --risk (#1921): the conductor's risk assessment of THIS round's CRITICAL and
+  # WARNING findings, forwarded to the consolidator for this round only — unlike
+  # --promote, it is never persisted, because every round is assessed afresh (a
+  # fix pass can change a finding's probability). Checked up front while the
+  # threshold is on, so a malformed file refuses the round before any state is
+  # written; with the threshold off or ignored it is forwarded unread.
+  --risk) _need_val "$1" $# "${2:-}"; risk="$2"; shift 2 ;;
   --max-rounds) _need_val "$1" $# "${2:-}"; max_rounds="$2"; shift 2 ;;
   --status-file) _need_val "$1" $# "${2:-}"; status_file="$2"; shift 2 ;;
   --work-dir) _need_val "$1" $# "${2:-}"; work_dir="$2"; shift 2 ;;
@@ -545,9 +554,11 @@ while [[ $# -gt 0 ]]; do
     print -r -- "                             # confirmed / re_raised / unconfirmed per carried entry (#1583)."
     print -r -- "                             # Hook mode reads <findings-path>.carry.json instead."
     print -r -- "  [--promote FILE]"
+    print -r -- "  [--risk FILE]              # step mode: this round's risk assessment (#1921), read only"
+    print -r -- "                             # while corner_case_risk_threshold is on; demotes low-risk Warnings."
     print -r -- "  [--work-dir DIR] [--status-file PATH] [--telemetry-file PATH] [--telemetry-dir DIR]"
     print -r -- "  [--parent-run-id ID]       # the resolve-issue run this loop runs under (#1226)"
-    print -r -- "  [--no-review]   # fast path; mutually exclusive with --promote and --carry-accounting"
+    print -r -- "  [--no-review]   # fast path; mutually exclusive with --promote, --carry-accounting and --risk"
     exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
   *) print -u2 -- "unexpected argument: $1"; exit 2 ;;
@@ -633,6 +644,12 @@ fi
 # silently.
 [[ -n "$carry_accounting" && ( -n "$review_cmd" || $no_review -eq 1 ) ]] && {
   print -u2 -- "resolve-story-loop: --carry-accounting is step-mode only; in hook mode the panel writes <findings-path>.carry.json, and --no-review consolidates nothing"; exit 2 }
+# --risk (#1921) is one round's assessment, so it has the same two refusals for
+# the same reasons: hook mode runs every round in one invocation (a single file
+# would be applied to rounds it never saw), and --no-review consolidates nothing,
+# so the file would be silently ignored.
+[[ -n "$risk" && ( -n "$review_cmd" || $no_review -eq 1 ) ]] && {
+  print -u2 -- "resolve-story-loop: --risk is step-mode only; hook mode supplies no assessment (every blocker is kept), and --no-review consolidates nothing"; exit 2 }
 
 # --issue rides straight into the telemetry envelope, whose contract is a
 # non-negative integer. Before #1004 a junk value (`--issue '#123'` from a
@@ -1804,7 +1821,7 @@ fi
 # supposedly touched: the fail-OPEN direction this whole list exists to close.
 local -a loop_internal_files=()
 local _lp=""
-for _lp in "$status_file" "$findings_file" "$telemetry_file" "$carry_accounting"; do
+for _lp in "$status_file" "$findings_file" "$telemetry_file" "$carry_accounting" "$risk"; do
   [[ -n "$_lp" ]] || continue
   [[ "${_lp:A}" == "${repo:A}"/* ]] || continue
   loop_internal_files+=("${${_lp:A}#"${repo:A}"/}")
@@ -1860,6 +1877,25 @@ if [[ -n "$promote" ]]; then
   # cwd need not be stable, and a bare `promoted.json` would resolve differently
   # (or, worse, resolve to a DIFFERENT same-named file) on the next one.
   promote="${promote:A}"
+fi
+
+# --risk (#1921), validated here for the reason --promote is: the consolidator
+# refuses a malformed assessment with exit 2, but mid-round that surfaces as a
+# BARE exit 1 after the round's setup has already run. Checked with the SAME
+# library the consolidator uses, so the refusal names the same entry in the same
+# words. Only while the threshold is ON — off or ignored, the file is forwarded
+# and never read, which is what keeps such a round byte-identical to one without
+# it. Canonicalised because the consolidator runs later, possibly from another
+# cwd, and the in-repo exclusion above already matched it by `:A`.
+if [[ -n "$risk" ]]; then
+  source "${self_dir}/risk-threshold-lib.zsh" || {
+    print -u2 -- "resolve-story-loop: could not load risk-threshold-lib.zsh"; exit 1 }
+  local thr_raw="" thr_state="off" thr_milli=0
+  risk_threshold_parse
+  if [[ "$thr_state" == "on" ]]; then
+    risk_validate_file "resolve-story-loop" "$risk" || exit 2
+  fi
+  risk="${risk:A}"
 fi
 
 local changelists_file="$work_dir/changelists.jsonl"
@@ -2894,6 +2930,9 @@ while (( round <= effective_max )); do
   consolidate_args=( --findings "$scoped" --round "$round" )
   [[ -n "$prev_changelist" ]] && consolidate_args+=( --prev "$prev_changelist" )
   [[ -n "$promote" ]] && consolidate_args+=( --promote "$promote" )
+  # this round's risk assessment (#1921) — this invocation's round only, since
+  # step mode runs one round per invocation and each round is assessed afresh
+  [[ -n "$risk" ]] && consolidate_args+=( --risk "$risk" )
   consolidate_args+=( --adjudicated "$adjudicated_file" )
   # the PREVIOUS round's fix-touched set (#1435), so each blocker is stamped with
   # where it came from. `-f` not `-s`: an empty set is a real answer (every

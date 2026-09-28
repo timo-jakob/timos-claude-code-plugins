@@ -4153,7 +4153,9 @@ reliable but the merging needs semantics:
   since #1584 there is one more than the three #1434 shipped: a finding the
   conductor's *decided pass* marked **red**, on its own stamp or anywhere in its
   dedup group, is never dropped, because a red is an observed tool verdict
-  rather than a restated opinion. The rest: it matches
+  rather than a restated opinion; and since #1921 a risk-demoted item is never
+  dropped either, because it is logged as a suggestion on purpose. The rest: it
+  matches
   under the **reused #983 matcher** (gather on `file`+`dimension`+line
   proximity) on the **exact normalized-title arm ONLY** — never the
   shared-token or tokenless arms, which exist to fail *toward* the human on a
@@ -4181,7 +4183,10 @@ false_trips,adjudicated_dropped}, blocking[], suggestions[], conflicts[],
 non_converging, false_trips[], escalation_reasons[] }`, where each `blocking[]` item additionally
 carries `false_trip: bool` (#983), `class` when `--fix-touched` was given
 (#1435), and, when the overlay raised it,
-`promoted: true` (#995). A fourth stamp, **`decided: "red"|"green"` (#1584)**,
+`promoted: true` (#995). With `corner_case_risk_threshold` on and `--risk` given,
+an assessed item also carries `risk_assessment`, a demoted one `demoted: true`,
+and the summary `risk_demoted` — see *Runtime setting:
+`corner_case_risk_threshold`* (#1921). A fourth stamp, **`decided: "red"|"green"` (#1584)**,
 rides on **every** item — `blocking[]` and `suggestions[]` alike — when the
 round decided the claim the merged item is titled from. A `green` record does
 **not** imply the item is a suggestion: the group severity max, the #994
@@ -4189,8 +4194,9 @@ promotion overlay, and a reviewer-written `WARNING`/`CRITICAL` whose `decides:`
 claim came back green (the decided pass changes no severity on that malformed
 shape) each carry a green-decided finding into `blocking[]`. It records which
 way the conductor's *decided pass* went, and it is a
-**record, not a mechanism** (nothing reads it to set severity, priority or
-blocking, so a `red` whose severity was not rewritten stays a suggestion). Any
+**record, not a mechanism** (nothing reads it to raise a severity, so a `red`
+whose severity was not rewritten stays a suggestion; the one reader that acts
+on it is the #1921 risk demotion, which never lowers a `red` item). Any
 other value, or no field, adds no key, which keeps a run on findings that never
 carry it byte-identical to before it existed. On dedup the **group** decides,
 but only among members sharing the representative normalized title — the dedup
@@ -6966,15 +6972,55 @@ file more (epic #1795: 3 children became 21).
   pre-rendered with its untrusted text neutralised. The PR Summary pastes those
   rows under a fixed paragraph above
   the dossier, whose residue wording is gated on the status alone and would
-  otherwise claim they were filed. The dossier contract itself is unchanged, so
-  its hidden block's `open` still counts dropped findings; #1921 owns that.
-- **Scope:** residue filing only. The review loop's own blocking decision is
-  untouched; extending the floor to it is #1921.
+  otherwise claim they were filed. The dossier's residue counts are unchanged, so
+  its hidden block's `open` still counts findings dropped at residue; #1932 owns
+  that.
+- **Scope (#1921): every blocking finding, not only residue.** With the
+  threshold on, the conductor assesses each round's `CRITICAL` and `WARNING`
+  findings after the decided pass, writes `<work-dir>/risk-<R>.json` in the same
+  shape, and passes it with `resolve-story-loop.zsh --risk` (step mode only;
+  refused beside `--review-cmd` and `--no-review`), which forwards it to
+  `consolidate-findings.zsh --risk` for that round.
+  - **The stamp.** Every assessed changelist item carries `risk_assessment:
+    {p, p_why, impact, impact_why, risk, risk_thousandths, threshold,
+    threshold_thousandths}` beside `decided`.
+  - **Demotion.** A `WARNING` item below the threshold is demoted: `severity:
+    "SUGGESTION"`, priority `Low`, `blocking: false`, `demoted: true`. It moves
+    to `suggestions` and never blocks convergence.
+  - **Placement.** The demotion runs straight after dedup and before the
+    promotion overlay, so the overlay raises a human pick again (clearing
+    `demoted`) and the pick always wins. It also runs before the adjudicated
+    drop, which never selects a demoted item, and before conflict and
+    non-convergence classification. `summary.risk_demoted` appears only when
+    the demotion ran.
+  - **Never demoted:** a `CRITICAL` item, a promoted item and a tool-red item.
+    A dedup group is demoted only when every `WARNING` member was assessed and
+    the highest member risk is below the threshold.
+  - **Severity and impact are independent.** Severity decides only
+    eligibility.
+  - **Off or ignored:** `--risk` is accepted and never read, no key above
+    appears, and the changelist is byte-identical.
+  - **One parser.** `consolidate-findings.zsh`, `resolve-story-loop.zsh` and
+    `build-residue-issues.zsh` source one parser and one assessment validator,
+    `scripts/risk-threshold-lib.zsh`, so no value is read two ways.
+  - **Assessed once.** The residue builder reuses a blocker's
+    `risk_assessment` stamp instead of re-assessing it (`assessed_in: "loop"`,
+    versus `"residue"` for a `--risk` entry), and refuses with exit 2 a `--risk`
+    entry naming a stamped finding. A stamp below its own recorded threshold on
+    a surviving blocker marks one the loop kept on purpose, and the builder
+    keeps it too.
+  - **Visibility.** A demotion is shown in the progress block and in the
+    dossier: a paragraph and table above the waived suggestions, and an
+    optional `risk_demoted` array in the hidden block, present only when
+    non-empty. The hidden `waived_low` still lists demoted items, because the
+    Approver folds it into its risk register; only the rendered waived list
+    leaves them out.
 
-The procedure is `development/skills/resolve-issue/reference/residue.md`,
+The procedures are `development/skills/resolve-issue/reference/residue.md`,
 § *Risk threshold — assess before filing (#1920)*, which amends the frozen
-residue branch without editing it. User-facing docs: [how-to: set a corner-case
-risk threshold](docs/how-to/set-a-corner-case-risk-threshold.md).
+residue branch without editing it, and `reference/review-loop.md`, § *The risk
+pass* (#1921). User-facing docs: [how-to: set a corner-case risk
+threshold](docs/how-to/set-a-corner-case-risk-threshold.md).
 
 ## Worktree pattern for parallel work
 

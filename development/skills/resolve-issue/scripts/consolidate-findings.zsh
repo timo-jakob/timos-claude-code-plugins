@@ -121,9 +121,10 @@
 #     to the severity the reviewer proposed. An optional per-finding `decided`
 #     ("red" | "green") records which way it went, and is carried through to the
 #     changelist item so the promotion is auditable there. It is a RECORD, not a
-#     mechanism — nothing here reads it to set severity, priority or blocking, so
-#     a `decided: "red"` whose severity the conductor did NOT rewrite stays a
-#     suggestion, and a `decided: "green"` never demotes anything. Any other
+#     mechanism — nothing here reads it to RAISE a severity, so a `decided: "red"`
+#     whose severity the conductor did NOT rewrite stays a suggestion, and a
+#     `decided: "green"` never demotes anything. (Its one reader is the #1921 risk
+#     demotion, which never LOWERS a `red` item.) Any other
 #     value, or no field at all, adds no key — which is what keeps a run on
 #     findings that never carry it byte-identical to before it existed. On dedup
 #     the GROUP decides — but only among members sharing the representative's
@@ -142,10 +143,34 @@
 #     conductor's `<work-dir>/decided-<R>.log`, never here, so nothing downstream
 #     may read `green` as "the tool passed".
 #
+#   - Risk demotion (#1921): with `corner_case_risk_threshold` ON (the #1920
+#     variable, parsed by the shared risk-threshold-lib.zsh) and --risk FILE, the
+#     conductor's assessment of the round's CRITICAL and WARNING findings is
+#     applied. Every assessed item is stamped `risk_assessment: {p, p_why, impact,
+#     impact_why, risk, risk_thousandths, threshold, threshold_thousandths}`, a
+#     record beside `decided`. A WARNING item whose risk (p x impact, integer
+#     thousandths) is BELOW the threshold is demoted to a suggestion — severity
+#     SUGGESTION, priority Low, blocking false, `demoted: true` — so it is logged,
+#     never fixed, and never counts toward convergence. It never disappears.
+#     NEVER demoted, at any threshold or risk: a CRITICAL item, a human-promoted
+#     item (`promoted: true`), and an item a tool decided red (`decided: "red"`,
+#     or a red anywhere in its dedup group). A dedup group is demoted only when
+#     EVERY WARNING member has an assessment and the HIGHEST member risk is below
+#     the threshold; the item carries that member's assessment. An unassessed
+#     finding keeps its severity (a missing judgement never demotes anything).
+#     Placed straight after dedup, BEFORE the promotion overlay — which then
+#     raises a human pick again, clearing `demoted`, so the pick always wins — and
+#     before the adjudicated drop, which never selects a demoted item, and the
+#     conflict / non-convergence classification, so a demoted item never reads as
+#     a surviving blocker.
+#     `summary.risk_demoted` is present only when the demotion ran. With the
+#     threshold OFF or IGNORED, --risk is accepted and the file is never read, and
+#     no key above appears: the output is byte-identical to a run without it.
+#
 # Usage:
 #   consolidate-findings.zsh --findings FILE [--round N] [--prev FILE]
 #                            [--promote FILE] [--adjudicated FILE]
-#                            [--fix-touched FILE]
+#                            [--fix-touched FILE] [--risk FILE]
 #     --findings  aggregate findings JSON for THIS round (required)
 #     --round     round number (default 1)
 #     --prev      previous round's changelist JSON (this script's own output);
@@ -164,13 +189,18 @@
 #                 flag here an EMPTY file is accepted: "the fix pass touched
 #                 nothing reviewable" is a real state (a fix confined to
 #                 `.review/`), and it means every blocker is a `new_defect`.
+#     --risk      the conductor's risk assessment for THIS round (#1921), in
+#                 #1920's shape: a JSON array of {file, line, dimension, title,
+#                 p, p_why, impact, impact_why}. Read only while the threshold
+#                 is ON; a malformed file is then exit 2, naming the entry.
 #
-# Exit codes: 0 ok · 2 usage error · 1 internal (unreadable / invalid JSON)
+# Exit codes: 0 ok · 2 usage error (including a malformed --risk while the
+#             threshold is on) · 1 internal (unreadable / invalid JSON)
 
 emulate -L zsh
 setopt nounset pipefail
 
-local usage="usage: consolidate-findings.zsh --findings FILE [--round N] [--prev FILE] [--promote FILE] [--adjudicated FILE] [--fix-touched FILE]"
+local usage="usage: consolidate-findings.zsh --findings FILE [--round N] [--prev FILE] [--promote FILE] [--adjudicated FILE] [--fix-touched FILE] [--risk FILE]"
 
 # A value flag with no value, or one whose value is the NEXT FLAG, is a caller
 # mistake that this script used to turn into the wrong failure. Under `nounset`
@@ -195,7 +225,7 @@ _need_val() {  # $1 = flag, $2 = remaining arg count, $3 = candidate value
     print -u2 -- "consolidate-findings: $1 requires a non-empty value"; exit 2 }
 }
 
-local findings="" round=1 prev="" promote="" adjudicated="" fix_touched=""
+local findings="" round=1 prev="" promote="" adjudicated="" fix_touched="" risk_file=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
   --findings) _need_val "$1" $# "${2:-}"; findings="$2"; shift 2 ;;
@@ -207,6 +237,7 @@ while [[ $# -gt 0 ]]; do
   # slip _need_val exists for, and would silently drop the whole stamp); it is
   # the file's CONTENTS that may legitimately be empty — see below
   --fix-touched) _need_val "$1" $# "${2:-}"; fix_touched="$2"; shift 2 ;;
+  --risk) _need_val "$1" $# "${2:-}"; risk_file="$2"; shift 2 ;;
   -h|--help) print -r -- "$usage"; exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
   *) print -u2 -- "unexpected argument: $1"; exit 2 ;;
@@ -357,6 +388,30 @@ if [[ -n "$fix_touched" ]]; then
   has_touched='true'
 fi
 
+# The risk demotion (#1921). The threshold is parsed by the SAME parser the
+# residue builder uses, so a value can never demote here and be read differently
+# there. `riskon` is the one gate the program reads: it is true only when the
+# threshold is ON *and* an assessment was supplied. Every other combination —
+# threshold off, ignored, or on with no --risk (hook mode supplies none) — leaves
+# `risk_json` empty and the program on exactly its pre-#1921 path, which is the
+# byte-identity guarantee. --risk is accepted and left UNREAD while the threshold
+# is off or ignored, so a caller can pass it every round without first reading
+# the environment itself.
+source "${0:A:h}/risk-threshold-lib.zsh" || {
+  print -u2 -- "consolidate-findings: could not load risk-threshold-lib.zsh"; exit 1 }
+local thr_raw="" thr_state="off" thr_milli=0 risk_json='[]' riskon='false'
+risk_threshold_parse
+if [[ -n "$risk_file" ]]; then
+  if [[ "$thr_state" == "ignored" ]]; then
+    print -r -u2 -- "consolidate-findings: corner_case_risk_threshold='${thr_raw}' is not a decimal in [0, 1] with at most three decimals — IGNORED, so no finding is demoted (e.g. 0.05, not 5 or 30)"
+  elif [[ "$thr_state" == "on" ]]; then
+    risk_validate_file "consolidate-findings" "$risk_file" || exit 2
+    risk_json=$(jq -c '.' -- "$risk_file") || {
+      print -u2 -- "consolidate-findings: could not read --risk: $risk_file"; exit 1 }
+    riskon='true'
+  fi
+fi
+
 local -r PROG='
 def sevrank(s): if s=="CRITICAL" then 3 elif s=="WARNING" then 2 elif s=="SUGGESTION" then 1 else 0 end;
 def prio(s): if s=="CRITICAL" then "Critical" elif s=="WARNING" then "High" else "Low" end;
@@ -413,6 +468,33 @@ def line_near($a;$b):
 # line-less candidates rank last (LINEWIN + 1) and ties keep prior
 # blocking-array order; used by BOTH matched_prior branches so co-windowed
 # priors always attribute to their own successors (#969)
+# RISK STAMP + DEMOTION (#1921) — applied to one item carrying the internal
+# `_risk` (see the dedup block), which it always deletes. The stamp is a RECORD
+# beside `decided`; the demotion is the only place a severity is ever LOWERED in
+# this program, so its exemptions are spelled out here rather than inherited:
+# CRITICAL never (severity must be WARNING), and an observed tool red never
+# (`decided` on the item, or `group_red` anywhere in its group). A human pick is
+# exempt by ORDER rather than by a test here: this runs before the promotion
+# overlay, which raises the picked item again afterwards. `$k.all` keeps a group
+# with an unassessed blocking member blocking. The comparison is strict: a risk
+# EQUAL to the threshold stays blocking. A blocker that keeps a stamp BELOW its
+# own threshold was therefore kept by an exemption — which is how the residue
+# builder recognises it without a second key.
+# NB: no apostrophes in this block — the jq program is single-quoted.
+def riskstamp:
+  if has("_risk") then
+    ._risk as $k | $k.top as $e
+    | del(._risk)
+    | . + { risk_assessment: { p: $e.p, p_why: $e.p_why, impact: $e.impact,
+              impact_why: $e.impact_why, risk: ($e.r / 1000),
+              risk_thousandths: $e.r, threshold: $thr_raw,
+              threshold_thousandths: $thr_milli } }
+    | if (.severity == "WARNING") and $k.all and ($e.r < $thr_milli)
+         and (.decided != "red") and (.group_red != true)
+      then . + { severity: "SUGGESTION", priority: prio("SUGGESTION"),
+                 blocking: blocks("SUGGESTION"), demoted: true }
+      else . end
+  else . end;
 def nearest($c): sort_by(
   if ((.line | type) == "number") and (($c.line | type) == "number")
   then (((.line) - ($c.line)) | if . < 0 then -. else . end)
@@ -449,7 +531,8 @@ def nearest($c): sort_by(
   # this script and, on a red, rewrites `.severity` to the reviewer proposed one.
   # `decided` records WHICH way that went so the promotion is visible in the
   # changelist — it is a record, never the mechanism: nothing here reads it to
-  # change a severity, a priority or whether an item blocks. Carried through as a
+  # raise a severity or make an item block (the #1921 risk demotion reads it
+  # only to never lower a red). Carried through as a
   # direct per-item field, the same shape `false_trip` (#983), `promoted` (#995)
   # and `class` (#1435) already use.
   #
@@ -510,6 +593,30 @@ def nearest($c): sort_by(
     # the shape to avoid), so it never reaches the output and a run that passes no
     # flags stays byte-identical.
     | ([ .[] | .decided // empty ]) as $anydec
+    # RISK (#1921) — the group view of the conductor assessment, gathered HERE
+    # because the members are only visible inside the dedup group. Only the
+    # blocking members count: the conductor assesses CRITICAL and WARNING
+    # findings, and a Low member neither blocks nor was assessed. `top` is the
+    # member with the HIGHEST risk — the conservative pick, since a group is
+    # demoted only when even its riskiest member is below the threshold — and
+    # `all` says whether every blocking member was assessed, because one
+    # unassessed member keeps the whole item blocking. Identity is matched on the
+    # normalized file and line the members carry, against the entry normalized
+    # the same way, so a `./` or a digit-string line cannot defeat the match.
+    # Internal (`_risk`), consumed and deleted by riskstamp below; null when the
+    # demotion is off, so no key is added and the output is unchanged.
+    | ( if $riskon then
+          ( [ .[] | select(blocks(.severity)) | . as $m
+              | ( [ $risk[] | select(((.file // "") | normfile) == $m.file
+                                     and (.line | normline) == $m.line
+                                     and ((.dimension // "") | tostring) == $m.dimension
+                                     and (.title // "") == $m.title) ] | first ) ] ) as $bm
+          | ( [ $bm[] | select(. != null)
+                | . + { r: ((.p * 100 | round) * (.impact * 10 | round)) } ] ) as $as
+          | if ($as | length) > 0
+            then { top: ($as | max_by(.r)), all: ([ $bm[] | . != null ] | all) }
+            else null end
+        else null end ) as $rk
     | $rep + {
         severity: $sev,
         priority: prio($sev),
@@ -522,8 +629,22 @@ def nearest($c): sort_by(
         else . end )
     | ( if ($anydec | index("red")) != null then . + { group_red: true }
         else . end )
+    | ( if $rk != null then . + { _risk: $rk } else . end )
     | del(.reviewer)
   ) ) as $items
+
+# RISK DEMOTION (#1921) — applied HERE, straight after dedup and BEFORE the
+# promotion overlay, so a human pick always wins: a WARNING the human promoted
+# back and the reviewer then re-raised is demoted to Low first, and the overlay
+# below raises it again with `promoted: true` (clearing `demoted`), exactly as it
+# raises any other picked suggestion. Demoting AFTER the overlay could never see
+# that pick — the overlay only raises Low items, so a re-raised WARNING would
+# carry no `promoted` flag and be demoted, undoing the human. It stays before the
+# adjudicated drop too, which never selects a demoted item (see there).
+# `group_red` is still present here for the tool-red exemption; it is stripped
+# in the adjudication projection below. With the demotion off no item carries
+# `_risk`, so this map is the identity and the output is unchanged.
+| ( $items | map(riskstamp) ) as $items
 
 # PROMOTION OVERLAY (#994) — human-selected waived suggestions raised to blocking.
 # Placed here deliberately: AFTER dedup (so one promoted key cannot bump the same
@@ -586,7 +707,11 @@ def nearest($c): sort_by(
                         # everywhere it is read afterwards. A direct per-item
                         # flag with NO stamp gate (the #983 false_trip
                         # precedent), so an absent flag simply counts 0.
-                        promoted: true })),
+                        promoted: true }
+                        # a risk-demoted item the human picked is no longer
+                        # demoted (#1921); `del` of an absent key is a no-op
+                        # that keeps key order, so other raises are unchanged
+                        | del(.demoted))),
                 claimed: ($cl + [$best.key]) }
           end)
     | .its ) as $items
@@ -638,6 +763,10 @@ def nearest($c): sort_by(
       # Both absent keys are null, and null is neither "red" nor true, so an
       # undecided finding is unaffected and a flagless run stays byte-identical.
       | select($it.decided != "red" and $it.group_red != true)
+      # GUARD 5 (#1921): never drop a risk-demoted item. It cleared a blocking
+      # bar this round and is logged as a suggestion ON PURPOSE; dropping it as
+      # a re-raise of an earlier waived suggestion would make it disappear.
+      | select($it.demoted != true)
       | select([ $adjudicated[]
                  | select((($it.title | normtitle) != "")
                      and (((.title // "") | normtitle) == ($it.title | normtitle))
@@ -764,7 +893,9 @@ def nearest($c): sort_by(
 
 | {
     round: $round,
-    summary: {
+    # parenthesised: an object value must be a single term, and the risk key
+    # (#1921) is appended with `+`, only when the demotion ran
+    summary: ({
       critical: ($crit | length),
       high: ($high | length),
       low: ($low | length),
@@ -776,7 +907,8 @@ def nearest($c): sort_by(
       # the key", which is the same argument promotion_phase carries in the
       # status JSON.
       adjudicated_dropped: $adj_dropped
-    },
+    } + ( if $riskon then { risk_demoted: ([ $items[] | select(.demoted == true) ] | length) }
+          else {} end )),
     blocking: $blocking,
     suggestions: $low,
     conflicts: $conflicts,
@@ -792,6 +924,25 @@ def nearest($c): sort_by(
 jq -c --argjson round "$round" --argjson prev "$prev_json" --argjson promote "$promote_json" \
   --argjson adjudicated "$adjudicated_json" \
   --argjson fixtouched "$fix_touched_json" --argjson has_touched "$has_touched" \
+  --argjson riskon "$riskon" --argjson risk "$risk_json" \
+  --arg thr_raw "$thr_raw" --argjson thr_milli "$thr_milli" \
   "$PROG" -- "$findings" || {
   print -u2 -- "consolidate-findings: invalid findings JSON: $findings"; exit 1
 }
+
+# An assessment entry that matched no CRITICAL or WARNING finding is a mistyped
+# identity, and its finding therefore kept its severity — the safe direction, but
+# the conductor meant to judge it and should know why nothing changed. Stderr
+# only: the changelist above is already written, and this never changes it.
+if [[ "$riskon" == "true" ]]; then
+  local n_unmatched=""
+  n_unmatched=$(jq -r --argjson risk "$risk_json" '
+    def normfile: ((. // "") | tostring | sub("^\\./";""));
+    def normline: if (. | type) == "number" then .
+      elif ((. | type) == "string") and (test("^[0-9]+$")) then tonumber else null end;
+    [ .[] | select(.severity == "CRITICAL" or .severity == "WARNING")
+      | [(.file | normfile), (.line | normline), ((.dimension // "") | tostring), (.title // "")] ] as $ids
+    | [ $risk[] | [((.file // "") | normfile), (.line | normline), ((.dimension // "") | tostring), (.title // "")]
+        | select(. as $k | $ids | any(. == $k) | not) ] | length' -- "$findings" 2>/dev/null) || n_unmatched=""
+  [[ -z "$n_unmatched" || "$n_unmatched" == 0 ]] || print -r -u2 -- "consolidate-findings: ${n_unmatched} --risk entr(y/ies) matched no CRITICAL or WARNING finding this round (identity is file + line + dimension + title, exactly) — those findings were not assessed and keep their severity"
+fi

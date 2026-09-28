@@ -25,7 +25,8 @@ Add the variable to your settings:
 }
 ```
 
-The next `/development:resolve-issue` run that ends in residue uses it. As with
+The next `/development:resolve-issue` run uses it, in every review round and
+again when it files residue. As with
 any `env` setting, restart the session if a mid-session edit does not seem to
 apply.
 
@@ -86,10 +87,49 @@ its probability, impact, risk and the reasoning behind both. The dossier itself
 still counts them as open, so the paragraph is what tells you they were **not**
 filed. If you disagree with an assessment, file that finding by hand.
 
+## What it does inside the review loop
+
+The same floor applies to every review round, not only to residue (#1921). The
+loop no longer spends fix rounds on a corner case below your floor.
+
+In each round, the run assesses every blocking finding the reviewers raised,
+using the same probability and impact rules. A **Warning** whose risk is below
+the threshold is **demoted to a suggestion**: it is logged, it is not fixed, and
+it no longer stops the loop converging.
+
+Some findings are never demoted, however low their risk:
+
+- a **Critical** finding;
+- a suggestion you promoted yourself;
+- a finding a tool actually confirmed.
+
+A demoted finding never disappears:
+
+- **Progress log:** the round's block has a `demoted by risk threshold` line,
+  then one line per finding with its probability, impact and risk.
+- **PR body:** a **Demoted by the risk threshold** table above the waived
+  suggestions lists each finding with its assessment and reasoning.
+- **Promotion prompt:** at convergence, the suggestion-promotion prompt offers
+  demoted findings back like any other suggestion. Pick one to have the loop fix
+  it after all. A finding that blocked in an earlier round before it was
+  demoted is not offered; it appears only in the PR table.
+
+If you turned the promotion prompt off (`enable_suggestions`), the progress log
+and the PR table are the only places a demotion shows.
+
+A finding the loop already assessed is not assessed again when it ends up as
+residue: the residue filter reuses the loop's assessment. A finding the loop
+assessed but never demotes — a Critical, your own pick, a tool-confirmed one —
+is kept at residue too, whatever its risk.
+
 ## What it does not touch
 
-Only which residue gets **filed**. It does not change when a run ends in residue,
-nor what the review loop fixes before it gets there — applying the floor to the
-loop's own findings is planned as a follow-up (#1921). The procedure the run
-follows is `development/skills/resolve-issue/reference/residue.md`, section
-*Risk threshold — assess before filing*.
+The floor does not change when a run ends in residue. It also does not change
+how the review dossier's machine-readable block counts residue it dropped: that
+block still counts those findings as open. Carrying a separate dropped count
+there is #1932.
+
+The procedures the run follows are in `development/skills/resolve-issue/reference/`:
+
+- `review-loop.md`, section *The risk pass*;
+- `residue.md`, section *Risk threshold — assess before filing*.

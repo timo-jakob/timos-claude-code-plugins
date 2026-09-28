@@ -238,9 +238,81 @@ nrounds=$(jq -n --argjson s "$status_json" --argjson p "$promotion_status_json" 
 # merely shares a word, hiding real un-actioned work. The overlay can afford
 # leniency because it is line-windowed and one-to-one; the dossier reconstructs
 # neither bound.
+#
+# THE RISK-DEMOTED SET (#1921). Findings the loop demoted below
+# corner_case_risk_threshold are Low items stamped `demoted: true`, so without a
+# rule they would read as ordinary waived suggestions — hiding that each one
+# cleared a reviewer blocking bar and was set aside by a risk judgement. ONE
+# harvest, prepended to both programs below so the hidden block and the rendered
+# table can never list different findings. It walks EVERY item — blocking and
+# suggestions — of every round of both phases in order and follows each finding
+# the way the consolidator follows one across rounds: same file, dimension and
+# normalised title, with the line within LINEWIN (10) lines of the record it
+# continues (a null line on either side is a wildcard). So a fix pass that moves
+# a finding a few lines still continues its record, while two same-titled
+# findings further apart stay two records. Each record carries the finding as it
+# was LATEST seen (`priority`, `demoted`) and whether any occurrence was demoted
+# (`anydemoted`). The demoted set is the records whose latest occurrence is still
+# demoted — so a finding a later round kept blocking, or the human promoted back
+# and the sub-loop then fixed, is not listed as "not fixed". `seq` orders the
+# records across both phases (round numbers restart in a promotion phase) and is
+# dropped from the hidden block. With nothing demoted no record has
+# `anydemoted`, which keeps a run with the threshold off byte-identical. (No
+# apostrophes: the definition is single-quoted.)
+local demoted_def='
+  def dem_lk: [(.file // ""), (.dimension // ""),
+               ((.title // "") | tostring | ascii_downcase | gsub("\\s+"; " ")
+                 | sub("^ +"; "") | sub(" +$"; ""))];
+  # 10 is consolidate-findings.zsh LINEWIN (its gather window; the verdict here
+  # is an exact normalised title), and the 11 in dem_find is LINEWIN + 1 —
+  # change all three together
+  def dem_near($a; $b):
+    if (($a | type) == "number") and (($b | type) == "number")
+    then ((($a) - ($b)) | (if . < 0 then -. else . end) <= 10) else true end;
+  # the index of the record an item continues — the nearest same-key record in
+  # the window — or null
+  # only a record from an EARLIER round is continued: two findings of one round
+  # are two findings, however close
+  def dem_find($recs; $it; $pass):
+    ($it | dem_lk) as $k
+    | [ $recs | to_entries[]
+        | select(.value.lk == $k and .value.pass != $pass and dem_near(.value.line; $it.line))
+        | { i: .key, d: (if ((.value.line | type) == "number") and (($it.line | type) == "number")
+                         then ((.value.line - $it.line) | if . < 0 then -. else . end) else 11 end) } ]
+    | sort_by(.d) | (.[0].i // null);
+  def dem_records($s; $p):
+    [ (($s.round_changelists // []) + ((($p // {}).round_changelists // [])))
+      | to_entries[] | .key as $pass | .value | .round as $rn
+      | ((.blocking // []), (.suggestions // []))[]
+      | { item: ., round: $rn, pass: $pass } ]
+    | to_entries
+    | reduce .[] as $e ([];
+        ($e.value.item) as $it
+        | dem_find(.; $it; $e.value.pass) as $i
+        | { lk: ($it | dem_lk), file: $it.file, line: $it.line, dimension: $it.dimension,
+            title: $it.title, round: $e.value.round, pass: $e.value.pass, seq: $e.key,
+            ids: ((if $i == null then [] else .[$i].ids end)
+                  + [[$it.file, $it.line, $it.dimension, $it.title] | tojson]),
+            priority: ($it.priority // "Low"), demoted: ($it.demoted == true),
+            anydemoted: (($it.demoted == true) or ($i != null and (.[$i].anydemoted // false))),
+            p: $it.risk_assessment.p, impact: $it.risk_assessment.impact,
+            risk_thousandths: $it.risk_assessment.risk_thousandths,
+            p_why: $it.risk_assessment.p_why, impact_why: $it.risk_assessment.impact_why,
+            threshold: $it.risk_assessment.threshold } as $r
+        | if $i == null then . + [$r] else .[$i] = $r end);
+  # the identities the promotion phase raised (`promoted: true`), line-insensitive
+  # like the #1064 exclusion: a demoted finding the human picked and the
+  # sub-loop fixed is not "not fixed", even when the fix moved it past the window
+  def dem_raised($p): [ (($p // {}).round_changelists // [])[] | .blocking[]?
+                        | select(.promoted == true) | dem_lk ];
+  def dem_picked($r): (.priority == "Low") and (.lk as $k | any($r[]; . == $k));
+  def demoted_set($s; $p):
+    dem_raised($p) as $r
+    | [ dem_records($s; $p)[] | select(.demoted) | select(dem_picked($r) | not) ];
+'
 local dossier=""
 dossier=$(jq -cn --argjson s "$status_json" --argjson p "$promotion_status_json" \
-              --argjson sel "$promoted_json" '
+              --argjson sel "$promoted_json" "$demoted_def"'
   def normtitle: ((. // "") | tostring | ascii_downcase | gsub("\\s+"; " ")
     | sub("^ +"; "") | sub(" +$"; ""));
   # a STRING key, not an array: jq index() on an array argument searches for a
@@ -299,7 +371,31 @@ dossier=$(jq -cn --argjson s "$status_json" --argjson p "$promotion_status_json"
                ($x | identkey) as $k
                | if ($x.priority == "Low") and (.seen[$k] == true) then .
                  else { seen: (if $x.priority == "Low" then (.seen + { ($k): true }) else .seen end),
-                        out: (.out + [$x]) } end) | .out ) end ) as $uv
+                        out: (.out + [$x]) } end) | .out ) end ) as $uvraw
+  | dem_records($s; $p) as $recs
+  | demoted_set($s; $p) as $demmap
+  # A finding that was demoted in ANY round (#1921) is counted ONCE, with the
+  # priority and line of its LATEST occurrence, in both directions:
+  # blocking-then-demoted counts as a suggestion and stays in waived_low, and
+  # demoted-then-kept-blocking counts as "blocking found & fixed". So $uv is
+  # built from the RECORDS, not from the deduped entries: every record that was
+  # ever demoted contributes exactly one entry, carrying its latest identity
+  # (file, line, dimension, title) and priority, and a deduped entry survives
+  # only when no such record absorbed its exact identity (`ids`). A record never
+  # demoted whose every identity was absorbed that way contributes its own
+  # entry too, so no finding is lost to a shared identity. A demoted Low the
+  # promotion phase raised is left out, as the #1064 exclusion leaves it out of
+  # $uvraw. A finding never demoted is left exactly as before, so with nothing
+  # demoted $uv is $uvraw.
+  | dem_raised($p) as $raisedlk
+  | [ $recs[] | select(.anydemoted) ] as $drecs
+  | [ $drecs[].ids[] ] as $claimed
+  | ( [ $uvraw[] | ([.file, .line, .dimension, .title] | tojson) as $id
+        | select(any($claimed[]; . == $id) | not) ]
+      + [ $recs[] | select(.anydemoted
+                           or (all(.ids[]; . as $i | any($claimed[]; . == $i)) and ($claimed | length) > 0))
+          | select(dem_picked($raisedlk) | not)
+          | { file, line, dimension, title, priority, reviewers: [] } ] ) as $uv
   | (($core + ($uv | map(.dimension))) | unique) as $dims
   | (if $p == null then $s else $p end) as $terminal
   # Blockers still OPEN, per dimension (#1435). Until residue existed this was
@@ -351,6 +447,11 @@ dossier=$(jq -cn --argjson s "$status_json" --argjson p "$promotion_status_json"
       rounds: ((($s.rounds // ($brounds | length))) + (if $p == null then 0 else ($p.rounds // ($prounds | length)) end)),
       repo_type: ($s.repo_type // ($p // {}).repo_type),
       dimensions: $dimmap,
+      # a risk-demoted finding (#1921) STAYS in this machine-readable list, which
+      # the Approver folds into its risk register: removing it would take a
+      # finding that cleared a blocking bar out of that register. Only the
+      # rendered waived list below leaves it out, since the human reads it in
+      # its own table; `risk_demoted` names which of these were demoted.
       waived_low: [ $uv[] | select(.priority=="Low") | {file, line, dimension, title} ],
       # Reviewers come from the widest set, because BOTH the exclusion and the
       # cross-phase dedupe drop whole findings — and a dropped copy may name a
@@ -361,6 +462,10 @@ dossier=$(jq -cn --argjson s "$status_json" --argjson p "$promotion_status_json"
       reviewers: ([ (if $p == null then $u else $allf end)[] | .reviewers[]? ] | unique),
       final: ($terminal.final_changelist.summary // {})
     }
+  # present only when non-empty (#1921), so a dossier with no demotion keeps
+  # exactly its previous shape for every reader of the hidden block
+  | if ($demmap | length) == 0 then . else . + { risk_demoted: [ $demmap[]
+        | {file, line, dimension, title, round, p, impact, risk_thousandths} ] } end
   | if $p == null then . else . + { promotion: {
       rounds: ($p.rounds // ($prounds | length)),
       status: $p.status,
@@ -394,7 +499,14 @@ dossier=$(jq -cn --argjson s "$status_json" --argjson p "$promotion_status_json"
 # PR body carrying half a section and no hidden block, with nothing to signal it.
 local section=""
 section=$(jq -rn --argjson s "$status_json" --argjson p "$promotion_status_json" \
-                 --argjson d "$dossier" '
+                 --argjson d "$dossier" "$demoted_def"'
+  # untrusted reviewer and conductor text in a table cell (#1921): newlines and
+  # backticks stripped, pipes escaped — the same neutralisation the residue
+  # builder applies to its dropped-finding rows
+  def safe: (. // "") | tostring | gsub("[\r\n`]"; " ") | gsub(" +"; " ")
+            | sub("^ +"; "") | sub(" +$"; "");
+  def cell: safe | gsub("\\|"; "\\|");
+  def linepart: if (.line | type) == "number" then ":\(.line)" else "" end;
   # the second of the two build-dossier stamp reads — same per-item expression
   # as the four sibling copies; change all five together (#995/#1064)
   def roundline($r; $label): "- \($label)\($r.round): \($r.summary.blocking) blocking"
@@ -469,11 +581,33 @@ section=$(jq -rn --argjson s "$status_json" --argjson p "$promotion_status_json"
           "- `\(.key)` — \(.value.blocking) blocking found, \(.value.open) still open (filed as follow-up issue(s)), \(.value.suggestions) suggestion(s)"
         else "- `\(.key)` — \(.value.blocking) blocking found & fixed, \(.value.suggestions) suggestion(s)" end) ]
   + [ "" ]
-  + (if ($d.waived_low | length) > 0 then
-       [ "**Waived suggestions** (Low — logged, never blocking)", "" ]
-       + [ ($d.waived_low[] | "- `\(.file):\(.line)` [\(.dimension)] \(.title)") ]
-       + [ "" ]
-     else [] end)
+  # RISK-DEMOTED (#1921), above the waived list and never folded into it.
+  + ( [ demoted_set($s; $p)[] ] as $dem
+      | if ($dem | length) == 0 then [] else
+          [ ("**Demoted by the risk threshold (`corner_case_risk_threshold` = `\($dem | max_by(.seq) | .threshold | cell)`):** "
+             + "these findings cleared a reviewer'"'"'s blocking bar, but each one'"'"'s risk (probability × impact) "
+             + "is below the threshold, so the loop logged them as suggestions and did not fix them. "
+             + "Promote any of them if you disagree with its assessment."),
+            "",
+            "| finding | round | p | impact | risk | why |",
+            "|---|---|---|---|---|---|" ]
+          + [ $dem[] | "| `\((.title | cell)[0:120])` — `\(((.file // "") | cell)[0:120])\(linepart)`"
+                       + " | \(.round) | \(.p) | \(.impact) | \(.risk_thousandths / 1000)"
+                       + " | \(.p_why | cell); \(.impact_why | cell) |" ]
+          + [ "" ] end )
+  # the rendered waived list leaves out what the demoted table above already
+  # lists (#1921); waived_low carries each demoted finding under the latest
+  # identity of its record, so that identity is the match. With nothing demoted the
+  # filter keeps everything
+  + ( demoted_set($s; $p) as $dm
+      | [ $dm[] | [.file, .line, .dimension, .title] | tojson ] as $dmids
+      | [ $d.waived_low[] | ([.file, .line, .dimension, .title] | tojson) as $id
+          | select(any($dmids[]; . == $id) | not) ] as $wl
+      | if ($wl | length) > 0 then
+          [ "**Waived suggestions** (Low — logged, never blocking)", "" ]
+          + [ ($wl[] | "- `\(.file):\(.line)` [\(.dimension)] \(.title)") ]
+          + [ "" ]
+        else [] end )
   + [ ("**Reviewers:** " + ($d.reviewers | if length==0 then "—" else join(", ") end)),
       "",
       "_Machine-readable dossier below is consumed by the Approver'"'"'s risk register._",

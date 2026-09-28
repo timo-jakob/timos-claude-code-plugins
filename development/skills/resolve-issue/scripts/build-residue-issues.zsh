@@ -43,7 +43,17 @@
 #                   { file, line, dimension, title,       ← the finding identity
 #                     p, p_why, impact, impact_why }      ← the assessment
 #                   Read ONLY when the risk threshold (below) is active; with it
-#                   off the flag is accepted and ignored, file unread
+#                   off the flag is accepted and ignored, file unread.
+#                   Since #1921 a changelist blocker may already carry the
+#                   loop's `risk_assessment` stamp (consolidate-findings.zsh
+#                   --risk); such a finding is NOT assessed again — its stamp is
+#                   used (`assessed_in: "loop"` in the dropped record, where a
+#                   --risk entry's is `"residue"`), and a --risk entry naming a
+#                   stamped finding is exit 2. A stamp below its OWN recorded
+#                   threshold on a surviving blocker marks one the loop kept on
+#                   purpose (never demoted: CRITICAL, tool red, human pick,
+#                   partly assessed group), and it is kept here too. Pass `[]`
+#                   when every residual blocker is stamped.
 #     --dropped-file  where the DROPPED record is written. Required with --risk:
 #                   a finding the threshold drops must land somewhere the PR body
 #                   can name it, never only in a stream nobody keeps
@@ -301,30 +311,17 @@ local title_defs='
 '
 
 # --- the risk threshold (#1920) ---------------------------------------------
-# Parsed ONCE, into integer thousandths, and into one of three states. `off` and
+# Parsed ONCE, into integer thousandths, and into one of three states, by the
+# parser this script SHARES with consolidate-findings.zsh (#1921) — so the loop's
+# in-round demotion and this filter can never read one value two ways. `off` and
 # `ignored` both leave the plan path below exactly as it was — the byte-identity
 # promise the whole option rests on — and differ only in whether a set value is
 # announced as ignored.
-local thr_raw="${corner_case_risk_threshold-}" thr_state="off" thr_milli=0
-if [[ -n "$thr_raw" ]]; then
-  # One leading digit at most (0 or 1), then up to three decimals. The digit
-  # class is what refuses `30` and `-0.1`; the decimal cap refuses `0.0005`; the
-  # range check below refuses `1.5`, which the shape alone would admit.
-  if [[ "$thr_raw" =~ '^([01]?)(\.([0-9]{1,3}))?$' && "$thr_raw" != "." ]]; then
-    local thr_int="${match[1]:-0}" thr_frac="${match[3]-}"
-    thr_frac="${(r:3::0:)thr_frac}"
-    thr_milli=$(( 10#$thr_int * 1000 + 10#$thr_frac ))
-    if (( thr_milli > 1000 )); then
-      thr_state="ignored"
-    elif (( thr_milli > 0 )); then
-      thr_state="on"
-    fi
-  else
-    thr_state="ignored"
-  fi
-fi
+source "${0:A:h}/risk-threshold-lib.zsh" || {
+  print -r -u2 -- "build-residue-issues: could not load risk-threshold-lib.zsh"; exit 1 }
+local thr_raw="" thr_state="off" thr_milli=0
+risk_threshold_parse
 if [[ "$thr_state" == "ignored" ]]; then
-  thr_milli=0
   print -r -u2 -- "build-residue-issues: corner_case_risk_threshold='${thr_raw}' is not a decimal in [0, 1] with at most three decimals — IGNORED, so no residue is dropped (e.g. 0.05, not 5 or 30)"
 fi
 
@@ -348,54 +345,52 @@ record=$(jq -cn --arg raw "$thr_raw" --arg state "$thr_state" --argjson milli "$
 if [[ "$thr_state" == "on" && -z "$risk_file" ]]; then
   print -r -u2 -- "build-residue-issues: corner_case_risk_threshold is set but no --risk assessment was given — nothing is dropped"
 elif [[ "$thr_state" == "on" ]]; then
-  # Every assessment problem is exit 2 and names the file: the assessment is the
-  # conductor's own output, so a bad one is a caller mistake to fix and re-run —
-  # and it must never be read as "drop everything" or "keep everything".
-  [[ ! -d "$risk_file" ]] || { print -r -u2 -- "build-residue-issues: --risk is a directory: $risk_file"; exit 2 }
-  [[ -r "$risk_file" && -s "$risk_file" ]] || {
-    print -r -u2 -- "build-residue-issues: --risk file missing, unreadable or empty: $risk_file"; exit 2 }
-  jq -e -s 'length == 1 and (.[0] | type == "array")' "$risk_file" >/dev/null 2>&1 || {
-    print -r -u2 -- "build-residue-issues: --risk is not exactly one JSON array: $risk_file"; exit 2 }
+  # Every assessment problem is exit 2 and names the file (the shared validator
+  # says which entry and why): the assessment is the conductor's own output, so a
+  # bad one is a caller mistake to fix and re-run — and it must never be read as
+  # "drop everything" or "keep everything".
+  risk_validate_file "build-residue-issues" "$risk_file" || exit 2
 
-  # The first defect found, or nothing. `p` is checked for at most two decimals
-  # and `impact` for one of the four anchors by ROUNDING a scaled value and
-  # comparing, never by float equality — 0.29 * 100 is 28.999… in jq.
-  local risk_err=""
-  risk_err=$(jq -r '
-    # NB: no apostrophes in this program — it is single-quoted.
-    def scaled_ok($x; $k): (($x * $k) as $v | ((($v | round) - $v) | fabs) < 0.000001);
-    def nonblank: type == "string" and (gsub("\\s"; "") | length) > 0;
-    def ident: [(.file // ""), (.line // null), (.dimension // ""), (.title // "")];
-    def entry_name($i): "entry \($i) (\((.title // "<no title>") | tostring | .[0:80]))";
-    [ to_entries[] | .key as $i | .value as $e
-      | if ($e | type) != "object" then "entry \($i): not an object"
-        else ($e | entry_name($i)) as $l
-        | if ($e.file | type) != "string" then "\($l): file must be a string"
-          elif ($e.dimension | type) != "string" then "\($l): dimension must be a string"
-          elif ($e.title | type) != "string" then "\($l): title must be a string"
-          elif ((($e.line // null) | type) | . != "number" and . != "null") then "\($l): line must be a number or null"
-          elif ($e.p | type) != "number" or $e.p < 0 or $e.p > 1 or (scaled_ok($e.p; 100) | not)
-            then "\($l): p must be a number in [0, 1] with at most two decimals (got \($e.p | tojson))"
-          elif ($e.impact | type) != "number" or (scaled_ok($e.impact; 10) | not)
-               or ([1, 4, 7, 10] | index($e.impact * 10 | round)) == null
-            then "\($l): impact must be one of 0.1, 0.4, 0.7, 1.0 (got \($e.impact | tojson))"
-          elif ($e.p_why | nonblank | not) then "\($l): p_why must be a non-empty rationale"
-          elif ($e.impact_why | nonblank | not) then "\($l): impact_why must be a non-empty rationale"
-          else empty end
-        end ]
-    + ( [ to_entries[] | select(.value | type == "object") | {i: .key, k: (.value | ident)} ]
-        | group_by(.k) | map(select(length > 1))
-        | map("entry \(.[1].i) duplicates the identity of entry \(.[0].i) — one assessment per finding") )
-    | .[0] // empty' "$risk_file" 2>/dev/null) || {
-    print -r -u2 -- "build-residue-issues: could not validate --risk: $risk_file"; exit 2 }
-  [[ -z "$risk_err" ]] || { print -r -u2 -- "build-residue-issues: malformed --risk $risk_file: $risk_err"; exit 2 }
+  # ASSESSED ONCE (#1921). A residual blocker whose changelist item already
+  # carries the loop's `risk_assessment` stamp was judged in the round that
+  # raised it, and that judgement is reused below rather than made again: two
+  # assessments of one finding could disagree, and nothing would show which one
+  # decided. So a --risk entry for a stamped finding is refused rather than
+  # silently preferred or silently ignored — the conductor meant to assess only
+  # the unstamped remainder, and a second opinion here is its mistake to fix.
+  local twice=""
+  twice=$(jq -r --slurpfile a "$risk_file" '
+    def ident: [((.file // "") | tostring | sub("^\\./"; "")), (.line // null), (.dimension // ""), (.title // "")];
+    [ (.blocking // [])[] | select((.risk_assessment | type) == "object") | ident ] as $stamped
+    | [ $a[0][] | select(ident as $k | $stamped | any(. == $k)) | (.title // "") ]
+    | .[0] // empty' -- "$changelist" 2>/dev/null) || {
+    print -r -u2 -- "build-residue-issues: could not read the risk_assessment stamps in --changelist: $changelist"; exit 1 }
+  [[ -z "$twice" ]] || {
+    print -r -u2 -- "build-residue-issues: malformed --risk $risk_file: \"${twice}\" was already assessed in the loop — assess only residual blockers without a risk_assessment stamp"; exit 2 }
 
   # The split. Identity is the loop-wide {file, line, dimension, title} key the
   # consolidator already uses for --promote and --adjudicated, matched on the
-  # RAW values — the same fields the plan below renders its title from.
+  # RAW values — the same fields the plan below renders its title from. A stamped
+  # blocker takes its p and impact from the stamp (`assessed_in: "loop"`), an
+  # unstamped one from --risk (`assessed_in: "residue"`); either way the CURRENT
+  # threshold decides, so the two sources can never double-count a finding.
   local split=""
   split=$(jq -c --argjson milli "$thr_milli" --slurpfile a "$risk_file" "$title_defs"'
-    def ident: [(.file // ""), (.line // null), (.dimension // ""), (.title // "")];
+    def ident: [((.file // "") | tostring | sub("^\\./"; "")), (.line // null), (.dimension // ""), (.title // "")];
+    # the loop stamp as an assessment entry, or null when there is none worth
+    # reading — the same numbers the consolidator validated when it stamped it
+    # A stamp BELOW the threshold it was judged against, on an item that is
+    # still a blocker, means the loop kept it on purpose — a CRITICAL, a tool
+    # red, a human pick or a partly assessed group, none of which the loop
+    # demotes. Such a blocker is kept here too: the stamp records its risk, but
+    # it was never the stamp that decided it.
+    def stamp: (.risk_assessment // null)
+      | if (type == "object") and ((.p | type) == "number") and ((.impact | type) == "number")
+        then {p, p_why, impact, impact_why, assessed_in: "loop",
+              exempt: (((.risk_thousandths | type) == "number")
+                       and ((.threshold_thousandths | type) == "number")
+                       and (.risk_thousandths < .threshold_thousandths))}
+        else null end;
     # The PR-body table row for a dropped finding, rendered HERE rather than by
     # the caller: finding titles and rationales are untrusted text, and a
     # backtick, a pipe or a newline in one would otherwise break the very table
@@ -409,15 +404,17 @@ elif [[ "$thr_state" == "on" ]]; then
     ($a[0] | map({k: ident, v: .})) as $as
     | (.blocking // []) as $b
     | [ $b[] | . as $f | (ident) as $k
-        | ([ $as[] | select(.k == $k) | .v ] | first) as $e
+        | ( ($f | stamp)
+            // ([ $as[] | select(.k == $k) | .v | . + {assessed_in: "residue"} ] | first) ) as $e
         | if $e == null then {f: $f, keep: true, assessed: false}
           else (($e.p * 100 | round) * ($e.impact * 10 | round)) as $r
-          | {f: $f, keep: ($r >= $milli), assessed: true,
+          | {f: $f, keep: (($e.exempt == true) or ($r >= $milli)), assessed: true,
              rec: { title: ($f.title // ""), issue_title: ($f | issue_title),
                     file: ($f.file // ""), line: ($f.line // null),
                     dimension: ($f.dimension // ""), p: $e.p, p_why: $e.p_why,
                     impact: $e.impact, impact_why: $e.impact_why,
                     risk: ($r / 1000), risk_thousandths: $r,
+                    assessed_in: $e.assessed_in,
                     row: ($f | table_row($e; $r)) } }
           end ] as $d
     | { changelist: (. + {blocking: [ $d[] | select(.keep) | .f ]}),

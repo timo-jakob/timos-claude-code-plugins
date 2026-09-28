@@ -1298,6 +1298,8 @@ del(.[2].title)|entry 2 (<no title>): title must be a string
 del(.[1].dimension)|entry 1 (exactly at): dimension must be a string
 .[1] = 42|entry 1: not an object
 . + [.[0]]|entry 3 duplicates the identity of entry 0
+. + [.[0] + {file: ("./" + .[0].file)}]|entry 3 duplicates the identity of entry 0
+.[0].line = false|entry 0 (just below): line must be a number or null
 ROWS
   # not JSON, and a JSON value that is not an array
   printf 'not json\n' > "$bad"
@@ -1450,4 +1452,118 @@ EOF
   [ "$status" -eq 0 ]
   [ "$output" = "$baseline" ]
   contains "$stderr" "no --risk assessment was given"
+}
+
+# --- #1921: the loop already assessed it — reuse the stamp, never re-assess ---
+# consolidate-findings.zsh --risk stamps each assessed blocker with
+# `risk_assessment`. A residual blocker carrying that stamp takes its p and
+# impact from it (assessed_in: "loop"); only unstamped ones come from --risk.
+
+stamped_fixture() {
+  cat > "$CL" <<'EOF'
+{"round":5,"blocking":[
+ {"file":"a.zsh","line":1,"dimension":"tests","title":"stamped low","priority":"High",
+  "risk_assessment":{"p":0.07,"p_why":"loop: rare","impact":0.7,"impact_why":"loop: a hang","risk":0.049,"risk_thousandths":49,"threshold":"0.01","threshold_thousandths":10}},
+ {"file":"b.zsh","line":2,"dimension":"bugs","title":"stamped high","priority":"High",
+  "risk_assessment":{"p":0.6,"p_why":"loop: common","impact":0.7,"impact_why":"loop: wrong behaviour","risk":0.42,"risk_thousandths":420,"threshold":"0.01","threshold_thousandths":10}},
+ {"file":"c.zsh","line":3,"dimension":"bugs","title":"unstamped","priority":"High"}]}
+EOF
+  RISK="$BATS_TEST_TMPDIR/risk.json"
+  DROPPED="$BATS_TEST_TMPDIR/dropped.json"
+  cat > "$RISK" <<'EOF'
+[{"file":"c.zsh","line":3,"dimension":"bugs","title":"unstamped","p":0.01,"p_why":"residue: rare","impact":0.1,"impact_why":"residue: cosmetic"}]
+EOF
+}
+
+@test "#1921 AC10 a stamped blocker reuses the loop's assessment under the CURRENT threshold; no identity is counted twice" {
+  stub_fail
+  stamped_fixture
+  build_thr 0.05 --issue 1921 --dry-run --risk "$RISK" --dropped-file "$DROPPED"
+  [ "$status" -eq 0 ]
+  # only "stamped high" (0.42) is filed; 0.049 (stamp, re-judged at 0.05) and 0.001 are dropped
+  [ "$(echo "$output" | jq -c '[.[].title]')" = '["review residue: stamped high — b.zsh:2 [bugs]"]' ]
+  [ "$(jq -c '[.dropped[] | {title, p, impact, risk_thousandths, p_why, assessed_in}]' "$DROPPED")" = \
+    '[{"title":"stamped low","p":0.07,"impact":0.7,"risk_thousandths":49,"p_why":"loop: rare","assessed_in":"loop"},{"title":"unstamped","p":0.01,"impact":0.1,"risk_thousandths":1,"p_why":"residue: rare","assessed_in":"residue"}]' ]
+  [ "$(jq -c '[.kept[] | {title, p, impact, assessed_in}]' "$DROPPED")" = \
+    '[{"title":"stamped high","p":0.6,"impact":0.7,"assessed_in":"loop"}]' ]
+  [ "$(jq -c '.unassessed' "$DROPPED")" = '[]' ]
+  # no identity appears twice across kept, dropped and unassessed
+  [ "$(jq '[(.kept[], .dropped[]) | [.file, .line, .dimension, .title]] + [.unassessed[]] | length' "$DROPPED")" -eq 3 ]
+  [ "$(jq '[(.kept[], .dropped[]) | [.file, .line, .dimension, .title]] | unique | length' "$DROPPED")" -eq 3 ]
+}
+
+@test "#1921 AC10 an empty --risk applies the stamps alone" {
+  stub_fail
+  stamped_fixture
+  printf '[]\n' > "$RISK"
+  build_thr 0.05 --issue 1921 --dry-run --risk "$RISK" --dropped-file "$DROPPED"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '[.dropped[].title]' "$DROPPED")" = '["stamped low"]' ]
+  [ "$(jq -c '.unassessed' "$DROPPED")" = '["unstamped"]' ]
+  [ "$(echo "$output" | jq 'length')" -eq 2 ]
+}
+
+@test "#1921 AC10 a --risk entry for a stamped finding is exit 2: already assessed in the loop" {
+  stub_fail
+  stamped_fixture
+  cat > "$RISK" <<'EOF'
+[{"file":"a.zsh","line":1,"dimension":"tests","title":"stamped low","p":0.9,"p_why":"second opinion","impact":1.0,"impact_why":"second opinion"}]
+EOF
+  build_thr 0.05 --issue 1921 --dry-run --risk "$RISK" --dropped-file "$DROPPED"
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  contains "$stderr" '"stamped low" was already assessed in the loop'
+  contains "$stderr" "$RISK"
+}
+
+@test "#1921 AC10 with the threshold off the stamps change nothing" {
+  stub_fail
+  stamped_fixture
+  build_unset --issue 1921 --dry-run
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq 'length')" -eq 3 ]
+}
+
+@test "#1921 AC10 a blocker the loop kept despite a below-threshold stamp (an exemption) is kept, never dropped" {
+  # a stamp below its OWN threshold on a surviving blocker: the loop exempted it
+  # (a CRITICAL, a tool red, a human pick, a partly assessed group)
+  stub_fail
+  cat > "$CL" <<'EOF'
+{"round":5,"blocking":[
+ {"file":"a.zsh","line":1,"dimension":"security","title":"exempt critical","priority":"Critical",
+  "risk_assessment":{"p":0,"p_why":"never","impact":0.1,"impact_why":"cosmetic","risk":0,"risk_thousandths":0,"threshold":"0.05","threshold_thousandths":50}}]}
+EOF
+  RISK="$BATS_TEST_TMPDIR/risk.json"; DROPPED="$BATS_TEST_TMPDIR/dropped.json"
+  printf '[]\n' > "$RISK"
+  build_thr 0.05 --issue 1921 --dry-run --risk "$RISK" --dropped-file "$DROPPED"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq 'length')" -eq 1 ]
+  [ "$(jq -c '[.kept[] | {title, assessed_in}]' "$DROPPED")" = '[{"title":"exempt critical","assessed_in":"loop"}]' ]
+  [ "$(jq '.dropped | length' "$DROPPED")" -eq 0 ]
+}
+
+@test "#1921 AC10 a stamp exactly AT its own threshold is not an exemption: a higher residue threshold drops it" {
+  # the loop keeps a risk equal to the threshold without exempting it, so only a
+  # stamp strictly below its own threshold marks an exemption
+  stub_fail
+  cat > "$CL" <<'EOF'
+{"round":5,"blocking":[
+ {"file":"a.zsh","line":1,"dimension":"bugs","title":"at its own threshold","priority":"High",
+  "risk_assessment":{"p":0.05,"p_why":"w","impact":1.0,"impact_why":"w","risk":0.05,"risk_thousandths":50,"threshold":"0.05","threshold_thousandths":50}}]}
+EOF
+  RISK="$BATS_TEST_TMPDIR/risk.json"; DROPPED="$BATS_TEST_TMPDIR/dropped.json"
+  printf '[]\n' > "$RISK"
+  build_thr 0.1 --issue 1921 --dry-run --risk "$RISK" --dropped-file "$DROPPED"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq 'length')" -eq 0 ]
+  [ "$(jq -r '.dropped[0].assessed_in' "$DROPPED")" = "loop" ]
+}
+
+@test "#1921 AC10 a ./-spelled --risk entry for a stamped finding is still refused as already assessed" {
+  stub_fail
+  stamped_fixture
+  printf '%s\n' '[{"file":"./a.zsh","line":1,"dimension":"tests","title":"stamped low","p":0.9,"p_why":"w","impact":1.0,"impact_why":"w"}]' > "$RISK"
+  build_thr 0.05 --issue 1921 --dry-run --risk "$RISK" --dropped-file "$DROPPED"
+  [ "$status" -eq 2 ]
+  contains "$stderr" '"stamped low" was already assessed in the loop'
 }
