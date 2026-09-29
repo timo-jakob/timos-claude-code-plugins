@@ -130,10 +130,14 @@
 #       `.is_<T>` true (a `-` in T read as `_`), and T is not the repo_type;
 #       table order, no duplicates. The markers are read from detect-stack's
 #       output, never re-derived here. Only some topics have a flag there today
-#       (is_opentofu, is_composition beside the two fallbacks' own); a topic
-#       whose marker exists only as a maintenance SKILL.md *Topics* recipe
-#       (react, docs) must gain its detect-stack flag when it is registered, or
-#       its row never fires — the missing key reads as false. A topic never
+#       (is_opentofu, is_composition, is_react beside the two fallbacks' own); a
+#       topic whose marker exists only as a maintenance SKILL.md *Topics* recipe
+#       (docs) must gain its detect-stack flag when it is registered, or its row
+#       never fires — the missing key reads as false. The one row today is
+#       `react` (#959), so a javascript repo whose is_react fires is reviewed by
+#       development-javascript:review AND development-react:review. A row's
+#       marker that is PRESENT but null (detect-stack could not evaluate it) is
+#       exit 1, never read as false. A topic never
 #       rescues an `unsupported_repo_type` nor settles an `ambiguous_repo_type`:
 #       both exit 3 before any topic is read. The fallback repo_types
 #       (claude-plugin, kubernetes) are NOT table rows, so they stay fallbacks —
@@ -175,8 +179,8 @@
 #                     delta is computed, so ONE override covers every git call.
 #   REVIEW_TOPIC_TABLE  when SET (even to ""), REPLACES the shipped review-topic
 #                     table with its whitespace-separated topic names, in order
-#                     (#1072). The shipped table is empty until a topic panel
-#                     exists, so this is how bats registers one. Each name must
+#                     (#1072). This is how bats registers a topic the shipped
+#                     table does not carry, or runs with none (""). Each name must
 #                     match `[a-z][a-z0-9-]*`; anything else is exit 1, since a
 #                     malformed name would read a detect-stack key that no
 #                     topic can have. While it is in effect `plan` says so
@@ -197,7 +201,9 @@
 #   3  typed escalation — unsupported or ambiguous repo type; a JSON error object
 #      { error, ... } is printed on stdout for the orchestrator to relay
 #   1  internal error — detect-stack / git / jq failed (a topic marker read
-#      included), a malformed REVIEW_TOPIC_TABLE name, a `--prior-tree` that
+#      included, and a registered topic's marker that detect-stack reported
+#      as null, i.e. could not evaluate), a malformed REVIEW_TOPIC_TABLE name,
+#      a `--prior-tree` that
 #      does not resolve to a tree-ish in the repo, an unreadable
 #      `.maintenance.yml` primary key (#1588 — the repo itself is fine, a file
 #      inside it is not; reaches `detect` as well as `plan`, since both go
@@ -236,14 +242,15 @@ local tree_id_bin="${self_dir}/git-tree-id.zsh"
 
 # THE review-topic table (#1072): the topics whose `development-<topic>:review`
 # panel joins the language panel when detect-stack's `is_<topic>` marker fires.
-# It ships EMPTY on purpose — a row naming a panel that does not exist yet would
-# make every such repo's round start a panel nobody can dispatch. Registering a
-# topic follows ARCHITECTURE.md, *Review-panel invocation contract*,
-# *Registering a review topic* — the whole recipe lives there, not here.
-# claude-plugin and kubernetes are FALLBACK repo_types; docs and composition have
-# no review skill; opentofu (and kubernetes as a topic) is #1943's decision,
-# after #1806 — so none of them is a row.
-typeset -ga _RD_REVIEW_TOPICS=()
+# A row is added only in the PR that ships its panel — a row naming a panel that
+# does not exist yet would make every such repo's round start a panel nobody can
+# dispatch. Registering a topic follows ARCHITECTURE.md, *Review-panel invocation
+# contract*, *Registering a review topic* — the whole recipe lives there, not
+# here. `react` (#959): development-react:review, gated on detect-stack's
+# is_react. claude-plugin and kubernetes are FALLBACK repo_types; docs and
+# composition have no review skill; opentofu (and kubernetes as a topic) is
+# #1943's decision, after #1806 — so none of them is a row.
+typeset -ga _RD_REVIEW_TOPICS=(react)
 if (( ${+REVIEW_TOPIC_TABLE} )); then
   _RD_REVIEW_TOPICS=( ${=REVIEW_TOPIC_TABLE} )
 fi
@@ -874,9 +881,18 @@ _topic_review_skills() {
     (( ${listed[(Ie)$topic]} )) && continue
     key="is_${topic//-/_}"
     # `== true`, not `-r` on the raw value: only a JSON boolean true is a fired
-    # marker, so a string "true" from a malformed detector does not join a panel
-    is_on=$(print -r -- "$_RD_DETECT_JSON" | jq -r --arg k "$key" '(.[$k] // false) == true') || {
+    # marker, so a string "true" from a malformed detector does not join a panel.
+    # A PRESENT key holding null is detect-stack's "could not evaluate" (#959:
+    # is_react's third state), distinct from an absent key: it is refused rather
+    # than read as "not this topic", since planning without the panel would
+    # review a React repo with the React panel silently missing.
+    is_on=$(print -r -- "$_RD_DETECT_JSON" | jq -r --arg k "$key" \
+      'if has($k) and .[$k] == null then "unevaluated" else ((.[$k] // false) == true) end') || {
       print -u2 -- "${ctx}: could not read .${key} from the detect-stack output"; exit 1
+    }
+    [[ "$is_on" != "unevaluated" ]] || {
+      print -u2 -- "${ctx}: detect-stack could not evaluate .${key} (it reported null: its search did not complete — an unreadable or vanishing path — or jq is not on PATH); refusing to plan without the ${topic} panel"
+      exit 1
     }
     [[ "$is_on" == "true" ]] && listed+=("$topic")
   done

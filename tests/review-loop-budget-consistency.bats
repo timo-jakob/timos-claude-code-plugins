@@ -457,6 +457,7 @@ grep_site() {  # grep_site <file> <fixed-string>
     "development-kubernetes/skills/review/SKILL.md" \
     "development-opentofu/skills/review/SKILL.md" \
     "development-python/skills/review/SKILL.md" \
+    "development-react/skills/review/SKILL.md" \
     "development-swift/skills/review/SKILL.md" | sort -u)"
   # roster equality FIRST: a new panel reds here before the duty checks below
   # can pass over it
@@ -466,12 +467,12 @@ grep_site() {  # grep_site <file> <fixed-string>
   # the SEVENTH site: ARCHITECTURE.md states the same invariant and hardcodes
   # the roster's size, so without these a drift there (or a seventh panel that
   # never reaches the contract doc) leaves the suite green
-  [ "${#found[@]}" -eq 8 ]
+  [ "${#found[@]}" -eq 9 ]
   # Fragments unique to the sentence each one pins — the bare descriptor tokens
   # recur in the same section's JSON sample, so they are presence checks only.
   grep_site "$ARCH_PANEL_DUTIES" 'a second injection duty'
   grep_site "$ARCH_PANEL_DUTIES" "forward both into each agent's launch prompt"
-  grep_site "$ARCH_PANEL_DUTIES" 'All eight panels (`claude-plugin`'
+  grep_site "$ARCH_PANEL_DUTIES" 'All nine panels (`claude-plugin`'
   grep_site "$ARCH_PANEL_DUTIES" 'carry **both rules**'
   grep_site "$ARCH_PANEL_DUTIES" 'never a licence to'
   grep_site "$ARCH_PANEL_DUTIES" 'fix_verification_path'

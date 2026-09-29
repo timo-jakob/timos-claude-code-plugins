@@ -167,7 +167,8 @@ scripts live one directory up. Use the resolved absolute path.
 **Check the exit status before parsing (#1177).** A non-zero exit means
 detection could not complete and `/tmp/detect.json` is **empty** — the script
 names the reason on stderr (a **topic marker** search that could not finish —
-today the kubernetes one or the opentofu one, and the message names which —
+today the kubernetes one or the opentofu one, and the message names which; the
+react marker never aborts, it reports `is_react: null`, which this skill does not read —
 refusing to report `is_kubernetes: false` / `is_opentofu: false` for a tree it
 could not read). **Halt and forward that stderr verbatim**, and read which
 marker it names rather than assuming: a repo with an unreadable subtree and no
@@ -501,7 +502,15 @@ copy — a test fixture, say — is not a composition repo.
 **The `react-marker:begin`/`:end` sentinels are load-bearing**, not decoration:
 `tests/react-topic-marker.bats` extracts exactly the text between them and executes
 it, so the suite tests this recipe rather than a copy of it. Keep the whole recipe
-between them, and keep them a single unique pair.
+between them, and keep them a single unique pair. Since #959
+`development/skills/bootstrap/scripts/detect-stack.sh` carries a second copy of
+the search in its `is-react-marker` block — the `is_react` flag
+`review-dispatch.zsh` reads to add the React review panel — and the same suite
+requires the two `find` expressions to be **identical**, not merely similar. Only
+the failure handling around the search differs: where this recipe yields `2`
+(*could not evaluate*), detect-stack reports `is_react: null` on a repo where
+`javascript` was detected — for a search that did not finish, or a missing `jq` —
+and `false` on any other repo, where there is no JS manifest to evaluate.
 
 The `spring` topic is **only meaningful when `java` is also detected** —
 require both before composing `development-spring`. The `docs` topic has no such

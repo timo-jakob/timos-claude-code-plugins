@@ -396,21 +396,39 @@ module — **Module Federation is rejected**, with the reasoning recorded so it 
 be argued with. Design:
 [`docs/superpowers/specs/2026-07-27-mfe-app-family-design.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/docs/superpowers/specs/2026-07-27-mfe-app-family-design.md).
 
-**What the plugin itself ships (v0.1):** the composition wiring and nothing else
-([#956](https://github.com/timo-jakob/timos-claude-code-plugins/issues/956)). The
-tool universe is deliberately **empty** — the gather (`gather-react-findings.zsh`)
-is real but reports no tools, which is precisely what moves `react` into
-`supported_topics` and proves the dispatch path end-to-end. A marker without a
-gather would be detected but never dispatched, leaving the foundation unverified.
-Tools arrive with the rest of epic
-[#686](https://github.com/timo-jakob/timos-claude-code-plugins/issues/686): the React
-Query + MSW API binding
-([#958](https://github.com/timo-jakob/timos-claude-code-plugins/issues/958)), the
-review panel
-([#959](https://github.com/timo-jakob/timos-claude-code-plugins/issues/959)), and
-a11y / Playwright / Lighthouse budgets
-([#960](https://github.com/timo-jakob/timos-claude-code-plugins/issues/960)). CI
+**What the plugin itself ships:** the composition wiring
+([#956](https://github.com/timo-jakob/timos-claude-code-plugins/issues/956)) and
+the React review panel
+([#959](https://github.com/timo-jakob/timos-claude-code-plugins/issues/959)). The
+maintenance tool universe is still deliberately **empty** — the gather
+(`gather-react-findings.zsh`) is real but reports no tools, which is precisely what
+moves `react` into `supported_topics` and proves the dispatch path end-to-end. A
+marker without a gather would be detected but never dispatched, leaving the
+foundation unverified. The a11y / Playwright / Lighthouse budgets
+([#960](https://github.com/timo-jakob/timos-claude-code-plugins/issues/960)) arrive
+with the rest of epic
+[#686](https://github.com/timo-jakob/timos-claude-code-plugins/issues/686). CI
 remediation reuses `development-javascript`'s `js-ci-fixer`.
+
+**The React review panel
+([#959](https://github.com/timo-jakob/timos-claude-code-plugins/issues/959)).**
+`/development-react:review` is the family's first **topic** review panel. When
+`/development:resolve-issue` reviews a JavaScript repo whose `package.json` has
+`react` in its runtime dependencies, it runs this panel **beside** the JavaScript
+panel, never instead of it. The JavaScript panel keeps bugs, security, performance,
+code quality, tests and resilience; this panel adds one dimension, `react_idioms`,
+checked by `react-idioms-reviewer`. Each check has a fixed severity, so the review
+loop converges:
+
+| Check | Severity |
+| --- | --- |
+| A Rules of Hooks violation — a hook called conditionally, after an early return, in a loop or callback, or outside a React function, and a stale closure the reviewer can show | `CRITICAL` |
+| Server state fetched outside TanStack Query — an effect that fetches and stores the result in state, or an alternative server-state library such as SWR, RTK Query or Apollo | `WARNING` |
+| A deviation from the Vite single-page-app shape or the component structure — a second build toolchain, a component defined inside another, a module exporting components beside values that are not constants | `SUGGESTION` |
+
+Only `CRITICAL` and `WARNING` block a review round. The checks are aligned with the
+rules of hooks and react-refresh rules the bootstrap overlay's ESLint config
+enforces, so the reviewer and a bootstrapped repo agree.
 
 **Bootstrap overlay
 ([#957](https://github.com/timo-jakob/timos-claude-code-plugins/issues/957)).**
@@ -429,7 +447,14 @@ replacing it. The templates live with every other bootstrap template, in
 
 | Skill | Command | Description |
 | ------- | --------- | ------------- |
-| Maintenance dispatcher | (dispatch target of `/development:maintenance`) | Topic dispatcher for React findings. Validates the v2 payload and returns a plan. Empty tool universe in v0.1 — always an empty plan until [#958](https://github.com/timo-jakob/timos-claude-code-plugins/issues/958)–[#960](https://github.com/timo-jakob/timos-claude-code-plugins/issues/960) register tools. |
+| Maintenance dispatcher | (dispatch target of `/development:maintenance`) | Topic dispatcher for React findings. Validates the v2 payload and returns a plan. Empty tool universe for now — always an empty plan until [#960](https://github.com/timo-jakob/timos-claude-code-plugins/issues/960) registers tools. |
+| Review | `/development-react:review [paths]` | Runs `react-idioms-reviewer` over the change — the `react_idioms` dimension. `/development:resolve-issue` runs it beside `/development-javascript:review` on a React repo ([#959](https://github.com/timo-jakob/timos-claude-code-plugins/issues/959)) |
+
+**Agents:**
+
+| Agent | Model | Focus |
+| ------- | ------- | ------- |
+| react-idioms-reviewer | opus | Rules of Hooks and stale closures (CRITICAL), server state outside TanStack Query (WARNING), Vite SPA shape and component structure (SUGGESTION) (#959) |
 
 ## development-kubernetes
 
