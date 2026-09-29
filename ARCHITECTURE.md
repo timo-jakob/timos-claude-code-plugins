@@ -3315,17 +3315,21 @@ from the descriptor's `fix_verification_path` **or** hook mode's
 `$REVIEW_FIX_VERIFICATION`, since a hook-mode panel sees no descriptor at all
 and would otherwise declare every hook-mode round's carry absent. When neither
 names a readable carry the caller omitted `--fix-verification`, so there is
-nothing to enumerate and nothing to cite. All eight panels therefore write **no findings file at all** there and
+nothing to enumerate and nothing to cite. All nine panels therefore write **no findings file at all** there and
 report the slip to the caller, naming the flag — absence of the carry is never
 evidence of an empty one, and the missing aggregate is what makes the caller's
 omission surface as a refusal instead of a silently unverified round.
 
-All eight panels (`claude-plugin`, `python`, `java`, `go`, `swift`, `javascript`,
-`kubernetes`, `opentofu`)
+All nine panels (`claude-plugin`, `python`, `java`, `go`, `swift`, `javascript`,
+`kubernetes`, `opentofu`, and the `react` topic panel)
 carry **both rules**, with the empty-scope one's two qualifications, the
 confirmation-count report and — since #1583 — the hook-mode sidecar duty (write
 the per-entry accounting to `$REVIEW_FINDINGS.carry.json`, or the loop refuses
-the round); a new panel is not wired up until it states them all. The
+the round); a new panel is not wired up until it states them all. A topic panel
+running **beside** a language panel writes both that sidecar and its findings
+array only to paths given to that panel specifically, and otherwise returns them
+for the joiner to merge into the round's one file and one sidecar — so it never
+overwrites the language panel's. The
 invariant is the two duties, **not the bytes** — each panel spells them in its
 own scope vocabulary (the repo, the project, the rendered temp tree) and against
 its own not-applicable terminal, and `kubernetes` necessarily says more, because
@@ -3453,6 +3457,22 @@ same way: `prose_logic` (`claude-plugin-prose-logic`), `contract`
 are its extension, while `tests` **reuses** the core dimension and its
 `*-test-reviewer` convention (`claude-plugin-test-reviewer`) — five claude-plugin
 dimensions in total.
+
+`development-react` (#959) is the first **topic** panel: `review-dispatch.zsh
+plan` lists `development-react:review` in `topic_review_skills` when
+`is_react` fires, and it runs beside the JavaScript language panel rather than
+instead of it (*Review-panel invocation contract*, below). It extends the enum with
+exactly one dimension, **`react_idioms`** (`react-idioms-reviewer`), and carries
+none of the core five: the JavaScript panel beside it reviews those. The name
+carries the topic prefix every topic-panel dimension must carry, so it can never
+collide with a language panel's dimension in the one round both join. Its
+severity is **fixed per check** in the reviewer itself, so the loop converges:
+a Rules of Hooks violation (including a stale closure the reviewer can show) is
+`CRITICAL`, server state fetched outside TanStack Query (ad-hoc `useEffect`
+fetching, or an alternative server-state library) is `WARNING`, and a Vite SPA
+shape or component-structure deviation is `SUGGESTION`, which never blocks a
+round. Like every non-core dimension it inherits the `build-dossier.zsh` `$core`
+gap (#1148).
 
 ### Scope-bounded severity (#982)
 
@@ -4011,15 +4031,21 @@ cannot mint a second artifact path for the same round:
   **review-topic table** (`_RD_REVIEW_TOPICS`), `detect-stack.sh` reports
   `.is_<T>` true (a `-` in *T* read as `_`; a checked jq read, an absent key
   defaulting to false, and only a JSON boolean `true` counting), and *T* is not
-  the `repo_type`. Entries follow table order with no duplicates. The markers
+  the `repo_type`. A row's marker that is **present but `null`** is the
+  detector's *could not evaluate* — `is_react`'s third state (#959) — and `plan`
+  refuses it (exit 1) rather than read it as false, which would review a React
+  repo with its panel silently missing. Entries follow table order with no duplicates. The markers
   are read from `detect-stack.sh`'s output, never re-derived in the dispatch —
   but only some topics have a flag there today (`is_opentofu`,
-  `is_composition`, beside the two fallbacks' own). A topic whose marker exists
-  only as a maintenance SKILL.md *Topics* recipe, as `react` and `docs` do
+  `is_composition`, `is_react`, beside the two fallbacks' own). A topic whose
+  marker exists only as a maintenance SKILL.md *Topics* recipe, as `docs` does
   today, has no `is_<topic>` flag yet: its row would never fire, since the
-  missing key reads as false. The table **ships empty**: a row naming a panel that
-  does not exist would make every such repo's round start a panel nobody can
-  dispatch. `opentofu`, whose panel and `is_opentofu` flag both exist, is
+  missing key reads as false. A row lands **only in the PR that ships its
+  panel**: a row naming a panel that does not exist would make every such repo's
+  round start a panel nobody can dispatch. The table's one row is **`react`**
+  (#959): a `javascript` repo whose `is_react` fires is reviewed by
+  `development-javascript:review` **and** `development-react:review`, and a
+  JavaScript repo without React by the language panel alone. `opentofu`, whose panel and `is_opentofu` flag both exist, is
   deliberately not a row either: composing it (and `kubernetes`) as a topic is
   #1943's decision, sequenced after #1806. The fallback repo_types are **not**
   rows, so they stay fallbacks — a Go repo carrying a Helm chart or `*.tf` is
@@ -4047,7 +4073,7 @@ cannot mint a second artifact path for the same round:
   against a `DETECT_STACK_BIN` stub, so it cannot notice a flag the real
   `detect-stack.sh` never emits; the marker suite is what does. **Every
   dimension a topic panel emits is prefixed with the topic's own name**
-  (`react_hooks`, `react_a11y` — never `bugs` or `a11y`), which keeps it
+  (`react_idioms` — never `bugs` or a bare `idioms`), which keeps it
   disjoint from every other panel's, language **or topic**, since several topic
   panels can join one round: a finding's dimension is what the carry accounting
   and `consolidate-findings.zsh`'s file + line + dimension dedup key on, so a
@@ -7562,7 +7588,11 @@ detection cannot complete — when a **topic marker's** search did not finish an
 reporting `is_kubernetes: false` or `is_opentofu: false` would be a claim about a
 tree it could not read. Both markers can reach that state independently, so a
 repo with an unreadable subtree and no `.tf` aborts on the opentofu half even
-with readable charts. Callers must branch on **non-zero**, never on a specific code
+with readable charts. The react marker (#959) is deliberately **not** a third
+abort path: its one consumer is `review-dispatch.zsh`, so on a repo where
+`javascript` was detected it reports `is_react: null` for a search it could not
+finish or a missing `jq` (and `false` on any other repo) and lets the run
+complete, and `review-dispatch.zsh plan` refuses the null. Callers must branch on **non-zero**, never on a specific code
 (`set -euo pipefail` can also abort it with `1`), and must **not** parse the
 empty document: every key reads as absent, which looks exactly like a repo with
 no git, no languages and no artifacts. The **stderr is the deliverable** — it

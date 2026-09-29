@@ -1423,8 +1423,8 @@ _gate_pair_violations() {
   local dims total
   dims="$(_review_dimensions)"
   total="$(printf '%s\n' "$dims" | grep -c . || true)"
-  [ "$total" -eq 14 ] || {
-    printf 'the derived dimension roster holds %s entries, expected 14:\n%s\n' \
+  [ "$total" -eq 15 ] || {
+    printf 'the derived dimension roster holds %s entries, expected 15:\n%s\n' \
       "$total" "$dims" >&2
     printf 'A panel gaining or losing a dimension moves this figure in the same PR.\n' >&2
     return 1

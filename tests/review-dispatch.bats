@@ -3195,8 +3195,9 @@ _fatal_fixture() {
 }
 
 # ---- #1072: the topic-composition seam (topic_review_skills) ---------------
-# The shipped review-topic table is EMPTY until a topic panel exists (#959 adds
-# react), so these cases register a topic through the REVIEW_TOPIC_TABLE seam.
+# The shipped review-topic table holds `react` alone (#959, cases further down).
+# The seam's own cases register whatever topics they need through the
+# REVIEW_TOPIC_TABLE override, so they hold whatever the shipped table becomes.
 
 tplan() {  # $1 = topic table ; $2 = detect json ; rest = extra flags
   # --separate-stderr: an override in effect is announced on stderr, and the
@@ -3206,10 +3207,10 @@ tplan() {  # $1 = topic table ; $2 = detect json ; rest = extra flags
     REVIEW_TOPIC_TABLE="$table" zsh "$S" plan --repo "$R" --base main "$@"
 }
 
-@test "#1072 plan with no registered topic emits topic_review_skills [] right after review_skill" {
+@test "#1072 plan with no firing topic emits topic_review_skills [] right after review_skill" {
   echo "x" > "$R/app.js"
   run env -u REVIEW_TOPIC_TABLE DETECT_STACK_BIN="$STUB" \
-    DETECT_LANGS_JSON='{"languages":["javascript"],"is_react":true}' \
+    DETECT_LANGS_JSON='{"languages":["javascript"],"is_react":false}' \
     zsh "$S" plan --repo "$R" --base main
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -c .topic_review_skills)" = "[]" ]
@@ -3217,7 +3218,7 @@ tplan() {  # $1 = topic table ; $2 = detect json ; rest = extra flags
   [ "$(echo "$output" | jq -r 'keys_unsorted[2]')" = "topic_review_skills" ]
 }
 
-@test "#1072 the shipped table is empty: language + fallback/topic markers emit [] with review_skill unchanged" {
+@test "#1072 the shipped table: language + fallback/non-row topic markers emit [] with review_skill unchanged" {
   echo "print(1)" > "$R/app.py"
   local j t
   for j in '{"languages":["python"]}' '{"languages":["go"],"is_kubernetes":true}' \
@@ -3256,16 +3257,43 @@ tplan() {  # $1 = topic table ; $2 = detect json ; rest = extra flags
   [ "$stderr" = "plan: REVIEW_TOPIC_TABLE overrides the shipped review-topic table: ''" ]
 }
 
-@test "#1072 a registered topic whose marker is false, absent, null or non-boolean yields []" {
+@test "#1072 a registered topic whose marker is false, absent or non-boolean yields []" {
   echo "x" > "$R/app.js"
   local j
   for j in '{"languages":["javascript"],"is_react":false}' '{"languages":["javascript"]}' \
-           '{"languages":["javascript"],"is_react":"true"}' '{"languages":["javascript"],"is_react":null}'; do
+           '{"languages":["javascript"],"is_react":"true"}'; do
     echo "input: $j"
     tplan "react" "$j"
     [ "$status" -eq 0 ]
     [ "$(echo "$output" | jq -c .topic_review_skills)" = "[]" ]
   done
+}
+
+@test "#959 a registered topic whose marker is PRESENT but null (could not evaluate) is exit 1, never []" {
+  # null is detect-stack's third state for is_react; reading it as false would
+  # plan a React repo without the React panel and say nothing
+  echo "x" > "$R/app.js"
+  tplan "react" '{"languages":["javascript"],"is_react":null}'
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -qF -- 'detect-stack could not evaluate .is_react (it reported null: its search did not complete'
+  echo "$stderr" | grep -qF -- 'or jq is not on PATH); refusing to plan without the react panel'
+  # ...and the SHIPPED table refuses it too, with no override in effect
+  run --separate-stderr env -u REVIEW_TOPIC_TABLE DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["javascript"],"is_react":null}' \
+    zsh "$S" plan --repo "$R" --base main
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+}
+
+@test "#959 a null marker for a topic that is NOT a table row is never read" {
+  # only rows are consulted, so a null elsewhere in the document cannot refuse.
+  # A NON-EMPTY table whose own row is false, so the marker loop really runs — an
+  # empty table would pass whether the script read rows only or every is_* key
+  echo "x" > "$R/app.js"
+  tplan "vue" '{"languages":["javascript"],"is_vue":false,"is_react":null}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c .topic_review_skills)" = "[]" ]
 }
 
 @test "#1072 entries follow table order, skip duplicates, and read a hyphenated topic as is_<t_with_underscores>" {
@@ -3359,4 +3387,69 @@ tplan() {  # $1 = topic table ; $2 = detect json ; rest = extra flags
   [ "$status" -eq 1 ]
   [ -z "$output" ]
   echo "$stderr" | grep -qF -- "could not read .is_react from the detect-stack output"
+}
+
+# ---- #959: the shipped `react` row --------------------------------------------
+# The first real row. These cases run with the override UNSET, so they exercise
+# the table the script ships rather than one the test registered.
+
+@test "#959 the shipped review-topic table is exactly (react)" {
+  # the table declaration itself — a second row, or a dropped one, reds here
+  # before any behavioural case can pass over it
+  run grep -E '^typeset -ga _RD_REVIEW_TOPICS=' "$S"
+  [ "$status" -eq 0 ]
+  [ "$output" = 'typeset -ga _RD_REVIEW_TOPICS=(react)' ]
+}
+
+@test "#959 a React JS repo plans the javascript panel AND the react topic panel" {
+  echo "x" > "$R/app.tsx"
+  run --separate-stderr env -u REVIEW_TOPIC_TABLE DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["javascript"],"is_react":true}' \
+    zsh "$S" plan --repo "$R" --base main
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "javascript" ]
+  [ "$(echo "$output" | jq -r .review_skill)" = "development-javascript:review" ]
+  [ "$(echo "$output" | jq -c .topic_review_skills)" = '["development-react:review"]' ]
+  # the shipped table is not an override, so nothing is announced
+  [ -z "$stderr" ]
+}
+
+@test "#959 a non-React JS repo plans the javascript panel alone" {
+  echo "x" > "$R/app.js"
+  local j
+  for j in '{"languages":["javascript"],"is_react":false}' '{"languages":["javascript"]}'; do
+    echo "input: $j"
+    run --separate-stderr env -u REVIEW_TOPIC_TABLE DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON="$j" \
+      zsh "$S" plan --repo "$R" --base main
+    [ "$status" -eq 0 ]
+    [ "$(echo "$output" | jq -r .review_skill)" = "development-javascript:review" ]
+    [ "$(echo "$output" | jq -c .topic_review_skills)" = "[]" ]
+  done
+}
+
+@test "#959 the registered panel is a shipped skill, so the row never names a panel nobody can dispatch" {
+  # ARCHITECTURE.md's registration rule: a row lands only with its panel
+  [ -f "$REPO_ROOT/development-react/skills/review/SKILL.md" ]
+  run jq -er '.plugins[] | select(.name == "development-react") | .source' \
+    "$REPO_ROOT/.claude-plugin/marketplace.json"
+  [ "$status" -eq 0 ]
+  [ "$output" = "./development-react" ]
+}
+
+@test "#959 end to end with the REAL detect-stack: a React package.json adds the react panel" {
+  # no DETECT_STACK_BIN stub: the stub cases cannot notice a flag the real
+  # detector never emits, which is the gap ARCHITECTURE.md names
+  printf '{"name":"web","dependencies":{"react":"19.1.0","react-dom":"19.1.0"}}\n' > "$R/package.json"
+  run --separate-stderr env -u REVIEW_TOPIC_TABLE -u DETECT_STACK_BIN zsh "$S" plan --repo "$R" --base main
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "javascript" ]
+  [ "$(echo "$output" | jq -c .topic_review_skills)" = '["development-react:review"]' ]
+}
+
+@test "#959 end to end with the REAL detect-stack: react only in devDependencies adds no panel" {
+  printf '{"name":"lib","devDependencies":{"react":"19.1.0"}}\n' > "$R/package.json"
+  run --separate-stderr env -u REVIEW_TOPIC_TABLE -u DETECT_STACK_BIN zsh "$S" plan --repo "$R" --base main
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "javascript" ]
+  [ "$(echo "$output" | jq -c .topic_review_skills)" = "[]" ]
 }

@@ -132,6 +132,12 @@ Every plugin's agents. Generated from each agent `.md`'s frontmatter
 | `python-sonar-triage` | `opus` | Read, Edit, Bash, Grep, LSP | For each SonarCloud/SonarQube finding (bug, code smell, vulnerability, security hotspot), investigate the context with LSP first, then fix when behavior is preserved. Security hotspots get the same treatment — investigated, not punted. Used by development-python:maintenance. |
 | `python-test-reviewer` | `opus` | Read, Grep, Glob | Python testing specialist that identifies coverage gaps, weak assertions, flaky tests, and test quality issues. The tests dimension of /development-python:review; also a risk-register lens for python-approver (#449). |
 
+## development-react
+
+| Agent | Model | Tools | Description |
+| --- | --- | --- | --- |
+| `react-idioms-reviewer` | `opus` | Read, Grep, Glob | React idioms specialist that checks a diff for Rules of Hooks violations and the stale closures they cause, server state fetched outside TanStack Query (ad-hoc useEffect fetching or an alternative server-state library), and deviations from the Vite single-page-app shape and component structure. The react_idioms dimension of /development-react:review, a topic panel that runs beside /development-javascript:review on a React repo. |
+
 ## development-spring
 
 | Agent | Model | Tools | Description |

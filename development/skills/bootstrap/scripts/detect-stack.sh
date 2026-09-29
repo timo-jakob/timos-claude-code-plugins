@@ -99,6 +99,23 @@
 #                                  user's request — but its Step 1 GUARDS on
 #                                  it: `true` on a run not asked to be a
 #                                  composition run stops before Q4 and §3l.
+#   is_react              bool|null repo carries the react TOPIC marker — `react`
+#                                  in the RUNTIME dependencies of any
+#                                  package.json outside the prune set (#959).
+#                                  `null` — this key's own third state — when,
+#                                  on a repo where `javascript` was detected,
+#                                  the search could not reach a verdict (a find
+#                                  that did not complete with no hit, or no
+#                                  jq); a non-JS repo is `false` either way. It
+#                                  never aborts the run, and review-dispatch.zsh
+#                                  refuses it.
+#                                  Kept identical — prune set, start depth, type
+#                                  guard, per-file exec and jq filter — to the
+#                                  orchestrator's react-marker recipe;
+#                                  tests/react-topic-marker.bats derives both.
+#                                  review-dispatch.zsh reads it to add the
+#                                  React review panel beside the javascript
+#                                  one; bootstrap does not route on it.
 #   existing_artifacts    object   path -> true for files we would otherwise generate
 #   missing_artifacts     []string templates expected under THIS repo's conditions
 #                                  (resolved toolchain/languages/bot path) that are absent —
@@ -256,7 +273,9 @@
 #   0  the JSON above is on stdout.
 #   2  detection could not complete, and NOTHING is on stdout. Every such path is
 #      a TOPIC MARKER failing to reach a verdict — today the kubernetes one or
-#      the opentofu one, and the stderr message names which — in one of two
+#      the opentofu one (the react marker reports `is_react: null` instead, and
+#      aborts only on the unreachable `cannot enter` path below), and the stderr
+#      message names which — in one of two
 #      shapes: the repo became unenterable (`cannot enter <cwd> …`, nothing ran),
 #      or the search came up empty with at least one half unfinished
 #      (`… did not complete …`). Either way `is_kubernetes: false` /
@@ -1637,6 +1656,73 @@ fi
 is_composition="false"
 if test -f "$cwd/.claude-workspace.yaml"; then is_composition="true"; fi
 # is-composition-marker:end
+# The `is-react-marker:begin`/`:end` sentinels are load-bearing too (#959):
+# tests/react-topic-marker.bats derives the search from this block and from
+# SKILL.md's `react-marker` recipe — the prune set, the `-mindepth 1` start, the
+# `-name package.json ! -type d` guard, the per-file `-exec … {} \;` form and the
+# `.dependencies.react // empty` filter — and requires the two to agree. It is the
+# marker review-dispatch.zsh reads to add the React review panel beside the
+# javascript one, so a copy that drifted would review a repo the maintenance
+# orchestrator does not treat as React, or skip one it does.
+#
+# What is deliberately NOT shared with the recipe is the failure handling, and it
+# differs from the kubernetes and opentofu blocks above too. A hit stands whatever
+# else failed, as there. But on a repo where `javascript` was detected, a search
+# that could NOT reach a verdict — a find that did not complete with no hit, or a
+# missing jq — reports `is_react: null`, this key's own third state, and never
+# aborts the run. Only review-dispatch.zsh reads this key, and it refuses a null
+# marker (exit 1), so the one consumer still fails closed; aborting here instead
+# would stop bootstrap and maintenance, which never read it — bootstrap before the
+# very preflight that offers to install jq. A repo where `javascript` was NOT
+# detected is `false` either way, since the javascript detector found no manifest
+# under the same prune set — accepting one residual gap: detect_lang does not
+# report an unfinished walk, so a React manifest inside an unreadable directory
+# of a repo with no other JS manifest (and with the kubernetes and opentofu
+# walks answering from hits elsewhere) reads as `false`, not `null`. A manifest
+# jq cannot parse is a non-match, as in the recipe: `-exec`'s status is the
+# predicate, never find's exit status.
+# is-react-marker:begin
+is_react="false"
+react_hits=""
+react_find_rc=0
+if command -v jq >/dev/null 2>&1; then
+	react_hits="$(
+		cd "$cwd" 2>/dev/null || exit 125
+		find . -mindepth 1 \
+			-path '*/node_modules' -prune -o \
+			-path '*/.git' -prune -o \
+			-path '*/vendor' -prune -o \
+			-path '*/.build' -prune -o \
+			-path '*/dist' -prune -o \
+			-path '*/templates' -prune -o \
+			-name package.json ! -type d \
+			-exec jq -er '.dependencies.react // empty' {} \; 2>/dev/null
+	)" && react_find_rc=0 || react_find_rc=$?
+elif [[ " ${langs[*]-} " == *" javascript "* ]]; then
+	# no jq to evaluate the manifests with: could not evaluate. Silent on stderr,
+	# like every other success path — the null IS the report (its consumer names
+	# both causes when it refuses), and a stderr line on a run that exits 0
+	# would corrupt any caller that captures stdout and stderr together
+	is_react="null"
+fi
+if [[ "$react_find_rc" -eq 125 ]]; then
+	# the kubernetes and opentofu blocks' own sentinel for a failed `cd`, and
+	# untested for the same reason theirs is: `$cwd` is this script's own `$(pwd)`
+	printf 'detect-stack: cannot enter %s to run the react marker\n' "$cwd" >&2
+	exit 2
+fi
+if [[ -n "$react_hits" ]]; then
+	is_react="true"
+elif [[ "$react_find_rc" -ne 0 && " ${langs[*]-} " == *" javascript "* ]]; then
+	# the search did not finish and found nothing, on a repo that has a JS
+	# manifest: could not evaluate (silent, for the reason above). The same
+	# javascript gate as the missing-jq branch — without it a GitOps or Go repo
+	# with one unreadable directory would report null, and review-dispatch,
+	# which refuses a null on every repo type, would stop planning a repo that
+	# cannot be React
+	is_react="null"
+fi
+# is-react-marker:end
 # The infrastructure-as-code tree (SKILL.md §3l, #1154): the kubernetes topic
 # marker with no application language. `.github/workflows/kubernetes-ci.yml`
 # becomes a candidate there — and only there. Without it the one workflow that
@@ -2096,6 +2182,7 @@ cat <<EOF
   "is_kubernetes": $(json_bool "$is_kubernetes"),
   "is_opentofu": $(json_bool "$is_opentofu"),
   "is_composition": $(json_bool "$is_composition"),
+  "is_react": $([[ "$is_react" == "null" ]] && printf 'null' || json_bool "$is_react"),
   "existing_artifacts": $artifacts_json,
   "missing_artifacts": $missing_json,
   "github_state": $github_state

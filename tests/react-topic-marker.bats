@@ -495,17 +495,17 @@ write_pkg() {
   contains "$row" 'the v0.1 tool universe is empty'
 }
 
-@test "the development-react plugin.json exists at v0.1.0 and marketplace.json matches it in lockstep" {
+@test "the development-react plugin.json exists at v0.2.0 and marketplace.json matches it in lockstep" {
   plugin="$REPO_ROOT/development-react/.claude-plugin/plugin.json"
   [ -f "$plugin" ]
   run jq -er '.version' "$plugin"
   [ "$status" -eq 0 ]
-  [ "$output" = "0.1.0" ]
+  [ "$output" = "0.2.0" ]
 
   run jq -er '.plugins[] | select(.name == "development-react") | .version' \
     "$REPO_ROOT/.claude-plugin/marketplace.json"
   [ "$status" -eq 0 ]
-  [ "$output" = "0.1.0" ]
+  [ "$output" = "0.2.0" ]
 }
 
 @test "the marketplace entry points at ./development-react" {
@@ -529,4 +529,239 @@ write_pkg() {
 
 @test "docs/reference/plugins.md documents the development-react plugin" {
   grep -Fq '## development-react' "$REPO_ROOT/docs/reference/plugins.md"
+}
+
+# --- #959: detect-stack.sh's is_react — the review-dispatch marker ------------
+# review-dispatch.zsh adds development-react:review when detect-stack reports
+# is_react, so detect-stack carries a SECOND copy of the search above. It is held
+# identical to the recipe, not merely similar: the find expression is extracted
+# from both bounded blocks and compared whole, after flattening line
+# continuations and whitespace. The failure handling around it deliberately
+# differs (the recipe answers a predicate; detect-stack reports an unfinished
+# search as `is_react: null` on a JS repo), which is why the comparison is over
+# the expression, not the block.
+
+# the bounded is-react-marker block of detect-stack.sh
+detect_react_block() {
+  [ "$(grep -c '^# is-react-marker:begin$' "$DETECT")" -eq 1 ]
+  [ "$(grep -c '^# is-react-marker:end$' "$DETECT")" -eq 1 ]
+  sed -n '/^# is-react-marker:begin$/,/^# is-react-marker:end$/p' "$DETECT"
+}
+
+# the find expression in $1, from `find .` through the per-file `{} \;`, with
+# line continuations joined and whitespace squeezed to single spaces
+find_expr_of() {
+  printf '%s\n' "$1" | sed -e 's/\\$//' | tr '\n\t' '  ' | tr -s ' ' \
+    | grep -oE 'find \. .*\{\} \\;'
+}
+
+@test "is_react: detect-stack's search is IDENTICAL to the SKILL.md recipe's (#959)" {
+  local block recipe_expr detect_expr
+  block="$(detect_react_block)"
+  [ -n "$block" ]
+  [ "$(printf '%s\n' "$block" | wc -l)" -le 45 ]
+  recipe_expr="$(find_expr_of "$RECIPE")"
+  detect_expr="$(find_expr_of "$block")"
+  [ -n "$recipe_expr" ]
+  [ -n "$detect_expr" ]
+  # exactly one find expression in each, so the comparison cannot pick a stray one
+  [ "$(printf '%s\n' "$recipe_expr" | wc -l)" -eq 1 ]
+  [ "$(printf '%s\n' "$detect_expr" | wc -l)" -eq 1 ]
+  [ "$detect_expr" = "$recipe_expr" ]
+  # ...and it says the load-bearing things, so two identically WRONG copies
+  # cannot pass by agreeing
+  contains "$detect_expr" '-mindepth 1'
+  contains "$detect_expr" '-name package.json ! -type d'
+  contains "$detect_expr" ".dependencies.react // empty"
+  lacks "$detect_expr" 'devDependencies'
+}
+
+@test "is_react: detect-stack's prune set is detect_lang's too (the third copy, same oracle)" {
+  local detect_set block_set
+  detect_set="$(sed -n '/^detect_lang()/,/^}/p' "$DETECT" \
+    | grep -oE "\-path '[^']+' -prune" | sort -u)"
+  block_set="$(detect_react_block | grep -oE "\-path '[^']+' -prune" | sort -u)"
+  [ -n "$detect_set" ]
+  [ "$block_set" = "$detect_set" ]
+}
+
+@test "is_react: the non-vacuity control — a widened copy is caught by the comparison" {
+  # the same extraction over a copy with devDependencies added must DIFFER from
+  # the recipe, or the identity test above proves nothing
+  local widened
+  widened="$(detect_react_block | sed "s/'.dependencies.react \/\/ empty'/'(.dependencies.react \/\/ .devDependencies.react) \/\/ empty'/")"
+  [ "$(find_expr_of "$widened")" != "$(find_expr_of "$RECIPE")" ]
+}
+
+# Run the REAL detect-stack in the current fixture dir with `run`, asserting ITS
+# exit status (not a pipeline's) before handing back is_react as $IS_REACT.
+# `-c` so a null stays the literal `null`, distinct from a missing key.
+detect_is_react() {
+  run --separate-stderr "$@" bash "$DETECT"
+  [ "$status" -eq 0 ] || { printf 'detect-stack exited %s: %s\n' "$status" "$stderr" >&2; return 1; }
+  IS_REACT="$(printf '%s' "$output" | jq -c '.is_react')"
+}
+
+# A PATH holding every tool detect-stack needs EXCEPT jq, so only the jq branch
+# can differ from a normal run.
+no_jq_path() {
+  local stub="$BATS_TEST_TMPDIR/nojq" t
+  mkdir -p "$stub"
+  for t in bash find grep sed awk tr sort head cat dirname basename git uname wc cut mktemp rm \
+           printf test env date ls tail xargs; do
+    if command -v "$t" >/dev/null 2>&1 && [ -x "$(command -v "$t")" ]; then
+      ln -sf "$(command -v "$t")" "$stub/$t"
+    fi
+  done
+  [ ! -e "$stub/jq" ]
+  printf '%s' "$stub"
+}
+
+# A `find` wrapper that runs the real search, then exits 1 when — and only when
+# — its arguments carry the react block's own jq filter. An unreadable directory
+# cannot isolate the react branch (the kubernetes and opentofu blocks walk the
+# same tree first and abort on it), and matching on `package.json` alone would
+# also hit detect_lang's own search, which merely happens to ignore find's status.
+react_find_shim() {
+  local shim="$BATS_TEST_TMPDIR/findshim" real_find
+  real_find="$(command -v find)"
+  mkdir -p "$shim"
+  printf '#!/usr/bin/env bash\n"%s" "$@"\ncase "$*" in *".dependencies.react // empty"*) exit 1 ;; esac\n' \
+    "$real_find" > "$shim/find"
+  chmod +x "$shim/find"
+  printf '%s' "$shim"
+}
+
+@test "is_react: true for a runtime react dependency in the root package.json" {
+  write_pkg ./package.json dependencies
+  detect_is_react
+  [ "$IS_REACT" = "true" ]
+}
+
+@test "is_react: true for a monorepo sub-package even when the root lacks react" {
+  jq -n '{name: "root", private: true}' > package.json
+  write_pkg ./packages/web/package.json dependencies
+  detect_is_react
+  [ "$IS_REACT" = "true" ]
+}
+
+@test "is_react: false for devDependencies-only" {
+  write_pkg ./package.json devDependencies
+  detect_is_react
+  [ "$IS_REACT" = "false" ]
+}
+
+@test "is_react: false for peerDependencies-only" {
+  write_pkg ./package.json peerDependencies
+  detect_is_react
+  [ "$IS_REACT" = "false" ]
+}
+
+@test "is_react: false for react-dom without react (exact key, not a prefix)" {
+  write_pkg ./package.json dependencies react-dom
+  detect_is_react
+  [ "$IS_REACT" = "false" ]
+}
+
+@test "is_react: false when the only match is in a pruned tree (node_modules, templates, dist)" {
+  write_pkg ./package.json dependencies lodash
+  write_pkg ./node_modules/lib/package.json dependencies
+  write_pkg ./templates/app/package.json dependencies
+  write_pkg ./dist/package.json dependencies
+  detect_is_react
+  [ "$IS_REACT" = "false" ]
+}
+
+@test "is_react: a malformed manifest on its own is a non-match (false), not an unfinished search" {
+  mkdir -p ./packages/aaa-bad
+  printf 'not json at all\n' > ./packages/aaa-bad/package.json
+  detect_is_react
+  [ "$IS_REACT" = "false" ]
+}
+
+@test "is_react: a malformed manifest does not mask a real sibling match" {
+  mkdir -p ./packages/aaa-bad
+  printf 'not json at all\n' > ./packages/aaa-bad/package.json
+  write_pkg ./packages/web/package.json dependencies
+  detect_is_react
+  [ "$IS_REACT" = "true" ]
+}
+
+@test "is_react: a missing jq on a JS repo is null — could not evaluate — and the run still completes" {
+  write_pkg ./package.json dependencies
+  local p
+  p="$(no_jq_path)"
+  detect_is_react env PATH="$p"
+  [ "$IS_REACT" = "null" ]
+  # silent: a success path that wrote to stderr would corrupt any caller that
+  # captures both streams together (three detect-stack suites do, #1153/#1177)
+  [ -z "$stderr" ]
+}
+
+@test "is_react: a missing jq on a repo with no JS manifest is simply false (core output needs no jq)" {
+  printf '# readme\n' > README.md
+  local p
+  p="$(no_jq_path)"
+  detect_is_react env PATH="$p"
+  [ "$IS_REACT" = "false" ]
+}
+
+@test "is_react: a react search that did not complete with no hit is null, and the run still completes" {
+  write_pkg ./package.json dependencies lodash
+  local p
+  p="$(react_find_shim)"
+  detect_is_react env PATH="$p:$PATH"
+  [ "$IS_REACT" = "null" ]
+  [ -z "$stderr" ]
+}
+
+@test "is_react: a hit stands even when the react search did not complete" {
+  write_pkg ./package.json dependencies
+  local p
+  p="$(react_find_shim)"
+  detect_is_react env PATH="$p:$PATH"
+  [ "$IS_REACT" = "true" ]
+}
+
+@test "is_react: a NON-JS repo with an unreadable subtree is false, not null, and the run completes (the #1153 shape)" {
+  # the shape that reddened three existing detect-stack suites when the react
+  # block aborted: kubernetes and opentofu answer from their hits, the react
+  # search cannot finish — and with no JS manifest the answer is false, since a
+  # null here would make review-dispatch refuse to plan a repo that cannot be
+  # React
+  if [ "$(id -u)" -eq 0 ]; then skip "root bypasses directory permissions"; fi
+  printf 'apiVersion: v2\nname: web\n' > Chart.yaml
+  printf 'resource "null_resource" "x" {}\n' > main.tf
+  mkdir -p ./locked
+  chmod 000 ./locked
+  run --separate-stderr bash "$DETECT"
+  chmod 755 ./locked
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | jq -c '.is_react')" = "false" ]
+  [ "$(printf '%s' "$output" | jq -c '.is_kubernetes')" = "true" ]
+  # the react block adds nothing to stderr on this success path
+  lacks "$stderr" 'react'
+}
+
+@test "is_react: a JS repo with an unreadable subtree and no hit is null, and the run completes" {
+  if [ "$(id -u)" -eq 0 ]; then skip "root bypasses directory permissions"; fi
+  printf 'apiVersion: v2\nname: web\n' > Chart.yaml
+  printf 'resource "null_resource" "x" {}\n' > main.tf
+  write_pkg ./package.json dependencies lodash
+  mkdir -p ./locked
+  chmod 000 ./locked
+  run --separate-stderr bash "$DETECT"
+  chmod 755 ./locked
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | jq -c '.is_react')" = "null" ]
+  [ "$(printf '%s' "$output" | jq -c '.languages')" = '["javascript"]' ]
+}
+
+@test "is_react: a non-JS repo whose react search did not complete is false (the javascript gate), via the find shim" {
+  # the shim isolates the gate from the unreadable-directory mechanics above
+  printf '# readme\n' > README.md
+  local p
+  p="$(react_find_shim)"
+  detect_is_react env PATH="$p:$PATH"
+  [ "$IS_REACT" = "false" ]
 }
