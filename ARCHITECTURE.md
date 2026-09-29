@@ -756,13 +756,16 @@ one *is* a degraded service. (Breaker → dependency status is exact: closed =
   `ops` and never the reverse, which is what keeps the #1192 ops package free of a
   breaker import as its own contract promises.
 - **The review dimension is `resilience`** (#966) — a `*-resilience-reviewer`
-  agent in each **service** language plugin (Go, Java, Python, Swift), wired
-  into that language's review panel alongside bugs/security/performance. It
+  agent in each **service** language plugin (Go, Java, Python, Swift, and
+  JavaScript (Node) since #1071), wired into that language's review panel
+  alongside bugs/security/performance. It
   flags four defect classes on a diff: an outbound dependency call with no
   breaker, timeout, or registered fallback; an unbounded or un-backed-off
   retry; a path where a lost dependency hangs or crashes the service (the
   language-specific shapes — a blocked event loop in Python, thread-pool
-  exhaustion in Java, `try!` in Swift, goroutine growth in Go); and a hard/soft
+  exhaustion in Java, `try!` in Swift, goroutine growth in Go, and in Node a
+  blocked event loop, an unhandled promise rejection that ends the process, or
+  an outbound call with no bounded timeout); and a hard/soft
   misdeclaration. Severity is anchored to **what happens when the dependency
   dies**, not to style, and findings are scoped to the dependency calls the
   diff actually touches — both bounds exist so the review loop converges
@@ -1530,11 +1533,11 @@ repair, after which the reviewer never gains the check and this paragraph would
 read as though the gap had closed itself. Until the template repair ships,
 bootstrap keeps emitting the contradicting file into new repos; until the
 reviewer check ships too, nothing catches an adopter reintroducing it.
-`development-javascript` and `development-react` ship
-no security reviewer, so no reviewer deepening is filed for them either — which
+`development-react` ships
+no security reviewer, and `development-javascript`'s `js-security-reviewer`
+(#1071) carries none of this position's checks — its deepening is #1941 — which
 means **#1326's browser in-memory storage rule ships with no reviewer at all**,
-and the SPA half of this position has no review dimension until one of those
-plugins grows a security panel. And
+and the SPA half of this position has no review dimension until #1941 lands. And
 `development-spring` ships no review panel of its own — a Spring repo is
 reviewed by the Java panel, so #1323's realization is enforced by
 `java-security-reviewer` rather than by a Spring reviewer that does not exist.
@@ -3312,13 +3315,13 @@ from the descriptor's `fix_verification_path` **or** hook mode's
 `$REVIEW_FIX_VERIFICATION`, since a hook-mode panel sees no descriptor at all
 and would otherwise declare every hook-mode round's carry absent. When neither
 names a readable carry the caller omitted `--fix-verification`, so there is
-nothing to enumerate and nothing to cite. All seven panels therefore write **no findings file at all** there and
+nothing to enumerate and nothing to cite. All eight panels therefore write **no findings file at all** there and
 report the slip to the caller, naming the flag — absence of the carry is never
 evidence of an empty one, and the missing aggregate is what makes the caller's
 omission surface as a refusal instead of a silently unverified round.
 
-All seven panels (`claude-plugin`, `python`, `java`, `go`, `swift`, `kubernetes`,
-`opentofu`)
+All eight panels (`claude-plugin`, `python`, `java`, `go`, `swift`, `javascript`,
+`kubernetes`, `opentofu`)
 carry **both rules**, with the empty-scope one's two qualifications, the
 confirmation-count report and — since #1583 — the hook-mode sidecar duty (write
 the per-entry accounting to `$REVIEW_FINDINGS.carry.json`, or the loop refuses
@@ -3328,9 +3331,9 @@ own scope vocabulary (the repo, the project, the rendered temp tree) and against
 its own not-applicable terminal, and `kubernetes` necessarily says more, because
 its render-first flow has a terminal that otherwise writes no findings file at
 all — and `opentofu` likewise, because its pre-dispatch gate has the same
-kind of terminal. Where each rule sits also varies: five panels carry the
-empty-scope rule in the scope preamble **above** `## Step 1`, `kubernetes` and
-`opentofu` inside their dispatch step. Read a
+kind of terminal. Where each rule sits also varies: `kubernetes` and
+`opentofu` carry the empty-scope rule inside their dispatch step, every other
+panel in the scope preamble **above** `## Step 1`. Read a
 divergence in wording or placement as adaptation, and only a **missing duty** as
 drift — normalising `kubernetes` to the generic phrasing would delete the
 temp-tree scoping and the `[]`-versus-`.failed.json` reconciliation that keep
@@ -3368,13 +3371,23 @@ reviewer emits, and `consolidate-findings.zsh` accepts the tenth additively.
 `performance` (`*-performance-reviewer`), `code_quality` (`*-code-quality`),
 `tests` (`*-test-reviewer`). A sixth, **`resilience`**
 (`*-resilience-reviewer`, #966), is shared by every **service** language — Go,
-Java, Python, Swift — and checks the six-mandate resilience policy on a diff
-(below). It is deliberately absent from `development-claude-plugin`, which
+Java, Python, Swift, JavaScript (Node) — and checks the six-mandate resilience
+policy on a diff (below). It is deliberately absent from `development-claude-plugin`, which
 reviews a plugin repo: there is no outbound dependency call to circuit-break.
 Swift adds one language-specific dimension, `swift6_compliance`
 (`swift6-compliance`), for seven Swift dimensions in total. A language may
 extend the enum with its own dimension the same way; the core five never change
 meaning.
+
+`development-javascript` (#1071) ships the core five plus `resilience`, for six
+JavaScript dimensions, as `js-*` agents — `js-bug-hunter`,
+`js-security-reviewer`, `js-performance-reviewer`, `js-code-quality`,
+`js-test-reviewer` and `js-resilience-reviewer` — the prefix that plugin's
+maintenance agents already used. Its `resilience` reviewer compares against
+`opossum`, the blessed Node breaker (#1145), and is bounded to the outbound
+calls the diff touches, so a browser-only diff yields no findings from it. It
+has no approver yet, so the Approver half of the #1147 discussion below does not
+apply to it.
 
 `development-kubernetes` (#1153) extends it with two more, and ships **three**
 dimensions in total — the core one first, each written as
@@ -3735,15 +3748,16 @@ reason above, and Residue because
 `development/skills/resolve-issue/reference/residue.md` is the same for every
 repo type, so no profile has a residue rule to state.
 
-Profiles populated today: **6** — **claude-plugin** (its blessed
+Profiles populated today: **7** — **claude-plugin** (its blessed
 `run-gate.zsh` gate and attestation capture, its degraded-mode relay, its epic
 verification command, §4's version-bump rule, and the **Panel** pointer above),
-plus **python**, **java**, **go**, **swift** and **kubernetes** (#1505 — each
+plus **python**, **java**, **go**, **swift** and **kubernetes** (#1505), and
+**javascript** (#1071) (each
 naming the whole-suite command its own plugin's ci-fixer already runs, or for
 kubernetes the validation tools its maintenance skill names, since that plugin
 ships no ci-fixer; each stating `--gate-attest: not applicable` and the **Panel**
 pointer with no dimension list). Their **Version bump** is a *conditional*
-`none`, not an unconditional one: the four language profiles bump nothing
+`none`, not an unconditional one: the five language profiles bump nothing
 **unless the repo also ships a `<plugin>/` tree**, because a detected language
 beats the `claude-plugin` fallback, so a language repo that ships plugin content
 loads *its* profile and would otherwise lose §4's floor entirely; the kubernetes
@@ -3945,9 +3959,9 @@ cannot mint a second artifact path for the same round:
   open, so it carries the repo-relative name and a diff excerpt instead. The
   opener's two sentences still apply to it unchanged. The protocol states that
   rule and its carried-section counterpart; this summary does not restate them.
-  The six `development-<type>:review` panels' own launch templates do **not**
+  The `development-<type>:review` panels' own launch templates do **not**
   carry it — #1582 scoped them out deliberately, one normative site rather than
-  seven — so a panel invoked **directly** as `/development-<type>:review`,
+  one per panel — so a panel invoked **directly** as `/development-<type>:review`,
   outside the loop, gets the repo-relative scope and no opener. (The loop
   dispatches the reviewers *of* the skill `review_skill` names, so using a panel
   skill is the blessed path; what is off the rail is invoking one standalone.)
@@ -3959,9 +3973,9 @@ cannot mint a second artifact path for the same round:
   CRITICAL false positive of the #1558 session.
 - **Repo-type detection reuses the maintenance logic** — it runs
   `bootstrap/scripts/detect-stack.sh` and reads its `.languages`. Supported
-  review types are `swift` | `python` | `java` | `go` | `claude-plugin` |
-  `kubernetes` — the last two are no-language FALLBACKS, not `.languages`
-  values — each mapping to that type's
+  review types are `swift` | `python` | `java` | `go` | `javascript` |
+  `claude-plugin` | `kubernetes` — the last two are no-language FALLBACKS, not
+  `.languages` values — each mapping to that type's
   `:review` skill. When several apply, `.maintenance.yml`'s `primary`
   disambiguates.
 - **The two fallbacks are ordered, and a language beats both — but their
@@ -3972,10 +3986,16 @@ cannot mint a second artifact path for the same round:
   `.claude-plugin/plugin.json` is definitional for what the repo *is*, so a
   plugin repo carrying one unsupported-language file is still a plugin repo —
   whereas a `Chart.yaml` is routinely incidental to an application repo, and
-  handing a JS/TS service's diff to the manifest panel would converge
+  handing a Rust service's diff to the manifest panel would converge
   finding-free and record a review that never happened. Such a repo keeps the
   typed `unsupported_repo_type` escalation, which names the languages so a human
   can route it.
+  Since #1071 `javascript` is a supported language, so a `package.json` or
+  `tsconfig.json` anywhere in a repo now counts: a plugin repo that also ships a
+  Node hook or MCP server is reviewed by the JavaScript panel (language wins) —
+  which reports a story touching only plugin prose **not applicable**, never
+  clean — and a Python, Java, Go or Swift repo that also carries a JS/TS manifest is
+  ambiguous until `.maintenance.yml` sets `primary`.
   `claude-plugin` is tried first, because both markers fire on a plugin repo
   that *also* carries Kubernetes content, and such a repo's content is plugin
   prose — it must be reviewed by the plugin panel. This repo becomes exactly
@@ -4812,7 +4832,7 @@ the carry and accounts for each entry as one of confirmed, re-raised, unconfirme
 — see the panel duties above); on
 a loop-driven **full** round it writes nothing, because `[]` with zero blockers
 on `scope_mode: "full"` is the CONVERGED condition. The other
-five panels report a failed round to their caller and write no sidecar, so
+panels report a failed round to their caller and write no sidecar, so
 sidecar *absence* proves nothing. `/development:resolve-issue` §3.5 step 2
 carries the consumer-side rule: the session never authors a **review round's**
 findings file. Every `[]` that reaches `--findings-file` is some panel's own

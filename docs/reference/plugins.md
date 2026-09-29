@@ -43,7 +43,7 @@ of this plugin):
 | Bootstrap | `/development:bootstrap` | Sets up the full quality + security toolchain. The quality toolchain is a declaration in `.maintenance.yml`, composed per tool: public repos default to SonarCloud + Snyk + CodeQL, private repos to self-hosted SonarQube + Trivy + a self-hosted runner, and any other valid combination is composed too, with branch protection and the setup preflight following the declared tools. Generates pre-commit hooks, Dependabot config, issue/PR templates, branch protection, and the **Zero Tolerance standard** (≥90% new-code coverage, 0 code smells, all A ratings) enforced via a layered model: a `coverage-floor` CI step + a `diff-cover` pre-push hook + the configured Sonar gate. The Sonar gate uses a custom Quality Gate on paid SonarCloud / self-hosted SonarQube; on SonarCloud free (where custom-gate assignment is paywalled) it falls back to `Sonar way` and the CI step remains the real 90% enforcement. On macOS, automation scripts handle SonarCloud / SonarQube / Snyk setup, secret storage, gate configuration, and runner registration. Idempotent — safe to re-run. **Requires macOS + Homebrew** (see [Requirements](requirements.md)). |
 | Maintenance | `/development:maintenance [--dry-run] [--no-merge]` | Orchestrator. Runs detection + per-tool findings gathering + coverage measurement, constructs the JSON payload, dispatches to the matching language plugin (`development-python`, `development-java`, `development-swift`, `development-go`, `development-javascript`) and any topic plugins (`development-spring`, `development-claude-plugin`, `development-docs`, `development-react`, `development-kubernetes`, `development-opentofu`), collects results, and merges worktree branches back to the user's current branch. Effective entry point for "go fix everything safely fixable on this project." `--dry-run` prints the payload without dispatching; `--no-merge` leaves the worktree branches available for manual merge. |
 | Commit | `/development:commit [message]` | Runs formatting/linting (delegates to language-specific plugin), generates a commit message, ensures a feature branch, and commits |
-| Resolve Issue | `/development:resolve-issue <issue#\|epic#>` | Takes a filed issue (or an epic of issues) and drives it to a merge-ready, **bot-authored** PR: dependency precheck (GitHub-native `blockedBy`; rejects on open blockers, refuses cycles, offers guided remediation interactively — epic #583) → readiness gate → branch off fresh main → implement → validate (tests must be green) → commit → `open-pr` (Maintenance-App-authored, auto-merge armed). For an epic: decomposes the children, orders them conflict-aware (sequential-by-default, disjoint-only parallel worktrees), tests each before merge, then runs a holistic end-to-end test over the merged epic. Repo-type-agnostic (Swift / Python / Java / Go / Claude-plugin / Kubernetes). |
+| Resolve Issue | `/development:resolve-issue <issue#\|epic#>` | Takes a filed issue (or an epic of issues) and drives it to a merge-ready, **bot-authored** PR: dependency precheck (GitHub-native `blockedBy`; rejects on open blockers, refuses cycles, offers guided remediation interactively — epic #583) → readiness gate → branch off fresh main → implement → validate (tests must be green) → commit → `open-pr` (Maintenance-App-authored, auto-merge armed). For an epic: decomposes the children, orders them conflict-aware (sequential-by-default, disjoint-only parallel worktrees), tests each before merge, then runs a holistic end-to-end test over the merged epic. Repo-type-agnostic (Swift / Python / Java / Go / JavaScript / Claude-plugin / Kubernetes). |
 | Refine Issue | `/development:refine-issue <issue#>` | **Interactive** — drives a `needs-refinement` issue back to READY. Diagnoses via the readiness gate, then loops the `issue-refiner` agent with you (explanation → questions → recommendations → a prose rewrite → a proposed `story-spec/v1` block, with outside-in test cases mined from the repo), writes back the **human-approved** prose + block (a human-authored issue edit, not a bot PR), re-gates, and clears the label only on READY. Spins out linked `test-case` issues for a surface-touching story's outside-in cases; takes a typed parked exit when a session can't converge; pointed at an **epic**, walks each `needs-refinement` child and posts an epic summary. |
 | Define Personas | `/development:define-personas` | **Interactive** — creates or updates a repo's `personas/v1` registry (`docs/personas.md`): who actually uses each surface and what they type into it. Loops the `persona-definer` agent with you (repo-grounded candidate personas + Socratic questions), then writes back the **human-approved** prose + machine block to the working tree (lands via the normal PR flow). The registry feeds `refine-issue`'s realistic test-data generation and the readiness gate's advisory persona-reference check. |
 | Git Branch Naming | `/development:git-branch-naming` | Defines the branch naming convention (`<type>/<issue>-<description>`) and creates properly named branches |
@@ -342,6 +342,37 @@ Future docs-site and docs-freshness tooling will live under this one topic.
 | Skill | Command | Description |
 | ------- | --------- | ------------- |
 | Maintenance dispatcher | (dispatch target of `/development:maintenance`) | Topic dispatcher for documentation findings. Validates the v2 payload and returns a plan routing each finding group to a docs agent. Routes `c4_drift` to `docs-c4-drift-advisor` ([#793](https://github.com/timo-jakob/timos-claude-code-plugins/issues/793)). |
+
+## development-javascript
+
+JavaScript/TypeScript language plugin — the foundation `development-react`
+composes onto. Its maintenance dispatcher triages the `format_lint` group
+(ESLint `--fix` + Prettier `--write`), and since #1071 it owns the review panel
+the `/development:resolve-issue` loop dispatches for a repo that detects as
+`javascript`. Node is a blessed service language, so the panel carries the
+shared `resilience` dimension alongside the five core ones; a JS approver is not
+built yet.
+
+**Skills:**
+
+| Skill | Command | Description |
+| ------- | --------- | ------------- |
+| Maintenance dispatcher | `/development-javascript:maintenance <json>` | Validates the payload and returns a PR-grouped plan for the `format_lint` group. Standalone invocation prints usage and stops. |
+| Review | `/development-javascript:review [paths]` | Spawns 6 specialized review agents in parallel — bugs, security, performance, code quality, tests, resilience (#1071) |
+| Resolve profile | `/development-javascript:resolve-profile` (not invoked by hand — loaded by name by `/development:resolve-issue` at its §1b step) | The javascript repo type's driver rules for the resolve-issue conductor — the blessed whole-suite gate (`npm run typecheck && npm test`, typecheck only when the script exists, pinned against `js-ci-fixer`), `--gate-attest: not applicable`, a *conditional* `none` version bump, and the panel pointer. Not for direct use. |
+
+**Agents:**
+
+| Agent | Model | Focus |
+| ------- | ------- | ------- |
+| js-format-lint-fixer | haiku | ESLint `--fix` + Prettier `--write`, reports what changed |
+| js-ci-fixer | opus | Fixes a failing CI run on a maintenance PR (test, typecheck, lockfile) |
+| js-bug-hunter | fable | Coercion and falsy-default pitfalls, null/undefined crashes, floating promises, async races, swallowed errors (#1071) |
+| js-security-reviewer | fable | Injection, XSS, prototype pollution, SSRF, secrets in client bundles, JWT and cookie misuse (#1071) |
+| js-performance-reviewer | opus | Event-loop blocking, N+1 I/O, sequential awaits, unbounded growth, re-renders and bundle weight (#1071) |
+| js-code-quality | opus | Naming, type safety (`any`, casts, unvalidated input), module structure, API design (#1071) |
+| js-test-reviewer | opus | Coverage gaps, unawaited async assertions, mock misuse, flaky timers (#1071) |
+| js-resilience-reviewer | opus | Dependency calls with no breaker/timeout/registered fallback, un-jittered retries, a blocked event loop, unhandled rejections, hard/soft misdeclarations — `opossum` is the blessed breaker (#1071) |
 
 ## development-react
 

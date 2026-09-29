@@ -1113,16 +1113,14 @@ rstep() {
   headings="$(grep -E '^## development' "$REPO_ROOT/docs/reference/plugins.md")"
   [ -n "$headings" ]
 
+  # No DEFERRED_PLUGIN skip here: #1071 gave development-javascript its
+  # plugins.md section (its resolve-profile needs a row there), retiring this
+  # third of the #1104 deferral. The generator and README thirds still defer.
   while read -r name; do
-    if [ "$name" = "$DEFERRED_PLUGIN" ]; then
-      continue
-    fi
     # whole-line, not substring: "## development" is otherwise satisfied by
     # "## development-swift", so the generic plugin's section would be ungated
     grep -qx "## $name" "$REPO_ROOT/docs/reference/plugins.md"
   done <<< "$PLUGIN_NAMES"
-
-  run -1 grep -qx "## $DEFERRED_PLUGIN" "$REPO_ROOT/docs/reference/plugins.md"
 }
 
 @test "the plugins.md narrative restates the charter without contradicting ARCHITECTURE (#1151)" {

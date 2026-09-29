@@ -32,13 +32,29 @@ setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   # Every SERVICE language that owns a review panel. development-claude-plugin
   # is deliberately excluded — see the absence test at the bottom.
-  SERVICE_PLUGINS=(development-go development-java development-python development-swift)
+  SERVICE_PLUGINS=(development-go development-java development-python development-swift
+                   development-javascript)
+  # The service plugins that ship an Approver. development-javascript has a panel
+  # (#1071) but no approver yet — that is out of #1071's scope, and its absence
+  # is asserted below rather than left implicit. The #1147 approver guards
+  # iterate THIS list, never SERVICE_PLUGINS.
+  APPROVER_PLUGINS=(development-go development-java development-python development-swift)
+}
+
+# agent_prefix <plugin> — the prefix its agents are named with. Every service
+# plugin names its agents after the plugin suffix except javascript, whose
+# agents are `js-*` (the prefix development-javascript already used for its
+# maintenance agents before #1071 gave it a panel).
+agent_prefix() {
+  case "$1" in
+    development-javascript) printf js ;;
+    *) printf '%s' "${1#development-}" ;;
+  esac
 }
 
 # agent_file <plugin> — the resilience reviewer's path in that plugin.
 agent_file() {
-  local plugin="$1" lang="${1#development-}"
-  printf '%s/%s/agents/%s-resilience-reviewer.md' "$REPO_ROOT" "$plugin" "$lang"
+  printf '%s/%s/agents/%s-resilience-reviewer.md' "$REPO_ROOT" "$1" "$(agent_prefix "$1")"
 }
 
 # panel_file <plugin> — that plugin's review SKILL.md.
@@ -127,9 +143,34 @@ word_for() {
   local p f expected
   for p in "${SERVICE_PLUGINS[@]}"; do
     f="$(agent_file "$p")"
-    expected="${p#development-}-resilience-reviewer"
+    expected="$(agent_prefix "$p")-resilience-reviewer"
     [ "$(sed -n 's/^name: //p' "$f" | head -1)" = "$expected" ]
   done
+}
+
+@test "every panel row names a shipped agent whose frontmatter name matches EXACTLY" {
+  # The panel launches EVERY row by name as subagent_type, not just the
+  # resilience one, so a renamed agent file or a drifted `name:` dispatches that
+  # dimension to nothing. Derived from each panel's own table.
+  local p pairs agent dim f
+  for p in "${SERVICE_PLUGINS[@]}"; do
+    pairs="$(table_pairs "$p")"
+    [ -n "$pairs" ]
+    [ "$(wc -l <<< "$pairs" | tr -d ' ')" -eq "$(table_rows "$p")" ]
+    while read -r agent dim; do
+      f="$REPO_ROOT/$p/agents/$agent.md"
+      [ -f "$f" ] || { echo "$p: no agent file for $agent" >&2; return 1; }
+      [ "$(sed -n 's/^name: //p' "$f" | head -1)" = "$agent" ]
+    done <<< "$pairs"
+  done
+  # ...and the new panel's agent-to-dimension pairing is pinned, so two swapped
+  # Dimension cells (which keep the derived dimension SET identical) red here
+  [ "$(table_pairs development-javascript)" = "js-bug-hunter bugs
+js-security-reviewer security
+js-performance-reviewer performance
+js-code-quality code_quality
+js-test-reviewer tests
+js-resilience-reviewer resilience" ]
 }
 
 @test "each reviewer declares model and read-only tools" {
@@ -182,7 +223,7 @@ word_for() {
   # vacuous — the agent's own NAME contains it.
   local p row
   for p in "${SERVICE_PLUGINS[@]}"; do
-    row="$(grep -E "^\| ${p#development-}-resilience-reviewer \|" "$(panel_file "$p")")"
+    row="$(grep -E "^\| $(agent_prefix "$p")-resilience-reviewer \|" "$(panel_file "$p")")"
     contains "$row" "| opus | resilience |"
   done
 }
@@ -346,6 +387,8 @@ word_for() {
   contains "$(cat "$(agent_file development-java)")" "thread-pool exhaustion"
   contains "$(cat "$(agent_file development-swift)")" "fatalError()"
   contains "$(cat "$(agent_file development-go)")" "unbounded goroutine growth"
+  contains "$(flat_file "$(agent_file development-javascript)")" "unhandled rejection **terminates the process**"
+  contains "$(flat_file "$(agent_file development-javascript)")" "A blocked event loop"
 }
 
 @test "every reviewer states the runtime defaults it must not misreport" {
@@ -358,6 +401,21 @@ word_for() {
   # stopping it emitting a confidently-wrong CRITICAL on a default-constructed
   # client. Needle is unique to the guard, not to a vendor name.
   contains "$(cat "$(agent_file development-go)")" "Do NOT report a default-constructed client as unbounded"
+  # Node's global fetch is bounded (undici's 300-second header/body defaults),
+  # so "no timeout" on a bare fetch is false; axios's default of 0 is the real one.
+  contains "$(flat_file "$(agent_file development-javascript)")" "Do NOT report a bare \`fetch()\` in Node as"
+  contains "$(flat_file "$(agent_file development-javascript)")" "Its default is \`0\`"
+}
+
+@test "the JS reviewer names opossum as the blessed breaker, and stays off browser-only code" {
+  # #1145 names opossum; #936's shipped ops-api templates already promise it to
+  # adopters, so the reviewer must compare against it rather than invent one.
+  local f
+  f="$(flat_file "$(agent_file development-javascript)")"
+  [ -n "$f" ]
+  contains "$f" '**`opossum` is the blessed breaker**'
+  # A browser-only diff has no outbound dependency call to govern.
+  contains "$f" "yields **no findings** from this dimension"
 }
 
 @test "every reviewer carries the liveness/readiness misuse rule" {
@@ -395,7 +453,7 @@ word_for() {
     # NB: the backticks are ESCAPED — unescaped they are command substitution,
     # not a regex literal. The Go table backticks its agent names; the other
     # three don't, so both spellings are accepted.
-    grep -qE "^\| \`?${p#development-}-resilience-reviewer\`? \|" "$REPO_ROOT/docs/reference/plugins.md"
+    grep -qE "^\| \`?$(agent_prefix "$p")-resilience-reviewer\`? \|" "$REPO_ROOT/docs/reference/plugins.md"
   done
 }
 
@@ -574,6 +632,26 @@ word_for() {
 
 # ---- the two documented downstream gaps, pinned BEHAVIOURALLY ---------------
 
+@test "the approver roster is exactly the service plugins minus development-javascript" {
+  # The #1147 guards below iterate APPROVER_PLUGINS, so a service plugin missing
+  # from it is silently unguarded. Pin the split: every service plugin but
+  # javascript ships an approver, and javascript deliberately does not (#1071
+  # scoped the JS approver out). When one lands, this reds and the plugin moves
+  # into APPROVER_PLUGINS.
+  local p
+  for p in "${SERVICE_PLUGINS[@]}"; do
+    if [ "$p" = development-javascript ]; then
+      # positive control first, so a moved agents/ dir cannot pass the absence
+      [ -f "$(agent_file "$p")" ]
+      [ -z "$(ls "$REPO_ROOT/$p"/agents/*approver* 2>/dev/null)" ]
+    else
+      [ -f "$REPO_ROOT/$p/agents/${p#development-}-approver.md" ]
+      contains " ${APPROVER_PLUGINS[*]} " " $p "
+    fi
+  done
+  [ "${#APPROVER_PLUGINS[@]}" -eq $(( ${#SERVICE_PLUGINS[@]} - 1 )) ]
+}
+
 @test "#1147: no Approver pins a dimension enum its panel can exceed" {
   # The inverse of the gap this file used to pin. Every approver agent — and its
   # operator mirror, where it restates the enum — must admit `resilience`, and
@@ -585,7 +663,7 @@ word_for() {
   # `code_quality`, which is exactly the "bucketed under a dimension nothing
   # downstream knows" failure the table-cell test above exists to prevent.
   local p f mirror enum dim agent pairs
-  for p in "${SERVICE_PLUGINS[@]}"; do
+  for p in "${APPROVER_PLUGINS[@]}"; do
     # Materialise the derivation and prove it before trusting it — a `while read`
     # fed by process substitution swallows the producer's status, so an awk that
     # matched nothing (renamed plugin dir, moved SKILL.md, changed table header)
@@ -665,7 +743,7 @@ word_for() {
   # whose author updates the count prose (the obvious edit) but not the step-10
   # list would otherwise pass every assertion here — which is #1147 itself.
   local p word f agent dim pairs walk mirror flat
-  for p in "${SERVICE_PLUGINS[@]}"; do
+  for p in "${APPROVER_PLUGINS[@]}"; do
     word="$(word_for "$(table_rows "$p")")"
     lacks "$word" "UNMAPPED"
     pairs="$(table_pairs "$p")"
@@ -748,7 +826,7 @@ word_for() {
   # wrap splits — `go-approver.md` already splits "not six full / reviews", which
   # would have left this very sweep blind on the file it was written for.
   local p word f wrong flat
-  for p in "${SERVICE_PLUGINS[@]}"; do
+  for p in "${APPROVER_PLUGINS[@]}"; do
     word="$(word_for "$(table_rows "$p")")"
     lacks "$word" "UNMAPPED"
     for f in "$REPO_ROOT/$p/agents/${p#development-}-approver.md" \
@@ -798,7 +876,8 @@ word_for() {
                 f && /^  [a-z]/ {exit} f' "$wf")"
   contains "$paths" "development-go"
   for path in 'development-go/**' 'development-java/**' 'development-python/**' \
-              'development-swift/**' 'docs/reference/plugins.md' 'ARCHITECTURE.md' \
+              'development-swift/**' 'development-javascript/**' \
+              'docs/reference/plugins.md' 'ARCHITECTURE.md' \
               '.claude-plugin/marketplace.json' 'development/skills/bootstrap/templates/**'; do
     grep -qxF "      - '$path'" <<< "$paths"
   done

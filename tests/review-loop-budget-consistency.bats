@@ -453,6 +453,7 @@ grep_site() {  # grep_site <file> <fixed-string>
     "development-claude-plugin/skills/review/SKILL.md" \
     "development-go/skills/review/SKILL.md" \
     "development-java/skills/review/SKILL.md" \
+    "development-javascript/skills/review/SKILL.md" \
     "development-kubernetes/skills/review/SKILL.md" \
     "development-opentofu/skills/review/SKILL.md" \
     "development-python/skills/review/SKILL.md" \
@@ -465,12 +466,12 @@ grep_site() {  # grep_site <file> <fixed-string>
   # the SEVENTH site: ARCHITECTURE.md states the same invariant and hardcodes
   # the roster's size, so without these a drift there (or a seventh panel that
   # never reaches the contract doc) leaves the suite green
-  [ "${#found[@]}" -eq 7 ]
+  [ "${#found[@]}" -eq 8 ]
   # Fragments unique to the sentence each one pins — the bare descriptor tokens
   # recur in the same section's JSON sample, so they are presence checks only.
   grep_site "$ARCH_PANEL_DUTIES" 'a second injection duty'
   grep_site "$ARCH_PANEL_DUTIES" "forward both into each agent's launch prompt"
-  grep_site "$ARCH_PANEL_DUTIES" 'All seven panels (`claude-plugin`'
+  grep_site "$ARCH_PANEL_DUTIES" 'All eight panels (`claude-plugin`'
   grep_site "$ARCH_PANEL_DUTIES" 'carry **both rules**'
   grep_site "$ARCH_PANEL_DUTIES" 'never a licence to'
   grep_site "$ARCH_PANEL_DUTIES" 'fix_verification_path'
@@ -599,6 +600,7 @@ grep_site() {  # grep_site <file> <fixed-string>
     "$REPO_ROOT/development-claude-plugin/skills/review/SKILL.md"
     "$REPO_ROOT/development-go/skills/review/SKILL.md"
     "$REPO_ROOT/development-java/skills/review/SKILL.md"
+    "$REPO_ROOT/development-javascript/skills/review/SKILL.md"
     "$REPO_ROOT/development-python/skills/review/SKILL.md"
     "$REPO_ROOT/development-swift/skills/review/SKILL.md"
   )

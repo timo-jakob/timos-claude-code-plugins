@@ -109,7 +109,7 @@
 #       never reads either file; the loop writes them and the reviewers consume
 #       them. `--max-rounds` is deliberately NOT a flag here: finality is the
 #       loop's rule, and duplicating the ceiling would mean two places to change.
-#       repo_type ∈ {swift, python, java, go, claude-plugin, kubernetes};
+#       repo_type ∈ {swift, python, java, go, javascript, claude-plugin, kubernetes};
 #       review_skill is the
 #       review skill the orchestrator invokes (development-<repo_type>:review),
 #       passing changed_files as the review scope. claude-plugin (#809) and
@@ -120,7 +120,7 @@
 #       first: both markers fire on a plugin repo that ALSO carries Kubernetes
 #       content, and plugin prose is what such a repo is actually made of.
 #       kubernetes additionally requires NO detected language at all (not merely
-#       no supported one), so a JS/TS service shipping a Helm chart keeps the
+#       no supported one), so a Rust service shipping a Helm chart keeps the
 #       typed escalation instead of being reviewed by the manifest panel.
 #       The panel writes its aggregate findings JSON (issue #558 schema) to
 #       findings_path, which defaults to
@@ -694,11 +694,11 @@ _repo_type() {
   local l
   # the last jq whose failure was read as a VERDICT (#1177): `jq -e` exits 1 for
   # false/null but 5 for a program error, and treating both as "this language is
-  # absent" turns four jq errors into an `unsupported_repo_type` claim about the
+  # absent" turns five jq errors into an `unsupported_repo_type` claim about the
   # repo. Same rule as every other read here — a dead jq is a fact about the
   # machine, not about the repo.
   local probe_rc
-  for l in swift python java go; do
+  for l in swift python java go javascript; do
     print -r -- "$langs_json" | jq -e --arg l "$l" 'index($l) != null' >/dev/null 2>&1
     probe_rc=$?
     (( probe_rc <= 1 )) || {
@@ -722,12 +722,12 @@ _repo_type() {
     # reversing these two would then point its own review loop at a manifest
     # panel. (Today is_kubernetes is false here, so only one marker fires.)
     # The kubernetes fallback additionally requires NO detected language at all,
-    # not merely no SUPPORTED one. `supported` is the intersection with the four
+    # not merely no SUPPORTED one. `supported` is the intersection with the five
     # panel languages, so it is empty both for a language-less GitOps repo and
-    # for, say, a JavaScript service — and `is_kubernetes` is a topic marker that
-    # composes with any language, so a JS/TS service that ships its own Helm
+    # for, say, a Rust service — and `is_kubernetes` is a topic marker that
+    # composes with any language, so a Rust service that ships its own Helm
     # chart (a very ordinary shape) would otherwise be handed to the manifest
-    # panel for a story whose diff is JS. That panel has no competence there: it
+    # panel for a story whose diff is Rust. That panel has no competence there: it
     # would converge finding-free and the loop would record a clean review that
     # never happened. Such a repo keeps the typed `unsupported_repo_type`
     # escalation, which names the languages so a human can route it.
@@ -757,7 +757,7 @@ _repo_type() {
       repo_type="kubernetes"
     else
       jq -nc --argjson langs "$langs_json" \
-        '{error:"unsupported_repo_type", languages:$langs, supported:["swift","python","java","go"],
+        '{error:"unsupported_repo_type", languages:$langs, supported:["swift","python","java","go","javascript"],
           detail:"no review panel exists for the detected languages"}'
       exit 3
     fi

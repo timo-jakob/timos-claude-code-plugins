@@ -71,6 +71,10 @@ on:
       - 'development-java/**'
       - 'development-python/**'
       - 'development-swift/**'
+      # the fifth service-language panel (#1071), for the same reason — and
+      # review-dispatch.bats / resolve-profile-contract.bats read its review
+      # and resolve-profile skills too
+      - 'development-javascript/**'
       # the marketplace manifest: resilience-review-dimension.bats asserts the
       # development-go entry's description byte-equal to its plugin.json, and a
       # marketplace-only edit matches none of the per-plugin globs above
