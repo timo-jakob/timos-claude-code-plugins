@@ -74,6 +74,10 @@ bats tests/acceptance/rest tests/acceptance/cli
 # drives story-telemetry.zsh and the review loop against a scratch repo
 bats tests/acceptance/cli/resolve-issue-story-telemetry.bats
 
+# bootstrap's --iac-only gate-job probe (#1641) — 10 story cases, offline:
+# drives branch-protection.sh against a scratch GitOps repo, gh/curl stubbed
+bats tests/acceptance/cli/bootstrap-iac-gate-probe.bats
+
 # development-opentofu's review panel (#1161) — 5 story cases, offline:
 # drives the pre-dispatch gate against a stubbed tofu / tflint
 bats tests/acceptance/cli/opentofu-review.bats
