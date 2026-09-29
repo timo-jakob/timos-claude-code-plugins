@@ -149,7 +149,7 @@ iac_section() {
 }
 
 @test "an explicit --gate-command lands verbatim in the workflow, the hook and .maintenance.yml (#1604)" {
-  run render_iac --gate-command 'make a && make b' \
+  run render_iac --approval human --gate-command 'make a && make b' \
     iac/.github/workflows/kubernetes-ci.yml.tmpl iac/hooks/pre-push.tmpl common/.maintenance.yml.tmpl
   [ "$status" -eq 0 ]
   [ "$(yq -r '.jobs.gate.steps[-1].run' "$WF")" = 'make a && make b' ]
@@ -408,7 +408,7 @@ EOF
 }
 
 @test "the rendered .maintenance.yml records the gate command beside primary: kubernetes (#1604)" {
-  run render_iac common/.maintenance.yml.tmpl
+  run render_iac --approval human common/.maintenance.yml.tmpl
   [ "$status" -eq 0 ]
   [ "$(yq -r '.primary' "$OUT/common/.maintenance.yml")" = "kubernetes" ]
   [ "$(yq -r '.gate' "$OUT/common/.maintenance.yml")" = "make lint" ]

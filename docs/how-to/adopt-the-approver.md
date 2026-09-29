@@ -23,12 +23,27 @@ operator-facing adoption guide is
    directory); a missing App is reported with the arguments to pass
    `register-claude-apps.zsh` (`register-args:`), and a registered App whose
    key was lost with the command that regenerates it (`fix:`).
-2. **Per-repo** — `/development:bootstrap --claude-approver true`. Bootstrap
+2. **Per-repo** — `/development:bootstrap --claude-approver true`. The Approver
+   is **opt-in per repository**: bootstrap records the choice as
+   `approval: approver` in the repo's `.maintenance.yml`, and a recorded value
+   wins on every later run, whichever machine runs it. Without the flag and
+   with nothing recorded, bootstrap defaults to `approver` when both Apps are
+   registered for the repo's owner, and to `human` otherwise; plugin and
+   GitOps/IaC repos are always
+   `human`. See
+   [`.maintenance.yml`](../reference/maintenance-yml.md#approval). Bootstrap
    installs the Apps on the repo (via `install-claude-apps.zsh`; no repo
    secrets are stored — tokens are minted locally), generates the policy + PR
    template. (**No workflow** — since
    epic #476 the Approver is user-invoked locally, and
    `claude-approver.yml.tmpl` was removed in #479.)
+
+   To keep a repository human-only instead, record `approval: human`: bootstrap
+   it with `--claude-approver false` while its `.maintenance.yml` records no
+   `approval:` yet, or edit the line yourself — once a value is recorded the
+   flag no longer changes it. The writer App still opens the PRs, a human
+   approves them, and armed auto-merge merges them. No Approver policy is
+   written.
 3. **Per-policy** — amend `.claude/approver-policy.md` as your team's norms
    evolve. Changes go through normal PR review.
 
@@ -55,8 +70,8 @@ approver via `{{APPROVER_LANG}}`, which resolves **only** to those three.
 
 **Go is a special case.** It ships `go-approver` and `/development-go:approve`,
 but `{{APPROVER_LANG}}` does not resolve for it — so `--claude-approver true`
-on a Go repo warns and skips the Approver wiring: **no App installed on the
-repo** and **no policy file**. (Credential *registration* is language-independent,
+on a Go repo warns and skips the Approver wiring: **no Approver App installed on
+the repo** (only the writer) and **no policy file**. (Credential *registration* is language-independent,
 so the Keychain half still happens; what is missing is the per-repo install, and
 without it no installation token can be minted.) To use
 `/development-go:approve` today you must therefore do both by hand: install the

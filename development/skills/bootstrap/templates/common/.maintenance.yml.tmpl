@@ -4,6 +4,9 @@
 # mechanical/lint-level treatment only. See ARCHITECTURE.md "Primary / auxiliary
 # model" in the development plugin family.
 primary: {{PRIMARY}}
+# The approval model /development:bootstrap resolved (#1684). A recorded value wins on every
+# re-run: human (a human approves; armed auto-merge then merges) | approver (the Claude Approver).
+approval: {{APPROVAL}}
 # --- KUBERNETES-START ---
 # The repository's gate COMMAND: what .github/workflows/kubernetes-ci.yml and hooks/pre-push run. A re-run of
 # bootstrap keeps a recorded value and renders it into both.

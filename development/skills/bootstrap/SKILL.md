@@ -27,54 +27,39 @@ Supported flags:
   (GPG or SSH) on the default branch. Off by default because every
   contributor must register a signing key. When set, the orchestrator
   invokes `branch-protection.sh --require-signed-commits true` in Step 4b.
-- `--claude-approver true|false` — install the two Claude GitHub Apps
-  (Claude Approver + Claude Maintenance) on this repo — no repo secrets or
-  variables are stored (#476/#498; both identities mint their tokens locally
-  from the Keychain). **The default is
-  auto-detected**: `true` when both Claude Apps are already registered on this
-  machine **for the target repo's owner** (#1683) — an organisation repo needs
-  the organisation's pair, a personal repo the personal one — else `false`.
-  Probe it from inside the target repo with the helper every consumer shares
-  (the mint scripts, `install-claude-apps.zsh` and the Step 4.5 preflight all
-  use it, so it agrees with `register-claude-apps.zsh --list` for that owner):
+- `--claude-approver true|false` — **choose** the repo's approval model, which
+  `.maintenance.yml` records as `approval:` (#1684): `true` chooses
+  `approval: approver` — install the two Claude GitHub Apps (Claude Approver +
+  Claude Maintenance) and wire the Approver — and `false` chooses
+  `approval: human` — install only the writer App; a human approves and armed
+  auto-merge then merges. No repo secrets or variables are stored either way
+  (#476/#498; both identities mint their tokens locally from the Keychain).
+  **The flag is only the middle of three sources**: a value **recorded** in
+  `.maintenance.yml` wins over it on every re-run, and without either the
+  **default** applies — chiefly, on a language repo, whether both Claude Apps
+  are registered on this machine **for the target repo's owner** (#1683; an
+  organisation repo needs the organisation's pair, a personal repo the personal
+  one). So two developers re-bootstrapping the same repo get the same model
+  whatever their machines hold. The resolution — the full default, including
+  the human-only plugin and IaC repos — is
+  `resolve-approval.zsh`'s, stated in *Resolve the approval model*, below the
+  decision tree.
 
-  ```bash
-  "<skill-base-dir>/scripts/claude-apps-owner.zsh" status claude-approver claude-maintenance
-  #   0 → true   (both registered: apps.json entry + Keychain key)
-  #   3 → false  (the report names which is not registered or has lost its
-  #               key — a writer-only owner reports "approver: not registered";
-  #               on a `key missing` line, say in the Step 2 plan that the
-  #               Approver was not auto-enabled and quote the `fix:` line)
-  #   4 → false  (the repo has no GitHub owner yet — no .git, no GitHub
-  #               remote, or gh unauthenticated: States A-C below; say so in
-  #               one line)
-  #   1 → stop: apps.json is still schema 1 or unreadable, or the Keychain
-  #       could not be read. Relay the helper's stderr — it names the fix
-  #       (register-claude-apps.zsh --list migrates a schema-1 file)
-  ```
-
-  Run the probe only when it can matter: an explicit `--claude-approver`
-  needs none, and neither does a plugin repo, where the value is forced to
-  `false` (see `--claude-plugin`). **Run it once the repo has its GitHub
-  owner** — after the Step 1 decision tree has taken States A–C through Q1's
-  `gh repo create` and State C's `gh auth login`, and before the Step 2 plan
-  reports the resolved value — never at argument parsing, when a new repo has
-  no owner yet. Exit 4 then means the repo *still* has no GitHub remote.
-
-  Rationale: the user who registered the Apps has already opted into the
-  Approver ecosystem, so it is the blessed default *for them*; nobody else
-  pays the App-install + credential-storage commitment by default. An explicit `--claude-approver true|false` overrides the
-  auto-detected default (the preflight still offers `register-claude-apps.zsh`
-  when the resolved value is `true` but the Apps aren't registered yet). When the
-  resolved value is `true`, the Approver is wired for the repo's Approver-capable
-  language (currently Python, Java, or Swift); it warn-and-skips when neither
-  resolves as the review target (§3e). A **plugin repo** never installs the
-  Approver regardless (see `--claude-plugin` — the two are mutually exclusive),
-  so the resolved value is forced to `false` there. **Throughout this skill,
-  "`--claude-approver true`" (and "with the flag" / "was set") means the
-  *resolved* value — the explicit flag or the auto-detected default — not the
-  literal invocation; the off-switch on an Apps-registered machine is an explicit
-  `--claude-approver false`.**
+  Rationale for the default: the user who registered the Apps has already
+  opted into the Approver ecosystem, so it is the blessed default *for them*;
+  nobody else pays the App-install + credential-storage commitment by default,
+  and once recorded, the choice belongs to the repository rather than the
+  machine. When the model resolves `approver`, the Approver is wired for the
+  repo's Approver-capable language (currently Python, Java, or Swift); it
+  warn-and-skips when neither resolves as the review target (§3e). A **plugin
+  repo** never installs the Approver regardless (see `--claude-plugin` — the two
+  are mutually exclusive). **Throughout this skill, "`--claude-approver true`"
+  (and "with the flag" / "was set") means the *resolved* `approval: approver` —
+  recorded, chosen or default — not the literal invocation, and
+  "`--claude-approver false`" means the resolved `approval: human`; the
+  off-switch for a repo is a recorded `approval: human` — which an explicit
+  `--claude-approver false` records only while nothing is recorded yet; after
+  that, edit `approval:` in `.maintenance.yml`.**
 - `--claude-plugin true|false` — bootstrap this repo as a **Claude Code plugin
   repository** (a marketplace of plugins, not an application). **The default is
   auto-detected** from the repo: `true` when `.claude-plugin/plugin.json` or
@@ -92,11 +77,12 @@ Supported flags:
   - installs the **plugin-repo lint** pre-commit hooks (shellcheck / shfmt /
     markdownlint) — the `CLAUDE_PLUGIN` block in `.pre-commit-config.yaml`;
   - **does NOT install the Approver.** A plugin repo is the origin of every other
-    repo and requires **human-only** approval (no AI auto-approval). Whatever
-    `--claude-approver` resolved to, **skip the Approver** — the two are mutually
-    exclusive for a plugin repo. Warn only when `--claude-approver true` was
-    passed **explicitly** (an auto-detected `true` needs no warning — nothing was
-    requested).
+    repo and requires **human-only** approval (no AI auto-approval), so it
+    records `approval: human` whatever the machine holds, and a recorded
+    `approval: approver` is refused. An explicit `--claude-approver true` is
+    ignored — the two are mutually exclusive for a plugin repo; warn only then
+    (`resolve-approval.zsh` reports it as `ignored_flag=`), since a default
+    needs no warning — nothing was requested.
   See `docs/CLAUDE-APPS.md` for the design and the Apps' permissions.
 
 ## Guiding Principles
@@ -410,7 +396,8 @@ flow. Stop and ask for input wherever marked; do not guess.
    >   marked copy the reviewer recommends `overwrite`: its plugin-owned IaC
    >   rule.) On an approved overwrite, write and stamp the result (Step 3.6) and
    >   repeat the `branch-protection.sh` call **in this same run**. That refreshed
-   >   file is the one working-tree write this gap-fill makes, and it rides Step 4d/4e as the bot PR — the PR's own run reports
+   >   file is a working-tree write this gap-fill makes (the `approval:` record is the
+   >   other — see below), and it rides Step 4d/4e as the bot PR — the PR's own run reports
    >   `gate`. If the overwrite is declined, or the repeated call refuses again,
    >   take the next bullet — never render a second time;
    > - **no marker** (user-owned) or **absent** → do not overwrite a user's file;
@@ -466,7 +453,10 @@ flow. Stop and ask for input wherever marked; do not guess.
    (e.g., `branch-protection.sh`, `gh secret set`); they do NOT touch files
    in the working tree — the one exception being the reviewed, marker-carrying
    `kubernetes-ci.yml` refresh above, when `branch-protection.sh --iac-only true`
-   refuses it. If multiple gaps coexist, present them as a
+   refuses it. The `approval:` record into an existing `.maintenance.yml` that
+   has none (step 4's approval paragraph) is not a gap-fill action but is a
+   working-tree write too, and both ride Step 4d/4e as the bot PR. If multiple
+   gaps coexist, present them as a
    checkboxed list so the user can pick a subset.
 
 4. **Missing-file gap-fill — run this BEFORE the drift check whenever
@@ -521,6 +511,19 @@ flow. Stop and ask for input wherever marked; do not guess.
    values a missing `.maintenance.yml` records. `detect-stack.sh` scoped
    `missing_artifacts` to that same toolchain, so its tool-scoped gaps are
    exactly the ones this render set covers.
+
+   **So does the approval model (#1684)**, on every path but §3m, and in
+   whichever of steps 3, 4 and 5 this State D run reaches — once Q4 has settled
+   whether this is the §3l path (its `--kind`), and before rendering anything,
+   unless this run already took it: run *Resolve the approval model* and take
+   its exit branch. Its value is the `--approval` a missing
+   `.maintenance.yml` renders with — the template has no default, so a render
+   without it trips the leftover check — and it is this run's `Approval:` line
+   in the plan. An **existing** `.maintenance.yml` is never in
+   `missing_artifacts`, so record it here: once the plan is confirmed, its
+   `--record --expect <the planned value>` runs as in Step 3, appending
+   `approval:` to a file that has none — a committable delta, which step 5a's
+   no-drift stop does not swallow.
 
    **The docs machinery (#766) is the second not-blind set.** An
    already-bootstrapped repo that predates the docs templates reports the
@@ -695,8 +698,12 @@ flow. Stop and ask for input wherever marked; do not guess.
       rendered pre-#213 or hand-made). An **empty array means no drift** —
       report "toolchain is current" and stop; there is nothing to reconcile,
       nothing to commit, and so no Step 4e finishing flow runs. (If this run
-      *also* rendered gap-fill files above, that delta still flows to Step 4d/4e
-      as usual — "no drift" only means the already-present files are current.)
+      *also* rendered gap-fill files above, that delta still flows to Step
+      4d/4e as usual — "no drift" only means the already-present files are
+      current. So does a pending `approval:` record: when *Resolve the approval
+      model* returned `approval_source` `chosen` or `default` — nothing is
+      recorded, whether the key is absent or blank — do not stop — continue to
+      the Step 2 plan, and on confirmation its `--record` is the delta.)
 
       > **The sha256 is the drift signal — not the version label.** A marker
       > records both the template hash AND the plugin version at render time.
@@ -776,6 +783,8 @@ You now have, with certainty:
 - A Docker scanning flag.
 - A **resolved toolchain** (see *Resolve the toolchain* below) — except on the
   §3l IaC path, which renders no quality workflow and resolves none.
+- A **resolved approval model** (see *Resolve the approval model* below) — on
+  every path but §3m's composition repo, which records none.
 
 If any of these is still missing, stop and ask. Never proceed with a missing
 value or a guessed default — but do not mistake the IaC path's settled-empty
@@ -865,6 +874,91 @@ non-zero, relay its stderr verbatim and **stop before the finish** — do not
 hand-edit `tools:` and do not commit without it; a flow-style partial mapping
 (`tools: {code_scanning: codeql}`) is the user's to rewrite as a block mapping.
 
+### Resolve the approval model (#1684)
+
+Who approves this repo's PRs is a **declaration** too: `.maintenance.yml`
+records `approval: human` (the writer App opens the PR, a human approves, armed
+auto-merge then merges) or `approval: approver` (the Claude Approver approves
+it in Step 4f). It is resolved on **every** path but §3m (a composition repo
+records none), the §3l IaC path included — that path opens PRs as well — by the
+shipped script, never re-derived here:
+
+```bash
+"<skill-base-dir>/scripts/resolve-approval.zsh" --kind <language|claude-plugin|iac> \
+  --maintenance-file <repo>/.maintenance.yml [--claude-approver <true|false>]
+```
+
+`--kind` is `claude-plugin` when `--claude-plugin true` resolved, `iac` on the
+§3l IaC path, else `language`. Pass `--claude-approver` only when the user
+passed it. A **recorded** value wins, else the flag (source `chosen`), else the
+**default**: on a language repo `approver` when both Claude Apps are
+registered for the repo's owner, else `human`. A plugin repo and
+the IaC path are **human-only**: always `human`, a recorded `approver` is
+refused, and `--claude-approver true` is ignored — the plugin repo because it
+admits no AI auto-approval, the IaC path because it has no Approver-capable
+language to wire. An absent, empty or null `approval:` records nothing, like
+`gate:`.
+
+The owner probe behind the language default is the shared
+`claude-apps-owner.zsh status claude-approver claude-maintenance` (#1683), run
+from the directory `--maintenance-file` names so it asks about that repo's
+owner, and only when it can matter — a language repo with nothing recorded and
+no flag. So **run this once the repo has its GitHub owner**: after
+the Step 1 decision tree has taken States A–C through Q1's `gh repo create` and
+State C's `gh auth login`, and before the Step 2 plan — never at argument
+parsing, when a new repo has no owner yet. State D, which has its owner already,
+runs it in whichever of its steps 3–5 it reaches, before any gap-fill render.
+
+Branch on the exit code **and** stdout:
+
+- **exit 0** → `approval=<human|approver>` and `approval_source=<recorded|chosen|default>`,
+  plus `probe=registered|not-registered|no-owner` when the probe ran and the
+  probe's own report on stderr. Carry both into the Step 2 plan's `Approval:`
+  line. On `probe=no-owner` no owner resolved — no GitHub remote yet, or `gh`
+  not authenticated — so the default `human` was never asked of an owner's
+  registry: ask at the plan whether to record it now — a recorded value is never
+  re-evaluated later — or to stop here, fix the cause (a GitHub remote, or
+  `gh auth login`) and re-run `/development:bootstrap`; when the relayed report carries a
+  `key missing` line, say in the plan that the Approver was not enabled and
+  quote its `fix:` line. An `ignored_flag=--claude-approver <v>` line means the
+  user passed a flag that did not decide — a human-only repo given `true`, or a
+  recorded value that differs from the flag's: **warn** in the plan that it was
+  ignored, and for a recorded value name the fix, editing `approval:` in
+  `.maintenance.yml`, since a flag never overrides a record.
+- **exit 1** → stdout is empty; relay stderr verbatim and **stop**. It is a
+  recorded value outside `human` | `approver`, a recorded `approver` on a
+  human-only repo, a `.maintenance.yml` that does not parse or `yq` missing, or
+  any probe failure — a schema-1 `apps.json` (the relayed message names
+  `register-claude-apps.zsh --list`, which migrates it), an unreadable Keychain
+  or a missing `jq` among them. Never pick a different value over a recorded
+  one.
+- **exit 2** → your own malformed invocation: fix the command and re-run.
+
+**Recording it (Step 3)** follows *Recording it* above exactly: a repo with no
+`.maintenance.yml` gets `approval:` from the template (`render.zsh --approval`
+with the planned value), and an existing one gets this invocation re-run with
+`--record --expect <the planned value>` added — it appends the template's
+`approval:` lines when the key is absent, fills in a key present with no value,
+and writes nothing when a value is recorded, touching no other line. `--expect`
+refuses to record a resolution that has changed since the plan (a probe that
+now reports no owner, say, or a file edited meanwhile), so the record is always
+what the user confirmed. A
+non-zero `--record` stops before the finish; on an `--expect` refusal, re-resolve,
+re-confirm the plan and re-run Step 3 from §3a with the re-confirmed value.
+
+**Changing it later** is an edit to `approval:` in `.maintenance.yml` — a
+recorded value outranks `--claude-approver` on every run, so the flag only ever
+decides for a repo that records nothing yet. An edit to `human` takes effect on
+the next run; an edit to `approver` on an already-bootstrapped repo does not yet
+render its `.claude/approver-policy.md` (#1928).
+
+**What `approval: human` changes on a language repo**: no Approver policy is
+rendered (§3e), Step 4.5 installs only the writer App
+(`install-claude-apps.zsh --writer-only`), and Step 4f skips — the armed PR
+waits for a human's approval. An existing `.claude/approver-policy.md` is left
+on disk untouched, but it no longer wires the Approver: Step 4f keys on the
+resolved model first.
+
 ## Step 2: Show the Plan and Get Confirmation
 
 Before writing anything, present a clear summary:
@@ -880,6 +974,10 @@ Bootstrap plan:
   Sonar gate:       "Zero Tolerance" custom gate (paid plan / self-hosted) or `Sonar way` fallback (SonarCloud free)   # language repos only
   Toolchain:        static analysis <v> (<source>) · vulnerabilities <v> (<source>) · code scanning <v> (<source>)   # language repos only
   CI runner:        <github-hosted | self-hosted>
+  Approval:         approval: <human | approver> (<recorded | chosen | default>) —
+                    <human approves; armed auto-merge then merges | the local
+                    Claude Approver approves in Step 4f; armed auto-merge then
+                    merges>
   Will create:
     - <list of files to create>
   Will skip (already present):
@@ -902,7 +1000,8 @@ Bootstrap plan:
                     interactive steps — browser imports/auth, token pastes, and
                     the scripts' per-step Y/N confirmations (e.g. runner
                     registration, Snyk auth)[, plus the Claude
-                    App-install click when --claude-approver]; degrades to
+                    App-install click — both Apps for approval: approver, the
+                    writer only for approval: human]; degrades to
                     SETUP.md on failure. Confirming the plan authorizes it too.
                     (Omit this line on a non-macOS host — automation can't run
                     there; the manual SETUP.md checklist covers it.)
@@ -915,6 +1014,31 @@ vulnerabilities snyk (recorded) · code scanning codeql (chosen)` — and derive
 `CI runner:` from `self_hosted_runner` alone: `self-hosted` exactly when it is
 `true`, else `github-hosted`. The `Will create:` list's tool-scoped files come
 from `toolchain-templates.zsh` for that same toolchain (Step 3).
+
+**The `Approval:` line comes from `resolve-approval.zsh`'s output** (*Resolve
+the approval model*, #1684) — the value and its source in parentheses, for
+example `approval: human (recorded) — human approves; armed auto-merge then
+merges` — on every path that resolves it, the §3l IaC path's plan included. For `human` the
+`Will create:` list carries no `.claude/approver-policy.md`, and the
+`Setup automation:` line names the writer-App install rather than the Approver
+pair — off the §3l IaC path, where the trimmed form below stands and the writer
+App is Step 4e's offer.
+
+**For `approver`, resolve §3e's `{{APPROVER_LANG}}` now** — it depends only on
+the primary and the resolved languages — because the plan must not promise an
+Approver the run cannot wire. When none resolves, the line reads
+`approval: approver (<source>) — no Approver-capable language yet: the writer
+App only, a human approves`, the `Setup automation:` line names the writer-App
+install, the `Will create:` list carries no `.claude/approver-policy.md`, and
+§3e's *No-approver-language* warning and choice are put to the
+user **here**, with the plan, never mid-Step 3. Choosing human-only then ends
+this run before anything is committed — first remove, by path, the files it
+rendered (never a tree-wide checkout or clean), State D's gap-filled
+`.maintenance.yml` included, since a left-behind
+`approval: approver` would read as recorded next time: re-invoke with
+`--claude-approver false` when nothing is recorded, or edit `approval: human`
+in `.maintenance.yml` first, so the next plan shows the model that will be
+recorded.
 
 **On the §3l IaC path the plan takes a different shape**, and the difference is
 load-bearing: this block is the consent gate, so promising a coverage gate and a
@@ -1087,6 +1211,7 @@ block stripping + leftover check) is done by the shipped, tested script
   --project-key "<key>" --org-key "<org>" \
   --default-branch "<branch>" --languages "<a b c>" --primary "<primary>" \
   --static-analysis "<v>" --vulnerabilities "<v>" --code-scanning "<v>" \
+  --approval "<human|approver>" \
   --python-version "<x.y>" --java-version "<n>" \
   --security-contact-email "<email-or-empty>" \
   --visibility "<public|private>" --docker "<true|false>" \
@@ -1137,6 +1262,7 @@ The table below documents where each placeholder's **value** comes from:
 | `{{PRIMARY}}` | the repo's **primary** type (its reason to exist) for `.maintenance.yml` — a language (`python`) or a topic (`claude-plugin`, `kubernetes`). Determine: **(0)** if `--claude-plugin` resolves to `true` — the explicit flag, or its auto-detected default when `.claude-plugin/plugin.json` or `.claude-plugin/marketplace.json` is present → `claude-plugin`; **(1)** else if exactly one language was detected → that language (a detected language takes precedence over the kubernetes marker whatever `.maintenance.yml` records — the **mixed repo** is [#1193](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1193), not this slice); **(2)** else if the **resolved** language set (after Q4) is **empty**, `is_kubernetes` is `true` (or the user confirmed Q4's empty-repo question) **and `.maintenance.yml` records no other `primary:`** (if it does, surface the conflict per §3l — never overwrite it silently) → `kubernetes` (the IaC/GitOps repo of §3l — a topic holds the primary slot, which the primary/auxiliary model already permits). Resolved, not detected: a language the user names in Q4 takes branch (1), however empty detection was; **(3)** else (multiple languages) → **ask** the user which is primary (`AskUserQuestion`, options = the detected languages). Surface the chosen primary in the Step 2 plan ("Primary type: X") so the user confirms it there — it's a *declaration*, not a silent inference. |
 | `{{GATE_COMMAND}}` | the repo's gate **command** on the §3l IaC path (#1604) — rendered into `.github/workflows/kubernetes-ci.yml`'s last step, `hooks/pre-push` and `.maintenance.yml`'s `gate:` line. Resolve it as the **recorded** `gate:` value when `.maintenance.yml` already carries one, else `make lint`. Read it with `yq -r .gate`; an absent key, `null` or a blank value is **not** a recorded value. Pass it via `render.zsh --gate-command` (its default is `make lint`; an explicit empty value is refused). |
 | `{{STATIC_ANALYSIS}}` / `{{VULNERABILITIES}}` / `{{CODE_SCANNING}}` | the **resolved** toolchain from `resolve-tools.zsh` (*Resolve the toolchain*, #1651) — rendered into `.maintenance.yml`'s `tools:` block. Pass via `render.zsh --static-analysis` / `--vulnerabilities` / `--code-scanning`. No defaults: the block sits in the `TOOLCHAIN` block, kept on every path but §3l, so a language-path render that forgot them trips the leftover check. Not passed on the §3l IaC path. |
+| `{{APPROVAL}}` | the **resolved** approval model from `resolve-approval.zsh` (*Resolve the approval model*, #1684) — `human` or `approver`, rendered into `.maintenance.yml`'s `approval:` line wherever *Resolve the approval model* runs. Pass via `render.zsh --approval`. No default, so a render that forgot it trips the leftover check; any other value is refused. |
 | `{{COVERAGE_THRESHOLD}}` | always `90` |
 | `{{PYTHON_VERSION}}` | from `detect-stack.sh` (`language_meta.python.version`) — parsed from `pyproject.toml`'s `requires-python`. Defaults to `3.12` when Python isn't detected or no `requires-python` is set. Substitute as-is (e.g., `3.13`). |
 | `{{PYTHON_VERSION_COMPACT}}` | same as `{{PYTHON_VERSION}}` but with the dot stripped (e.g., `313`). Used in `ruff.toml`'s `target-version = "py{{PYTHON_VERSION_COMPACT}}"`. Compute as `language_meta.python.version.replace('.', '')`. |
@@ -1546,13 +1672,13 @@ Copy from `templates/common/`:
 - `.editorconfig` (cross-editor whitespace + encoding settings)
 - `.yamllint` (YAML lint config — line-length 120, GitHub Actions `on:` allowed; used by the `yamllint` pre-commit
   hook and any YAML CI). Static copy, no substitution.
-- `.maintenance.yml` (render `.maintenance.yml.tmpl` — substitute `{{PRIMARY}}`). Declares the repo's primary type so
-  `/development:maintenance` treats it as primary and everything else as auxiliary (see ARCHITECTURE.md "Primary /
-  auxiliary model"). On the §3l IaC path it also records `gate:`, the repo's gate command (#1604): an existing
-  `.maintenance.yml` **without** a `gate:` key gets the line appended — idempotency rule 3 with `merge` as the
-  recommendation, since no existing value changes; an existing `gate:`
-  value is **left alone** byte-for-byte and is the `--gate-command` value for this run's workflow and hook renders, so
-  a consumer who renamed the command keeps the name. Off §3l it records `tools:` — *Recording it*, #1651.
+- `.maintenance.yml` (render `.maintenance.yml.tmpl` — substitute `{{PRIMARY}}`, `{{APPROVAL}}`). Declares the repo's
+  primary type so `/development:maintenance` treats it as primary and everything else as auxiliary (ARCHITECTURE.md
+  "Primary / auxiliary model"), and `approval:` (*Resolve the approval model*, #1684). On the §3l IaC
+  path it also records `gate:`, the repo's gate command (#1604): an existing `.maintenance.yml` **without** a `gate:`
+  key gets the line appended — idempotency rule 3 with `merge` as the recommendation, since no existing value changes;
+  an existing `gate:` value is **left alone** byte-for-byte and is the `--gate-command` value for this run's workflow
+  and hook renders, so a consumer who renamed the command keeps the name. Off §3l it records `tools:` (#1651).
 - `LICENSE` — only if missing, ask which license (default MIT)
 - `trivy.yaml` (shared Trivy config — license + vuln + secret + misconfig scanners; license policy customizable per project)
 - `.github/SECURITY.md` (vulnerability disclosure policy — substitute `{{SECURITY_CONTACT_BLOCK}}` per Q6 answer)
@@ -1797,12 +1923,17 @@ For each detected language, merge in the appropriate config from
 
 ### 3e. Claude Approver artifacts (when `--claude-approver true`)
 
+**`approval: human` renders nothing here** (#1684) — however it resolved,
+recorded, chosen or default: no `.claude/approver-policy.md` is written, and
+the final report says so. The rest of this section applies only to a resolved
+`approval: approver`.
+
 **Plugin-repo exclusion:** if `--claude-plugin true` was set, **skip this section
 entirely** — render no Approver workflow or policy, regardless of how
 `--claude-approver` resolved. A plugin repo is the origin of every other repo and
 is **human-only approval** (no AI auto-approval). Warn that the Approver flag was
-ignored because of `--claude-plugin` **only when `--claude-approver true` was
-passed explicitly**; an auto-detected `true` needs no warning (nothing was
+ignored because of `--claude-plugin` **only when `resolve-approval.zsh` reported
+`ignored_flag=`** — the flag was passed; a default needs no warning (nothing was
 requested). Set up human approval the normal way (Step 4b branch protection
 requires 1 review; no Approver bot to satisfy it).
 
@@ -1875,18 +2006,22 @@ the primary is a topic / no-approver language with no single
 Approver-capable language to fall back to), do **not** render the
 policy file. Warn the user:
 
-> `--claude-approver` resolved `true` (explicitly or auto-detected), but no
+> The approval model resolved `approver` (recorded, chosen or default), but no
 > Approver-capable language (currently Python, Java, or Swift) resolves as this
 > repo's review target. The
 > Claude Approver ships per-language; for other languages the policy file
-> would be a no-op. Re-run with `--claude-approver false` (where the Apps are
-> registered for this repo's owner the default otherwise resolves `true` again),
-> or wait for that language's Approver agent to ship.
+> would be a no-op. To make this repo human-only, record `approval: human` —
+> re-run with `--claude-approver false` if nothing is recorded yet, else edit
+> `approval:` in `.maintenance.yml` — or wait for that language's Approver agent
+> to ship.
 
-Offer to continue with the Approver skipped (or re-run with
-`--claude-approver false`), or abort. The Step 4.5 install path
-also skips when no Approver-capable language resolves — the Approver App
-would be installed with no approve skill to serve it.
+The Step 2 plan already put this warning and choice to the user (*For
+`approver`, resolve §3e's `{{APPROVER_LANG}}` now*), so confirming the plan was
+the choice to continue: do not ask again here. Continuing records the resolved
+`approval: approver` all the same: the declaration names who should approve,
+and a later run picks the Approver up once that language's agent ships. The Step 4.5 install path
+installs only the writer App then — the Approver App would be installed with no
+approve skill to serve it.
 
 ### 3f. Language-specific bootstrap artifacts
 
@@ -4427,7 +4562,11 @@ emit `templates/iac/.github/workflows/kubernetes-ci.yml.tmpl` as
 `.github/workflows/kubernetes-ci.yml`, `templates/iac/scripts/k8s-gate.zsh.tmpl` as
 `scripts/k8s-gate.zsh`, `templates/iac/hooks/pre-push.tmpl` as `hooks/pre-push`
 and `templates/iac/Makefile.tmpl` as `Makefile`, and write `primary: kubernetes` into
-`.maintenance.yml` (branch (2) of the `{{PRIMARY}}` table in Step 3 above).
+`.maintenance.yml` (branch (2) of the `{{PRIMARY}}` table in Step 3 above). This path
+records `approval:` too (#1684) — it opens PRs like any other: resolve it with
+`resolve-approval.zsh --kind iac` (*Resolve the approval model*), whose default here
+is `human`, and record it through `render.zsh --approval` or `--record` as that
+section says.
 
 Do **not** require an application language before bootstrapping. A repo of
 charts and manifests has plenty to validate — rendering always produces
@@ -4586,8 +4725,10 @@ conflict.
    only as far as the repository itself — States A and B, State C's
    `gh auth login`, and State D's steps 1–2 — asking Q1, Q2 and Q3 only.
    State D's later steps (toolchain gate, gap-fill, drift check), Q3a–Q6,
-   *After the decision tree*'s language, toolchain and Docker requirements, and
-   *Resolve the toolchain* do not apply: this path has none of those values.
+   *After the decision tree*'s language, toolchain, Docker and approval-model
+   requirements, *Resolve the toolchain* and *Resolve the approval model* do not
+   apply: this path has none of those values, and its scaffold records no
+   `approval:` (#1684).
 2. The members (below), gathered **before** the plan, so the user approves the
    values the scaffold will write.
 3. Step 2, presenting this plan and nothing from the generic template — the
@@ -5208,11 +5349,11 @@ flow with a suggested message like `Bootstrap project with quality and
 security toolchain`. Whether pushing follows is the **Step 4e finishing
 flow**'s decision — do not push here.
 
-**Skip 4d when nothing was written.** If this run rendered, repaired, or
-generated nothing in the working tree — a **GitHub-side-only gap-fill**
-(branch protection, secrets) or a no-drift **"toolchain is current"** run —
-there is nothing to commit: skip 4d (don't launch the commit flow against a
-clean tree) and, consequently, skip 4e (its precondition, below, fails too).
+**Skip 4d when nothing was written.** If this run rendered, repaired,
+generated or recorded nothing in the working tree — a **GitHub-side-only
+gap-fill** (branch protection, secrets) or a no-drift **"toolchain is current"**
+run, either one with no `approval:` recorded — there is nothing to commit: skip
+4d (don't launch the commit flow against a clean tree) and, consequently, skip 4e (its precondition, below, fails too).
 
 ### 4e. Finishing flow — open the bot-authored PR
 
@@ -5233,10 +5374,11 @@ simply keeps it waiting; nothing merges recklessly, and nothing is ever handed
 back for the user to push by hand.)
 
 - **Precondition — a committable delta must exist.** 4e opens a PR only when
-  Step 4d produced a commit (files were rendered, repaired, or generated in the
-  working tree). A **GitHub-side-only gap-fill** (branch protection, secrets —
-  which by design *do not touch the working tree*) and a no-drift **"toolchain
-  is current"** run commit nothing, so there is no PR to open: **skip 4e** and
+  Step 4d produced a commit (files were rendered, repaired, generated or
+  recorded in the working tree). A **GitHub-side-only gap-fill** (branch
+  protection, secrets — which by design *do not touch the working tree*) and a
+  no-drift **"toolchain is current"** run, either one with no `approval:`
+  recorded, commit nothing, so there is no PR to open: **skip 4e** and
   just report the GitHub-side reconciliation. Never manufacture an empty commit
   or a no-delta PR to satisfy this step.
 
@@ -5272,7 +5414,7 @@ bot-path blocker, in order:
    - `maintenance: not registered` with a `register-args:` line → run
      `register-claude-apps.zsh` with exactly those arguments (`--org <slug>`
      for an organisation), then `install-claude-apps.zsh --writer-only`
-     (installs it on the repo, the `--claude-plugin` extension);
+     (installs it on the repo, the `approval: human` extension);
    - exit 0 and the mint says `App is not installed on <repo>` — printed
      only for GitHub's own 404 (registered, not yet installed) → only
      `install-claude-apps.zsh --writer-only`; exit 0 with `GitHub rejected the
@@ -5347,19 +5489,23 @@ session is the only place that review can happen. Bootstrap owns the drive here
 — the same one the maintenance orchestrator's `merge-pr-cycle.zsh` performs — so
 the run reaches a **merged** PR with no input after the Step 2 plan confirmation.
 
-**Runs only when the Approver is WIRED for this repo — detected from repo
-state, not this invocation's flag.** The repo is wired when the Approver
-policy/App is installed (**`.claude/approver-policy.md` present** — from this
-run's `--claude-approver true` **or** a prior bootstrap) **and** an
-`{{APPROVER_LANG}}` resolves (§3e: `python`/`java`/`swift`). This is the same
-condition 4e calls an "Approver-capable repo" — one definition, not three.
-**Otherwise skip cleanly, no drive** — a **human-only repo** (a plugin repo, or
-one with no Approver policy / no-or-multiple Approver-capable language) has a
-human approve, so report that the armed PR merges on their approval and move on.
-Keying on the repo's **wiring** rather than `--claude-approver` on *this* run is
-deliberate: a **State D re-bootstrap** of an already-wired repo re-runs with
-`--claude-approver` resolving to whatever this machine/flags yield now — not
-necessarily what wired the repo originally — and it must still drive its PR home. It also needs 4e to
+**Runs only when the repo's approval model resolved `approver` AND the Approver
+is WIRED for it — detected from the resolved model and repo state, not from the
+flag alone.** The
+model is *Resolve the approval model*'s (#1684): a resolved `approval: human`
+**skips this step** whatever else is on disk. The repo is wired when the
+Approver policy/App is installed (**`.claude/approver-policy.md` present** —
+from this run's §3e **or** a prior bootstrap) **and** an `{{APPROVER_LANG}}`
+resolves (§3e: `python`/`java`/`swift`). This is the same condition 4e calls an
+"Approver-capable repo" — one definition, not three.
+**Otherwise skip cleanly, no drive** — a **human-only repo** (`approval: human`:
+a plugin repo, a repo that recorded or chose it, or one whose owner has only the
+writer; or one with no Approver policy / no-or-multiple Approver-capable
+language) has a human approve, so report that the armed PR merges on their
+approval and move on. The model is stable across machines because it is
+**recorded**: a **State D re-bootstrap** of an already-wired repo resolves the
+recorded `approval: approver` whatever this machine holds, so it still drives
+its PR home. It also needs 4e to
 have actually opened a bot PR with auto-merge **armed** (not the arming-failed or
 blocked-before-a-PR cases — there's nothing to drive there). Never drive an
 approver that isn't installed.
@@ -5562,13 +5708,15 @@ anything missing:
   --claude-approver "<true|false>"
 ```
 
-Pass the **resolved** `--claude-approver` value (the explicit flag, or the
-auto-detected default — see the flag list): `true` whenever it resolved `true`
-(so the preflight can verify the two Claude GitHub Apps are registered locally
-and offer to run `register-claude-apps.zsh` when they aren't), `false` when it
-resolved `false` — including the plugin-repo forced `false`. A flagless run on a
-machine where the Apps are already registered resolves `true`, so it passes
-`true`, not `false`.
+Pass the **resolved** approval model as `--claude-approver` (*Resolve the
+approval model*, #1684): `true` exactly when the full `install-claude-apps.zsh`
+row below will run — `approval` resolved `approver` (recorded, chosen or
+default) **and** an Approver-capable language resolves (§3e's
+`{{APPROVER_LANG}}`) — so the preflight can verify the two Claude GitHub Apps
+are registered locally and offer to run `register-claude-apps.zsh` when they
+aren't; `false` otherwise, a plugin repo included, so it never demands an
+Approver App nothing will install. A recorded `approval: human` passes `false`
+even on a machine where both Apps are registered.
 
 The script will:
 
@@ -5589,7 +5737,7 @@ The script will:
    Docker.app if not.
 7. When `--claude-approver true`: verify `python3` is present, verify both
    Claude Apps are registered locally **for the repo's owner** (the same
-   `claude-apps-owner.zsh status` probe as the auto-detection, #1683), and
+   `claude-apps-owner.zsh status` probe as the approval model's default, #1683), and
    offer to run `register-claude-apps.zsh` with exactly the missing Apps for
    that owner (`--org <slug>` for an organisation) when any is missing, then
    re-probe and stop unless the pair is now registered. It stops instead of
@@ -5622,6 +5770,7 @@ hold:
 | `setup-snyk.sh` | `snyk auth --auth-type=token`, `SNYK_TOKEN`, the GitHub-integration project import, the auto-Fix-PR and PR-status-check manual-step notices | `vulnerabilities` is `snyk` — whatever the visibility or Dockerfile |
 | `enable-github-security.sh` | Dependabot alerts + automated security fixes always; secret scanning + push protection + Private Vulnerability Reporting iff public; the GitHub Advanced Security note iff private | every non-IaC repo |
 | `install-claude-apps.zsh` | the Claude Apps install (the *`--claude-approver true` extension* below) | `--claude-approver` resolved `true` and an Approver-capable language resolves (§3e's `{{APPROVER_LANG}}`) |
+| `install-claude-apps.zsh --writer-only` | the writer App install only (the *`approval: human` extension* below) | `approval` resolved `human` — a plugin repo, or a language repo that recorded, chose or defaulted to it — or resolved `approver` with no Approver-capable language resolving (#1684) — never on the §3l IaC path, whose writer App is Step 4e's offer |
 
 So a public SonarCloud + trivy repo runs `setup-sonarcloud.sh` and
 `enable-github-security.sh` only (`trivy-fs` needs no account or secret), and a
@@ -5688,6 +5837,9 @@ trigger above:
 
 # --claude-approver resolved true and an Approver-capable language resolves
 "<skill-base-dir>/scripts/install-claude-apps.zsh"
+
+# approval resolved human, or approver with no Approver-capable language resolving
+"<skill-base-dir>/scripts/install-claude-apps.zsh" --writer-only
 ```
 
 `enable-github-security.sh` is the one script that takes visibility, because
@@ -5752,8 +5904,9 @@ step applies only when *this run* stored secrets after the PR opened, whatever
 the state.)
 
 **Then run the deferred Step 4f drive.** On an **Approver-wired repo** (per 4f's
-repo-state test — `.claude/approver-policy.md` present + a resolvable
-`{{APPROVER_LANG}}`, *not* `--claude-approver` on this run), Step 4f deferred its
+repo-state test — a resolved `approval: approver` + `.claude/approver-policy.md`
+present + a resolvable `{{APPROVER_LANG}}`, *not* `--claude-approver` on this
+run), Step 4f deferred its
 approve → merge cycle until the secrets landed and CI could go green. Now that
 the re-trigger has run, **return to Step 4f** and run its await → approve →
 verify procedure so the PR reaches **merged**. (This is the completion for any
@@ -5790,12 +5943,15 @@ which (idempotent):
   before #476 it flags the leftover CI-era secrets/variables;
   `--verify --fix` deletes the unambiguous ones.
 
-### `--claude-plugin true` extension — install the WRITER App
+### `approval: human` extension — install the WRITER App
 
-When `--claude-plugin true` was set, the repo is **human-only approval** (no
-Approver — §3e was skipped). Instead, install just the **writer** (the Claude
-Maintenance App) so Claude's PRs are bot-authored and the human can approve them.
-After the per-tool steps, delegate to:
+When `approval` resolved `human` (#1684) — every plugin repo (`--claude-plugin
+true`), and any language repo that recorded, chose or defaulted to it — the repo
+is **human-only approval** (no Approver — §3e rendered nothing). The same
+holds, for now, for an `approver` repo §3e warn-skipped because no
+Approver-capable language resolves. Instead, install just the **writer** (the
+Claude Maintenance App) so Claude's PRs are bot-authored and the human can
+approve them. After the per-tool steps, delegate to:
 
 ```bash
 "<skill-base-dir>/scripts/install-claude-apps.zsh" --writer-only
@@ -5803,9 +5959,12 @@ After the per-tool steps, delegate to:
 
 which installs **only** the Maintenance App on the repo (no Approver, no
 `ANTHROPIC_API_KEY`, no repo secrets — `/development:open-pr` mints the writer
-token locally from the Keychain). Mutually exclusive with `--claude-approver`:
-if both flags were passed, the Approver was already dropped (§3e), and only this
-writer install runs.
+token locally from the Keychain). It never runs beside the full install: the two
+table rows split the resolved model, and exactly one of them holds — this one
+also for an `approver` repo whose Approver §3e warn-skipped for want of an
+Approver-capable language, so that repo still gets its writer. Like every
+per-tool step it never runs on the §3l IaC path, whose writer App is Step 4e's
+offer.
 
 The result: `/development:open-pr` opens PRs authored by
 `claude-maintenance-<owner>[bot]`; the human approves; squash auto-merge +
@@ -5814,8 +5973,8 @@ isn't registered for this repo's owner yet, `install-claude-apps.zsh
 --writer-only` stops naming the exact register command
 (`register-claude-apps.zsh [--org <slug>] --apps claude-maintenance`) — run it,
 then re-run the install. (The Step 4.5 preflight does not check the writer: its
-Claude Apps block runs only for `--claude-approver true`, which a plugin repo
-never resolves.)
+Claude Apps block runs only when the full install's row holds, and this install
+runs exactly when it does not.)
 
 ## Step 5: Print the Manual-Setup Checklist
 
@@ -5829,6 +5988,13 @@ describe artifacts this path never emitted, so cite only the sections the
 checklist itself names — its branch-protection section carries the IaC context
 list for exactly this reason.
 
+**The report names the approval model** (#1684) wherever it was resolved: the resolved
+`approval:` value and its source, as the plan showed it. For `approval: human`
+it also says that **no Approver policy was written** — a human approves each PR
+and armed auto-merge then merges it — and, when a `.claude/approver-policy.md`
+from an earlier bootstrap is still on disk, that it was left untouched and no
+longer wires the Approver.
+
 > **Key the checklist item on Step 4e's actual outcome — and always point at
 > the blessed finish (the bot PR), never a manual "push and open a PR
 > yourself."** Five cases:
@@ -5838,10 +6004,11 @@ list for exactly this reason.
 >   PR/merge item.
 > - **Bot PR armed but Step 4f hasn't completed** (deferred, or it ran and
 >   stopped on a blocker) → key it on the repo's approval model **per 4f's
->   repo-state test** (`.claude/approver-policy.md` present + a resolvable
->   `{{APPROVER_LANG}}`), not this run's `--claude-approver` flag. **Human-only
->   repo** (a plugin repo, or no Approver policy / no-or-multiple Approver
->   language): "approve PR #N — armed auto-merge then merges it." **Approver-wired
+>   repo-state test** (a resolved `approval: approver` + `.claude/approver-policy.md`
+>   present + a resolvable `{{APPROVER_LANG}}`), not this run's `--claude-approver`
+>   flag. **Human-only repo** (`approval: human`, a plugin repo, or no Approver
+>   policy / no-or-multiple Approver language): "approve PR #N — armed auto-merge
+>   then merges it." **Approver-wired
 >   repo whose 4f drive was deferred** (this run stored secrets after the PR
 >   opened — a full initial bootstrap **or** a State D run with missing-secret
 >   gaps — and Step 4.5 didn't run the drive): **keep** "after the secrets +
@@ -5863,7 +6030,8 @@ list for exactly this reason.
 >   fix the reported error), then run `/development:open-pr` on the bootstrap
 >   branch to land the 4d commit as a bot PR." (Never a user-authored-PR item.)
 > - **4e was skipped because there was no committable delta** (GitHub-side-only
->   gap-fill, or a no-drift "toolchain is current" run) → nothing was staged
+>   gap-fill, or a no-drift "toolchain is current" run, either one with no
+>   `approval:` recorded) → nothing was staged
 >   and nothing is outstanding on the PR axis; **omit** the item entirely.
 >
 > **Only list genuinely outstanding work.** A checklist item is a TODO the
@@ -5910,8 +6078,9 @@ NEXT STEPS:
 6. After the secrets above are in place, re-trigger the open bot PR's CI so the
    token-gated checks (Sonar, Snyk) re-run with them:
    `<skill-base-dir>/../maintenance/scripts/retrigger-pr-ci.zsh --grace 0 <pr>`.
-7. **Approver-wired repo only** (per 4f's repo-state test — `.claude/approver-policy.md`
-   present + a resolvable `<APPROVER_LANG>`, not this run's flag): once that CI is
+7. **Approver-wired repo only** (per 4f's repo-state test — `approval: approver`,
+   `.claude/approver-policy.md` present + a resolvable `<APPROVER_LANG>`, not this
+   run's flag): once that CI is
    green, run the deferred **Step 4f** drive — `/development-<APPROVER_LANG>:approve <pr>`
    — so the armed PR gets its local approval and merges. (Human-only repos skip
    this — a human approves instead.)
@@ -5992,7 +6161,8 @@ message — fix the workflow it names, then re-run `branch-protection.sh`:
   user's identity (the writer App is a prerequisite — installed when absent,
   never bypassed with a user-authored PR); **never** push before the Step 2
   confirmation; and a run with **no committable delta** (a GitHub-side-only
-  gap-fill, or a no-drift "toolchain is current" run) pushes nothing, because
+  gap-fill, or a no-drift "toolchain is current" run, either one with no
+  `approval:` recorded) pushes nothing, because
   there is nothing to land.
 - NEVER commit secrets or tokens to the repo. All credentials go to GitHub
   Actions secrets only.

@@ -395,11 +395,11 @@ EOF
 }
 
 @test "render: #1604 the real .maintenance.yml.tmpl records gate: only on the kubernetes primary" {
-  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --primary kubernetes \
+  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --approval human --primary kubernetes \
     common/.maintenance.yml.tmpl
   [ "$status" -eq 0 ]
   [ "$(yq -r '.gate' "$OUT/common/.maintenance.yml")" = "make lint" ]
-  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --primary python --languages python \
+  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --approval human --primary python --languages python \
     --static-analysis sonarcloud --vulnerabilities snyk --code-scanning codeql \
     common/.maintenance.yml.tmpl
   [ "$status" -eq 0 ]
@@ -411,7 +411,7 @@ EOF
 # --- #1651: the declared toolchain in .maintenance.yml's tools: block -------------
 
 @test "render: #1651 the toolchain flags fill .maintenance.yml's tools: block exactly" {
-  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --primary java --languages java \
+  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --approval human --primary java --languages java \
     --static-analysis sonarcloud --vulnerabilities snyk --code-scanning none \
     common/.maintenance.yml.tmpl
   [ "$status" -eq 0 ]
@@ -426,7 +426,7 @@ EOF
   local i
   for i in 0 2 4; do
     local -a flags=("${all[@]:0:i}" "${all[@]:i+2}")
-    run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --primary java --languages java \
+    run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --approval human --primary java --languages java \
       "${flags[@]}" common/.maintenance.yml.tmpl
     [ "$status" -eq 1 ]
     local omitted="${all[i]#--}"
@@ -448,7 +448,7 @@ EOF
 }
 
 @test "render: #1651 the §3l IaC path renders no tools: block and needs no toolchain flag" {
-  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --primary kubernetes --languages "" \
+  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --approval human --primary kubernetes --languages "" \
     common/.maintenance.yml.tmpl
   [ "$status" -eq 0 ]
   [ "$(yq -r '.tools' "$OUT/common/.maintenance.yml")" = null ]
@@ -476,7 +476,7 @@ EOF
   local vis sa v cs
   for vis in public private; do
     if [ "$vis" = public ]; then sa=sonarcloud v=snyk cs=codeql; else sa=sonarqube v=trivy cs=none; fi
-    run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --primary python --languages python \
+    run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --approval human --primary python --languages python \
       --visibility "$vis" --static-analysis "$sa" --vulnerabilities "$v" --code-scanning "$cs" \
       common/.maintenance.yml.tmpl
     [ "$status" -eq 0 ]
@@ -487,6 +487,9 @@ EOF
 # mechanical/lint-level treatment only. See ARCHITECTURE.md \"Primary / auxiliary
 # model\" in the development plugin family.
 primary: python
+# The approval model /development:bootstrap resolved (#1684). A recorded value wins on every
+# re-run: human (a human approves; armed auto-merge then merges) | approver (the Claude Approver).
+approval: human
 # --- TOOLCHAIN-START ---
 # The quality toolchain /development:bootstrap resolved (#1651). A recorded value wins on every
 # re-run: static_analysis sonarcloud | sonarqube, vulnerabilities snyk | trivy, code_scanning codeql | none.
@@ -496,6 +499,72 @@ tools:
   code_scanning: $cs
 # --- TOOLCHAIN-END ---" ]
   done
+}
+
+# --- #1684: the declared approval model in .maintenance.yml's approval: line ------
+
+@test "render: #1684 --approval fills approval: on the language path, either value" {
+  local value
+  for value in human approver; do
+    run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --approval "$value" --primary python \
+      --languages python --static-analysis sonarcloud --vulnerabilities snyk --code-scanning codeql \
+      common/.maintenance.yml.tmpl
+    [ "$status" -eq 0 ]
+    [ "$(yq -r '.approval' "$OUT/common/.maintenance.yml")" = "$value" ]
+  done
+}
+
+@test "render: #1684 --approval fills approval: beside gate: on the IaC path" {
+  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --approval human --primary kubernetes \
+    --languages "" common/.maintenance.yml.tmpl
+  [ "$status" -eq 0 ]
+  [ "$(yq -r '.approval' "$OUT/common/.maintenance.yml")" = human ]
+  [ "$(yq -r '.gate' "$OUT/common/.maintenance.yml")" = "make lint" ]
+}
+
+@test "render: #1684 a render that forgot --approval trips the leftover check" {
+  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --primary kubernetes --languages "" \
+    common/.maintenance.yml.tmpl
+  [ "$status" -eq 1 ]
+  contains "$output" "{{APPROVAL}}"
+}
+
+@test "render: #1684 an --approval outside human | approver is a usage error that writes nothing" {
+  printf 'approval: {{APPROVAL}}\n' > "$T/a.tmpl"
+  local value
+  for value in '' ' ' Human auto true; do
+    run zsh "$SCRIPT" --templates "$T" --out "$OUT" --approval "$value" a.tmpl
+    [ "$status" -eq 2 ]
+    contains "$output" "--approval must be human or approver"
+    [ ! -e "$OUT/a" ]
+  done
+}
+
+@test "render: #1684 --approval as the last argument, with no value, is a usage error" {
+  printf 'approval: {{APPROVAL}}\n' > "$T/a.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" a.tmpl --approval
+  [ "$status" -eq 2 ]
+  contains "$output" "--approval must be human or approver"
+}
+
+@test "render: #1684 approval approver is refused for a plugin repo and for the IaC path" {
+  printf 'approval: {{APPROVAL}}\n' > "$T/a.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --approval approver --claude-plugin true a.tmpl
+  [ "$status" -eq 2 ]
+  contains "$output" "approval approver is never rendered for a plugin repo or the IaC path"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --approval approver --primary kubernetes a.tmpl
+  [ "$status" -eq 2 ]
+  [ ! -e "$OUT/a" ]
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --approval human --primary kubernetes a.tmpl
+  [ "$status" -eq 0 ]
+}
+
+@test "render: #1684 approval approver is refused for --primary claude-plugin without --claude-plugin" {
+  printf 'approval: {{APPROVAL}}\n' > "$T/a.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --approval approver --primary claude-plugin a.tmpl
+  [ "$status" -eq 2 ]
+  contains "$output" "approval approver is never rendered for a plugin repo or the IaC path"
+  [ ! -e "$OUT/a" ]
 }
 
 @test "render: #1670 an IaC-path render (no toolchain flags) of SETUP.md and the pre-commit config still succeeds" {
