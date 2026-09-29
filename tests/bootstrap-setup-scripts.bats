@@ -795,6 +795,8 @@ trigger_holds() {
   case "$t" in
     'every non-IaC repo') return 0 ;;
     '`--claude-approver` resolved `true` and an Approver-capable language resolves'*) [ "$APPROVER" = true ]; return ;;
+    # #1684: the writer-only row is the full install's complement
+    '`approval` resolved `human`'*) [ "$APPROVER" != true ]; return ;;
   esac
   k="$(printf '%s' "$t" | sed -nE 's/^`([a-z_]+)` is `([a-z]+)`.*/\1/p')"
   v="$(printf '%s' "$t" | sed -nE 's/^`([a-z_]+)` is `([a-z]+)`.*/\2/p')"
@@ -810,7 +812,7 @@ step45_runs() { # <visibility> <static_analysis> <vulnerabilities> <approver>
     --code-scanning none)"
   [ -n "$RESOLVED" ] || return 1
   APPROVER="$4"
-  for s in "${NEW_SCRIPTS[@]}" install-claude-apps.zsh; do
+  for s in "${NEW_SCRIPTS[@]}" install-claude-apps.zsh 'install-claude-apps.zsh --writer-only'; do
     t="$(trigger_of "$s")"
     [ -n "$t" ] || { echo "no Step 4.5 row for $s" >&2; return 1; }
     rc=0
@@ -824,7 +826,7 @@ step45_runs() { # <visibility> <static_analysis> <vulnerabilities> <approver>
 @test "#1769 AC1: #1670 row 8 (private, sonarcloud + snyk) runs no register-runner.sh and no setup-sonarqube.sh" {
   local runs
   runs="$(step45_runs private sonarcloud snyk false)"
-  [ "$runs" = "$(printf '%s\n' setup-sonarcloud.sh setup-snyk.sh enable-github-security.sh)" ] ||
+  [ "$runs" = "$(printf '%s\n' setup-sonarcloud.sh setup-snyk.sh enable-github-security.sh 'install-claude-apps.zsh --writer-only')" ] ||
     { echo "$runs"; return 1; }
 }
 
@@ -844,7 +846,7 @@ step45_runs() { # <visibility> <static_analysis> <vulnerabilities> <approver>
 @test "#1769: a private SonarQube repo runs the SonarQube script and the runner, not SonarCloud's" {
   local runs
   runs="$(step45_runs private sonarqube trivy false)"
-  [ "$runs" = "$(printf '%s\n' setup-sonarqube.sh register-runner.sh enable-github-security.sh)" ] ||
+  [ "$runs" = "$(printf '%s\n' setup-sonarqube.sh register-runner.sh enable-github-security.sh 'install-claude-apps.zsh --writer-only')" ] ||
     { echo "$runs"; return 1; }
 }
 
@@ -852,9 +854,26 @@ step45_runs() { # <visibility> <static_analysis> <vulnerabilities> <approver>
   grep -qx install-claude-apps.zsh <<<"$(step45_runs public sonarcloud snyk true)"
   run ! grep -qx install-claude-apps.zsh <<<"$(step45_runs public sonarcloud snyk false)"
   local block
-  block="$(sed -n '/^### Per-tool automation/,/^### `--claude-plugin true` extension/p' "$SKILL")"
+  block="$(sed -n '/^### Per-tool automation/,/^### `approval: human` extension/p' "$SKILL")"
   contains "$block" '"<skill-base-dir>/scripts/install-claude-apps.zsh"'
   contains "$block" '"<skill-base-dir>/scripts/enable-github-security.sh" --visibility "<public|private>"'
+}
+
+@test "#1684: exactly one of the two Claude Apps install rows runs, whichever way the model resolved" {
+  local approver runs
+  for approver in true false; do
+    runs="$(step45_runs public sonarcloud snyk "$approver")"
+    [ "$(grep -c '^install-claude-apps.zsh' <<<"$runs")" -eq 1 ] || { echo "$approver: $runs"; return 1; }
+  done
+  grep -qx 'install-claude-apps.zsh --writer-only' <<<"$(step45_runs public sonarcloud snyk false)"
+}
+
+@test "#1684: the writer-only row states its complement clause and its IaC exclusion" {
+  # trigger_holds matches this row by prefix, so pin the clauses it cannot see
+  local t
+  t="$(trigger_of 'install-claude-apps.zsh --writer-only')"
+  contains "$t" 'or resolved `approver` with no Approver-capable language resolving'
+  contains "$t" 'never on the §3l IaC path'
 }
 
 @test "MUTATION: the trigger evaluator rejects a trigger it does not know" {

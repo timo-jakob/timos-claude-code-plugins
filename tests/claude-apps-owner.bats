@@ -681,10 +681,12 @@ fix: $SCRIPTS/install-claude-apps.zsh --verify --fix" ]
 @test "probe: bootstrap's auto-detection and the maintenance probes run the shared helper" {
   local boot="$REPO_ROOT/development/skills/bootstrap/SKILL.md"
   local maint="$REPO_ROOT/development/skills/maintenance/SKILL.md"
-  contains "$(cat "$boot")" '"<skill-base-dir>/scripts/claude-apps-owner.zsh" status claude-approver claude-maintenance'
+  # Since #1684 the auto-detection is the approval model's language default,
+  # resolved by resolve-approval.zsh, which runs the shared helper itself — the
+  # probe, and an owner-less repo resolving the default rather than stopping,
+  # are driven for real in bootstrap-resolve-approval.bats.
+  contains "$(cat "$boot")" '"<skill-base-dir>/scripts/resolve-approval.zsh" --kind <language|claude-plugin|iac>'
   contains "$(cat "$maint")" '"<skill-base-dir>/../bootstrap/scripts/claude-apps-owner.zsh" \'
-  # An owner with no GitHub remote yet resolves the default, it does not stop.
-  contains "$(cat "$boot")" '#   4 → false  (the repo has no GitHub owner yet'
   # No shipped skill still reads a top-level key of apps.json.
   run grep -rnE "jq -e '\.claude_(approver|maintenance)'" "$REPO_ROOT/development" "$REPO_ROOT"/development-*
   [ "$status" -eq 1 ]

@@ -5,17 +5,20 @@ bootstraps. The file records decisions about the repository. Nothing else in the
 repository encodes them, and every later bootstrap run and maintenance run reads them
 from here instead of inferring them again.
 
-A repository bootstrapped on the infrastructure-as-code path gets two keys:
+A repository bootstrapped on the infrastructure-as-code path gets three keys:
 
 ```yaml
 primary: kubernetes
+approval: human
 gate: make lint
 ```
 
-Every other repository gets `primary:` and a `tools:` block instead of `gate:`:
+Every other repository gets `primary:`, `approval:` and a `tools:` block instead of
+`gate:`:
 
 ```yaml
 primary: python
+approval: approver
 tools:
   static_analysis: sonarcloud
   vulnerabilities: snyk
@@ -29,6 +32,7 @@ A single bootstrap run writes `gate:` or `tools:`, never both.
 | Key | Written on | Value | Read by |
 | --- | --- | --- | --- |
 | `primary:` | every bootstrap | the repository's primary type | `/development:maintenance`, bootstrap re-runs |
+| `approval:` | every path except the composition path | who approves the repository's PRs: `human` or `approver` | bootstrap re-runs |
 | `gate:` | the IaC path only (`primary: kubernetes`) | the repository's gate command; default `make lint` | bootstrap, which renders it into two files |
 | `tools:` | every path except the IaC path | the quality toolchain, in three categories | bootstrap re-runs |
 
@@ -54,6 +58,45 @@ The repository's **primary type**: its reason to exist. The value is a language
   path from what it detects and from your answers in the current run. A recorded
   `primary:` with any other value takes the repository off the IaC path, unless you agree to
   change it when bootstrap reports the conflict.
+
+## `approval:`
+
+The repository's **approval model**: who supplies the approving review its pull
+requests need.
+
+| Value | Who approves | What bootstrap sets up |
+| --- | --- | --- |
+| `human` | a person reviews and approves; armed auto-merge then merges | the writer App only — no Approver policy |
+| `approver` | the Claude Approver approves; armed auto-merge then merges | both Apps and `.claude/approver-policy.md` — only the writer App, and no policy, while no Approver-capable language (Python, Java, Swift) resolves |
+
+The writer App opens the pull request under both models. On the
+infrastructure-as-code path bootstrap offers to install it when it opens its pull
+request, rather than during setup automation.
+
+- **Written on every path except the composition path**, whose repository records
+  no `approval:`.
+- **How bootstrap chooses it.** `--claude-approver true` chooses `approver` and
+  `--claude-approver false` chooses `human`. Without the flag, a language repository
+  defaults to `approver` when both Claude Apps are registered on the machine for the
+  repository's owner. Otherwise it defaults to `human`. Bootstrap shows the
+  value and where it came from (`recorded`, `chosen` or `default`) in its plan, and
+  names it in its final report.
+- **Claude plugin and infrastructure-as-code repositories are always `human`.** A
+  plugin repository admits no AI approval, and an infrastructure-as-code repository has
+  no language the Approver reviews. Bootstrap refuses a recorded `approval: approver`
+  on either, and ignores `--claude-approver true` with a warning.
+- **On a re-run.** A recorded value wins over the flag and the default, so two people
+  bootstrapping the same repository get the same model, whatever Apps their machines
+  hold. A flag that disagrees with the recorded value is ignored, with a warning. To
+  change the model, edit `approval:` and re-run bootstrap; switching an
+  already-bootstrapped repository to `approver` this way does not yet render its
+  Approver policy
+  ([#1928](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1928)). When
+  an existing `.maintenance.yml` has no `approval:` key, bootstrap appends one and
+  leaves every other line as it is.
+- **What counts as recorded.** An absent key, `null` and a blank value are **not**
+  recorded values.
+- **Current limits.** `/development:maintenance` does not read `approval:` yet.
 
 ## `gate:`
 

@@ -7,8 +7,8 @@
 # OWNER OF THE CURRENT REPOSITORY, so one machine mints the organisation's App
 # inside an organisation repo and the personal one inside a personal repo, with
 # no flag. This file is that one answer, shared by the mint scripts,
-# install-claude-apps.zsh, bootstrap's --claude-approver auto-detection and its
-# Step 4.5 preflight, so none of them re-implements it.
+# install-claude-apps.zsh, bootstrap's approval-model default (resolve-approval.zsh,
+# #1684) and its Step 4.5 preflight, so none of them re-implements it.
 #
 # Consumers are READ-ONLY: nothing here writes apps.json or the Keychain. A
 # schema-1 apps.json (no `owners`) is refused with the command that migrates it

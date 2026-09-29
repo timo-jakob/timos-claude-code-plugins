@@ -156,6 +156,20 @@ under its own trigger (#1769); `enable-github-security.sh` is the only one keyed
 on visibility, and no Step 4.5 step re-applies branch protection.
 `/development:maintenance` does not read `tools:` yet (#1672).
 
+**So is the approval model (#1684).** Bootstrap records `approval: human |
+approver` on every path but the composition path, the IaC path included,
+resolved by `development/skills/bootstrap/scripts/resolve-approval.zsh`: a
+recorded value wins, else `--claude-approver true|false` (→ `approver | human`),
+else the default — on a language repo `approver` when both Claude Apps are
+registered for the repo's owner (#1683), else `human`. A plugin repo and the IaC
+path are human-only: always `human`, a recorded `approver` refused. Before this
+the model followed the bootstrapping machine's App registry, so two developers
+got different results; recorded, it belongs to the repository. `approval: human`
+renders no Approver policy, installs only the writer App
+(`install-claude-apps.zsh --writer-only`; on the IaC path Step 4e's offer) and
+skips the approve → merge drive. `/development:maintenance` does not read
+`approval:` yet.
+
 **Mechanism.** The orchestrator reads `.maintenance.yml` and tags each dispatch
 via the payload's `dispatch_mode` (`"primary"` | `"auxiliary"`). The language /
 topic plugin honors it — *auxiliary* means **delegate with a policy override**

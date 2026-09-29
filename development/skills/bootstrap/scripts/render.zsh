@@ -87,6 +87,16 @@
 #                                 The two combinations resolve-tools.zsh rejects —
 #                                 public + sonarqube, private + codeql — are
 #                                 refused here too (exit 2), so neither renders.
+#   --approval human|approver     {{APPROVAL}} — the RESOLVED approval model
+#                                 (resolve-approval.zsh, #1684) recorded in
+#                                 .maintenance.yml's `approval:` line (every
+#                                 render of that template; §3m's composition
+#                                 repo never renders it). No default, so a
+#                                 render that forgot it trips the leftover
+#                                 check; any other value, or `approver` with
+#                                 --claude-plugin true, --primary claude-plugin
+#                                 or --primary kubernetes (human-only), is a
+#                                 usage error (exit 2).
 #   --coverage-threshold <n>      {{COVERAGE_THRESHOLD}} (default: 90)
 #   --python-version <x.y>        {{PYTHON_VERSION}} (default: 3.12; the
 #                                 compact form {{PYTHON_VERSION_COMPACT}} is
@@ -195,6 +205,12 @@ while (($# > 0)); do
 			{ print -u2 -- "render.zsh: $1 needs a non-blank value" && usage; }
 		key="${${1#--}//-/_}" && vals[${key:u}]="$2" && shift 2
 		;;
+	--approval)
+		# a blank value would render a null key that records nothing (#1684)
+		[[ "${2-}" == human || "${2-}" == approver ]] ||
+			{ print -u2 -- "render.zsh: --approval must be human or approver, got: ${2-}" && usage; }
+		vals[APPROVAL]="$2" && shift 2
+		;;
 	--coverage-threshold) vals[COVERAGE_THRESHOLD]="$2" && shift 2 ;;
 	--python-version) vals[PYTHON_VERSION]="$2" && shift 2 ;;
 	--java-version) vals[JAVA_VERSION]="$2" && shift 2 ;;
@@ -243,6 +259,12 @@ if [[ "$visibility" == public && "${vals[STATIC_ANALYSIS]:-}" == sonarqube ]]; t
 fi
 if [[ "$visibility" == private && "${vals[CODE_SCANNING]:-}" == codeql ]]; then
 	print -u2 -- "render.zsh: private + codeql is never rendered (it needs GitHub Advanced Security)" && usage
+fi
+# resolve-approval.zsh refuses a recorded approver on the human-only kinds (#1684);
+# rendering one would stop every later bootstrap run.
+if [[ "${vals[APPROVAL]:-}" == approver && ("$claude_plugin" == true || "${vals[PRIMARY]:-}" == claude-plugin ||
+	"${vals[PRIMARY]:-}" == kubernetes) ]]; then
+	print -u2 -- "render.zsh: approval approver is never rendered for a plugin repo or the IaC path (both are human-only)" && usage
 fi
 
 [[ -d "$templates" ]] || die "template root not found: $templates"

@@ -169,22 +169,46 @@ GitHub with no local record. Recover by:
 
 ## Per-repo setup
 
-Once the **One-time (per-machine) setup** above has registered the two Apps,
-bootstrap **auto-detects** the default: `--claude-approver` resolves to `true`
-when both Apps are registered for **this repo's owner**
-(`claude-apps-owner.zsh status` exits 0, #1683), so for those repos you do
-**not** need to pass the flag — the Approver is wired by default. An
-organisation repo on a machine with only your personal pair resolves `false`
-until you register the organisation's pair (`--org <slug>`). Pass the flag
-explicitly only to override:
+**The Approver is opt-in per repository.** Each repository declares who
+approves its PRs in `.maintenance.yml` (#1684):
+
+```yaml
+approval: approver   # the Claude Approver approves; armed auto-merge then merges
+approval: human      # a human approves; armed auto-merge then merges
+```
+
+Bootstrap records the line on its first run and reads it back on every re-run,
+so a recorded value decides — whichever machine runs bootstrap and whatever
+Apps it has registered, and whatever `--claude-approver` a later run passes
+(bootstrap warns that it ignored the flag). An organisation that wants no
+Approver anywhere records `approval: human` in each repository — by
+bootstrapping each with `--claude-approver false` while nothing is recorded yet,
+or by editing the line; the writer App still opens the PRs, a human approves
+them, and armed auto-merge merges them.
+
+When nothing is recorded yet, `--claude-approver true|false` chooses the value,
+and without the flag bootstrap takes a **default**: `approver` when both Apps
+are registered for **this repo's owner** (`claude-apps-owner.zsh status` exits
+0, #1683), else `human` — so an owner who registered only the writer gets a
+human-only repo with no flag. An organisation repo on a machine with only your
+personal pair defaults to `human` until you register the organisation's pair
+(`--org <slug>`). A Claude plugin repo and a GitOps/IaC repo are always
+`human`.
 
 ```sh
 cd /path/to/repo
-/development:bootstrap --signed-commits              # Apps registered → Approver auto-wired
-/development:bootstrap --signed-commits --claude-approver false   # keep THIS repo human-only
+/development:bootstrap --signed-commits              # records the default (approver if the Apps are registered)
+/development:bootstrap --signed-commits --claude-approver false   # records approval: human (when nothing is recorded yet)
 ```
 
-When `--claude-approver` resolves to `true` (explicitly or auto-detected),
+To change a repository's model later, edit `approval:` in `.maintenance.yml`
+and re-run bootstrap. Switching to `human` leaves an existing
+`.claude/approver-policy.md` on disk untouched but stops bootstrap driving the
+Approver; delete the file in the same PR if nobody needs it. Switching an
+already-bootstrapped repository to `approver` this way does not yet render its
+`.claude/approver-policy.md` (#1928).
+
+When the approval model resolves `approver` (recorded, chosen or default),
 bootstrap will:
 
 1. Render `.claude/approver-policy.md` (the per-PR-type criteria the
@@ -202,6 +226,11 @@ bootstrap will:
    so the App installation is all a repo needs. On a repo bootstrapped
    before epic #476, `install-claude-apps.zsh --verify --fix` removes
    the leftover CI-era secrets/variables.
+
+When it resolves `human`, bootstrap renders **no** `.claude/approver-policy.md`,
+installs only the Claude Maintenance App
+(`install-claude-apps.zsh --writer-only`), skips its approve → merge drive, and
+says in its plan and final report that a human approves.
 
 If a Python project is detected (any `pyproject.toml` with a
 `[project]` table), bootstrap **also** renders the API-stability gate
@@ -540,9 +569,9 @@ Bootstrap does **not** discover this by scanning for agents — §3e
 resolves `{{APPROVER_LANG}}` against a hardcoded `python` / `java` /
 `swift`. So on a Go repo (or any other language) `--claude-approver
 true` **warns and skips**: no policy is rendered, and because no
-Approver-capable language resolves, the Step 4.5 App-install path skips
-too. Using `/development-go:approve` there means installing the Apps by
-hand (`scripts/install-claude-apps.zsh`) **and** hand-authoring
+Approver-capable language resolves, Step 4.5 installs only the writer App
+(#1684). Using `/development-go:approve` there means installing the Approver
+App by hand (`scripts/install-claude-apps.zsh`) **and** hand-authoring
 `.claude/approver-policy.md` — see
 [`development-go/docs/go-approver.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development-go/docs/go-approver.md).
 

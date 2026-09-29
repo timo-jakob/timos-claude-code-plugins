@@ -258,8 +258,8 @@ writer-only owner has just `claude_maintenance`:
 ```
 
 **Which pair a repository uses (#1683).** Every consumer — the mint
-scripts, `install-claude-apps.zsh`, bootstrap's `--claude-approver`
-auto-detection and its Step 4.5 preflight — resolves the **owner of the
+scripts, `install-claude-apps.zsh`, bootstrap's approval-model default
+(`resolve-approval.zsh`, #1684) and its Step 4.5 preflight — resolves the **owner of the
 current repository** (`gh repo view`, lower-cased) and reads only
 `owners[<owner>]` and the Keychain service `claude-plugins.<owner>.<app>`.
 They share one helper, `claude-apps-owner.zsh`, so they cannot disagree

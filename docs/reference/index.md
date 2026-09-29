@@ -19,7 +19,7 @@ when you already know what you're looking for.
 - [Repo scripts](repo-scripts.md) — the helper scripts under `scripts/`, and the
   scripts bootstrap emits into a target repository.
 - [`.maintenance.yml`](maintenance-yml.md) — the keys bootstrap records in a
-  target repository: `primary:`, `gate:` and `tools:`.
+  target repository: `primary:`, `approval:`, `gate:` and `tools:`.
 - [Requirements](requirements.md) — platform and runtime dependencies.
 
 For the authoritative architecture & schema contract, see
