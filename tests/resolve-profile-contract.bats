@@ -233,6 +233,17 @@ _gate_clauses() {
     'go|Do not produce it here' \
     'go|Epic verification (§E4)' \
     'go|end-to-end exercise of the affected behaviour' \
+    'javascript|Epic verification (§E4)' \
+    'javascript|end-to-end exercise of the affected behaviour' \
+    'javascript|Lint is not the gate' \
+    'javascript|never `npm install`' \
+    'javascript|`npm test` alone' \
+    "javascript|Check that read's own exit status" \
+    'javascript|has no suite to gate on' \
+    'javascript|is not one this gate can install' \
+    'javascript|a non-root manifest; the gate runs at the repo root only' \
+    'javascript|before every gate run' \
+    'javascript|A non-zero `npm ci` is not a suite red' \
     'swift|report the unresolved scheme/destination and stop' \
     'swift|do not run it here' \
     'swift|-enableCodeCoverage YES build test' \
@@ -704,8 +715,8 @@ _arch_order_violation() {
   # the same PR, which is what a derived sweep alone can never see.
   local n
   n="$(_profiles | grep -c . || true)"
-  [ "$n" -eq 6 ] || {
-    printf 'the repo ships %s profile(s), expected 6.\n' "$n" >&2
+  [ "$n" -eq 7 ] || {
+    printf 'the repo ships %s profile(s), expected 7.\n' "$n" >&2
     printf 'Adding one? THREE figures move together, in the same PR: this count,\n' >&2
     printf "the Resolve profile contract row in MAINTAINING.md's Invariants in force,\n" >&2
     printf "and ARCHITECTURE.md's 'Profiles populated today: **N**' sentence.\n" >&2
@@ -1190,6 +1201,7 @@ _gate_pairs() {
     'python|development-python/agents/python-ci-fixer.md|pytest --cov|.venv/bin/python -m pytest' \
     'java|development-java/agents/java-ci-fixer.md|./gradlew build test jacocoTestReport' \
     'go|development-go/agents/go-ci-fixer.md|go test ./...|-race' \
+    'javascript|development-javascript/agents/js-ci-fixer.md|npm run typecheck && npm test|.scripts.typecheck // empty' \
     'swift|development-swift/agents/swift-ci-fixer.md|swift test|--enable-code-coverage' \
     'kubernetes|development-kubernetes/skills/maintenance/SKILL.md|kubeconform|kube-linter|kyverno test'
 }
@@ -1318,7 +1330,7 @@ _gate_pair_violations() {
   # gone. So a row may not repeat a token either — the gate-pair twin of the
   # duplicate-row refusal in the clause tripwire below.
   local row n=0 t k want got summed=0 bad=""
-  local -a expect=( 'python 2' 'java 1' 'go 2' 'swift 2' 'kubernetes 3' )
+  local -a expect=( 'python 2' 'java 1' 'go 2' 'javascript 2' 'swift 2' 'kubernetes 3' )
   local rows toks
   rows="$(_gate_pairs)"
   while IFS= read -r row; do
@@ -1513,7 +1525,7 @@ _gate_pair_violations() {
   # ONE source for the figure: the assertion and its diagnostic drifted
   # apart once already (#1561), and the message is the only thing carrying
   # the table's admission argument to whoever trips it.
-  local -r want_rows=164
+  local -r want_rows=175
   n="$(_gate_clauses | grep -c . || true)"
   local uniq
   uniq="$(_gate_clauses | LC_ALL=C sort -u | grep -c . || true)"
@@ -1542,7 +1554,7 @@ _gate_pair_violations() {
   # `#1505 the gate-pair rows carry the exact token count recorded` records its
   # own figure, and DERIVED from the table rather than counted by hand.
   local want row t got bad=""
-  local -a expect=( 'python 9' 'java 8' 'go 51' 'swift 8' 'kubernetes 88' )
+  local -a expect=( 'python 9' 'java 8' 'go 51' 'javascript 11' 'swift 8' 'kubernetes 88' )
   for row in "${expect[@]}"; do
     t="${row%% *}"; want="${row##* }"
     got="$(_gate_clauses | cut -d'|' -f1 | grep -cxF -- "$t" || true)"

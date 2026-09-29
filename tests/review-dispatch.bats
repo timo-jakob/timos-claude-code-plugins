@@ -80,6 +80,25 @@ plan() {  # $1 = languages json ; rest = extra flags
   echo "$output" | jq -e '.supported | index("go") != null' >/dev/null
 }
 
+@test "plan: javascript repo maps to development-javascript:review (#1071)" {
+  # Before #1071 a JS/TS repo had no panel and escalated unsupported_repo_type,
+  # so it got no review at all.
+  plan '{"languages":["javascript"]}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "javascript" ]
+  [ "$(echo "$output" | jq -r .review_skill)" = "development-javascript:review" ]
+}
+
+@test "plan: #1071 the unsupported-repo-type error's supported list is exactly the five panels" {
+  # Equality, not membership: a sixth language added to the loop without this
+  # list — or javascript dropped from it — reds here.
+  plan '{"languages":["rust"]}'
+  [ "$status" -eq 3 ]
+  [ "$(echo "$output" | jq -r .error)" = "unsupported_repo_type" ]
+  [ "$(echo "$output" | jq -c .supported)" = '["swift","python","java","go","javascript"]' ]
+  [ "$(echo "$output" | jq -c .languages)" = '["rust"]' ]
+}
+
 @test "plan: findings_path is a well-known per-round path in the worktree" {
   # --final, because since #1434 a round past the first must say what it is
   # iterating on. This test is about the artifact PATH, not the scope, so
@@ -372,20 +391,53 @@ EOF
 
 # ---- unsupported / ambiguous repo type is a TYPED escalation, not a crash
 
-@test "plan: unsupported repo type (rust/ts) exits 3 with a typed error" {
-  # Was go/typescript until #872 gave Go a panel; the case still needs a pair
-  # with no panel on either side, so it moved to rust/javascript.
-  plan '{"languages":["rust","javascript"]}'
+@test "plan: unsupported repo type (rust/elixir) exits 3 with a typed error" {
+  # Was go/typescript until #872 gave Go a panel, then rust/javascript until
+  # #1071 gave JavaScript one; the case still needs a pair with no panel on
+  # either side, so it moved to rust/elixir.
+  plan '{"languages":["rust","elixir"]}'
   [ "$status" -eq 3 ]
   [ "$(echo "$output" | jq -r .error)" = "unsupported_repo_type" ]
 }
 
 @test "plan: a supported language alongside an unsupported one still dispatches (#872)" {
-  # go+javascript is no longer the unsupported case: go has a panel, javascript
-  # does not, so the single supported language wins rather than escalating.
-  plan '{"languages":["go","javascript"]}'
+  # go+rust: go has a panel, rust does not, so the single supported language
+  # wins rather than escalating.
+  plan '{"languages":["go","rust"]}'
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r .review_skill)" = "development-go:review" ]
+}
+
+@test "plan: #1071 rust+javascript — the former unsupported pair — now selects javascript" {
+  plan '{"languages":["rust","javascript"]}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "javascript" ]
+  [ "$(echo "$output" | jq -r .review_skill)" = "development-javascript:review" ]
+}
+
+@test "plan: #1071 go+javascript with no primary is ambiguous, naming both candidates" {
+  # Was the single-supported-language case until #1071; both now have panels,
+  # so the existing tiebreak applies.
+  plan '{"languages":["go","javascript"]}'
+  [ "$status" -eq 3 ]
+  [ "$(echo "$output" | jq -r .error)" = "ambiguous_repo_type" ]
+  [ "$(echo "$output" | jq -c .candidates)" = '["go","javascript"]' ]
+}
+
+@test "plan: #1071 go+javascript with primary: go selects go" {
+  printf 'primary: go\n' > "$R/.maintenance.yml"
+  plan '{"languages":["go","javascript"]}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "go" ]
+  [ "$(echo "$output" | jq -r .review_skill)" = "development-go:review" ]
+}
+
+@test "plan: #1071 go+javascript with primary: javascript selects javascript" {
+  printf 'primary: javascript\n' > "$R/.maintenance.yml"
+  plan '{"languages":["go","javascript"]}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "javascript" ]
+  [ "$(echo "$output" | jq -r .review_skill)" = "development-javascript:review" ]
 }
 
 @test "plan: no detected languages exits 3 with a typed error" {
@@ -580,17 +632,39 @@ EOF
 
 @test "plan: #1153 an UNSUPPORTED language DOES block the kubernetes fallback" {
   # the asymmetry that keeps the manifest panel from reviewing application code.
-  # `supported` is empty both for a language-less GitOps repo AND for a
-  # JavaScript service, and `is_kubernetes` composes with any language — so a
-  # JS/TS service shipping its own Helm chart (an ordinary shape) would be
-  # handed to the manifest panel for a story whose diff is JS. That panel has no
-  # competence there: it converges finding-free and the loop records a clean
-  # review that never happened. Such a repo must keep the typed escalation,
-  # which names the languages so a human can route it.
-  plan '{"languages":["javascript"],"is_kubernetes":true}'
+  # `supported` is empty both for a language-less GitOps repo AND for a Rust
+  # service, and `is_kubernetes` composes with any language — so a Rust service
+  # shipping its own Helm chart (an ordinary shape) would be handed to the
+  # manifest panel for a story whose diff is Rust. That panel has no competence
+  # there: it converges finding-free and the loop records a clean review that
+  # never happened. Such a repo must keep the typed escalation, which names the
+  # languages so a human can route it. (This case was javascript until #1071
+  # gave JavaScript a panel; see the next test.)
+  plan '{"languages":["rust"],"is_kubernetes":true}'
   [ "$status" -eq 3 ]
   [ "$(echo "$output" | jq -r .error)" = "unsupported_repo_type" ]
-  [ "$(echo "$output" | jq -e '.languages | index("javascript") != null')" = "true" ]
+  [ "$(echo "$output" | jq -e '.languages | index("rust") != null')" = "true" ]
+}
+
+@test "plan: #1071 a plugin repo that also ships JS is reviewed by the javascript panel" {
+  # A Node hook or MCP server puts a package.json in a plugin repo. javascript is
+  # a supported language since #1071, and a detected language always wins over
+  # the claude-plugin fallback — the same rule that already sends a plugin repo
+  # carrying Python to the Python panel. Pinned so the reroute is a decision
+  # (ARCHITECTURE.md's fallback bullet records it), not an accident.
+  plan '{"languages":["javascript"],"is_claude_plugin":true}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "javascript" ]
+  [ "$(echo "$output" | jq -r .review_skill)" = "development-javascript:review" ]
+}
+
+@test "plan: #1071 javascript with is_kubernetes selects javascript, not the manifest panel" {
+  # the language-first principle, now for the JS/TS service shipping a Helm
+  # chart that used to escalate
+  plan '{"languages":["javascript"],"is_kubernetes":true}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "javascript" ]
+  [ "$(echo "$output" | jq -r .review_skill)" = "development-javascript:review" ]
 }
 
 @test "plan: #1153 an UNSUPPORTED language does NOT block the claude-plugin fallback" {
@@ -673,7 +747,7 @@ EOF
   local langs t
   langs="$(sed -n 's/^  for l in \(.*\); do$/\1/p' "$S")"
   [ -n "$langs" ]
-  [ "$(printf '%s\n' "$langs" | wc -w | tr -d ' ')" -eq 4 ]
+  [ "$(printf '%s\n' "$langs" | wc -w | tr -d ' ')" -eq 5 ]
   for t in $langs claude-plugin kubernetes; do
     [ -f "$REPO_ROOT/development-$t/skills/review/SKILL.md" ]
     # and each panel's skill really is named `review`, or the synthesised
@@ -1459,6 +1533,21 @@ detect() {  # $1 = languages json ; rest = extra flags
   [ "$(echo "$output" | jq -r 'keys | join(",")')" = "repo_type" ]
 }
 
+@test "detect: #1071 a javascript repo detects as javascript" {
+  detect '{"languages":["javascript"]}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c .)" = '{"repo_type":"javascript"}' ]
+}
+
+@test "detect: #1071 THIS repo still detects as claude-plugin, with the real detector" {
+  # javascript joining the supported set must not pull this repo off its own
+  # panel: it detects no language, so the claude-plugin fallback still applies.
+  # Un-stubbed on purpose — the stub would only prove the fixture's languages.
+  run env -u DETECT_STACK_BIN zsh "$S" detect --repo "$REPO_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "claude-plugin" ]
+}
+
 @test "detect: #1504 the claude-plugin fallback reaches it too" {
   detect '{"languages":[],"is_claude_plugin":true}'
   [ "$status" -eq 0 ]
@@ -1473,6 +1562,7 @@ detect() {  # $1 = languages json ; rest = extra flags
   local langs from_plan from_detect
   for langs in '{"languages":["python"]}' \
                '{"languages":["go"]}' \
+               '{"languages":["javascript"]}' \
                '{"languages":[],"is_claude_plugin":true}' \
                '{"languages":[],"is_kubernetes":true}'; do
     plan "$langs"
@@ -1867,6 +1957,7 @@ _profile_is_tracked() {
                '{"languages":["java"]}' \
                '{"languages":["go"]}' \
                '{"languages":["swift"]}' \
+               '{"languages":["javascript"]}' \
                '{"languages":[],"is_kubernetes":true}' \
                '{"languages":[],"is_claude_plugin":true}'; do
     detect "$langs"

@@ -566,7 +566,11 @@ raw_identity_section() {
   contains "$section" 'bootstrap keeps emitting the contradicting file'
   # the two plugins that ship no security reviewer at all — needle derived from
   # the same variables the tree scan uses, so a rename cannot rot one half alone
-  contains "$section" "\`${JS_PLUGIN##*/}\` and \`${REACT_PLUGIN##*/}\` ship no security reviewer"
+  contains "$section" "\`${REACT_PLUGIN##*/}\` ships no security reviewer"
+  # development-javascript DOES ship one since #1071, undeepened — the record
+  # must say so and name the issue that deepens it
+  contains "$section" "\`${JS_PLUGIN##*/}\`'s \`js-security-reviewer\`"
+  contains "$section" "carries none of this position's checks — its deepening is #1941"
   # and the CONSEQUENCE, not just the upstream fact: #1326's storage rule has no
   # reviewer at all, which a reader would otherwise have to derive
   contains "$section" '**#1326'"'"'s browser in-memory storage rule ships with no reviewer at all**'
@@ -599,12 +603,21 @@ raw_identity_section() {
   err="$BATS_TEST_TMPDIR/find-stderr.txt"
   # stderr CAPTURED rather than discarded: `2>/dev/null` would swallow a genuine
   # find failure and report it as zero matches.
-  found="$(find "$JS_PLUGIN" "$REACT_PLUGIN" "$SPRING_PLUGIN" \
+  found="$(find "$REACT_PLUGIN" "$SPRING_PLUGIN" \
              -type f -name '*security-reviewer.md' 2>"$err" | wc -l | tr -d ' ')"
-  printf 'security reviewers found under the three plugins: %s\n' "$found" >&2
+  printf 'security reviewers found under react and spring: %s\n' "$found" >&2
   cat "$err" >&2
   [ ! -s "$err" ]
   [ "$found" -eq 0 ]
+  # development-javascript ships exactly one since #1071, and the prose says it
+  # is UNDEEPENED — so the storage rule's own vocabulary must be absent from it.
+  # When #1941 deepens it, this reds and the prose above must move with it.
+  local js_found js_reviewer="$JS_PLUGIN/agents/js-security-reviewer.md"
+  js_found="$(find "$JS_PLUGIN" -type f -name '*security-reviewer.md' 2>"$err" | wc -l | tr -d ' ')"
+  [ ! -s "$err" ]
+  [ "$js_found" -eq 1 ]
+  [ -f "$js_reviewer" ]
+  run -1 grep -qE 'localStorage|sessionStorage' "$js_reviewer"
   # anti-vacuity: the same find over a plugin that DOES ship one must be
   # non-zero, or a broken invocation (bad flag, wrong name pattern) would report
   # 0 above forever and the guard would prove nothing
