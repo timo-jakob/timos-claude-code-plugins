@@ -2333,7 +2333,7 @@ EOF
   plan '{"languages":["python"]}' --round 1
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r 'keys_unsorted | join(",")')" = \
-    "repo_type,review_skill,round,base,findings_path,changed_files,worktree_root,original_root,scope_abs,scope_mode,scope_empty,prior_tree,delta_files,fix_verification_path,adjudicated_path" ]
+    "repo_type,review_skill,topic_review_skills,round,base,findings_path,changed_files,worktree_root,original_root,scope_abs,scope_mode,scope_empty,prior_tree,delta_files,fix_verification_path,adjudicated_path" ]
 }
 
 @test "#1582 --no-relative survives a user-level diff.relative=true" {
@@ -3192,4 +3192,171 @@ _fatal_fixture() {
   # the discriminating half: with the anchor hoisted, stderr names $AROOT, which
   # never contains '/pkg'
   echo "$stderr" | grep -qF -- "$AR/pkg"
+}
+
+# ---- #1072: the topic-composition seam (topic_review_skills) ---------------
+# The shipped review-topic table is EMPTY until a topic panel exists (#959 adds
+# react), so these cases register a topic through the REVIEW_TOPIC_TABLE seam.
+
+tplan() {  # $1 = topic table ; $2 = detect json ; rest = extra flags
+  # --separate-stderr: an override in effect is announced on stderr, and the
+  # descriptor on stdout must stay a single JSON document
+  local table="$1" langs="$2"; shift 2
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON="$langs" \
+    REVIEW_TOPIC_TABLE="$table" zsh "$S" plan --repo "$R" --base main "$@"
+}
+
+@test "#1072 plan with no registered topic emits topic_review_skills [] right after review_skill" {
+  echo "x" > "$R/app.js"
+  run env -u REVIEW_TOPIC_TABLE DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["javascript"],"is_react":true}' \
+    zsh "$S" plan --repo "$R" --base main
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c .topic_review_skills)" = "[]" ]
+  [ "$(echo "$output" | jq -r '.review_skill')" = "development-javascript:review" ]
+  [ "$(echo "$output" | jq -r 'keys_unsorted[2]')" = "topic_review_skills" ]
+}
+
+@test "#1072 the shipped table is empty: language + fallback/topic markers emit [] with review_skill unchanged" {
+  echo "print(1)" > "$R/app.py"
+  local j t
+  for j in '{"languages":["python"]}' '{"languages":["go"],"is_kubernetes":true}' \
+           '{"languages":["go"],"is_opentofu":true}' '{"languages":["java"],"is_composition":true}' \
+           '{"languages":["python"],"is_claude_plugin":true}' '{"languages":["go"],"is_docs":true}' \
+           '{"languages":[],"is_claude_plugin":true}' '{"languages":[],"is_kubernetes":true}'; do
+    echo "input: $j"   # printed on failure, so a red names the input
+    run --separate-stderr env -u REVIEW_TOPIC_TABLE DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON="$j" \
+      zsh "$S" plan --repo "$R" --base main
+    [ "$status" -eq 0 ]
+    [ "$(echo "$output" | jq -c .topic_review_skills)" = "[]" ]
+    t=$(echo "$output" | jq -r .repo_type)
+    [ "$(echo "$output" | jq -r .review_skill)" = "development-${t}:review" ]
+    # with no override in effect, plan announces none
+    [ -z "$stderr" ]
+  done
+}
+
+@test "#1072 a registered topic whose marker fires joins, beside the unchanged language review_skill" {
+  echo "x" > "$R/app.js"
+  tplan "react" '{"languages":["javascript"],"is_react":true}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "javascript" ]
+  [ "$(echo "$output" | jq -r .review_skill)" = "development-javascript:review" ]
+  [ "$(echo "$output" | jq -c .topic_review_skills)" = '["development-react:review"]' ]
+}
+
+@test "#1072 an override in effect is announced once on stderr, even when set to empty" {
+  echo "x" > "$R/app.js"
+  tplan "react" '{"languages":["javascript"],"is_react":true}'
+  [ "$status" -eq 0 ]
+  [ "$stderr" = "plan: REVIEW_TOPIC_TABLE overrides the shipped review-topic table: 'react'" ]
+  tplan "" '{"languages":["javascript"],"is_react":true}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c .topic_review_skills)" = "[]" ]
+  [ "$stderr" = "plan: REVIEW_TOPIC_TABLE overrides the shipped review-topic table: ''" ]
+}
+
+@test "#1072 a registered topic whose marker is false, absent, null or non-boolean yields []" {
+  echo "x" > "$R/app.js"
+  local j
+  for j in '{"languages":["javascript"],"is_react":false}' '{"languages":["javascript"]}' \
+           '{"languages":["javascript"],"is_react":"true"}' '{"languages":["javascript"],"is_react":null}'; do
+    echo "input: $j"
+    tplan "react" "$j"
+    [ "$status" -eq 0 ]
+    [ "$(echo "$output" | jq -c .topic_review_skills)" = "[]" ]
+  done
+}
+
+@test "#1072 entries follow table order, skip duplicates, and read a hyphenated topic as is_<t_with_underscores>" {
+  echo "x" > "$R/app.js"
+  tplan "vue react vue next-js" \
+    '{"languages":["javascript"],"is_react":true,"is_vue":true,"is_next_js":true}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c .topic_review_skills)" = \
+    '["development-vue:review","development-react:review","development-next-js:review"]' ]
+}
+
+@test "#1072 a kubernetes-typed repo never lists its own type, while another registered topic still joins" {
+  echo "x" > "$R/Chart.yaml"
+  tplan "kubernetes react" '{"languages":[],"is_kubernetes":true,"is_react":true}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "kubernetes" ]
+  [ "$(echo "$output" | jq -c .topic_review_skills)" = '["development-react:review"]' ]
+}
+
+@test "#1072 a claude-plugin-typed repo never lists its own type" {
+  echo "x" > "$R/notes.md"
+  tplan "claude-plugin" '{"languages":[],"is_claude_plugin":true}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "claude-plugin" ]
+  [ "$(echo "$output" | jq -c .topic_review_skills)" = "[]" ]
+}
+
+@test "#1072 an unsupported repo still exits 3 with a registered topic's marker true" {
+  tplan "react" '{"languages":["rust"],"is_react":true}'
+  [ "$status" -eq 3 ]
+  [ "$(echo "$output" | jq -r .error)" = "unsupported_repo_type" ]
+  [ "$(echo "$output" | jq -r 'has("topic_review_skills")')" = "false" ]
+}
+
+@test "#1072 an ambiguous repo still exits 3 with a registered topic's marker true" {
+  tplan "react" '{"languages":["python","java"],"is_react":true}'
+  [ "$status" -eq 3 ]
+  [ "$(echo "$output" | jq -r .error)" = "ambiguous_repo_type" ]
+  [ "$(echo "$output" | jq -r 'has("topic_review_skills")')" = "false" ]
+}
+
+@test "#1072 detect still emits only repo_type with a registered topic's marker true" {
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["javascript"],"is_react":true}' \
+    REVIEW_TOPIC_TABLE="react" zsh "$S" detect --repo "$R"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c .)" = '{"repo_type":"javascript"}' ]
+}
+
+@test "#1072 the topic markers are read from the SAME detection that chose the repo type" {
+  # one detect-stack run per plan: a second scan could disagree with the first
+  echo "x" > "$R/app.js"
+  local counting="$BATS_TEST_TMPDIR/detect-counting.sh"
+  printf '#!/usr/bin/env bash\necho x >> "%s"\necho "$DETECT_LANGS_JSON"\n' \
+    "$BATS_TEST_TMPDIR/detect-calls" > "$counting"
+  chmod +x "$counting"
+  run --separate-stderr env DETECT_STACK_BIN="$counting" \
+    DETECT_LANGS_JSON='{"languages":["javascript"],"is_react":true}' REVIEW_TOPIC_TABLE="react" \
+    zsh "$S" plan --repo "$R" --base main
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c .topic_review_skills)" = '["development-react:review"]' ]
+  [ "$(grep -c '' "$BATS_TEST_TMPDIR/detect-calls")" -eq 1 ]
+}
+
+@test "#1072 a malformed topic name in the table is an internal error (exit 1), never a descriptor" {
+  echo "x" > "$R/app.js"
+  local name
+  # 1x: a leading digit; a_b: an underscore would share is_a_b with `a-b`
+  for name in 'React' '-x' 'a.b' 'a]' '1x' 'a_b'; do
+    echo "input: $name"
+    run --separate-stderr env DETECT_STACK_BIN="$STUB" \
+      DETECT_LANGS_JSON='{"languages":["javascript"]}' REVIEW_TOPIC_TABLE="$name" \
+      zsh "$S" plan --repo "$R" --base main
+    [ "$status" -eq 1 ]
+    [ -z "$output" ]
+    echo "$stderr" | grep -qF -- "malformed review topic name in the table: $name"
+  done
+}
+
+@test "#1072 a topic-marker read that jq cannot perform is exit 1, not an empty list" {
+  # a jq shim that dies (exit 5, a program error) only when handed the marker
+  # KEY, so _repo_type's own reads succeed and the failure is the one under test
+  echo "x" > "$R/app.js"
+  local real_jq; real_jq="$(command -v jq)"
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  printf '#!/usr/bin/env bash\nfor a in "$@"; do [ "$a" = is_react ] && exit 5; done\nexec %q "$@"\n' \
+    "$real_jq" > "$BATS_TEST_TMPDIR/bin/jq"
+  chmod +x "$BATS_TEST_TMPDIR/bin/jq"
+  run --separate-stderr env PATH="$BATS_TEST_TMPDIR/bin:$PATH" DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["javascript"],"is_react":true}' REVIEW_TOPIC_TABLE="react" \
+    zsh "$S" plan --repo "$R" --base main
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -qF -- "could not read .is_react from the detect-stack output"
 }

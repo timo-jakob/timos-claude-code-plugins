@@ -330,7 +330,12 @@
 # Hooks (run via the shell, with these env vars exported):
 #   --review-cmd  must write this round's aggregate findings JSON (issue #558
 #                 schema) to $REVIEW_FINDINGS. Also sees $REVIEW_ROUND,
-#                 $REVIEW_SKILL, $REVIEW_SCOPE_FILE (changed files, one per line),
+#                 $REVIEW_SKILL, $REVIEW_TOPIC_SKILLS (#1072 — the plan's
+#                 topic_review_skills as a JSON array, `[]` when no topic panel
+#                 joins; every one of them reviews the same scope, and the hook
+#                 merges their arrays into the one $REVIEW_FINDINGS and their
+#                 carry records into its one sidecar), $REVIEW_SCOPE_FILE (changed
+#                 files, one per line),
 #                 $REVIEW_REPO, and — since #1434 — $REVIEW_SCOPE_MODE ("full" |
 #                 "delta"), $REVIEW_FIX_VERIFICATION (round >= 2: the previous
 #                 round's blockers, to verify the fix actually landed) and
@@ -588,6 +593,12 @@ pft_continues=0
 # to tell "nothing unconfirmed" from "a status file that predates the key". A
 # plain assignment, not `local`: see the note above.
 carry_unconfirmed_json='[]'
+# The dispatch plan's `topic_review_skills` (#1072) — the topic panels that join
+# the language panel each round. `[]` until the plan is read, and on every exit
+# that precedes it (--no-review, a refused input, an exit-3 escalation), so the
+# status JSON always carries the field for the same reason as the four above.
+# A plain assignment, not `local`: see the note above.
+topic_review_skills='[]'
 
 # Clear a stale telemetry run-id sidecar (#995) as EARLY as the run is known to
 # be fresh — here, right after argument parsing, where `work_dir` and `resume`
@@ -746,6 +757,7 @@ emit_and_exit() {
     --argjson clists "$clists" --argjson promotion_phase "$promotion_phase" \
     --argjson granted "$granted_json" --argjson residue_replaced "$residue_replaced" \
     --argjson pftc "$pft_continues" --argjson cu "$carry_unconfirmed_json" \
+    --argjson topics "$topic_review_skills" \
     '{status:$status, rounds:$rounds, max_rounds:$max,
       effective_max_rounds:$effmax, max_rounds_source:$maxsrc,
       promotion_phase:$promotion_phase, closing_sweep_granted:$granted,
@@ -753,6 +765,7 @@ emit_and_exit() {
       carry_unconfirmed:$cu,
       repo_type:(if $repo_type=="" then null else $repo_type end),
       review_skill:(if $review_skill=="" then null else $review_skill end),
+      topic_review_skills:$topics,
       escalation_reasons:$esc, residue_replaced_reasons:$residue_replaced,
       history:$history, round_changelists:$clists,
       final_changelist:$final}')
@@ -2326,6 +2339,25 @@ fi
 local scope_file="$work_dir/scope.txt"
 repo_type=$(print -r -- "$plan" | jq -r '.repo_type')
 review_skill=$(print -r -- "$plan" | jq -r '.review_skill')
+# the topic panels (#1072), handed to --review-cmd as REVIEW_TOPIC_SKILLS and
+# reported in the status JSON. Checked, and held to its contract shape: the key
+# is ALWAYS present in the plan and is an array of strings. A MISSING key is
+# refused too, not defaulted — the loop ships beside the dispatch that emits it,
+# so its absence means a drifted dispatch whose topic panels would otherwise be
+# skipped at exit 0 with nothing reported.
+# Read into a TEMPORARY and refuse through emit_and_exit: a bare `exit 1` would
+# leave --status-file holding the previous round's verdict on a --resume (#912),
+# and a failed substitution straight into the global would blank the `[]` every
+# emit_and_exit reads with --argjson.
+local topics_read=""
+topics_read=$(print -r -- "$plan" \
+  | jq -ce 'if has("topic_review_skills") and (.topic_review_skills | type) == "array"
+              and all(.topic_review_skills[]; type == "string")
+            then .topic_review_skills else error("topic_review_skills missing or malformed") end') || {
+  print -u2 -- "resolve-story-loop: dispatch plan carries a missing or malformed topic_review_skills"
+  emit_and_exit "ERROR" "$resume_round" 1 "$repo_type" "$review_skill" "$resume_prev" "$history_file" "$changelists_file"
+}
+topic_review_skills="$topics_read"
 # scope_file is written per round inside the loop (#911) — no pre-loop write,
 # so a stale copy can never be mistaken for the round's real scope.
 # A --work-dir INSIDE the repo would sweep the loop's own state files
@@ -2843,7 +2875,8 @@ while (( round <= effective_max )); do
     rm -f -- "$findings_path.carry.json" || {
       print -u2 -- "resolve-story-loop: could not clear the stale carry-accounting sidecar $findings_path.carry.json at round $round"; exit 1 }
     ( export REVIEW_ROUND="$round" REVIEW_FINDINGS="$findings_path" \
-             REVIEW_SKILL="$review_skill" REVIEW_SCOPE_FILE="$scope_file" \
+             REVIEW_SKILL="$review_skill" REVIEW_TOPIC_SKILLS="$topic_review_skills" \
+             REVIEW_SCOPE_FILE="$scope_file" \
              REVIEW_REPO="$repo" REVIEW_SCOPE_MODE="$scope_mode" \
              REVIEW_FIX_VERIFICATION="$fix_verification" \
              REVIEW_ADJUDICATED="$adjudicated_file"; eval "$review_cmd" ) || {

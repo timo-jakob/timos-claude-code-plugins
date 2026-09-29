@@ -4270,3 +4270,87 @@ JSON
   [ "$status" -eq 0 ]
   grep -qxF 'root.jsonl' "$SNAP/scope.txt"
 }
+
+# ---- #1072: topic panels reach the hook and the status JSON ----------------
+
+@test "#1072 a registered topic reaches --review-cmd as REVIEW_TOPIC_SKILLS and the status JSON as topic_review_skills" {
+  SNAP="$BATS_TEST_TMPDIR/snap-topic"
+  mkdir -p "$SNAP"
+  export SNAP
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["python"],"is_react":true}' REVIEW_TOPIC_TABLE="react" \
+    zsh "$S" --repo "$R" --base main --work-dir "$BATS_TEST_TMPDIR/wd" \
+    --review-cmd 'printf "%s" "$REVIEW_TOPIC_SKILLS" > "$SNAP/topics.json"; printf "[]" > "$REVIEW_FINDINGS"' \
+    --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  [ "$(jq -c . "$SNAP/topics.json")" = '["development-react:review"]' ]
+  [ "$(echo "$output" | jq -c '.topic_review_skills')" = '["development-react:review"]' ]
+  [ "$(echo "$output" | jq -r '.review_skill')" = "development-python:review" ]
+  # the dispatch's override note reaches the loop's stderr, never its status JSON
+  contains "$stderr" "REVIEW_TOPIC_TABLE overrides the shipped review-topic table"
+}
+
+@test "#1072 with no topic, REVIEW_TOPIC_SKILLS is the JSON array [] and the status field is []" {
+  SNAP="$BATS_TEST_TMPDIR/snap-notopic"
+  mkdir -p "$SNAP"
+  export SNAP
+  run env -u REVIEW_TOPIC_TABLE DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$BATS_TEST_TMPDIR/wd" \
+    --review-cmd 'printf "%s" "${REVIEW_TOPIC_SKILLS-UNSET}" > "$SNAP/topics.json"; printf "[]" > "$REVIEW_FINDINGS"' \
+    --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  [ "$(cat "$SNAP/topics.json")" = "[]" ]
+  [ "$(echo "$output" | jq -c '.topic_review_skills')" = "[]" ]
+}
+
+@test "#1072 topic_review_skills is present ([]) on the --no-review exit, before any plan" {
+  run zsh "$S" --no-review
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c '.topic_review_skills')" = "[]" ]
+}
+
+@test "#1072 topic_review_skills is present ([]) on an exit-3 escalation, which names no panel" {
+  ambiguous_run
+  [ "$(echo "$output" | jq -r '.status')" = "ESCALATE_AMBIGUOUS" ]
+  [ "$(echo "$output" | jq -c '.topic_review_skills')" = "[]" ]
+}
+
+@test "#1072 the status JSON's key set is pinned, topic_review_skills right after review_skill" {
+  # ARCHITECTURE.md lists these keys in this order; without a pin a key could
+  # move or vanish with the suite green
+  clean_loop
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r 'keys_unsorted | join(",")')" = \
+    "status,rounds,max_rounds,effective_max_rounds,max_rounds_source,promotion_phase,closing_sweep_granted,possible_false_trip_auto_continues,carry_unconfirmed,repo_type,review_skill,topic_review_skills,escalation_reasons,residue_replaced_reasons,history,round_changelists,final_changelist" ]
+}
+
+@test "#1072 a plan whose topic_review_skills is missing or not an array of strings is an internal error, never exported" {
+  local fake="$BATS_TEST_TMPDIR/fake-dispatch.zsh" real filt
+  real="$(dirname "$LOOP_REAL")/review-dispatch.zsh"
+  SNAP="$BATS_TEST_TMPDIR/snap-malformed"
+  mkdir -p "$SNAP"
+  export SNAP
+  for filt in '.topic_review_skills = [1]' '.topic_review_skills = {"a":"development-x:review"}' \
+              '.topic_review_skills = "development-x:review"' 'del(.topic_review_skills)'; do
+    echo "input: $filt"   # printed on failure, so a red names the shape
+    printf '#!/usr/bin/env zsh\nif [[ $1 == plan ]]; then\n  zsh %q "$@" | jq -c %q\nelse\n  exec zsh %q "$@"\nfi\n' \
+      "$real" "$filt" "$real" > "$fake"
+    chmod +x "$fake"
+    rm -rf "$BATS_TEST_TMPDIR/wd" "$SNAP/ran"
+    # a stale verdict in the status file, as a previous --resume would leave it
+    printf '{"status":"AWAITING_FIX"}' > "$SNAP/status.json"
+    run --separate-stderr env RESOLVE_LOOP_DISPATCH_BIN="$fake" DETECT_STACK_BIN="$STUB" \
+      DETECT_LANGS_JSON='{"languages":["python"]}' \
+      zsh "$S" --repo "$R" --base main --work-dir "$BATS_TEST_TMPDIR/wd" \
+      --status-file "$SNAP/status.json" \
+      --review-cmd ': > "$SNAP/ran"; printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+    [ "$status" -eq 1 ]
+    contains "$stderr" "missing or malformed topic_review_skills"
+    # the round never started, so no hook ever saw the malformed value
+    [ ! -e "$SNAP/ran" ]
+    # the refusal overwrites the stale verdict, and keeps the field well-formed
+    [ "$(jq -r '.status' "$SNAP/status.json")" = "ERROR" ]
+    [ "$(jq -c '.topic_review_skills' "$SNAP/status.json")" = "[]" ]
+  done
+}

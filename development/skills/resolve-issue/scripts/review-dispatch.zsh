@@ -56,8 +56,8 @@
 #        [--final] [--prior-tree TREE_ID] [--fix-verification PATH]
 #        [--adjudicated PATH]
 #       Emit the dispatch descriptor JSON on stdout:
-#         { repo_type, review_skill, round, base, findings_path, changed_files[],
-#           worktree_root, original_root, scope_abs[],
+#         { repo_type, review_skill, topic_review_skills[], round, base,
+#           findings_path, changed_files[], worktree_root, original_root, scope_abs[],
 #           scope_mode, scope_empty, prior_tree, delta_files,
 #           fix_verification_path, adjudicated_path }
 #       worktree_root / original_root / scope_abs are the #1582 path rail. A
@@ -122,6 +122,25 @@
 #       kubernetes additionally requires NO detected language at all (not merely
 #       no supported one), so a Rust service shipping a Helm chart keeps the
 #       typed escalation instead of being reviewed by the manifest panel.
+#       topic_review_skills (#1072) is the TOPIC-COMPOSITION seam: always
+#       present, directly after review_skill, an array of
+#       `development-<topic>:review` strings — `[]` when no topic applies. It
+#       never changes review_skill. Topic T is listed exactly when T is a row of
+#       the review-topic table (`_RD_REVIEW_TOPICS` below), detect-stack reports
+#       `.is_<T>` true (a `-` in T read as `_`), and T is not the repo_type;
+#       table order, no duplicates. The markers are read from detect-stack's
+#       output, never re-derived here. Only some topics have a flag there today
+#       (is_opentofu, is_composition beside the two fallbacks' own); a topic
+#       whose marker exists only as a maintenance SKILL.md *Topics* recipe
+#       (react, docs) must gain its detect-stack flag when it is registered, or
+#       its row never fires — the missing key reads as false. A topic never
+#       rescues an `unsupported_repo_type` nor settles an `ambiguous_repo_type`:
+#       both exit 3 before any topic is read. The fallback repo_types
+#       (claude-plugin, kubernetes) are NOT table rows, so they stay fallbacks —
+#       a Go repo carrying a Helm chart is reviewed exactly as before. Every
+#       listed panel runs in the same round against this same descriptor, and
+#       the conductor joins their findings into the one findings_path
+#       (reference/review-loop.md, *Topic panels*).
 #       The panel writes its aggregate findings JSON (issue #558 schema) to
 #       findings_path, which defaults to
 #       `<worktree_root>/.review/findings-round-<N>.json` — ABSOLUTE, and the
@@ -147,12 +166,22 @@
 #
 # Seams (for tests / non-PATH installs):
 #   DETECT_STACK_BIN  overrides the detect-stack.sh binary (must emit the same
-#                     JSON, at least the `.languages` array; `.is_claude_plugin`
-#                     and `.is_kubernetes` are read with a false default when
-#                     absent).
+#                     JSON, at least the `.languages` array; `.is_claude_plugin`,
+#                     `.is_kubernetes` and, on `plan`, each review-topic table
+#                     row's `.is_<topic>` (#1072) are read with a false default
+#                     when absent).
 #   GIT_BIN           overrides the `git` binary. It is also handed to
 #                     git-tree-id.zsh (as its own GIT_TREE_ID_BIN seam) when the
 #                     delta is computed, so ONE override covers every git call.
+#   REVIEW_TOPIC_TABLE  when SET (even to ""), REPLACES the shipped review-topic
+#                     table with its whitespace-separated topic names, in order
+#                     (#1072). The shipped table is empty until a topic panel
+#                     exists, so this is how bats registers one. Each name must
+#                     match `[a-z][a-z0-9-]*`; anything else is exit 1, since a
+#                     malformed name would read a detect-stack key that no
+#                     topic can have. While it is in effect `plan` says so
+#                     once on stderr, so a stray export left in a conductor's
+#                     shell is visible rather than silently changing panels.
 #
 # Exit codes:
 #   0  success — the repo type (detect), the descriptor (plan) or the
@@ -167,7 +196,8 @@
 #      --argjson parse error.
 #   3  typed escalation — unsupported or ambiguous repo type; a JSON error object
 #      { error, ... } is printed on stdout for the orchestrator to relay
-#   1  internal error — detect-stack / git / jq failed, a `--prior-tree` that
+#   1  internal error — detect-stack / git / jq failed (a topic marker read
+#      included), a malformed REVIEW_TOPIC_TABLE name, a `--prior-tree` that
 #      does not resolve to a tree-ish in the repo, an unreadable
 #      `.maintenance.yml` primary key (#1588 — the repo itself is fine, a file
 #      inside it is not; reaches `detect` as well as `plan`, since both go
@@ -203,6 +233,20 @@ local git_bin="${GIT_BIN:-git}"
 # per round (#981/#1434), so the two must be one implementation — hence the
 # sibling script rather than a second inlined `write-tree` here.
 local tree_id_bin="${self_dir}/git-tree-id.zsh"
+
+# THE review-topic table (#1072): the topics whose `development-<topic>:review`
+# panel joins the language panel when detect-stack's `is_<topic>` marker fires.
+# It ships EMPTY on purpose — a row naming a panel that does not exist yet would
+# make every such repo's round start a panel nobody can dispatch. Registering a
+# topic follows ARCHITECTURE.md, *Review-panel invocation contract*,
+# *Registering a review topic* — the whole recipe lives there, not here.
+# claude-plugin and kubernetes are FALLBACK repo_types; docs and composition have
+# no review skill; opentofu (and kubernetes as a topic) is #1943's decision,
+# after #1806 — so none of them is a row.
+typeset -ga _RD_REVIEW_TOPICS=()
+if (( ${+REVIEW_TOPIC_TABLE} )); then
+  _RD_REVIEW_TOPICS=( ${=REVIEW_TOPIC_TABLE} )
+fi
 
 die_usage() { print -u2 -- "$1"; exit 2 }
 
@@ -665,9 +709,14 @@ _primary() {
 # `review-dispatch:` prefix, deliberately: they name a failure of the detector
 # itself rather than of either subcommand's invocation.
 typeset -g +x _RD_REPO_TYPE=""
+# The detect-stack document `_repo_type` read, kept so `plan` reads the topic
+# markers from the SAME detection that chose the repo type (#1072) — a second
+# detect-stack run could disagree with the first, and costs a full scan.
+typeset -g +x _RD_DETECT_JSON=""
 _repo_type() {
   local repo="$1" ctx="$2"
   local detect_json; detect_json=$(_detect_json "$repo") || exit 1
+  _RD_DETECT_JSON="$detect_json"
   # All three reads CHECK jq's status (#1177), like the `lang_count` read below.
   # They already failed closed — an empty value matches neither "true" nor a
   # language — so no misroute was reachable; what was wrong is the STATUS. The
@@ -801,6 +850,45 @@ _repo_type() {
   _RD_REPO_TYPE="$repo_type"
 }
 
+# --- the topic panels that join the language panel (#1072) -----------------
+# Prints the `topic_review_skills` JSON array for repo type $1, reading the
+# markers from `_RD_DETECT_JSON` (so `_repo_type` must have run). Runs only
+# AFTER `_repo_type` succeeded, which is what keeps both exit-3 escalations
+# untouched by any topic: they have already exited by the time this is reached.
+# Every marker read CHECKS jq's status and defaults an absent key to false — the
+# same rule `_repo_type` applies to its own flags (#809, #1177): an older
+# detect-stack without the key means "not this topic", a dead jq means exit 1.
+_topic_review_skills() {
+  # `own_type`, not the usual name: resolve-profile-contract.bats counts every
+  # assignment to that name in this file as a place a repo type is EMITTED, and
+  # this is only a read of one already chosen
+  local own_type="$1" ctx="$2" topic key is_on
+  local -a listed=()
+  for topic in "${_RD_REVIEW_TOPICS[@]}"; do
+    [[ "$topic" =~ '^[a-z][a-z0-9-]*$' ]] || {
+      print -u2 -- "${ctx}: malformed review topic name in the table: ${topic}"; exit 1
+    }
+    # the repo type's own panel is already review_skill; a table row naming it
+    # would dispatch the same panel twice in one round
+    [[ "$topic" == "$own_type" ]] && continue
+    (( ${listed[(Ie)$topic]} )) && continue
+    key="is_${topic//-/_}"
+    # `== true`, not `-r` on the raw value: only a JSON boolean true is a fired
+    # marker, so a string "true" from a malformed detector does not join a panel
+    is_on=$(print -r -- "$_RD_DETECT_JSON" | jq -r --arg k "$key" '(.[$k] // false) == true') || {
+      print -u2 -- "${ctx}: could not read .${key} from the detect-stack output"; exit 1
+    }
+    [[ "$is_on" == "true" ]] && listed+=("$topic")
+  done
+  local -a skills=()
+  for topic in "${listed[@]}"; do skills+=("development-${topic}:review"); done
+  # `jq -n '$ARGS.positional'` rather than a `printf | jq -R | jq -s` pipeline,
+  # so an EMPTY list encodes as `[]` rather than as `[""]`
+  jq -nc '$ARGS.positional' --args "${skills[@]}" || {
+    print -u2 -- "${ctx}: could not encode the topic review skills"; exit 1
+  }
+}
+
 cmd_plan() {
   local repo="" base="origin/main" round=1 findings_path=""
   # `prior_tree_given` tracks PRESENCE, separately from the value. The blank
@@ -919,6 +1007,12 @@ cmd_plan() {
     print -u2 -- "plan: internal error: the repo type was not determined"; exit 1
   }
   local repo_type="$_RD_REPO_TYPE"
+  # A command substitution is safe HERE, unlike `_repo_type`'s: this function
+  # has no typed exit-3 document to lose, only exit 1, and the status is read.
+  (( ! ${+REVIEW_TOPIC_TABLE} )) || \
+    print -u2 -- "plan: REVIEW_TOPIC_TABLE overrides the shipped review-topic table: '${REVIEW_TOPIC_TABLE}'"
+  local topics_json
+  topics_json=$(_topic_review_skills "$repo_type" plan) || exit 1
 
   # ABSOLUTE, because `repo` is now the anchored root (#1587) — so the default is
   # `<worktree_root>/.review/findings-round-<N>.json` for EVERY spelling of
@@ -1023,6 +1117,7 @@ cmd_plan() {
   jq -nc \
     --arg repo_type "$repo_type" \
     --arg review_skill "development-${repo_type}:review" \
+    --argjson topics "$topics_json" \
     --argjson round "$round" \
     --arg base "$base" \
     --arg findings_path "$findings_path" \
@@ -1034,7 +1129,8 @@ cmd_plan() {
     --argjson delta "$delta_json" \
     --arg fixver "$fix_verification" \
     --arg adjud "$adjudicated" \
-    '{repo_type:$repo_type, review_skill:$review_skill, round:$round, base:$base,
+    '{repo_type:$repo_type, review_skill:$review_skill,
+      topic_review_skills:$topics, round:$round, base:$base,
       findings_path:$findings_path, changed_files:$changed,
       worktree_root:$worktree_root,
       original_root:(if $original_root=="" then null else $original_root end),

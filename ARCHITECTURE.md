@@ -3867,6 +3867,7 @@ cannot mint a second artifact path for the same round:
 {
   "repo_type": "python",
   "review_skill": "development-python:review",
+  "topic_review_skills": [],
   "round": 1,
   "base": "origin/main",
   "findings_path": "/Users/dev/repos/shop/.claude/worktrees/brisk-otter/.review/findings-round-1.json",
@@ -4001,6 +4002,59 @@ cannot mint a second artifact path for the same round:
   prose — it must be reviewed by the plugin panel. This repo becomes exactly
   that case once #1155 lands its Kubernetes fixtures. Neither fallback ever
   joins the ambiguity tiebreak.
+- **Topic panels compose beside the language panel (#1072).** Maintenance
+  dispatch composes — a repo can be `java` *and* `spring` — and review dispatch
+  now has the same seam. `topic_review_skills` is **always present**, directly
+  after `review_skill`: an array of `development-<topic>:review` strings, `[]`
+  when no topic applies. `review_skill` keeps its value and meaning in every
+  case. Topic *T* is listed **exactly when** *T* is a row of the script's
+  **review-topic table** (`_RD_REVIEW_TOPICS`), `detect-stack.sh` reports
+  `.is_<T>` true (a `-` in *T* read as `_`; a checked jq read, an absent key
+  defaulting to false, and only a JSON boolean `true` counting), and *T* is not
+  the `repo_type`. Entries follow table order with no duplicates. The markers
+  are read from `detect-stack.sh`'s output, never re-derived in the dispatch —
+  but only some topics have a flag there today (`is_opentofu`,
+  `is_composition`, beside the two fallbacks' own). A topic whose marker exists
+  only as a maintenance SKILL.md *Topics* recipe, as `react` and `docs` do
+  today, has no `is_<topic>` flag yet: its row would never fire, since the
+  missing key reads as false. The table **ships empty**: a row naming a panel that
+  does not exist would make every such repo's round start a panel nobody can
+  dispatch. `opentofu`, whose panel and `is_opentofu` flag both exist, is
+  deliberately not a row either: composing it (and `kubernetes`) as a topic is
+  #1943's decision, sequenced after #1806. The fallback repo_types are **not**
+  rows, so they stay fallbacks — a Go repo carrying a Helm chart or `*.tf` is
+  reviewed exactly as before, and a
+  `kubernetes`- or `claude-plugin`-typed repo never lists its own type; `docs`
+  and `composition` have no review skill and are never rows. A topic marker
+  **never** rescues an `unsupported_repo_type` nor settles an
+  `ambiguous_repo_type`: both exit 3 before any topic is read, and `detect`
+  still emits only `repo_type`. Every listed panel runs **in the same round
+  against the same descriptor**, and the conductor joins their findings into the
+  one `findings_path` — `reference/review-loop.md`, *Topic panels*, states the
+  per-panel outcome and carry rules. Nothing about convergence
+  changes: the severity map, the blocking rule, the dedup key and the round cap
+  are `consolidate-findings.zsh`'s and the loop's, and a round counts once however
+  many panels contribute. In hook mode the loop exports the array to
+  `--review-cmd` as `REVIEW_TOPIC_SKILLS` and reports it in its status JSON.
+
+  **Registering a review topic** is three changes in one PR: a row in
+  `review-dispatch.zsh`'s `_RD_REVIEW_TOPICS` table (naming a topic whose
+  `development-<topic>:review` skill ships in the same PR or already exists),
+  an `is_<topic>` flag in `detect-stack.sh` — **added in that PR when the topic
+  has none yet**, with its `*-topic-marker.bats` suite extended to hold the flag
+  identical to the maintenance recipe — and a `tests/review-dispatch.bats` case
+  that plans a repo firing the marker and asserts the entry. The bats case runs
+  against a `DETECT_STACK_BIN` stub, so it cannot notice a flag the real
+  `detect-stack.sh` never emits; the marker suite is what does. **Every
+  dimension a topic panel emits is prefixed with the topic's own name**
+  (`react_hooks`, `react_a11y` — never `bugs` or `a11y`), which keeps it
+  disjoint from every other panel's, language **or topic**, since several topic
+  panels can join one round: a finding's dimension is what the carry accounting
+  and `consolidate-findings.zsh`'s file + line + dimension dedup key on, so a
+  shared name would merge two panels' distinct findings and leave a carried
+  entry with no single owning panel. Bats drives the seam without a real
+  row through the `REVIEW_TOPIC_TABLE` override, declared in the script's Seams
+  header beside `DETECT_STACK_BIN` / `GIT_BIN`.
 - **The review scope is the story's diff, never the whole repo.** `changed_files`
   is everything that differs from `base` (committed + staged + unstaged) plus new
   untracked files — **repo-root-relative and repo-wide regardless of where
@@ -4750,8 +4804,10 @@ gate after a fix, which emits status `ERROR`) alongside a machine-readable
 status JSON (`{status, rounds, max_rounds, effective_max_rounds,
 max_rounds_source, promotion_phase,
 closing_sweep_granted, possible_false_trip_auto_continues, carry_unconfirmed, repo_type,
-review_skill, escalation_reasons, residue_replaced_reasons, history, round_changelists,
-final_changelist}`), where `effective_max_rounds` (an integer — the ceiling
+review_skill, topic_review_skills, escalation_reasons, residue_replaced_reasons, history,
+round_changelists, final_changelist}`), where `topic_review_skills` (#1072) is the
+dispatch plan's array, **always present** (`[]` on every exit before the plan is
+read), and where `effective_max_rounds` (an integer — the ceiling
 actually in force) and `max_rounds_source` (`"flag"` or `"work-dir"`) are
 **always-present** too (#1576): they report a human grant adopted from
 `<work-dir>/.max-rounds` **without** touching `max_rounds`, which keeps
