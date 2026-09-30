@@ -5196,6 +5196,138 @@ The 5-grant soft cap stays a
 **nudge**, not a hard stop: by the fifth grant the ceiling already stands at
 5 + 5×3 = 20 rounds.
 
+## Round handoff and verdict contracts (#1934)
+
+Epic #1933 moves each review round's heavy work — the panel, the decided pass,
+the fix — out of the conductor's context and into **fresh subagents** of three
+kinds: `panel`, `decide` and `fix`. The conductor hands a job over as a
+**handoff** file and reads back a **verdict** file, and it never opens reviewer
+output, findings contents or diffs. These two versioned contracts are that
+boundary. Both files live inside the `resolve-story-loop.zsh` `--work-dir`,
+never in the repository.
+
+`development/skills/resolve-issue/scripts/round-handoff.zsh` is the only door
+either file goes through. `write-handoff` / `write-verdict --work-dir DIR` read
+one JSON object on stdin, validate it, write
+`<DIR>/{handoff,verdict}-<N>-<kind>.json` atomically (overwriting an existing
+file) and print its absolute path; `read-handoff` / `read-verdict --file FILE`
+print the validated object. **One validator serves the writers and the
+readers**, so nothing a reader would refuse can be written. Exit codes: 0 ok ·
+2 usage · 3 contract rejection — a missing or unreadable file and invalid
+writer input included — with exactly one `round-handoff:` reason on stderr and
+nothing written or printed · 1 internal. This change adds the contracts and the
+script only; wiring them into the round protocol is #1935 and later.
+
+**Key presence — one rule for both contracts.** Every field listed below for a
+kind (and for the `mode` or `trigger` in force) is a **required key**. A field
+marked *or null* must be present **with** `null`; omitting it is a missing
+field. No other field may be null. The one exception is the fix handoff's
+`changelist` and `gate_log`: each is required and non-null under its own
+trigger, and absent or null under the other. A key the contract does not list
+for that kind is rejected — which is what keeps finding text out of a verdict.
+
+**Paths.** Every path field is absolute. Every non-null path the contracts
+place **in the work-dir** — `aggregate_findings_file` on both the decide
+handoff and the panel verdict, plus `carry_accounting_file`,
+`carry_lines_file` and `ran_commands_file` — must, after zsh `:A` resolution
+(`..` and symlinks), lie **strictly under** `${work_dir:A}/`. A handoff's own
+`work_dir` must `:A`-equal the directory the file sits in. A verdict carries no
+`work_dir`, so its work-dir is the directory it is written to (`--work-dir`) or
+read from. `profile_fix_rules` is a **reference** to a profile heading (for
+example `development-claude-plugin:resolve-profile § Fix-pass rules`), not a
+path, so the path rules do not apply to it.
+
+**Round.** `round` is an integer ≥ 1, and on read it must equal the file
+name's `<N>` — as the object's `kind` must equal the name's `<kind>`.
+
+### `round-handoff/v1`
+
+At `<work-dir>/handoff-<N>-<kind>.json`, with `kind` ∈ {`panel`, `fix`,
+`decide`}.
+
+| Kind | Field | Type |
+|---|---|---|
+| common | `schema` | `"round-handoff/v1"` |
+| common | `kind` | `panel` \| `fix` \| `decide` |
+| common | `round` | int ≥ 1 |
+| common | `tree_id` | non-empty string |
+| common | `work_dir` | absolute path |
+| common | `status_file` | absolute path |
+| panel | `mode` | `round` \| `carry-redispatch` \| `carry-repair` |
+| panel | `delta_base` | string or null |
+| panel | `carried_finding_ids` | [string] |
+| panel | `carry_entries` | [`{file, dimension, title}`], each a non-empty string; non-empty **only** in the two carry modes, and non-empty there |
+| fix | `trigger` | `awaiting-fix` \| `gate-red` |
+| fix | `grant` | `{rounds, severity_bar}` (int ≥ 1, non-empty string) or null |
+| fix | `guidance` | string or null |
+| fix | `rule2_mandatory` | bool |
+| fix | `profile_fix_rules` | reference string or null |
+| fix | `changelist` | absolute path — required on `awaiting-fix` |
+| fix | `gate_log` | absolute path — required on `gate-red` |
+| decide | `aggregate_findings_file` | absolute path, in the work-dir |
+| decide | `worktree_root` | absolute path |
+| decide | `retired_file` | absolute path |
+
+**Subagent dispatch mechanism.** The three subagent kinds ship as **plugin
+agents** — a `development/agents/` file whose `tools:` frontmatter lists
+`Agent` where the kind dispatches reviewers — and each **nested dispatch is
+made in the foreground** (`run_in_background: false`). Probed on
+`claude --version` 2.1.285 (Claude Code), 2026-10-01. To re-run the probe:
+build a throwaway plugin in a temp dir **outside** the repository —
+`.claude-plugin/plugin.json` plus `agents/round-probe.md` with `tools: Agent`
+— and run `claude -p --plugin-dir <tmp> --output-format stream-json --verbose`,
+asking for the round-probe agent, which dispatches — with
+`run_in_background: false` — a `general-purpose` subagent told to reply with a
+random nonce only; a run whose nested dispatch omits that flag is not the
+probe. The probe **passes** when both
+hold: the nonce appears in the probe agent's returned result, **and** the
+stream-json holds an `Agent` tool_use whose `parent_tool_use_id` is the probe
+agent's own tool_use id. Anything else is a fail, and a fail means the kinds are
+dispatched as `general-purpose` with their prompt taken from the reference
+text instead. The first run on that version **failed** the nonce half while
+passing the nesting half: the nested `Agent` call defaulted to a background
+launch, so the probe agent returned before its subagent replied. A re-run whose
+probe agent passed `run_in_background: false` passed both halves — which is why
+the foreground dispatch is part of the mechanism, not a detail of the probe.
+Nothing from the probe is committed.
+
+### `round-verdict/v1`
+
+At `<work-dir>/verdict-<N>-<kind>.json`. **A verdict never holds finding text
+or a diff** — only an outcome, a cause, counts and paths to files the
+conductor passes on unopened.
+
+| Kind | Field | Type |
+|---|---|---|
+| common | `schema` | `"round-verdict/v1"` |
+| common | `kind` | `panel` \| `fix` \| `decide` |
+| common | `round` | int ≥ 1 |
+| common | `outcome` | `ok` \| `failed` \| `not_applicable` — `not_applicable` on `panel` only |
+| common | `cause` | from the kind's closed set; required (non-null) when `outcome` is not `ok`, null on `ok` |
+| panel | `aggregate_findings_file` | absolute path in the work-dir on `ok`; null otherwise |
+| panel | `carry_accounting_file` | absolute path in the work-dir, or null on round 1 or when `verify-<R>.json` holds `[]` |
+| panel | `carry_lines_file` | absolute path in the work-dir, or null — null **exactly** when `carry_accounting_file` is null |
+| panel | `findings_count` | int ≥ 0 on `ok`; null otherwise |
+| fix | `fix_applied` | bool, never null |
+| fix | `files_changed` | int ≥ 0, never null |
+| decide | `decided_red`, `decided_green`, `malformed` | int ≥ 0 on `ok`; null on `failed` |
+| decide | `ran_commands_file` | absolute path in the work-dir on `ok`; null on `failed` |
+
+The closed cause sets:
+
+- **panel:** `dimension-not-run`, `render-failed`, `fix-verification-null`,
+  `fix-verification-unreadable`, `carry-unconfirmed`, `plan-failed`,
+  `wrong-worktree-root`, `empty-excerpt`, `story-diff-empty`, `not-applicable`,
+  `no-agent-tool`;
+- **fix:** `cannot-fix` — which carries `fix_applied: false` and
+  `files_changed: 0`;
+- **decide:** `wrong-worktree-root`.
+
+Which cause pairs with which outcome, and what the conductor does with each,
+is the round protocol's concern (#1937), not the validator's: the validator
+checks only that a cause is in its kind's closed set and present exactly when
+the outcome is not `ok`.
+
 ## The telemetry/v1 contract (#740)
 
 Two telemetry streams predate this contract — review-loop (#566) and
