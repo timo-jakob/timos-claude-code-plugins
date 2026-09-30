@@ -145,14 +145,15 @@ public protocol DependencyHealthSource: Sendable {
 }
 ```
 
-**The blessed source is the Swift resilience payload (#1146)**, which is not built
-yet. Until it lands, leaving `dependencies` unset is entirely legal and still
-conforms: `/health` is then a byte-identical ops-api **v1.0** body — **no
-`components` key at all**, not an empty object — with readiness decided by your
-`readiness` closure alone.
+**The blessed source is the Swift resilience payload (#1146)**, which bootstrap places
+beside this one at `Sources/<ServiceTarget>/Resilience/`: pass
+`DependencyHealth.seam(for: catalog)` here, and see that payload's `README.md` for the
+wiring. Leaving `dependencies` unset is still entirely legal and conforms: `/health` is
+then a byte-identical ops-api **v1.0** body — **no `components` key at all**, not an
+empty object — with readiness decided by your `readiness` closure alone.
 
-If you implement `DependencyHealthSource` by hand in the meantime, **return a freshly
-built dictionary every call.** The protocol is `Sendable` and the method is `async`
+If you implement `DependencyHealthSource` by hand instead, **return a freshly built
+dictionary every call.** The protocol is `Sendable` and the method is `async`
 precisely so the compiler holds you to a snapshot: handing back a registry's live,
 mutating dictionary while `/health` reads it is a data race. Swift 6's strict
 concurrency checking makes that hard to write by accident, which is the whole reason

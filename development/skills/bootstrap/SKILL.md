@@ -3595,6 +3595,31 @@ Like the Python, Java, Go and Node payloads these need an explicit destination:
   perform it with the deps paste. If the user declines, **defer the ENTIRE payload**
   behind a Step-5 TODO. The fragment deliberately has no paste site for it, so nothing
   else in the adoption path will catch this.
+- **Precondition — the resilience payload below must be placeable too.** It lands in
+  the same target at `Sources/<ServiceTarget>/Resilience/`, and its `public` types
+  share that target's one module namespace — a directory isolates no names in Swift.
+  So before placing anything, check that `Resilience/` is free, and that the target's
+  sources (under its declared `path:`) declare none of the payload's top-level names:
+  `CircuitBreaker`, `DependencyCatalog`, `DependencyHealth`, `BreakerConfiguration`,
+  `BreakerSnapshot`, `CallOutcome`, `CallNotPermitted`, `DependencyTimeout`,
+  `NotADependencyFailure`, `DependencyDeclarationError`, `ClaimRegistry`,
+  `parseDependencyDeclaration` and `bundledDependencyDeclaration` — plus, on the
+  worked example's adapt path, `PricingAPIClient`, `Price`, `PriceUnavailable`,
+  `ConfigurationError` and `DependencyProtocolError`. A clash is an invalid-redeclaration
+  compile error on the bootstrap PR. **Surface either as its own Step-2 plan line.**
+  Bootstrap never renames the payload's own types and never edits the adopter's sources:
+  a clash on one of the example's names is resolved by renaming the example on the adapt
+  path, a clash on any other name only by the adopter renaming their own type, and an
+  occupied `Resilience/` only by the adopter freeing it. **A promise to rename or free is
+  not a resolution: re-run this check at placement time** against the names the pair will
+  actually declare — on the adapt path, the example's *renamed* types, not the shipped
+  ones — and place the pair only if none of them is in the tree by then. A clash confined
+  to the example's *renamed* type never costs the pair: give the example a type name that
+  is free (only its `dependencyName` must match the declaration) or take the omit path,
+  and say which in the placement report. If a clash on any other name is still there, or
+  the user declines, **defer the ENTIRE pair** behind a Step-5 TODO naming what blocked
+  it — never place the ops half alone. Unlike the metrics-bootstrap arm above, a redeclaration does not sit inert until
+  it is wired: it breaks the build the moment it is placed.
 - **Bootstrap does NOT add `swiftSettings:` — that is a `targets:` edit**, which the
   rule above forbids. The tools-version raise is what makes the setting *expressible*;
   adding it is the adopter's. Record `swiftSettings: [.swiftLanguageMode(.v6)]` on the
@@ -3632,14 +3657,128 @@ Like the Python, Java, Go and Node payloads these need an explicit destination:
   languages/swift/ops-api/README.md
 ```
 
-Whenever this block installs, the **Swift resilience payload** (#1146) installs with
-it once that lands — it supplies the ops-api v1.1 `components` map and the hard/soft
-readiness hinge that `OpsApi.swift` reports. Until then the surface is a conforming
-ops-api **v1.0** body: no `components` field, readiness from the caller's own
-`readiness` closure alone.
+Whenever this block installs, the **Swift resilience payload below** (#1146) installs
+with it — it supplies the ops-api v1.1 `components` map and the hard/soft readiness
+hinge that `OpsApi.swift` reports.
 
 With Swift landed, every language the family scaffolds a service in now has a
 canonical ops-api implementation.
+
+**Swift resilience + dependency health (#1146).** Whenever the Swift ops-api block
+above **installed**, also install the blessed resilience payload — a payload-owned
+`CircuitBreaker` **actor** (no third-party dependency; its `README.md` records the
+fit-check every Swift breaker library failed) wired around dependency clients per the
+six-mandate policy, plus the `components` map and the hard/soft readiness hinge, both
+read passively from breaker state. It **extends** the ops-api payload rather than
+standing alone: `DependencyHealth.swift` conforms to that payload's
+`DependencyHealthSource` and returns its `Dependency` values, so the two are placed
+together or not at all.
+
+*Applicability — gate before you install.* The gate is **the Swift ops-api block's own
+outcome and nothing else**, which is what makes "placed together or not at all" true
+rather than aspirational — every condition that could skip this payload is tested
+*there* (its client classification, its ambiguous-so-ask case, and its deferral
+preconditions: no `Package.swift`, an existing metrics bootstrap, the tools-version, the
+platform floor, and this payload's own placeability). Two exhaustive cases:
+
+1. **The Swift ops-api block skipped, classified the repo a client, or deferred** →
+   **skip this too**, for the same reason. A client has nothing to circuit-break on a
+   server's behalf, and a payload with no ops surface has nothing to report to. That
+   judgement is made *there*, never re-tested here. **A deferral there defers the pair:**
+   whichever precondition deferred the ops block, its Step-5 TODO names this payload
+   too, so resolving it later places both halves — never the ops half alone.
+2. **The Swift ops-api block installed** → **install** per the render command below.
+
+If you ever need a condition that skips *this* payload but not the ops-api one, add it
+to the ops-api gate instead — a fresh condition here would silently re-introduce the
+split this gate exists to prevent (an `OpsConfig.dependencies` wired to report
+`components` with no source to supply them).
+
+Placement follows the ops-api block's rules, with these payload-specific ones:
+
+- **`Sources/<ServiceTarget>/Resilience/`, in the SAME target as `Ops/OpsApi.swift`** —
+  `DependencyCatalog.swift`, `DependencyHealth.swift`,
+  `resilience-dependencies.properties` and the shipped `README.md`, plus
+  `PricingAPIClient.swift` **only on the adapt path** (see below). Beside, not inside,
+  `Ops/`: the dependency direction is one-way and load-bearing (resilience depends on
+  ops, never the reverse), which keeps `OpsApi.swift` free of any breaker exactly as its
+  own header promises. Within one module imports cannot express that direction, so
+  `DependencyCatalog.swift` and `DependencyHealth.swift` carry
+  `#if canImport(Ops) import Ops #endif` and compile unchanged if the adopter
+  later splits `Ops` and `Resilience` into two targets. Land under the target's declared
+  `path:` when it has one, as the ops block does.
+- **Still no `targets:` edit, and nothing to paste.** This payload has no third-party
+  dependency, so its `Package.swift.deps` is a record of *why*, with no paste site — the
+  ops-api block's own fragment is the one with packages in it. It shares that block's
+  **tools-version 6.1 floor** and its `swiftSettings: [.swiftLanguageMode(.v6)]`
+  Step-5 item, which covers this payload too since it sits in the same target; do not
+  add a second checklist line for it. Add ONE line beside it, though: SwiftPM warns
+  that the non-source files both payloads place inside the target (each `README.md`
+  and `Package.swift.deps`, and `resilience-dependencies.properties`) are unhandled,
+  and silencing that takes an `exclude:` list on the target — a `targets:` edit, so
+  the adopter's, never bootstrap's.
+- **This payload's `README.md` and `Package.swift.deps` do NOT take the ops-api block's
+  "beside it" rule.** Both payloads ship files with those exact names; staged into
+  `Ops/` the second silently clobbers the first, destroying the ops-api payload's
+  adoption doc and its dependency fragment. Place this payload's pair in `Resilience/`.
+- **The declaration is compiled in, as Swift source.** `resilience-dependencies.properties`
+  is carried verbatim by `DependencyCatalog.swift` as `bundledDependencyDeclaration`,
+  because Swift has no `//go:embed` and the resource-bundle route needs a `resources:`
+  line in `targets:` (forbidden here) plus a Dockerfile that copies the `.resources`
+  bundle — a declaration read from the working directory simply does not exist in the
+  container image. `$OPS_DEPENDENCIES_FILE` still overrides it at runtime for a mounted
+  ConfigMap. **When you substitute the dependencies, edit BOTH copies identically.**
+- **Substitute the repo's real direct dependencies** (the **names** may be derived from
+  the detected stack — a database URL, a configured client) for the two worked examples,
+  **classifying each `hard` or `soft` — the kind comes from the user, never from a stack
+  heuristic**.
+  **If the names, or the kind of any one of them, cannot be determined during the run,
+  leave BOTH examples in place and carry an explicit Step-5 checklist item** naming this
+  payload's symptom: `/health` reports two dependencies the service does not have as
+  `up`, and startup fails on `requireAllDeclaredGuarded()` once that call is wired. A
+  name without a user-confirmed kind is never written: the declaration has no
+  kind-unknown value, and a provisional `soft` disarms the readiness hinge. Never guess
+  names or kinds, and never leave them verbatim and unrecorded.
+- **Record — do not perform — the startup wiring.** Bootstrap does not edit the
+  entrypoint, and at staging time no client is routed through the catalog, so calling the
+  guard here would only guarantee a startup failure. Carry Step-5 checklist items
+  instead, beside the ops block's own wiring item: (a) startup must call
+  `try await catalog.requireAllDeclaredGuarded()` once every client is built; (b)
+  `DependencyHealth.seam(for: catalog)` — **not** the initializer, which would serve
+  `"components":{}` for an empty declaration — must be passed to
+  `OpsConfig.dependencies`; and (c) **each dependency client's initializer must call
+  `try await catalog.requireDeclared(<name>)`**, the only writer of the guarded set (a)
+  reads, so without it (a) refuses every declared dependency and the pod never boots.
+  Without (b) `/health` stays a blind ops-api v1.0; without (a) a declared-but-unguarded
+  dependency keeps a breaker that can never leave `closed`, so `/health` reports it `up`
+  straight through an outage. The placed `README.md` shows the wiring.
+- **`PricingAPIClient.swift` is a worked example, not service code.** **Decide
+  adapt-or-omit in the Step-2 plan**, as its own line — the second render command below
+  is keyed on that decision. On the **omit** path do not run it, and point a Step-5
+  checklist item at the placed `README.md` for the reference shape. On the **adapt** path
+  rename it to the real dependency and keep its `dependencyName` in lockstep with the
+  declaration, or its `requireDeclared` claim fails at startup. When the substitution
+  bullet above left the examples in place — names or a kind undetermined — there is
+  nothing to adapt it to: take the omit path. As shipped it requires
+  `PRICING_API_BASE_URL` and refuses to construct without it.
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  languages/swift/resilience/DependencyCatalog.swift \
+  languages/swift/resilience/DependencyHealth.swift \
+  languages/swift/resilience/Package.swift.deps \
+  languages/swift/resilience/resilience-dependencies.properties \
+  languages/swift/resilience/README.md
+```
+
+Then the worked example, unless the Step-2 plan says to omit it:
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  languages/swift/resilience/PricingAPIClient.swift
+```
 
 **Java (non-Spring) resilience + dependency health (#1142).** Whenever the Java
 ops-api block above **installed** (its cases 4-fold-and-install and 5), also
@@ -3863,9 +4002,8 @@ on `@Retry`, `CallNotPermittedException` in the retry's `ignore-exceptions`), an
 why the health surface is an Actuator `@Endpoint` rather than a `@RestController`
 (the management child context has no `RequestMappingHandlerMapping`, so a
 controller there is never mapped — and one in the main context lands on the public
-app port). Non-Spring Java (#1142), Python (#1143), Go (#1144) and Node (#1145)
-have landed too — the blocks above; the remaining child of epic #967 is #1146
-swift.
+app port). Non-Spring Java (#1142), Python (#1143), Go (#1144), Node (#1145) and
+Swift (#1146) have landed too — the blocks above, every child of epic #967.
 
 `spec-publish.yml` needs an `NPM_TOKEN` repository secret with publish rights —
 surface it in the Step 5 checklist (and, on State-D adoption, expect it in the

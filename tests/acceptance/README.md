@@ -32,8 +32,10 @@ That is deliberate, not an oversight:
   writes cases into the tree does not also get to wire the runner.
 
 So treat a green run here as *authoring-time and on-demand* evidence, not as a
-gate. The always-on gate for these payloads is the grep-based structural suite in
-`tests/ops-api-language-payloads.bats`, plus the `ops-conformance` CI job that
+gate. The always-on gate for these payloads is the grep-based structural suites —
+`tests/ops-api-language-payloads.bats` for the ops surfaces and
+`tests/swift-resilience-payload.bats` for the Swift resilience payload — plus the
+`ops-conformance` CI job that
 bootstrap installs in the **target** repo.
 
 ## Running them
@@ -74,6 +76,12 @@ bats tests/acceptance/rest tests/acceptance/cli
 # BOTH templates (node-ops-sandbox.zsh --with-resilience), then kills real
 # upstream processes to trip the breakers; one case waits out the 10s reset
 bats tests/acceptance/rest/javascript-resilience.bats tests/acceptance/cli/javascript-resilience.bats
+
+# the Swift resilience payload (#1146) — its 10 story cases, across rest/ and
+# cli/; the cli half's Linux-parity case docker-builds the fixture
+# on swift:6.2 (Docker required, ~2 GB on first pull)
+SWIFT="$(xcrun --find swift)" bats tests/acceptance/rest/swift-resilience.bats \
+  tests/acceptance/cli/swift-resilience.bats
 
 # resolve-issue story-mode telemetry (#1226) — 13 story cases, offline:
 # drives story-telemetry.zsh and the review loop against a scratch repo
@@ -144,6 +152,20 @@ built on, so a missing one is a hard error rather than a silently disarmed guard
 A suite whose toolchain is missing **fails loudly** rather than skipping — a
 skipped check that reads as green is the failure mode this repo's test
 conventions are written against.
+
+**The Swift resilience suites build a real Swift service.**
+`lib/swift-ops-sandbox.zsh` compiles the shipped ops-api and resilience payloads
+into ONE executable target — the bootstrapped layout — beside
+`lib/swift-fixture-main.swift`, which adds only the world around the service: a
+fake `pricing-api` upstream that counts its hits, a simulated `orders-db`, and an
+app port. Every breaker state the cases observe is reached by real failing calls
+through the payload's catalog. They need a Swift 6.2+ toolchain (`$SWIFT`, default
+`swift` — point it at a working one when the shim on `PATH` is broken): the sandbox
+manifest declares tools-version 6.1, the payloads' floor, but the ops-api payload's
+dependency graph (through swift-otel) now resolves packages that need a 6.2 toolchain
+to build. Beyond that they need `curl`,
+`jq`, `zsh` and `pgrep`, plus Docker for the parity case. The sandbox follows the
+Node one's keying, locking and in-use refusal, with the same typed exit codes.
 
 Override the cache location with `$ACCEPTANCE_CACHE` (default:
 `${TMPDIR:-/tmp}/claude-acceptance-cache`). Delete it to force a clean rebuild.
