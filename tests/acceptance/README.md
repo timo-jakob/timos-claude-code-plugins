@@ -70,6 +70,11 @@ three apart without matching on wording.)
 # dry-runs included, which pull ~1 GB on a host with Docker)
 bats tests/acceptance/rest tests/acceptance/cli
 
+# the Node resilience payload (#1145) — 9 story cases, 7 rest + 2 cli: builds
+# BOTH templates (node-ops-sandbox.zsh --with-resilience), then kills real
+# upstream processes to trip the breakers; one case waits out the 10s reset
+bats tests/acceptance/rest/javascript-resilience.bats tests/acceptance/cli/javascript-resilience.bats
+
 # resolve-issue story-mode telemetry (#1226) — 13 story cases, offline:
 # drives story-telemetry.zsh and the review loop against a scratch repo
 bats tests/acceptance/cli/resolve-issue-story-telemetry.bats
@@ -129,9 +134,11 @@ needs `zsh`, `jq`, mikefarah `yq`, `python3`, `curl` and `sha256sum` or
 `jq` and `git`, runs fully offline against a scratch repo (detection stubbed,
 nothing reaching GitHub), and is likewise also run by the
 `bats tests/acceptance/cli` invocation above. The requirements below are the
-Node payload's.
+Node payloads' — the ops-api one (#936) and the resilience one (#1145), which
+share the sandbox.
 
-Requirements: `node` (24+), `npm`, `curl`, `jq`, `zsh`, `pgrep` (procps), and
+Requirements: `node` (24+, and for the resilience suites a major inside the
+payloads' joint floor `^22 || ^24 || ^26`), `npm`, `curl`, `jq`, `zsh`, `pgrep` (procps), and
 network access on the first run. `pgrep` is what the in-use refusal above is
 built on, so a missing one is a hard error rather than a silently disarmed guard.
 A suite whose toolchain is missing **fails loudly** rather than skipping — a

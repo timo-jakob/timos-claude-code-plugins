@@ -69,12 +69,22 @@ die() {
 }
 
 SUITE="default"
+# --with-resilience places the Node resilience payload (#1145) BESIDE the ops-api
+# one, exactly as bootstrap does — both fragments merged, both payloads copied,
+# and the build's copy step for the declaration file — and swaps in the fixture
+# that drives it. Without the flag the sandbox is the #936 ops-only one, unchanged.
+RESILIENCE_PAYLOAD="$TEMPLATE/resilience"
+WITH_RESILIENCE=0
 while (( $# )); do
   case "$1" in
     --suite)
       [[ -n "${2:-}" ]] || die 2 "--suite requires a value"
       SUITE="$2"
       shift 2
+      ;;
+    --with-resilience)
+      WITH_RESILIENCE=1
+      shift
       ;;
     *) die 2 "unknown argument: $1" ;;
   esac
@@ -195,6 +205,14 @@ sandbox_is_free || die 3 "$SANDBOX is in use by a running fixture — wait for t
 for f in "$PAYLOAD/opsApi.ts" "$PAYLOAD/package.json.deps" "$TEMPLATE/tsconfig.json"; do
   [[ -f "$f" ]] || die 2 "template file missing: $f"
 done
+if (( WITH_RESILIENCE )); then
+  for f in dependencyCatalog.ts dependencyHealth.ts pricingApiClient.ts package.json.deps \
+           resilience-dependencies.properties; do
+    [[ -f "$RESILIENCE_PAYLOAD/$f" ]] || die 2 "template file missing: $RESILIENCE_PAYLOAD/$f"
+  done
+  jq -e . "$RESILIENCE_PAYLOAD/package.json.deps" > /dev/null \
+    || die 2 "resilience package.json.deps is not valid JSON"
+fi
 
 mkdir -p "$SANDBOX/src/ops" || die "could not create $SANDBOX"
 
@@ -217,10 +235,16 @@ mkdir -p "$SANDBOX/src/ops" || die "could not create $SANDBOX"
 # truncated package.json.next behind.
 jq -e . "$PAYLOAD/package.json.deps" > /dev/null \
   || die 2 "package.json.deps is not valid JSON"
-jq '. + {name: "ops-acceptance", version: "1.4.2", private: true}
+# With --with-resilience the two fragments are merged the way bootstrap merges
+# them — both `dependencies` and `devDependencies` blocks, recursively — so the
+# cases prove the PAIR installs together, not each fragment in isolation.
+fragments=("$PAYLOAD/package.json.deps")
+(( WITH_RESILIENCE )) && fragments+=("$RESILIENCE_PAYLOAD/package.json.deps")
+jq -s 'reduce .[] as $f ({}; . * $f)
+    | . + {name: "ops-acceptance", version: "1.4.2", private: true}
     | del(."//")
     | .devDependencies.typescript = "^7.0.0"' \
-  "$PAYLOAD/package.json.deps" > "$SANDBOX/package.json.next" \
+  "${fragments[@]}" > "$SANDBOX/package.json.next" \
   || die "could not write $SANDBOX/package.json.next (is the cache full or read-only?)"
 
 # ---- tsconfig --------------------------------------------------------------
@@ -282,11 +306,28 @@ sandbox_is_free || die 3 "$SANDBOX is in use by a running fixture — wait for t
 rm -rf "$SANDBOX/src" "$SANDBOX/dist" || die "could not clean the sandbox payload"
 mkdir -p "$SANDBOX/src/ops" || die "could not recreate $SANDBOX/src/ops"
 cp "$PAYLOAD/opsApi.ts" "$SANDBOX/src/ops/opsApi.ts" || die "could not copy opsApi.ts"
-cp "$SCRIPT_DIR/ops-fixture-service.ts" "$SANDBOX/src/main.ts" || die "could not copy the fixture"
+if (( WITH_RESILIENCE )); then
+  # src/resilience/ BESIDE src/ops/ — the placement the payload's one relative
+  # import (`../ops/opsApi.js`) is written for, so the shipped file compiles as-is.
+  mkdir -p "$SANDBOX/src/resilience" || die "could not create $SANDBOX/src/resilience"
+  cp "$RESILIENCE_PAYLOAD"/{dependencyCatalog,dependencyHealth,pricingApiClient}.ts "$SANDBOX/src/resilience/" \
+    || die "could not copy the resilience payload"
+  cp "$SCRIPT_DIR/resilience-fixture-service.ts" "$SANDBOX/src/main.ts" || die "could not copy the fixture"
+else
+  cp "$SCRIPT_DIR/ops-fixture-service.ts" "$SANDBOX/src/main.ts" || die "could not copy the fixture"
+fi
 
 [[ -x "$SANDBOX/node_modules/.bin/tsc" ]] \
   || die 2 "$SANDBOX/node_modules/.bin/tsc is missing — the sandbox toolchain is incomplete; delete $SANDBOX and re-run"
 ( cd "$SANDBOX" && ./node_modules/.bin/tsc --project tsconfig.json ) >&2 \
   || die "tsc failed — the payload does not compile under the shipped strict config, OR the dependency cache was partially evicted; delete $SANDBOX and re-run before blaming the payload"
+
+# The build's copy step bootstrap adds for this payload: tsc copies no
+# non-TypeScript file, and the catalog reads its declaration from beside the
+# COMPILED module. Done here, after tsc, exactly where an adopter's build does it.
+if (( WITH_RESILIENCE )); then
+  cp "$RESILIENCE_PAYLOAD/resilience-dependencies.properties" "$SANDBOX/dist/resilience/" \
+    || die "could not copy the declaration into $SANDBOX/dist/resilience/"
+fi
 
 print -r -- "$SANDBOX"

@@ -3220,9 +3220,9 @@ Like the Python, Java and Go payloads these need an explicit destination:
   runtime, in whichever direction it differs:
   - **Target major LOWER than the fragment's** (e.g. Node 22): **lower
     `@types/node` to the target's major.** That is the default because it is
-    local and reversible, and for any target **at or above the payload's floor**
+    local and reversible, and for any target **inside the payloads' joint floor**
     (below) it is the whole answer: no Node-pin raise is offered, so there is no
-    decline to handle, and this is never a reason to defer the payload. **Below
+    decline to handle, and this is never a reason to defer the payload. **Outside
     the floor is a different question** — there the raise is not a preference but
     the payload's precondition, so the floor rule below governs it, decline arm
     included. Either way, never merge a `@types/node` major above the runtime.
@@ -3233,24 +3233,27 @@ Like the Python, Java and Go payloads these need an explicit destination:
   are absent at run time, so the failure lands in production rather than in the
   build.
 
-  **The payload's own Node floor is `^18.19.0 || >=20.6.0`** — not a house rule
-  but the `engines.node` the shipped `@opentelemetry/sdk-metrics` and
-  `exporter-*` packages declare. Check the target's runtime against it **before
-  placing anything**: below the floor, the OTel dependencies will not install and
-  the surface can never run.
+  **The payloads' joint Node floor is `^22 || ^24 || ^26`** — not a house rule
+  but the `engines.node` of `opossum` `^10.0.0`, which the **Node resilience
+  payload** below (#1145) pins. This block's own OpenTelemetry packages declare a
+  looser `^18.19.0 || >=20.6.0`, but the two payloads are placed together or not
+  at all, so the stricter one governs both. Check the target's runtime against it
+  **before placing anything**.
 
-  **The floor is minor-granular and the resolution above yields a major, so say
-  which majors decide it and which need a minor.** Majors **21 and up** are above
-  the floor; major **19** is below it outright (it satisfies neither clause —
-  easy to miss if you read the floor as a single range from 18.19 to 20.6).
-  Majors **18 and 20 straddle a clause**, so for those two read the minor off the
-  concrete source (the image tag, `.nvmrc`, an exact `engines.node`); when no
-  source states one, treat it as **below** the floor rather than guessing, since
-  guessing high is the direction that ships a payload which cannot install.
+  **The floor is major-granular, and it is not a range.** Majors **22, 24 and 26**
+  are inside it. Everything else is outside — **21 and below**, and the odd majors
+  **23 and 25** between the listed ones, which is the easy one to miss if you read
+  the floor as "22 and up". Under npm's default `engine-strict=false` an engines
+  mismatch only **warns**, so a runtime outside the floor still installs: the
+  payloads are *unsupported* there, not uninstallable — and that is exactly why
+  the check is made here rather than left to `npm install`, which would not stop.
 
-  Below the floor, surface the Node-pin raise as its own Step-2 plan line, and if
-  the user declines, **defer the ENTIRE payload** behind a Step-5 TODO. At or
-  above it (every current Node), there is nothing to do.
+  Outside the floor, surface **one** Node-pin raise as its own Step-2 plan line —
+  it covers both payloads, targets the shipped 24, and on approval moves
+  every runtime source the repo has among the four above, the base image
+  included — and if the user declines, **defer the ENTIRE ops-api
+  payload** behind a Step-5 TODO, which defers the resilience payload with it
+  (its gate is this block's outcome). Inside it, there is nothing to do.
 - **`"type": "module"` is required, and it is the easily-missed one.** The payload
   is NodeNext ESM and reads `import.meta.url` to find the service's `package.json`
   for the `/info` version fallback; under CommonJS that is a compile error. The
@@ -3295,11 +3298,133 @@ Like the Python, Java and Go payloads these need an explicit destination:
   languages/javascript/ops-api/README.md
 ```
 
-Whenever this block installs, the **Node resilience payload** (#1145) installs
-with it once that lands — it supplies the ops-api v1.1 `components` map and the
-hard/soft readiness hinge that `opsApi.ts` reports. Until then the surface is a
-conforming ops-api **v1.0** body: no `components` field, readiness from the
-caller's own check alone.
+Whenever this block installs, the **Node resilience payload below** (#1145)
+installs with it — it supplies the ops-api v1.1 `components` map and the
+hard/soft readiness hinge that `opsApi.ts` reports.
+
+**Node resilience + dependency health (#1145).** Whenever the Node ops-api block
+above **installed**, also install the blessed resilience payload — `opossum` wired
+around dependency clients per the six-mandate policy, plus the `components` map
+and the hard/soft readiness hinge, both read passively from breaker state. It
+**extends** the ops-api payload rather than standing alone: `dependencyHealth.ts`
+implements that payload's `DependencyHealthSource` and returns its `Dependency`
+values, so the two are placed together or not at all.
+
+*Applicability — gate before you install.* The gate is **the Node ops-api block's
+own outcome and nothing else**, which is what makes "placed together or not at
+all" true rather than aspirational — every condition that could skip this payload
+is tested *there* (its five skip cases, its ambiguous-so-ask case, and its
+TypeScript, `"type": "module"`, OpenTelemetry-range and Node-floor deferrals —
+the floor there is already this payload's). Two exhaustive cases:
+
+1. **The Node ops-api block skipped or deferred** → **skip this too**, for the
+   same reason it skipped. A package with no ops surface has nothing to report
+   breaker state to. That judgement is made *there*, never re-tested here.
+2. **The Node ops-api block installed** → **install** per the render command
+   below.
+
+If you ever need a condition that skips *this* payload but not the ops-api one,
+add it to the ops-api gate instead — a fresh condition here would silently
+re-introduce the split this gate exists to prevent (an `OpsConfig.dependencies`
+wired to report `components` with no source to supply them).
+
+Placement follows the ops-api block's rules, with these payload-specific ones:
+
+- **Every file you place goes in ONE directory of their own, beside the ops
+  directory** — `<source root>/resilience/`, i.e. `src/resilience/` next to
+  `src/ops/` — `dependencyCatalog.ts`, `dependencyHealth.ts`,
+  `resilience-dependencies.properties`, the shipped `README.md` and
+  `package.json.deps`, plus
+  `pricingApiClient.ts` **only on the adapt path** (see the adapt-or-omit bullet
+  below). Beside, not inside, the ops directory: the import direction is one-way
+  and load-bearing (`resilience` imports `ops`, never the reverse), which is what
+  keeps the ops module free of any breaker library exactly as its own doc comment
+  promises.
+- **This payload's `README.md` and `package.json.deps` do NOT take the ops-api
+  block's "beside it" rule.** Both payloads ship files with those exact names;
+  staged into `src/ops/` the second silently clobbers the first, destroying the
+  ops-api payload's own adoption doc and its OpenTelemetry fragment. Place both
+  in `src/resilience/` with its sources, never in `src/ops/`: the README refers
+  to the fragment "beside" it, exactly as the ops-api pair does.
+- **Re-point the ONE flagged import only if the ops payload moved.**
+  `dependencyHealth.ts` imports `../ops/opsApi.js` under a `<-- CHANGE THIS
+  IMPORT` marker — correct as shipped when the two directories are siblings. If
+  the ops-api block placed `opsApi.ts` anywhere else, fix the relative path, and
+  keep its **`.js` specifier** (NodeNext resolution requires it on a relative
+  import, even though the source file is `.ts`).
+- **`resilience-dependencies.properties` must reach the COMPILED output.** It is
+  read at startup from beside the compiled `dependencyCatalog.js`, and `tsc`
+  copies no non-TypeScript file. So **append a copy step to the package's `build`
+  script** that copies it into the directory the compiled `dependencyCatalog.js`
+  lands in — `<outDir>/resilience/` for a plain `tsc` build, beside the bundle for
+  a bundling one (esbuild, tsup, rollup) — as part of this payload's merge.
+  A build without it fails **startup** loudly, naming the path it looked
+  for, never a silent default. `$OPS_DEPENDENCIES_FILE` still overrides it at
+  runtime for a mounted ConfigMap.
+- **Substitute the repo's real direct dependencies** for the two worked examples,
+  **classifying each `hard` or `soft`** (both are asked in the Step-2 plan, one
+  `<name>=hard|soft` line per dependency, its name pre-filled where the detected
+  stack supplies one). **If the plan leaves them unanswered, leave the examples and
+  carry an explicit Step-5 checklist item** naming this payload's
+  symptom: `/health` reports two dependencies the service does not have as `up`,
+  and startup fails on `requireAllDeclaredGuarded` once that call is wired. Never
+  guess names or kinds, and never leave them verbatim and unrecorded.
+- **Record — do not perform — the startup wiring.** Bootstrap does not edit the
+  entrypoint, and at staging time no client is routed through the catalog, so
+  calling the guard here would only guarantee a startup failure in the adopter's
+  deployable. Carry Step-5 checklist items instead: (a) startup must call
+  `catalog.requireAllDeclaredGuarded()` once every client is built, (b)
+  `new DependencyHealth(catalog)` must be passed as `OpsConfig.dependencies`, (c)
+  every outbound call must go through `catalog.call`, which no guard checks, and
+  (d) **each dependency client's constructor must call
+  `catalog.requireDeclared(<name>)`** — the only writer of the guarded set that
+  (a) reads, so without it (a) refuses every declared dependency and the pod never
+  boots. Without (b) `/health` stays a blind ops-api v1.0; without (a) a
+  declared-but-unguarded dependency keeps a breaker that can never leave `closed`,
+  so `/health` reports it `up` straight through an outage — as it does for a
+  claimed client whose calls bypass (c). The placed `README.md` shows each wiring.
+- **`pricingApiClient.ts` is a worked example, not service code.** **Decide
+  adapt-or-omit in the Step-2 plan**, as its own line — the second render command
+  below is keyed on that decision. On the **omit** path — the default, taken
+  unless the plan answers *adapt* naming a real dependency — do not run it, and
+  point a Step-5 checklist item at the placed `README.md` for the reference shape. On the
+  **adapt** path rename it to the real dependency and keep its `DEPENDENCY_NAME`
+  in lockstep with the declaration file, or its `requireDeclared` claim fails at
+  startup. As shipped it requires `PRICING_API_BASE_URL` and refuses to construct
+  without it.
+- **Deps — the ops-api block's install and failure rules.** Merge `package.json.deps`'
+  `dependencies` (`opossum`) and `devDependencies` (`@types/opossum`) into the
+  **same** `package.json` the ops-api fragment went into, then run `npm install`
+  from the same directory that block used (the workspace root in a workspaces
+  repo). **If `npm install` fails**, keep the merged entries and record a Step-5
+  line naming the command and the directory, exactly as that block does. Never
+  remove entries to make the command succeed, and **never place these `.ts` files
+  without them** — the `opossum` import won't resolve, and without its types the
+  strict config rejects it.
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  languages/javascript/resilience/dependencyCatalog.ts \
+  languages/javascript/resilience/dependencyHealth.ts \
+  languages/javascript/resilience/package.json.deps \
+  languages/javascript/resilience/resilience-dependencies.properties \
+  languages/javascript/resilience/README.md
+```
+
+Then the worked example, only when the Step-2 plan answered *adapt*:
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  languages/javascript/resilience/pricingApiClient.ts
+```
+
+**Both payloads ship a `package.json.deps`, and they are different files** — the
+ops-api one brings the OpenTelemetry packages, this one `opossum` and its types.
+Merge **both** into the package's `package.json`; taking only the second leaves
+the ops surface without its exporters, and only the first leaves the catalog
+without its breaker.
 
 **Swift canonical implementation (#937).** For a Swift **service** repo, also install
 the blessed Swift realization — a self-contained swift-nio listener serving all five
@@ -3738,9 +3863,9 @@ on `@Retry`, `CallNotPermittedException` in the retry's `ignore-exceptions`), an
 why the health surface is an Actuator `@Endpoint` rather than a `@RestController`
 (the management child context has no `RequestMappingHandlerMapping`, so a
 controller there is never mapped — and one in the main context lands on the public
-app port). Non-Spring Java (#1142), Python (#1143) and Go (#1144) have landed
-too — the blocks above; the remaining children of epic #967 are #1145
-javascript and #1146 swift.
+app port). Non-Spring Java (#1142), Python (#1143), Go (#1144) and Node (#1145)
+have landed too — the blocks above; the remaining child of epic #967 is #1146
+swift.
 
 `spec-publish.yml` needs an `NPM_TOKEN` repository secret with publish rights —
 surface it in the Step 5 checklist (and, on State-D adoption, expect it in the

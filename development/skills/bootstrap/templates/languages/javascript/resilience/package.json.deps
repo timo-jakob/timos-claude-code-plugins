@@ -1,0 +1,41 @@
+{
+  "//": [
+    "Canonical Node resilience dependency fragment (#1145).",
+    "",
+    "A package.json FRAGMENT, not a package file: merge its `dependencies` and",
+    "`devDependencies` blocks into the same package.json you merged the ops-api",
+    "payload's package.json.deps into, then `npm install`. The two fragments are",
+    "DIFFERENT files -- that one brings the OpenTelemetry packages, this one the",
+    "breaker -- and both must be merged. Comments ride in this `//` key, npm's own",
+    "convention, so the file stays valid JSON.",
+    "",
+    "ONE library, deliberately. opossum is the blessed Node circuit breaker; the",
+    "bounded jittered retry is a small loop inside dependencyCatalog.ts rather than",
+    "a second dependency (README.md, \"Why opossum and no retry library\").",
+    "",
+    "opossum ships no types, and the strict NodeNext tsconfig rejects an untyped",
+    "import, so @types/opossum comes too. Its 8.x line types opossum 10 exactly:",
+    "opossum's whole runtime (lib/ and index.js) is byte-identical from 8.5.0",
+    "through 9.0.0 to 10.0.0 -- the two majors only narrowed engines.node. The",
+    "README's fit-check records the comparison.",
+    "",
+    "opossum ^10 declares engines.node \"^26 || ^24 || ^22\", which is STRICTER than",
+    "the ops-api fragment's OpenTelemetry floor. The two payloads are placed",
+    "together or not at all, so this is the pair's joint floor. Under npm's default",
+    "engine-strict=false a runtime outside it only WARNS at install -- it installs,",
+    "but it is unsupported.",
+    "",
+    "Your package.json must declare \"type\": \"module\", exactly as for the ops-api",
+    "payload: both are NodeNext ESM, and this one reads import.meta.url to find its",
+    "declaration file.",
+    "",
+    "Versions are a floor, not a pin -- Renovate/Dependabot move them."
+  ],
+  "type": "module",
+  "dependencies": {
+    "opossum": "^10.0.0"
+  },
+  "devDependencies": {
+    "@types/opossum": "^8.1.9"
+  }
+}

@@ -33,6 +33,10 @@ OPS_SCRUB=(
   -u GIT_SHA -u BUILD_VERSION -u OPS_PORT
   -u OTEL_EXPORTER_OTLP_ENDPOINT -u OTEL_EXPORTER_OTLP_METRICS_ENDPOINT
   -u OTEL_EXPORTER_OTLP_PROTOCOL -u OTEL_EXPORTER_OTLP_METRICS_PROTOCOL
+  # …and the two the resilience payload (#1145) reads. An inherited
+  # OPS_DEPENDENCIES_FILE would silently replace the shipped declaration, so a
+  # case about the shipped hard/soft pair would run against someone else's.
+  -u OPS_DEPENDENCIES_FILE -u PRICING_API_BASE_URL
 )
 
 # ops_provision — build the sandbox. Called ONCE per file from setup_file, and
@@ -44,11 +48,14 @@ OPS_SCRUB=(
 # `node dist/main.js` — a module-not-found crash that reads as a payload
 # regression. The provisioner prints the directory it chose, and that value (not
 # a second, independently recomputed path) is what the tests use.
+#
+# Extra arguments pass through to the provisioner — `--with-resilience` is the one
+# the #1145 suites use, to place the resilience payload beside the ops one.
 ops_provision() {
   local root
   root="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)" || return 1
   OPS_SANDBOX_DIR="$(zsh "$root/tests/acceptance/lib/node-ops-sandbox.zsh" \
-    --suite "$BATS_TEST_FILENAME")" || return 1
+    --suite "$BATS_TEST_FILENAME" "$@")" || return 1
   [ -n "$OPS_SANDBOX_DIR" ] || {
     echo "node-ops-sandbox.zsh printed no sandbox path" >&2
     return 1
@@ -114,6 +121,8 @@ ops_port() {
   case "$key" in
     rest/ops-api-node.bats) band=0 ;;
     cli/ops-api-node.bats) band=1 ;;
+    rest/javascript-resilience.bats) band=2 ;;
+    cli/javascript-resilience.bats) band=3 ;;
     *)
       echo "ops_port: no port band registered for '$key' — add one here before adding an acceptance file" >&2
       return 1
