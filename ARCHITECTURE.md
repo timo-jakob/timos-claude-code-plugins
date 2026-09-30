@@ -553,11 +553,8 @@ one *is* a degraded service. (Breaker → dependency status is exact: closed =
   central and language-agnostic (#965). The **review dimension** (#966) is
   shipped and catches violations on new diffs. The per-language scaffolding is
   #967's six children, of which **Spring (#1141), non-Spring Java (#1142),
-  Python (#1143), Go (#1144) and Node (#1145) have landed** — see below; swift
-  is #1146. **#1146's prerequisite is met** — #937 shipped the Swift
-  ops-api surface with its `components` seam unfilled: an `async`, `Sendable`
-  `DependencyHealthSource` returning a snapshot, with no breaker library on the
-  import path. #1146's Swift library is undecided. A
+  Python (#1143), Go (#1144), Node (#1145) and Swift (#1146) have landed** — all
+  six — see below. A
   **maintenance advisor** will catch the same defect classes on the back
   catalogue (#968) and is **not yet built** — until it lands, the pattern is
   enforced on new diffs only.
@@ -778,6 +775,41 @@ one *is* a degraded service. (Breaker → dependency status is exact: closed =
   stricter than the ops-api payload's own, and `@types/opossum` `^8.1.9` types it
   because opossum's runtime is byte-identical from 8.5.0 to 10.0.0. As in Go, the
   resilience module imports ops (type-only, here) and never the reverse.
+- **The Swift realization is a payload-owned `CircuitBreaker` actor — no
+  third-party breaker at all (#1146).** Swift has no clear library winner, so the
+  choice was made by a written fit-check over six required properties
+  (async/await-native, one instance per dependency, state readable without
+  traffic, maintenance health, Swift 6 strict-concurrency clean, builds on Linux),
+  recorded in the payload's README. Every candidate failed at least one on
+  evidence: `Kitura/CircuitBreaker` is callback-and-Dispatch, not clean under
+  strict concurrency, and unreleased since 2022; `AlexanderNey/CircuitBreaker`
+  keeps `run` and `state` internal; `harryngict/ResilientNetworkKit` does not build
+  on Linux; and `atacan/UsefulThings`, the closest fit, still reads `open` after
+  its reset window when no traffic arrives, counts caller errors, and trips only on
+  consecutive failures. The actor extends Go's precedent (a stdlib retry rather
+  than a second library) to the breaker itself. It never runs the guarded call on
+  the actor — four concurrent 1s calls through one breaker take 1.01s, the test
+  that disqualified `pybreaker` — trips on a failure **rate** over a **count**-based
+  window with a minimum volume (so no time-reset can leave a rarely-called
+  dependency untrippable), computes open → half-open from the clock on read (mandate
+  5's visibility with no traffic and no scheduler), and stamps `since` on each
+  transition. Unlike Go, the catalog **imposes** mandate 1 itself: it races the
+  operation against a per-call timeout and cancels it, and the timeout counts, so a
+  brownout opens the breaker. The payload
+  (`templates/languages/swift/resilience/`) lands **in the service's own target**
+  at `Sources/<ServiceTarget>/Resilience/` beside `Ops/`, with no `targets:` edit,
+  so the one-way rule cannot be an import boundary; it is held by `OpsApi.swift`
+  naming no resilience type, and the files' `#if canImport(Ops)` import lets the
+  same sources compile as a separate `Resilience` target depending on `Ops`, where
+  a reverse reference is a compile error. The siblings'
+  `resilience-dependencies.properties` declaration is kept, and — the one
+  genuinely Swift-specific decision — **compiled in as Swift source**
+  (`bundledDependencyDeclaration`, the file verbatim), because Swift has no
+  `//go:embed` and the `Bundle.module` route needs both a `resources:` line in
+  `targets:` and a Dockerfile that copies the resource bundle; the trade is that
+  the literal and the file must be edited together. An empty declaration is wired
+  through `DependencyHealth.seam(for:)`, which returns `nil`, so `/health` stays a
+  byte-identical v1.0 body rather than serving an empty `components` object.
 - **The review dimension is `resilience`** (#966) — a `*-resilience-reviewer`
   agent in each **service** language plugin (Go, Java, Python, Swift, and
   JavaScript (Node) since #1071), wired into that language's review panel
@@ -7801,9 +7833,11 @@ roster derived from it, `load roster`), `tests/prose-lockstep.bash` (the
 propagation invariants' shared prose normalisation, `load prose-lockstep`, #1432),
 `tests/resolve-issue-corpus.bash` (the resolve-issue skill's file set, `load
 resolve-issue-corpus`, #1503), `tests/marker-find-stub.bash` (the failing-marker-find
-fixture, `load marker-find-stub`, #1393) and `tests/acceptance/lib/ops-acceptance.bash`
-(the acceptance tier's fixture helpers, `load ../lib/ops-acceptance`) — note that
-last one is **nested**, so a library is not necessarily at `tests/*.bash`. They
+fixture, `load marker-find-stub`, #1393), `tests/acceptance/lib/ops-acceptance.bash`
+(the acceptance tier's fixture helpers, `load ../lib/ops-acceptance`) and
+`tests/acceptance/lib/swift-ops-acceptance.bash` (the Swift resilience acceptance
+helpers, `load ../lib/swift-ops-acceptance`, #1146) — note that the acceptance ones
+are **nested**, so a library is not necessarily at `tests/*.bash`. They
 are standalone `.bash` files,
 indented like the `.bats` files that source them rather than in shfmt's tab
 style — which is why pre-commit runs **shellcheck on `.sh` and `.bash`** but

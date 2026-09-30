@@ -420,12 +420,48 @@ pull-compat surface served by the SDK's Prometheus exporter.
     default of a single active major 1 is wrong-but-green for a v2-only service;
     Swift refuses to start instead.
 
-  The v1.1 half arrives with the **Swift resilience payload** (#1146), which is not
-  built yet. Until it lands the seam ships **unwired**, and an unwired surface is a
-  conforming ops-api **v1.0** body: no `components` field at all, readiness from
-  your own `readiness` closure alone. You can conform to `DependencyHealthSource`
-  by hand in the meantime — return a freshly built dictionary every call — but that
-  is the escape hatch, not the default.
+  Bootstrap installs the **resilience payload** alongside it (the two are placed
+  together or not at all), which is what fills in the v1.1 half — per-dependency
+  `components` on `/health` and the hard/soft readiness hinge, both read from
+  circuit-breaker state. It lands in the **same target**, at
+  `Sources/<ServiceTarget>/Resilience/`, with no `targets:` edit and **no third-party
+  dependency**: the breaker is a payload-owned `CircuitBreaker` actor, because no
+  maintained Swift breaker library passed the fit-check its `README.md` records. What is
+  yours to do — its `README.md` says which steps fail quietly if you skip them:
+
+  - declare your direct dependencies in `resilience-dependencies.properties`
+    (`<name>=hard|soft`, one per line, **full-line `#` comments only**, no
+    duplicates) **and in the identical string literal compiled into
+    `DependencyCatalog.swift`** — Swift has no `//go:embed`, so the declaration
+    reaches the container image as Swift source, and a working-directory read would
+    find nothing there. `$OPS_DEPENDENCIES_FILE` still overrides it for a mounted
+    ConfigMap. **Replace the shipped `orders-db`/`pricing-api` examples** — left
+    verbatim they fail startup on `requireAllDeclaredGuarded()` (nothing guards
+    them), and if you skip that call `/health` reports two dependencies you do not
+    have as `up`;
+  - **claim each dependency in its client's initializer** with
+    `try await catalog.requireDeclared(name)`. It is the only writer of the guarded
+    set, so a service that claims only by routing through `catalog.call` — which runs
+    at request time, after the startup guard — reaches
+    `catalog.requireAllDeclaredGuarded()` below with an empty set, and it then
+    refuses *every* declared dependency and the pod never boots;
+  - route every outbound call through `catalog.call(name, operation:, fallback:)`.
+    Unlike Go, the catalog **does** impose the per-call timeout (2s by default): it
+    races your operation against the clock and cancels it, and the timeout counts
+    against the breaker — so your operation must honour `Task` cancellation, as
+    URLSession, AsyncHTTPClient and NIO do;
+  - pass `DependencyHealth.seam(for: catalog)` to `OpsConfig.dependencies` — the
+    `seam(for:)` helper, not the initializer, so an empty declaration leaves the slot
+    unset and `/health` stays a byte-identical v1.0 body rather than serving an empty
+    `components` object;
+  - call `try await catalog.requireAllDeclaredGuarded()` once at startup, after your
+    clients are built. It is the only thing that catches a dependency you declared
+    but never wired — whose breaker can never leave `closed`, so `/health` would
+    report it `up` throughout an outage.
+
+  `PricingAPIClient.swift` is a worked example, not service code: adapt it to a real
+  dependency or leave it out. The payload's own `README.md` is the reference for the
+  shape, including why no third-party breaker was chosen.
 
   This payload serves the **service** shape only. A Swift *client* — an iOS/macOS
   app, a library-only package, a CLI tool — has no ops surface to expose, and

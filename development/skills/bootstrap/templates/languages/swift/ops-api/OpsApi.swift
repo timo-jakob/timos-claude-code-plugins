@@ -23,7 +23,8 @@
 //      #684 deprecation machinery and every incident triage read first.
 //    * The dependency-health seam (ops-api v1.1) is an async, Sendable protocol over
 //      a plain snapshot. This file imports NO circuit-breaker library and must never
-//      grow one — the breaker-backed source is the resilience payload's job (#1146).
+//      grow one — the breaker-backed source is the Swift resilience payload (#1146),
+//      placed beside this file at `Sources/<ServiceTarget>/Resilience/`.
 
 import Foundation
 import Metrics
@@ -120,11 +121,11 @@ public struct Dependency: Sendable, Codable {
 /// is then a byte-identical ops-api **v1.0** body with no `components` key at all,
 /// and readiness is decided by ``OpsConfig/readiness`` alone.
 ///
-/// The blessed implementation is the Swift resilience payload (#1146), which derives
-/// these entries passively from circuit-breaker state. Implement it by hand in the
-/// meantime if you like, but **return a freshly built dictionary every call**: handing
-/// back a live, mutating registry map is a data race, and this protocol is `Sendable`
-/// precisely so the compiler holds you to a snapshot.
+/// The blessed implementation is the Swift resilience payload's `DependencyHealth`
+/// (#1146), which derives these entries passively from circuit-breaker state. If you
+/// implement it by hand instead, **return a freshly built dictionary every call**:
+/// handing back a live, mutating registry map is a data race, and this protocol is
+/// `Sendable` precisely so the compiler holds you to a snapshot.
 public protocol DependencyHealthSource: Sendable {
     func components() async -> [String: Dependency]
 }

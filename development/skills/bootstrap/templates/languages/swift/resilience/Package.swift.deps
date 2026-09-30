@@ -1,0 +1,36 @@
+// Canonical Swift resilience package requirements (#1146).
+//
+// This is a Package.swift FRAGMENT, not a manifest — the Swift analogue of the Go
+// payload's go.mod.deps and the Java payload's build.gradle.kts dependency block.
+// Unlike every sibling, it carries NOTHING TO PASTE.
+//
+// NO THIRD-PARTY DEPENDENCY, deliberately. The circuit breaker is the payload-owned
+// `CircuitBreaker` actor in DependencyCatalog.swift, and the bounded jittered retry is
+// a loop beside it — the Go payload set the precedent with its retry half, about
+// thirty lines of stdlib rather than a second blessed library. No maintained Swift
+// breaker passed the fit-check: README.md, "Why a payload-owned actor breaker",
+// scores every candidate on the six required properties and records why each was
+// rejected. Everything this payload imports ships with the toolchain: Foundation
+// (plus FoundationNetworking on Linux, for the worked example's URLSession) and the
+// ops-api payload's own types, which it reads from the SAME target.
+//
+// Bootstrap adds DEPENDENCIES ONLY and performs no `targets:` edit, and this payload
+// needs neither: it sits in the service's own target beside `Ops/OpsApi.swift`, at
+// `Sources/<ServiceTarget>/Resilience/`. The ops-api payload's Package.swift.deps is
+// still pasted in full — that is the half with packages in it.
+//
+// THE MANIFEST MUST DECLARE `// swift-tools-version:6.1` OR NEWER, on its very first
+// line — the same floor as the ops-api payload it shares a target with. The payload is
+// written for the Swift 6 language mode and compiles with zero concurrency diagnostics
+// under it (the breaker is an actor, every value crossing it is Sendable, and the
+// declaration parser uses typed throws); below 6.1 the tools version cannot express
+// `.swiftLanguageMode(.v6)` as a per-target setting, so the strict checking it is
+// verified against silently does not happen.
+//
+// And on the target that holds Ops/ and Resilience/, so the payload is checked the way
+// it was verified — an adopter-owned `targets:` edit, never bootstrap's:
+//
+//     swiftSettings: [.swiftLanguageMode(.v6)]
+//
+// Platforms floor: none beyond the ops-api payload's `.macOS(.v13), .iOS(.v16)`.
+// Linux has no platform floor to state and is the deployment target.

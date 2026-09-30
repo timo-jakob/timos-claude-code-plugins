@@ -115,6 +115,9 @@ ops_sandbox() {
 # on where the repo happens to be checked out, so the flake it reintroduces is
 # exactly the EADDRINUSE this function exists to prevent AND is unreproducible on
 # another machine. An unregistered file fails loudly instead of silently sharing.
+#
+# Bands 4 and 5 are taken too, by swift_port_band in swift-ops-acceptance.bash
+# (same 9500 + band*100 formula): a new band here starts at 6.
 ops_port() {
   local key band
   key="$(basename "$(dirname "$BATS_TEST_FILENAME")")/$(basename "$BATS_TEST_FILENAME")"
