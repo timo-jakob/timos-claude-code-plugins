@@ -36,31 +36,72 @@ claude-plugin`). It works on any repo with the Maintenance App installed.
 ## Step 1b — rebase onto main if main is ahead
 
 A branch cut from an older `main` opens a PR that may already conflict, or that
-CI validates against a stale base. Before pushing, fetch and check whether
-`origin/main` has commits the branch lacks; if so, rebase onto it:
+CI validates against a stale base. Before pushing, run the rebase engine from
+inside the repository. It fetches `origin main` and, when main has commits the
+branch lacks, rebases onto `origin/main` with the repo type's merge driver wired
+in for that one rebase, so a mechanical manifest conflict is resolved by rule
+(#1822):
 
 ```bash
-git fetch origin main
-if [[ -n "$(git rev-list HEAD..origin/main)" ]]; then
-  git rebase origin/main || { git rebase --abort; echo "rebase onto origin/main conflicts — resolve by hand, then re-run"; exit 1; }
-fi
+# The lease, taken BEFORE the rebase: the remote branch as this branch last saw
+# it. Empty → the branch must not exist yet. A remote tip this branch does not
+# contain means commits landed there that a push would overwrite: stop.
+LEASE=$(git ls-remote origin "refs/heads/${BRANCH}" | cut -f1)
+[[ -z "$LEASE" ]] || git merge-base --is-ancestor "$LEASE" HEAD \
+  || { echo "origin/${BRANCH} has commits this branch lacks — stop, open no PR"; exit 1; }
+VERDICT=$("<skill-base-dir>/../../scripts/merge/rebase-onto-main.zsh")
+#   exit 0 → clean or resolved     exit 1 → conflict (the rebase was aborted)
+#   exit 2 → your own bad call (it takes no arguments)
+#   exit 3 → runtime failure (fetch, detect, a dirty tree): stop, report stderr
+#            (a stderr naming "rebased onto <sha>" means the rebase DID happen)
 ```
 
-- **main not ahead** (`rev-list` empty) → nothing to do; continue with Step 2.
-- **Rebase succeeded** → continue. Tell the user in the Step 5 report that the
-  branch was rebased and onto which `origin/main` sha. If the caller validated
-  the branch (a test gate, a review loop) before this step, say so too: that
-  result was against the old base, and CI on the PR is now the check against
-  the new one.
-- **Rebase conflicted** → the `--abort` restores the branch exactly as it was.
-  **Stop — open no PR** and report the conflicting files (`git rebase` printed
-  them). A conflict needs a human's or the caller's judgment; never resolve it
-  by picking a side automatically. A plugin-version conflict in `plugin.json` /
-  `marketplace.json` is the common case: re-bump to the next version above
-  main's and re-run this skill.
+Stdout is one JSON object; branch on its `verdict`:
 
-The push in Step 3 already uses `--force-with-lease`, so a rebased branch that
-was pushed before is updated safely.
+- **`clean`** → continue with Step 2. With no `base`, main was not ahead and
+  nothing ran. With a `base`, the branch was rebased onto that `origin/main` sha
+  and nothing needed resolving.
+- **`resolved`** → the rebase succeeded, and the merge driver resolved the
+  fields listed in `resolved`, one record per field:
+  `{path, plugin, field, main, pr, result}`. Continue with Step 2, and list each
+  resolved field (path, plugin, field, main → PR → result) in the **PR body**
+  and in the final report.
+- **`conflict`** → the engine has run `git rebase --abort`, so the branch is
+  exactly as it was. **Stop — open no PR** and report the conflicting paths in
+  `files`. A conflict the driver did not resolve needs a human's or the caller's
+  judgment; never resolve it by picking a side automatically.
+
+**A rebase can leave nothing to PR.** On `clean` with a `base`, and on
+`resolved`, re-check Step 1's precondition against the new base: when
+`git rev-list --count "<base>..HEAD"` is `0`, every commit was already on main
+(squash-merged or cherry-picked work) — **stop, push nothing, open no PR**, and
+report that.
+
+**The final report carries the rebase, on every path this skill ends on** —
+Step 5, and the user-authored fallbacks in Steps 2 and 3 alike: that the branch
+was rebased and onto which sha, each resolved field, and, if the caller
+validated the branch (a test gate, a review loop) before this step, that the
+result was against the old base and CI on the PR is now the check against the
+new one. Only textual conflicts are resolved; a textually clean rebase that
+breaks something semantically is CI's to catch. A repo whose type cannot be
+determined, or whose type has no `merge-driver-<repo_type>.zsh` beside the
+engine, gets a plain rebase, where any conflict stops.
+
+**Every push after this step replaces the remote branch under the `LEASE`
+recorded above** — the bot push in Step 3 and both user-authored fallbacks — so
+it succeeds only while the remote still holds what this branch was rebased from.
+A rebased branch that was pushed before is no fast-forward of it, so a plain
+`git push` is rejected; never `git pull` to get past that (it merges the
+pre-rebase commits back in), never push with a bare `--force`, and never re-read
+the lease at push time (it would always match, which is a bare `--force`). Name
+the lease explicitly: a bare `--force-with-lease` checks a remote-tracking ref,
+which a push to a URL never has, so it is refused as `stale info` whenever the
+branch already exists.
+
+```bash
+# <remote>: Step 3's token URL for the bot, `origin` on a user-authored fallback
+git push "<remote>" "HEAD:${BRANCH}" --force-with-lease="${BRANCH}:${LEASE}"
+```
 
 ## Step 2 — mint the writer token
 
@@ -117,8 +158,9 @@ personal one — on the same machine, with no flag.
     that only that account can register its Apps — and for a
     registered-but-not-installed App the install path is
     `install-claude-apps.zsh --writer-only`. Then open the PR the normal way:
-    `gh pr create ...` (as the user) and **stop** (don't arm auto-merge —
-    there's no approver-able author). Report which path ran. **Never** mint
+    push to `origin` under Step 1b's lease, `gh pr create ...` (as the user)
+    and **stop** (don't arm auto-merge — there's no approver-able author).
+    Report which path ran, plus Step 1b's rebase note. **Never** mint
     another owner's App instead: a personal App cannot author PRs on an
     organisation's repo, and the script refuses to fall through by design.
 
@@ -150,7 +192,8 @@ the bot (so a "review from someone other than the last pusher" rule never blocks
 *your* approval). Use the token for both:
 
 ```bash
-git push "https://x-access-token:$(cat "$TOKEN_FILE")@github.com/${REPO}.git" "HEAD:${BRANCH}" --force-with-lease
+git push "https://x-access-token:$(cat "$TOKEN_FILE")@github.com/${REPO}.git" "HEAD:${BRANCH}" \
+  --force-with-lease="${BRANCH}:${LEASE}"
 
 GH_TOKEN="$(cat "$TOKEN_FILE")" gh pr create \
   --base main --head "$BRANCH" \
@@ -175,8 +218,9 @@ When the bot push fails with exactly that error: tell the user this
 installation hasn't accepted the `workflows: write` grant yet — point them at
 `install-claude-apps.zsh --verify` (it prints the re-accept instructions) —
 then **fall back to the user-authored path for this run**: `rm -f "$TOKEN_FILE"`,
-push + `gh pr create` as the user, **stop** (no auto-merge; they admin-merge),
-and report which path ran and why. Don't retry the bot push — the rejection is
+push to `origin` under Step 1b's lease + `gh pr create` as the user, **stop**
+(no auto-merge; they admin-merge), and report which path ran and why, plus Step
+1b's rebase note. Don't retry the bot push — the rejection is
 deterministic until the grant is re-accepted.
 
 **Re-pushing to an already-open PR? Re-trigger CI (#605).** The `gh pr create`
@@ -291,7 +335,8 @@ else to run; you don't need to babysit it.
 
 Tell the user: the PR URL, that it's **authored by the bot and awaiting their
 approval**, and that auto-merge (squash) is armed. They review + approve; it
-merges itself. No admin-merge needed. If Step 1b rebased the branch, say so.
+merges itself. No admin-merge needed. Include Step 1b's rebase note — the new
+base sha, each `resolved` field and the old-base caveat — when Step 1b rebased.
 
 ## Guardrails
 
