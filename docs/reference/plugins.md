@@ -400,15 +400,18 @@ be argued with. Design:
 ([#956](https://github.com/timo-jakob/timos-claude-code-plugins/issues/956)) and
 the React review panel
 ([#959](https://github.com/timo-jakob/timos-claude-code-plugins/issues/959)). The
-maintenance tool universe is still deliberately **empty** — the gather
-(`gather-react-findings.zsh`) is real but reports no tools, which is precisely what
-moves `react` into `supported_topics` and proves the dispatch path end-to-end. A
-marker without a gather would be detected but never dispatched, leaving the
-foundation unverified. The a11y / Playwright / Lighthouse budgets
-([#960](https://github.com/timo-jakob/timos-claude-code-plugins/issues/960)) arrive
-with the rest of epic
-[#686](https://github.com/timo-jakob/timos-claude-code-plugins/issues/686). CI
-remediation reuses `development-javascript`'s `js-ci-fixer`.
+gather (`gather-react-findings.zsh`, which lives in `development`) is what moves
+`react` into `supported_topics`. It audits two tools as **advisory** findings
+([#1947](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1947)):
+`a11y` (an axe package plus a registered `toHaveNoViolations` matcher) and
+`lighthouse_budget` (root `lighthouserc.json` byte budgets at `error`, no
+flapping timing gate). Both check configuration only. The gates that **block**
+are the ones bootstrap renders into a new React app
+([#1946](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1946)).
+The dispatcher does not route the two tools yet
+([#960](https://github.com/timo-jakob/timos-claude-code-plugins/issues/960)), so
+it reports their findings under `missing_tooling`. CI remediation reuses
+`development-javascript`'s `js-ci-fixer`.
 
 **The React review panel
 ([#959](https://github.com/timo-jakob/timos-claude-code-plugins/issues/959)).**
