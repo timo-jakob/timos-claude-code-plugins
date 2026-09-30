@@ -35,6 +35,7 @@ of this plugin):
 | --- | --- | --- |
 | `switch_fable_to_opus` | off | `1`, `true` or `yes` turn it on: agents that would run on fable dispatch on opus instead ([how-to](../how-to/switch-fable-agents-to-opus.md)) |
 | `enable_suggestions` | on | `0`, `false`, `no` or `off` turn it off: `/development:resolve-issue` no longer stops after its review loop converges to offer the waived suggestions for promotion. It waives them all and goes straight on to the PR ([how-to](../how-to/turn-off-suggestion-prompts.md)) |
+| `epic_strictly_sequential` | off | `1`, `true`, `yes` or `on` turn it on: `/development:resolve-issue` resolves an epic's children one at a time in the session, with the test gate and every wait in the foreground and no background process ([how-to](../how-to/run-epics-strictly-sequentially.md)) |
 
 **Skills:**
 

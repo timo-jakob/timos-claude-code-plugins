@@ -7217,6 +7217,35 @@ residue branch without editing it, and `reference/review-loop.md`, § *The risk
 pass* (#1921). User-facing docs: [how-to: set a corner-case risk
 threshold](docs/how-to/set-a-corner-case-risk-threshold.md).
 
+## Runtime setting: `epic_strictly_sequential`
+
+The third maintainer-set runtime switch, read from the environment like the two
+above. It trades an epic run's throughput for a run that can be left
+unattended: no re-work from parallel children, and nothing running outside the
+session.
+
+- **Value:** `1` / `true` / `yes` / `on` in any case are on; unset, `""` and
+  any other value are **off** — today's behaviour. The rule is stated once, in
+  `development/skills/resolve-issue/scripts/strictly-sequential.zsh`, which the
+  conductor runs once at the start of the Epic flow and announces, so a typo
+  shows up as the wrong mode.
+- **On:** E3 resolves every child sequentially in the session, the
+  provably-disjoint set included (no parallel worktree sub-agents), each child
+  after the first branched only once `origin/main` holds the previous child's
+  merge commit (`branch-off-fresh-main.zsh --after`, exit 4 until it does); every
+  review-loop round boundary is the serial boundary with `<full gate>` as a
+  foreground call (no detached gate; a call that outlives its timeout is waited
+  on as the harness's own tracked task, never re-launched); and every PR-checks
+  wait is a foreground `await-pr-checks.zsh` call.
+- **Unchanged:** E1b's all-children readiness gate, the review panel and other
+  sub-agents, the human-only-repo stop per child, and the ban on headless
+  `claude`.
+
+The procedure is `development/skills/resolve-issue/reference/sequential.md`,
+which the Epic flow reads before E1. User-facing docs:
+[how-to: run epics strictly
+sequentially](docs/how-to/run-epics-strictly-sequentially.md).
+
 ## Worktree pattern for parallel work
 
 The Agent tool natively supports `isolation: "worktree"`. The runtime
@@ -7899,6 +7928,20 @@ The zsh default applies to new files only. If a substantial new feature
 inside an existing bash script would benefit clearly from zsh idioms
 (e.g., several associative-array lookups), propose extracting it into a
 new zsh helper rather than mixing styles in one file.
+
+### Branching from `main` means from an up-to-date `main`
+
+Every skill that creates a working branch from `main` — resolve-issue step 1
+and its epic chain, commit, git-branch-naming and bootstrap's branch-first
+step — calls `development/scripts/git/branch-off-fresh-main.zsh` rather than
+spelling its own git commands. It fetches `origin main`, pulls (`--ff-only`)
+when HEAD is `main` or fast-forwards the local `main` when that is safe from
+elsewhere, and branches from the fetched tip; a failed fetch or a `main` that
+cannot fast-forward is exit 3 and creates nothing. `--after <sha>` refuses
+(exit 4) until `origin/main` contains that commit — how a sequential epic makes
+each child start from the previous child's merge, so no PR needs a rebase to
+catch up. The rule is stated once, there; tests are in
+`tests/branch-off-fresh-main.bats`.
 
 ## Open questions
 

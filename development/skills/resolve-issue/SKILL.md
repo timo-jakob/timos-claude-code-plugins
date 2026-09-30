@@ -302,12 +302,11 @@ gate malfunction.
 Per `/development:git-branch-naming` — `<type>/<N>-<slug>`, with `type` from
 the issue's type label if it has one; else from the title's Conventional-Commit
 prefix (`fix(...)` → `fix`, `feat(...)` → `feat`, …); else inferred from the
-change (`fix` / `feat` / `docs` / `chore` / `refactor`). Always branch from the
-current origin tip — never stack:
+change (`fix` / `feat` / `docs` / `chore` / `refactor`). Always pull the latest
+main, then branch from it — never stack; the script does both, and stops on exit 3:
 
 ```bash
-git fetch origin -q
-git switch -c "<type>/<N>-<slug>" origin/main
+"<skill-base-dir>/../../scripts/git/branch-off-fresh-main.zsh" "<type>/<N>-<slug>"
 ```
 
 ### 1b. Detect the repo type and load the profile
@@ -1024,6 +1023,9 @@ see `reference/telemetry.md` § Story telemetry (#1226)
 You do **not** implement the epic directly — you resolve its children
 conflict-aware, then verify the whole, then **close the epic** (E4/E5).
 
+**Before E1, read the mode** — `epic_strictly_sequential` can make E3 wholly sequential:
+see `reference/sequential.md` § Strictly sequential mode
+
 ### E1. Enumerate the children
 
 **Native sub-issues are the source of truth for parenthood (#802)** — the same
@@ -1387,8 +1389,9 @@ one starts, so nothing else needs a human mid-run.
   bot-authored PR. They don't depend on each other, so their PRs open and merge
   independently.
 - **Everything else** → **sequential + stable**: resolve one child fully
-  (Single-issue flow → PR), **wait for it to merge**, `git fetch origin`, branch
-  the next off the fresh tip, continue — through the whole chain.
+  (Single-issue flow → PR), **wait for it to merge**, branch the next with step 1's script
+  plus `--after <merge commit>` (the PR's `mergeCommit.oid`) — a pulled main that holds the
+  previous child, so no rebase later — and continue through the whole chain.
 
 > **Bias hard to sequential.** Worktrees make parallelism *possible*, not
 > *preferred*; parallelise only the provably-disjoint set. **Minimising merge

@@ -17,6 +17,7 @@ what you want to achieve.
 - [Switch fable agents to opus when the fable budget runs out](switch-fable-agents-to-opus.md)
 - [Turn off suggestion prompts after the review loop converges](turn-off-suggestion-prompts.md)
 - [Set a corner-case risk threshold for review residue](set-a-corner-case-risk-threshold.md)
+- [Run epics strictly sequentially, with nothing in the background](run-epics-strictly-sequentially.md)
 - [Maintain this repo (quarterly template refresh)](maintain-this-repo.md)
 - [Contribute (signed commits, branch protection)](contributing.md)
 - [Add support for a new language plugin](../adding-a-language-plugin.md)

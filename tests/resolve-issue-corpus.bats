@@ -38,7 +38,7 @@ setup() {
   # made deliberately in two places rather than silently in one. This is the only
   # copy outside the helper, and it is what makes the "roster changed" case below
   # a real assertion rather than a tautology.
-  EXPECTED_REFS=(review-loop.md residue.md promotion.md escalation.md interactive.md telemetry.md)
+  EXPECTED_REFS=(review-loop.md residue.md promotion.md escalation.md interactive.md sequential.md telemetry.md)
 }
 
 # Build a synthetic skill tree at $1 holding SKILL.md plus the named reference
@@ -67,6 +67,7 @@ _synth() {
     "$base/reference/promotion.md" \
     "$base/reference/escalation.md" \
     "$base/reference/interactive.md" \
+    "$base/reference/sequential.md" \
     "$base/reference/telemetry.md")"
   [ "$output" = "$want" ]
 }
@@ -118,7 +119,7 @@ _synth() {
   # `cat member; printf '\n'` per member, so each 1-line member contributes its
   # line plus a blank separator.
   local want
-  want="$(printf 'conductor\n\nbody of review-loop.md\n\nbody of residue.md\n\nbody of promotion.md\n\nbody of escalation.md\n\nbody of interactive.md\n\nbody of telemetry.md\n')"
+  want="$(printf 'conductor\n\nbody of review-loop.md\n\nbody of residue.md\n\nbody of promotion.md\n\nbody of escalation.md\n\nbody of interactive.md\n\nbody of sequential.md\n\nbody of telemetry.md\n')"
   [ "$(cat "$out")" = "$want" ]
 }
 

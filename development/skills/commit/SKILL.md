@@ -47,7 +47,10 @@ Before committing, make sure changes are not committed directly to `main`.
    - Derive a short kebab-case description from the changes.
    - Ask the user once if there is a GitHub Issue number. If they say no or don't know, proceed without one.
    - Propose the branch name to the user before creating it.
-   - Create and switch to the branch: `git switch -c <branch-name>`
+   - Pull the latest `main`, then create and switch to the branch — your uncommitted changes come along:
+     `"<skill-base-dir>/../../scripts/git/branch-off-fresh-main.zsh" <branch-name>`. On exit 3 (the fetch failed,
+     or `main` cannot fast-forward because it diverged or local changes are in the way), show the user its message
+     and stop — never branch off a `main` that was not updated.
 
 ## Step 4: Stage and Commit
 
