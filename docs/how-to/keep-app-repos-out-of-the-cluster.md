@@ -137,9 +137,9 @@ no-cluster-deploy EXEMPT: .maintenance.yml records primary: kubernetes
 An infrastructure repository is the one place a cluster write belongs; its own
 gate is `kubernetes-ci.yml`'s single `gate` check (running the `render`,
 `schema`, `lint`, `policy`, `config-scan` and `argocd` stages), which
-`branch-protection.sh --iac-only true` requires instead. Bootstrap does not
+`branch-protection.sh --iac-only kubernetes` requires instead. Bootstrap does not
 render the pair on that path, `detect-stack.sh` holds both halves out of
-`missing_artifacts` there, and `--iac-only true` never adds the context.
+`missing_artifacts` there, and `--iac-only kubernetes` never adds the context.
 
 A repository that carries Kubernetes manifests **and** records a language
 primary is an application repository and is checked — a repo that builds an

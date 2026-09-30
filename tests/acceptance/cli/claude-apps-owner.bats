@@ -77,7 +77,7 @@ add_1682_aliases() {
   [ "$(status_registered)" = "$(list_registered acme-corp)" ]
   [ "$(status_registered)" = "maintenance" ]
   run --separate-stderr bash "$PREFLIGHT" --languages "" \
-    --has-dockerfile false --iac-only true --claude-approver true </dev/null
+    --has-dockerfile false --iac-only kubernetes --claude-approver true </dev/null
   [ "$status" -ne 0 ]
   contains "$output" "approver: not registered"
   contains "$output" "maintenance: registered"

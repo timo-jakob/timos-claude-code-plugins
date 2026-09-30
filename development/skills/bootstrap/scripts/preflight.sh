@@ -8,7 +8,7 @@
 #                --languages "swift javascript python go" \
 #                --has-dockerfile true|false \
 #                [--has-ko true|false] \
-#                [--iac-only true|false] \
+#                [--iac-only false|kubernetes] \
 #                [--assume-yes]
 #
 #   --static-analysis / --vulnerabilities   the RESOLVED toolchain
@@ -18,9 +18,10 @@
 #                     flags. `snyk` needs snyk-cli, `trivy` needs trivy, and
 #                     `sonarqube` (like `trivy` or a Dockerfile) needs the
 #                     Docker daemon + compose plugin. Required unless
-#                     --iac-only true, where neither is required or read.
+#                     --iac-only kubernetes, where neither is required or read.
 #
-#   --iac-only true   the §3l IaC path (#1605): require `gh jq git` plus the
+#   --iac-only kubernetes
+#                     the §3l IaC path (#1605): require `gh jq git` plus the
 #                     gate's toolchain (iac_brews below) and no other brew
 #                     formula — no pre-commit, gitleaks, semgrep, sonar-scanner
 #                     or snyk-cli — and skip the Docker-daemon check, none of
@@ -44,6 +45,8 @@ HAS_DOCKERFILE="false"
 ASSUME_YES="false"
 CLAUDE_APPROVER="false"
 IAC_ONLY="false"
+# the one statement of --iac-only's value set, shared by both refusals below
+IAC_ONLY_ENUM_MSG="--iac-only must be one of: false kubernetes"
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -85,7 +88,7 @@ while [[ $# -gt 0 ]]; do
 		shift 2
 		;;
 	--iac-only)
-		[[ $# -ge 2 ]] || die "--iac-only must be true or false"
+		[[ $# -ge 2 ]] || die "$IAC_ONLY_ENUM_MSG"
 		IAC_ONLY="$2"
 		shift 2
 		;;
@@ -93,9 +96,9 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 
-[[ "$IAC_ONLY" =~ ^(true|false)$ ]] || die "--iac-only must be true or false"
+[[ "$IAC_ONLY" =~ ^(false|kubernetes)$ ]] || die "$IAC_ONLY_ENUM_MSG"
 # the toolchain names the language-app prerequisites; the IaC path never reads it
-if [[ "$IAC_ONLY" != "true" ]]; then
+if [[ "$IAC_ONLY" != "kubernetes" ]]; then
 	[[ "$STATIC_ANALYSIS" =~ ^(sonarcloud|sonarqube)$ ]] ||
 		die "--static-analysis must be sonarcloud or sonarqube (the resolved static_analysis)"
 	[[ "$VULNERABILITIES" =~ ^(snyk|trivy)$ ]] ||
@@ -113,7 +116,7 @@ require_brew
 # kubernetes-ci.yml pins; Homebrew cannot pin, so locally they are brew-current.
 iac_brews=(helm kustomize kubeconform kube-linter kyverno trivy yq)
 
-if [[ "$IAC_ONLY" == "true" ]]; then
+if [[ "$IAC_ONLY" == "kubernetes" ]]; then
 	required_brews=("gh" "jq" "git" "${iac_brews[@]}")
 else
 	# Always required
@@ -297,7 +300,7 @@ fi
 # --- docker (SonarQube, Trivy, or any project with a Dockerfile) -------------
 needs_docker="false"
 # never on the IaC path: its Docker consumers (image, Trivy image, SonarQube) are never emitted there
-if [[ "$IAC_ONLY" != "true" ]] &&
+if [[ "$IAC_ONLY" != "kubernetes" ]] &&
 	[[ "$STATIC_ANALYSIS" == "sonarqube" || "$VULNERABILITIES" == "trivy" || "$HAS_DOCKERFILE" == "true" ]]; then
 	needs_docker="true"
 fi

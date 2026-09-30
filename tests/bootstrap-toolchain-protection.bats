@@ -122,7 +122,7 @@ protect_in_fixture() {
     contains "$stderr" '--vulnerabilities'
     # … and before one, on the IaC path too, where the toolchain is never read
     run --separate-stderr env PATH="$STUB_BIN:$PATH" bash "$s" \
-      --visibility public --iac-only true
+      --visibility public --iac-only kubernetes
     [ "$status" -eq 1 ]
     contains "$stderr" '--static-analysis'
   done
@@ -160,7 +160,7 @@ protect_in_fixture() {
       --static-analysis public --vulnerabilities snyk
     [ "$status" -eq 1 ]
     contains "$stderr" '--static-analysis must be sonarcloud or sonarqube'
-    # near misses pin both regex anchors and the case, as --iac-only's truex/xtrue/True do
+    # near misses pin both regex anchors and the case, as --iac-only's kubernetesx/xkubernetes/Kubernetes do (tests/iac-only-enum.bats)
     local v
     for v in sonarcloudx xsonarqube SonarCloud; do
       run --separate-stderr env PATH="$STUB_BIN:$PATH" bash "$s" --static-analysis "$v" --vulnerabilities snyk
@@ -489,22 +489,22 @@ iac_expected() {
     awk 'NF' | LC_ALL=C sort
 }
 
-@test "#1671 AC10: --iac-only true with neither toolchain flag behaves as today on both scripts" {
+@test "#1671 AC10: --iac-only kubernetes with neither toolchain flag behaves as today on both scripts" {
   protection_stubs
   stage_iac_workflow
   cd "$W"
   run --separate-stderr env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --has-dockerfile false --has-codeql false --iac-only true --default-branch main
+    --has-dockerfile false --has-codeql false --iac-only kubernetes --default-branch main
   [ "$status" -eq 0 ]
   [ "$(put_contexts)" = "gate" ]
   preflight_stubs
-  run --separate-stderr run_preflight --has-dockerfile true --iac-only true --assume-yes
+  run --separate-stderr run_preflight --has-dockerfile true --iac-only kubernetes --assume-yes
   [ "$status" -eq 0 ]
   [ "$(checked_tools "$output")" = "$(iac_expected)" ]
   lacks "$output" 'Checking Docker'
 }
 
-@test "#1671 AC10: under --iac-only true a passed toolchain — even an out-of-set one — is neither validated nor read" {
+@test "#1671 AC10: under --iac-only kubernetes a passed toolchain — even an out-of-set one — is neither validated nor read" {
   protection_stubs
   stage_iac_workflow
   local sa v
@@ -512,7 +512,7 @@ iac_expected() {
     for v in snyk grype; do
       : > "$CURL_DATA"
       run --separate-stderr protect_in_fixture --static-analysis "$sa" --vulnerabilities "$v" \
-        --has-dockerfile false --has-codeql false --iac-only true --default-branch main
+        --has-dockerfile false --has-codeql false --iac-only kubernetes --default-branch main
       [ "$status" -eq 0 ] || { echo "branch-protection $sa/$v: $stderr"; return 1; }
       lacks "$stderr" 'must be'
       [ "$(put_contexts)" = "gate" ]
@@ -522,7 +522,7 @@ iac_expected() {
   for sa in sonarqube bogus; do
     for v in snyk grype; do
       run --separate-stderr run_preflight --static-analysis "$sa" --vulnerabilities "$v" \
-        --has-dockerfile false --iac-only true --assume-yes
+        --has-dockerfile false --iac-only kubernetes --assume-yes
       [ "$status" -eq 0 ] || { echo "preflight $sa/$v: $stderr"; return 1; }
       lacks "$stderr" 'must be'
       # the IaC set exactly: snyk-cli is never added, and no Docker check runs
@@ -543,12 +543,12 @@ iac_expected() {
   done
   # … and the three IaC-path sites say so: §3l's Step 4b call, State D's gap-fill
   # and the Step 4.5 preflight note
-  grep -qF '`branch-protection.sh` with `--iac-only true` and neither toolchain flag' "$SKILL"
+  grep -qF '`branch-protection.sh` with `--iac-only kubernetes` and neither toolchain flag' "$SKILL"
   # joined, since the prose wraps wherever its paragraph does
   local joined
   joined="$(tr -s '[:space:]' ' ' < "$SKILL" | sed 's/ > / /g')"
   contains "$joined" '**On the §3l path pass neither toolchain flag**'
-  contains "$joined" '**with `--iac-only true` and neither toolchain flag**'
+  contains "$joined" '**with `--iac-only kubernetes` and neither toolchain flag**'
 }
 
 # --- AC8: no --visibility invocation anywhere -------------------------------------------
@@ -592,7 +592,7 @@ SWEEP_AWK='
   contains "$block" '--codeql-languages'
   contains "$block" '--has-ko'
   contains "$block" '--iac-only false'
-  contains "$block" 'pass --iac-only true'
+  contains "$block" 'pass --iac-only kubernetes'
   lacks "$block" '--visibility'
 }
 

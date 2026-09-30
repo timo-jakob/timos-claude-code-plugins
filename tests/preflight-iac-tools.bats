@@ -11,7 +11,7 @@
 #     reads those pins). Three sources, one set — a tool added to the gate but not
 #     to the preflight leaves every local `make lint` refusing on a tool
 #     bootstrap never offered to install.
-#   * THE BEHAVIOUR. With --iac-only true the script really checks that set plus
+#   * THE BEHAVIOUR. With --iac-only kubernetes the script really checks that set plus
 #     gh/jq/git and nothing from the language-app batch — observed from its own
 #     per-tool report lines, with uname, brew and gh stubbed so it runs anywhere.
 
@@ -127,10 +127,10 @@ checked_tools() {
   ' | LC_ALL=C sort
 }
 
-@test "preflight --iac-only true checks gh, jq, git and the gate's tools, and nothing from the language-app batch (#1605)" {
+@test "preflight --iac-only kubernetes checks gh, jq, git and the gate's tools, and nothing from the language-app batch (#1605)" {
   preflight_stubs
   run --separate-stderr env PATH="$TEST_PATH" bash "$PREFLIGHT" \
-    --languages "" --has-dockerfile false --iac-only true --assume-yes
+    --languages "" --has-dockerfile false --iac-only kubernetes --assume-yes
   [ "$status" -eq 0 ]
   local checked expected t
   checked="$(checked_tools "$output")"
@@ -147,24 +147,24 @@ checked_tools() {
   # an IaC repo needs no Docker even when handed a toolchain that would (sonarqube,
   # trivy): with no docker on PATH and no TTY, the Docker check would exit non-zero
   run --separate-stderr env PATH="$TEST_PATH" bash "$PREFLIGHT" \
-    --static-analysis sonarqube --vulnerabilities trivy --languages "" --has-dockerfile false --iac-only true --assume-yes </dev/null
+    --static-analysis sonarqube --vulnerabilities trivy --languages "" --has-dockerfile false --iac-only kubernetes --assume-yes </dev/null
   [ "$status" -eq 0 ]
   lacks "$output" 'Checking Docker'
   # …nor does one that carries a tooling Dockerfile
   run --separate-stderr env PATH="$TEST_PATH" bash "$PREFLIGHT" \
-    --languages "" --has-dockerfile true --iac-only true --assume-yes </dev/null
+    --languages "" --has-dockerfile true --iac-only kubernetes --assume-yes </dev/null
   [ "$status" -eq 0 ]
   lacks "$output" 'Checking Docker'
 }
 
-@test "preflight --iac-only true adds no language or claude-plugin tools, whatever --languages and the cwd say (#1605)" {
+@test "preflight --iac-only kubernetes adds no language or claude-plugin tools, whatever --languages and the cwd say (#1605)" {
   preflight_stubs
   # the language loop and the .claude-plugin -> parallel block only add a tool when
   # their input asks for one, so give them both: three languages and the marker
   mkdir -p .claude-plugin
   printf '{}\n' > .claude-plugin/marketplace.json
   run --separate-stderr env PATH="$TEST_PATH" bash "$PREFLIGHT" \
-    --languages "swift python go" --has-dockerfile false --iac-only true --assume-yes
+    --languages "swift python go" --has-dockerfile false --iac-only kubernetes --assume-yes
   [ "$status" -eq 0 ]
   local checked expected t
   checked="$(checked_tools "$output")"
@@ -184,7 +184,7 @@ checked_tools() {
   done
 }
 
-@test "preflight --iac-only true reports a yq that is not mikefarah's v4 as missing, and accepts mikefarah's (#1637)" {
+@test "preflight --iac-only kubernetes reports a yq that is not mikefarah's v4 as missing, and accepts mikefarah's (#1637)" {
   preflight_stubs
   local v
   # a yq that is not mikefarah's v4 — kislyuk's python-yq, or mikefarah v3 — is
@@ -195,7 +195,7 @@ checked_tools() {
     printf '#!/bin/sh\necho "%s"\n' "$v" > "$STUB_BIN/yq"
     chmod +x "$STUB_BIN/yq"
     run --separate-stderr env PATH="$TEST_PATH" bash "$PREFLIGHT" \
-      --languages "" --has-dockerfile false --iac-only true --assume-yes
+      --languages "" --has-dockerfile false --iac-only kubernetes --assume-yes
     [ "$status" -ne 0 ]
     contains "$output" 'yq — missing (mikefarah v4 required'
     contains "$output" "if Homebrew's python-yq is installed, 'brew unlink python-yq' before installing"
@@ -209,7 +209,7 @@ checked_tools() {
     printf '#!/bin/sh\necho "%s"\n' "$v" > "$STUB_BIN/yq"
     chmod +x "$STUB_BIN/yq"
     run --separate-stderr env PATH="$TEST_PATH" bash "$PREFLIGHT" \
-      --languages "" --has-dockerfile false --iac-only true --assume-yes
+      --languages "" --has-dockerfile false --iac-only kubernetes --assume-yes
     [ "$status" -eq 0 ]
     contains "$output" 'yq (mikefarah v4)'
     lacks $'\n'"$(cat "$BREW_INSTALLS")"$'\n' $'\nyq\n'
@@ -227,7 +227,7 @@ checked_tools() {
   printf '#!/bin/sh\necho "yq 3.4.3"\n' > "$late/yq"
   chmod +x "$late/yq"
   run --separate-stderr env PATH="$STUB_BIN:$late:$HIDE_BIN:/usr/bin:/bin" bash "$PREFLIGHT" \
-    --languages "" --has-dockerfile false --iac-only true --assume-yes
+    --languages "" --has-dockerfile false --iac-only kubernetes --assume-yes
   [ "$status" -eq 0 ]
   contains "$output" 'yq — missing (mikefarah v4 required'
   contains $'\n'"$(cat "$BREW_INSTALLS")"$'\n' $'\nyq\n'
@@ -275,13 +275,14 @@ checked_tools() {
   checked="$(checked_tools "$output")"
   contains $'\n'"$checked"$'\n' $'\npre-commit\n'
   lacks $'\n'"$checked"$'\n' $'\nhelm\n'
-  # a value merely CONTAINING a valid token is refused too — `truex` pins the end
-  # anchor, `xtrue` the start anchor, `True` the case — like the exact `== "true"`
-  # the validation guards
+  # a value merely CONTAINING a valid token is refused too — `kubernetesx` pins
+  # the end anchor, `xkubernetes` the start anchor, `Kubernetes` the case — like
+  # the exact `== "kubernetes"` the validation guards. The refusal's wording is
+  # pinned once, in tests/iac-only-enum.bats; this asserts only the refusal.
   local v
-  for v in yes truex xtrue True; do
+  for v in yes kubernetesx xkubernetes Kubernetes; do
     run --separate-stderr env PATH="$TEST_PATH" bash "$PREFLIGHT" --iac-only "$v"
     [ "$status" -eq 1 ]
-    contains "$stderr" '--iac-only must be true or false'
+    contains "$stderr" '--iac-only must be'
   done
 }

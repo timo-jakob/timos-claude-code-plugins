@@ -224,7 +224,7 @@ plugin for maintenance dispatch**; the primary/auxiliary model already permits a
 topic to be primary, so no new mechanism is needed. The *bootstrap* half is
 narrower, and the two must not be conflated: bootstrap emits the gate —
 `scripts/k8s-gate.zsh`, the one-job workflow that runs it and the `gate:` key it
-records in `.maintenance.yml` — and calls `branch-protection.sh --iac-only true`
+records in `.maintenance.yml` — and calls `branch-protection.sh --iac-only kubernetes`
 for the kubernetes marker with an **empty resolved language set**. There a recorded `primary:` can
 **veto** the path (any other value takes the repo off it) but never **grant**
 it, so a declaration alone does not entitle a repo to the pipeline. The mixed
@@ -250,7 +250,7 @@ template owned by the generic `development` plugin, not something this plugin's
 skills run, which is the same boundary that keeps detection in `development`. A
 manifests repo has no test suite, so the language-app
 gates — the coverage floor above all — do not apply to it, and bootstrap does not
-render them. Branch protection still runs: `branch-protection.sh --iac-only true`
+render them. Branch protection still runs: `branch-protection.sh --iac-only kubernetes`
 **requires the single `gate` context instead of** the language-app set (which no
 workflow on such a repo would ever report) — `kubernetes-ci.yml`'s one job, which
 runs those six stages since #1604 (#1606) — leaving the protection rule and the
