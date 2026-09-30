@@ -27,19 +27,38 @@ setup() {
   mkdir -p "$OUT"
 }
 
-# The ten template sources, repo-relative to the react/ overlay: #957's six and
-# the four React Query binding files (#958, SKILL.md §3k.6).
+# The seventeen template sources, repo-relative to the react/ overlay: #957's six,
+# the four React Query binding files (#958, SKILL.md §3k.6) and the seven WebUI
+# gate files (#1946). Sorted as `LC_ALL=C sort` orders them.
 REACT_FILES=(
+  .github/workflows/webui-quality-noop.yml.tmpl
+  .github/workflows/webui-quality.yml.tmpl
   contract-consumer/eslint.config.js
   contract-consumer/vitest.config.ts
   eslint.config.js
+  gitignore
+  lighthouserc.json
   src/Greeting.test.tsx
   src/api/hooks.test.tsx
   src/api/hooks.ts
   src/api/index.ts
+  src/test/a11y-canary.test.tsx
   src/test/query-wrapper.tsx
   src/test/setup.ts
+  tests/e2e/playwright.config.ts
+  tests/e2e/smoke.spec.ts
   vitest.config.ts
+)
+
+# The WebUI gate files §3k.5 renders in BOTH variants (#1946), as its render
+# blocks list them. `gitignore` is merged, never rendered, so it is not here.
+WEBUI_FILES=(
+  src/test/a11y-canary.test.tsx
+  tests/e2e/playwright.config.ts
+  tests/e2e/smoke.spec.ts
+  lighthouserc.json
+  .github/workflows/webui-quality.yml.tmpl
+  .github/workflows/webui-quality-noop.yml.tmpl
 )
 
 # The binding set, as §3k.6 renders it.
@@ -52,13 +71,14 @@ BINDING_FILES=(
 
 # Render one variant exactly as §3k.5 lists it: "consumer" or "plain".
 render_variant() {
-  local prefix=languages/javascript/react
+  local prefix=languages/javascript/react f webui=()
   local cfg="$prefix"
   [ "$1" = consumer ] && cfg="$prefix/contract-consumer"
+  for f in "${WEBUI_FILES[@]}"; do webui+=("$prefix/$f"); done
   zsh "$RENDER" --templates "$TEMPLATES" --out "$OUT/$1" \
     --project-name "Demo" --default-branch "main" \
     "$cfg/eslint.config.js" "$cfg/vitest.config.ts" \
-    "$prefix/src/test/setup.ts" "$prefix/src/Greeting.test.tsx"
+    "$prefix/src/test/setup.ts" "$prefix/src/Greeting.test.tsx" "${webui[@]}"
 }
 
 # Every code line of the lower layer $1 must appear verbatim in the React variant
@@ -81,7 +101,7 @@ has() {
   grep -qF -- "$2" "$1" || { echo "missing in ${1#"$REPO_ROOT"/}: $2"; return 1; }
 }
 
-@test "react: the template tree contains exactly the ten blessed files" {
+@test "react: the template tree contains exactly the seventeen blessed files" {
   local expected actual
   expected="$(printf '%s\n' "${REACT_FILES[@]}")"
   # .DS_Store is Finder litter, not a template (the kubernetes skeleton false red)
@@ -98,9 +118,18 @@ has() {
     [ "$status" -eq 0 ] || { echo "render $v: $output"; false; }
     run grep -rqE '\{\{[A-Z_][A-Z0-9_]*\}\}' "$OUT/$v"
     [ "$status" -eq 1 ]
-    for f in src/test/setup.ts src/Greeting.test.tsx; do
+    for f in src/test/setup.ts src/Greeting.test.tsx src/test/a11y-canary.test.tsx \
+      tests/e2e/playwright.config.ts tests/e2e/smoke.spec.ts lighthouserc.json; do
       cmp -s "$OUT/$v/languages/javascript/react/$f" "$RX/$f" || { echo "$v: $f differs from source"; false; }
     done
+    # the two workflows lose .tmpl and carry the default branch; nothing else changes
+    for f in webui-quality webui-quality-noop; do
+      diff <(sed 's/{{DEFAULT_BRANCH}}/main/g' "$RX/.github/workflows/$f.yml.tmpl") \
+        "$OUT/$v/languages/javascript/react/.github/workflows/$f.yml" || { echo "$v: $f.yml"; false; }
+    done
+    # nothing renders into the deployed-UI acceptance spine (#702)
+    run find "$OUT/$v" -path '*tests/acceptance*'
+    [ -z "$output" ] || { echo "$v rendered under tests/acceptance: $output"; false; }
     src="$RX"
     [ "$v" = consumer ] && src="$RX/contract-consumer"
     for f in eslint.config.js vitest.config.ts; do
@@ -179,7 +208,7 @@ has() {
 @test "react: both vitest variants mergeConfig over ./vite.config, the app config first" {
   local f
   for f in "$RX/vitest.config.ts" "$RX/contract-consumer/vitest.config.ts"; do
-    has "$f" 'import { defineConfig, mergeConfig } from "vitest/config";'
+    has "$f" 'import { configDefaults, defineConfig, mergeConfig } from "vitest/config";'
     has "$f" 'import viteConfig from "./vite.config";'
     # viteConfig is the FIRST argument, so the test block overrides it
     run grep -A1 -xF 'export default mergeConfig(' "$f"
@@ -191,7 +220,7 @@ has() {
 @test "react: the setup module registers the jest-dom matchers and unmounts after each test" {
   local f="$RX/src/test/setup.ts"
   has "$f" 'import "@testing-library/jest-dom/vitest";'
-  has "$f" 'import { afterEach } from "vitest";'
+  has "$f" 'import { afterEach, expect } from "vitest";'
   grep -qxF 'afterEach(() => cleanup());' "$f"
 }
 
@@ -305,7 +334,7 @@ STEP_END='### 3k.6. React Query binding (a React repo consuming a spec — #958)
   contains "$section" 'If §3k deferred and this step will not end with the consumer+React pair on disk for **both** files — an install failed, or either prompt resolved to skip — abort §3k'"'"'s scaffold exactly as §3k'"'"'s own overwrite-skip abort does: discard the ACL/MSW files and workflows, commit the seeded `orval.config.ts` and its transformer, and name the abort in the Step 5 item.'
   contains "$section" 'so if the install succeeded, render the **plain React** pair under the same rules instead.'
   contains "$section" 'Because §3k wrote neither config, no committed config names the discarded `src/test/msw-setup.ts`.'
-  contains "$section" 'The prompt answers given against the consumer+React diff do **not** carry over to the plain pair: a file whose prompt resolved to skip **stays skipped**, with its skip consequences below (for `vitest.config.ts`, `src/test/setup.ts` and the example test withheld); a file whose prompt resolved to overwrite gets a **fresh** rule-3 prompt showing the plain React diff, since that consent was for different content; a known predecessor of the plain variant is overwritten without a prompt.'
+  contains "$section" 'The prompt answers given against the consumer+React diff do **not** carry over to the plain pair: a file whose prompt resolved to skip **stays skipped**, with its skip consequences below (for `vitest.config.ts`, `src/test/setup.ts`, the example test and the WebUI gate set withheld); a file whose prompt resolved to overwrite gets a **fresh** rule-3 prompt showing the plain React diff, since that consent was for different content; a known predecessor of the plain variant is overwritten without a prompt.'
 }
 
 @test "react: SKILL.md's React step states the per-variant known-predecessor rule and its skips" {
@@ -536,4 +565,215 @@ BINDING_END='### 3l. Infrastructure-as-code repos (no application language) — 
   contains "$section" '`hooks.ts` **re-exports** that hook'
   contains "$section" '`npx eslint src` reports `@typescript-eslint/no-deprecated` on the line in the component that calls `useGetOrders()`'
   contains "$section" 'It is **executed under #1063**.'
+}
+
+# --- the WebUI gates (#1946, SKILL.md §3k.5) ------------------------------------
+
+WQ="webui-quality.yml.tmpl"
+WQN="webui-quality-noop.yml.tmpl"
+
+@test "webui: both §3k.5 render blocks list every WebUI gate file, and each exists" {
+  local section block body f
+  section="$(react_step)"
+  ends_with "$section" "$STEP_END"
+  for block in '# §3k machinery present → the consumer+React pair' '# §3k machinery absent → the plain React pair'; do
+    # the block runs from its comment to the closing fence
+    body="${section#*"$block"}"
+    body="${body%%\`\`\`*}"
+    for f in "${WEBUI_FILES[@]}"; do
+      [ -f "$RX/$f" ] || { echo "missing: react/$f"; false; }
+      contains "$body" "languages/javascript/react/$f"
+    done
+  done
+  contains "$section" 'axe-core @playwright/test @lhci/cli'
+}
+
+@test "webui: lighthouserc.json gates only the two byte budgets, at error, with filesystem upload" {
+  local rc="$RX/lighthouserc.json"
+  jq -e . "$rc" > /dev/null
+  [ "$(jq -r '.ci.assert.assertions | keys | join(",")' "$rc")" \
+    = "resource-summary:script:size,resource-summary:total:size" ]
+  [ "$(jq -c '.ci.assert.assertions["resource-summary:script:size"]' "$rc")" = '["error",{"maxNumericValue":307200}]' ]
+  [ "$(jq -c '.ci.assert.assertions["resource-summary:total:size"]' "$rc")" = '["error",{"maxNumericValue":512000}]' ]
+  # nothing else can gate: no preset, no budget file, no Web Vitals assertion
+  [ "$(jq '.ci.assert | has("preset")' "$rc")" = false ]
+  [ "$(jq '.ci.assert | has("budgetsFile")' "$rc")" = false ]
+  run grep -qE 'largest-contentful-paint|total-blocking-time|cumulative-layout-shift|budget\.json|"preset"' "$rc"
+  [ "$status" -eq 1 ]
+  [ "$(jq -r '.ci.upload.target' "$rc")" = filesystem ]
+  # measured against vite preview on the root route
+  [ "$(jq -r '.ci.collect.url | join(",")' "$rc")" = "http://localhost:4173/" ]
+  contains "$(jq -r '.ci.collect.startServerCommand' "$rc")" 'npm run preview -- --port 4173'
+}
+
+@test "webui: the canary expects at least one violation, through the family matcher" {
+  local c="$RX/src/test/a11y-canary.test.tsx" s="$RX/src/test/setup.ts"
+  has "$c" 'import axe from "axe-core";'
+  has "$c" 'render(<img src="/logo.svg" />);'
+  has "$c" 'expect(results.violations.length).toBeGreaterThanOrEqual(1);'
+  has "$c" 'expect(results).not.toHaveNoViolations();'
+  # the matcher is family-owned, built on bare axe-core, and registered in setup.ts
+  has "$s" 'import type { AxeResults } from "axe-core";'
+  grep -qxF 'expect.extend({' "$s"
+  grep -qxF '  toHaveNoViolations(results: AxeResults) {' "$s"
+  has "$s" 'pass: violations.length === 0,'
+  # the type augmentation the canary's matcher call needs under `tsc -b`, in
+  # Vitest 5's two-parameter shape
+  grep -qxF 'declare module "vitest" {' "$s"
+  grep -qxF '  interface Matchers<R, T> {' "$s"
+  grep -qxF '    toHaveNoViolations: () => R;' "$s"
+  # no wrapper package is imported anywhere in the overlay (comments may name them)
+  run grep -rlE 'from "(vitest|jest)-axe' "$RX"
+  [ "$status" -eq 1 ]
+}
+
+@test "webui: both vitest variants exclude tests/e2e/** on top of Vitest's defaults" {
+  local f
+  for f in "$RX/vitest.config.ts" "$RX/contract-consumer/vitest.config.ts"; do
+    grep -qxF '      exclude: [...configDefaults.exclude, "tests/e2e/**"],' "$f" \
+      || { echo "no tests/e2e exclude in ${f#"$REPO_ROOT"/}"; false; }
+  done
+}
+
+@test "webui: the Playwright harness serves vite preview on 4173 from tests/e2e, never tests/acceptance" {
+  local p="$RX/tests/e2e/playwright.config.ts"
+  has "$p" 'command: "npm run preview -- --port 4173 --strictPort",'
+  has "$p" 'url: "http://localhost:4173",'
+  has "$p" 'baseURL: "http://localhost:4173",'
+  has "$RX/tests/e2e/smoke.spec.ts" 'await page.goto("/");'
+  # the smoke's two assertions ARE the test: React mounted, and nothing threw
+  has "$RX/tests/e2e/smoke.spec.ts" 'page.on("pageerror", (error) => pageErrors.push(error));'
+  has "$RX/tests/e2e/smoke.spec.ts" 'await expect(page.locator("#root")).not.toBeEmpty();'
+  has "$RX/tests/e2e/smoke.spec.ts" 'expect(pageErrors).toEqual([]);'
+  # specs are collected next to the config, and no code line points at the
+  # acceptance spine (a comment may name it, to say it is off limits)
+  has "$p" 'testDir: ".",'
+  run grep -rhE 'tests/acceptance' "$RX/tests" "$RX/.github"
+  run grep -vE '^[[:space:]]*(//|#)' <<< "$output"
+  [ -z "$output" ] || { echo "code line names tests/acceptance: $output"; false; }
+  [ ! -e "$RX/tests/acceptance" ]
+}
+
+@test "webui: the workflow runs the two named gates, and the noop reports the same names on the inverse paths" {
+  local w="$RX/.github/workflows/$WQ" n="$RX/.github/workflows/$WQN" real noop ignored
+  real="$(yq -r '.jobs[].name' "$w" | LC_ALL=C sort)"
+  noop="$(yq -r '.jobs[].name' "$n" | LC_ALL=C sort)"
+  [ "$real" = "$(printf '%s\n' 'e2e (playwright)' 'lighthouse (budgets)')" ] || { echo "real: $real"; false; }
+  [ "$noop" = "$real" ] || { printf 'noop:\n%s\nreal:\n%s\n' "$noop" "$real"; false; }
+  # the noop triggers on exactly the paths the real workflow ignores, and those
+  # are the quality workflows' own paths-ignore
+  ignored="$(yq -r '.on.pull_request.paths-ignore[]' "$w")"
+  [ -n "$ignored" ]
+  [ "$(yq -r '.on.push.paths-ignore[]' "$w")" = "$ignored" ]
+  [ "$(yq -r '.on.pull_request.paths[]' "$n")" = "$ignored" ]
+  [ "$(yq -r '.on.pull_request.paths-ignore[]' "$TEMPLATES/public/.github/workflows/quality-public.yml.tmpl")" = "$ignored" ]
+  # each job does the work its name promises
+  has "$w" 'run: npx playwright install --with-deps chromium'
+  has "$w" 'run: npx playwright test -c tests/e2e/playwright.config.ts'
+  has "$w" 'run: npx lhci autorun'
+  [ "$(yq -r '.permissions.contents' "$w")" = read ]
+}
+
+@test "webui: the React gitignore fragment ignores the Playwright and Lighthouse output" {
+  local g="$RX/gitignore" e
+  for e in playwright-report/ test-results/ .lighthouseci/; do
+    grep -qxF "$e" "$g" || { echo "gitignore lacks $e"; false; }
+  done
+  # merged by §3k.5, like any language fragment
+  contains "$(react_step)" 'Merge `react/gitignore` into `.gitignore`'
+}
+
+@test "webui: a non-React JS bootstrap renders neither webui-quality workflow" {
+  local n_all n_step args=() f
+  # only the React overlay holds them …
+  run find "$TEMPLATES" -name 'webui-quality*' ! -path "$RX/*"
+  [ -z "$output" ] || { echo "outside react/: $output"; false; }
+  # … only §3k.5 names them in SKILL.md …
+  n_all="$(grep -c 'webui-quality' "$SKILL")"
+  n_step="$(sed -n '/^### 3k\.5\. React overlay/,/^### 3k\.6\. /p' "$SKILL" | grep -c 'webui-quality')"
+  [ "$n_all" -gt 0 ]
+  [ "$n_all" -eq "$n_step" ] || { echo "webui-quality named outside §3k.5 ($n_all vs $n_step)"; false; }
+  # … and rendering the whole javascript tree minus the React overlay yields none
+  # (mfe-contract/ is left out: its {{NPM_SCOPE}} comes from the composition step,
+  # which render.zsh has no flag for)
+  while IFS= read -r f; do args+=("languages/javascript/$f"); done < <(
+    cd "$JS" && find . -type f ! -path './react/*' ! -path './mfe-contract/*' ! -name .DS_Store \
+      | sed 's|^\./||' | LC_ALL=C sort)
+  [ "${#args[@]}" -gt 10 ]
+  run zsh "$RENDER" --templates "$TEMPLATES" --out "$OUT/non-react" \
+    --project-name "Demo" --default-branch "main" "${args[@]}"
+  [ "$status" -eq 0 ] || { echo "render: $output"; false; }
+  run find "$OUT/non-react" -name 'webui-quality*'
+  [ -z "$output" ]
+}
+
+@test "webui: the over-budget fixture lives in tests/fixtures/react-webui and is in no render list" {
+  [ -f "$REPO_ROOT/tests/fixtures/react-webui/over-budget.zsh" ]
+  # never a template, and never a render argument (an indented path line)
+  run find "$TEMPLATES" -path '*react-webui*'
+  [ -z "$output" ]
+  run grep -nE '^  [^ ]*react-webui' "$SKILL"
+  [ "$status" -eq 1 ] || { echo "render-list line: $output"; false; }
+  contains "$(react_step)" 'under `tests/fixtures/react-webui/` and is never in a render list'
+}
+
+@test "webui: the over-budget fixture writes an incompressible ballast the app must load" {
+  local fx="$REPO_ROOT/tests/fixtures/react-webui/over-budget.zsh" app="$BATS_TEST_TMPDIR/app"
+  # usage error without an app
+  run zsh "$fx"
+  [ "$status" -eq 2 ]
+  contains "$output" 'usage: over-budget.zsh <app-dir>'
+  mkdir -p "$app/src"
+  printf 'console.log("app");\n' > "$app/src/main.tsx"
+  run zsh "$fx" "$app"
+  [ "$status" -eq 0 ]
+  # over the 300 KiB script budget even after gzip: random bytes do not compress
+  [ "$(wc -c < "$app/src/ballast.ts")" -gt 614400 ]
+  [ "$(gzip -c "$app/src/ballast.ts" | wc -c)" -gt 307200 ]
+  [ "$(grep -c 'from "./ballast"' "$app/src/main.tsx")" -eq 1 ]
+  # and USES it, so the bundler cannot tree-shake the side-effect-free module
+  [ "$(grep -c 'BALLAST.length' "$app/src/main.tsx")" -eq 1 ]
+  # idempotent: a second run never imports or uses it twice
+  run zsh "$fx" "$app"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'from "./ballast"' "$app/src/main.tsx")" -eq 1 ]
+  [ "$(grep -c 'BALLAST.length' "$app/src/main.tsx")" -eq 1 ]
+}
+
+@test "webui: SETUP.md §4 and the consistency agent name both required contexts" {
+  local setup="$TEMPLATES/common/SETUP.md.tmpl" agent="$REPO_ROOT/development/agents/bootstrap-config-consistency.md"
+  has "$setup" '**React (§3k.5):** `e2e (playwright)` and `lighthouse (budgets)` are required **only when the React overlay is rendered**'
+  has "$setup" '`webui-quality-noop.yml`'
+  has "$setup" 'are **both** on disk (with either absent, `branch-protection.sh` omits both contexts'
+  has "$agent" '`.github/workflows/webui-quality.yml` and its'
+  has "$agent" 'are in `checks` exactly when **both** `webui-quality*.yml` files will be'
+  has "$agent" 'on disk — planned this run **or already there**'
+  has "$agent" 'or, for a job that reports under its `name:` (the React'
+  has "$agent" 'the same two job names as the real workflow'
+}
+
+@test "webui: §3k.5 states the gates' adoption gap, required contexts and budgets, the budgets read from lighthouserc.json" {
+  local section script total
+  section="$(react_step)"
+  ends_with "$section" "$STEP_END"
+  contains "$section" 'So is a missing `.github/workflows/webui-quality.yml` or `.github/workflows/webui-quality-noop.yml` — a React app bootstrapped before the WebUI gates (#1946), or one that lost the noop.'
+  contains "$section" '**The two jobs are required contexts:** `branch-protection.sh` adds `e2e (playwright)` and `lighthouse (budgets)` whenever **both** `.github/workflows/webui-quality.yml` and its noop are on disk'
+  # the prose budgets are the JSON's, so neither can drift alone
+  script="$(jq -r '.ci.assert.assertions["resource-summary:script:size"][1].maxNumericValue' "$RX/lighthouserc.json")"
+  total="$(jq -r '.ci.assert.assertions["resource-summary:total:size"][1].maxNumericValue' "$RX/lighthouserc.json")"
+  matches "$script" '^[0-9]+$'
+  matches "$total" '^[0-9]+$'
+  contains "$section" "fails the build above $script bytes of script or $total bytes in total; LCP/TBT/CLS are collected, never asserted"
+}
+
+@test "webui: §3k.5 withholds the gate set on a vitest.config.ts skip, and the canary alone on a setup.ts skip" {
+  local section
+  section="$(react_step)"
+  ends_with "$section" "$STEP_END"
+  contains "$section" '**Withhold the whole WebUI gate set with them**: the a11y canary, `tests/e2e/playwright.config.ts`, `tests/e2e/smoke.spec.ts`, `lighthouserc.json` and both `webui-quality*.yml` workflows.'
+  contains "$section" 'with the workflows absent `branch-protection.sh` requires neither WebUI context.'
+  contains "$section" '**except the a11y canary whenever `src/test/setup.ts` does not end up as the variant'"'"'s template** (its own prompt resolved to skip)'
+  contains "$section" 'drop the withheld paths from the list before running it.'
+  # a pre-#1946 app's family files reach that skip branch through a prompt, not an overwrite
+  contains "$section" 'Neither is a known predecessor, so each takes the rule-3 prompt below, whose diff is exactly those additions; a skip withholds the gates as the skip paragraph below says.'
 }

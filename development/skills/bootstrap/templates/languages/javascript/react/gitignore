@@ -1,0 +1,4 @@
+# React WebUI gates (#1946): Playwright and Lighthouse CI output
+playwright-report/
+test-results/
+.lighthouseci/

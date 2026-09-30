@@ -344,6 +344,43 @@ protect_in_fixture() {
   contains "$output" 'Both a Dockerfile and a root .ko.yaml were detected'
 }
 
+@test "#1946: the React WebUI contexts are required if and only if webui-quality.yml and its noop are both on disk" {
+  protection_stubs
+  local without with half
+  # without either workflow: neither context, and no warning (a non-React repo)
+  run protect_in_fixture --static-analysis sonarcloud --vulnerabilities snyk \
+    --has-dockerfile false --has-codeql false --default-branch main
+  [ "$status" -eq 0 ]
+  without="$(put_contexts)"
+  run ! grep -qx 'e2e (playwright)' <<< "$without"
+  run ! grep -qx 'lighthouse (budgets)' <<< "$without"
+  lacks "$output" 'lighthouse (budgets)'
+  # either half alone: still neither, and the missing half is named
+  for half in webui-quality.yml webui-quality-noop.yml; do
+    rm -f "$W/.github/workflows/webui-quality.yml" "$W/.github/workflows/webui-quality-noop.yml"
+    touch "$W/.github/workflows/$half"
+    : > "$CURL_DATA"
+    run protect_in_fixture --static-analysis sonarcloud --vulnerabilities snyk \
+      --has-dockerfile false --has-codeql false --default-branch main
+    [ "$status" -eq 0 ]
+    [ "$(put_contexts)" = "$without" ] || { echo "with only $half: $(put_contexts)"; false; }
+    if [ "$half" = webui-quality.yml ]; then
+      contains "$output" '`.github/workflows/webui-quality-noop.yml` is absent — NOT requiring `e2e (playwright)`'
+    else
+      contains "$output" '`.github/workflows/webui-quality.yml` is absent — NOT requiring `e2e (playwright)`'
+    fi
+  done
+  # with both: exactly those two contexts are added, each once, and nothing else moves
+  touch "$W/.github/workflows/webui-quality.yml" "$W/.github/workflows/webui-quality-noop.yml"
+  : > "$CURL_DATA"
+  run protect_in_fixture --static-analysis sonarcloud --vulnerabilities snyk \
+    --has-dockerfile false --has-codeql false --default-branch main
+  [ "$status" -eq 0 ]
+  with="$(put_contexts)"
+  [ "$with" = "$({ printf '%s\n' "$without"; echo 'e2e (playwright)'; echo 'lighthouse (budgets)'; } | LC_ALL=C sort)" ] \
+    || { printf 'without:\n%s\nwith:\n%s\n' "$without" "$with"; false; }
+}
+
 # --- AC4: rows 1 and 5 are today's defaults, byte for byte as sets ------------------
 
 @test "#1671 AC4: rows 1 and 5 produce exactly the pre-change golden context lists" {
