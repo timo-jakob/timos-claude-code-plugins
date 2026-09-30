@@ -137,6 +137,7 @@ Every plugin's agents. Generated from each agent `.md`'s frontmatter
 | Agent | Model | Tools | Description |
 | --- | --- | --- | --- |
 | `react-idioms-reviewer` | `opus` | Read, Grep, Glob | React idioms specialist that checks a diff for Rules of Hooks violations and the stale closures they cause, server state fetched outside TanStack Query (ad-hoc useEffect fetching or an alternative server-state library), and deviations from the Vite single-page-app shape and component structure. The react_idioms dimension of /development-react:review, a topic panel that runs beside /development-javascript:review on a React repo. |
+| `react-webui-quality-advisor` | `opus` | Read, Edit, Bash, Grep | For each a11y or lighthouse_budget finding (a React repo missing the axe package or its toHaveNoViolations matcher, or a lighthouserc.json whose byte budgets are missing, not blocking or too loose, whose timing assertions gate, or which carries a preset), apply the edit only where it is mechanical and leaves the repo valid — a setup-file import, a jq edit to lighthouserc.json — and escalate the rest, since adding a dependency, writing a Lighthouse config or dropping a preset's assertions needs npm, CI or human judgment. Never runs npm, a browser or Lighthouse. Used by development-react:maintenance. |
 
 ## development-spring
 

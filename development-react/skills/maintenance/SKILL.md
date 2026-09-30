@@ -7,8 +7,10 @@ description: >
   finding group to a React agent. A TOPIC plugin: it composes alongside
   development-javascript, not instead of it, triggered by the React marker (`react`
   in the runtime dependencies of any package.json) and only when javascript is also
-  detected. The v0.1 tool universe is deliberately EMPTY, so a valid payload yields
-  a zero-group plan; tools arrive with #957-#960. CI remediation reuses
+  detected. Two tools are routed, one group each, both to react-webui-quality-advisor:
+  a11y (the axe package and toHaveNoViolations matcher) and lighthouse_budget (the
+  lighthouserc.json byte budgets and timing gates). The routing is the executable
+  scripts/plan-dispatch.zsh, whose stdout is returned verbatim. CI remediation reuses
   development-javascript's js-ci-fixer. A single invocation returns the plan. The
   per-group work agents are the orchestrator's job, not the dispatcher's. Pure
   function of its JSON input; does not run its own detection or gather — it validates
@@ -31,24 +33,23 @@ Like the other topic plugins (`development-spring`, `development-docs`,
 dance** — a topic has no application test suite of its own. This dispatcher is a
 single invocation returning one `plan`.
 
-**This is the foundation slice (#956), and its tool universe is deliberately
-empty.** The plugin exists so the React topic is discovered, loads, and composes
-alongside `development-javascript` in dispatch — the wiring the rest of epic #686
-sits on. The gather (`gather-react-findings.zsh`) is real but tool-less, which is
-what moves `react` from `unsupported_topics` into `supported_topics`: a marker
-without a gather would be detected but never dispatched, leaving this slice's one
-job unverified. Consequently **every valid payload yields an empty plan today** —
-that is the correct, testable result, not an error. Tools arrive with #957 (bootstrap
-templates), #958 (React Query + MSW binding), #959 (review panel), and #960
-(a11y / Playwright / Lighthouse budgets).
+**The routing is executable (#1948).** The decision lives in
+`scripts/plan-dispatch.zsh`, a pure function of the payload, following
+`development-composition` (#1747): you run it and return its stdout verbatim, so
+the plan is tested rather than re-derived by a model on every run. The gather
+(`gather-react-findings.zsh`, #1947) audits two WebUI quality gates, `a11y` and
+`lighthouse_budget`, and reports **advisory** findings: the gates that **block**
+are the ones bootstrap renders into a new React app (#1946). Both tools route to
+`react-webui-quality-advisor`, which applies an edit only where it is mechanical
+and escalates the rest.
 
-**Input:** `$ARGUMENTS` is the absolute path to a JSON file. Read it.
+**Input:** `$ARGUMENTS` is the absolute path to a JSON file.
 
 **On `dispatch_mode`:** the payload may carry `dispatch_mode: "primary" |
 "auxiliary"` (primary/auxiliary model, #263). React findings are triaged the same
 in either mode, so accept the field; it does not change the plan.
 
-## Step 1 — read and validate the payload
+## Step 1 — validate the payload and run the planner
 
 Check the **no-arguments** case first, so a user who ran
 `/development-react:maintenance` directly gets the explanation rather than a
@@ -57,46 +58,88 @@ confusing `no payload file at:` with an empty path:
 ```bash
 [ -n "$ARGUMENTS" ] || { echo "development-react:maintenance is a dispatch target for /development:maintenance, not a standalone command"; exit 1; }
 test -f "$ARGUMENTS" || { echo "no payload file at: $ARGUMENTS"; exit 1; }
-jq -e '.schema_version == "2"' "$ARGUMENTS" >/dev/null \
-  || { echo "unexpected payload schema (want schema_version 2)"; exit 1; }
+zsh "<skill-base-dir>/scripts/plan-dispatch.zsh" "$ARGUMENTS"
 ```
 
-**Stop on any validation failure.** If a path was given but the payload file is
-missing, unreadable, not JSON, or its `schema_version` is not `"2"`, report the
-one-line error from the check above and **stop** — never fall through to Step 4 and
-return the empty-plan response for a payload you could not validate. The empty plan
-is for a *valid* v2 payload, **not** for a broken or wrong-version one (masking a
-payload-contract break — e.g. a future v3 orchestrator — as "nothing to do" would be
-a silent failure). This distinction is what keeps the empty plan honest while the
-tool universe is empty: an unvalidatable payload and a tool-less one must never
-produce the same response.
+The planner itself refuses a payload that is not JSON or whose
+`schema_version == "2"` check fails, before building anything:
 
-## Step 2 — read the findings
+- **Exit 0** → its stdout **is** the response. Return it inline, unchanged —
+  never add, drop or reword a group or entry, and never add a plan group of your
+  own.
+- **Exit 1** → the payload could not be validated (missing file, not JSON,
+  `schema_version` not `"2"`) or `jq` is missing. Report the one stderr line and
+  **stop**. Never fall back to an empty plan for a payload you could not validate:
+  the empty plan is for a *valid* payload with nothing to do, and masking a
+  payload-contract break — e.g. a future v3 orchestrator — as "nothing to do" would
+  be a silent failure.
+- **Exit 2** → your own malformed invocation; fix it and re-run once. If it exits
+  2 again, report the stderr line and **stop**, as for exit 1.
 
-The tools this plugin handles live under `findings_by_tool`. **In v0.1 there are
-none** — the table is empty by design and is filled in by #957-#960:
+## Step 2 — the routing table
+
+The tools this plugin handles live under `findings_by_tool`:
 
 | Tool | Routed to | Character |
 | --- | --- | --- |
-| *(none yet — the v0.1 tool universe is empty)* | — | — |
+| `a11y` | `react-webui-quality-advisor` (opus) | the axe package and `toHaveNoViolations` matcher: a narrow setup-file fix, otherwise escalated |
+| `lighthouse_budget` | `react-webui-quality-advisor` (opus) | `lighthouserc.json` byte budgets and timing gates: `jq` edits, re-parsed after each one |
 
-Respect `dispatch_filter` if present: only build groups for tools listed in
+One group per tool, the `development-docs` pattern. The planner respects
+`dispatch_filter` if present: it only builds groups for tools listed in
 `.dispatch_filter.only_tools`. In practice the orchestrator **omits
 `dispatch_filter` for topics** and skips topic dispatch entirely under
-`--tool`/`--concern`, so this handling is **defensive**: with no handled tools, an
-empty plan is the correct result either way.
+`--tool`/`--concern`, so this handling is **defensive**.
 
-## Step 3 — build the plan
+## Step 3 — the group shapes
 
 For each handled tool with a **non-empty** finding list (and allowed by any
-`dispatch_filter`), emit **one group** — at most one per tool. With no handled
-tools in v0.1, the plan is always `[]`. When #957-#960 register their tools, each
-adds its row to the Step 2 table and its group shape here, following the
-`development-docs` pattern.
+`dispatch_filter`), the planner emits **one group** — at most one per tool, `a11y`
+first. A tool whose finding list is empty gets no group. Finding ids pass through
+unchanged, including a three-part id whose assertion id contains a colon
+(`lighthouse_budget:timing_assertion_blocking:categories:performance`).
+
+Group for `a11y` (only when `findings_by_tool.a11y` is non-empty):
+
+```json
+{
+  "group_id": 1,
+  "tool": "a11y",
+  "description": "Triage <N> accessibility-gate finding(s)",
+  "findings": ["<finding id>", "..."],
+  "files": ["<the de-duplicated union of the findings' files>"],
+  "rationale": "the axe package and toHaveNoViolations matcher findings triaged together by react-webui-quality-advisor",
+  "agent": "react-webui-quality-advisor",
+  "isolation": true,
+  "suggested_pr_title": "test(a11y): register the axe toHaveNoViolations matcher",
+  "priority_score": 0.5
+}
+```
+
+Group for `lighthouse_budget` (only when `findings_by_tool.lighthouse_budget` is
+non-empty):
+
+```json
+{
+  "group_id": 2,
+  "tool": "lighthouse_budget",
+  "description": "Triage <N> Lighthouse budget finding(s)",
+  "findings": ["<finding id>", "..."],
+  "files": ["lighthouserc.json"],
+  "rationale": "the lighthouserc.json budget findings triaged together by react-webui-quality-advisor",
+  "agent": "react-webui-quality-advisor",
+  "isolation": true,
+  "suggested_pr_title": "ci(lighthouse): align lighthouserc.json with the family byte budgets",
+  "priority_score": 0.4
+}
+```
+
+`group_id` counts the emitted groups from 1, so a lone `lighthouse_budget` group
+is `1`. `isolation: true` — the agent edits the repo, so it runs in a worktree.
 
 **Never invent a group for an unhandled tool** — and never let it vanish either. If
-a payload carries findings under a tool this table does not list, leave it out of the
-plan **and add an entry to `missing_tooling`**:
+a payload carries findings under a tool this table does not list, the planner's
+rule is to leave it out of the plan **and add an entry to `missing_tooling`**:
 
 ```json
 { "tool": "<the unhandled tool>",
@@ -111,16 +154,16 @@ plan **and add an entry to `missing_tooling`**:
 for work that was silently dropped. Fabricating a group is equally wrong: it would
 route findings to an agent that does not exist.
 
-## Step 4 — return the response
+## Step 4 — the response
 
-Return this JSON inline (NOT via a file). No `improver_result` — there is no
-coverage pre-flight.
+The planner's stdout, returned inline (NOT via a file). No `improver_result` —
+there is no coverage pre-flight.
 
 ```json
 {
   "schema_version": "2",
   "ci_fixer_agent": "js-ci-fixer",
-  "plan": [ /* always [] in v0.1 — the tool universe is empty */ ],
+  "plan": [ /* one group per handled tool with findings (Step 3); [] when neither has any */ ],
   "missing_tooling": [ /* one entry per unhandled tool that carried findings (Step 3); [] otherwise */ ]
 }
 ```
@@ -138,15 +181,19 @@ Notes on the fields:
   plugin — so the language plugin itself can still be absent. The orchestrator covers
   the gap: if the named agent cannot be spawned it escalates exactly as for
   `ci_fixer_agent: null` — never substituting a different fixer.
-- **Empty `plan`** — the v0.1 tool universe is empty, so a valid payload always
-  returns `"plan": []`. Because the payload's `tooling_configured` is **also** empty,
-  the orchestrator records this as *"no tools registered for this topic yet — nothing
-  was inspected"*, **not** as "clean". That distinction is the orchestrator's rule for
-  reading an empty topic plan; do not describe an empty v0.1 plan as a clean result.
+- **Empty `plan`** — an empty plan with **both** tools reported configured in the
+  payload's `tooling_configured` and no `missing_tooling` entry is **clean**: the
+  gather inspected both gates and found nothing. A tool reported **unconfigured**
+  (`false`) is **not** clean — the gate it audits is absent or could not be judged.
+  Usually the gather says so with a finding (`a11y:no_axe_package`,
+  `lighthouse_budget:missing_config` or `invalid_config`) that the plan routes like
+  any other. When it could not judge at all it leaves only a `<tool>:` note, and the
+  planner then emits a `missing_tooling` entry for that tool citing the note — so
+  an unaudited gate is never returned as an empty, clean-looking response.
 - **`missing_tooling`** — one entry per tool that carried findings but is **not** in
-  Step 2's routing table (Step 3). Empty **only** when the payload carried no such
-  findings — never emit an empty `plan` *and* an empty `missing_tooling` for a
-  payload that carried findings.
+  Step 2's routing table (Step 3), plus one per handled tool the gather could not
+  audit (above). Empty **only** when neither holds — never emit an empty `plan`
+  *and* an empty `missing_tooling` for a payload that carried findings.
 
 ## What you never do
 
@@ -157,4 +204,4 @@ Notes on the fields:
   `findings` list — pass the finding ids through faithfully.
 - Don't hold any JavaScript/TypeScript-generic logic — ESLint, Prettier, vitest,
   tsconfig and coverage belong to `development-javascript`. This plugin owns React
-  framework idioms only.
+  framework idioms and the React WebUI quality gates only.

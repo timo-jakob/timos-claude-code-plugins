@@ -408,10 +408,13 @@ gather (`gather-react-findings.zsh`, which lives in `development`) is what moves
 flapping timing gate). Both check configuration only. The gates that **block**
 are the ones bootstrap renders into a new React app
 ([#1946](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1946)).
-The dispatcher does not route the two tools yet
-([#960](https://github.com/timo-jakob/timos-claude-code-plugins/issues/960)), so
-it reports their findings under `missing_tooling`. CI remediation reuses
-`development-javascript`'s `js-ci-fixer`.
+The dispatcher routes each tool's findings as one group to
+`react-webui-quality-advisor`
+([#1948](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1948)),
+which applies an edit only where it is mechanical — a setup-file matcher import,
+a `jq` edit to `lighthouserc.json` — and escalates the rest. It never runs npm, a
+browser or Lighthouse. CI remediation reuses `development-javascript`'s
+`js-ci-fixer`.
 
 **The React review panel
 ([#959](https://github.com/timo-jakob/timos-claude-code-plugins/issues/959)).**
@@ -450,7 +453,7 @@ replacing it. The templates live with every other bootstrap template, in
 
 | Skill | Command | Description |
 | ------- | --------- | ------------- |
-| Maintenance dispatcher | (dispatch target of `/development:maintenance`) | Topic dispatcher for React findings. Validates the v2 payload and returns a plan. Empty tool universe for now — always an empty plan until [#960](https://github.com/timo-jakob/timos-claude-code-plugins/issues/960) registers tools. |
+| Maintenance dispatcher | (dispatch target of `/development:maintenance`) | Topic dispatcher for React findings. Validates the v2 payload and returns a plan from the executable `plan-dispatch.zsh`. Routes `a11y` and `lighthouse_budget` to `react-webui-quality-advisor`, one group per tool ([#1948](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1948)). |
 | Review | `/development-react:review [paths]` | Runs `react-idioms-reviewer` over the change — the `react_idioms` dimension. `/development:resolve-issue` runs it beside `/development-javascript:review` on a React repo ([#959](https://github.com/timo-jakob/timos-claude-code-plugins/issues/959)) |
 
 **Agents:**
@@ -458,6 +461,7 @@ replacing it. The templates live with every other bootstrap template, in
 | Agent | Model | Focus |
 | ------- | ------- | ------- |
 | react-idioms-reviewer | opus | Rules of Hooks and stale closures (CRITICAL), server state outside TanStack Query (WARNING), Vite SPA shape and component structure (SUGGESTION) (#959) |
+| react-webui-quality-advisor | opus | Triages `a11y` and `lighthouse_budget` findings: a narrow setup-file matcher import and `jq` edits to `lighthouserc.json` budgets and timing gates are fixed; a missing axe package, a missing or invalid config and a preset are escalated (#1948) |
 
 ## development-kubernetes
 
