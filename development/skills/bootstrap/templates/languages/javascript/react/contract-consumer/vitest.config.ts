@@ -1,4 +1,4 @@
-import { defineConfig, mergeConfig } from "vitest/config";
+import { configDefaults, defineConfig, mergeConfig } from "vitest/config";
 import viteConfig from "./vite.config";
 
 // Vitest config — CONTRACT-CONSUMER + REACT variant (development-react #957).
@@ -15,6 +15,9 @@ export default mergeConfig(
   defineConfig({
     test: {
       environment: "jsdom",
+      // tests/e2e/ holds the Playwright smoke specs (#1946), which Playwright runs in a real
+      // browser — never Vitest, whose default include would otherwise collect *.spec.ts.
+      exclude: [...configDefaults.exclude, "tests/e2e/**"],
       setupFiles: ["./src/test/msw-setup.ts", "./src/test/setup.ts"],
       coverage: {
         provider: "v8",

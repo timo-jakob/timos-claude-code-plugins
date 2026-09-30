@@ -1,0 +1,37 @@
+# Doc-only PR companion for webui-quality.yml (#1946).
+#
+# `e2e (playwright)` and `lighthouse (budgets)` are required status checks, and
+# GitHub leaves a required check at `expected` forever when the workflow that
+# defines it was skipped via `paths-ignore`. This sibling triggers ONLY on the
+# paths webui-quality.yml ignores and reports success under the SAME two job
+# names, so a doc-only PR can merge. Rendered alongside webui-quality.yml by the
+# React overlay (bootstrap §3k.5), never on its own.
+#
+# Mixed PRs (code and doc paths) fire both workflows; the real gate takes
+# minutes and completes last, so its result is the one that counts (#96).
+name: WebUI Quality — docs noop
+
+on:
+  pull_request:
+    branches: ["{{DEFAULT_BRANCH}}"]
+    paths:
+      - "**.md"
+      - "LICENSE"
+      - ".gitignore"
+      - "docs/**"
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: e2e (playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Doc-only PR — skipping the Playwright smoke test (noop companion for a required check)."
+
+  lighthouse:
+    name: lighthouse (budgets)
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Doc-only PR — skipping the Lighthouse budgets (noop companion for a required check)."

@@ -4127,8 +4127,10 @@ restate or loosen it here. Its three outcomes:
 outside it. In State D a marker match is an **adoption gap** when any of these
 holds: `src/test/setup.ts` is missing, or the on-disk `eslint.config.js` or
 `vitest.config.ts` is not the React variant the selection table below picks (for
-example it is still a known predecessor). Offer it in the plan and complete it
-as a fresh bootstrap would.
+example it is still a known predecessor). So is a missing
+`.github/workflows/webui-quality.yml` or `.github/workflows/webui-quality-noop.yml`
+— a React app bootstrapped before the WebUI gates (#1946), or one that lost the
+noop. Offer it in the plan and complete it as a fresh bootstrap would.
 
 **Prerequisite — bootstrap augments a Vite app, it never creates one.** The
 blessed entry point is
@@ -4175,7 +4177,7 @@ first **snapshot `package.json` and the lockfile**, since §3k's own
 shipping a manifest:
 
 ```text
-npm i -D vitest jsdom @testing-library/react @testing-library/dom @testing-library/jest-dom
+npm i -D vitest jsdom @testing-library/react @testing-library/dom @testing-library/jest-dom axe-core @playwright/test @lhci/cli
 # only the ones package.json does not already list (create-vite 8 and earlier
 # provide them; 9+ does not):
 npm i -D eslint-plugin-react-hooks eslint-plugin-react-refresh globals
@@ -4207,7 +4209,8 @@ same rules instead. Because §3k wrote neither config, no committed config names
 the discarded `src/test/msw-setup.ts`. The prompt answers given against the
 consumer+React diff do **not** carry over to the plain pair: a file whose prompt
 resolved to skip **stays skipped**, with its skip consequences below (for
-`vitest.config.ts`, `src/test/setup.ts` and the example test withheld); a file
+`vitest.config.ts`, `src/test/setup.ts`, the example test and the WebUI gate set
+withheld); a file
 whose prompt resolved to overwrite gets a **fresh** rule-3 prompt showing the
 plain React diff, since that consent was for different content; a known
 predecessor of the plain variant is overwritten without a prompt.
@@ -4223,9 +4226,30 @@ show (a hand-written MSW setup alone is not §3k's machinery):
 | absent (§3k skipped, stopped, aborted, or not a consumer) | `react/eslint.config.js` → `eslint.config.js`, `react/vitest.config.ts` → `vitest.config.ts` |
 
 Both variants also render `react/src/test/setup.ts` → `src/test/setup.ts` (the
-testing-library setup module) and `react/src/Greeting.test.tsx` →
-`src/Greeting.test.tsx` (one self-contained example component test). None
-carries a `{{…}}` placeholder; `render.zsh`'s leftover check proves it:
+testing-library setup module, which also registers the family-owned
+`toHaveNoViolations` axe matcher) and `react/src/Greeting.test.tsx` →
+`src/Greeting.test.tsx` (one self-contained example component test), plus the
+**WebUI gates** (#1946), the same in both variants:
+
+| Source (under `react/`) | Target | Gate |
+|---|---|---|
+| `src/test/a11y-canary.test.tsx` | `src/test/a11y-canary.test.tsx` | axe, inside `test-and-coverage`: a known-bad render must report at least one violation, so an unwired matcher turns it red |
+| `tests/e2e/playwright.config.ts`, `tests/e2e/smoke.spec.ts` | the same paths | `e2e (playwright)`: the production build served by `vite preview` on port 4173 |
+| `lighthouserc.json` | `lighthouserc.json` | `lighthouse (budgets)`: `@lhci/cli` fails the build above 307200 bytes of script or 512000 bytes in total; LCP/TBT/CLS are collected, never asserted |
+| `.github/workflows/webui-quality.yml.tmpl` | `.github/workflows/webui-quality.yml` | runs both jobs, skipping the quality workflows' doc-only paths |
+| `.github/workflows/webui-quality-noop.yml.tmpl` | `.github/workflows/webui-quality-noop.yml` | reports both job names on exactly those doc-only paths |
+
+Both vitest variants exclude `tests/e2e/**`, so `test-and-coverage` never
+collects the Playwright spec, and the harness never writes into
+`tests/acceptance/web/` (the deployed-UI spine, #702). **The two jobs are
+required contexts:** `branch-protection.sh` adds `e2e (playwright)` and
+`lighthouse (budgets)` whenever **both** `.github/workflows/webui-quality.yml` and
+its noop are on disk (with one missing, it warns and requires neither, since the
+PRs that half skips would never report them), and `SETUP.md` §4 names them.
+Merge `react/gitignore` into `.gitignore` the way §3d merges a language
+fragment (see *`.gitignore` merging*), so the app ignores `playwright-report/`,
+`test-results/` and `.lighthouseci/`. Only the two workflows carry a placeholder (`{{DEFAULT_BRANCH}}`); `render.zsh`'s leftover
+check proves every one resolved:
 
 ```bash
 # §3k machinery present → the consumer+React pair
@@ -4235,7 +4259,13 @@ carries a `{{…}}` placeholder; `render.zsh`'s leftover check proves it:
   languages/javascript/react/contract-consumer/eslint.config.js \
   languages/javascript/react/contract-consumer/vitest.config.ts \
   languages/javascript/react/src/test/setup.ts \
-  languages/javascript/react/src/Greeting.test.tsx
+  languages/javascript/react/src/Greeting.test.tsx \
+  languages/javascript/react/src/test/a11y-canary.test.tsx \
+  languages/javascript/react/tests/e2e/playwright.config.ts \
+  languages/javascript/react/tests/e2e/smoke.spec.ts \
+  languages/javascript/react/lighthouserc.json \
+  languages/javascript/react/.github/workflows/webui-quality.yml.tmpl \
+  languages/javascript/react/.github/workflows/webui-quality-noop.yml.tmpl
 
 # §3k machinery absent → the plain React pair
 "<skill-base-dir>/scripts/render.zsh" \
@@ -4244,7 +4274,13 @@ carries a `{{…}}` placeholder; `render.zsh`'s leftover check proves it:
   languages/javascript/react/eslint.config.js \
   languages/javascript/react/vitest.config.ts \
   languages/javascript/react/src/test/setup.ts \
-  languages/javascript/react/src/Greeting.test.tsx
+  languages/javascript/react/src/Greeting.test.tsx \
+  languages/javascript/react/src/test/a11y-canary.test.tsx \
+  languages/javascript/react/tests/e2e/playwright.config.ts \
+  languages/javascript/react/tests/e2e/smoke.spec.ts \
+  languages/javascript/react/lighthouserc.json \
+  languages/javascript/react/.github/workflows/webui-quality.yml.tmpl \
+  languages/javascript/react/.github/workflows/webui-quality-noop.yml.tmpl
 ```
 
 **Layer ordering — React composes, it does not clobber.** Four layers can own
@@ -4281,6 +4317,12 @@ known predecessor of the variant being rendered**:
 A file already byte-identical to the variant being rendered is idempotency
 rule 2 (skip silently).
 
+A React app bootstrapped **before the WebUI gates (#1946)** carries the family's
+earlier `vitest.config.ts` (no `tests/e2e/**` exclude) and `src/test/setup.ts`
+(no axe matcher). Neither is a known predecessor, so each takes the rule-3
+prompt below, whose diff is exactly those additions; a skip withholds the gates
+as the skip paragraph below says.
+
 **The create-vite fingerprint** — stated once here, and the definition §3d and
 §3k point at. An **unmodified create-vite `eslint.config.js`** is the stock
 file create-vite 8 and earlier generate for `react-ts`, recognised by content
@@ -4305,8 +4347,19 @@ Step 5 item naming the React layers it lacks. If the prompt for
 `vitest.config.ts` resolves to skip, keep the user's file **and render neither
 `src/test/setup.ts` nor the example test** — without jsdom and the setup module
 the example cannot run — and record a Step 5 item naming the missing React test
-wiring and the two files withheld. Otherwise `src/test/setup.ts` and the example
-test follow the ordinary idempotency rules.
+wiring and the files withheld. **Withhold the whole WebUI gate set with them**:
+the a11y canary, `tests/e2e/playwright.config.ts`, `tests/e2e/smoke.spec.ts`,
+`lighthouserc.json` and both `webui-quality*.yml` workflows. The user's config
+has no `tests/e2e/**` exclude, so Vitest would collect the Playwright spec, and
+no setup module registers the canary's matcher — either turns
+`test-and-coverage` red — and with the workflows absent `branch-protection.sh`
+requires neither WebUI context. Otherwise `src/test/setup.ts` and the example
+test follow the ordinary idempotency rules, and the gate set renders — **except
+the a11y canary whenever `src/test/setup.ts` does not end up as the variant's
+template** (its own prompt resolved to skip): the matcher lives in that module,
+so withhold the canary alone and name it in the Step 5 item. The render blocks
+above list the full set; drop the withheld paths from the list before running
+it.
 
 create-vite 9 and later ship **oxlint** (`.oxlintrc.json`, a `lint: oxlint`
 script) instead of an ESLint config, so on such an app the on-disk
@@ -4316,7 +4369,11 @@ in place — rule 4, never delete what the user has.
 
 Really building the rendered tree — running the example test green, and
 passing ESLint + Prettier at 120 — is not asserted in this repo's suite; it is
-the render-and-build smoke check's job (#1063).
+the render-and-build smoke check's job (#1063). So are the WebUI gates' rendered
+runs: the skeleton and the canary green, the e2e smoke green, and the
+over-budget fixture failing `lighthouse (budgets)`. That fixture lives in this
+repo under `tests/fixtures/react-webui/` and is never in a render list, because a
+rendered over-budget build would turn the blocking gate red from day one.
 
 ### 3k.6. React Query binding (a React repo consuming a spec — #958)
 

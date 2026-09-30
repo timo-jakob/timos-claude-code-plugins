@@ -404,6 +404,27 @@ if [[ "$IAC_ONLY" != "kubernetes" ]]; then
 	checks+=("license-fs" "$STATIC_ANALYSIS")
 	[[ "$VULNERABILITIES" == "trivy" ]] && checks+=("trivy-fs")
 	[[ "$image_required" == "true" ]] && checks+=("image") # ko-image shares the `image` job name (#875)
+	# --- the React WebUI gates (#1946) ------------------------------------------
+	# webui-quality.yml is rendered only by the React overlay (bootstrap §3k.5).
+	# Its two jobs report under their `name:`s, and those are the contexts. Gated on
+	# the workflow being ON DISK, exactly as `image` is on ko-image.yml above: a
+	# non-React repo, or a React repo bootstrapped before #1946, has no workflow to
+	# report them, and a required context nothing reports wedges every PR at
+	# `expected`. BOTH halves, like `no-cluster-deploy` above: the workflow skips
+	# doc-only PRs and its noop companion reports the same names on exactly those,
+	# so with either missing some PRs would never report them. A non-React repo has
+	# neither file and gets no warning.
+	webui=".github/workflows/webui-quality.yml"
+	webui_noop=".github/workflows/webui-quality-noop.yml"
+	if [[ -f "$webui" && -f "$webui_noop" ]]; then
+		checks+=("e2e (playwright)" "lighthouse (budgets)")
+	elif [[ -f "$webui" || -f "$webui_noop" ]]; then
+		missing_half="$webui"
+		[[ -f "$missing_half" ]] && missing_half="$webui_noop"
+		warn "\`$missing_half\` is absent — NOT requiring \`e2e (playwright)\` or"
+		warn "\`lighthouse (budgets)\` (the PRs that half covers would never report them)."
+		warn "Re-run /development:bootstrap to render the React WebUI gates (#1946)."
+	fi
 	if [[ "$HAS_CODEQL" == "true" ]]; then
 		# Gated on codeql.yml actually being ON DISK, like `image`/ko-image and
 		# `no-cluster-deploy` above: a context no workflow reports wedges every

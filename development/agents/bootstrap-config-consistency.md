@@ -26,9 +26,22 @@ Walk through every cross-reference and verify both sides agree:
    - Every job ID declared in `.github/workflows/quality-*.yml` that should
      gate merges is included in `branch-protection.sh`'s `checks` array.
    - Conversely, every entry in `checks` corresponds to an actual job ID in
-     the workflow.
+     the workflow — or, for a job that reports under its `name:` (the React
+     WebUI jobs below), to that job's name.
    - Watch for renames: the unified `image` job (not `snyk-container` /
      `trivy-image`), the CodeQL job is named `analyze`.
+   - React overlay (§3k.5): `.github/workflows/webui-quality.yml` and its
+     companion `webui-quality-noop.yml` (`webui-quality*.yml`). Their jobs
+     report under their `name:`, not their ID, so compare the **names**.
+     `branch-protection.sh` decides from what is **on disk after the write**,
+     so judge the same state: `e2e (playwright)` and `lighthouse (budgets)`
+     are in `checks` exactly when **both** `webui-quality*.yml` files will be
+     on disk — planned this run **or already there** (a byte-identical file
+     skipped by idempotency rule 2, or a user's copy kept by a rule-3 skip,
+     still counts). With only one of them on disk the script warns and
+     requires neither, which is correct, not a mismatch. The noop must
+     declare the same two job names as the real workflow — a name only one of
+     them carries leaves a doc-only PR stuck at `expected`.
 
 3. **Secret references**
    - Every `${{ secrets.X }}` in the workflows is documented in
