@@ -1134,10 +1134,12 @@ both keys (`[]` when compliant):
   `preset_present` (MINOR). `warn` and `off` are never findings.
   `tooling_configured.lighthouse_budget` means the file exists and parses.
 
-The Playwright gate has no audit here. Routing these two groups to a fixer in the
-`development-react` dispatcher is #960's dispatcher child. Until that lands the
-dispatcher surfaces them under `missing_tooling`, which is the intended interim
-behaviour.
+The Playwright gate has no audit here. The `development-react` dispatcher routes
+each of the two tools as one group to `react-webui-quality-advisor` (#1948), via
+its executable `plan-dispatch.zsh`. The agent applies only the mechanical edits —
+a setup-file matcher import, `jq` edits to `lighthouserc.json` re-parsed after
+each one — and escalates a missing axe package, a missing or invalid config and a
+preset, since those need npm, CI or a judgment call.
 
 ### Deployment — GitOps promotion and immutable references (#1189)
 

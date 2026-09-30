@@ -486,26 +486,30 @@ write_pkg() {
   contains "$body" 'does not handle yet'
 }
 
-@test "the dispatcher's ROUTING TABLE declares the empty v0.1 tool universe" {
+@test "the dispatcher's ROUTING TABLE routes a11y and lighthouse_budget to react-webui-quality-advisor (#1948)" {
   skill="$REPO_ROOT/development-react/skills/maintenance/SKILL.md"
-  # the table row itself — not a whole-file grep for '#957', which the frontmatter
-  # and prose already satisfy and which would survive deleting the table
-  row="$(grep -F '(none yet' "$skill")"
-  [ -n "$row" ]
-  contains "$row" 'the v0.1 tool universe is empty'
+  # the table rows themselves — a whole-file grep for the agent name would be
+  # satisfied by the frontmatter and prose, and would survive deleting the table
+  run grep -cE '^\| `a11y` \| `react-webui-quality-advisor` \(opus\) \|' "$skill"
+  [ "$output" = "1" ]
+  run grep -cE '^\| `lighthouse_budget` \| `react-webui-quality-advisor` \(opus\) \|' "$skill"
+  [ "$output" = "1" ]
+  # and the empty-universe placeholder row is gone
+  run grep -F '(none yet' "$skill"
+  [ "$status" -eq 1 ]
 }
 
-@test "the development-react plugin.json exists at v0.2.0 and marketplace.json matches it in lockstep" {
+@test "the development-react plugin.json exists at v0.3.0 and marketplace.json matches it in lockstep" {
   plugin="$REPO_ROOT/development-react/.claude-plugin/plugin.json"
   [ -f "$plugin" ]
   run jq -er '.version' "$plugin"
   [ "$status" -eq 0 ]
-  [ "$output" = "0.2.0" ]
+  [ "$output" = "0.3.0" ]
 
   run jq -er '.plugins[] | select(.name == "development-react") | .version' \
     "$REPO_ROOT/.claude-plugin/marketplace.json"
   [ "$status" -eq 0 ]
-  [ "$output" = "0.2.0" ]
+  [ "$output" = "0.3.0" ]
 }
 
 @test "the marketplace entry points at ./development-react" {
