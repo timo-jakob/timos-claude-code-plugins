@@ -9,12 +9,13 @@
 #                        [--has-ko true|false] \
 #                        --has-codeql true|false \
 #                        [--codeql-languages "python javascript-typescript ..."] \
-#                        [--iac-only true|false] \
+#                        [--iac-only false|kubernetes] \
 #                        --default-branch main \
 #                        [--require-signed-commits true|false]
 #
-# --iac-only true is the infrastructure-as-code path (the bootstrap skill's §3l):
-# the kubernetes topic marker with no application language AND no other
+# --iac-only is an enum naming the IaC topic, not a boolean: `false` (the
+# default) is the language-app path, and `kubernetes` is the
+# infrastructure-as-code path (the bootstrap skill's §3l): the kubernetes topic marker with no application language AND no other
 # `primary:` recorded. A detected language, or a recorded language /
 # claude-plugin primary, settles it false whatever the marker says; the mixed
 # repo (marker plus a stray tooling language) is #1193. There, the language-app
@@ -49,7 +50,7 @@
 # language-app context set follows #1670 D1 — toolchain plus stack, with no
 # visibility term — so this script neither accepts nor derives visibility: a
 # `--visibility` exits 1 naming the two flags that replaced it. Neither flag is
-# required or read under --iac-only true, whose context set is `gate` alone.
+# required or read under --iac-only kubernetes, whose context set is `gate` alone.
 #
 # --has-codeql is true exactly when the resolved `code_scanning` is `codeql`;
 # CodeQL's public-only rule is enforced at the plan (resolve-tools.zsh step 4,
@@ -74,6 +75,8 @@ HAS_KO="false"
 HAS_CODEQL="false"
 CODEQL_LANGUAGES=""
 IAC_ONLY="false"
+# the one statement of --iac-only's value set, shared by both refusals below
+IAC_ONLY_ENUM_MSG="--iac-only must be one of: false kubernetes"
 DEFAULT_BRANCH="main"
 REQUIRE_SIGNED_COMMITS="false"
 
@@ -110,6 +113,7 @@ while [[ $# -gt 0 ]]; do
 		shift 2
 		;;
 	--iac-only)
+		[[ $# -ge 2 ]] || die "$IAC_ONLY_ENUM_MSG"
 		IAC_ONLY="$2"
 		shift 2
 		;;
@@ -126,13 +130,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 # validated, not merely compared: an unvalidated flag silently falls through to
-# the language-app context set on any value but the literal "true" — `True`,
-# `yes`, or a following flag swallowed as the value — and that is exactly the
-# permanent-`expected` state --iac-only exists to prevent
-[[ "$IAC_ONLY" =~ ^(true|false)$ ]] || die "--iac-only must be true or false"
+# the language-app context set on any value but the literal "kubernetes" —
+# `Kubernetes`, the retired `true`, or a following flag swallowed as the value —
+# and that is exactly the permanent-`expected` state --iac-only exists to prevent
+[[ "$IAC_ONLY" =~ ^(false|kubernetes)$ ]] || die "$IAC_ONLY_ENUM_MSG"
 # The toolchain names the language-app contexts, so it is required exactly on
 # that path — and never read on the IaC path, which requires `gate` alone.
-if [[ "$IAC_ONLY" != "true" ]]; then
+if [[ "$IAC_ONLY" != "kubernetes" ]]; then
 	[[ "$STATIC_ANALYSIS" =~ ^(sonarcloud|sonarqube)$ ]] ||
 		die "--static-analysis must be sonarcloud or sonarqube (the resolved static_analysis)"
 	[[ "$VULNERABILITIES" =~ ^(snyk|trivy)$ ]] ||
@@ -162,7 +166,7 @@ checks=("test-and-coverage" "semgrep" "pre-commit")
 # wedges every PR at `expected` forever — the failure this file warns about four
 # separate times. branch-protection.sh always runs from the target repo root, so
 # the path is repo-relative.
-if [[ "$IAC_ONLY" != "true" ]]; then
+if [[ "$IAC_ONLY" != "kubernetes" ]]; then
 	# BOTH halves, because the workflow runs the script: a present workflow with
 	# a missing checker makes every PR fail with `no such file or directory`
 	# instead of a verdict — the same wedge one level down.
@@ -182,7 +186,7 @@ fi
 # quality-*.yml is not rendered, so every context above would sit at `expected`
 # forever and block each PR. The toolchain contexts below are skipped for the same
 # reason — its contexts come from that same unrendered workflow.
-if [[ "$IAC_ONLY" == "true" ]]; then
+if [[ "$IAC_ONLY" == "kubernetes" ]]; then
 	# Gated on the job actually being ON DISK, like `no-cluster-deploy` above and
 	# `image` below — but REFUSED rather than dropped. A repo bootstrapped before
 	# #1604 still carries the per-stage kubernetes-ci.yml, which never reports
@@ -356,7 +360,7 @@ fi
 # Everything below builds the LANGUAGE-APP context set, so the IaC path skips it
 # whole: its `image`/CodeQL/Sonar contexts all come from workflows that path does
 # not render.
-if [[ "$IAC_ONLY" != "true" ]]; then
+if [[ "$IAC_ONLY" != "kubernetes" ]]; then
 	# --- does any workflow actually PROVIDE the shared `image` check? -------------
 	# Both the Docker lane (quality-*.yml's `image` job) and the ko lane
 	# (ko-image.yml's `image` job) report a status check literally named `image`.

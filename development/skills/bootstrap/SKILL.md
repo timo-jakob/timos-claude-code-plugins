@@ -331,7 +331,7 @@ flow. Stop and ask for input wherever marked; do not guess.
    `--vulnerabilities <vulnerabilities>`, because its PUT replaces the whole
    rule: a flag left out is a context silently dropped, and a signing value
    left out clears the signature requirement. **On the §3l path pass
-   neither toolchain flag**: the script's `--iac-only true` mode neither
+   neither toolchain flag**: the script's `--iac-only kubernetes` mode neither
    requires nor reads them:
 
    > **The IaC set is NOT blind-renderable.** `detect-stack.sh` lists
@@ -372,13 +372,13 @@ flow. Stop and ask for input wherever marked; do not guess.
    >
    > **Only when the three-part IaC condition above holds** (workflow present
    > AND resolved language set empty AND no other `primary:` recorded)
-   > invoke `branch-protection.sh` with **`--iac-only true`**, and its context comparison set is the
+   > invoke `branch-protection.sh` with **`--iac-only kubernetes`**, and its context comparison set is the
    > single `gate` context `kubernetes-ci.yml` reports, never the language-app set. The PUT *replaces*
    > the rule, so getting this wrong swaps the live `gate` context for contexts no
    > workflow on that repo reports — pinning every PR on the permanent
    > `expected` state §3l exists to prevent.
    >
-   > **When that `--iac-only true` call REFUSES (exit 1, no rule written)**
+   > **When that `--iac-only kubernetes` call REFUSES (exit 1, no rule written)**
    > (#1606), the workflow on disk cannot report `gate` — typically a repo
    > bootstrapped before #1604, whose present `kubernetes-ci.yml` still has one
    > job per stage, so `missing_artifacts` never lists it and step 5's drift
@@ -458,7 +458,7 @@ flow. Stop and ask for input wherever marked; do not guess.
    Gap-fill actions invoke only the specific Step 4 sub-scripts they need
    (e.g., `branch-protection.sh`, `gh secret set`); they do NOT touch files
    in the working tree — the one exception being the reviewed, marker-carrying
-   `kubernetes-ci.yml` refresh above, when `branch-protection.sh --iac-only true`
+   `kubernetes-ci.yml` refresh above, when `branch-protection.sh --iac-only kubernetes`
    refuses it. The `approval:` record into an existing `.maintenance.yml` that
    has none (step 4's approval paragraph) is not a gap-fill action but is a
    working-tree write too, and both ride Step 4d/4e as the bot PR. If multiple
@@ -583,7 +583,7 @@ flow. Stop and ask for input wherever marked; do not guess.
    `languages` is empty, ask Q4 and its empty-repo confirmation **here, before
    rendering anything** from `missing_artifacts`: on a confirmed "none", drop every
    §3l not-emitted artifact from the list, render the IaC set, and then take step
-   3's `github_state` gap-fill with `--iac-only true`, which the drops have made
+   3's `github_state` gap-fill with `--iac-only kubernetes`, which the drops have made
    reachable; on a language answer, render the list as usual; on a declined
    confirmation, render nothing and halt as Q4 directs.
 
@@ -1069,7 +1069,7 @@ delivered:
   Local hook:       hooks/pre-push runs the same command once `make hooks` has
                     wired it (Step 4a, when the gate already passes; else the
                     final report names `make hooks`)
-  Setup automation: preflight only (--iac-only true) — verifies and
+  Setup automation: preflight only (--iac-only kubernetes) — verifies and
                     batch-installs gh, jq, git and the gate's tools (helm,
                     kustomize, kubeconform, kube-linter, kyverno, trivy, yq).
                     The Sonar / Snyk / runner automation is skipped: nothing on
@@ -4549,7 +4549,7 @@ recorded primary on its own. **Both answers have a defined outcome:**
   `kubernetes` and proceed on this path. The conflict is resolved, so the
   "never on the conflict path" restriction below no longer applies to this run.
 - **They decline, or do not answer** → the recorded value stands, so this is
-  not the IaC path: never emit the workflow or pass `--iac-only true`. But do
+  not the IaC path: never emit the workflow or pass `--iac-only kubernetes`. But do
   not simply "take that primary's path" either — this branch is only reachable
   with an **empty** resolved language set, so for a recorded *language* primary
   there is no language path to fall back to: §3b/§3c key on the toolchain with
@@ -4627,12 +4627,12 @@ selector, which needs a toolchain this path never resolves). It does **not** emi
 | `infra/sonarqube/**`, `infra/github-runner/README.md` (private path) | Scaffolding for a Sonar scan and a self-hosted runner this path never generates or uses |
 | the §3d per-language fragments (`.nvmrc`, `eslint.config.js`, `ruff.toml`, `release.yml`, the `gitignore` fragments …) | There is no detected language to configure — the set is keyed on one, so it is inert here rather than suppressed. `detect-stack.sh` holds the fragments out of `missing_artifacts` on the same condition, so a State-D gap-fill cannot re-create them |
 | `.pre-commit-config.yaml` — the whole file, not only its per-language hook blocks | This path's local hook is the version-controlled `hooks/pre-push`, which runs the same gate command CI's `gate` job runs; the file's CI backstop lives in `quality-*.yml`, which this path does not emit either. `detect-stack.sh` holds it out of `missing_artifacts` on this path (§3a) |
-| `scripts/check-no-cluster-deploy.zsh` **and `.github/workflows/no-cluster-deploy.yml`** (#1206) | The gate exists to keep an APPLICATION repo out of the cluster; an infrastructure repo is the one place a cluster write belongs, so requiring it here would fail the repo for doing its job. `detect-stack.sh` holds **both** halves out of `missing_artifacts` on this path — never one without the other, since the workflow runs the script — and `branch-protection.sh --iac-only true` never adds the context |
+| `scripts/check-no-cluster-deploy.zsh` **and `.github/workflows/no-cluster-deploy.yml`** (#1206) | The gate exists to keep an APPLICATION repo out of the cluster; an infrastructure repo is the one place a cluster write belongs, so requiring it here would fail the repo for doing its job. `detect-stack.sh` holds **both** halves out of `missing_artifacts` on this path — never one without the other, since the workflow runs the script — and `branch-protection.sh --iac-only kubernetes` never adds the context |
 | `SETUP.md`'s §3h section and its §1/§6 pre-commit steps, **and the `no-cluster-deploy` bullets in `CLAUDE.md` and `CONTRIBUTING.md`** (the direct-to-cluster rule) | All three scaffolds ARE emitted here, but each describes an installed, required gate this path does not install — and `CLAUDE.md`'s bullet actively tells the repo's agent never to write to a cluster, which is what a GitOps repo exists to do. Drop all three (`SETUP.md` §3h plus the `(§3h)` cross-reference in its §4 bullet; `CLAUDE.md`'s and `CONTRIBUTING.md`'s CI bullets) — and SETUP.md's §1 `pre-commit` install lines, its §1 cross-language `gitleaks`/`semgrep` installs, its §6 all-files `pre-commit` step and its §6 SonarCloud/Snyk first-run note with them, since this path emits neither a pre-commit config nor a quality workflow — or replace each with a one-line pointer to the required `gate` check and its local command, `make lint`. `SETUP.md` §3h opens with an IaC courtesy blockquote, but that is for an app repo's reader — it is not a substitute for removing the section here, and it does not exist in the other two |
 
 **The final report names** the gate command (the resolved `{{GATE_COMMAND}}`,
 `make lint` unless one is recorded), the single required `gate` context — or,
-when `branch-protection.sh --iac-only true` refused (#1606 or #1641 — any exit-1
+when `branch-protection.sh --iac-only kubernetes` refused (#1606 or #1641 — any exit-1
 arm) or fell back on a
 403, that no rule was applied and `gate` is **not yet** required, quoting the
 script's message as the Step 5 item — and
@@ -4645,7 +4645,7 @@ targets first. When Step 4a found the hook already wired, it says instead that t
 hook is wired and rejects pushes until the gate command passes.
 
 **Branch protection still runs — with the IaC context set.** Call Step 4b's
-`branch-protection.sh` with `--iac-only true` and neither toolchain flag
+`branch-protection.sh` with `--iac-only kubernetes` and neither toolchain flag
 (`--static-analysis`, `--vulnerabilities`). That swaps the language-app
 contexts (`test-and-coverage`, `semgrep`, `pre-commit`, `no-cluster-deploy`,
 plus the toolchain-specific Sonar/Trivy/CodeQL and the image contexts) for the single
@@ -4667,7 +4667,7 @@ the repo is not on this path, **whatever `.maintenance.yml` records** (the
 record vetoes, never grants — #1193). **Which of two things you do depends on whether
 `kubernetes-ci.yml` is already on disk.** If it is **not**: bootstrap that
 language normally and do not emit this template, write `primary: kubernetes`, or
-pass `--iac-only true` — a mixed repo is a later slice, and
+pass `--iac-only kubernetes` — a mixed repo is a later slice, and
 the language's own CI already gates its build. This slice covers the
 no-language case only.
 
@@ -5097,7 +5097,7 @@ approval):
   --has-ko "<true|false — whether a root .ko.yaml exists (Go ko image path, #875)>" \
   --has-codeql "<true exactly when resolve-tools.zsh's code_scanning is codeql, else false>" \
   --codeql-languages "<CodeQL language list when has-codeql=true — the same mapped IDs as {{CODEQL_LANGUAGES}}, e.g. 'python javascript-typescript'; either form is accepted: space-separated, or comma-separated as {{CODEQL_LANGUAGES}} renders it; the script splits on commas and whitespace>" \
-  --iac-only "<true on the §3l IaC path — the kubernetes topic marker with an empty RESOLVED language set (after Q4) and no other `primary:` recorded, or a marker-less repo whose Q4 empty-repo confirmation was accepted (§3l); else false. A detected language, or a recorded language / `claude-plugin` primary, settles it `false` whatever the marker says — §3l renders no workflow for the `gate` context to come from>" \
+  --iac-only "<kubernetes on the §3l IaC path — the kubernetes topic marker with an empty RESOLVED language set (after Q4) and no other `primary:` recorded, or a marker-less repo whose Q4 empty-repo confirmation was accepted (§3l); else false. A detected language, or a recorded language / `claude-plugin` primary, settles it `false` whatever the marker says — §3l renders no workflow for the `gate` context to come from>" \
   --default-branch "<DEFAULT_BRANCH>" \
   --require-signed-commits "<Step 4b's signing value — below>"
 ```
@@ -5126,7 +5126,7 @@ The script applies a single protection rule that:
   `no-cluster-deploy` when both of its halves are on disk (#1670 D1). The toolchain always comes from
   *Resolve the toolchain*'s `key=value` output, never from visibility — the
   script accepts no visibility at all. With
-  `--iac-only true` it requires the `kubernetes-ci.yml` `gate` context **instead of**
+  `--iac-only kubernetes` it requires the `kubernetes-ci.yml` `gate` context **instead of**
   the language-app set, because §3l renders no `quality-*.yml` for those
   contexts to come from — so that path passes neither toolchain flag, and the
   script neither requires nor reads them there. Everything else in this list still applies on that
@@ -5176,7 +5176,7 @@ it means CodeQL is **not** a required check. Render `codeql.yml` (§3b) and
 re-run the script, or list it as an outstanding Step 5 item; never report the
 `analyze` contexts as required after that warning.
 
-**One FATAL refusal, on the §3l IaC path only (#1606).** With `--iac-only true`
+**One FATAL refusal, on the §3l IaC path only (#1606).** With `--iac-only kubernetes`
 the script exits **1** before writing anything — neither the rule nor the merge
 settings — when `.github/workflows/kubernetes-ci.yml` cannot report `gate`: it is
 absent, has no `gate` job, or its `gate` job carries `name:`, a `strategy:` block
@@ -5717,7 +5717,7 @@ anything missing:
   --languages "<space-separated detected languages>" \
   --has-dockerfile "<true|false>" \
   --has-ko "<true|false — root .ko.yaml, #875>" \
-  --iac-only "<true on the §3l IaC path, else false>" \
+  --iac-only "<kubernetes on the §3l IaC path, else false>" \
   --claude-approver "<true|false>"
 ```
 
@@ -5739,13 +5739,13 @@ The script will:
    `sonar-scanner`, plus per resolved tool: `snyk` for `snyk`, `trivy` for
    `trivy` — whatever the visibility or Dockerfile — plus language-specific
    linters, plus `parallel` on claude-plugin repos — the bats review-loop gate
-   parallelises via it, #980). With `--iac-only true` the list is `gh`, `jq`,
+   parallelises via it, #980). With `--iac-only kubernetes` the list is `gh`, `jq`,
    `git` and the gate's tools (`helm`, `kustomize`, `kubeconform`,
    `kube-linter`, `kyverno`, `trivy`, `yq`) instead.
 4. Offer to `brew install` all missing pieces in one batch.
 5. Verify `gh auth status`; offer to run `gh auth login` if not authenticated.
 6. When `static_analysis` is `sonarqube`, `vulnerabilities` is `trivy`, or the
-   repo has a Dockerfile (never with `--iac-only true`): verify the Docker
+   repo has a Dockerfile (never with `--iac-only kubernetes`): verify the Docker
    daemon is running and the docker compose plugin is present; offer to launch
    Docker.app if not.
 7. When `--claude-approver true`: verify `python3` is present, verify both
@@ -5805,7 +5805,7 @@ step's.
 > secret. So on the IaC path:
 > run no per-tool script — `enable-github-security.sh` included, which this
 > path has never run (its toggles stay a repo-Settings choice) — and report that
-> branch protection was already applied by Step 4b with `--iac-only true` — **unless
+> branch protection was already applied by Step 4b with `--iac-only kubernetes` — **unless
 > Step 4b hit its #1606 refusal (any exit-1 arm, #1641's three included) or its
 > 403 fallback**, in which case report it as
 > **not** applied and carry Step 4b's outstanding Step 5 item (the rule **and**
@@ -5813,7 +5813,7 @@ step's.
 > that the rule was written. (The
 > `--claude-approver` extension below is likewise moot — a manifests repo has no
 > Approver-capable language.) **Scope: this section only.** The *preflight
-> check* above still runs, **with `--iac-only true` and neither toolchain flag**
+> check* above still runs, **with `--iac-only kubernetes` and neither toolchain flag**
 > (`--static-analysis`, `--vulnerabilities`): it then requires `gh`, `jq`
 > and `git` plus the gate's tools (`helm`, `kustomize`, `kubeconform`,
 > `kube-linter`, `kyverno`, `trivy`, `yq`) — what `make lint` and the pre-push
@@ -5821,7 +5821,7 @@ step's.
 > all-or-nothing install prompt carries nothing this path leaves unused.
 > Declining it is a preflight *failure*, which by the rule above skips Step 4.5:
 > CI's `gate` still gates, but `make lint` and the hook refuse on the first
-> missing tool, so say so in the report. `--iac-only true` also skips preflight's
+> missing tool, so say so in the report. `--iac-only kubernetes` also skips preflight's
 > Docker-daemon check, which exists for image/Trivy/SonarQube consumers this path
 > never emits.
 
@@ -6123,7 +6123,7 @@ and no other `primary:` recorded; a recorded
 `primary: kubernetes` never grants this path on its own — #1193; a marker-less
 repo reaches it only through Q4's empty-repo confirmation)
 Step 4b already required the `kubernetes-ci.yml` `gate` check via
-`--iac-only true`, so branch protection is **not** an outstanding item. What the
+`--iac-only kubernetes`, so branch protection is **not** an outstanding item. What the
 checklist carries instead is what the user cannot infer — **unless
 Step 4b hit its 403 fallback** (no admin permission), in which case the general
 rule wins and the manual branch-protection setup IS an outstanding item, listed

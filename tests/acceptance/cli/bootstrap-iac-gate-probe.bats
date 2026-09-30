@@ -21,7 +21,7 @@
 # manifests` — and gets either a rule that cannot wedge PRs or a refusal naming
 # the exact shape to change.
 #
-# What runs for real: branch-protection.sh --iac-only true against that repo,
+# What runs for real: branch-protection.sh --iac-only kubernetes against that repo,
 # with `gh` and `curl` stubbed (no GitHub is touched; the PUT payload is
 # recorded so the applied rule is asserted, not inferred). The default gate's
 # tests/bootstrap-iac-pipeline.bats covers the same criteria clause by clause,
@@ -68,7 +68,7 @@ EOF
 
 protect() {
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --has-dockerfile false --has-codeql false --iac-only true --default-branch main
+    --has-dockerfile false --has-codeql false --iac-only kubernetes --default-branch main
 }
 
 # the applied rule's required contexts, or nothing when no rule was written

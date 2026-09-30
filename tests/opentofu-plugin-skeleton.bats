@@ -615,12 +615,12 @@ setup() {
 
 @test "ARCHITECTURE.md records that NEITHER half of the branch-protection contract is wired yet (#1159)" {
   # the enumeration above names branch-protection.sh as the consumer of those six
-  # contexts, but that script's IaC path is a BOOLEAN --iac-only resolving to a
-  # literal kubernetes context set, and detect-stack.sh's derivation takes a repo
+  # contexts, but that script's IaC path is an --iac-only enum whose one IaC value
+  # is `kubernetes` (#1892), resolving to a literal kubernetes context set, and detect-stack.sh's derivation takes a repo
   # declaring `primary: opentofu` OFF that path rather than onto it. Unsaid,
   # #1162 is pointed at a flag that cannot select its set.
   contains "$ARCH_FLAT" 'Neither half of that contract is wired yet, and #1162 owns both'
-  contains "$ARCH_FLAT" 'is today a **boolean**'
+  contains "$ARCH_FLAT" 'is today an enum `--iac-only` with a `kubernetes` value'
   contains "$ARCH_FLAT" 'taking a repo **off** that path rather than onto it'
   contains "$ARCH_FLAT" 'a specification for #1162, not a description of a flag that'
   # the PRESCRIPTION half, not just the diagnosis: everything after the colon is
@@ -640,6 +640,9 @@ setup() {
   [ -f "$bp" ]
   bp_body="$(cat "$bp")"
   contains "$bp_body" '--iac-only'
+  # the enum's value set is exactly what the prose says it is today: `kubernetes`
+  # and no opentofu value — #1162 widens it and must retire this needle
+  contains "$bp_body" '[[ "$IAC_ONLY" =~ ^(false|kubernetes)$ ]]'
   lacks "$bp_body" 'state-encryption'
   # the second half: detect-stack.sh's recorded-primary veto has no opentofu arm
   # yet, which is the ONLY reason the prose's "takes a repo off that path" claim
@@ -717,12 +720,12 @@ setup() {
   local skill_3l
   skill_3l="$(sed -n '/^### 3l\./,/^### /p' "$skill" | tr -s '[:space:]' ' ')"
   [ -n "$skill_3l" ]
-  # the POSITIVE wiring clause, not the bare token: §3l states `--iac-only true`
+  # the POSITIVE wiring clause, not the bare token: §3l states `--iac-only kubernetes`
   # in both polarities (its conflict branch says "never emit the workflow or
-  # pass `--iac-only true`"), so a bare needle is satisfied by the negated
+  # pass `--iac-only kubernetes`"), so a bare needle is satisfied by the negated
   # mention alone — the negated-clause hazard this file's header forbids, and it
   # would survive the very relocation this scoped haystack exists to catch.
-  contains "$skill_3l" '`branch-protection.sh` with `--iac-only true`'
+  contains "$skill_3l" '`branch-protection.sh` with `--iac-only kubernetes`'
   # #1160 put opentofu into this file at TWO sites — the detect-stack exit-2
   # contract (either marker can abort the run) and the `is_opentofu` output-key
   # bullet — so the whole-file sweep is replaced by a SCOPED one: §3l is where

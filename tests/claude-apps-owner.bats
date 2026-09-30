@@ -609,13 +609,13 @@ fix: $SCRIPTS/install-claude-apps.zsh --verify --fix" ]
 
   in_personal_repo "timo-jakob"
   run --separate-stderr bash "$PREFLIGHT" --languages "" \
-    --has-dockerfile false --iac-only true --claude-approver true </dev/null
+    --has-dockerfile false --iac-only kubernetes --claude-approver true </dev/null
   [ "$status" -eq 0 ]
   contains "$output" "Both Claude Apps registered locally for timo-jakob (user)"
 
   in_org_repo "acme-corp"
   run --separate-stderr bash "$PREFLIGHT" --languages "" \
-    --has-dockerfile false --iac-only true --claude-approver true </dev/null
+    --has-dockerfile false --iac-only kubernetes --claude-approver true </dev/null
   [ "$status" -ne 0 ]
   contains "$output" "approver: not registered"
   contains "$output" "maintenance: registered"
@@ -713,7 +713,7 @@ fix: $SCRIPTS/install-claude-apps.zsh --verify --fix" ]
   [ "$status" -eq 1 ]
   contains "$stderr" "register-claude-apps.zsh --list"
   run --separate-stderr bash "$PREFLIGHT" --languages "" \
-    --has-dockerfile false --iac-only true --claude-approver true </dev/null
+    --has-dockerfile false --iac-only kubernetes --claude-approver true </dev/null
   [ "$status" -ne 0 ]
   contains "$stderr" "register-claude-apps.zsh --list"
 

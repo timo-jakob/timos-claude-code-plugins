@@ -576,7 +576,7 @@ Disable it on `{{DEFAULT_BRANCH}}`:
   --codeql-languages "<langs>" \
   --iac-only false \
   --default-branch {{DEFAULT_BRANCH}}
-  # (an infrastructure repo recording `primary: kubernetes`: pass --iac-only true
+  # (an infrastructure repo recording `primary: kubernetes`: pass --iac-only kubernetes
   #  and drop --static-analysis / --vulnerabilities, or the rule loses `gate`)
   # (note: --require-signed-commits omitted — defaults to false)
 ```
@@ -590,7 +590,7 @@ without the flag.
 
 > **Infrastructure (GitOps) repositories: this section does not apply.** If
 > `.maintenance.yml` records `primary: kubernetes`, bootstrap installs neither
-> half of this gate and `branch-protection.sh --iac-only true` never requires
+> half of this gate and `branch-protection.sh --iac-only kubernetes` never requires
 > the context — your required check is `kubernetes-ci.yml`'s single `gate`
 > instead. Writing to a cluster is what an infrastructure repository is *for*.
 
@@ -747,7 +747,7 @@ To do it manually instead: repo Settings → Branches → Add rule for `{{DEFAUL
   {{REQUIRED_CONTEXTS}}
   <!-- --- TOOLCHAIN-END --- -->
   - **`no-cluster-deploy` (§3h)**, listed above, is required on every application repository only **when BOTH `.github/workflows/no-cluster-deploy.yml` and `scripts/check-no-cluster-deploy.zsh` are on disk** (absent, the script warns and omits the context, exactly as it does for `image`/`ko-image.yml`, so a repo predating the gate is never wedged at `expected`). Unlike `image`, it carries **no path filter at all** — a required check whose workflow a `paths:` filter skipped sits at `expected` forever and wedges every PR that misses those paths. It is a static scan of `.github/workflows/**`, so running it unconditionally costs seconds. It is **not** in the IaC set below: an infrastructure repo is the one place a cluster write belongs.
-  - **IaC** (the kubernetes topic marker — or bootstrap's explicit empty-GitOps-repo confirmation — with no application language and no other `primary:` recorded in `.maintenance.yml` — `branch-protection.sh --iac-only true`): `gate`. This single context **replaces** the list above rather than adding to it: that path emits no `quality-*.yml`, so every language-app context would sit at `expected` forever and block each PR. It comes from `.github/workflows/kubernetes-ci.yml`'s one job, which runs the repo's gate command (`make lint` → `scripts/k8s-gate.zsh`, whose stages validate the **rendered** manifests rather than the templates).
+  - **IaC** (the kubernetes topic marker — or bootstrap's explicit empty-GitOps-repo confirmation — with no application language and no other `primary:` recorded in `.maintenance.yml` — `branch-protection.sh --iac-only kubernetes`): `gate`. This single context **replaces** the list above rather than adding to it: that path emits no `quality-*.yml`, so every language-app context would sit at `expected` forever and block each PR. It comes from the IaC workflow's one `gate` job, `.github/workflows/kubernetes-ci.yml` on the kubernetes path, which runs the repo's gate command (there, `make lint` → `scripts/k8s-gate.zsh`, whose stages validate the **rendered** manifests rather than the templates).
   - **`image` is path-conditional (#386):** it is listed above when the repository has a Dockerfile; a Go repository that publishes with ko (a root `.ko.yaml`) reports `image` from `ko-image.yml` instead, so require it there too. Keep it required, but the job only runs the container build+scan when the PR touches container files (`Dockerfile*`, `.dockerignore`, compose files, the scanner policy `.snyk`/`trivy.yaml`). On an app/dependency PR that touches none of those, the `image` job ends green *without* scanning — so a pre-existing base-image CVE the change can't influence never blocks it ("working on the app → app checks, working on the image → container checks"). A PR that does touch container files gets the full scan gate. Non-PR events (push to the default branch, release, weekly schedule) always scan + publish.
   - **Not required:** `push-and-sign` (the GHCR publish job) runs only on push/release events — it never produces a PR check, so it is never in the required list. `gitleaks` and `scorecard` are likewise not required checks (secret scanning is gated through the `pre-commit` check; Scorecard is a periodic score, not a gate).
   <!-- --- SNYK-START --- -->

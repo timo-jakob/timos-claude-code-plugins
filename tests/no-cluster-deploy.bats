@@ -1495,7 +1495,7 @@ jobs:
 # Branch protection — both directions
 # ---------------------------------------------------------------------------
 
-# branch-protection.sh refuses --iac-only true unless the repo's kubernetes-ci.yml
+# branch-protection.sh refuses --iac-only kubernetes unless the repo's kubernetes-ci.yml
 # has a `gate` job (#1606), so the IaC-path tests stage the shipped template's
 # workflow — its `gate:` job key survives unrendered — into the fixture repo.
 stage_iac_workflow() {
@@ -1595,7 +1595,7 @@ EOF
   cd "$W"
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
     --has-dockerfile false --has-codeql false \
-    --iac-only true --default-branch main
+    --iac-only kubernetes --default-branch main
   [ "$status" -eq 0 ]
   local contexts expected
   contexts="$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | sort | join(",")')"
@@ -1613,7 +1613,7 @@ EOF
   cd "$W"
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
     --has-dockerfile false --has-codeql false \
-    --iac-only true --default-branch main
+    --iac-only kubernetes --default-branch main
   [ "$status" -eq 0 ]
   local contexts expected
   contexts="$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | sort | join(",")')"

@@ -510,7 +510,7 @@ echo "${CURL_HTTP_STATUS:-200}"
 exit 0
 EOF
   chmod +x "$STUB_BIN/gh" "$STUB_BIN/curl"
-  # The script runs from the target repo root and refuses --iac-only true unless
+  # The script runs from the target repo root and refuses --iac-only kubernetes unless
   # that repo's kubernetes-ci.yml has a `gate` job (#1606), so every test runs in
   # a GitOps repo holding the REALLY RENDERED workflow — not a hand-written
   # stand-in that could keep passing after the template renames its job. The
@@ -530,7 +530,7 @@ EOF
   protection_stubs
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
     --has-dockerfile false --has-codeql false \
-    --iac-only true --default-branch main
+    --iac-only kubernetes --default-branch main
   [ "$status" -eq 0 ]
   local contexts expected
   contexts="$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | sort | join(",")')"
@@ -555,7 +555,7 @@ EOF
   protection_stubs
   CURL_HTTP_STATUS=403 run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
     --has-dockerfile false --has-codeql false \
-    --iac-only true --default-branch main
+    --iac-only kubernetes --default-branch main
   # a hand-applied rule is a legitimate outcome, so this must NOT be a failure
   [ "$status" -eq 0 ]
   contains "$output" '403'
@@ -588,7 +588,7 @@ EOF
   protection_stubs
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
     --has-dockerfile true --has-ko true --has-codeql true \
-    --codeql-languages "python javascript" --iac-only true --default-branch main
+    --codeql-languages "python javascript" --iac-only kubernetes --default-branch main
   [ "$status" -eq 0 ]
   local contexts
   contexts="$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | sort | join(",")')"
@@ -601,7 +601,7 @@ EOF
   protection_stubs
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
     --static-analysis sonarqube --vulnerabilities trivy --has-dockerfile false --has-codeql false \
-    --iac-only true --default-branch main
+    --iac-only kubernetes --default-branch main
   [ "$status" -eq 0 ]
   local contexts
   contexts="$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | sort | join(",")')"
@@ -631,16 +631,18 @@ EOF
   lacks "$contexts" 'config-scan'
 }
 
-@test "branch-protection rejects an --iac-only value that is neither true nor false (#1154)" {
-  # unvalidated, `--iac-only True` silently takes the language-app path — the
-  # exact permanent-`expected` failure the flag exists to prevent, with no
-  # diagnostic. --static-analysis / --vulnerabilities are validated for the same reason.
+@test "branch-protection rejects an --iac-only value outside its enum (#1154, #1892)" {
+  # unvalidated, `--iac-only Kubernetes` silently takes the language-app path —
+  # the exact permanent-`expected` failure the flag exists to prevent, with no
+  # diagnostic. --static-analysis / --vulnerabilities are validated for the same
+  # reason. The refusal's wording is pinned once, in tests/iac-only-enum.bats;
+  # this asserts only that it refuses, names the flag, and writes no rule.
   protection_stubs
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
     --has-dockerfile false --has-codeql false \
-    --iac-only True --default-branch main
+    --iac-only Kubernetes --default-branch main
   [ "$status" -ne 0 ]
-  contains "$output" '--iac-only must be true or false'
+  contains "$output" '--iac-only must be'
   [ ! -s "$CURL_DATA" ]
 }
 
@@ -651,7 +653,7 @@ EOF
   protection_stubs
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
     --has-dockerfile false --has-codeql false \
-    --iac-only true --default-branch main
+    --iac-only kubernetes --default-branch main
   [ "$status" -eq 0 ]
   local rule
   rule="$(head -1 "$CURL_DATA")"
@@ -683,7 +685,7 @@ EOF
   rm "$PROTECT_REPO/.github/workflows/kubernetes-ci.yml"
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
     --has-dockerfile false --has-codeql false \
-    --iac-only true --default-branch main
+    --iac-only kubernetes --default-branch main
   [ "$status" -eq 1 ]
   contains "$output" '.github/workflows/kubernetes-ci.yml` is absent'
   # the template to render, not just "render something": State D quotes this
@@ -733,7 +735,7 @@ write_per_stage_workflow() {
   write_per_stage_workflow marked
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
     --has-dockerfile false --has-codeql false \
-    --iac-only true --default-branch main
+    --iac-only kubernetes --default-branch main
   [ "$status" -eq 1 ]
   contains "$output" 'carries the plugin'"'"'s provenance marker but has no `gate` job'
   contains "$output" 'Refresh it from the plugin'"'"'s templates/iac/.github/workflows/kubernetes-ci.yml.tmpl'
@@ -748,7 +750,7 @@ write_per_stage_workflow() {
   write_per_stage_workflow unmarked
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
     --has-dockerfile false --has-codeql false \
-    --iac-only true --default-branch main
+    --iac-only kubernetes --default-branch main
   [ "$status" -eq 1 ]
   contains "$output" 'is user-owned and has no `gate` job'
   # the remedy must name all three causes, or a reader who adds a `gate` job with
@@ -768,7 +770,7 @@ write_per_stage_workflow() {
   grep -q '^  gate:  # the one job$' "$PROTECT_REPO/.github/workflows/kubernetes-ci.yml"
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
     --has-dockerfile false --has-codeql false \
-    --iac-only true --default-branch main
+    --iac-only kubernetes --default-branch main
   [ "$status" -eq 0 ]
   [ "$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | join(",")')" = "gate" ]
 }
@@ -852,7 +854,7 @@ write_gate_workflow() {
     write_gate_workflow "$shape"
     run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
       --has-dockerfile false --has-codeql false \
-      --iac-only true --default-branch main
+      --iac-only kubernetes --default-branch main
     [ "$status" -eq 0 ]
     [ "$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | join(",")')" = "gate" ]
   done
@@ -882,7 +884,7 @@ write_gate_workflow() {
     write_gate_workflow "$shape"
     run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
       --has-dockerfile false --has-codeql false \
-      --iac-only true --default-branch main
+      --iac-only kubernetes --default-branch main
     [ "$status" -eq 1 ]
     contains "$output" 'carries `name:`, a `strategy:` block or a reusable-workflow `uses:`'
     contains "$output" '`gate (<leg>)` per matrix entry'
@@ -908,7 +910,7 @@ write_gate_workflow() {
     "$body" > "$PROTECT_REPO/.github/workflows/kubernetes-ci.yml"
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
     --has-dockerfile false --has-codeql false \
-    --iac-only true --default-branch main
+    --iac-only kubernetes --default-branch main
   [ "$status" -eq 1 ]
   contains "$output" 'carries `name:`, a `strategy:` block or a reusable-workflow `uses:`'
   lacks "$output" 'provenance marker'
@@ -940,7 +942,7 @@ write_marker_at_line() {
   write_marker_at_line 10
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
     --has-dockerfile false --has-codeql false \
-    --iac-only true --default-branch main
+    --iac-only kubernetes --default-branch main
   [ "$status" -eq 1 ]
   contains "$output" 'carries the plugin'"'"'s provenance marker but has no `gate` job'
   [ ! -s "$CURL_DATA" ]
@@ -949,7 +951,7 @@ write_marker_at_line() {
   write_marker_at_line 11
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
     --has-dockerfile false --has-codeql false \
-    --iac-only true --default-branch main
+    --iac-only kubernetes --default-branch main
   [ "$status" -eq 1 ]
   contains "$output" 'is user-owned and has no `gate` job'
   lacks "$output" 'provenance marker'
@@ -971,7 +973,7 @@ write_marker_at_line() {
     printf '%s\n%s\n' "$mention" "$body" > "$out"
     run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
       --has-dockerfile false --has-codeql false \
-      --iac-only true --default-branch main
+      --iac-only kubernetes --default-branch main
     [ "$status" -eq 1 ]
     contains "$output" 'is user-owned and has no `gate` job'
     lacks "$output" 'provenance marker'
@@ -1003,7 +1005,7 @@ write_marker_at_line() {
     write_gate_workflow "$shape"
     run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
       --has-dockerfile false --has-codeql false \
-      --iac-only true --default-branch main
+      --iac-only kubernetes --default-branch main
     [ "$status" -eq 1 ]
     contains "$output" 'written in flow style'
     contains "$output" 'Write it as a block mapping'
@@ -1040,7 +1042,7 @@ write_trigger_workflow() {
     write_trigger_workflow "$on"
     run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
       --has-dockerfile false --has-codeql false \
-      --iac-only true --default-branch main
+      --iac-only kubernetes --default-branch main
     [ "$status" -eq 0 ]
     [ "$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | join(",")')" = "gate" ]
   done
@@ -1075,7 +1077,7 @@ write_trigger_workflow() {
     write_trigger_workflow "$on"
     run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
       --has-dockerfile false --has-codeql false \
-      --iac-only true --default-branch main
+      --iac-only kubernetes --default-branch main
     [ "$status" -eq 1 ]
     contains "$output" 'does not run on every pull request'
     contains "$output" 'on a bare `pull_request` with no `types:`'
@@ -1089,7 +1091,7 @@ write_trigger_workflow() {
   sed -i.bak -E 's/^  pull_request:.*$/  push:/' "$PROTECT_REPO/.github/workflows/kubernetes-ci.yml"
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
     --has-dockerfile false --has-codeql false \
-    --iac-only true --default-branch main
+    --iac-only kubernetes --default-branch main
   [ "$status" -eq 1 ]
   contains "$output" 'carries `name:`'
   lacks "$output" 'does not run on every pull request'
@@ -1121,7 +1123,7 @@ EOF
   write_per_stage_workflow unmarked
   AWK_FAIL_ON='claude-bootstrap: rendered from' run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
     --has-dockerfile false --has-codeql false \
-    --iac-only true --default-branch main
+    --iac-only kubernetes --default-branch main
   [ "$status" -eq 1 ]
   contains "$output" 'could not read `'"$PROTECT_REPO"'/.github/workflows/kubernetes-ci.yml`'
   contains "$output" 'awk exited 2 while probing its provenance marker'
@@ -1134,7 +1136,7 @@ EOF
   awk_failing_stub
   AWK_FAIL_ON='in_jobs' run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
     --has-dockerfile false --has-codeql false \
-    --iac-only true --default-branch main
+    --iac-only kubernetes --default-branch main
   [ "$status" -eq 1 ]
   contains "$output" 'could not read `'"$PROTECT_REPO"'/.github/workflows/kubernetes-ci.yml`'
   contains "$output" 'awk exited 2 while probing its `gate` job'
@@ -1147,7 +1149,7 @@ EOF
   awk_failing_stub
   AWK_FAIL_ON='is_pr' run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
     --has-dockerfile false --has-codeql false \
-    --iac-only true --default-branch main
+    --iac-only kubernetes --default-branch main
   [ "$status" -eq 1 ]
   contains "$output" 'awk exited 2 while probing its `on:` triggers'
   lacks "$output" 'does not run on every pull request'
@@ -1216,7 +1218,7 @@ EOF
   # made to require the IaC `gate` context from a workflow this path never emitted,
   # which is the permanent-`expected` state --iac-only exists to prevent.
   contains "$section" 'do not emit this template, write `primary: kubernetes`, or'
-  contains "$section" 'pass `--iac-only true`'
+  contains "$section" 'pass `--iac-only kubernetes`'
   # and the two-arm split itself: collapse it and the on-disk arm below (the
   # Known limitation) loses the branch it hangs off
   contains "$section" 'depends on whether'
@@ -1238,7 +1240,7 @@ EOF
   contains "$section" '**One requirable check — `gate`.**'
   contains "$section" 'for the single `gate` context above'
   lacks "$section" 'Six separately requirable checks'
-  contains "$section" '--iac-only true'
+  contains "$section" '--iac-only kubernetes'
   contains "$section" 'Never skip the script on this path'
   # the pointer at Step 4.5 — the step that would otherwise UNDO the rule three
   # steps later, and the one clause tying the two sites together
@@ -1274,11 +1276,11 @@ EOF
   ends_with "$block" '### 4b.5. Workflow labels (`blocked`) '
   # the VALUE and the condition, not just the flag name — the block could
   # otherwise document `--iac-only false` on the IaC path and still pass
-  contains "$block" '--iac-only "<true on the §3l IaC path'
+  contains "$block" '--iac-only "<kubernetes on the §3l IaC path'
   contains "$block" 'it requires the `kubernetes-ci.yml` `gate` context **instead of**'
   # the no-other-primary qualifier the sibling sites carry. This is the site a
   # model reads when COMPOSING the invocation, so without it here the conflict
-  # repo yields `--iac-only true` and requires the `gate` context from a workflow §3l
+  # repo yields `--iac-only kubernetes` and requires the `gate` context from a workflow §3l
   # never rendered — every PR pinned on a permanent `expected`.
   contains "$block" 'no other `primary:` recorded'
   contains "$block" 'settles it `false` whatever the marker says'
@@ -1305,7 +1307,10 @@ EOF
   # …and the context NAME. A rename of the workflow's job would otherwise leave
   # SETUP.md handing a no-admin user (the 403 path) a recipe for a context no
   # workflow reports — and the retired six-name list is asserted gone (#1605)
-  contains "$setup" '`branch-protection.sh --iac-only true`): `gate`. This single context **replaces**'
+  contains "$setup" '`branch-protection.sh --iac-only kubernetes`): `gate`. This single context **replaces**'
+  # …and where it comes from, worded topic-neutrally (#1892) so the next IaC
+  # path (#1162) adds its workflow beside kubernetes-ci.yml without reopening it
+  contains "$setup" "It comes from the IaC workflow's one \`gate\` job, \`.github/workflows/kubernetes-ci.yml\` on the kubernetes path"
   lacks "$setup" '`render`, `schema`, `lint`, `policy`, `config-scan`, `argocd`'
   step5="$(sed -n '/^For the \*\*IaC path\*\*/,/^## /p' "$SKILL" | tr -s '[:space:]' ' ')"
   contains "$step5" 'no other `primary:` recorded'
@@ -1465,7 +1470,7 @@ EOF
   # the third precedence arm, which the condition previously dropped
   contains "$block" 'no other `primary:` is recorded'
   # the block's OWN clause, not the bare flag — that occurs at five other lines
-  contains "$block" 'invoke `branch-protection.sh` with **`--iac-only true`**'
+  contains "$block" 'invoke `branch-protection.sh` with **`--iac-only kubernetes`**'
   # and the genuinely-mixed case, which §3l excludes rather than claims
   # needles kept WITHIN a source line: the block is a markdown blockquote, so
   # whitespace-normalising leaves the `>` markers in place and any needle
@@ -1662,16 +1667,16 @@ step4a_iac() {
   contains "$step4a" '"<skill-base-dir>/scripts/install-precommit-hooks.zsh"'
 }
 
-@test "Step 4.5 runs the preflight with --iac-only true on the IaC path (#1605)" {
+@test "Step 4.5 runs the preflight with --iac-only kubernetes on the IaC path (#1605)" {
   local block quote
   block="$(sed -n '/^### Preflight check/,/^### Per-tool automation/p' "$SKILL" | tr -s '[:space:]' ' ')"
   ends_with "$block" '### Per-tool automation '
-  contains "$block" '--iac-only "<true on the §3l IaC path, else false>"'
-  contains "$block" 'With `--iac-only true` the list is `gh`, `jq`, `git` and the gate'"'"'s tools'
+  contains "$block" '--iac-only "<kubernetes on the §3l IaC path, else false>"'
+  contains "$block" 'With `--iac-only kubernetes` the list is `gh`, `jq`, `git` and the gate'"'"'s tools'
   quote="$(sed -n '/^> \*\*The §3l IaC path runs none of the per-tool steps/,/^\*\*The invocations\*\*/p' "$SKILL" \
     | tr -s '[:space:]' ' ')"
   ends_with "$quote" '**The invocations**, each run from the target repo'"'"'s root and only under its '
-  contains "$quote" 'still runs, **with `--iac-only true` and neither toolchain flag**'
+  contains "$quote" 'still runs, **with `--iac-only kubernetes` and neither toolchain flag**'
 }
 
 @test "no IaC-path section describes the pre-commit framework as installed or enforced (#1605)" {
@@ -1698,9 +1703,9 @@ step4a_iac() {
   starts_with "${sections[2]}" ' **The IaC set (#1154, #1604) is the third not-blind set.**'
   ends_with "${sections[2]}" '**The ops-major migration (#1330) is the fourth not-blind set.** When '
   # the marker-less, language-less repo asks Q4 BEFORE rendering, then reaches step 3
-  contains "${sections[2]}" 'So when `is_kubernetes` is `false` and `languages` is empty, ask Q4 and its empty-repo confirmation **here, before rendering anything** from `missing_artifacts`: on a confirmed "none", drop every §3l not-emitted artifact from the list, render the IaC set, and then take step 3'"'"'s `github_state` gap-fill with `--iac-only true`, which the drops have made reachable; on a language answer, render the list as usual; on a declined confirmation, render nothing and halt as Q4 directs.'
+  contains "${sections[2]}" 'So when `is_kubernetes` is `false` and `languages` is empty, ask Q4 and its empty-repo confirmation **here, before rendering anything** from `missing_artifacts`: on a confirmed "none", drop every §3l not-emitted artifact from the list, render the IaC set, and then take step 3'"'"'s `github_state` gap-fill with `--iac-only kubernetes`, which the drops have made reachable; on a language answer, render the list as usual; on a declined confirmation, render nothing and halt as Q4 directs.'
   ends_with "${sections[3]}" 'A GitOps repo may still carry a Dockerfile (a tooling image, say). On this path '
-  contains "${sections[3]}" 'Setup automation: preflight only (--iac-only true) — verifies and batch-installs gh, jq, git and the gate'"'"'s tools'
+  contains "${sections[3]}" 'Setup automation: preflight only (--iac-only kubernetes) — verifies and batch-installs gh, jq, git and the gate'"'"'s tools'
   ends_with "${sections[4]}" '**Every other path:** if `pre-commit` is installed on the user'"'"'s machine, run: '
   ends_with "${sections[5]}" '**The invocations**, each run from the target repo'"'"'s root and only under its '
   ends_with "${sections[6]}" '## Important Rules '
@@ -1743,7 +1748,7 @@ step4a_iac() {
   contains "$skill" 'the `--iac-only` checks array (the single `gate` context)'
   contains "$setup" 'your required check is `kubernetes-ci.yml`'"'"'s single `gate`'
   contains "$setup" 'its own required check is `kubernetes-ci.yml`'"'"'s `gate` job instead'
-  contains "$setup" '`branch-protection.sh --iac-only true`): `gate`.'
+  contains "$setup" '`branch-protection.sh --iac-only kubernetes`): `gate`.'
 }
 
 @test "EXPECTED_JOBS equals the rendered workflow's job ids (#1606)" {
@@ -1798,7 +1803,7 @@ step4a_iac() {
   step4b="$(sed -n '/^### 4b\. Branch protection/,/^### 4b\.5\./p' "$SKILL" | tr -s '[:space:]' ' ')"
   [ -n "$statd" ]
   [ -n "$step4b" ]
-  contains "$statd" 'When that `--iac-only true` call REFUSES (exit 1, no rule written)'
+  contains "$statd" 'When that `--iac-only kubernetes` call REFUSES (exit 1, no rule written)'
   contains "$statd" 'Do not re-invoke `/development:bootstrap` to clear it'
   # the RATIONALE must stay true of a marked file, which bootstrap does refresh:
   # an unqualified "it reaches the same refusal" contradicts the script's own
