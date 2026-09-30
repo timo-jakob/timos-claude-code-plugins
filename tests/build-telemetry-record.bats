@@ -70,7 +70,48 @@ EOF
   done
   # ...and exactly the payload keys it does own
   [ "$(echo "$output" | jq -c 'keys_unsorted | sort')" = \
-    '["convergence_assessment","escalation","findings_by_round","fixed","max_rounds","possible_false_trip_auto_continues","promotion_phase","rounds","status","waived"]' ]
+    '["convergence_assessment","escalation","findings_by_round","fixed","gate_by_round","max_rounds","possible_false_trip_auto_continues","promotion_phase","rounds","status","waived"]' ]
+}
+
+@test "gate_by_round is read from history[].gate, null where a round has none (#1973)" {
+  cat > "$ST" <<'EOF'
+{"status":"CONVERGED","rounds":3,"max_rounds":5,
+ "history":[
+  {"round":1,"blocking":2,"gate":{"scope":"full","attested":true,"wall_s":212.4,
+    "slowest":[{"file":"tests/resolve-story-loop-step.bats","wall_s":297.1}]}},
+  {"round":2,"blocking":1,"gate":{"scope":"selected","attested":false,"wall_s":61.2,"slowest":[]}},
+  {"round":3,"blocking":0,"gate":null}],
+ "round_changelists":[{"round":1,"blocking":[],"suggestions":[]},
+                      {"round":2,"blocking":[],"suggestions":[]},
+                      {"round":3,"blocking":[],"suggestions":[]}],
+ "final_changelist":{"blocking":[]}}
+EOF
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.gate_by_round == [
+    {round:1, gate:{scope:"full", attested:true, wall_s:212.4,
+                    slowest:[{file:"tests/resolve-story-loop-step.bats", wall_s:297.1}]}},
+    {round:2, gate:{scope:"selected", attested:false, wall_s:61.2, slowest:[]}},
+    {round:3, gate:null}]'
+  # rounds stays the integer count, and findings_by_round is untouched by it
+  echo "$output" | jq -e '(.rounds | type) == "number" and .rounds == 3 and (.findings_by_round | length) == 3'
+  echo "$output" | jq -e '[.findings_by_round[] | has("gate")] | any | not'
+}
+
+@test "gate_by_round: a history line predating the key reads null; no history is []" {
+  cat > "$ST" <<'EOF'
+{"status":"CONVERGED","rounds":1,"max_rounds":5,"history":[{"round":1,"blocking":0}],
+ "round_changelists":[{"round":1,"blocking":[],"suggestions":[]}],"final_changelist":{"blocking":[]}}
+EOF
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.gate_by_round == [{round:1, gate:null}]'
+  cat > "$ST" <<'EOF'
+{"status":"SKIPPED","rounds":0,"max_rounds":5}
+EOF
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.gate_by_round == []'
 }
 
 @test "the payload embeds into a telemetry/v1 record the validator accepts (#1004)" {

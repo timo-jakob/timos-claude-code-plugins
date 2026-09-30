@@ -13,8 +13,16 @@
 #     (below), so the same full suite finishes in a fraction of the sequential
 #     wall-clock.
 #
-# Quality guardrail (epic #979): the WHOLE suite still runs every round. The
-# speedup is parallelism + never double-running — NEVER subsetting or skipping.
+# Quality guardrail (epic #979, amended by #1973 for intermediate DELTA review
+# rounds only): the WHOLE suite runs before every full-scope round — round 1 and
+# the closing sweep, including the grant beyond the ceiling — and in hook mode
+# and CI. Only the gate before a delta round may subset: `--select-base REF`
+# runs just the bats files select-tests.zsh says the story diff can affect,
+# reports `"scope":"selected"`, and marks its tree `selected:<hex>` so the
+# attestation fails closed into any full-scope round (the review loop accepts a
+# `selected:` attestation only on a --resume into a delta round, and its own
+# --test-cmd is always this script WITHOUT --select-base). Without the flag the
+# speedup is parallelism + never double-running — never subsetting or skipping.
 #
 # Degradation is allowed, silence is not. GNU `parallel` is bats' `--jobs`
 # backend; when it is absent the gate still runs — SEQUENTIALLY, at identical
@@ -39,21 +47,36 @@
 # takes every core, as before the registry existed, and says so on stderr.
 #
 # Usage:
-#   run-gate.zsh [--tests-dir DIR] [--tap-out FILE]
-#     --tests-dir DIR   directory of .bats files to run (default: tests)
+#   run-gate.zsh [--tests-dir DIR] [--tap-out FILE] [--select-base REF]
+#     --tests-dir DIR   directory of .bats files to run (default: tests), given
+#                       relative to the repo root when --select-base is used
 #     --tap-out FILE    where to tee the TAP stream (default: a mktemp file)
+#     --select-base REF run only the bats files select-tests.zsh selects for the
+#                       diff against merge-base(REF, HEAD) — for the gate before
+#                       an intermediate DELTA review round only (#1973). When the
+#                       selector falls back to the whole suite, or fails, the run
+#                       is an ordinary full run and reports "scope":"full".
 #
 # Output:
 #   stdout — ONE JSON summary object (machine-readable), e.g.
-#     {"mode":"parallel","jobs":10,"ok":1220,"not_ok":0,"total":1220,
-#      "exit":0,"tap":"/tmp/run-gate.XXXX.tap","tree":"<40-hex or empty>"}
+#     {"mode":"parallel","jobs":10,"scope":"full","ok":1220,"not_ok":0,
+#      "total":1220,"exit":0,"wall_s":212.407,"tap":"/tmp/run-gate.XXXX.tap",
+#      "tree":"<40-hex or empty>","files":[{"file":"tests/a.bats","wall_s":3.1}]}
 #     mode is one of: "parallel" | "sequential" | "sequential-degraded".
+#     scope is "full" (the whole --tests-dir) or "selected" (a subset, #1973).
+#     wall_s is the whole run's wall-clock seconds; `files` lists every bats
+#     file the run ran with the time bats' JUnit report gives it (empty when no
+#     report was written — a timing gap, never a verdict).
 #     `tree` is the working-tree identity (git-tree-id.zsh) captured at the run —
 #     empty outside a git repo. On a GREEN run the caller passes it to the review
 #     loop's --gate-attest so the loop skips its own byte-identical re-run of this
-#     same tree (#981 gate attestation). It is a plain field; NEVER read it as
-#     the pass/fail signal — `exit` is the gate verdict, `tree` only says which
-#     tree was gated.
+#     same tree (#981 gate attestation). A SELECTED run reports it as
+#     `selected:<hex>`: the loop strips the prefix and accepts it only on a
+#     --resume into a delta round; into the closing sweep it is dropped (and a
+#     bare re-pass of the same hex is caught too), so it can never skip the
+#     gate before a full-scope round. It is a plain field; NEVER
+#     read it as the pass/fail signal — `exit` is the gate verdict, `tree` only
+#     says which tree was gated.
 #   stderr — the live TAP stream, a human count line, and (degraded) the warning.
 #
 # Exit codes:
@@ -86,22 +109,28 @@
 #   GATE_SLOTS_DIR     overrides the slot registry directory (default:
 #                      ${TMPDIR:-/tmp}/run-gate-slots.$UID), so a test can
 #                      register "other live gates" without running any.
+#   GATE_SELECT_BIN    overrides the selector --select-base calls (default:
+#                      select-tests.zsh beside this script), so a test can hand
+#                      the gate a canned selection.
 
 emulate -L zsh
 setopt nounset pipefail
 # The suite runs as a background job (below); zsh's default BG_NICE would add
 # its own +5 on top of the explicit `nice -n 10`.
 setopt no_bg_nice
+zmodload -F zsh/datetime p:EPOCHREALTIME
 
 local self_dir="${0:A:h}"
+local t_start=$EPOCHREALTIME
 
 die_usage() { print -u2 -- "run-gate: $1"; exit 2 }
 
-local tests_dir="tests" tap_out=""
+local tests_dir="tests" tap_out="" select_base=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
   --tests-dir) (( $# >= 2 )) || die_usage "--tests-dir needs a value"; tests_dir="$2"; shift 2 ;;
   --tap-out)   { (( $# >= 2 )) && [[ -n "$2" ]]; } || die_usage "--tap-out needs a non-empty value"; tap_out="$2"; shift 2 ;;
+  --select-base) { (( $# >= 2 )) && [[ -n "$2" && "$2" != -* ]]; } || die_usage "--select-base needs a ref"; select_base="$2"; shift 2 ;;
   -h|--help) awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"; exit 0 ;;
   *) die_usage "unknown argument: $1" ;;
   esac
@@ -117,8 +146,12 @@ command -v "$bats_bin" >/dev/null 2>&1 \
 # Set BEFORE the slot exists, so no window leaves a slot behind. zsh defers a
 # trap until a FOREGROUND child exits, so the suite runs as a background job the
 # script `wait`s on (below) — that is what lets a signal act immediately.
-local slot="" slot_tmp="" rc_file=""
-cleanup() { local f; for f in "$slot" "$slot_tmp" "$rc_file"; do [[ -n "$f" ]] && rm -f -- "$f" 2>/dev/null; done; return 0 }
+local slot="" slot_tmp="" rc_file="" junit_dir=""
+cleanup() {
+  local f; for f in "$slot" "$slot_tmp" "$rc_file"; do [[ -n "$f" ]] && rm -f -- "$f" 2>/dev/null; done
+  [[ -n "$junit_dir" ]] && rm -rf -- "$junit_dir" 2>/dev/null
+  return 0
+}
 # TERM every descendant, collected in full BEFORE any is signalled: a killed
 # parent's children re-parent away and could no longer be found. Always TERM,
 # whatever the gate received — a background job starts with SIGINT ignored, so
@@ -223,6 +256,34 @@ else
   print -u2 -- "run-gate: git-tree-id.zsh not found/executable next to run-gate — gate attestation unavailable (#981)"
 fi
 
+# --- what to run: the whole --tests-dir, or a selection (#1973) ---------------
+# Only --select-base narrows the run. Every way the selection can fail — the
+# selector missing, erroring, printing something unreadable, or choosing the
+# whole suite itself — is an ordinary FULL run (the fail-safe direction), and it
+# reports "scope":"full" with a bare tree, because the whole suite is what ran.
+local scope="full"
+local -a targets=("$tests_dir")
+if [[ -n "$select_base" ]]; then
+  local select_bin="${GATE_SELECT_BIN:-${self_dir}/select-tests.zsh}" sel="" sel_kind=""
+  local -a sel_files=()
+  if sel="$("$select_bin" --repo . --tests-dir "$tests_dir" --base "$select_base" 2>/dev/null)" \
+     && sel_kind="$(print -r -- "$sel" | jq -r '.selection' 2>/dev/null)"; then
+    if [[ "$sel_kind" == "selected" ]]; then
+      sel_files=( ${(f)"$(print -r -- "$sel" | jq -r '.files[]' 2>/dev/null)"} )
+      if (( ${#sel_files} )); then
+        scope="selected"; targets=( "${sel_files[@]}" )
+        print -u2 -- "run-gate: selected ${#sel_files} bats file(s) for the diff against ${select_base} (#1973)"
+      else
+        print -u2 -- "run-gate: the selector chose no files — running the full suite (#1973)"
+      fi
+    else
+      print -u2 -- "run-gate: the selector chose the full suite ($(print -r -- "$sel" | jq -r '.reason // "no reason"' 2>/dev/null)) (#1973)"
+    fi
+  else
+    print -u2 -- "run-gate: test selection failed ('$select_bin') — running the full suite (#1973)"
+  fi
+fi
+
 # --- run the suite EXACTLY ONCE, tee TAP, keep bats' REAL exit ----------------
 if [[ -z "$tap_out" ]]; then
   # NB: the X's MUST be trailing — BSD/macOS mktemp rejects a mid-string
@@ -249,7 +310,11 @@ fi
 # reads red, never green.
 rc_file="$(mktemp "${TMPDIR:-/tmp}/run-gate-rc.XXXXXX")" \
   || die_usage "could not create an exit-code temp file"
-{ nice -n 10 "$bats_bin" "${bats_args[@]}" "$tests_dir"; print -r -- $? >| "$rc_file" } \
+# Per-file timings (#1973) come from bats' JUnit report, one <testsuite> per
+# file. A report that cannot be set up costs the timings, never the run.
+junit_dir="$(mktemp -d "${TMPDIR:-/tmp}/run-gate-junit.XXXXXX" 2>/dev/null)" || junit_dir=""
+[[ -n "$junit_dir" ]] && bats_args+=(--report-formatter junit --output "$junit_dir")
+{ nice -n 10 "$bats_bin" "${bats_args[@]}" "${targets[@]}"; print -r -- $? >| "$rc_file" } \
   | tee "$tap_out" >&2 &
 wait
 local rc="$(<"$rc_file")"
@@ -292,7 +357,37 @@ tap_json="${tap_json//$'\t'/\\t}"
 # 40 hex (SHA-1) or 64 hex (SHA-256 repos) — else blank it, so a stray value
 # never corrupts the JSON summary. Exact-match by the loop is length-agnostic.
 [[ "$tree" =~ '^([0-9a-f]{40}|[0-9a-f]{64})$' ]] || tree=""
-printf '{"mode":"%s","jobs":%d,"ok":%d,"not_ok":%d,"total":%d,"exit":%d,"tap":"%s","tree":"%s"}\n' \
-  "$mode" "$jobs" "$ok" "$not_ok" "$total" "$rc" "$tap_json" "$tree"
+# A selected run's identity carries the prefix the loop keys the scope rule on
+# (#1973): the loop accepts it only into a delta round.
+[[ -n "$tree" && "$scope" == "selected" ]] && tree="selected:$tree"
+
+# Per-file timings from the JUnit report: `<testsuite name="x.bats" … time="T"`.
+# bats names a suite by the file's basename, so it is re-joined to the
+# directory it ran from. A missing or unreadable report leaves `files` empty.
+local files_json="" line fname ftime fdir
+typeset -A dir_of=()
+local tgt
+for tgt in "${targets[@]}"; do
+  if [[ -d "$tgt" ]]; then
+    for fname in "$tgt"/*.bats(N:t); do dir_of[$fname]="${tgt%/}"; done
+  else
+    dir_of[${tgt:t}]="${tgt:h}"
+  fi
+done
+if [[ -n "$junit_dir" && -r "$junit_dir/report.xml" ]]; then
+  for line in ${(f)"$(grep -o '<testsuite [^>]*>' "$junit_dir/report.xml" 2>/dev/null)"}; do
+    [[ "$line" =~ 'name="([^"]*)"' ]] || continue; fname="$match[1]"
+    [[ "$line" =~ 'time="([0-9]*\.?[0-9]+)"' ]] || continue
+    ftime=$(LC_ALL=C printf '%.3f' "$match[1]")
+    fdir="${dir_of[$fname]:-$tests_dir}"
+    fname="${fdir%/}/$fname"
+    fname="${fname//\\/\\\\}"; fname="${fname//\"/\\\"}"
+    files_json+="${files_json:+,}{\"file\":\"${fname}\",\"wall_s\":${ftime}}"
+  done
+fi
+local wall_s
+wall_s=$(LC_ALL=C printf '%.3f' $(( EPOCHREALTIME - t_start )))
+printf '{"mode":"%s","jobs":%d,"scope":"%s","ok":%d,"not_ok":%d,"total":%d,"exit":%d,"wall_s":%s,"tap":"%s","tree":"%s","files":[%s]}\n' \
+  "$mode" "$jobs" "$scope" "$ok" "$not_ok" "$total" "$rc" "$wall_s" "$tap_json" "$tree" "$files_json"
 
 exit $rc

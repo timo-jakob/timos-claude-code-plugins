@@ -54,6 +54,9 @@ gatepid="$(cat "$BATS_TEST_TMPDIR/stub-gate-pid")"
 cat "${STUB_LS_DIR:-${GATE_SLOTS_DIR:-}}/$gatepid" > "$BATS_TEST_TMPDIR/stub-slot-content" 2>/dev/null
 TZ=UTC LC_ALL=C ps -o lstart= -p "$gatepid" > "$BATS_TEST_TMPDIR/stub-gate-lstart"
 cat "$TAPFIX"
+# the JUnit report bats writes into --output DIR (#1973): a canned one, when set
+prev=""; for a in "$@"; do [[ "$prev" == "--output" ]] && outdir="$a"; prev="$a"; done
+[[ -n "${outdir:-}" && -n "${STUB_JUNIT:-}" ]] && cp "$STUB_JUNIT" "$outdir/report.xml"
 # kill the suite's subshell, the one that writes bats' exit code, before it can
 [[ -n "${STUB_KILL_PARENT:-}" ]] && kill -9 "$PPID"
 # in the background: bash runs a trap only between commands, so a foreground
@@ -305,8 +308,9 @@ EOF
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.mode=="parallel" and .jobs==6'
   grep -q -- '--jobs 6' "$ARGV"
-  # the machine summary is exactly today's — no field added or dropped
-  echo "$output" | jq -e 'keys == (["exit","jobs","mode","not_ok","ok","tap","total","tree"])'
+  # the machine summary's key set is pinned — #1973 added scope, wall_s and
+  # files, and the shared budget adds nothing of its own
+  echo "$output" | jq -e 'keys == (["exit","files","jobs","mode","not_ok","ok","scope","tap","total","tree","wall_s"])'
   # a lone gate prints no sharing note
   run ! grep -q 'other live gate' <<< "$stderr"
 }
@@ -688,4 +692,189 @@ EOF
   [ "$status" -eq 0 ]                                    # non-fatal: the gate verdict is untouched
   [ "$(echo "$output" | jq -r '.tree')" = "" ]          # no attestation
   contains "$stderr" "gate attestation unavailable"   # degradation is LOUD, not silent
+}
+
+# ---- scope, timings and the selected run (#1973) ----------------------------
+# A plain run is scope "full" with a bare tree; --select-base runs only what the
+# selector (stubbed through GATE_SELECT_BIN) chose, reports "selected", and
+# marks its tree `selected:<hex>` so it can never attest a full-scope round.
+
+# a canned JUnit report: one <testsuite> per bats file, as bats writes it
+mk_junit() {
+  STUB_JUNIT="$BATS_TEST_TMPDIR/report.xml"
+  cat > "$STUB_JUNIT" <<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites time="4.5">
+<testsuite name="a.bats" tests="2" failures="0" errors="0" skipped="0" time="3.25" timestamp="2026-09-30T18:00:00" hostname="h">
+    <testcase classname="a.bats" name="one" time="1.5" />
+</testsuite>
+<testsuite name="b.bats" tests="1" failures="0" errors="0" skipped="0" time=".75" timestamp="2026-09-30T18:00:00" hostname="h">
+</testsuite>
+</testsuites>
+XML
+}
+
+# a selector stub printing $SEL_OUT and exiting $SEL_EXIT; records its argv
+mk_selector() {
+  SEL_STUB="$BATS_TEST_TMPDIR/select-stub.sh"
+  cat > "$SEL_STUB" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" > "$BATS_TEST_TMPDIR/sel-argv"
+printf '%s\n' "${SEL_OUT:-}"
+exit "${SEL_EXIT:-0}"
+SH
+  chmod +x "$SEL_STUB"
+}
+
+@test "a plain run: scope full, a numeric wall_s, and per-file wall_s from the JUnit report" {
+  mk_junit
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4 STUB_EXIT=0 STUB_JUNIT="$STUB_JUNIT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.scope == "full" and (.wall_s | type == "number") and .wall_s >= 0'
+  # the report's basenames are re-joined to the dir they ran from, and a
+  # leading-dot time is normalised to valid JSON
+  echo "$output" | jq -e --arg d "$TESTS_DIR" \
+    '.files == [{file:($d + "/a.bats"), wall_s:3.25}, {file:($d + "/b.bats"), wall_s:0.75}]'
+  # the report is requested from bats in a temp dir the gate cleans up
+  grep -q -- '--report-formatter junit --output' "$ARGV"
+  local outdir; outdir="$(sed -E 's/.*--output ([^ ]+).*/\1/' "$ARGV")"
+  [ ! -e "$outdir" ]
+}
+
+@test "no JUnit report: files is empty and the verdict is untouched" {
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4 STUB_EXIT=0
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.files == [] and .exit == 0 and .scope == "full"'
+}
+
+@test "--select-base: runs ONLY the selected files, scope selected, tree selected:<hex>" {
+  mk_gitproj; mk_selector
+  printf '1..1\nok 1 x\n' > "$TAPFIX"
+  cd "$proj"
+  local want; want="$(zsh "$REPO_ROOT/development/skills/resolve-issue/scripts/git-tree-id.zsh" .)"
+  run --separate-stderr env -u GATE_NPROC -u GATE_PARALLEL_BIN \
+    GATE_BATS_BIN="$STUB" CALLS="$CALLS" ARGV="$ARGV" TAPFIX="$TAPFIX" \
+    GATE_SELECT_BIN="$SEL_STUB" SEL_OUT='{"selection":"selected","reason":null,"changed":["x"],"files":["tests/a.bats","tests/c.bats"]}' \
+    zsh "$S" --tests-dir tests --select-base origin/main
+  [ "$status" -eq 0 ]
+  [ "$(calls)" -eq 1 ]
+  echo "$output" | jq -e --arg t "selected:$want" '.scope == "selected" and .tree == $t'
+  # bats got the two files and NOT the tests dir
+  grep -qE 'tests/a\.bats tests/c\.bats$' "$ARGV"
+  run ! grep -qE '(^| )tests$' "$ARGV"
+  # the selector was asked about this tests dir and base
+  grep -q -- '--tests-dir tests --base origin/main' "$BATS_TEST_TMPDIR/sel-argv"
+}
+
+@test "--select-base: a selected file's JUnit time keeps the file's own directory" {
+  mk_gitproj; mk_selector; mk_junit
+  cd "$proj"
+  run --separate-stderr env -u GATE_NPROC -u GATE_PARALLEL_BIN \
+    GATE_BATS_BIN="$STUB" CALLS="$CALLS" ARGV="$ARGV" TAPFIX="$TAPFIX" STUB_JUNIT="$STUB_JUNIT" \
+    GATE_SELECT_BIN="$SEL_STUB" SEL_OUT='{"selection":"selected","reason":null,"changed":["x"],"files":["tests/a.bats"]}' \
+    zsh "$S" --tests-dir tests --select-base origin/main
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.files[0] == {file:"tests/a.bats", wall_s:3.25}'
+}
+
+@test "--select-base: a RED selected run is unattestable — tree blank, never selected:" {
+  mk_gitproj; mk_selector
+  cd "$proj"
+  run --separate-stderr env -u GATE_NPROC -u GATE_PARALLEL_BIN \
+    GATE_BATS_BIN="$STUB" CALLS="$CALLS" ARGV="$ARGV" TAPFIX="$TAPFIX" STUB_EXIT=1 \
+    GATE_SELECT_BIN="$SEL_STUB" SEL_OUT='{"selection":"selected","reason":null,"changed":["x"],"files":["tests/a.bats"]}' \
+    zsh "$S" --tests-dir tests --select-base origin/main
+  [ "$status" -eq 1 ]
+  echo "$output" | jq -e '.scope == "selected" and .tree == ""'
+}
+
+@test "--select-base: the selector choosing the full suite is a FULL run with a bare tree" {
+  mk_gitproj; mk_selector
+  cd "$proj"
+  run --separate-stderr env -u GATE_NPROC -u GATE_PARALLEL_BIN \
+    GATE_BATS_BIN="$STUB" CALLS="$CALLS" ARGV="$ARGV" TAPFIX="$TAPFIX" \
+    GATE_SELECT_BIN="$SEL_STUB" SEL_OUT='{"selection":"full","reason":"an unmapped path changed: x","changed":["x"],"files":["tests/a.bats"]}' \
+    zsh "$S" --tests-dir tests --select-base origin/main
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.scope == "full" and (.tree | test("^[0-9a-f]{40}$"))'
+  grep -qE '(^| )tests$' "$ARGV"
+  contains "$stderr" "an unmapped path changed"
+}
+
+@test "--select-base: a failing or unreadable selector falls back to a full run" {
+  mk_gitproj; mk_selector
+  cd "$proj"
+  local spec
+  for spec in "1|{}" "0|not json" "0|"; do
+    run --separate-stderr env -u GATE_NPROC -u GATE_PARALLEL_BIN \
+      GATE_BATS_BIN="$STUB" CALLS="$CALLS" ARGV="$ARGV" TAPFIX="$TAPFIX" \
+      GATE_SELECT_BIN="$SEL_STUB" SEL_EXIT="${spec%%|*}" SEL_OUT="${spec#*|}" \
+      zsh "$S" --tests-dir tests --select-base origin/main
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -e '.scope == "full" and (.tree | startswith("selected:") | not)'
+    grep -qE '(^| )tests$' "$ARGV"
+  done
+}
+
+@test "--select-base: a selection with NO files is a full run with a bare tree, never selected:" {
+  mk_gitproj; mk_selector
+  cd "$proj"
+  run --separate-stderr env -u GATE_NPROC -u GATE_PARALLEL_BIN \
+    GATE_BATS_BIN="$STUB" CALLS="$CALLS" ARGV="$ARGV" TAPFIX="$TAPFIX" \
+    GATE_SELECT_BIN="$SEL_STUB" SEL_OUT='{"selection":"selected","reason":null,"changed":["x"],"files":[]}' \
+    zsh "$S" --tests-dir tests --select-base origin/main
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.scope == "full" and (.tree | test("^[0-9a-f]{40}$"))'
+  grep -qE '(^| )tests$' "$ARGV"
+  contains "$stderr" "chose no files"
+}
+
+@test "--select-base with the REAL default selector beside the gate: selected end to end" {
+  # no GATE_SELECT_BIN: run-gate must find select-tests.zsh next to itself, and
+  # that file must be executable — the wiring every other case stubs out
+  local iso="$BATS_TEST_TMPDIR/iso" d="$REPO_ROOT/development/skills/resolve-issue/scripts"
+  mkdir -p "$iso"
+  cp -p "$d/run-gate.zsh" "$d/select-tests.zsh" "$d/git-tree-id.zsh" "$iso/"
+  mk_gitproj
+  mkdir -p "$proj/src"
+  echo x > "$proj/src/x.sh"; echo y > "$proj/src/y.sh"
+  printf 'setup() { S="$REPO_ROOT/src/x.sh"; }\n' > "$proj/tests/a.bats"
+  printf 'setup() { S="$REPO_ROOT/src/y.sh"; }\n' > "$proj/tests/b.bats"
+  git -C "$proj" add -A && git -C "$proj" commit -qm fixture && git -C "$proj" branch base
+  echo changed >> "$proj/src/x.sh"
+  cd "$proj"
+  run --separate-stderr env -u GATE_NPROC -u GATE_PARALLEL_BIN -u GATE_SELECT_BIN \
+    GATE_BATS_BIN="$STUB" CALLS="$CALLS" ARGV="$ARGV" TAPFIX="$TAPFIX" \
+    zsh "$iso/run-gate.zsh" --tests-dir tests --select-base base
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.scope == "selected" and (.tree | startswith("selected:"))'
+  grep -qE 'tests/a\.bats$' "$ARGV"
+  run ! grep -q 'tests/b.bats' "$ARGV"
+}
+
+@test "--select-base: a missing selector binary falls back to a full run" {
+  mk_gitproj
+  cd "$proj"
+  run --separate-stderr env -u GATE_NPROC -u GATE_PARALLEL_BIN \
+    GATE_BATS_BIN="$STUB" CALLS="$CALLS" ARGV="$ARGV" TAPFIX="$TAPFIX" \
+    GATE_SELECT_BIN="$BATS_TEST_TMPDIR/no-such-selector" \
+    zsh "$S" --tests-dir tests --select-base origin/main
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.scope == "full"'
+  contains "$stderr" "test selection failed"
+}
+
+@test "--select-base without a ref is a usage error" {
+  run env GATE_BATS_BIN="$STUB" zsh "$S" --tests-dir "$TESTS_DIR" --select-base
+  [ "$status" -eq 2 ]
+  run env GATE_BATS_BIN="$STUB" zsh "$S" --tests-dir "$TESTS_DIR" --select-base --tap-out x
+  [ "$status" -eq 2 ]
+}
+
+@test "without --select-base the selector is never consulted" {
+  mk_selector
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4 STUB_EXIT=0 GATE_SELECT_BIN="$SEL_STUB"
+  [ "$status" -eq 0 ]
+  [ ! -e "$BATS_TEST_TMPDIR/sel-argv" ]
+  echo "$output" | jq -e '.scope == "full"'
 }

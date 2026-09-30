@@ -615,8 +615,8 @@ the launch properties and the four `--gate-attest` rules, is on-demand reading:
 see `reference/review-loop.md` § The round protocol
 
 - pre-commit hooks (`pre-commit run --all-files`, or the staged subset),
-- tests for the stack — the **whole suite**, never a subset. The blessed gate
-  command for this repo's type — what to capture from it, and any degraded mode
+- tests for the stack — the **whole suite**, never a subset (#604, below). The
+  blessed gate command for this repo's type — what to capture, any degraded mode
   it must relay to the user — is the profile's:
   profile: `development-<repo_type>:resolve-profile` § Gate
   **If you reached this step without having run §1b at all, run its `detect` +
@@ -684,14 +684,14 @@ see `reference/review-loop.md` § The round protocol
   passed. When **neither** trigger fired (no user-docs plan, and no C4 revisit),
   or the machinery is absent, there is nothing to build and the gate is unchanged.
 
-**Run the full suite — unit *and* integration — not a unit-only subset.** A green
-local gate must mean the **whole** suite is green: a subset run (e.g. `pytest
-tests/unit`) can pass while the change silently breaks integration tests whose
-fixtures exercise it, so the break stays invisible until CI / the Approver —
-after the bot PR is opened and CI minutes are already spent, exactly the outcome
-the local gate exists to prevent (#604). Run the whole suite, or at minimum the
-changed behaviour's **full blast radius** across unit and integration; when in
-doubt, run everything.
+**Run the full suite — unit *and* integration — not a unit-only subset (#604).**
+A subset (e.g. `pytest tests/unit`) can pass while the change breaks integration
+tests whose fixtures exercise it, unseen until CI / the Approver has spent CI
+minutes on the bot PR. **#1973 amends this for intermediate (delta) review
+rounds only:** a plugin repo's gate before a *delta* round runs
+`run-gate.zsh --select-base <base>`; round 1's gate (this one), the closing
+sweep, hook mode and CI stay on the whole suite — `reference/review-loop.md`,
+*Selected gates for delta rounds (#1973)*. Anywhere else, run everything.
 
 **When a `story-spec/v1` block was consumed (#577), its `acceptance_criteria` and
 `testable_checks` are the concrete bar this gate must clear** — treat them as the

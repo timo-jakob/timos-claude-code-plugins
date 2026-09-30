@@ -374,13 +374,39 @@
 #                 uncomputable current identity runs --test-cmd as before. The
 #                 gate itself never weakens — this removes only a byte-identical
 #                 duplicate. Ignored without --test-cmd or without --resume.
+#                 SCOPE RULE (#1973): a gate's scope is the scope_mode of the
+#                 round it precedes. A `selected:<id>` attestation (a
+#                 run-gate.zsh --select-base run) is accepted ONLY on a --resume
+#                 into a delta round, and then skips on an exact <id> match; on a
+#                 --resume into a full-scope round (the closing sweep, the grant
+#                 beyond the ceiling included) only a bare <id> can skip, so a
+#                 selected one always runs --test-cmd — and so does a bare <id>
+#                 equal to a selected one this run already accepted (kept in
+#                 <work-dir>/.selected-attest until the loop's own full gate
+#                 passes, or a --gate-summary proves a green full run on that
+#                 tree). --test-cmd itself is always the FULL gate; the loop
+#                 never selects.
+#   --gate-summary the run-gate.zsh JSON summary of the gate the session ran
+#                 before the round this invocation consolidates (#1973).
+#                 Telemetry, and one guard: it never decides a skip on its own,
+#                 but a green "scope":"full" summary of the attested tree lifts
+#                 the .selected-attest backstop (see SCOPE RULE above). Its
+#                 scope, wall_s and 10 slowest files are recorded as that round's
+#                 history[].gate with attested:true, unless the loop ran its own
+#                 --test-cmd, whose summary is recorded instead (attested:false).
+#                 Unreadable or not a run-gate summary: a stderr note, no record.
+#   history[].gate {scope, attested, wall_s, slowest} per round, or null when
+#                 the loop neither ran a run-gate.zsh gate nor received a
+#                 --gate-summary for that round. A gate belongs to the round it
+#                 precedes: a --resume gate to the round it resumes into, hook
+#                 mode's post-fix gate to the next round.
 #
 # Usage:
 #   resolve-story-loop.zsh --repo PATH [--base REF] \
 #       --findings-file FILE [--test-cmd CMD] [--resume] \
 #       [--max-rounds N] [--status-file PATH] [--work-dir DIR] \
 #       [--issue N] [--telemetry-file PATH] [--telemetry-dir DIR] \
-#       [--parent-run-id ID] [--gate-attest TREE_ID] \
+#       [--parent-run-id ID] [--gate-attest TREE_ID] [--gate-summary FILE] \
 #       [--findings-tree TREE_ID] [--carry-accounting FILE] [--promote FILE] \
 #       [--risk FILE]                                                   # step mode
 #   resolve-story-loop.zsh --repo PATH [--base REF] \
@@ -460,7 +486,7 @@ local TREE_ID="${self_dir}/git-tree-id.zsh"
 local repo="" base="origin/main" review_cmd="" fix_cmd="" test_cmd="" findings_file=""
 local max_rounds=$MAX_REVIEW_ROUNDS status_file="" work_dir="" no_review=0
 local issue="" telemetry_file="" resume=0 gate_attest="" findings_tree="" promote=""
-local carry_accounting="" parent_run_id="" telemetry_dir="" risk=""
+local carry_accounting="" parent_run_id="" telemetry_dir="" risk="" gate_summary=""
 
 # A value flag with no value, or one whose value is the NEXT FLAG, is a caller
 # mistake — and both are silent disasters here. Under `nounset` a dangling
@@ -511,6 +537,10 @@ while [[ $# -gt 0 ]]; do
   --fix-cmd) _need_val "$1" $# "${2:-}"; fix_cmd="$2"; shift 2 ;;
   --test-cmd) _need_val "$1" $# "${2:-}"; test_cmd="$2"; shift 2 ;;
   --gate-attest) _need_val_optional "$1" $# "${2:-}"; gate_attest="$2"; shift 2 ;;
+  # --gate-summary (#1973): telemetry (recorded by _gate_record below), plus one
+  # guard — a green full summary of the attested tree lifts the .selected-attest
+  # backstop.
+  --gate-summary) _need_val "$1" $# "${2:-}"; gate_summary="$2"; shift 2 ;;
   --findings-tree) _need_val "$1" $# "${2:-}"; findings_tree="$2"; shift 2 ;;
   --findings-file) _need_val "$1" $# "${2:-}"; findings_file="$2"; shift 2 ;;
   # --carry-accounting (#1583): step mode's per-reviewer carry accounting — one
@@ -552,6 +582,9 @@ while [[ $# -gt 0 ]]; do
   -h|--help)
     print -r -- "usage: resolve-story-loop.zsh --repo PATH (--findings-file FILE | --review-cmd CMD --fix-cmd CMD)"
     print -r -- "  [--test-cmd CMD] [--gate-attest TREE_ID] [--base REF] [--max-rounds N] [--resume] [--issue N]"
+    print -r -- "  [--gate-summary FILE]      # the session gate's run-gate.zsh summary (#1973): telemetry, and a"
+    print -r -- "                             # green full one of the attested tree lifts the selected backstop."
+    print -r -- "                             # A selected:<id> --gate-attest skips only into a delta round."
     print -r -- "  [--findings-tree TREE_ID]  # step mode: the tree the round's panel READ (git-tree-id.zsh),"
     print -r -- "                             # minted BEFORE the panel ran. Omitting it disables the #1435"
     print -r -- "                             # cadence check; it is not --gate-attest and neither implies the other."
@@ -986,6 +1019,57 @@ write_round_scope() {  # $1 = descriptor JSON, $2 = round
 # the #1434 round identity are comparisons of the same kind.
 _tree_id() {  # $1 = repo
   GIT_TREE_ID_BIN="${GIT_TREE_ID_BIN:-git}" "$TREE_ID" "$1"
+}
+
+# --- per-round gate records (#1973) ------------------------------------------
+# `<work-dir>/gate-<R>.json` holds {scope, attested, wall_s, slowest} for the
+# gate that PRECEDED round R, and round R's history line carries it as `gate`
+# (null without one). Measurement only: nothing here decides whether a gate
+# runs or skips, and every failure costs the record, never the round.
+#
+# $3 is text holding a run-gate.zsh summary — a file's content, or a gate's
+# captured stdout, of which the LAST line that is a summary counts. Anything
+# else records nothing; $4 = "quiet" suppresses the note for that case (the
+# loop's own --test-cmd need not be run-gate.zsh at all).
+_gate_record() {  # $1 = round, $2 = attested (true|false), $3 = summary text, $4 = quiet
+  [[ -n "$work_dir" && -d "$work_dir" ]] || return 0
+  local rec=""
+  rec=$(print -r -- "$3" | jq -Rsc --argjson att "$2" '
+      [ split("\n")[] | (try fromjson catch null)
+        | select(type == "object" and (.scope | type) == "string"
+                 and (.wall_s | type) == "number" and (.files | type) == "array") ]
+      | last
+      | if . == null then empty else
+          { scope, attested: $att, wall_s,
+            slowest: ( [ .files[] | select(type == "object" and (.wall_s | type) == "number") ]
+                       | sort_by(-.wall_s) | .[:10] | map({file, wall_s}) ) }
+        end' 2>/dev/null) || rec=""
+  if [[ -z "$rec" ]]; then
+    [[ "${4:-}" == quiet ]] || \
+      print -u2 -- "resolve-story-loop: no run-gate.zsh summary for the round $1 gate — its history[].gate stays null (#1973)"
+    return 0
+  fi
+  print -r -- "$rec" 2>/dev/null >| "$work_dir/gate-$1.json" || \
+    print -u2 -- "resolve-story-loop: could not write the round $1 gate record to $work_dir/gate-$1.json (#1973)"
+  return 0
+}
+
+# Run --test-cmd — always the FULL gate: the loop never selects (#1973). Its
+# stdout is captured, mirrored to stderr (the loop's stdout is the status JSON),
+# and read for a run-gate.zsh summary to record against round $1, the round this
+# gate precedes. Returns the command's own exit status.
+_run_test_cmd() {  # $1 = the round this gate precedes
+  local out="" rc=0
+  [[ -n "$work_dir" && -d "$work_dir" ]] && out="$work_dir/.gate-out-$1.txt"
+  if [[ -n "$out" ]] && { : 2>/dev/null >| "$out"; }; then
+    ( cd "$repo" && eval "$test_cmd" ) >> "$out"; rc=$?
+    cat -- "$out" >&2 2>/dev/null
+    (( rc == 0 )) && _gate_record "$1" false "$(<"$out")" quiet
+    rm -f -- "$out" 2>/dev/null
+  else
+    ( cd "$repo" && eval "$test_cmd" ) >&2; rc=$?
+  fi
+  return $rc
 }
 
 # --- fix-touched capture (#1435) -------------------------------------------
@@ -2197,9 +2281,12 @@ else
   # ...and the max-rounds grant sidecar (#1576), which is the largest blast
   # radius of the set: a previous story's granted ceiling would silently FUND
   # rounds this run never earned, and nothing downstream would notice.
+  # ...and the per-round gate records (#1973), so a previous run's timings are
+  # never reported as this run's rounds.
   rm_state_err=$(rm -f -- "$work_dir"/tree-*.txt(N) "$work_dir"/dispatch-tree-*.txt(N) "$work_dir"/verify-*.json(N) "$closing_sweep_file" \
-    "$pft_marker" "$max_rounds_file" "$work_dir"/.max-rounds.tmp.*(N) "$work_dir"/fix-touched-*.txt(N) "$work_dir"/fix-base-*.txt(N) 2>&1) || \
-    print -ru2 -- "resolve-story-loop: could not clear the previous run's iteration state in $work_dir (${rm_state_err}) — a foreign fix-verification carry, closing-sweep marker, possible-false-trip marker, max-rounds sidecar (.max-rounds, .max-rounds.tmp.*) or fix-touched set may be adopted (#1434, #1435, #1498, #1576)"
+    "$pft_marker" "$max_rounds_file" "$work_dir"/.max-rounds.tmp.*(N) "$work_dir"/fix-touched-*.txt(N) "$work_dir"/fix-base-*.txt(N) \
+    "$work_dir"/gate-[0-9]*.json(N) "$work_dir/.selected-attest" 2>&1) || \
+    print -ru2 -- "resolve-story-loop: could not clear the previous run's iteration state in $work_dir (${rm_state_err}) — a foreign fix-verification carry, closing-sweep marker, possible-false-trip marker, max-rounds sidecar (.max-rounds, .max-rounds.tmp.*), fix-touched set or gate record may be adopted (#1434, #1435, #1498, #1576, #1973)"
   print -r -- '[]' > "$adjudicated_file" || {
     print -u2 -- "resolve-story-loop: could not initialise $adjudicated_file"; exit 1 }
   # (the telemetry run-id sidecar is cleared far earlier — see the #995 note
@@ -2301,16 +2388,69 @@ if (( step_mode && resume )) && [[ -n "$work_dir" && -d "$work_dir" ]]; then
   fi
 fi
 
+# The round this invocation consolidates — the round the gate below PRECEDES,
+# and so the round its record belongs to (#1973). A re-invocation of the same
+# round (a STALE_FINDINGS recovery) re-decides its gate, so an earlier attempt's
+# record is dropped first.
+local gate_round=$(( resume_round + 1 )) gate_ran=0
+[[ -n "$work_dir" && -d "$work_dir" ]] && rm -f -- "$work_dir/gate-$gate_round.json" 2>/dev/null
+
 if (( step_mode && resume )) && [[ -n "$test_cmd" ]]; then
-  local gate_skipped=0
-  if [[ -n "$gate_attest" ]]; then
+  local gate_skipped=0 attest_id="$gate_attest" attest_label="full-suite"
+  # The scope rule (#1973): a gate's scope is the scope_mode of the round it
+  # precedes. A `selected:<id>` attestation proves only the bats files the
+  # story diff selected, so it may skip the gate before a DELTA round and never
+  # the gate before a full-scope one — the closing sweep, which is the only
+  # full-scope round a --resume can enter (round 1 is never resumed into), the
+  # grant beyond the ceiling included since that grant is a closing sweep too.
+  # A full-scope round's `selected:` attestation is dropped here, so the round
+  # takes the ordinary fail-closed path below and runs --test-cmd — the FULL
+  # gate. A bare <id> is #981's attestation, unchanged in every round.
+  #
+  # The prefix is not the whole guard, because a session can drop it: the sweep a
+  # zero-blocker delta round promotes runs no fix pass and no new gate, so the
+  # attestation it consolidates with is the one HELD from that delta round — and
+  # a session rebuilding it from the bare T it minted would hand in a matching
+  # bare id for a tree only a selected run ever proved. So every selected id the
+  # loop accepts is remembered in <work-dir>/.selected-attest, and a BARE id equal
+  # to it is treated as selected here. The loop's own green full gate clears it.
+  local selected_seen="" selected_file="$work_dir/.selected-attest"
+  [[ -n "$work_dir" && -s "$selected_file" ]] && selected_seen="${$(<"$selected_file")//[[:space:]]/}"
+  # ...unless the session proves a FULL run on that very tree: at the sweep a
+  # zero-blocker delta round promotes, the tree has not moved, so the full gate
+  # the session starts there reports the same hex its selected gate did. Its
+  # summary — green, "scope":"full", the attested tree — is that proof, and lifts
+  # the backstop; without it the bare id is still treated as selected.
+  if [[ -n "$selected_seen" && "$gate_attest" == "$selected_seen" \
+        && -n "$gate_summary" && -f "$gate_summary" && -r "$gate_summary" ]] \
+     && jq -e --arg t "$gate_attest" '.scope == "full" and .tree == $t and .exit == 0' \
+          -- "$gate_summary" >/dev/null 2>&1; then
+    print -u2 -- "resolve-story-loop: --gate-summary proves a green FULL run on the attested tree ($gate_attest) — the selected-run backstop is lifted (#1973)"
+    rm -f -- "$selected_file" 2>/dev/null
+    selected_seen=""
+  fi
+  if [[ "$gate_attest" == selected:* ]]; then
+    attest_id="${gate_attest#selected:}" attest_label="selected-gate"
+  elif [[ -n "$gate_attest" && "$gate_attest" == "$selected_seen" ]]; then
+    attest_label="selected-gate"
+  fi
+  if [[ "$attest_label" == selected-gate ]] \
+     && (( closing_sweep_round > 0 && gate_round == closing_sweep_round )); then
+    print -u2 -- "resolve-story-loop: --gate-attest '${gate_attest}' names a tree only a SELECTED gate run proved, and round ${gate_round} is the closing full sweep — only a full gate can attest a full-scope round; running --test-cmd (#1973)"
+    attest_id=""
+  fi
+  if [[ -n "$attest_id" ]]; then
     local cur_tree=""
     [[ -x "$TREE_ID" ]] && cur_tree="$(_tree_id "$repo" 2>/dev/null)"
-    if [[ -n "$cur_tree" && "$cur_tree" == "$gate_attest" ]]; then
+    if [[ -n "$cur_tree" && "$cur_tree" == "$attest_id" ]]; then
       gate_skipped=1
+      if [[ "$attest_label" == selected-gate && -n "$work_dir" && -d "$work_dir" ]]; then
+        print -r -- "$attest_id" 2>/dev/null >| "$selected_file" || \
+          print -u2 -- "resolve-story-loop: could not record the selected attestation in $selected_file — a bare re-pass of it into the closing sweep would not be caught (#1973)"
+      fi
       print -u2 -- "resolve-story-loop: --gate-attest matches the working tree ($cur_tree) — skipping the duplicate --test-cmd run (#981)"
       if [[ -n "$work_dir" && -d "$work_dir" ]]; then
-        { print -r -- "**Gate (round $(( resume_round + 1 ))):** attested green — skipped the duplicate full-suite run (#981)" \
+        { print -r -- "**Gate (round $(( resume_round + 1 ))):** attested green — skipped the duplicate ${attest_label} run (#981)" \
           >> "$work_dir/progress.md" ; } 2>/dev/null || true
       fi
     else
@@ -2318,9 +2458,23 @@ if (( step_mode && resume )) && [[ -n "$test_cmd" ]]; then
     fi
   fi
   if (( ! gate_skipped )); then
-    ( cd "$repo" && eval "$test_cmd" ) || {
+    gate_ran=1
+    _run_test_cmd "$gate_round" || {
       print -u2 -- "resolve-story-loop: --test-cmd red on --resume (prior round's fix broke the gate)"
       emit_and_exit "ERROR" "$resume_round" 1 "" "" "$resume_prev" "$history_file" "$changelists_file" }
+    # a green FULL gate on this tree supersedes any selected proof of it
+    [[ -n "$work_dir" ]] && rm -f -- "$selected_file" 2>/dev/null
+  fi
+fi
+# The session's own gate for this round, when the loop did not run one: its
+# summary is the round's record (attested:true). This recording is telemetry
+# only — the skip decision above has already used the summary (to lift the
+# backstop), and nothing below consults it.
+if (( ! gate_ran )) && [[ -n "$gate_summary" ]]; then
+  if [[ -f "$gate_summary" && -r "$gate_summary" ]]; then
+    _gate_record "$gate_round" true "$(<"$gate_summary")"
+  else
+    print -u2 -- "resolve-story-loop: --gate-summary is not a readable file ($gate_summary) — round ${gate_round}'s history[].gate stays null (#1973)"
   fi
 fi
 
@@ -2385,7 +2539,7 @@ local fix_base_tree=""
 local digest="" prev_digest_file=""
 local prev_findings_empty=0
 local blocking=0 conflict=0 nonconv=0 nconf=0 verdict="" ftrips=0
-local adj_dropped=0
+local adj_dropped=0 gate_rec='null'
 local cur_tree="" prior_tree="" prior_tree_file="" fix_verification=""
 local scope_mode="" replanned_scope_mode="" delta_json="" carried=0
 local is_final=0 is_closing_sweep=0 is_empty_delta=0 empty_delta_note=""
@@ -3073,10 +3227,18 @@ while (( round <= effective_max )); do
   # treatment; that is a follow-up, not this story's scope.)
   adj_dropped=$(jq '.summary.adjudicated_dropped // 0' -- "$changelist") || {
     print -u2 -- "resolve-story-loop: could not read summary.adjudicated_dropped at round $round"; exit 1 }
+  # the gate that preceded this round (#1973): its record, or null. A record
+  # that is not a JSON object reads as null, so it can never cost the history
+  # line — the same reason adjudicated_dropped is checked above.
+  gate_rec='null'
+  if [[ -s "$work_dir/gate-$round.json" ]]; then
+    gate_rec=$(jq -ce 'if type == "object" then . else null end' -- "$work_dir/gate-$round.json" 2>/dev/null) || gate_rec='null'
+    [[ -n "$gate_rec" ]] || gate_rec='null'
+  fi
   jq -c --argjson r "$round" --argjson b "$blocking" --argjson c "$nconf" --argjson nc "$nonconv" \
-     --argjson ft "$ftrips" --argjson ad "$adj_dropped" \
+     --argjson ft "$ftrips" --argjson ad "$adj_dropped" --argjson g "$gate_rec" \
      '{round:$r, blocking:$b, conflicts:$c, non_converging:($nc==1), false_trips:$ft,
-       adjudicated_dropped:$ad}' <<< '{}' >> "$history_file" || {
+       adjudicated_dropped:$ad, gate:$g}' <<< '{}' >> "$history_file" || {
     print -u2 -- "resolve-story-loop: could not append the round $round history line to $history_file"; exit 1 }
 
   # ...and ONLY NOW record this round's suggestions as adjudicated. The append
@@ -3314,9 +3476,11 @@ while (( round <= effective_max )); do
     print -u2 -- "resolve-story-loop: --fix-cmd failed at round $round"; exit 1 }
   _capture_fix_touched "$fix_base_tree" "$round" || true
 
-  # 6. re-run the gate (optional); red after a fix is an operational abort
+  # 6. re-run the gate (optional); red after a fix is an operational abort. It
+  # precedes the NEXT round, so its record is that round's (#1973) — and hook
+  # mode never selects: --test-cmd is the full gate here as everywhere.
   if [[ -n "$test_cmd" ]]; then
-    ( cd "$repo" && eval "$test_cmd" ) || {
+    _run_test_cmd "$(( round + 1 ))" || {
       print -u2 -- "resolve-story-loop: --test-cmd red after fix in round $round"
       emit_and_exit "ERROR" "$round" 1 "$repo_type" "$review_skill" "$final_changelist" "$history_file" "$changelists_file" }
   fi
