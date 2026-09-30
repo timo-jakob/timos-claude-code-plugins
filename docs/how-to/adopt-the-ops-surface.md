@@ -334,13 +334,51 @@ pull-compat surface served by the SDK's Prometheus exporter.
     undeclared table is as wrong-but-green as the shipped illustration copied
     verbatim.
 
-  The v1.1 half — per-dependency `components` on `/health` and the hard/soft
-  readiness hinge — arrives with the **Node resilience payload** (#1145), which
-  will bind `opossum` breaker state to this surface's seam. Until it lands the
-  seam ships **unwired**, and an unwired surface is a conforming ops-api **v1.0**
-  body: no `components` field, readiness from your own `readiness` function alone.
-  You can implement `DependencyHealthSource` by hand in the meantime — return a
-  freshly built object every call — but that is the escape hatch, not the default.
+  Bootstrap installs the **resilience payload** alongside it (the two are placed
+  together or not at all), which is what fills in the v1.1 half — per-dependency
+  `components` on `/health` and the hard/soft readiness hinge, both read from
+  circuit-breaker state. The blessed library is **`opossum`**, a *single* library
+  like Go's: mandate 3's bounded jittered retry is a short loop in the catalog.
+  The catalog keeps opossum for breaker state, fast-fail and the open → half-open
+  timer, but trips on its **own** count-based window, because opossum's trip rule
+  counts an excluded caller error as a success. The pair's joint Node floor is
+  `^22 || ^24 || ^26` — opossum's — and your `package.json` still needs
+  `"type": "module"`. Five things are yours to do, and three fail quietly if you
+  skip them:
+
+  - declare your direct dependencies in `resilience-dependencies.properties`
+    (`<name>=hard|soft`, one per line, **full-line `#` comments only**, no
+    duplicates). It is read at startup from beside the **compiled**
+    `dependencyCatalog.js`, and `tsc` does not copy it, so your `build` needs a
+    copy step (bootstrap adds one); a build without it fails startup naming the
+    path. `$OPS_DEPENDENCIES_FILE` overrides it for a mounted ConfigMap. **Replace
+    the shipped `orders-db`/`pricing-api` examples** — left verbatim they fail
+    startup on `requireAllDeclaredGuarded` (nothing guards them), and if you skip
+    that call `/health` reports two dependencies you do not have as `up`. A
+    `hard` dependency whose breaker is open fails `/health/ready` with a 503; a
+    `soft` one keeps the pod ready and floors the aggregate at `degraded`;
+  - **claim each dependency in its client's constructor** with
+    `catalog.requireDeclared(name)` — the only writer of the guarded set, so a
+    service that never claims reaches `requireAllDeclaredGuarded()` with an empty
+    one and refuses to boot;
+  - route every outbound call through `catalog.call(name, action, fallback,
+    { signal })`, and **pass the action's `AbortSignal` to your I/O**. The catalog
+    imposes the 2s per-attempt timeout — which is also the slow-call threshold,
+    since opossum has none — but only your action owns the socket. Make the
+    fallback **resolve**: an outage that ends in an unhandled rejection
+    terminates a Node process by default;
+  - pass `new DependencyHealth(catalog)` as `OpsConfig.dependencies`;
+  - call `catalog.requireAllDeclaredGuarded()` once at startup, after your clients
+    are built. It is the only thing that catches a dependency you declared but
+    never wired — whose breaker can never leave `closed`, so `/health` would
+    report it `up` throughout an outage.
+
+  Leave `OpsConfig.dependencies` unset and the surface is still a conforming
+  ops-api **v1.0** body — no `components` field, readiness from your own
+  `readiness` function alone — which is correct but blind. `pricingApiClient.ts`
+  is a worked example, not service code: adapt it to a real dependency or leave it
+  out. The payload's own `README.md` is the reference for the shape, including the
+  measured fit-check behind `opossum` and why `cockatiel` was dismissed.
 - **Swift** — bootstrap copies `OpsApi.swift` to
   `Sources/<ServiceTarget>/Ops/OpsApi.swift`, with the payload's `README.md`
   beside it, and pastes two blocks from `Package.swift.deps` into your

@@ -40,7 +40,9 @@ The three `exporter-*` packages are deliberately left unversioned **in one
 command**, which is what keeps them on a single 0.x train (see below).
 
 **This payload needs Node `^18.19.0 || >=20.6.0`** — the `engines.node` those OTel
-packages declare. Below it they do not install at all.
+packages declare. Below it they do not install at all. Bootstrap places the Node
+resilience payload beside this one, and its `opossum` narrows the pair's **joint**
+floor to `^22 || ^24 || ^26`; see that payload's `README.md`.
 
 **In a workspaces repo, run these from the workspace root.** npm resolves and
 locks workspace packages there; a nested install writes a second
@@ -187,9 +189,10 @@ dependency, read passively from that dependency's circuit-breaker state, plus a
 `OpsConfig.dependencies` to any object implementing `DependencyHealthSource`.
 
 **The blessed source is the Node resilience payload** (#1145), which bootstrap
-installs alongside this one once it lands — the two are placed together or not at
-all. It wires `opossum` around your dependency clients and derives these entries
-from breaker state. Leaving `OpsConfig.dependencies` unset is still legal and
+installs alongside this one — the two are placed together or not at all. It wires
+`opossum` around your dependency clients and derives these entries from breaker
+state: pass `new DependencyHealth(catalog)` as `OpsConfig.dependencies`, and its
+`README.md` (in `src/resilience/`) covers the rest. Leaving `OpsConfig.dependencies` unset is still legal and
 still conforms: the surface is then an ops-api **v1.0** body, with no `components`
 field and readiness decided by your `readiness` function alone.
 
@@ -197,7 +200,7 @@ The binding is an interface over plain objects, so this module needs no breaker
 library on its import path — and must never grow one. **The import direction is
 one-way**: the resilience payload imports this module, never the reverse.
 
-If you implement `DependencyHealthSource` by hand in the meantime, **return a
+If you implement `DependencyHealthSource` by hand instead, **return a
 freshly built object every call.** Node is single-threaded, so unlike the Go
 sibling there is no concurrent-map fault to fear — but `/health` serializes what
 you hand back, so returning your live registry lets any later mutation of it be

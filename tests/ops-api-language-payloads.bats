@@ -1811,21 +1811,28 @@ ts_flat() { local b; b="$(ts_func "$1")" || return 1; ts_flatten "$b"; }
   # actually asked. Both needles are unique to this gate.
   contains "$block" 'as its own line in the Step-2 plan**, naming the half that is absent'
   contains "$block" 'TODO. Placing a `.ts`'
-  # The payload's Node floor is the OTel packages' own engines.node, not a house
-  # rule — and it is checked BEFORE placement, because below it the dependencies
-  # do not install and the surface can never run.
-  contains "$block" "The payload's own Node floor is \`^18.19.0 || >=20.6.0\`"
-  contains "$block" 'placing anything**: below the floor, the OTel dependencies will not install'
+  # The Node floor is the JOINT floor of the two payloads placed together (#1145):
+  # opossum ^10's engines.node, stricter than the OTel packages' own — not a house
+  # rule — and it is checked BEFORE placement.
+  contains "$block" "**The payloads' joint Node floor is \`^22 || ^24 || ^26\`**"
+  contains "$block" 'looser `^18.19.0 || >=20.6.0`, but the two payloads are placed together or not'
+  contains "$block" '**before placing anything**.'
   # …and what to DO about it. Without these two the block states a floor with no
   # instruction attached — the same gap the three other deferral sites had.
-  contains "$block" 'Below the floor, surface the Node-pin raise as its own Step-2 plan line, and if'
-  contains "$block" 'the user declines, **defer the ENTIRE payload** behind a Step-5 TODO. At or'
-  # The floor is minor-granular while the resolution yields a MAJOR, so the block
-  # must say which majors decide it outright and which two need a minor read —
-  # otherwise "major 20 vs >=20.6.0" has no answer and the model guesses, in
-  # either direction.
-  contains "$block" 'Majors **21 and up** are above'
-  contains "$block" 'treat it as **below** the floor rather than guessing'
+  contains "$block" 'Outside the floor, surface **one** Node-pin raise as its own Step-2 plan line —'
+  contains "$block" 'included — and if the user declines, **defer the ENTIRE ops-api'
+  # …and the APPROVE arm: which major, and which pins move. Without it a raise
+  # of engines.node alone leaves the base image on an unsupported major.
+  contains "$block" 'it covers both payloads, targets the shipped 24, and on approval moves'
+  contains "$block" 'every runtime source the repo has among the four above, the base image'
+  # The floor is major-granular but NOT a range, so the block must say which majors
+  # fall outside it — the odd ones between the listed majors are the easy miss,
+  # and reading the floor as "22 and up" ships a payload onto an unsupported 23.
+  contains "$block" 'Majors **22, 24 and 26**'
+  contains "$block" 'the odd majors'
+  contains "$block" '**23 and 25**'
+  # engine-strict=false: npm only warns, so the check cannot be left to npm.
+  contains "$block" 'mismatch only **warns**'
   # The @types/node LOWER arm must NOT also claim the below-floor case: it says
   # "never defer over this", which is the opposite of what the floor demands.
   contains "$block" 'the floor rule below governs it, decline arm'
@@ -1837,10 +1844,9 @@ ts_flat() { local b; b="$(ts_func "$1")" || return 1; ts_flatten "$b"; }
   # trigger needle alone would not see it.
   contains "$block" 'admit; and with no source at all, the shipped 24.'
   contains "$block" '`.nvmrc` (24) if the ranges admit it; failing that, the highest major they'
-  # Major 19 satisfies NEITHER floor clause, and it shares a sentence with the
-  # 21-and-up rule — so without its own needle it can be deleted alone, leaving 19
-  # unclassified between "18/20 straddle" and "21 and up".
-  contains "$block" 'major **19** is below it outright'
+  # "21 and below" shares a sentence with the odd-majors rule — so without its own
+  # needle it can be deleted alone, leaving the old majors unclassified.
+  contains "$block" '**21 and below**'
   # The OTel conflict must be keyed on "admits no version at or above the floor",
   # not on "does not admit the floor version" — a range strictly ABOVE the floor
   # satisfies the payload while failing the latter test.

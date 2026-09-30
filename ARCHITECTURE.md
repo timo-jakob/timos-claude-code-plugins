@@ -553,16 +553,11 @@ one *is* a degraded service. (Breaker → dependency status is exact: closed =
   central and language-agnostic (#965). The **review dimension** (#966) is
   shipped and catches violations on new diffs. The per-language scaffolding is
   #967's six children, of which **Spring (#1141), non-Spring Java (#1142),
-  Python (#1143) and Go (#1144) have landed** — see below; javascript and swift
-  are #1145/#1146. #1145's prerequisite is now met — **#936 shipped the Node
-  ops-api surface with its `components` seam unfilled**, which is the gap #1144
-  closed for Go. **#1146's prerequisite is now met too** — #937 shipped the Swift
-  ops-api surface with the same seam unfilled: an `async`, `Sendable`
+  Python (#1143), Go (#1144) and Node (#1145) have landed** — see below; swift
+  is #1146. **#1146's prerequisite is met** — #937 shipped the Swift
+  ops-api surface with its `components` seam unfilled: an `async`, `Sendable`
   `DependencyHealthSource` returning a snapshot, with no breaker library on the
-  import path. **The Node
-  realization will be `opossum`** (#1145), the blessed breaker library for the
-  language, named here because #936's shipped templates already promise it to
-  adopters. #1146's Swift library is undecided. A
+  import path. #1146's Swift library is undecided. A
   **maintenance advisor** will catch the same defect classes on the back
   catalogue (#968) and is **not yet built** — until it lands, the pattern is
   enforced on new diffs only.
@@ -755,6 +750,34 @@ one *is* a degraded service. (Breaker → dependency status is exact: closed =
   imports
   `ops` and never the reverse, which is what keeps the #1192 ops package free of a
   breaker import as its own contract promises.
+- **The Node realization is `opossum` — kept for state, not for the trip rule
+  (#1145).** Like Go, one library: the bounded jittered retry is a short loop in
+  the catalog, breaker-aware for the same reasons. opossum was **confirmed, not
+  assumed** — measured against 10.0.0, four concurrent 1s calls take 1.00s, an open
+  breaker fast-fails without invoking the call, and its own reset timer moves open
+  → half-open with **zero traffic**, which is what **dismissed `cockatiel`**: its
+  transition is lazy, made on the next `execute()`, so a quiet service would report
+  a recovered dependency down indefinitely. One gap is load-bearing and fails
+  silently: opossum's `errorFilter` counts an excluded caller error as a
+  **success**, and its rolling counts include the rejections of its own open state,
+  so excluded traffic dilutes the failure rate (100 filtered 404s plus 20 real
+  failures read 20/120 and stayed closed). The payload therefore **disables
+  opossum's closed-state trip** (`volumeThreshold: Number.MAX_SAFE_INTEGER`) and
+  trips from its own count-based window over counted outcomes only, at the Java
+  sibling's resilience4j numbers (20 / 10 / 50%). Two Node-specific decisions: the
+  **timeout is the catalog's**, not the client's — an `AbortSignal` handed to the
+  action plus opossum's own `timeout`, so even a client that ignores the signal
+  cannot park its caller; and the **fallback must resolve**, because Node
+  terminates the process on an unhandled promise rejection by default, which would
+  turn an upstream outage into a pod crash. The payload
+  (`templates/languages/javascript/resilience/`) is TypeScript, NodeNext ESM, and
+  reads the `resilience-dependencies.properties` declaration from beside its
+  **compiled** module — `tsc` does not copy it, so bootstrap adds a copy step to the
+  build, and a build without one fails at startup rather than silently. opossum
+  `^10`'s `engines.node` (`^22 || ^24 || ^26`) is the pair's **joint** Node floor,
+  stricter than the ops-api payload's own, and `@types/opossum` `^8.1.9` types it
+  because opossum's runtime is byte-identical from 8.5.0 to 10.0.0. As in Go, the
+  resilience module imports ops (type-only, here) and never the reverse.
 - **The review dimension is `resilience`** (#966) — a `*-resilience-reviewer`
   agent in each **service** language plugin (Go, Java, Python, Swift, and
   JavaScript (Node) since #1071), wired into that language's review panel
