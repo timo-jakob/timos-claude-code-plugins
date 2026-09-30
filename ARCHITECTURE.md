@@ -1085,6 +1085,60 @@ consumer's generated client is its own sub-tier (#958, below).
   linting and running a rendered tree — including the deprecation warning at a
   real call site — is the render-and-build smoke check's job (#1063).
 
+### React WebUI gates — blocking in the app, advisory in maintenance (#1946, #1947)
+
+The same three WebUI quality gates are enforced in two places, and only one of
+them blocks.
+
+- **Blocking: the bootstrapped app's own CI (#1946).** The React overlay renders
+  the gates into a new app — an axe matcher (`toHaveNoViolations`, family-owned,
+  on bare `axe-core`, registered in `src/test/setup.ts` and exercised by an a11y
+  canary inside `test-and-coverage`), a Playwright smoke test, and Lighthouse CI
+  byte budgets in a root `lighthouserc.json`. A red gate there fails the pull
+  request. That is where a regression is stopped.
+- **Advisory: maintenance on an existing repo (#1947).** A React repo the
+  overlay never rendered — or one that drifted from it since — is reported by
+  `development/skills/maintenance/scripts/gather-react-findings.zsh`. It
+  **audits configuration only** and never runs npm, a browser or Lighthouse, so
+  its findings describe a missing or weakened gate. They cannot stand in for the
+  gate itself. *Rationale:* a maintenance run judges a repo it did not build.
+  Blocking on its static reading of someone else's config would put a heuristic
+  where the app's own CI already holds the real verdict.
+
+The audit accepts **exactly the layout #1946 renders**, and reads only root
+files: a monorepo whose React app lives below the root is a known gap, judged
+against the root. Every finding is
+`{id, tool, type, severity, message, fix, files}` with
+`id = <tool>:<type>[:<assertion-id>]`, and `findings_by_tool` always carries
+both keys (`[]` when compliant):
+
+- **`a11y`.** An axe package is a root `package.json` `devDependencies` key that
+  is `axe-core`, `vitest-axe` or `jest-axe`, or starts with `@axe-core/`; none
+  → `a11y:no_axe_package` (MAJOR). With one present, the string literals in the
+  `setupFiles` of the first root `vitest.config.*` (else `vite.config.*`) must
+  name a file that defines `toHaveNoViolations` or imports a
+  `vitest-axe`/`jest-axe` `extend-expect`. Otherwise the gather emits
+  `a11y:matcher_not_registered` (MAJOR). A `setupFiles` the gather cannot
+  read statically, and a missing or invalid `package.json`, are **notes**:
+  the audit could not judge them, so it claims nothing.
+  `tooling_configured.a11y` means an axe package is present.
+- **`lighthouse_budget`.** Only root `lighthouserc.json` is read. A missing
+  file is `missing_config` and an unparseable one `invalid_config` (both MAJOR,
+  exit 0). The two byte budgets — `resource-summary:script:size` ≤ 307200 and
+  `resource-summary:total:size` ≤ 512000 bytes — are each `budget_missing`
+  (MAJOR), `budget_not_blocking` (MINOR: not at `error`, or no numeric
+  `maxNumericValue`) or `budget_too_loose` (MINOR: above the limit; exactly the
+  limit passes). The timing assertions #960 rules out as flapping — LCP, TBT,
+  CLS and `categories:performance` — at `error` are
+  `timing_assertion_blocking` (MINOR), and a non-empty `preset` is
+  `preset_present` (MINOR). `warn` and `off` are never findings.
+  `tooling_configured.lighthouse_budget` means the file exists and parses.
+
+The Playwright gate has no audit here. Routing these two groups to a fixer in the
+`development-react` dispatcher is #960's dispatcher child. Until that lands the
+dispatcher surfaces them under `missing_tooling`, which is the intended interim
+behaviour.
+
 ### Deployment — GitOps promotion and immutable references (#1189)
 
 A deployable reaching a cluster is the last link in the polyrepo chain above,
