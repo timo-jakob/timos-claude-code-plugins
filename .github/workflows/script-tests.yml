@@ -181,7 +181,17 @@ jobs:
     # a nudge — and if #1408 restores the macos leg, this budget must be
     # re-derived from THAT leg again, because it will immediately be binding at
     # ~29 min on a slow runner and would trip 25 on arrival.
-    timeout-minutes: 25
+    #
+    # 27 after the 2026-09-30 re-measure (#1970) — so read the 25 and ~15 min in
+    # the paragraph above as history, and its re-measure trigger as "approaches
+    # 27". The ratio is 1.3x rather than 1.7x because this re-derivation used a
+    # 30% buffer. The ubuntu leg had grown to 13m42s–20m26s over the 12 green
+    # runs of 2026-09-29/30, the latest green main run (36724260301, 6321 cases)
+    # taking 20m26s — 82% of 25. 20m26s x 1.3 = 26m34s, rounded up. The PR #1968
+    # cancellation that prompted this was a hung Linux dependency-install step
+    # (25 min in a step that normally takes ~72s), not the suite; hardening that
+    # step is #1353's.
+    timeout-minutes: 27
     steps:
       - uses: actions/checkout@v6
         with:
