@@ -25,9 +25,25 @@ function; **you** relay between it and the human, and **you** own every GitHub
 write. The payoff of doing this well: the story reaches the implementer precisely
 specified, and a durable machine-readable `story-spec/v1` block rides along.
 
-**User input:** an issue number or URL. Operate on the session's repo
-(`gh repo view --json nameWithOwner`); the issue must belong to it. If empty,
-print `/development:refine-issue <issue-number|url>` and stop.
+**User input:** an issue number or URL, optionally with `--auto-accept <t>`.
+Operate on the session's repo (`gh repo view --json nameWithOwner`); the issue
+must belong to it. If empty, print
+`/development:refine-issue <issue-number|url> [--auto-accept <0..1>]` and stop.
+
+**Resolve the auto-accept threshold once, before anything else.** The run
+applies it in Step 2. Resolve it once per invocation, not once per epic child:
+
+```bash
+"<skill-base-dir>/scripts/auto-accept-threshold.zsh" [--flag <t>]   # --flag only when --auto-accept was given
+```
+
+It prints `<milli> <source>`. The value comes from the flag, else
+`refine_auto_accept_threshold` in the settings `env` block, else `1`. **Exit 2**
+means the `--auto-accept` value is malformed: tell the human the accepted form
+(a decimal from 0 to 1, at most three decimals) and stop. On `env-ignored`,
+relay the script's stderr line. Tell the human the threshold and its source in
+one line, e.g. "auto-accept: 0.9 (from settings)". Carry `<milli>` in your notes
+for Step 2.
 
 **Epic or single issue? (#580)** First classify the target
 (`gh issue view <N> --json labels,body`): it is an **epic** when it has
@@ -365,17 +381,52 @@ Then relay its returned JSON to the human in readable form:
 
 - **`explanation`** — *why* each objection blocks the story (so the human
   understands the gap);
-- **`questions`** — surface them and **collect the human's answers**;
+- **`questions`** — split them first (below), then surface the **ask** ones and
+  **collect the human's answers**;
 - **`recommendations`** — the concrete rewrites it suggests;
 - **`proposed_prose`** / **`proposed_story_spec`** — the draft, when it has one.
 
-Append this round (your relayed summary + the human's reply) to `conversation`
-and call the agent again with the human's `human_reply`. **Converge when the
-agent reports every objection `resolved: true` AND `questions == []`** — its
-`resolved_objections` drives this decision (that is its whole purpose). Then
-present the **final `proposed_prose` + `proposed_story_spec`** and get the
-human's **explicit approval of the exact rewrite**. Nothing is written until they
-approve. If they want changes, feed their reply back for another round.
+**Split the questions against the threshold, every round.** Write the agent's
+returned JSON to a file and run:
+
+```bash
+"<skill-base-dir>/scripts/split-refiner-questions.zsh" \
+  --threshold-milli <milli> --turn <turn.json>
+```
+
+It prints `{threshold, auto, ask}`. The script decides and you do not second-guess
+it. Its confidence is the lowest of the refiner's five criterion scores, and an
+answer is `auto` only when that is at or above the threshold. An exit 2 means
+the turn is not a JSON object with a `questions` array: re-spawn the refiner for
+this round once, and if it fails again, relay the questions to the human as
+they are.
+
+- **`auto`** — answer each one with its `answer`. Add it to the round's human
+  reply as `[auto-accepted @<confidence>] <question> → <answer>`, and tell the
+  human in one line per answer what you took and its weakest criterion. Keep a
+  running list of these answers for the approval step below.
+- **`ask`** — relay these as before. Show the `recommended_answer` and
+  `confidence` next to each one when present, so the human can simply agree.
+
+When every question is `auto`, do not wait for the human: call the agent again
+straight away with the auto-accepted answers as `human_reply`.
+
+Append this round (your relayed summary + the human's reply, auto-accepted lines
+included) to `conversation` and call the agent again with that reply as
+`human_reply`. **Converge when the agent reports every objection
+`resolved: true` AND `questions == []`** — its `resolved_objections` drives this
+decision (that is its whole purpose). Then present the **final
+`proposed_prose` + `proposed_story_spec`** and get the human's **explicit
+approval of the exact rewrite**. Nothing is written until they approve. If they
+want changes, feed their reply back for another round.
+
+**Auto-accept never approves the rewrite.** The threshold only answers the
+refiner's questions. The approval of the exact rewrite is always the human's,
+whatever the threshold. Present it with a heading **Answers taken
+automatically**, listing each auto-accepted question, the answer, its
+confidence and its weakest criterion. The human can overturn any of them
+before approving. An overturned answer is a normal human reply: feed it back for
+another round.
 
 **Record Step 7's counters as you go — on every path through this loop, not just
 a park.** They have no other source, and Step 7 refuses to guess, so leaving them
@@ -451,7 +502,8 @@ route** instead (keep the label, post Step 6's trail, emit `parked` /
 Build the parked comment with the script (never hand-roll the marker) and post
 it as the human, exactly like every other refine-issue side effect. The state
 object carries the type, the still-**`open_questions`**, the `conversation`, and
-the type-specific fields. Set Step 7's run variables as you go —
+the type-specific fields. `open_questions` holds **strings**: take each refiner
+question's `question` text, never the scored object. Set Step 7's run variables as you go —
 `STATE_OUTCOME="parked"` and `PARK_TYPE` to the type you chose:
 
 ```bash
@@ -719,8 +771,11 @@ they can add or fix it and, optionally, re-run refine-issue to reference it.
 Post one durable comment recording **what changed and why**, so the issue is a
 self-contained record: the objections you started from, a short before/after of
 the prose (or a note that the full diff is in the edit history), the re-gate
-verdict, and the resulting label state. This is the audit trail a later reader —
-or `resolve-issue` — relies on.
+verdict, and the resulting label state. When Step 2 auto-accepted any answers,
+the comment also lists them under **Answers taken automatically**, each with its
+confidence and the threshold. A later reader can then tell which parts of the
+story the human stated and which parts the refiner stated for them. This is the
+audit trail a later reader — or `resolve-issue` — relies on.
 
 ## Step 7 — emit telemetry (every decided ending, #579)
 
@@ -891,6 +946,12 @@ fi
   write to GitHub — every side effect (edit, label, comment) is yours.
 - **Human-approved, human-authored write-back.** No bot token, no PR: you edit
   the issue with the human's auth, and only after they approve the exact rewrite.
+- **Auto-accept answers questions, nothing else.** The threshold
+  (`--auto-accept`, else `refine_auto_accept_threshold`, else 1) decides only
+  which refiner questions you answer with the refiner's recommendation, and
+  `scripts/split-refiner-questions.zsh` makes that decision. It never approves
+  the rewrite, and it never answers the Step 0, Step 1 or Step 5 prompts.
+  Every auto-taken answer is shown at approval and recorded in Step 6's trail.
 - **The label tells the truth.** Remove `needs-refinement` **only** on a `READY`
   re-gate; otherwise it stays.
 - **One canonical hash.** Compute `prose_sha256` with

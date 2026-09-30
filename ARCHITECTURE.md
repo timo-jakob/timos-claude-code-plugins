@@ -7278,6 +7278,42 @@ which the Epic flow reads before E1. User-facing docs:
 [how-to: run epics strictly
 sequentially](docs/how-to/run-epics-strictly-sequentially.md).
 
+## Runtime setting: `refine_auto_accept_threshold`
+
+The fourth runtime switch, and the first one for `/development:refine-issue`.
+It lets the conductor answer an `issue-refiner` question with the refiner's
+own recommended answer, instead of asking the human, when the answer is
+confident enough.
+
+- **Value:** a decimal in [0, 1] with at most three decimals, the same shape as
+  `corner_case_risk_threshold`. The skill's `--auto-accept <t>` flag wins,
+  then the variable, then **`1`**. At 1 only an answer scored 1 on every
+  criterion is taken. A malformed flag is exit 2 and stops the run. A malformed
+  variable is ignored: it falls back to 1 and the run says so. A global setting
+  never blocks a run, and falling back to 1 means asking. The rule is stated
+  once, in `development/skills/refine-issue/scripts/auto-accept-threshold.zsh`.
+- **The refiner scores and a script decides.** Each `questions[]` entry of the
+  refiner's turn is an object: `question`, `recommended_answer` (nullable),
+  `criteria` (nullable), and `rationale`. `criteria` holds five scores in
+  [0, 1] with at most two decimals: `repo_consistency`, `best_practice`,
+  `evidence`, `uniqueness` and `reversibility`. Every round,
+  `split-refiner-questions.zsh` computes the confidence as the **minimum** of
+  the five scores, in integer thousandths. It never takes an overall figure
+  from the refiner. The script marks an answer `auto` when its confidence is
+  at or above the threshold. A plain-string, unrecommended, unscored or
+  malformed entry is always `ask`.
+- **Scope:** questions only. The human's approval of the exact rewrite before
+  the Step 3 write-back is unchanged, and so is the rule that the write-back
+  is human-authored. So are the Step 0, Step 1 and Step 5 prompts. Every
+  auto-accepted answer is listed at approval and in Step 6's before/after
+  comment. The refiner treats an auto-accepted human turn as an answer, never
+  as a waiver.
+- **Telemetry:** unchanged. The `refine-issue` payload carries no auto-accept
+  count.
+
+User-facing docs: [how-to: let refine-issue answer the questions it is sure
+about](docs/how-to/let-refine-issue-answer-confident-questions.md).
+
 ## Worktree pattern for parallel work
 
 The Agent tool natively supports `isolation: "worktree"`. The runtime
