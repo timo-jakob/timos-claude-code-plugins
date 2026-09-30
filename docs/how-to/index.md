@@ -18,6 +18,7 @@ what you want to achieve.
 - [Turn off suggestion prompts after the review loop converges](turn-off-suggestion-prompts.md)
 - [Set a corner-case risk threshold for review residue](set-a-corner-case-risk-threshold.md)
 - [Run epics strictly sequentially, with nothing in the background](run-epics-strictly-sequentially.md)
+- [Let refine-issue answer the questions it is sure about](let-refine-issue-answer-confident-questions.md)
 - [Maintain this repo (quarterly template refresh)](maintain-this-repo.md)
 - [Contribute (signed commits, branch protection)](contributing.md)
 - [Add support for a new language plugin](../adding-a-language-plugin.md)

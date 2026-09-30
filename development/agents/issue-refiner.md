@@ -468,7 +468,11 @@ Emit exactly one fenced `json` block and no other prose. Shape:
       "why": "Without a number, no test can prove the story is done — the reviewer can't tell pass from fail." }
   ],
   "questions": [
-    "What is the p95 latency target, and measured against which endpoint and payload?"
+    { "question": "What is the p95 latency target, and measured against which endpoint and payload?",
+      "recommended_answer": "p95 < 200 ms for POST /jobs at 50 req/s, the load profile tests/load/jobs.js already drives.",
+      "criteria": { "repo_consistency": 0.9, "best_practice": 0.8, "evidence": 0.7,
+                    "uniqueness": 0.4, "reversibility": 0.9 },
+      "rationale": "tests/load/jobs.js drives 50 req/s at POST /jobs; the 200 ms figure is a common default, not a stated product target, so another target is credible." }
   ],
   "recommendations": [
     "State the target as 'p95 < 200 ms for POST /jobs at 50 req/s', so it becomes a load-test assertion.",
@@ -520,7 +524,43 @@ Rules for the payload:
   shorten, or re-punctuate it.
 - **`questions`** — only the genuinely-open gaps this turn. Never re-ask what the
   reply or the repo already answered. `[]` is **necessary but not sufficient**
-  for convergence (see `resolved_objections`).
+  for convergence (see `resolved_objections`). Each entry is an object:
+  - `question` — the question, worded for the human;
+  - `recommended_answer` — the answer you would give, worded so it can stand as
+    the human's reply; `null` when you have none worth recommending;
+  - `criteria` — your score for that answer on each of five criteria, each a
+    number from 0 to 1 with at most two decimals; `null` only with a `null`
+    answer:
+    - `"repo_consistency"` — it agrees with ARCHITECTURE.md's positions, prior
+      story-spec precedent and the code as it is, and nothing you read
+      contradicts it;
+    - `"best_practice"` — it is the established convention for this kind of
+      problem, not one defensible option among several;
+    - `"evidence"` — it rests on something you actually read (name it in
+      `rationale`), not on an assumption;
+    - `"uniqueness"` — no credible alternative answer exists, so the question is
+      a formality;
+    - `"reversibility"` — a wrong answer would be cheap to notice and undo later;
+  - `rationale` — one or two sentences naming the evidence behind the scores and
+    the weakest criterion's reason.
+
+  **Why the scores exist:** the conductor may take your `recommended_answer`
+  without asking the human, when the **lowest** of the five scores is at or
+  above a threshold the human set (the default is 1). The conductor computes that
+  minimum itself; do not emit an overall confidence. So **score conservatively**:
+  - Give a `1` only when you can name the evidence for it in `rationale`.
+  - A question about product intent, priority, or a decision that belongs to a
+    stakeholder scores at most `0.5` on `uniqueness`, however good your
+    recommendation is. That is the human's call.
+  - When you are unsure between two scores, give the lower one.
+
+  An over-scored answer is written into the issue as though the human had said
+  it. An under-scored one only costs the human a question.
+
+  **A human turn that begins `[auto-accepted @<confidence>]`** is your own
+  recommendation, which the conductor took on the human's behalf. Treat it as the
+  human's answer, but never as a waiver: an objection that needs the human's own
+  words (the UI/UX and consistency waivers above) is not waived by one.
 - **`recommendations`** — concrete, adoptable advice (a suggested wording, a
   bounded scope), not vague direction.
 - **`proposed_prose`** — the rewritten issue body as **prose only**. Omit the
