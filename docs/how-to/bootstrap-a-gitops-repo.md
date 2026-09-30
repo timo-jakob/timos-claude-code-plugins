@@ -129,7 +129,17 @@ that one check.
 
 If the final report says **no rule was applied**, it quotes the reason. The usual causes
 are that the workflow is missing or its job has been renamed, or that your token was not
-allowed to change branch protection. In that case bootstrap wrote nothing: not the
+allowed to change branch protection. Two hand edits are refused as well, because a pull
+request would then wait for `gate` forever:
+
+- The workflow does not run on every pull request. For example, `on: [push,
+  pull_request]` is fine, but `pull_request:` with `paths: ["clusters/**"]` or
+  `types: [opened]` under it is not. Remove the filter; other triggers can stay.
+- The `gate` job is written in flow style, such as `gate: {runs-on: ubuntu-latest}`, or
+  through a YAML anchor, alias or `<<:` merge key. Write it as `gate:` on its own line
+  with its keys indented beneath it.
+
+In each case bootstrap wrote nothing: not the
 protection rule, and not the repository's merge settings. Fix the cause, then apply
 everything the final report lists as outstanding, not only the `gate` check.
 

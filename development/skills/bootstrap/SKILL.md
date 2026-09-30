@@ -407,8 +407,14 @@ flow. Stop and ask for input wherever marked; do not guess.
    >
    > **A third message names no provenance at all**: the `gate` job is there but
    > carries `name:`, a `strategy:` block or a reusable-workflow `uses:`, so
-   > GitHub reports the check under another name.
-   > There is nothing to refresh — the file already has the job — so take the
+   > GitHub reports the check under another name. Three more name none either
+   > (#1641): the `gate` job is **written in flow style** (or through an anchor,
+   > alias, tag or `<<:` merge key), the workflow **does not run on every pull
+   > request** (its `on:` lacks a bare `pull_request`, or filters it), or the
+   > script **could not read** the file (an awk failure, naming its status).
+   > Handle all four alike.
+   > There is nothing to refresh — the file already has the job, or was never
+   > read at all — so take the
    > **second** bullet whatever the file's provenance: make **no** working-tree
    > edit here (dropping that key is the owner's call, and this gap-fill's one
    > sanctioned write is the reviewed refresh above), and list the unapplied rule
@@ -4626,7 +4632,8 @@ selector, which needs a toolchain this path never resolves). It does **not** emi
 
 **The final report names** the gate command (the resolved `{{GATE_COMMAND}}`,
 `make lint` unless one is recorded), the single required `gate` context — or,
-when `branch-protection.sh --iac-only true` refused (#1606) or fell back on a
+when `branch-protection.sh --iac-only true` refused (#1606 or #1641 — any exit-1
+arm) or fell back on a
 403, that no rule was applied and `gate` is **not yet** required, quoting the
 script's message as the Step 5 item — and
 every artifact above that was skipped and why, on a confirmed empty repo too. An
@@ -5174,7 +5181,13 @@ the script exits **1** before writing anything — neither the rule nor the merg
 settings — when `.github/workflows/kubernetes-ci.yml` cannot report `gate`: it is
 absent, has no `gate` job, or its `gate` job carries `name:`, a `strategy:` block
 or a reusable-workflow `uses:` (GitHub would then report the check under that
-name, one leg per matrix entry, or `gate / <called job>`).
+name, `gate (<leg>)` per matrix entry, or `gate / <called job>`). Three further
+refusals (#1641) take the same exit: the `gate` job is **written in flow style**
+or through an anchor, alias, tag or `<<:` merge key, which the script cannot read;
+the workflow **does not run on every pull request** — its `on:` lacks a bare
+`pull_request`, or filters it with `types:`, `branches:`, `branches-ignore:`,
+`paths:` or `paths-ignore:` — so a PR it skips never reports `gate`; or awk
+**could not read** the file (the message names the awk status).
 Whichever arm fired, the handling below is the same. In a full run §3l has just rendered
 that workflow, so the refusal means the idempotency reviewer **kept** the present
 file — unmarked, or marked with its overwrite declined — or a render failed. The reviewer has
@@ -5793,7 +5806,8 @@ step's.
 > run no per-tool script — `enable-github-security.sh` included, which this
 > path has never run (its toggles stay a repo-Settings choice) — and report that
 > branch protection was already applied by Step 4b with `--iac-only true` — **unless
-> Step 4b hit its #1606 refusal or its 403 fallback**, in which case report it as
+> Step 4b hit its #1606 refusal (any exit-1 arm, #1641's three included) or its
+> 403 fallback**, in which case report it as
 > **not** applied and carry Step 4b's outstanding Step 5 item (the rule **and**
 > the merge settings) instead. Reaching this section is never itself evidence
 > that the rule was written. (The
@@ -6113,9 +6127,12 @@ Step 4b already required the `kubernetes-ci.yml` `gate` check via
 checklist carries instead is what the user cannot infer — **unless
 Step 4b hit its 403 fallback** (no admin permission), in which case the general
 rule wins and the manual branch-protection setup IS an outstanding item, listed
-with the `gate` context. **Or unless Step 4b hit its #1606 refusal** (exit 1:
-the workflow on disk cannot report `gate` — absent, no `gate` job, or a `gate`
-job carrying `name:`, a `strategy:` block or a reusable-workflow `uses:`): then
+with the `gate` context. **Or unless Step 4b hit its #1606 refusal** (exit 1,
+**any** arm — #1606's or #1641's: the workflow on disk cannot report `gate` —
+absent, no `gate` job, or a `gate` job carrying `name:`, a `strategy:` block or a
+reusable-workflow `uses:`; a `gate` job written in flow style or through an
+anchor, alias, tag or `<<:` merge key; a workflow that does not run on every pull
+request; or a file awk could not read): then
 neither the rule nor the merge
 settings were applied, and that is an outstanding item quoting the script's
 message — fix the workflow it names, then re-run `branch-protection.sh`:

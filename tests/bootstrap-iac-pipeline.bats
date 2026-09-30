@@ -803,6 +803,32 @@ write_gate_workflow() {
   crlf) printf 'name: kubernetes-ci\r\non:\r\n  pull_request:\r\njobs:\r\n  gate:\r\n    runs-on: ubuntu-latest\r\n    steps:\r\n      - run: make lint\r\n' > "$out" ;;
   named) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n  gate:\n    name: Gate\n    runs-on: ubuntu-latest\n    steps:\n      - run: make lint\n' > "$out" ;;
   matrix) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n  gate:\n    runs-on: ubuntu-latest\n    strategy:\n      matrix:\n        dir: [a, b]\n    steps:\n      - run: make lint\n' > "$out" ;;
+  # #1641 — a `strategy:` holding no matrix: GitHub reports it as `gate`, but
+  # accepting it was declined (the script header says why)
+  strategy-no-matrix) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n  gate:\n    runs-on: ubuntu-latest\n    strategy:\n      fail-fast: false\n    steps:\n      - run: make lint\n' > "$out" ;;
+  # #1641 — siblings carrying every renaming key, AFTER gate and BEFORE it
+  sibling-after) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n  gate:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make lint\n  render:\n    name: Render manifests\n    runs-on: ubuntu-latest\n    strategy:\n      matrix:\n        env: [staging, prod]\n    steps:\n      - run: make render\n  notify:\n    uses: ./.github/workflows/notify.yml\n' > "$out" ;;
+  sibling-before) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n  notify:\n    uses: ./.github/workflows/notify.yml\n  render:\n    name: Render manifests\n    runs-on: ubuntu-latest\n    strategy:\n      matrix:\n        env: [staging, prod]\n    steps:\n      - run: make render\n  gate:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make lint\n' > "$out" ;;
+  # #1641 — gate's own keys sit at six spaces, the sibling's at four
+  gate-deeper-indent) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make build\n  gate:\n      name: Gate\n      runs-on: ubuntu-latest\n      steps:\n        - run: make lint\n' > "$out" ;;
+  # #1641 — a column-0 comment INSIDE the jobs block, before gate
+  column0-comment) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make build\n# the gate job below is the one required check\n  gate:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make lint\n' > "$out" ;;
+  # #1641 — a gate job a line reader cannot read: an inline value on its key,
+  # or a merge key among its own keys (with a `name:` beside it, so the
+  # flow-style verdict is shown to win over the renamed one)
+  flow-map) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n  gate: {runs-on: ubuntu-latest, steps: [{run: make lint}]}\n' > "$out" ;;
+  anchor) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n  gate: &g\n    runs-on: ubuntu-latest\n    steps:\n      - run: make lint\n' > "$out" ;;
+  alias) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n  build: &g\n    runs-on: ubuntu-latest\n    steps:\n      - run: make lint\n  gate: *g\n' > "$out" ;;
+  tag) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n  gate: !!map\n    runs-on: ubuntu-latest\n    steps:\n      - run: make lint\n' > "$out" ;;
+  merge-key) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n  build: &base\n    runs-on: ubuntu-latest\n    steps:\n      - run: make build\n  gate:\n    <<: *base\n    name: Gate\n    steps:\n      - run: make lint\n' > "$out" ;;
+  # the same unreadable nodes opening on the line AFTER `gate:`, and a tagged
+  # key among its own keys — each hides a `name:` a plain-key reader never sees
+  next-line-flow) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n  gate:\n    {name: Gate, runs-on: ubuntu-latest, steps: [{run: make lint}]}\n' > "$out" ;;
+  next-line-alias) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n  build: &base\n    name: Build\n    runs-on: ubuntu-latest\n    steps:\n      - run: make build\n  gate:\n    *base\n' > "$out" ;;
+  tagged-key) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n  gate:\n    !!str name: Gate\n    runs-on: ubuntu-latest\n    steps:\n      - run: make lint\n' > "$out" ;;
+  anchored-key) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n  gate:\n    &k name: Gate\n    runs-on: ubuntu-latest\n    steps:\n      - run: make lint\n' > "$out" ;;
+  explicit-key) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n  gate:\n    ? name\n    : Gate\n    runs-on: ubuntu-latest\n    steps:\n      - run: make lint\n' > "$out" ;;
+  next-line-anchor) printf 'name: kubernetes-ci\non:\n  pull_request:\njobs:\n  gate:\n    &x\n    name: Gate\n    runs-on: ubuntu-latest\n    steps:\n      - run: make lint\n' > "$out" ;;
   *) printf 'write_gate_workflow: unknown shape %s\n' "$1" >&2; return 2 ;;
   esac
 }
@@ -812,8 +838,16 @@ write_gate_workflow() {
   # would deny a consumer protection over its file's layout — and tell it to add
   # a job it has, or to drop a `name:` that is a STEP's, not the job's
   local shape
+  #
+  # #1641's item-5 shapes, each red under the mutation it names:
+  #   sibling-after   — M5a-sticky: set `in_gate` without resetting it on the
+  #                     next job key, and `render`'s `name:` reads as gate's
+  #   sibling-before  — M5a-unscoped: drop `in_gate &&` from the child branch,
+  #                     and `render`'s `name:` before gate trips the refusal
+  #   column0-comment — M5c-comment-exit: drop `#` from the jobs-block exit
+  #                     rule, and the comment ends `jobs:` before gate is seen
   for shape in 4-space quoted single-quoted commented-jobs crlf step-name heredoc-name \
-    sibling-named flush-steps trailing-top-level-key; do
+    sibling-named flush-steps trailing-top-level-key sibling-after sibling-before column0-comment; do
     protection_stubs
     write_gate_workflow "$shape"
     run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
@@ -831,9 +865,19 @@ write_gate_workflow() {
   # pins every PR at `expected` forever
   local shape
   # including at four-space indent and with a quoted key: the depth and quoting
-  # tolerances must not turn the refusal off
+  # tolerances must not turn the refusal off.
+  #
+  # #1641's shapes, each red under the mutation it names:
+  #   strategy-no-matrix — M3-matrix-only: refuse `strategy:` only when a
+  #                        `matrix:` child follows. The two #1641 phrases below
+  #                        are asserted for EVERY shape, so reverting the
+  #                        message rewording reds this case (and the loop) too
+  #   gate-deeper-indent — M5b-block-indent: fix the child-key indent from the
+  #                        first child of the jobs block (build's four spaces),
+  #                        not of the gate job, and gate's six-space `name:` is
+  #                        never read
   for shape in named matrix reusable named-quoted named-single-quoted named-spaced \
-    named-4-space matrix-4-space; do
+    named-4-space matrix-4-space strategy-no-matrix gate-deeper-indent; do
     protection_stubs
     write_gate_workflow "$shape"
     run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
@@ -841,6 +885,9 @@ write_gate_workflow() {
       --iac-only true --default-branch main
     [ "$status" -eq 1 ]
     contains "$output" 'carries `name:`, a `strategy:` block or a reusable-workflow `uses:`'
+    contains "$output" '`gate (<leg>)` per matrix entry'
+    contains "$output" 'a `strategy:` without `matrix:` does nothing for a lone job'
+    lacks "$output" 'one leg per matrix entry'
     contains "$output" 'Drop `name:`/`strategy:` from the job'
     # the step-level carve-out, and the remedy for a reusable call, which dropping
     # `uses:` alone would leave unrunnable
@@ -930,6 +977,181 @@ write_marker_at_line() {
     lacks "$output" 'provenance marker'
     [ ! -s "$CURL_DATA" ]
   done
+}
+
+@test "branch-protection --iac-only REFUSES a gate job written in flow style or through an anchor (#1641)" {
+  # a line reader cannot see the keys such a job carries — a `name:` inside the
+  # braces, or behind the alias or merge key, would rename the check unseen — so
+  # it gets its own message: the job is there (not the no-gate-job wording) and
+  # its reported name is unknown (not the renamed-job wording).
+  #   flow-map, anchor, alias, tag — M2-fallthrough: treat an inline-valued
+  #     `gate:` as not a gate key, and the no-gate-job message fires instead
+  #   anchor — M2-anchor: accept `gate: &g` as a gate key, and the file is
+  #     accepted (exit 0) with a rule written
+  #   merge-key — its `<<:` sits beside a `name:`, so the flow verdict must win
+  #     over the renamed one
+  #   next-line-flow, next-line-alias, tagged-key — M2-next-line: drop the
+  #     plain-block-key requirement on gate's own keys, and each is ACCEPTED
+  #     (exit 0) while GitHub reports the job as `Gate`/`Build`
+  #   anchored-key, explicit-key, next-line-anchor — M2-blacklist: narrow the
+  #     plain-block-key WHITELIST to a blacklist of leading `{`, `*`, `!` and
+  #     `<<`, which every shape above still trips; these three slip past it
+  local shape
+  for shape in flow-map anchor alias tag merge-key next-line-flow next-line-alias tagged-key \
+    anchored-key explicit-key next-line-anchor; do
+    protection_stubs
+    write_gate_workflow "$shape"
+    run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
+      --has-dockerfile false --has-codeql false \
+      --iac-only true --default-branch main
+    [ "$status" -eq 1 ]
+    contains "$output" 'written in flow style'
+    contains "$output" 'Write it as a block mapping'
+    lacks "$output" 'has no `gate` job'
+    lacks "$output" 'carries `name:`'
+    [ ! -s "$CURL_DATA" ]
+  done
+}
+
+# A workflow with one plain `gate` job whose `on:` block is $1 verbatim (empty:
+# no `on:` key at all). The gate job is always readable, so any refusal these
+# produce is the trigger check's.
+write_trigger_workflow() {
+  printf 'name: kubernetes-ci\n%bjobs:\n  gate:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make lint\n' "$1" \
+    > "$PROTECT_REPO/.github/workflows/kubernetes-ci.yml"
+}
+
+@test "branch-protection --iac-only accepts every bare pull_request trigger shape (#1641)" {
+  # each runs the workflow on every PR, so each must apply the rule.
+  #   the scalar, flow-list and block-list shapes — M1-accept: recognise only
+  #     the block-mapping `pull_request:` form, and these three are refused
+  #   push-with-branches — a filter on a SIBLING trigger never narrows PRs
+  local on
+  for on in 'on: pull_request\n' \
+    'on: [push, pull_request]\n' \
+    'on: ["push", "pull_request"]  # both\n' \
+    'on:\n  - push\n  - pull_request\n' \
+    'on:\n  push:\n    branches: [main]\n  pull_request:\n' \
+    'on:\n  pull_request: ~\n  workflow_dispatch:\n' \
+    'on:\n  pull_request: null\n' \
+    'on:\n  pull_request: {}\n  push:\n' \
+    'on:\n  pull_request:  # every PR\npermissions:\n  contents: read\n'; do
+    protection_stubs
+    write_trigger_workflow "$on"
+    run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
+      --has-dockerfile false --has-codeql false \
+      --iac-only true --default-branch main
+    [ "$status" -eq 0 ]
+    [ "$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | join(",")')" = "gate" ]
+  done
+}
+
+@test "branch-protection --iac-only REFUSES a workflow that does not run on every pull request (#1641)" {
+  # the one fail-OPEN gap #1606 left: a narrowed trigger was accepted, and every
+  # PR it skips then sits at `expected` forever.
+  #   the five filtered shapes — M1-filter: ignore children under
+  #     `pull_request:`, and each is accepted
+  #   the pull_request_target shapes — M1-prefix: drop the word boundary after
+  #     `pull_request`, and each is accepted
+  #   every shape — M1-skip: delete the trigger check, and each is accepted
+  #   the two flow-mapping filters — M1-flow-filter: loosen the `{}` value test
+  #     to any value opening with `{`, and each is accepted fail-OPEN
+  local on
+  for on in 'on:\n  pull_request: {types: [opened]}\n' \
+    'on:\n  pull_request: {paths: ["clusters/**"]}\n  push:\n' \
+    'on:\n  pull_request:\n    types: [opened]\n' \
+    'on:\n  pull_request:\n    branches: [main]\n' \
+    'on:\n  pull_request:\n    branches-ignore: [wip]\n' \
+    'on:\n  pull_request:\n    paths: ["clusters/**"]\n  push:\n' \
+    'on:\n  pull_request:\n    paths-ignore: ["docs/**"]\n' \
+    'on: pull_request_target\n' \
+    'on: [push, pull_request_target]\n' \
+    'on:\n  - pull_request_target\n' \
+    'on:\n  pull_request_target:\n' \
+    'on: push\n' \
+    '' \
+    'on: {pull_request: {}}\n'; do
+    protection_stubs
+    write_trigger_workflow "$on"
+    run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
+      --has-dockerfile false --has-codeql false \
+      --iac-only true --default-branch main
+    [ "$status" -eq 1 ]
+    contains "$output" 'does not run on every pull request'
+    contains "$output" 'on a bare `pull_request` with no `types:`'
+    [ ! -s "$CURL_DATA" ]
+  done
+
+  # checked AFTER the gate-job check: a renamed gate job on a push-only
+  # workflow gets the renamed-job message, which names the fix that comes first
+  protection_stubs
+  write_gate_workflow named
+  sed -i.bak -E 's/^  pull_request:.*$/  push:/' "$PROTECT_REPO/.github/workflows/kubernetes-ci.yml"
+  run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
+    --has-dockerfile false --has-codeql false \
+    --iac-only true --default-branch main
+  [ "$status" -eq 1 ]
+  contains "$output" 'carries `name:`'
+  lacks "$output" 'does not run on every pull request'
+}
+
+# An `awk` first on PATH that exits 2 when any argument contains $AWK_FAIL_ON —
+# a substring of ONE probe's program — and otherwise runs the real awk, so
+# every other probe still reads the file.
+awk_failing_stub() {
+  local real
+  real="$(command -v awk)"
+  cat > "$STUB_BIN/awk" <<EOF
+#!/bin/sh
+for a in "\$@"; do
+  case "\$a" in *"\$AWK_FAIL_ON"*) exit 2 ;; esac
+done
+exec "$real" "\$@"
+EOF
+  chmod +x "$STUB_BIN/awk"
+}
+
+@test "branch-protection --iac-only reports an awk read failure as one, never as a verdict (#1641)" {
+  # an awk that exits 2 read nothing: taking its status as "unmarked" blames the
+  # user for a file never read, and a bare `set -e` abort says nothing at all
+  #   marker probe — M4-marker: restore `if awk …; then`, and status 2 reads as
+  #     unmarked, so the user-owned message fires
+  protection_stubs
+  awk_failing_stub
+  write_per_stage_workflow unmarked
+  AWK_FAIL_ON='claude-bootstrap: rendered from' run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
+    --has-dockerfile false --has-codeql false \
+    --iac-only true --default-branch main
+  [ "$status" -eq 1 ]
+  contains "$output" 'could not read `'"$PROTECT_REPO"'/.github/workflows/kubernetes-ci.yml`'
+  contains "$output" 'awk exited 2 while probing its provenance marker'
+  lacks "$output" 'user-owned'
+  [ ! -s "$CURL_DATA" ]
+
+  #   gate-state probe — M4-gate: drop the gate-state `|| die`, and `set -e`
+  #     aborts with awk's own status 2 and no message
+  protection_stubs
+  awk_failing_stub
+  AWK_FAIL_ON='in_jobs' run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
+    --has-dockerfile false --has-codeql false \
+    --iac-only true --default-branch main
+  [ "$status" -eq 1 ]
+  contains "$output" 'could not read `'"$PROTECT_REPO"'/.github/workflows/kubernetes-ci.yml`'
+  contains "$output" 'awk exited 2 while probing its `gate` job'
+  lacks "$output" 'user-owned'
+  [ ! -s "$CURL_DATA" ]
+
+  #   trigger probe — M4-trigger: drop the trigger probe's `|| die`, and
+  #     `set -e` aborts with awk's own status 2 and no message
+  protection_stubs
+  awk_failing_stub
+  AWK_FAIL_ON='is_pr' run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
+    --has-dockerfile false --has-codeql false \
+    --iac-only true --default-branch main
+  [ "$status" -eq 1 ]
+  contains "$output" 'awk exited 2 while probing its `on:` triggers'
+  lacks "$output" 'does not run on every pull request'
+  [ ! -s "$CURL_DATA" ]
 }
 
 # ---------------------------------------------------------------------------
@@ -1546,6 +1768,13 @@ step4a_iac() {
   # refusal causes — a reader who finds the file has a `gate` job would otherwise
   # read the third refusal as undocumented behaviour
   contains "$protect" 'is absent, has no `gate` job, or has a `gate` job carrying `name:`, `strategy:` or a reusable-workflow `uses:`'
+  # …and #1641's three further refusals, plus the declined limitation and its
+  # reason: without the reason a later reader "fixes" the strategy refusal away
+  contains "$protect" 'when the `gate` job is written in flow style or through an anchor, alias, tag or `<<:` merge key'
+  contains "$protect" 'when the workflow does not run on every pull request'
+  contains "$protect" 'when awk could not read the file at all ("could not read", naming the awk status)'
+  contains "$protect" 'Declined limitation (#1641): a `gate` job whose `strategy:` holds no `matrix:` is still refused'
+  contains "$protect" '`fail-fast`/`max-parallel` do nothing without a matrix, so the refusal only costs deleting a no-op key'
   # word-bounded, so every rewording of the retired set reds — not only the
   # three spellings it last had — without banning any word that contains "six"
   run grep -qiwE 'six' "$PROTECT"
@@ -1590,6 +1819,12 @@ step4a_iac() {
   contains "$statd" 'A third message names no provenance at all'
   contains "$statd" 'take the **second** bullet whatever the file'"'"'s provenance'
   contains "$statd" 'make **no** working-tree edit here'
+  # #1641's three further no-provenance refusals ride that same arm — unnamed,
+  # a re-bootstrap reading "written in flow style" would find no bullet to take
+  contains "$statd" 'Three more name none either (#1641): the `gate` job is **written in flow style**'
+  contains "$statd" 'the workflow **does not run on every pull request**'
+  contains "$statd" 'the script **could not read** the file'
+  contains "$statd" 'Handle all four alike.'
   contains "$skill" 'the one exception being the reviewed, marker-carrying `kubernetes-ci.yml` refresh above'
   contains "$step4b" 'the message'"'"'s refresh advice does **not** apply in a full run'
   contains "$step4b" 'One FATAL refusal, on the §3l IaC path only (#1606).'
@@ -1598,6 +1833,14 @@ step4a_iac() {
   # all three refusal causes here too, and that the handling does not vary by arm
   contains "$step4b" 'its `gate` job carries `name:`, a `strategy:` block or a reusable-workflow `uses:`'
   contains "$step4b" 'Whichever arm fired, the handling below is the same'
+  # …and #1641's three, so the operator reading the script's new messages finds
+  # them listed among the arms that handling covers
+  contains "$step4b" '`gate (<leg>)` per matrix entry'
+  lacks "$step4b" 'one leg per matrix entry'
+  contains "$step4b" 'the `gate` job is **written in flow style** or through an anchor, alias, tag or `<<:` merge key'
+  contains "$step4b" 'the workflow **does not run on every pull request**'
+  contains "$step4b" 'or filters it with `types:`, `branches:`, `branches-ignore:`, `paths:` or `paths-ignore:`'
+  contains "$step4b" 'awk **could not read** the file'
   # …and Step 4.5 must not report the rule as applied after a refusal
   contains "$skill" 'Reaching this section is never itself evidence'
   contains "$step4b" 'arming to take its *arming failed* branch'
@@ -1605,6 +1848,13 @@ step4a_iac() {
   # "branch protection is still not an outstanding item" would print a checklist
   # claiming protection is done on a repo that has no rule at all
   contains "$skill" 'Or unless Step 4b hit its #1606 refusal'
+  # …for EVERY exit-1 arm (#1641): a closed #1606 list here reads a flow-style,
+  # trigger or read-failure refusal as "not a refusal", and Step 5 then reports
+  # a rule that was never written as already valid
+  contains "$skill" 'Or unless Step 4b hit its #1606 refusal** (exit 1, **any** arm — #1606'"'"'s or #1641'"'"'s'
+  contains "$skill" 'a `gate` job written in flow style or through an anchor, alias, tag or `<<:` merge key; a workflow that does not run on every pull request; or a file awk could not read): then'
+  contains "$skill" 'refused (#1606 or #1641 — any exit-1 arm) or fell back on a'
+  contains "$skill" 'hit its #1606 refusal (any exit-1 arm, #1641'"'"'s three included) or its'
   contains "$skill" 'neither the rule nor the merge settings were applied'
   contains "$skill" 'outstanding item quoting the script'"'"'s message'
 }

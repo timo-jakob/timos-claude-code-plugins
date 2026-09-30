@@ -28,8 +28,21 @@
 # contexts differ, the protection does not. It refuses (exit 1, before any rule
 # is written) when .github/workflows/kubernetes-ci.yml is absent, has no `gate`
 # job, or has a `gate` job carrying `name:`, `strategy:` or a reusable-workflow
-# `uses:` (GitHub then reports the check under that name, one leg per matrix
-# entry, or `gate / <called job>`), since the `gate` context would never report.
+# `uses:` (GitHub then reports the check under that name, `gate (<leg>)` per
+# matrix entry, or `gate / <called job>`), since the `gate` context would never
+# report. It refuses the same way (#1641) when the `gate` job is written in flow
+# style or through an anchor, alias, tag or `<<:` merge key (a line reader cannot
+# see what such a job carries), when the workflow does not run on every pull
+# request (its `on:` lacks a bare `pull_request`, or filters it with `types:`,
+# `branches:`, `branches-ignore:`, `paths:` or `paths-ignore:` — a PR it skips
+# never reports `gate`), and when awk could not read the file at all ("could not
+# read", naming the awk status), rather than blaming a file it never read.
+#
+# Declined limitation (#1641): a `gate` job whose `strategy:` holds no `matrix:`
+# is still refused, although GitHub reports it as `gate`. Accepting it was
+# declined: `fail-fast`/`max-parallel` do nothing without a matrix, so the
+# refusal only costs deleting a no-op key, while telling the two apart would
+# mean reading the block's children for a shape that buys the owner nothing.
 #
 # --static-analysis and --vulnerabilities are the RESOLVED toolchain
 # (resolve-tools.zsh's `static_analysis` / `vulnerabilities`, #1671). The
@@ -192,7 +205,10 @@ if [[ "$IAC_ONLY" == "true" ]]; then
 	# or a reusable-workflow `uses:` — the three ways a job stops being reported
 	# under its own id (that name, `gate (<leg>)`, `gate / <called job>`) — so
 	# requiring `gate` would wedge every PR at `expected`, the very failure this
-	# guard exists to prevent, and the shape the message already asks for.
+	# guard exists to prevent, and the shape the message already asks for. A
+	# `gate` job it cannot read line by line (flow style, an anchor, alias, tag or
+	# `<<:` merge key) and a workflow whose `on:` skips some pull requests are
+	# refused for the same reason, each with its own message (#1641).
 	# Anchored at the work-tree root, not the CWD: unlike the two probes that
 	# merely DROP a context with a warning, this one is fatal, so a run from a
 	# subdirectory (where `gh repo view` still resolves the repo) would otherwise
@@ -207,9 +223,18 @@ if [[ "$IAC_ONLY" == "true" ]]; then
 		die "\`$iac_ci\` is absent — NOT applying branch protection: its \`gate\` check would never report. Render it from the plugin's $iac_tmpl into the working tree first, then re-run this script."
 	fi
 	# 0: a `gate` job GitHub reports as `gate`; 1: no `gate` job; 2: a `gate` job
-	# whose reported name is something else. Every line-end match goes through
-	# `[[:space:]]*`, which a CRLF-authored workflow's trailing CR satisfies, so
-	# such a file is read like any other.
+	# whose reported name is something else; 3: a `gate` job this line reader
+	# cannot read — an inline value on its key (`{…}`, `&anchor`, `*alias`,
+	# `!tag`), or a line among its own keys that is neither a plain block key nor
+	# a flush sequence item (the same nodes opening on the next line, a tagged or
+	# `?` key, a `<<:` merge key), any of which can carry a `name:` or
+	# `strategy:` the reader never sees. Every line-end match goes
+	# through `[[:space:]]*`, which a CRLF-authored workflow's trailing CR
+	# satisfies, so such a file is read like any other.
+	#
+	# An awk that exits non-zero read nothing, so its verdict is never taken:
+	# under `set -e` a bare failure would abort with no message, and a status
+	# read as a verdict would blame a file that was never read (#1641).
 	gate_job_state=$(
 		awk '
 			/^["\047]?jobs["\047]?[[:space:]]*:[[:space:]]*(#.*)?$/ { in_jobs = 1; next }
@@ -217,31 +242,111 @@ if [[ "$IAC_ONLY" == "true" ]]; then
 			in_jobs && /^[[:space:]]+[^[:space:]#]/ {
 				match($0, /^[[:space:]]+/)
 				this_indent = substr($0, 1, RLENGTH)
+				body = substr($0, RLENGTH + 1)
 				if (job_indent == "") { job_indent = this_indent }
 				if (this_indent == job_indent) {
-					in_gate = (substr($0, RLENGTH + 1) ~ /^["\047]?gate["\047]?[[:space:]]*:[[:space:]]*(#.*)?$/)
-					if (in_gate) { found = 1 }
+					in_gate = (body ~ /^["\047]?gate["\047]?[[:space:]]*:([[:space:]]|$)/)
+					if (in_gate) {
+						found = 1
+						# anything but a comment after the key is an inline value
+						if (body !~ /^["\047]?gate["\047]?[[:space:]]*:[[:space:]]*(#.*)?$/) { flow = 1 }
+					}
 					gate_key_indent = ""
 				} else if (in_gate && length(this_indent) > length(job_indent)) {
 					# only keys belonging to the gate job ITSELF: the first child
 					# line fixes their indent, so a step name, a `with:` map or a
 					# block scalar writing YAML sits deeper and never trips this
 					if (gate_key_indent == "") { gate_key_indent = this_indent }
-					if (this_indent == gate_key_indent &&
-					    substr($0, RLENGTH + 1) ~ /^["\047]?(name|strategy|uses)["\047]?[[:space:]]*:/) { renamed = 1 }
+					if (this_indent == gate_key_indent) {
+						# at this indent only a plain block key or a flush
+						# sequence item (`steps:` written flush) is readable;
+						# anything else — a flow node, alias, anchor or tag
+						# opening the job on the line after `gate:`, a tagged
+						# or `?` key, a `<<:` merge key — can hide a `name:`
+						if (body ~ /^-([[:space:]]|$)/) {
+						} else if (body !~ /^["\047]?[A-Za-z0-9_-]+["\047]?[[:space:]]*:([[:space:]]|$)/) {
+							flow = 1
+						} else if (body ~ /^["\047]?(name|strategy|uses)["\047]?[[:space:]]*:/) {
+							renamed = 1
+						}
+					}
 				}
 			}
-			END { print (found ? (renamed ? 2 : 0) : 1) }
+			END { print (found ? (flow ? 3 : (renamed ? 2 : 0)) : 1) }
 		' "$iac_ci"
-	)
+	) || die "could not read \`$iac_ci\` (awk exited $? while probing its \`gate\` job) — NOT applying branch protection. Make the file readable, then re-run this script."
+	if [[ "$gate_job_state" == 3 ]]; then
+		die "\`$iac_ci\`'s \`gate\` job is written in flow style, or through an anchor, alias, tag or \`<<:\` merge key — NOT applying branch protection: this script reads the job's own keys line by line and cannot tell whether GitHub reports it as \`gate\`. Write it as a block mapping — \`gate:\` alone on its line, its keys indented beneath it, no \`<<:\` — then re-run this script."
+	fi
 	if [[ "$gate_job_state" == 2 ]]; then
-		die "\`$iac_ci\`'s \`gate\` job carries \`name:\`, a \`strategy:\` block or a reusable-workflow \`uses:\`, so GitHub reports it under another name (that name, one leg per matrix entry, or \`gate / <called job>\`) — NOT applying branch protection: the \`gate\` context would never report. Drop \`name:\`/\`strategy:\` from the job (its steps may keep their own \`name:\`/\`uses:\`), or — for a reusable-workflow \`uses:\` — inline the called workflow's steps into the \`gate\` job, then re-run this script."
+		die "\`$iac_ci\`'s \`gate\` job carries \`name:\`, a \`strategy:\` block or a reusable-workflow \`uses:\`, so GitHub reports it under another name (that name, \`gate (<leg>)\` per matrix entry, or \`gate / <called job>\`) — NOT applying branch protection: the \`gate\` context would never report. Drop \`name:\`/\`strategy:\` from the job (its steps may keep their own \`name:\`/\`uses:\`; a \`strategy:\` without \`matrix:\` does nothing for a lone job), or — for a reusable-workflow \`uses:\` — inline the called workflow's steps into the \`gate\` job, then re-run this script."
 	fi
 	if [[ "$gate_job_state" != 0 ]]; then
-		if awk 'NR <= 10 && /^# claude-bootstrap: rendered from iac\//{ found = 1 } NR > 10 { exit } END { exit !found }' "$iac_ci"; then
-			die "\`$iac_ci\` carries the plugin's provenance marker but has no \`gate\` job (a pre-#1604 per-stage one?) — NOT applying branch protection: \`gate\` would never report. Refresh it from the plugin's $iac_tmpl into the working tree (after reviewing the diff), then re-run this script."
-		fi
+		# 0 is marked, 1 is unmarked; any other status read nothing
+		marker_status=0
+		awk 'NR <= 10 && /^# claude-bootstrap: rendered from iac\//{ found = 1 } NR > 10 { exit } END { exit !found }' "$iac_ci" ||
+			marker_status=$?
+		case "$marker_status" in
+		0) die "\`$iac_ci\` carries the plugin's provenance marker but has no \`gate\` job (a pre-#1604 per-stage one?) — NOT applying branch protection: \`gate\` would never report. Refresh it from the plugin's $iac_tmpl into the working tree (after reviewing the diff), then re-run this script." ;;
+		1) ;;
+		*) die "could not read \`$iac_ci\` (awk exited $marker_status while probing its provenance marker) — NOT applying branch protection. Make the file readable, then re-run this script." ;;
+		esac
 		die "\`$iac_ci\` is user-owned and has no \`gate\` job — NOT applying branch protection: \`gate\` would never report. Give it a job with id \`gate\` that GitHub reports under that id (no \`name:\`, no \`strategy:\`/matrix, no reusable-workflow \`uses:\`), or remove it so the plugin's $iac_tmpl is rendered, then re-run this script."
+	fi
+	# The `gate` job reports as `gate` — but only on the pull requests the
+	# workflow's `on:` runs it for. A PR it skips never reports `gate` and waits
+	# at `expected` forever, so require a bare `pull_request` (#1641): the scalar
+	# `on: pull_request`, the token in a flow list, a block-list item, or a
+	# block-mapping key valued empty, `~`, `null` or `{}` with no child lines.
+	# Any child — `types:`, `branches:`, `branches-ignore:`, `paths:`,
+	# `paths-ignore:` — narrows it, and a flow-mapping `on: {…}` is not read.
+	# Other triggers may sit beside it. 0: runs on every PR; 1: does not.
+	trigger_state=$(
+		awk '
+			function trim(s) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", s); return s }
+			function uncomment(s) { sub(/(^|[[:space:]])#.*$/, "", s); return trim(s) }
+			function is_pr(s) {
+				s = trim(s)
+				if (s ~ /^".*"$/ || s ~ /^\047.*\047$/) { s = substr(s, 2, length(s) - 2) }
+				return s ~ /^pull_request$/
+			}
+			/^["\047]?on["\047]?[[:space:]]*:([[:space:]]|$)/ {
+				v = $0
+				sub(/^[^:]*:/, "", v)
+				v = uncomment(v)
+				in_on = (v == "")
+				if (v ~ /^\[.*\]$/) {
+					n = split(substr(v, 2, length(v) - 2), toks, ",")
+					for (i = 1; i <= n; i++) { if (is_pr(toks[i])) { ok = 1 } }
+				} else if (v !~ /^\{/ && is_pr(v)) { ok = 1 }
+				next
+			}
+			in_on && /^[^[:space:]#]/ { in_on = 0; if (pr_open) { ok = 1; pr_open = 0 } }
+			in_on && /^[[:space:]]+[^[:space:]#]/ {
+				match($0, /^[[:space:]]+/)
+				this_indent = substr($0, 1, RLENGTH)
+				body = substr($0, RLENGTH + 1)
+				if (on_indent == "") { on_indent = this_indent }
+				if (length(this_indent) > length(on_indent)) {
+					# a child line: under an open `pull_request:` it is a filter
+					if (pr_open) { pr_open = 0 }
+					next
+				}
+				if (pr_open) { ok = 1; pr_open = 0 }
+				if (body ~ /^-([[:space:]]|$)/) {
+					if (is_pr(uncomment(substr(body, 2)))) { ok = 1 }
+				} else if (body ~ /^["\047]?pull_request["\047]?[[:space:]]*:([[:space:]]|$)/) {
+					v = body
+					sub(/^[^:]*:/, "", v)
+					v = uncomment(v)
+					if (v == "" || v == "~" || v == "null" || v ~ /^\{[[:space:]]*\}$/) { pr_open = 1 }
+				}
+			}
+			END { if (pr_open) { ok = 1 }; print (ok ? 0 : 1) }
+		' "$iac_ci"
+	) || die "could not read \`$iac_ci\` (awk exited $? while probing its \`on:\` triggers) — NOT applying branch protection. Make the file readable, then re-run this script."
+	if [[ "$trigger_state" != 0 ]]; then
+		die "\`$iac_ci\` does not run on every pull request — NOT applying branch protection: a PR its \`on:\` skips never reports \`gate\` and waits at \`expected\` forever. Trigger it on a bare \`pull_request\` with no \`types:\`, \`branches:\`, \`branches-ignore:\`, \`paths:\` or \`paths-ignore:\` filter (other triggers may stay beside it), then re-run this script."
 	fi
 	# the one job of templates/iac/.github/workflows/kubernetes-ci.yml.tmpl: it
 	# carries no `name:` and no matrix, so GitHub reports it under its id
