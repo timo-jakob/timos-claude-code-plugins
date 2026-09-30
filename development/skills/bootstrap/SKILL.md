@@ -5528,11 +5528,20 @@ Check HEAD first:
   `<type>/<short-description>` branch (the no-issue form; `type` from the delta —
   `docs` for a docs-only delta like seeding the C4 pages, else `chore`, e.g.
   `chore/bootstrap-gap-fill`) and commit from it. In a worktree do this **in
-  place** — the worktree stays (isolation is fine), only the branch is corrected:
+  place** — the worktree stays (isolation is fine), only the branch is corrected.
+  Branch from an **up-to-date `main`**: the family's script pulls it first, and
+  the uncommitted generated files come along onto the new branch:
 
   ```bash
-  git switch -c "<type>/<short-description>"
+  "<skill-base-dir>/../../scripts/git/branch-off-fresh-main.zsh" "<type>/<short-description>"
   ```
+
+  On exit 3 (the fetch failed, `main` cannot fast-forward, or a generated file
+  conflicts with the newer `main`), report its message and stop. One exception:
+  when HEAD already carries **commits** that `origin/main` lacks (`git rev-list
+  origin/main..HEAD` is non-empty), branching from `main` would leave them
+  behind, so correct the name in place instead with
+  `git switch -c "<type>/<short-description>"`.
 
 Never commit or open the PR from anything but a convention-conforming feature
 branch — in particular never from `main`/`master` or a `worktree-*` branch.

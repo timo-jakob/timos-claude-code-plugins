@@ -122,15 +122,20 @@ When asked to start work on a task or create a branch:
    this? If so, what's the number?"*; if they say no or don't know, proceed without one
 3. **Derive a short description** from the task or issue title (apply the rules above)
 4. **Propose the branch name** to the user before creating it
-5. **Create and switch to** the branch:
+5. **Pull the latest `main`, then create and switch to** the branch. Branching "from main" always means from an
+   up-to-date `main`, so use the family's script, which fetches, fast-forwards `main` (a pull when you are on it) and
+   branches from the fetched tip:
 
    ```bash
    # With issue
-   git switch -c feat/42-add-oauth-login
+   "<skill-base-dir>/../../scripts/git/branch-off-fresh-main.zsh" feat/42-add-oauth-login
 
    # Without issue
-   git switch -c feat/add-oauth-login
+   "<skill-base-dir>/../../scripts/git/branch-off-fresh-main.zsh" feat/add-oauth-login
    ```
+
+   On exit 3 (the fetch failed, or `main` cannot fast-forward), report its message and stop rather than branching
+   off a stale `main`.
 
 If the user provides a branch name that violates these rules, point out the violation and suggest a corrected name
 before proceeding.

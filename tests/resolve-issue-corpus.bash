@@ -63,7 +63,7 @@ resolve_issue_files() {
   # looking" failure this derivation exists to prevent, restored one indirection
   # later.)
   local -a ordered
-  ordered=(review-loop.md residue.md promotion.md escalation.md interactive.md telemetry.md)
+  ordered=(review-loop.md residue.md promotion.md escalation.md interactive.md sequential.md telemetry.md)
 
   for f in "$base"/reference/*.md; do
     [ -e "$f" ] || continue
