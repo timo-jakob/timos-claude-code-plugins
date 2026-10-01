@@ -17,7 +17,8 @@ proves only that no *original* line migrated into it, by asserting the two
 anchors stay adjacent in the pinned commit. And **everything after
 `<!-- /moved: round-protocol-tail -->`** is unproven too: the #1571 correction, the #1485 empty-story-diff note,
 the #1805 fix-pass rule pointer, *Topic panels* (#1072), *The decided pass* (#1584), *The risk pass*
-(#1921), *Carry accounting* (#1583), *Selected gates for delta rounds* (#1973) and the #1226 `loop_args` note all live there,
+(#1921), *Carry accounting* (#1583), *Selected gates for delta rounds* (#1973),
+*Round subagents* (#1935) and the #1226 `loop_args` note all live there,
 because a byte-frozen span cannot be edited and those rules had to correct or
 extend what it says. Edit either region knowing the byte check does not cover
 it.
@@ -2093,3 +2094,225 @@ nothing. The two summary sites — ARCHITECTURE.md's *the class condition that
 turns collapsing from advisory into mandatory* and
 `docs/explanation/review-loop.md`'s *stops being advisory and becomes required*
 — are accurate under this reading and are deliberately not edited.
+
+### Round subagents — the conductor reads only verdicts (#1935)
+
+Each round's heavy work runs in **fresh subagents**, not in the conductor's
+context: a **panel** subagent reviews, a **fix** subagent fixes. The conductor
+keeps the round boundary, the gate, consolidation and every human decision, and
+exchanges work with the subagents only through the `round-handoff/v1` and
+`round-verdict/v1` files (ARCHITECTURE.md, *Round handoff and verdict
+contracts*). **Where *Each round* above has the conductor plan and dispatch the
+panel itself (step 1) or apply the fix pass itself (step 3), this section
+governs**: those steps sit in a byte-frozen span, so they are superseded here
+rather than edited. What they say a panel or a fix pass must *do* still holds —
+the two briefs below hand that work to a subagent, they do not change it.
+
+**Depth budget.** No implementation adds a layer:
+
+- single-issue flow: conductor (0) → panel subagent (1) → reviewers (2);
+- epic E3 child flow: child conductor (1) → panel (2) → reviewers (3), which is
+  Claude Code's default nesting limit;
+- the fix subagent dispatches nothing.
+
+A panel subagent that has no `Agent` tool cannot dispatch reviewers: it returns
+`failed` / `no-agent-tool`, and the conductor reports and stops.
+
+**Dispatch mechanism.** ARCHITECTURE.md's *Subagent dispatch mechanism*
+paragraph records a probe **pass**, so the two kinds ship as plugin agents:
+`development/agents/round-panel.md` and `development/agents/round-fix.md`. The
+conductor dispatches `subagent_type: round-panel` and `subagent_type:
+round-fix`, one fresh subagent per job — a recovery or a retry is a **new**
+dispatch, never a resumed one — with a prompt that names the handoff file and
+`<skill-base-dir>`. Each agent body only points at its brief below.
+
+**Contract usage.** The conductor writes every handoff with `round-handoff.zsh
+write-handoff --work-dir <work-dir>` and reads every verdict with
+`round-handoff.zsh read-verdict --file <work-dir>/verdict-<R>-<kind>.json`. A
+subagent reads its handoff with `round-handoff.zsh read-handoff` and writes its
+verdict only with `round-handoff.zsh write-verdict --work-dir <work-dir>`.
+Neither side hand-writes or hand-parses those files.
+
+**The round boundary is unchanged, and the conductor owns all of it.** It mints
+`T`, launches the detached gate, waits on it, and dispatches the panel subagent
+while the gate runs — *The round boundary is concurrent* above, or
+`reference/sequential.md`'s serial boundary when that mode is on. No subagent
+launches or waits on the gate. The panel handoff's `tree_id` is `T`.
+
+**The carry precondition stays with the conductor.** Before writing a panel
+handoff for any round ≥ 2, run step 1's read-before-plan check — `jq length` on
+`<work-dir>/verify-<R>.json`. An absent, zero-byte or unreadable carry is
+report-and-stop.
+
+**What the conductor puts in a handoff.** Every key ARCHITECTURE.md's
+`round-handoff/v1` table lists for the kind — the table is the key set. The
+values only the conductor can supply:
+
+- **both kinds:** `round`; `tree_id` is the round's `T`; `worktree_root` is the
+  implementation worktree (*Build each reviewer's scope block* above says how to
+  identify it), resolved with `:A`;
+- **panel:** `base` is the loop's `--base`, resolved to a commit; `mode` is
+  `round`, so `carry_entries` is `[]`; `delta_base` is the tree identity
+  **read from** `<work-dir>/tree-<R-1>.txt` on every round ≥ 2 — its content,
+  never the path — and `null` on round 1; `carried_finding_ids` names the
+  entries of `verify-<R>.json`, and is `[]` when it holds none.
+
+A non-zero `round-handoff.zsh write-handoff` exit, or a `read-verdict` exit 1 or
+2, is report-and-stop.
+
+**Consolidation stays with the conductor.** On an `ok` panel verdict the
+conductor runs step-mode `resolve-story-loop.zsh` itself, exactly as step 2
+says, passing the verdict's `aggregate_findings_file` as `--findings-file` and,
+when it is non-null, its `carry_accounting_file` as `--carry-accounting`. It
+opens neither file. It narrates the round from the verdict's `findings_count`,
+the status JSON and the progress block the loop appended.
+
+**Interim panel recovery:** any non-`ok` panel verdict is report-and-stop until #1937
+— safe, but coarse: #1937 maps each cause onto the recovery arm step 2 names for
+it.
+
+**When the fix subagent runs.** On exit 20, read `final_changelist.summary.blocking`
+from the status JSON:
+
+- **non-zero** → dispatch the fix subagent with `trigger: awaiting-fix`, and
+  `changelist` naming `<work-dir>/changelist-<R>.json`, the round's changelist
+  the loop wrote. After an `ok` verdict, take the next round's boundary.
+- **zero** → the closing-sweep promotion (step 3). No fix runs; take the next
+  round's boundary as step 3 says.
+
+On a **red gate** (the boundary's step 6), dispatch the fix subagent with
+`trigger: gate-red` and `gate_log` naming the gate's recorded output. After an
+`ok` verdict, the conductor restarts the boundary from its step 1.
+
+In both cases the handoff also carries the round's `grant` (`null` when none was
+granted) and its `guidance` (the human's granted-round guidance, or `null`),
+`rule2_mandatory` (step 3's histogram trigger), and `profile_fix_rules` — the
+loaded profile's *Fix-pass rules* reference, or `null` when that heading begins
+with `none` (§1b's test). When it is non-null, the dispatch prompt carries that
+heading's body, since the subagent cannot load a skill.
+
+**A fix verdict that is not `ok` is report-and-stop**, on either trigger; on
+`gate-red` it is §3's *abandon and report*. **A fix that changed nothing is
+report-and-stop** too: an `ok` verdict with `fix_applied: false` or
+`files_changed: 0` never restarts the boundary on an unchanged tree. The one
+exception is an `awaiting-fix` pass that parked every blocker under step 3's
+rule 1 — the `- parked:` notes in `<work-dir>/progress.md` name each of the
+round's blocking items. Take the next boundary there, so the parked items are
+re-raised as step 3 says.
+
+**Before every dispatch, clear what an earlier dispatch of the same round and
+kind left behind**: delete `<work-dir>/verdict-<R>-<kind>.json` and, for a
+panel, `findings-round-<R>.json`, `carry-lines-<R>.txt` and
+`carry-round-<R>.json`. A delete that fails is report-and-stop. Without it, a
+re-dispatched subagent that dies reads back as the earlier one's verdict.
+
+**Stall retry.** A missing or invalid verdict is exactly a `round-handoff.zsh
+read-verdict` exit 3, a missing file included. It gets exactly one re-dispatch,
+then report-and-stop — a fresh subagent with a freshly written handoff. A
+verdict that validates but is not `ok` is not a stall, and recovery dispatches
+(#1937's) don't count against the retry.
+
+**Everything else is unchanged.** Exit codes 0, 14, 10, 11, 12, 13, 2 and 1 take
+their existing paths, from the status JSON alone — except a mid-run exit 2 on
+the CARRY-UNACCOUNTED arm, which is report-and-stop until #1937: its recovery
+reads per-entry lines the conductor no longer holds. Promotion, residue and
+escalation stay in the conductor, because each needs a human. A promotion
+sub-loop's rounds dispatch the same panel and fix subagents
+(`reference/promotion.md`).
+
+**The structural criterion.** The conductor reads only verdicts, status JSON and
+its work-dir state — never reviewer output, a findings file's contents or a
+diff. There are two named exceptions, both human-driven: NOT APPLICABLE option
+(2) on a full round (step 2), *"you read the story diff yourself"*, which only
+the human can choose; and the promotion seed procedure with its step-7
+verification (`reference/promotion.md`). The decided pass is a temporary third
+exception until #1936: it runs `decides:` commands from the aggregate, between
+the green gate and consolidation, as *The decided pass* above says. The risk
+pass (#1921) reads the same aggregate in the same slot, so it sits inside that
+exception too; #1936 does not move it.
+
+#### Panel subagent brief
+
+You review one round, in place of the conductor. Read your handoff with
+`round-handoff.zsh read-handoff --file <the handoff path your prompt names>`;
+the scripts below are under `<skill-base-dir>/scripts/`. Work in the handoff's
+`worktree_root`, never your cwd (ARCHITECTURE.md, *Where a subagent works*).
+
+1. **Plan.** Run `review-dispatch.zsh plan --repo <worktree_root> --base <base>
+   --round <round>`. From round 2 on, add `--prior-tree <delta_base>`,
+   `--fix-verification <work_dir>/verify-<round>.json` and `--adjudicated
+   <work_dir>/adjudicated.json`. Step 1 above governs when to add `--final`, the
+   plan's exit codes, and the `worktree_root` check.
+2. **Dispatch the reviewers** of the plan's `review_skill` and of every
+   `topic_review_skills` entry (*Topic panels*), exactly as each skill's own
+   Step 1 says. Its `SKILL.md` is in the same plugin cache as `<skill-base-dir>`:
+   `<plugin-root>/<plugin>[/<version>]/skills/<skill>/SKILL.md`. Build each
+   prompt as step 1 and *Build each reviewer's scope block* say, carry included.
+   **Dispatch every reviewer in the foreground** (`run_in_background: false`),
+   all in one message, whatever that skill's Step 1 says: a background dispatch
+   returns before the reviewer replies (ARCHITECTURE.md, *Subagent dispatch
+   mechanism*).
+3. **On a carried round, settle the carry before writing anything.** Check that
+   every reviewer accounted for the carry; re-dispatch that reviewer once when it
+   gave no per-entry lines, with the prompt step 2 built for it — inside the
+   panel subagent, that is what *Carry accounting*'s "re-dispatch the panel"
+   means — and keep only its second reply. Then append every reviewer's
+   per-entry lines to `<work-dir>/carry-lines-<R>.txt` and assemble
+   `<work-dir>/carry-round-<R>.json` from them, as *Carry accounting* says.
+4. **Write the aggregate once** — every panel's findings joined unchanged, a
+   re-dispatched reviewer's from its second reply — to
+   `<work-dir>/findings-round-<R>.json`, never to the dispatch sink
+   `findings_path`, which the loop truncates and refuses.
+
+   You have no `Write` tool: write every file in steps 3 and 4 with a quoted
+   heredoc — `cat > <file> <<'EOF'` to create one, `cat >> <file> <<'EOF'` only
+   to append each reviewer's lines to `carry-lines-<R>.txt` — never an unquoted
+   one or an interpolated string, so reviewer text that holds backticks or `$`
+   lands unchanged.
+5. **Write a `panel` verdict** with `round-handoff.zsh write-verdict --work-dir
+   <work_dir>`: on success, `ok` with the aggregate's path and length and the two
+   carry files (both `null` on round 1 or an empty carry). Return to the
+   conductor only that the verdict was written.
+
+Where step 1 or the sections it defers to would stop the round, return a
+non-`ok` verdict instead, and write no findings file:
+
+| Situation | `outcome` / `cause` |
+|---|---|
+| a reviewer dimension did not run | `failed` / `dimension-not-run` |
+| a reviewer prompt or a review skill could not be rendered or found | `failed` / `render-failed` |
+| round ≥ 2 and the plan's `fix_verification_path` is `null` | `failed` / `fix-verification-null` |
+| that path is set but a reviewer could not read it | `failed` / `fix-verification-unreadable` |
+| a carried entry is still unaccounted after the one re-dispatch | `failed` / `carry-unconfirmed` |
+| `plan` exited non-zero, and step 1 does not say to fix and re-run | `failed` / `plan-failed` |
+| `worktree_root` is not the implementation worktree | `failed` / `wrong-worktree-root` |
+| a `[DELETED by this story]` excerpt came back empty | `failed` / `empty-excerpt` |
+| a full round whose story diff is empty | `not_applicable` / `story-diff-empty` |
+| the language panel reported NOT APPLICABLE on a full round | `not_applicable` / `not-applicable` |
+| you have no `Agent` tool | `failed` / `no-agent-tool` |
+
+Never author a finding, edit one, or write `[]` on a reviewer's behalf.
+
+#### Fix subagent brief
+
+You apply one round's fix pass, in place of the conductor. Read your handoff
+with `round-handoff.zsh read-handoff --file <the handoff path your prompt
+names>`. Work in its `worktree_root`, never your cwd: first confirm that `git -C
+<worktree_root> rev-parse --show-toplevel` prints that path, and if it does not,
+edit nothing and return `failed` / `cannot-fix`. The fix subagent dispatches
+nothing, and never commits, pushes, or runs the gate.
+
+- **`trigger: awaiting-fix`** → implement every item of the `blocking` array in
+  the `changelist` file, exactly as step 3 says:
+  sibling-sweep each pattern, and subtract rather than add (*A fix pass
+  subtracts*), parking — and filing — what rule 1 refuses.
+- **`trigger: gate-red`** → read `gate_log`, find what is red, and fix it.
+
+On either trigger, apply `grant.severity_bar` when a grant is set, the human's
+`guidance`, rule 2's collapse as **mandatory** when `rule2_mandatory` is `true`
+(advisory otherwise, *The third histogram state*), and the profile's *Fix-pass
+rules* when the prompt carries them. Then write a `fix` verdict with
+`round-handoff.zsh write-verdict --work-dir <work_dir>`: `ok` with
+`fix_applied` and `files_changed` (the number of distinct files you edited), or
+`failed` / `cannot-fix` with `fix_applied: false` and `files_changed: 0` when
+you could not fix it. Return to the conductor only that the verdict was written.

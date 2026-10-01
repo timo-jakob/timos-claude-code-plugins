@@ -598,3 +598,14 @@ byte-frozen, so the correction is recorded here rather than edited into it.
   the loop was given, and the two records share a sink. The enrichment itself
   takes **no** `--parent-run-id`: it stays joined to the loop record it enriches
   by that record's `run_id`, and through it to the resolve-issue run.
+
+**The sub-loop's rounds dispatch the same panel and fix subagents (#1935).** The
+span above has the conductor run each sub-loop round's panel and fix pass
+itself. Like the blocking phase's rounds, they are now dispatched as the
+**panel** and **fix** subagents, through the same handoff and verdict files:
+`reference/review-loop.md` § *Round subagents — the conductor reads only
+verdicts (#1935)* governs. The seed procedure and its step-7 verification stay
+with the conductor — one of that section's two named exceptions. On sub-loop
+round 1, the panel verdict's `aggregate_findings_file` is the
+`<pre-seed-round-1.json>` the seed procedure starts from, and the seeded file —
+not the verdict's path — is what that round passes as `--findings-file`.
