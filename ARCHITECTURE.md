@@ -4528,10 +4528,11 @@ It is the evidence behind every severity the pass promoted, and the only place
 `decided: "green"` is resolved into "the command ran clean" vs "the command
 could not be run at all", a distinction the changelist deliberately does not
 carry. Nothing in the loop reads it; it is an audit record.
-**Per ROUND, and written fresh**: the pass truncates `decided-<R>.log` on the
-first entry of round R's **first** pass, rather than appending to whatever a
-previous run left there; a re-entry within the same round appends, since its
-earlier entries are that round's evidence. It is deliberately outside the loop's fresh-start clear, because the loop
+**Per ROUND, and written fresh**: the conductor truncates `decided-<R>.log`
+before round R's first decide dispatch (#1936), rather than letting the pass
+append to whatever a previous run left there; every decide pass only appends,
+a re-entry within the same round included, since its earlier entries are that
+round's evidence. It is deliberately outside the loop's fresh-start clear, because the loop
 does not own it — the conductor does, and the conductor is what re-creates it.
 
 **Rounds after the first iterate (#1434).** At the **start** of every round the
