@@ -1808,6 +1808,10 @@ measured in the #1435 and #1558 post-mortems. It runs in the same slot as the de
 pass, and like that pass it is recorded here because step 2 sits inside a
 byte-frozen span.
 
+While the threshold is on, the risk subagent (*Risk subagent brief* below) makes
+the assessment this section describes, and the conductor dispatches it and
+passes `--risk`.
+
 **First read the variable.** It lives in the environment and nothing in the
 conversation shows it:
 
@@ -1854,8 +1858,8 @@ again, because the fix pass may have changed how likely it is. Never copy an
 earlier round's numbers forward unexamined; the changelist keeps each round's
 stamp, so the record shows how an assessment moved. When the aggregate gains
 findings after this pass — the carry-accounting recovery below merges a
-re-dispatch's output into it — assess the merged findings too and rewrite
-`risk-<R>.json` before you re-invoke.
+re-dispatch's output into it — re-dispatch the risk subagent over the merged
+aggregate before you re-invoke.
 
 **Write and pass it.** Write the assessment to `<work-dir>/risk-<R>.json`,
 outside the repo like every other per-round file. It is one JSON array in the
@@ -1881,8 +1885,10 @@ resolve-story-loop.zsh … --resume --findings-file <…> \
   round only.
 - A malformed file (a `p` with three decimals, an impact off the anchors, a
   blank rationale, a duplicate identity) is **exit 2** before anything is
-  written. The message names the entry: fix it and re-invoke the same round
-  with the same flags. This exit 2 is **not** `STALE_FINDINGS` and writes **no**
+  written. The message names the entry: make one fresh risk dispatch whose
+  prompt carries that stderr line verbatim, then re-invoke the same round with
+  the same flags; a second such exit 2 in the same round is report-and-stop.
+  This exit 2 is **not** `STALE_FINDINGS` and writes **no**
   status JSON, so `--status-file` still holds the previous invocation's
   verdict — act on the stderr line alone.
 - An entry that matches no `CRITICAL` or `WARNING` finding assesses nothing,
@@ -2102,7 +2108,8 @@ turns collapsing from advisory into mandatory* and
 
 Each round's heavy work runs in **fresh subagents**, not in the conductor's
 context: a **panel** subagent reviews, a **decide** subagent settles the
-round's `decides:` claims, a **fix** subagent fixes. The conductor
+round's `decides:` claims, a **risk** subagent assesses its blockers while
+`corner_case_risk_threshold` is on, a **fix** subagent fixes. The conductor
 keeps the round boundary, the gate, consolidation and every human decision, and
 exchanges work with the subagents only through the `round-handoff/v1` and
 `round-verdict/v1` files (ARCHITECTURE.md, *Round handoff and verdict
@@ -2118,15 +2125,17 @@ the briefs below hand that work to a subagent, they do not change it.
 - epic E3 child flow: child conductor (1) → panel (2) → reviewers (3), which is
   Claude Code's default nesting limit;
 - the fix subagent dispatches nothing;
-- the decide subagent dispatches nothing.
+- the decide subagent dispatches nothing;
+- the risk subagent dispatches nothing.
 
 A panel subagent that has no `Agent` tool cannot dispatch reviewers: it returns
 `failed` / `no-agent-tool`, and the conductor reports and stops.
 
 **Dispatch mechanism.** ARCHITECTURE.md's *Subagent dispatch mechanism*
-paragraph records a probe **pass**, so the three kinds ship as plugin agents:
-`development/agents/round-panel.md`, `development/agents/round-fix.md` and
-`development/agents/round-decide.md`. The conductor dispatches `subagent_type:
+paragraph records a probe **pass**, so the four kinds ship as plugin agents:
+`development/agents/round-panel.md`, `development/agents/round-fix.md`,
+`development/agents/round-decide.md` and `development/agents/round-risk.md`;
+the risk kind is dispatched as *Risk subagent brief* below says. The conductor dispatches `subagent_type:
 round-panel` and `subagent_type: round-fix`, and `subagent_type: round-decide`
 for the decided pass, one fresh subagent per job — a recovery or a retry is a **new**
 dispatch, never a resumed one — with a prompt that names the handoff file and
@@ -2232,7 +2241,7 @@ the CARRY-UNACCOUNTED, CADENCE or never-ran arm, which takes
 `#### Verdict recovery arms (#1937)`.
 Promotion, residue and
 escalation stay in the conductor, because each needs a human. A promotion
-sub-loop's rounds dispatch the same panel, decide and fix subagents
+sub-loop's rounds dispatch the same panel, decide, risk and fix subagents
 (`reference/promotion.md`).
 
 **The structural criterion.** The conductor reads only verdicts, status JSON and
@@ -2240,12 +2249,10 @@ its work-dir state — never reviewer output, a findings file's contents or a
 diff. There are two named exceptions, both human-driven: NOT APPLICABLE option
 (2) on a full round (step 2), *"you read the story diff yourself"*, which only
 the human can choose; and the promotion seed procedure with its step-7
-verification (`reference/promotion.md`). The risk pass (#1921) is the one
-exception that is not human-driven: while `corner_case_risk_threshold` is on,
-the conductor reads the round's aggregate to assess its `CRITICAL` and
-`WARNING` findings and write `risk-<R>.json`, as *The risk pass* above says, and
-reads nothing else from it; when the threshold is off or ignored it opens
-nothing. #2025 moves it into a subagent.
+verification (`reference/promotion.md`). The risk pass (#1921) is not an
+exception: while `corner_case_risk_threshold` is on, the risk subagent assesses
+the aggregate and the conductor passes its verdict's `risk_file` as `--risk`
+unopened; when the threshold is off or ignored, no risk subagent is dispatched.
 
 #### Verdict recovery arms (#1937)
 
@@ -2538,8 +2545,7 @@ succeeded.
   `aggregate_findings_file` as `--findings-file`. On a promotion sub-loop's
   round 1, pass instead the seeded file built from that decided aggregate
   (`reference/promotion.md`). Open neither the aggregate,
-  `decides-ran-<R>.txt` nor `decides-retired.txt`, except through the risk pass,
-  as the structural criterion says.
+  `decides-ran-<R>.txt` nor `decides-retired.txt`.
 - **Narration.** Report the verdict's `decided_red`, `decided_green` and
   `malformed` counts and the `decided-<R>.log` path. Findings are named in
   `decided-<R>.log` only.
@@ -2559,3 +2565,79 @@ succeeded.
   `carry_unconfirmed[]` identity's `file` and `dimension`, reading only their
   `decides:` command and exit status. That lookup happens only on that
   report-and-stop path, and it counts as work-dir state.
+
+#### Risk subagent brief
+
+The risk subagent makes one round's risk assessment in place of the conductor.
+This brief states what it does and what the conductor does around it; the
+assessment itself — what is eligible, how `p` and `impact` are judged, the
+`risk-<R>.json` shape — is *The risk pass* above and `reference/residue.md` §
+*1. Assess every residual blocker*, and is restated by neither. The conductor
+dispatches `subagent_type: round-risk`, in the foreground
+(`run_in_background: false`), one fresh subagent per job; the risk subagent
+dispatches nothing.
+
+**The conductor, before the dispatch.**
+
+- **Threshold.** Read `corner_case_risk_threshold` and take one of its three
+  states, as *The risk pass* says. **Off** or **ignored**, or **hook mode**:
+  dispatch no risk subagent and pass no `--risk`; ignored keeps its narration
+  line and PR Summary note. **On**, in step mode: dispatch it every round, the
+  promotion sub-loop's rounds and the closing sweep included.
+- **Sequencing.**
+  1. Dispatch the risk subagent only after reading an `ok` decide verdict for
+     the round's latest decide dispatch.
+  2. Pass `--risk` only with the `risk_file` of an `ok` risk verdict whose
+     dispatch came after that decide verdict.
+  3. Whenever the aggregate changes after a risk dispatch — a fresh decide
+     dispatch (the CADENCE sequence) or a carry recovery's merge — re-dispatch
+     the risk subagent before the next invocation that passes `--risk`.
+- **The handoff.** Write `handoff-<R>-risk.json` with `round-handoff.zsh
+  write-handoff`: `aggregate_findings_file` the file the round passes as
+  `--findings-file` (*Risk pass, then consolidation* above; on a promotion
+  sub-loop's round 1, the seeded file, built in the work-dir),
+  `worktree_root` as *What the conductor puts in a handoff* says for every kind,
+  and `tree_id` the round's `T`.
+- **Clear before every risk dispatch.** Delete `<work-dir>/verdict-<R>-risk.json`
+  and `<work-dir>/risk-<R>.json`. A delete that fails is report-and-stop.
+
+**The risk subagent.** Read your handoff with `round-handoff.zsh read-handoff
+--file <the handoff path your prompt names>`; the scripts are under
+`<skill-base-dir>/scripts/`. Then:
+
+1. **Confirm `worktree_root`**: `git -C <worktree_root> rev-parse
+   --show-toplevel` must print that path. If it does not, write nothing and
+   return `failed` / `wrong-worktree-root`.
+2. **Assess** every `CRITICAL` and `WARNING` finding in
+   `aggregate_findings_file` as *The risk pass* says: afresh, never copied from
+   an earlier round, with `p`, `impact` and both rationales.
+3. **Write `<work-dir>/risk-<R>.json` once, atomically**, in the #1920 shape —
+   the identity verbatim, a digit-string `line` as the number it spells, `[]`
+   when nothing is eligible — to a temporary file in the work-dir, then `mv` it
+   into place.
+4. **Write a `risk` verdict** with `round-handoff.zsh write-verdict --work-dir
+   <work_dir>`: `ok` with `cause: null`, `risk_file` = `<work-dir>/risk-<R>.json`
+   and `assessed_count` the number of entries in it. Return to the conductor
+   only that the verdict was written.
+
+When you cannot read or parse the aggregate, or cannot assess an eligible
+finding, write no risk file and return `failed` / `assessment-failed`. A
+`failed` verdict carries `risk_file` and `assessed_count` both `null`. The risk
+subagent edits no repository file, and never commits, pushes or runs the gate.
+
+**The conductor, after the verdict.**
+
+- **Passing it on.** On an `ok` risk verdict, pass the verdict's `risk_file` as
+  `--risk` unopened, and the handoff's `aggregate_findings_file` as
+  `--findings-file`. Open neither file. Narrate from `assessed_count`, the
+  `risk-<R>.json` path, the status JSON and the progress block; demotions show
+  in the progress block.
+- **Not-ok and stall.** A risk verdict that validates but is not `ok` is
+  report-and-stop. The stall retry above applies unchanged: one fresh
+  re-dispatch on a `read-verdict` exit 3, then report-and-stop. Never fall back
+  to threshold off, and never invoke the loop without `--risk` while the
+  threshold is on.
+- **A loop exit 2 naming `--risk`** — a malformed risk file, which writes no
+  status JSON: make one fresh risk dispatch whose prompt carries that stderr
+  line verbatim, then re-invoke the same round with the same flags. A second
+  such exit 2 in the same round is report-and-stop.

@@ -5250,8 +5250,9 @@ The 5-grant soft cap stays a
 ## Round handoff and verdict contracts (#1934)
 
 Epic #1933 moves each review round's heavy work — the panel, the decided pass,
-the fix — out of the conductor's context and into **fresh subagents** of three
-kinds: `panel`, `decide` and `fix`. The conductor hands a job over as a
+the risk pass, the fix — out of the conductor's context and into **fresh
+subagents** of four kinds: `panel`, `decide`, `risk` and `fix`. The conductor
+hands a job over as a
 **handoff** file and reads back a **verdict** file, and it never opens reviewer
 output, findings contents or diffs. These two versioned contracts are that
 boundary. Both files live inside the `resolve-story-loop.zsh` `--work-dir`,
@@ -5278,9 +5279,10 @@ trigger, and absent or null under the other. A key the contract does not list
 for that kind is rejected — which is what keeps finding text out of a verdict.
 
 **Paths.** Every path field is absolute. Every non-null path the contracts
-place **in the work-dir** — `aggregate_findings_file` on both the decide
-handoff and the panel verdict, plus `carry_accounting_file`,
-`carry_lines_file` and `ran_commands_file` — must, after zsh `:A` resolution
+place **in the work-dir** — `aggregate_findings_file` on the decide and risk
+handoffs and the panel verdict, plus `carry_accounting_file`,
+`carry_lines_file`, `ran_commands_file` and the risk verdict's `risk_file` —
+must, after zsh `:A` resolution
 (`..` and symlinks), lie **strictly under** `${work_dir:A}/`. A handoff's own
 `work_dir` must `:A`-equal the directory the file sits in. A verdict carries no
 `work_dir`, so its work-dir is the directory it is written to (`--work-dir`) or
@@ -5294,12 +5296,12 @@ name's `<N>` — as the object's `kind` must equal the name's `<kind>`.
 ### `round-handoff/v1`
 
 At `<work-dir>/handoff-<N>-<kind>.json`, with `kind` ∈ {`panel`, `fix`,
-`decide`}.
+`decide`, `risk`}.
 
 | Kind | Field | Type |
 |---|---|---|
 | common | `schema` | `"round-handoff/v1"` |
-| common | `kind` | `panel` \| `fix` \| `decide` |
+| common | `kind` | `panel` \| `fix` \| `decide` \| `risk` |
 | common | `round` | int ≥ 1 |
 | common | `tree_id` | non-empty string |
 | common | `work_dir` | absolute path |
@@ -5321,8 +5323,10 @@ At `<work-dir>/handoff-<N>-<kind>.json`, with `kind` ∈ {`panel`, `fix`,
 | decide | `aggregate_findings_file` | absolute path, in the work-dir |
 | decide | `worktree_root` | absolute path |
 | decide | `retired_file` | absolute path |
+| risk | `aggregate_findings_file` | absolute path, in the work-dir |
+| risk | `worktree_root` | absolute path |
 
-**Where a subagent works (#2018).** A panel, fix or decide subagent works in
+**Where a subagent works (#2018).** A panel, fix, decide or risk subagent works in
 `worktree_root` and never in its cwd. On an epic child the cwd need not be the
 story's tree, and a subagent anchored on it reviews, edits or decides against
 the wrong one. A panel subagent passes `worktree_root` as `--repo` and `base` as
@@ -5332,9 +5336,10 @@ the wrong one. A panel subagent passes `worktree_root` as `--repo` and `base` as
 checks only that it is a non-empty string. `worktree_root` names the story's
 tree on every kind, so it is checked as an absolute path and is never subject
 to the work-dir containment rule. `base` is on the panel handoff only: a fix
-handoff carrying it is rejected as an unlisted key.
+handoff carrying it is rejected as an unlisted key. A risk handoff carries no
+`retired_file`, `base` or `mode`: each is rejected there as an unlisted key.
 
-**Subagent dispatch mechanism.** The three subagent kinds ship as **plugin
+**Subagent dispatch mechanism.** The four subagent kinds ship as **plugin
 agents** — a `development/agents/` file whose `tools:` frontmatter lists
 `Agent` where the kind dispatches reviewers — and each **nested dispatch is
 made in the foreground** (`run_in_background: false`). Probed on
@@ -5366,7 +5371,7 @@ conductor passes on unopened.
 | Kind | Field | Type |
 |---|---|---|
 | common | `schema` | `"round-verdict/v1"` |
-| common | `kind` | `panel` \| `fix` \| `decide` |
+| common | `kind` | `panel` \| `fix` \| `decide` \| `risk` |
 | common | `round` | int ≥ 1 |
 | common | `outcome` | `ok` \| `failed` \| `not_applicable` — `not_applicable` on `panel` only |
 | common | `cause` | from the kind's closed set; required (non-null) when `outcome` is not `ok`, null on `ok` |
@@ -5378,6 +5383,8 @@ conductor passes on unopened.
 | fix | `files_changed` | int ≥ 0, never null |
 | decide | `decided_red`, `decided_green`, `malformed` | int ≥ 0 on `ok`; null on `failed` |
 | decide | `ran_commands_file` | absolute path in the work-dir on `ok`; null on `failed` |
+| risk | `risk_file` | absolute path in the work-dir on `ok`; null on `failed` |
+| risk | `assessed_count` | int ≥ 0 on `ok`; null on `failed` |
 
 The closed cause sets:
 
@@ -5387,7 +5394,8 @@ The closed cause sets:
   `no-agent-tool`;
 - **fix:** `cannot-fix` — which carries `fix_applied: false` and
   `files_changed: 0`;
-- **decide:** `wrong-worktree-root`.
+- **decide:** `wrong-worktree-root`;
+- **risk:** `wrong-worktree-root`, `assessment-failed`.
 
 Which cause pairs with which outcome, and what the conductor does with each,
 is the round protocol's concern (#1937), not the validator's: the validator
