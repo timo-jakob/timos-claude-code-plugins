@@ -27,6 +27,10 @@
 #     restatement. Counted, so a pointer that grows back into a copy of the rule
 #     reds here — the shape #1496's rule 2 bans, and the shape a fix pass
 #     produces;
+#   * the SCOPE pointer: #2022's foreground-dispatch carve-out in the Round
+#     subagents section names the rule only to say what it governs, and points
+#     at it in the same "it is not restated here" form. Counted and pinned like
+#     the two consumers, so it can never grow into a third copy;
 #   * the DOC half pins `docs/explanation/review-loop.md` BY CONTENT: that it
 #     names the rule, and that it points at §3.5 rather than restating it;
 #   * a ROSTER TRIPWIRE over `git ls-files '*.md' '*.md.tmpl'`, so a third site
@@ -70,6 +74,12 @@ setup() {
   # its two consumers, so "above"/"below" would make the two pointers differ and
   # the count below impossible to write.
   POINTER='How to wait (this section) governs the wait'
+  # #2022's scope pointer, in the Round subagents section: it carves the
+  # conductor's foreground dispatches out of the rule and points at it. Its own
+  # needle, NOT a third use of $POINTER — it does not sit beside the paragraph,
+  # so "(this section)" would be false there, and the between-the-pointers pin
+  # below would then measure the wrong pair.
+  SCOPE_POINTER='How to wait governs only the gate and a dispatch that did launch in the background — it is not restated here'
   # The bare phrase, for the roster tripwire and the SKILL-wide count.
   # Deliberately WITHOUT the issue number, so the tripwire sees a new site that
   # names the rule in prose as readily as one that cites it.
@@ -332,18 +342,18 @@ _roster_hits() {
   fi
 }
 
-@test "#1513 AC2 the phrase appears exactly three times in SKILL.md" {
-  # The banner plus the two pointers, and nothing else. This is the tripwire
-  # the two counts above cannot be: a THIRD mention that is neither — a
-  # paraphrase in some other step, or a restatement that dropped the pointer
-  # wording — passes both of them and reds only here.
+@test "#1513 AC2 the phrase appears exactly four times in SKILL.md" {
+  # The banner, the two pointers and #2022's scope pointer, and nothing else.
+  # This is the tripwire the counts above cannot be: a FIFTH mention that is
+  # none of them — a paraphrase in some other step, or a restatement that
+  # dropped the pointer wording — passes all of them and reds only here.
   local n
   n="$(_hits "$SKILL" "$ROSTER_NEEDLE")" || return 1
   case "$n" in ''|*[!0-9]*)
     printf 'count is not a number: %s\n' "$n" >&2; return 1 ;;
   esac
-  if [ "$n" -ne 3 ]; then
-    printf 'expected 3 mentions of "%s" in SKILL.md (banner + 2 pointers), found %s\n' \
+  if [ "$n" -ne 4 ]; then
+    printf 'expected 4 mentions of "%s" in SKILL.md (banner + 2 pointers + scope pointer), found %s\n' \
       "$ROSTER_NEEDLE" "$n" >&2
     return 1
   fi
@@ -387,6 +397,32 @@ _roster_hits() {
   # between the two steps, with a detached suite running and no agent spawned —
   # nothing then re-invokes it and the round never reaches the observe step.
   contains "$body" 'The wait itself begins after step 3, not here'
+  for needle in "${RESTATEMENT_NEEDLES[@]}"; do
+    lacks "$body" "$needle"
+  done
+}
+
+@test "#2022 the foreground-dispatch scope pointer points at the rule, exactly once" {
+  # Counted, so a second carve-out cannot land beside it uncounted; and the
+  # count of four above holds only while this is the fourth mention.
+  local n ln body needle
+  n="$(_hits "$SKILL" "$SCOPE_POINTER")" || return 1
+  case "$n" in ''|*[!0-9]*)
+    printf 'count is not a number: %s\n' "$n" >&2; return 1 ;;
+  esac
+  if [ "$n" -ne 1 ]; then
+    printf 'expected exactly 1 scope pointer, found %s\n' "$n" >&2
+    return 1
+  fi
+  # …and it stays a POINTER: anchored on its own lead sentence, forward-only so
+  # the window holds the carve-out and not the normative paragraph, and free of
+  # every clause a restatement would carry.
+  ln="$(prose_gate_lines "$PROTO" 'A foreground dispatch returns its verdict in the same turn, so the conductor')"
+  case "$ln" in ''|*[!0-9]*)
+    printf 'scope pointer locator missing or ambiguous: %s\n' "$ln" >&2; return 1 ;;
+  esac
+  body="$(prose_window "$PROTO" "$((ln + 3))" 3)"
+  contains "$body" "$SCOPE_POINTER"
   for needle in "${RESTATEMENT_NEEDLES[@]}"; do
     lacks "$body" "$needle"
   done
@@ -510,7 +546,7 @@ _roster_hits() {
   case "$n" in ''|*[!0-9]*)
     printf 'count is not a number: %s\n' "$n" >&2; return 1 ;;
   esac
-  [ "$n" -eq 4 ]
+  [ "$n" -eq 5 ]
   # …including one whose phrase WRAPS mid-source-line, the shape a per-line
   # count cannot see at all. This is the control for counting over the collapsed
   # body rather than line by line: without it, a fourth naming site could land
@@ -523,8 +559,8 @@ _roster_hits() {
   case "$n" in ''|*[!0-9]*)
     printf 'count is not a number: %s\n' "$n" >&2; return 1 ;;
   esac
-  if [ "$n" -ne 5 ]; then
-    printf 'a wrapped mention was not counted: expected 5, found %s\n' "$n" >&2
+  if [ "$n" -ne 6 ]; then
+    printf 'a wrapped mention was not counted: expected 6, found %s\n' "$n" >&2
     return 1
   fi
 }
