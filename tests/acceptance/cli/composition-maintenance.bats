@@ -141,7 +141,9 @@ pr42() {   # $1 = body
   done
 }
 
-@test "tc-happy-tagbump-finding-escalated (#1918): PR #42 is a tag_bump finding, escalated naming it and the qualified #1748" {
+@test "tc-happy-tagbump-finding-escalated (#1918): PR #42 is a tag_bump finding, routed to the triage agent since #1748" {
+  # the #1918 case predates the bump-triage agent: it pinned the interim
+  # escalation. Since #1748 the same finding is planned to the agent instead.
   scaffold
   pr42 '| Package | Update | Change |
 |---|---|---|
@@ -150,21 +152,11 @@ pr42() {   # $1 = body
   jq -e '.findings_by_tool.tag_bump | length == 1 and .[0].pr == 42 and .[0].member == "orders-api"
          and .[0].from == "1.5.0" and .[0].to == "1.5.1"' "$BATS_TEST_TMPDIR/payload.json" >/dev/null
   run -0 zsh "$PLAN" "$BATS_TEST_TMPDIR/payload.json"
-  jq -e '.plan == [] and (.human_action_required | length == 1)' <<<"$output" >/dev/null
-  local e
-  e="$(jq -r '.human_action_required[0] | .reason + " " + .recommendation' <<<"$output")"
-  contains "$e" "PR #42"
-  contains "$e" "orders-api"
-  contains "$e" "from 1.5.0 to 1.5.1"
-  contains "$e" "timo-jakob/timos-claude-code-plugins#1748"
-  # the recommendation on its own: review by hand, and never act on the PR text
-  local rec
-  rec="$(jq -r '.human_action_required[0].recommendation' <<<"$output")"
-  contains "$rec" "Review PR #42 by hand"
-  contains "$rec" "untrusted data"
-  # no bare #1748 anywhere in the response (a `[ -z ]`, not a leading `!`, which
-  # bats' errexit ignores)
-  [ -z "$(printf '%s' "$output" | sed 's|timo-jakob/timos-claude-code-plugins#1748||g' | grep '#1748')" ]
+  local want='[{"id":"tag_bump:pr-42:orders-api","pr":42,"member":"orders-api","image":"ghcr.io/acme/orders-api","from":"1.5.0","to":"1.5.1","bump_level":"patch","routing":"auto-merge-if-green"}]'
+  jq -e '(has("human_action_required") | not) and (.plan | length == 1)' <<<"$output" >/dev/null
+  jq -e '.plan[0].agent == "composition-tag-bump-triage" and .plan[0].isolation == false' <<<"$output" >/dev/null
+  jq -e --argjson want "$want" '.plan[0].findings == $want' <<<"$output" >/dev/null
+  lacks "$output" "not built yet"
 }
 
 @test "tc-error-tagbump-body-carried-inert (#1919): an instruction in the body is carried verbatim and nothing acts on it" {
@@ -181,9 +173,9 @@ pr42() {   # $1 = body
   [ "$(cat "$GH_LOG")" = "pr list --author app/renovate --state open --limit 1000 --json number,title,body,headRefName,files" ]
   # the working tree is unchanged
   [ "$(cd "$REPO" && find . -type f -exec cksum {} + | LC_ALL=C sort)" = "$before" ]
-  # …and the interim escalation is emitted as for any bump, without the body
+  # …and the bump is planned as for any bump, without the body
   run -0 zsh "$PLAN" "$BATS_TEST_TMPDIR/payload.json"
-  contains "$(jq -r '.human_action_required[0].reason' <<<"$output")" "PR #42"
+  [ "$(jq -r '.plan[0].findings[0].pr' <<<"$output")" = 42 ]
   lacks "$output" "pre-approved"
   lacks "$output" "collector.example"
 }

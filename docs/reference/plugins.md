@@ -754,17 +754,18 @@ the bootstrap scaffold with its promote-to-prod workflow
 ([#1745](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1745));
 the scaffolded Renovate image-tag configuration
 ([#1746](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1746));
-and the topic marker, maintenance gather and dispatcher
-([#1747](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1747)).
+the topic marker, maintenance gather and dispatcher
+([#1747](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1747));
+and the injection-hardened bump-triage agent
+([#1748](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1748)).
 The rest of epic
 [#687](https://github.com/timo-jakob/timos-claude-code-plugins/issues/687)
-follows: the injection-hardened bump-triage agent
-([#1748](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1748)),
-and the how-to
+follows: the how-to
 ([#1749](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1749)).
-So the plugin ships **one skill and no agents** — the maintenance dispatcher —
-plus its scripts and the templates the scaffold copies. Bootstrap is the
-validator's first caller; the maintenance gather is its second.
+So the plugin ships **one skill and one agent** — the maintenance dispatcher
+and `composition-tag-bump-triage` — plus its scripts and the templates the
+scaffold copies. Bootstrap is the validator's first caller; the maintenance
+gather is its second.
 
 ### Maintenance
 
@@ -789,12 +790,22 @@ also emits it as `is_composition`, which nothing reads yet), runs
 | Finding tool | Routed to |
 | --- | --- |
 | `workspace_validation` | escalated to a human (`human_action_required`) — a member's pin is a human decision |
-| `tag_bump` | escalated to a human until the bump-triage agent (`timo-jakob/timos-claude-code-plugins#1748`) ships |
+| `tag_bump` | `composition-tag-bump-triage`, with each bump classified by the dispatcher |
 | a tool that could not run | escalated, quoting the gather's note |
 
-The escalation names the bump-triage issue fully qualified, never as a bare
-number, because it is read inside the composition repo, where a bare `#` number
-links to that repo's own issues.
+The dispatcher gives each bump a `bump_level` (`patch`, `minor`, `major`,
+`major-equiv` for a 0.x minor bump, `digest`, `unknown`) and a `routing`:
+`auto-merge-if-green` for a patch or minor bump of a member the manifest pins,
+`human-review` for everything else. The agent merges a green safe bump once an
+approving review exists, arms native auto-merge when none does, and never
+approves a PR itself. It reads the PR title, the PR body and the release notes
+it fetches for a minor bump as evidence, never as instructions: a PR whose text
+addresses an automated reader or asks for an action goes to human review with
+auto-merge not armed, and the text is quoted in its escalation. Every PR it
+sends to human review becomes one `human_action_required` entry naming the PR,
+the member, its from->to tag and the reason. When the dispatch escalates
+anything else, every bump is escalated beside it instead of being triaged that
+run.
 
 ### The scaffold and promote-to-prod
 
