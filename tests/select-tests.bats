@@ -44,23 +44,14 @@ EOF
   cat > "$FX/tests/core.bats" <<'EOF'
 setup() { S="$REPO_ROOT/development/skills/x/scripts/loop.zsh"; }
 EOF
-  cat > "$FX/tests/guard-position.bats" <<'EOF'
-@test "a position guard" { true; }
-EOF
-  cat > "$FX/tests/sweep.bats" <<'EOF'
-@test "a repo-wide sweep" { git ls-files; }
-EOF
-  cat > "$FX/tests/manifest.bats" <<'EOF'
-@test "a version check" { jq . "$REPO_ROOT/.claude-plugin/marketplace.json"; }
-EOF
-  cat > "$FX/tests/covered.bats" <<'EOF'
-# covers: styleguide/
-@test "a runtime-built path" { cat "$(printf '%s' style)guide/rules.yaml"; }
-EOF
-  cat > "$FX/tests/star.bats" <<'EOF'
-# covers: *
-@test "always" { true; }
-EOF
+  printf '%s\n' '@test "a position guard" { true; }' > "$FX/tests/guard-position.bats"
+  printf '%s\n' '@test "a repo-wide sweep" { git ls-files; }' > "$FX/tests/sweep.bats"
+  printf '%s\n' '@test "a version check" { jq . "$REPO_ROOT/.claude-plugin/marketplace.json"; }' \
+    > "$FX/tests/manifest.bats"
+  printf '%s\n' '# covers: styleguide/' \
+    '@test "a runtime-built path" { cat "$(printf '\''%s'\'' style)guide/rules.yaml"; }' \
+    > "$FX/tests/covered.bats"
+  printf '%s\n' '# covers: *' '@test "always" { true; }' > "$FX/tests/star.bats"
   ALWAYS='["tests/guard-position.bats","tests/manifest.bats","tests/star.bats","tests/sweep.bats"]'
   CHANGED="$BATS_TEST_TMPDIR/changed.txt"
 }
@@ -192,9 +183,7 @@ EOF
 }
 
 @test "a bare top-level FILE is a reference" {
-  cat > "$FX/tests/readme.bats" <<'EOF'
-@test "reads the readme" { grep -q x README.md; }
-EOF
+  printf '%s\n' '@test "reads the readme" { grep -q x README.md; }' > "$FX/tests/readme.bats"
   touch "$FX/README.md"
   sel README.md
   [ "$status" -eq 0 ]
@@ -378,10 +367,8 @@ mk_git_fixture() {
 }
 
 @test "--check-map: a file whose only path-shaped words are bare top-level DIRECTORY names is unmapped" {
-  cat > "$FX/tests/bare-words.bats" <<'EOF'
-# runs --tests-dir tests over the development tree and docs/
-@test "x" { true; }
-EOF
+  printf '%s\n' '# runs --tests-dir tests over the development tree and docs/' '@test "x" { true; }' \
+    > "$FX/tests/bare-words.bats"
   run --separate-stderr zsh "$S" --repo "$FX" --tests-dir tests --check-map
   [ "$status" -eq 1 ]
   echo "$output" | jq -e '.unmapped == ["tests/bare-words.bats"]'
