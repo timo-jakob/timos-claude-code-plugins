@@ -27,7 +27,8 @@
 #   - types: round an integer >= 1 (and, on read, equal to the file name's N,
 #     with the name's kind equal to the object's), counts non-negative
 #     integers, rule2_mandatory a bool, carry_entries items with string file,
-#     dimension and title, every path field absolute;
+#     dimension and title, the panel's base a non-empty string, every path
+#     field absolute (worktree_root, on every kind, included — #2018);
 #   - the conditional rules: carry_entries non-empty exactly in the carry
 #     modes; a cause exactly when outcome is not ok; not_applicable on a panel
 #     verdict only; the per-kind nullability rules;
@@ -129,8 +130,8 @@ def handoff_checks:
    elif .trigger | IN("awaiting-fix", "gate-red") | not then "unknown trigger: \(.trigger | tojson)"
    else empty end),
   ( ["schema", "kind", "round", "tree_id", "work_dir", "status_file"] as $common
-    | { panel: ["mode", "delta_base", "carried_finding_ids", "carry_entries"],
-        fix: ["trigger", "grant", "guidance", "rule2_mandatory", "profile_fix_rules"],
+    | { panel: ["mode", "delta_base", "carried_finding_ids", "carry_entries", "worktree_root", "base"],
+        fix: ["trigger", "grant", "guidance", "rule2_mandatory", "profile_fix_rules", "worktree_root"],
         decide: ["aggregate_findings_file", "worktree_root", "retired_file"] }[.kind] as $own
     | ( if .kind == "fix" then (if .trigger == "awaiting-fix" then ["changelist"] else ["gate_log"] end) else [] end ) as $trig
     | ( if .kind == "fix" then ["changelist", "gate_log"] else [] end ) as $optional
@@ -141,8 +142,12 @@ def handoff_checks:
   (if (.tree_id | str) | not then "tree_id is not a non-empty string" else empty end),
   (if (.work_dir | abs) | not then "work_dir is not an absolute path" else empty end),
   (if (.status_file | abs) | not then "status_file is not an absolute path" else empty end),
+  # Every kind carries worktree_root (#2018): the tree a subagent works in,
+  # never its cwd. It names the story tree, so it is not a work-dir path.
+  (if (.worktree_root | abs) | not then "worktree_root is not an absolute path" else empty end),
   ( select(.kind == "panel")
-    | (if .delta_base != null and (.delta_base | str | not) then "delta_base is not a string or null" else empty end),
+    | (if (.base | str) | not then "base is not a non-empty string" else empty end),
+      (if .delta_base != null and (.delta_base | str | not) then "delta_base is not a string or null" else empty end),
       (if (.carried_finding_ids | type == "array" and all(.[]; type == "string")) | not
          then "carried_finding_ids is not an array of strings" else empty end),
       (if (.carry_entries | type == "array") | not then "carry_entries is not an array"
@@ -171,7 +176,6 @@ def handoff_checks:
        end) ),
   ( select(.kind == "decide")
     | (if (.aggregate_findings_file | abs) | not then "aggregate_findings_file is not an absolute path" else empty end),
-      (if (.worktree_root | abs) | not then "worktree_root is not an absolute path" else empty end),
       (if (.retired_file | abs) | not then "retired_file is not an absolute path" else empty end) );
 
 def verdict_checks:

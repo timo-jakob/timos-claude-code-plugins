@@ -34,7 +34,8 @@ panel_handoff() { # $1 = mode
   jq -n --arg wd "$WD" --arg mode "$1" --argjson entries "$entries" '{
     schema: "round-handoff/v1", kind: "panel", round: 3, tree_id: "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
     work_dir: $wd, status_file: "/tmp/resolve-1934/status.json",
-    mode: $mode, delta_base: null, carried_finding_ids: ["f-12"], carry_entries: $entries }'
+    mode: $mode, delta_base: null, carried_finding_ids: ["f-12"], carry_entries: $entries,
+    worktree_root: "/Users/dev/repos/plugins/.claude/worktrees/tidy-otter", base: "a699c0e9" }'
 }
 
 fix_handoff() { # $1 = trigger
@@ -42,7 +43,8 @@ fix_handoff() { # $1 = trigger
     schema: "round-handoff/v1", kind: "fix", round: 2, tree_id: "9f3c1e7a",
     work_dir: $wd, status_file: "/tmp/resolve-1934/status.json",
     trigger: $trig, grant: {rounds: 2, severity_bar: "CRITICAL"}, guidance: null,
-    rule2_mandatory: false, profile_fix_rules: "development-claude-plugin:resolve-profile § Fix-pass rules" }
+    rule2_mandatory: false, profile_fix_rules: "development-claude-plugin:resolve-profile § Fix-pass rules",
+    worktree_root: "/Users/dev/repos/plugins/.claude/worktrees/tidy-otter" }
     + (if $trig == "awaiting-fix" then {changelist: ($wd + "/changelist-2.json")}
        else {gate_log: ($wd + "/gate-2.log")} end)'
 }
@@ -304,6 +306,59 @@ round_trip() {
 @test "rejects another kind's field as unlisted" {
   write handoff "$(decide_handoff | jq '.mode = "round"')"
   rejected "unlisted key for kind decide: mode"
+}
+
+# --- rejections: where a panel or fix subagent works (#2018) -----------------
+
+@test "rejects a panel handoff without worktree_root" {
+  write handoff "$(panel_handoff round | jq 'del(.worktree_root)')"
+  rejected "missing field: worktree_root"
+}
+
+@test "rejects a fix handoff without worktree_root" {
+  write handoff "$(fix_handoff awaiting-fix | jq 'del(.worktree_root)')"
+  rejected "missing field: worktree_root"
+}
+
+@test "rejects a relative worktree_root on a panel handoff" {
+  write handoff "$(panel_handoff round | jq '.worktree_root = "worktrees/tidy-otter"')"
+  rejected "worktree_root is not an absolute path"
+}
+
+@test "rejects a relative worktree_root on a fix handoff" {
+  write handoff "$(fix_handoff gate-red | jq '.worktree_root = "worktrees/tidy-otter"')"
+  rejected "worktree_root is not an absolute path"
+}
+
+@test "rejects a null worktree_root on a panel handoff" {
+  write handoff "$(panel_handoff round | jq '.worktree_root = null')"
+  rejected "worktree_root is not an absolute path"
+}
+
+@test "accepts a panel worktree_root outside the work-dir (not a work-dir path)" {
+  # The fixture's worktree_root is not under $WD; the round-trips above already
+  # pass with it, and this pins the exemption by name.
+  round_trip handoff "$(panel_handoff round | jq '.worktree_root = "/opt/elsewhere/checkout"')" handoff-3-panel.json
+}
+
+@test "rejects a panel handoff without base" {
+  write handoff "$(panel_handoff round | jq 'del(.base)')"
+  rejected "missing field: base"
+}
+
+@test "rejects an empty panel base" {
+  write handoff "$(panel_handoff round | jq '.base = ""')"
+  rejected "base is not a non-empty string"
+}
+
+@test "rejects a null panel base" {
+  write handoff "$(panel_handoff round | jq '.base = null')"
+  rejected "base is not a non-empty string"
+}
+
+@test "rejects a fix handoff carrying base" {
+  write handoff "$(fix_handoff awaiting-fix | jq '.base = "a699c0e9"')"
+  rejected "unlisted key for kind fix: base"
 }
 
 # --- rejections: round -------------------------------------------------------
