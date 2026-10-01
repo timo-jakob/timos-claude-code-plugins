@@ -311,11 +311,12 @@ load_fix_brief() {
   contains "$section" 'the `- parked:` notes in `<work-dir>/progress.md` name each of the round'"'"'s blocking items'
 }
 
-# --- AC 11: interim panel recovery --------------------------------------------
+# --- AC 11: interim panel recovery, retired by #1937 --------------------------
 
-@test "AC11: any non-ok panel verdict is report-and-stop until #1937" {
+@test "AC11: the interim report-and-stop rule is gone; a non-ok panel verdict takes the recovery arms" {
   load_section
-  contains "$section" 'any non-`ok` panel verdict is report-and-stop until #1937'
+  lacks "$section" 'any non-`ok` panel verdict is report-and-stop until #1937'
+  contains "$section" 'A non-`ok` panel verdict takes *Verdict recovery arms (#1937)* below.'
 }
 
 # --- AC 12: stall retry -------------------------------------------------------
@@ -331,7 +332,9 @@ load_fix_brief() {
 
 @test "AC12: every dispatch first clears the same round and kind's earlier verdict and panel files" {
   load_section
-  contains "$section" '**Before every dispatch, clear what an earlier dispatch of the same round and kind left behind**: delete `<work-dir>/verdict-<R>-<kind>.json` and, for a panel, `findings-round-<R>.json`, `carry-lines-<R>.txt` and `carry-round-<R>.json`. A delete that fails is report-and-stop.'
+  contains "$section" '**Before every dispatch, clear what an earlier dispatch of the same round and kind left behind**: delete `<work-dir>/verdict-<R>-<kind>.json` and, for a panel, what its mode replaces:'
+  contains "$section" '- a **`round`**-mode panel also deletes `findings-round-<R>.json`, `carry-lines-<R>.txt` and `carry-round-<R>.json`;'
+  contains "$section" 'A delete that fails is report-and-stop.'
 }
 
 # --- AC 13: everything else unchanged -----------------------------------------
@@ -339,7 +342,8 @@ load_fix_brief() {
 @test "AC13: the other exit codes keep their paths; promotion, residue and escalation stay in the conductor" {
   load_section
   contains "$section" 'Exit codes 0, 14, 10, 11, 12, 13, 2 and 1 take their existing paths, from the status JSON alone'
-  contains "$section" 'a mid-run exit 2 on the CARRY-UNACCOUNTED arm, which is report-and-stop until #1937'
+  contains "$section" 'a mid-run exit 2 on the CARRY-UNACCOUNTED, CADENCE or never-ran arm, which takes `#### Verdict recovery arms (#1937)`.'
+  lacks "$section" 'reads per-entry lines the conductor no longer holds'
   contains "$section" 'Promotion, residue and escalation stay in the conductor'
 }
 
@@ -542,4 +546,152 @@ load_decided_pass() {
   contains "$after" 'The decide pass'"'"'s atomic rewrite is the one overwrite step 1 permits — it changes stamps and severities only, never a finding'"'"'s `file`, `dimension` or line, so step 2 classifies against a baseline that is still valid.'
   load_section
   contains "$section" 'A promotion sub-loop'"'"'s rounds dispatch the same panel, decide and fix subagents'
+}
+
+# --- #1937: verdict recovery arms ---------------------------------------------
+#
+# One test per acceptance criterion of #1937, anchored like the rest.
+
+load_arms() {
+  arms="$(section_of "$PROTO" '#### Verdict recovery arms (#1937)' '#### |### |## ' | squeeze)"
+  [ -n "$arms" ]
+}
+load_carry_section() {
+  carry="$(section_of "$PROTO" '### Carry accounting — confirmed, re-raised, unconfirmed (#1583)' '### |## ' | squeeze)"
+  [ -n "$carry" ]
+}
+
+@test "#1937 AC1: the Verdict recovery arms sub-heading sits once inside the Round subagents section, outside every frozen span" {
+  [ "$(grep -cxF '#### Verdict recovery arms (#1937)' "$PROTO")" -eq 1 ]
+  load_section
+  contains "$section" '#### Verdict recovery arms (#1937)'
+  local arms_line tail_line
+  arms_line="$(grep -nxF '#### Verdict recovery arms (#1937)' "$PROTO" | cut -d: -f1)"
+  tail_line="$(grep -n '^<!-- /moved: ' "$PROTO" | tail -1 | cut -d: -f1)"
+  [ "$arms_line" -gt "$tail_line" ]
+  load_arms
+  contains "$arms" 'This is the one statement of what the conductor does with a non-`ok` panel verdict, and with the loop'"'"'s CARRY-UNACCOUNTED, CADENCE and never-ran refusals.'
+  contains "$arms" 'for its reasoning read that arm, which is not restated here'
+}
+
+@test "#1937 AC2: review-loop.md says 'until #1937' nowhere" {
+  [ -z "$(grep -F 'until #1937' "$PROTO")" ]
+}
+
+@test "#1937 AC3: a non-ok verdict stops the gate first, and the outcome/cause pairing is closed" {
+  load_arms
+  contains "$arms" '**A non-`ok` panel verdict is boundary step 3 refusing or aborting the round.** Stop the gate with the handle step 2 recorded, then take the arm below.'
+  contains "$arms" 'An arm that resumes the round resumes at step 1, except on a no-fix round, exactly as step 3 says.'
+  contains "$arms" '**A non-`ok` verdict from a `carry-repair` or `carry-redispatch` panel takes no row:** its gate has already finished, so nothing is stopped or resumed, and it is that ground'"'"'s cap — report-and-stop.'
+  contains "$arms" '`not-applicable` and `story-diff-empty` pair with `not_applicable`; the other nine causes pair with `failed`. A verdict whose outcome/cause pair is off this table is report-and-stop.'
+}
+
+@test "#1937 AC4: every one of the eleven panel causes maps onto its arm" {
+  load_arms
+  contains "$arms" '| `dimension-not-run`, `render-failed` | `failed` | step 2'"'"'s **FAILED** arm: one fresh round-mode panel; the same cause again is report-and-stop |'
+  contains "$arms" '| `fix-verification-null` | `failed` | the FAILED arm'"'"'s null carry: re-run the carry precondition on `verify-<R>.json`, then one fresh round-mode panel, whose brief plans with `--fix-verification`; the same cause again is report-and-stop |'
+  contains "$arms" '| `fix-verification-unreadable` | `failed` | the FAILED arm'"'"'s unreadable carry: re-run the carry precondition — an unreadable `verify-<R>.json` is report-and-stop — then one fresh round-mode panel; the same cause again is report-and-stop |'
+  contains "$arms" '| `carry-unconfirmed` | `failed` | the **missing-confirmation** arm: one fresh round-mode panel, and "if the re-run again reports no confirmation count, report it in the conversation and stop" |'
+  contains "$arms" '| `plan-failed` | `failed` | report-and-stop'
+  contains "$arms" '| `wrong-worktree-root` | `failed` | report-and-stop'
+  contains "$arms" '| `empty-excerpt` | `failed` | report-and-stop'
+  contains "$arms" 'and a fresh panel "fails the same way" |'
+  contains "$arms" '| `no-agent-tool` | `failed` | report-and-stop |'
+  contains "$arms" '| `not-applicable` | `not_applicable` | the **NOT APPLICABLE on a full round** arm: autonomous, stop with no commit and no PR; interactive, its three options, none taken without an explicit choice. Never coerced to `[]`, and the panel is not re-run |'
+  contains "$arms" '| `story-diff-empty` | `not_applicable` | the **empty story diff** shape: go back to **§2 (Implement)**'
+  contains "$arms" 'The three NOT APPLICABLE options are never offered, and, per the #1485 note, neither the re-invoke arm nor the panel re-run arm is taken |'
+  # the quoted arms really exist where the table says they do
+  contains "$(squeeze < "$PROTO")" 'if the re-run again reports no confirmation count, report it in the conversation and stop'
+  contains "$(squeeze < "$PROTO")" 'fails the same way.'
+}
+
+@test "#1937 AC5: the never-ran arm is a shown absence of dispatch, and a dispatched-but-silent panel is a stall" {
+  load_arms
+  contains "$arms" '**The never-ran arm is not a verdict.** It applies only when the conductor can show that no panel subagent was dispatched this round'
+  contains "$arms" 'Dispatch one round-mode panel, then a decide subagent over its aggregate, then re-invoke.'
+  contains "$arms" 'A panel that was dispatched and returned no valid verdict is a stall, not never-ran.'
+}
+
+@test "#1937 AC6: CARRY-UNACCOUNTED reads its ground from loop output and applies the tool-verdict exception first" {
+  load_arms
+  contains "$arms" 'Read the ground from the loop'"'"'s refusal stderr and the status JSON'"'"'s `carry_unconfirmed[]` — loop output, never reviewer output.'
+  contains "$arms" 'an entry stamped `"decided": "red"` in `verify-<R>.json`, or one the *Decide subagent brief*'"'"'s narrow `decided-<R'"'"'>.log` lookup finds a red for, is a tool-verdict carry — report it and its `decides:` command and stop, dispatching nothing.'
+}
+
+@test "#1937 AC7: each ground takes its carry mode, with its own cap" {
+  load_arms
+  contains "$arms" 'one panel in **`carry-repair`** mode, `carry_entries` every carried identity projected from `verify-<R>.json`. On `ok`, re-invoke with the same `--findings-file` and the rebuilt `--carry-accounting`; no decide dispatch follows;'
+  contains "$arms" 'one panel in **`carry-redispatch`** mode, `carry_entries` the refused identities only. On `ok`, dispatch a decide subagent over the merged aggregate, then re-invoke.'
+  contains "$arms" 'The cap is that arm'"'"'s own, per ground: "If the re-run again leaves an entry unaccounted, report it in the conversation and stop". A different ground takes its own arm once.'
+}
+
+@test "#1937 AC8: a stalled carry-redispatch is restored from its pre-carry snapshots" {
+  load_arms
+  contains "$arms" 'copy `findings-round-<R>.json` and `carry-lines-<R>.txt` to `<work-dir>/findings-round-<R>.pre-carry.json` and `<work-dir>/carry-lines-<R>.pre-carry.txt` without opening them'
+  contains "$arms" 'before its stall re-dispatch restore both over the originals, so the retry merges and appends exactly once. A failed copy or restore is report-and-stop.'
+  contains "$arms" '`carry-repair` takes no snapshot'
+}
+
+@test "#1937 AC9: every recovery is a fresh round-mode subagent with a rewritten handoff and a mode-aware clear" {
+  load_arms
+  contains "$arms" 'The FAILED re-run, the missing-confirmation arm, the never-ran arm and the CADENCE re-run dispatch in `round` mode, reusing the original `delta_base` and `carried_finding_ids` with `carry_entries` `[]`.'
+  contains "$arms" 'Before every recovery dispatch, rewrite `handoff-<R>-panel.json` with `round-handoff.zsh write-handoff`'
+  contains "$arms" 'which always deletes the previous `verdict-<R>-panel.json`, so a stalled recovery reads as a stall and never as the superseded verdict'
+  load_section
+  contains "$section" '`mode` is `round`, so `carry_entries` is `[]`, except on the two carry recoveries (*Verdict recovery arms (#1937)*)'
+}
+
+@test "#1937 AC10: the dispatch clear depends on the panel's mode" {
+  load_section
+  contains "$section" '- a **`carry-repair`** panel deletes nothing more;'
+  contains "$section" '- a **`carry-redispatch`** panel also deletes `<work-dir>/findings-round-<R>-carry.json` and `<work-dir>/verify-<R>-carry.json`, and keeps `findings-round-<R>.json`, `carry-lines-<R>.txt` and `carry-round-<R>.json`.'
+}
+
+@test "#1937 AC11: the CADENCE refusal in full — decide sequence first, held attest, never the fresh mint" {
+  load_arms
+  contains "$arms" '**The CADENCE refusal, in full.** First the *Decide subagent brief*'"'"'s sequence, unchanged.'
+  contains "$arms" 'mint a fresh `--findings-tree`, dispatch a new round-mode panel, dispatch a decide subagent over its aggregate, and consolidate with the fresh `--findings-tree` and the **held** `--gate-attest`, or with it omitted — never the fresh mint.'
+  contains "$arms" 'The other recovery, discarding the fix and re-consolidating, dispatches no panel.'
+}
+
+@test "#1937 AC12: arm caps and the stall retry are separate" {
+  load_arms
+  contains "$arms" 'Each arm'"'"'s cap is its own, and never the stall retry.'
+  contains "$arms" 'for a `carry-redispatch`, after the snapshot restore — and a recovery dispatch neither consumes nor resets it.'
+  contains "$arms" 'A verdict that validates but is not `ok` is never a stall.'
+}
+
+@test "#1937 AC13: the panel brief recovers plan exit 2, a wrong worktree and an empty excerpt inside its own dispatch" {
+  load_panel_brief
+  contains "$panel" '**Recover inside the dispatch before returning a non-`ok` verdict.**'
+  contains "$panel" 'a `plan` **exit 2** is your own malformed invocation: fix it and re-run once, as *A non-zero `plan` exit is never a scope* says. Return `plan-failed` only on exit 1, exit 3 or a second exit 2;'
+  contains "$panel" 'Return `wrong-worktree-root` only when the re-planned descriptor still names the wrong root;'
+  contains "$panel" 'apply *An empty excerpt is not always a stop*, and re-confirm `worktree_root`, before returning `empty-excerpt`.'
+  contains "$panel" 'Steps 1–5 are `round` mode. A `carry-repair` handoff takes *Carry modes* below instead; a `carry-redispatch` handoff runs steps 1–5 with the changes *Carry modes* names.'
+}
+
+@test "#1937 AC14: carry-repair rebuilds the accounting from the lines and leaves the aggregate untouched" {
+  load_panel_brief
+  contains "$panel" '**`carry-repair`** dispatches no reviewers.'
+  contains "$panel" 'rebuild `<work-dir>/carry-round-<R>.json` from those lines, and leave `findings-round-<R>.json` byte-unchanged.'
+  contains "$panel" 'When the lines cannot produce a valid accounting, return `failed` / `carry-unconfirmed`.'
+}
+
+@test "#1937 AC15: carry-redispatch writes its own file, merges once, and re-assembles the accounting from every line" {
+  load_panel_brief
+  contains "$panel" '**`carry-redispatch`** runs steps 1–5 with an **empty** scope and a verify file naming only `carry_entries`'
+  contains "$panel" 'First project the `verify-<R>.json` entries that `carry_entries` names into `<work-dir>/verify-<R>-carry.json` with `jq`; never write `verify-<R>.json`, which stays the loop'"'"'s carry.'
+  contains "$panel" 'Step 1 then plans with `--prior-tree <tree_id>` in place of `<delta_base>`, so the delta is empty, and `--fix-verification <work-dir>/verify-<R>-carry.json`, and never adds `--final`.'
+  contains "$panel" 'Steps 3 and 4 keep their re-dispatch and quoted-heredoc rules on these paths:'
+  contains "$panel" 'write their output to `<work-dir>/findings-round-<R>-carry.json`, merge it into `findings-round-<R>.json` (`jq -s '"'"'add'"'"'`) once, atomically'
+  contains "$panel" 're-assemble `carry-round-<R>.json` from every line in that file'
+  contains "$panel" 'Never retype or reword a finding.'
+}
+
+@test "#1937 AC16: Recover by ground points at the carry modes and no longer assumes the lines are in context" {
+  load_carry_section
+  lacks "$carry" 'its per-entry lines are in your context'
+  lacks "$carry" 'you then merge the two arrays into'
+  contains "$carry" 'rebuild `carry-round-R.json` from them with the panel brief'"'"'s `carry-repair` mode'
+  contains "$carry" 'the panel brief'"'"'s `carry-redispatch` mode merges the two arrays into `findings-round-R.json`'
 }
