@@ -17,7 +17,7 @@ proves only that no *original* line migrated into it, by asserting the two
 anchors stay adjacent in the pinned commit. And **everything after
 `<!-- /moved: round-protocol-tail -->`** is unproven too: the #1571 correction, the #1485 empty-story-diff note,
 the #1805 fix-pass rule pointer, *Topic panels* (#1072), *The decided pass* (#1584), *The risk pass*
-(#1921), *Carry accounting* (#1583) and the #1226 `loop_args` note all live there,
+(#1921), *Carry accounting* (#1583), *Selected gates for delta rounds* (#1973) and the #1226 `loop_args` note all live there,
 because a byte-frozen span cannot be edited and those rules had to correct or
 extend what it says. Edit either region knowing the byte check does not cover
 it.
@@ -1358,6 +1358,98 @@ read the heading below and apply its rule to each fix pass, unless its body
 begins with `none` (the conductor's §1b test). With no profile loaded there is
 nothing to apply.
 profile: `development-<repo_type>:resolve-profile` § Fix-pass rules
+
+### Selected gates for delta rounds (#1973)
+
+The byte-frozen span says the loop's `--resume` gate is "the **full** suite
+(unit **and** integration), never a subset (#604)", and the boundary's step 2
+starts "the same `<full gate>` command §3 runs". **The first stays true**: the
+loop's own `--test-cmd` is always the full `run-gate.zsh`, in every round, and
+hook mode never selects. What #1973 amends, for **intermediate (delta) review
+rounds only**, is the gate *the session* starts at a delta round's boundary —
+the #979 and #604 guardrails, both. **This section governs wherever the text
+above names the gate a boundary starts or the attestation it holds and
+disagrees with it**: the round protocol's opening paragraph (its whole-suite
+sentence), the boundary's steps 2, 5 and 7, the *No fix pass ran since the last
+boundary* bullet, the invariant paragraph's cadence recovery, and step 3's
+`AWAITING_FIX` hand-off, which names the full gate.
+
+**Only one gate shape can select: a plugin repo whose `<full gate>` is
+`run-gate.zsh` alone** — step 5's first arm. `--select-base` is a `run-gate.zsh`
+flag and nothing else's. Every other stack, a **compound** `<full gate>`
+(`run-gate.zsh` plus anything else as one command) and a gate whose suite
+writes into the tree start their `<full gate>` unchanged before every round, as
+the text above says; nothing in this section applies to them.
+
+**One rule: a gate's scope is the `scope_mode` of the round it precedes.** Only
+a delta round's gate is `selected`:
+
+1. **Round 1** — §3's gate, the full `run-gate.zsh`. Never selected.
+2. **A boundary into a delta round** — any round ≥ 2 that is **not** the closing
+   sweep, including rounds a human grant bought and possible-false-trip
+   continuations — **starts `<full gate>` with `--select-base <base>` appended**
+   (`<base>` is the loop's `--base`). This is the default, not an option: it
+   runs only the bats files `select-tests.zsh` maps the story diff to, plus the
+   always-run set, and falls back to the whole suite by itself whenever the
+   selection cannot be trusted.
+3. **A boundary into the closing sweep** — the round `<work-dir>/.closing-sweep`
+   names, the grant beyond the ceiling included — starts the **full** gate. That
+   includes the sweep a zero-blocker delta round promotes **whenever the
+   attestation held from that round is `selected:`**: there the *No fix pass
+   ran since the last boundary* exemption does **not** apply, because no full
+   gate has proved this tree. Mint `T` and start the full gate beside the
+   sweep's panel exactly as steps 1–4 say; a red is step 6's (fix, restart the
+   boundary), and a green consolidates with its own bare `tree` **and its
+   summary as `--gate-summary`** — the tree has not moved, so that bare id
+   equals the selected one, and the summary (green, `"scope":"full"`, that
+   tree) is how the loop tells a full run from a rebuilt copy. Only when the
+   held attestation is already a full run's bare id does that sweep skip the
+   gate, as before.
+4. **The loop's own `--test-cmd`** stays `<full gate>` — the full `run-gate.zsh`
+   — in the invocation template, every round. Never pass `--select-base` there.
+
+**The held attestation is the gate's reported `tree`, exactly as printed.** For
+a selected run that is `selected:` followed by the hex — keep the prefix and
+never rebuild the value from `T`, which would claim a full run. That holds at
+step 5 and wherever the text above re-passes a *held* attestation: the
+findings-file recovery re-invokes and the cadence recovery (the zero-blocker
+promotion after a selected gate starts a full gate instead, item 3). (The loop
+also remembers every selected identity it accepted and runs
+its own full gate when a bare copy of it reaches the closing sweep — unless a
+`--gate-summary` proves a green full run on that tree, as item 3's does — but
+that is the backstop, not the procedure.) `--findings-tree` stays the bare `T`.
+
+**Steps 5 and 7, for a selected run.** Its summary reports `"scope":"selected"`.
+Compare the hex after the `selected:` prefix with `T`: equal and green is step
+5's plugin-repo arm, consolidating with the whole reported value as
+`--gate-attest`; a different hex is step 7's drift. A `--select-base` run whose
+summary says `"scope":"full"` means the selector fell back — it ran the whole
+suite, and its bare `tree` is an ordinary full attestation. The loop accepts a
+`selected:` attestation **only on a `--resume` into a delta round**; into a
+full-scope round it runs `--test-cmd`, so a selected gate can never stand in for
+the full one before a round that may open a PR.
+
+**`--gate-summary` — the gate's timings, and item 3's proof of a full run.** It is one more flag
+on step 2's invocation template (which sits in the byte-frozen span): save the
+gate's JSON summary outside the repo, beside the findings files, and pass it as
+`--gate-summary <file>` on the invocation that consolidates the round **that
+gate** preceded — round 1's included. **Pass it only when this boundary started
+a gate.** A boundary that skipped the gate (a zero-blocker promotion held on a
+full run's attestation, the findings-file recovery re-invokes) omits it, so no
+round is credited with another round's gate; a re-invoke of the same round
+re-passes that round's own file. The loop records the summary's `scope`,
+`wall_s` and 10 slowest files as that round's `history[].gate` (`attested:
+true`); when the loop ran its own gate instead, that run's summary is recorded
+(`attested: false`). It never decides a skip on its own; its one effect on the
+gate is item 3's — proving a full run lifts the loop's selected-run backstop.
+
+**Why this is safe.** A selector that misses a dependency lets a regression
+surface one round late — at the closing sweep's full gate, as an ordinary red
+that step 6 fixes — never in a PR: every round that can end the run
+(`CONVERGED`, `CONVERGED_WITH_RESIDUE`) is a full-scope round, and the gate
+before it is full. (The loop's own refusal of a selected attestation into the
+sweep is the backstop for a session that skipped item 3's gate; its red there
+exits `ERROR`, which is why item 3 starts the gate rather than relying on it.)
 
 ### Topic panels — every `topic_review_skills` entry joins the round (#1072)
 

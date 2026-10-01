@@ -219,6 +219,14 @@ jq -c '
       # promotion_phase carries.
       # (No apostrophes in this block: the jq program is single-quoted.)
       possible_false_trip_auto_continues: ($s.possible_false_trip_auto_continues // 0),
+      # #1973: the gate that preceded each round, read from the per-round
+      # history lines. Deliberately a SEPARATE field from findings_by_round,
+      # which is in lockstep with three other renderings; a gate record is not
+      # a finding count and joins it only by `round`. gate is {scope, attested,
+      # wall_s, slowest} or null (no run-gate.zsh gate, and no summary, for that
+      # round), and a history line that predates the key reads null too.
+      gate_by_round: [ ($s.history // [])[] | select(type == "object")
+                       | {round, gate: (.gate // null)} ],
       fixed:  ( [ $seen[]
                   | select(.priority=="Critical" or .priority=="High")
                   | ("\(.file)|\(.line)|\(.dimension)|\(.title)") as $k

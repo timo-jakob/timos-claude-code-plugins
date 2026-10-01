@@ -62,6 +62,16 @@ These are the §3 rules for this repo type. The conductor's generic bullet says
     gate was started, and the gate's `tree` field is what confirms it — see
     *The round boundary is concurrent* (§3.5), which states the ordering; this
     profile restates none of it.
+  - **The whole-suite rule is amended for intermediate (delta) review rounds
+    only (#1973)** — both guardrails, #979's "the whole suite every round" and
+    #604's "never a subset". The gate before a **delta** round adds
+    `--select-base <base>`: it runs only the bats files the story diff can
+    affect, reports `"scope":"selected"`, and marks its tree `selected:<hex>`,
+    which the loop accepts as an attestation only into a delta round. Round 1,
+    the closing sweep (the grant beyond the ceiling included), the loop's own
+    `--test-cmd`, hook mode, §E4 and CI stay on the whole suite. When and how is
+    *Selected gates for delta rounds* in `reference/review-loop.md`; this
+    profile restates none of it.
 - **Relay a DEGRADED gate to the user, up front (#980).** `run-gate.zsh`'s
   stdout summary carries a `"mode"` field. When it is `"sequential-degraded"`
   (GNU `parallel` is not installed), the gate still ran the **whole** suite at

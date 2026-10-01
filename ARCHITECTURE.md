@@ -4785,8 +4785,8 @@ and nothing here restates the rule.
 which persists across `--resume` because the work-dir accumulators do.
 `history.jsonl`'s per-round line gains **no** residue-derived key — no `class`,
 no `fix_touched`, no residue counter. (It legitimately carries #1434's
-`adjudicated_dropped` as a sixth key; the invariant here is a negative on the
-residue keys, not a closed key set.)
+`adjudicated_dropped` as a sixth key and #1973's `gate` as a seventh; the
+invariant here is a negative on the residue keys, not a closed key set.)
 
 **`escalation_reasons` keeps its one meaning on the residue terminal.** The
 reasons are the changelist's, and on the non-convergence rung that changelist
@@ -5139,6 +5139,56 @@ uncomputable identity all run the gate exactly as before — the gate never
 weakens, only the provably-redundant re-run is elided. It applies only where
 `--test-cmd` *is* the attested `run-gate.zsh` (plugin repos); other stacks emit
 no `tree`, pass no `--gate-attest`, and are unchanged.
+
+**Selected gates for intermediate (delta) rounds (#1973).** Two recorded
+guardrails forbade subsetting the suite: #979 (`run-gate.zsh`: the whole suite
+every round) and #604 (resolve-issue Step 3: the full suite, never a subset).
+Both are **amended for intermediate delta rounds only**, and the rest of the
+guardrail stands. **One rule: a gate's scope is the `scope_mode` of the review
+round it precedes, and only a delta round's gate may be `selected`.** Round 1's
+gate (Step 3), the closing sweep's (the grant beyond the ceiling included), the
+loop's own `--test-cmd`, hook mode, epic verification and CI stay on the full
+suite. On a plugin repo whose `<full gate>` is `run-gate.zsh` alone, the
+session starts the gate before a delta round as `run-gate.zsh
+--select-base <base>` (every other stack, and a compound gate, never selects),
+which runs only the bats files
+`development/skills/resolve-issue/scripts/select-tests.zsh` selects: a pure map
+from the merge-base diff to the bats files that reference a changed path
+(static extraction of every repo path a file spells out, `$REPO_ROOT/`-prefixed
+ones included — a bare top-level directory name is never a reference — plus an
+optional `# covers:` header), joined by an always-run set (position guards,
+repo-wide `git ls-files` sweeps, manifest and version checks, and any file whose
+header is `# covers: *`). It falls back to the whole suite on any unmapped
+changed path, on a change to the shared test machinery or shared code
+(`tests/helpers/`, `tests/*.bash`, `development/scripts/`, this file, the
+marketplace manifest), and on an empty or uncomputable diff; a bats guard
+asserts every `tests/*.bats` file is mapped or always-run. A selected run
+reports `"scope":"selected"` and its tree as `selected:<hex>`. The loop strips
+the prefix and accepts it as `--gate-attest` **only** on a `--resume` into a
+delta round; on a `--resume` into the closing sweep it runs its own full gate —
+for the `selected:` value, and for a bare identity equal to a selected one it
+already accepted (remembered in `<work-dir>/.selected-attest`) unless a
+`--gate-summary` proves a green full run on that tree. The sweep a zero-blocker
+delta round promotes after a selected gate starts its own full gate, whose bare
+tree equals the held hex and whose summary is that proof; the remembered
+identity is the backstop for a session that skipped that gate. **The control
+point is therefore the gate before a
+full-scope round.** open-pr never reads the attestation, but the loop declares
+`CONVERGED` and `CONVERGED_WITH_RESIDUE` only on a full-scope round, and the
+gate before one is always full — so a selector that misses a dependency costs a
+round (the closing sweep or CI catches it), never a shipped regression.
+
+**Per-round gate telemetry (#1973).** Every `run-gate.zsh` summary carries
+`scope` (`full`|`selected`), the run's `wall_s`, and `files` — each bats file
+the run ran with its time from bats' JUnit report. Each round's
+`history.jsonl` line carries `gate: {scope, attested, wall_s, slowest}` (the 10
+slowest files) for the gate that **preceded** that round — from the loop's own
+`--test-cmd` run (`attested: false`) or, when the loop ran none, from the
+session's `--gate-summary FILE` (`attested: true`) — or `null` when it has
+neither. `--gate-summary` never decides a skip on its own; its one effect on
+the gate is lifting the `.selected-attest` backstop above. The
+status JSON's `rounds` stays the integer count; the per-round record lives in
+`history[]`.
 
 **The gate's job count is shared across concurrent gates (#1798).** Sessions run
 in parallel, and a `run-gate.zsh` that gave every gate every core drove a
@@ -5913,8 +5963,13 @@ later; so a `null` here means "not an escalation", **not** "succeeded", and the
 `escalation` breakdown's null bucket silently contains failed `ERROR` runs —
 read `outcome` when you want success/failure), `rounds`, `max_rounds`,
 `promotion_phase`, `possible_false_trip_auto_continues`, `findings_by_round`,
-`convergence_assessment`, and `fixed`
+`gate_by_round`, `convergence_assessment`, and `fixed`
 (blockers found and cleared) vs `waived` (Low suggestions logged).
+`gate_by_round` (#1973) is `[{round, gate}]`, read from the status JSON's
+`history[]`: each round's gate record (`{scope, attested, wall_s, slowest}`, or
+`null`), described under *Per-round gate telemetry*. It is a separate field
+rather than a key on each `findings_by_round` entry, so the findings lockstep
+below is untouched, and the two join on `round`.
 `possible_false_trip_auto_continues` (#1498) is copied from the status JSON with
 the same always-present reading stated there.
 `promotion_phase` (#995) is an always-present boolean copied from the status
