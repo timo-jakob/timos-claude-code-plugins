@@ -2012,8 +2012,9 @@ hook mode too, where the panel writes the same records to
 
 **Recover by ground.** For the first three grounds — no accounting supplied,
 a file of the wrong shape, a record naming no carried identity — the panel
-already ran and its per-entry lines are in your context: assemble or repair
-`carry-round-R.json` from them and re-invoke; run no panel. For an
+already ran and its per-entry lines are in `carry-lines-R.txt`: rebuild
+`carry-round-R.json` from them with the panel brief's `carry-repair` mode and
+re-invoke; no reviewer runs. For an
 **unevidenced re-raise** the reviewer's finding sits under the wrong identity:
 re-dispatch **the panel** for that entry, quoting the carried `{file,
 dimension, title}` verbatim and saying the finding must carry it, with an
@@ -2029,8 +2030,8 @@ Report that entry and its `decides:` command, and stop.
 
 **A re-dispatch writes to its own path** —
 `findings-round-R-carry.json`, never `findings-round-R.json`, which still holds
-the first pass's findings — and you then merge the two arrays into
-`findings-round-R.json` (`jq -s 'add' findings-round-R.json
+the first pass's findings — and the panel brief's `carry-redispatch` mode merges
+the two arrays into `findings-round-R.json` (`jq -s 'add' findings-round-R.json
 findings-round-R-carry.json`): panel output, never a hand edit; never retype or
 reword a finding yourself (a record-only `re_raised[]` is refused, and a
 re-raise that never reaches `.blocking` never reaches the next carry).
@@ -2157,7 +2158,8 @@ values only the conductor can supply:
   implementation worktree (*Build each reviewer's scope block* above says how to
   identify it), resolved with `:A`;
 - **panel:** `base` is the loop's `--base`, resolved to a commit; `mode` is
-  `round`, so `carry_entries` is `[]`; `delta_base` is the tree identity
+  `round`, so `carry_entries` is `[]`, except on the two carry recoveries
+  (*Verdict recovery arms (#1937)*); `delta_base` is the tree identity
   **read from** `<work-dir>/tree-<R-1>.txt` on every round ≥ 2 — its content,
   never the path — and `null` on round 1; `carried_finding_ids` names the
   entries of `verify-<R>.json`, and is `[]` when it holds none.
@@ -2171,11 +2173,8 @@ brief*), the conductor runs step-mode `resolve-story-loop.zsh` itself, exactly a
 says, passing the verdict's `aggregate_findings_file` as `--findings-file` and,
 when it is non-null, its `carry_accounting_file` as `--carry-accounting`. It
 opens neither file. It narrates the round from the verdict's `findings_count`,
-the status JSON and the progress block the loop appended.
-
-**Interim panel recovery:** any non-`ok` panel verdict is report-and-stop until #1937
-— safe, but coarse: #1937 maps each cause onto the recovery arm step 2 names for
-it.
+the status JSON and the progress block the loop appended. A non-`ok` panel
+verdict takes *Verdict recovery arms (#1937)* below.
 
 **When the fix subagent runs.** On exit 20, read `final_changelist.summary.blocking`
 from the status JSON:
@@ -2208,9 +2207,18 @@ re-raised as step 3 says.
 
 **Before every dispatch, clear what an earlier dispatch of the same round and
 kind left behind**: delete `<work-dir>/verdict-<R>-<kind>.json` and, for a
-panel, `findings-round-<R>.json`, `carry-lines-<R>.txt` and
-`carry-round-<R>.json`. A delete that fails is report-and-stop. Without it, a
-re-dispatched subagent that dies reads back as the earlier one's verdict.
+panel, what its mode replaces:
+
+- a **`round`**-mode panel also deletes `findings-round-<R>.json`,
+  `carry-lines-<R>.txt` and `carry-round-<R>.json`;
+- a **`carry-repair`** panel deletes nothing more;
+- a **`carry-redispatch`** panel also deletes
+  `<work-dir>/findings-round-<R>-carry.json` and
+  `<work-dir>/verify-<R>-carry.json`, and keeps `findings-round-<R>.json`,
+  `carry-lines-<R>.txt` and `carry-round-<R>.json`.
+
+A delete that fails is report-and-stop. Without it, a re-dispatched subagent
+that dies reads back as the earlier one's verdict.
 
 **Stall retry.** A missing or invalid verdict is exactly a `round-handoff.zsh
 read-verdict` exit 3, a missing file included. It gets exactly one re-dispatch,
@@ -2220,8 +2228,9 @@ verdict that validates but is not `ok` is not a stall, and recovery dispatches
 
 **Everything else is unchanged.** Exit codes 0, 14, 10, 11, 12, 13, 2 and 1 take
 their existing paths, from the status JSON alone — except a mid-run exit 2 on
-the CARRY-UNACCOUNTED arm, which is report-and-stop until #1937: its recovery
-reads per-entry lines the conductor no longer holds. Promotion, residue and
+the CARRY-UNACCOUNTED, CADENCE or never-ran arm, which takes
+`#### Verdict recovery arms (#1937)`.
+Promotion, residue and
 escalation stay in the conductor, because each needs a human. A promotion
 sub-loop's rounds dispatch the same panel, decide and fix subagents
 (`reference/promotion.md`).
@@ -2238,12 +2247,108 @@ the conductor reads the round's aggregate to assess its `CRITICAL` and
 reads nothing else from it; when the threshold is off or ignored it opens
 nothing. #2025 moves it into a subagent.
 
+#### Verdict recovery arms (#1937)
+
+This is the one statement of what the conductor does with a non-`ok` panel
+verdict, and with the loop's CARRY-UNACCOUNTED, CADENCE and never-ran
+refusals. Each row names an arm
+that already exists; for its reasoning read that arm, which is not restated
+here.
+
+**A non-`ok` panel verdict is boundary step 3 refusing or aborting the round.**
+Stop the gate with the handle step 2 recorded, then take the arm below. An arm
+that resumes the round resumes at step 1, except on a no-fix round, exactly as
+step 3 says. **A non-`ok` verdict from a `carry-repair` or `carry-redispatch`
+panel takes no row:** its gate has already finished, so nothing is stopped or
+resumed, and it is that ground's cap — report-and-stop.
+
+**Dispatch on `cause`.** `not-applicable` and `story-diff-empty` pair with
+`not_applicable`; the other nine causes pair with `failed`. A verdict whose
+outcome/cause pair is off this table is report-and-stop.
+
+| `cause` | `outcome` | arm |
+|---|---|---|
+| `dimension-not-run`, `render-failed` | `failed` | step 2's **FAILED** arm: one fresh round-mode panel; the same cause again is report-and-stop |
+| `fix-verification-null` | `failed` | the FAILED arm's null carry: re-run the carry precondition on `verify-<R>.json`, then one fresh round-mode panel, whose brief plans with `--fix-verification`; the same cause again is report-and-stop |
+| `fix-verification-unreadable` | `failed` | the FAILED arm's unreadable carry: re-run the carry precondition — an unreadable `verify-<R>.json` is report-and-stop — then one fresh round-mode panel; the same cause again is report-and-stop |
+| `carry-unconfirmed` | `failed` | the **missing-confirmation** arm: one fresh round-mode panel, and "if the re-run again reports no confirmation count, report it in the conversation and stop" |
+| `plan-failed` | `failed` | report-and-stop: the panel brief has already fixed and re-run a `plan` exit 2 once |
+| `wrong-worktree-root` | `failed` | report-and-stop: the panel brief has already re-planned against the implementation worktree |
+| `empty-excerpt` | `failed` | report-and-stop: the panel brief has already applied *An empty excerpt is not always a stop*, and a fresh panel "fails the same way" |
+| `no-agent-tool` | `failed` | report-and-stop |
+| `not-applicable` | `not_applicable` | the **NOT APPLICABLE on a full round** arm: autonomous, stop with no commit and no PR; interactive, its three options, none taken without an explicit choice. Never coerced to `[]`, and the panel is not re-run |
+| `story-diff-empty` | `not_applicable` | the **empty story diff** shape: go back to **§2 (Implement)** and take the boundary again, or, if the story needs no code change, say so and stop. The three NOT APPLICABLE options are never offered, and, per the #1485 note, neither the re-invoke arm nor the panel re-run arm is taken |
+
+**The never-ran arm is not a verdict.** It applies only when the conductor can
+show that no panel subagent was dispatched this round — on a missing/empty
+STALE_FINDINGS refusal, say. Dispatch one round-mode panel, then a decide
+subagent over its aggregate, then re-invoke. A
+panel that was dispatched and returned no valid verdict is a stall, not
+never-ran.
+
+**CARRY-UNACCOUNTED.** A mid-run exit 2 on that arm takes this section. Read the
+ground from the loop's refusal stderr and the status JSON's
+`carry_unconfirmed[]` — loop output, never reviewer output. First apply
+the #1647 tool-verdict exception: an entry stamped `"decided": "red"` in
+`verify-<R>.json`, or one the *Decide subagent brief*'s narrow `decided-<R'>.log`
+lookup finds a red for, is a tool-verdict carry — report it and its `decides:`
+command and stop, dispatching nothing. Otherwise, by ground (*Carry accounting →
+Recover by ground*):
+
+- **no accounting supplied, a file of the wrong shape, a record naming no
+  carried identity** → one panel in **`carry-repair`** mode, `carry_entries`
+  every carried identity projected from `verify-<R>.json`. On `ok`, re-invoke
+  with the same `--findings-file` and the rebuilt `--carry-accounting`; no
+  decide dispatch follows;
+- **an unevidenced re-raise, an entry neither confirmed nor re-raised** → one
+  panel in **`carry-redispatch`** mode, `carry_entries` the refused identities
+  only. On `ok`, dispatch a decide subagent over the merged aggregate, then
+  re-invoke.
+
+The cap is that arm's own, per ground: "If the re-run again leaves an entry
+unaccounted, report it in the conversation and stop". A different ground takes
+its own arm once.
+
+**A stalled `carry-redispatch` is restored, not re-merged.** Before that
+dispatch, copy `findings-round-<R>.json` and `carry-lines-<R>.txt` to
+`<work-dir>/findings-round-<R>.pre-carry.json` and
+`<work-dir>/carry-lines-<R>.pre-carry.txt` without opening them, and before its
+stall re-dispatch restore both over the originals, so the retry merges and
+appends exactly once. A failed copy or restore is report-and-stop.
+`carry-repair` takes no snapshot: it only reads the lines and rebuilds the
+accounting, so a re-dispatch repeats it exactly.
+
+**Every recovery is a fresh subagent with a fresh handoff.** The FAILED re-run,
+the missing-confirmation arm, the never-ran arm and the CADENCE re-run dispatch
+in `round` mode, reusing the original `delta_base` and `carried_finding_ids`
+with `carry_entries` `[]`. Before every recovery dispatch, rewrite
+`handoff-<R>-panel.json` with `round-handoff.zsh write-handoff` and clear as
+*Before every dispatch, clear* says for its mode, which always deletes the
+previous `verdict-<R>-panel.json`, so a stalled recovery reads as a stall and
+never as the superseded verdict.
+
+**The CADENCE refusal, in full.** First the *Decide subagent brief*'s sequence,
+unchanged. Then, for the panel re-run recovery: mint a fresh `--findings-tree`,
+dispatch a new round-mode panel, dispatch a decide subagent over its aggregate,
+and consolidate with the fresh `--findings-tree` and the **held**
+`--gate-attest`, or with it omitted — never the fresh mint. The other recovery,
+discarding the fix and re-consolidating, dispatches no panel.
+
+**Caps and the stall retry are separate.** Each arm's cap is its own, and never
+the stall retry. The stall retry applies to every recovery dispatch as to any
+other — for a `carry-redispatch`, after the snapshot restore — and a recovery
+dispatch neither consumes nor resets it. A verdict that validates but is not
+`ok` is never a stall.
+
 #### Panel subagent brief
 
 You review one round, in place of the conductor. Read your handoff with
 `round-handoff.zsh read-handoff --file <the handoff path your prompt names>`;
 the scripts below are under `<skill-base-dir>/scripts/`. Work in the handoff's
 `worktree_root`, never your cwd (ARCHITECTURE.md, *Where a subagent works*).
+Steps 1–5 are `round` mode. A `carry-repair` handoff takes *Carry modes* below
+instead; a `carry-redispatch` handoff runs steps 1–5 with the changes *Carry
+modes* names.
 
 1. **Plan.** Run `review-dispatch.zsh plan --repo <worktree_root> --base <base>
    --round <round>`. From round 2 on, add `--prior-tree <delta_base>`,
@@ -2280,6 +2385,42 @@ the scripts below are under `<skill-base-dir>/scripts/`. Work in the handoff's
    <work_dir>`: on success, `ok` with the aggregate's path and length and the two
    carry files (both `null` on round 1 or an empty carry). Return to the
    conductor only that the verdict was written.
+
+**Recover inside the dispatch before returning a non-`ok` verdict.** Three
+arms are yours, not the conductor's:
+
+- a `plan` **exit 2** is your own malformed invocation: fix it and re-run once,
+  as *A non-zero `plan` exit is never a scope* says. Return `plan-failed` only
+  on exit 1, exit 3 or a second exit 2;
+- a `worktree_root` that is not the implementation worktree: re-plan against
+  the implementation worktree, as step 1's check says. Return
+  `wrong-worktree-root` only when the re-planned descriptor still names the
+  wrong root;
+- an empty excerpt: apply *An empty excerpt is not always a stop*, and
+  re-confirm `worktree_root`, before returning `empty-excerpt`.
+
+**Carry modes.** Both write a `panel` verdict exactly as step 5 does.
+
+- **`carry-repair`** dispatches no reviewers. Read `<work-dir>/carry-lines-<R>.txt`,
+  rebuild `<work-dir>/carry-round-<R>.json` from those lines, and leave
+  `findings-round-<R>.json` byte-unchanged. On success the verdict is `ok` with
+  that untouched aggregate and its length, the rebuilt `carry-round-<R>.json`
+  and `carry-lines-<R>.txt`. When the lines cannot produce a valid accounting,
+  return `failed` / `carry-unconfirmed`.
+- **`carry-redispatch`** runs steps 1–5 with an **empty** scope and a verify
+  file naming only `carry_entries`, as *Carry accounting → Recover by ground*
+  says. First project the `verify-<R>.json` entries that `carry_entries` names
+  into `<work-dir>/verify-<R>-carry.json` with `jq`; never write
+  `verify-<R>.json`, which stays the loop's carry. Step 1 then plans with
+  `--prior-tree <tree_id>` in place of `<delta_base>`, so the delta is empty,
+  and `--fix-verification <work-dir>/verify-<R>-carry.json`, and never adds
+  `--final`. Steps 3 and 4 keep their re-dispatch and quoted-heredoc rules on
+  these paths: write their output to `<work-dir>/findings-round-<R>-carry.json`,
+  merge it into `findings-round-<R>.json` (`jq -s 'add'`) once, atomically,
+  append their per-entry lines to `carry-lines-<R>.txt`, and re-assemble
+  `carry-round-<R>.json` from every line in that file. The verdict is `ok` with
+  the merged aggregate and its length, `carry-round-<R>.json` and
+  `carry-lines-<R>.txt`. Never retype or reword a finding.
 
 Where step 1 or the sections it defers to would stop the round, return a
 non-`ok` verdict instead, and write no findings file:
