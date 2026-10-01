@@ -5307,6 +5307,8 @@ At `<work-dir>/handoff-<N>-<kind>.json`, with `kind` ∈ {`panel`, `fix`,
 | panel | `delta_base` | string or null |
 | panel | `carried_finding_ids` | [string] |
 | panel | `carry_entries` | [`{file, dimension, title}`], each a non-empty string; non-empty **only** in the two carry modes, and non-empty there |
+| panel | `worktree_root` | absolute path |
+| panel | `base` | non-empty string — the loop's resolved base commit |
 | fix | `trigger` | `awaiting-fix` \| `gate-red` |
 | fix | `grant` | `{rounds, severity_bar}` (int ≥ 1, non-empty string) or null |
 | fix | `guidance` | string or null |
@@ -5314,9 +5316,22 @@ At `<work-dir>/handoff-<N>-<kind>.json`, with `kind` ∈ {`panel`, `fix`,
 | fix | `profile_fix_rules` | reference string or null |
 | fix | `changelist` | absolute path — required on `awaiting-fix` |
 | fix | `gate_log` | absolute path — required on `gate-red` |
+| fix | `worktree_root` | absolute path |
 | decide | `aggregate_findings_file` | absolute path, in the work-dir |
 | decide | `worktree_root` | absolute path |
 | decide | `retired_file` | absolute path |
+
+**Where a subagent works (#2018).** A panel, fix or decide subagent works in
+`worktree_root` and never in its cwd. On an epic child the cwd need not be the
+story's tree, and a subagent anchored on it reviews, edits or decides against
+the wrong one. A panel subagent passes `worktree_root` as `--repo` and `base` as
+`--base` to `review-dispatch.zsh plan`. `base` is the commit the loop's own
+`--base` resolved to, fixed for the whole loop — never a moving ref such as
+`origin/main`, which another session's fetch can shift mid-loop; the validator
+checks only that it is a non-empty string. `worktree_root` names the story's
+tree on every kind, so it is checked as an absolute path and is never subject
+to the work-dir containment rule. `base` is on the panel handoff only: a fix
+handoff carrying it is rejected as an unlisted key.
 
 **Subagent dispatch mechanism.** The three subagent kinds ship as **plugin
 agents** — a `development/agents/` file whose `tools:` frontmatter lists
