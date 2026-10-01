@@ -4,7 +4,8 @@
 # loop's round-handoff/v1 and round-verdict/v1 files. Two halves:
 #
 #   - a write -> read round-trip for every panel mode, both fix triggers, the
-#     decide handoff, and every verdict kind (panel not_applicable included);
+#     decide and risk handoffs, and every verdict kind (panel not_applicable
+#     included);
 #   - one case per validator rejection, each asserting exit 3, exactly one
 #     `round-handoff:` stderr line, and — for a writer — no file written.
 #
@@ -81,6 +82,24 @@ decide_verdict_ok() {
   jq -n --arg wd "$WD" '{
     schema: "round-verdict/v1", kind: "decide", round: 4, outcome: "ok", cause: null,
     decided_red: 1, decided_green: 3, malformed: 0, ran_commands_file: ($wd + "/decides-ran-4.txt") }'
+}
+
+risk_handoff() {
+  jq -n --arg wd "$WD" '{
+    schema: "round-handoff/v1", kind: "risk", round: 4, tree_id: "c0ffee42",
+    work_dir: $wd, status_file: "/tmp/resolve-2025/status.json",
+    aggregate_findings_file: ($wd + "/findings-round-4.json"),
+    worktree_root: "/Users/dev/repos/plugins/.claude/worktrees/tidy-otter" }'
+}
+
+risk_verdict_ok() {
+  jq -n --arg wd "$WD" '{
+    schema: "round-verdict/v1", kind: "risk", round: 4, outcome: "ok", cause: null,
+    risk_file: ($wd + "/risk-4.json"), assessed_count: 5 }'
+}
+
+risk_verdict_failed() { # $1 = cause
+  risk_verdict_ok | jq --arg c "$1" '.outcome = "failed" | .cause = $c | .risk_file = null | .assessed_count = null'
 }
 
 # --- drivers ----------------------------------------------------------------
@@ -667,6 +686,121 @@ round_trip() {
 @test "a writer given a non-object exits 3 and writes no file" {
   write handoff '["handoff"]'
   rejected "not a JSON object"
+}
+
+# --- the risk kind (#2025) -----------------------------------------------------
+
+@test "round-trip: risk handoff" {
+  round_trip handoff "$(risk_handoff)" handoff-4-risk.json
+}
+
+@test "round-trip: risk verdict ok" {
+  round_trip verdict "$(risk_verdict_ok)" verdict-4-risk.json
+}
+
+@test "round-trip: risk verdict ok with nothing eligible (assessed_count 0)" {
+  round_trip verdict "$(risk_verdict_ok | jq '.assessed_count = 0')" verdict-4-risk.json
+}
+
+@test "round-trip: risk verdict failed, wrong-worktree-root" {
+  round_trip verdict "$(risk_verdict_failed wrong-worktree-root)" verdict-4-risk.json
+}
+
+@test "round-trip: risk verdict failed, assessment-failed" {
+  round_trip verdict "$(risk_verdict_failed assessment-failed)" verdict-4-risk.json
+}
+
+@test "rejects a risk handoff missing aggregate_findings_file" {
+  write handoff "$(risk_handoff | jq 'del(.aggregate_findings_file)')"
+  rejected "missing field: aggregate_findings_file"
+}
+
+@test "rejects a risk handoff missing worktree_root" {
+  write handoff "$(risk_handoff | jq 'del(.worktree_root)')"
+  rejected "missing field: worktree_root"
+}
+
+@test "rejects a risk handoff carrying retired_file (unlisted key)" {
+  write handoff "$(risk_handoff | jq --arg wd "$WD" '.retired_file = ($wd + "/decides-retired.txt")')"
+  rejected "unlisted key for kind risk: retired_file"
+}
+
+@test "rejects a risk handoff carrying base or mode (unlisted keys)" {
+  write handoff "$(risk_handoff | jq '.base = "a699c0e9"')"
+  rejected "unlisted key for kind risk: base"
+  write handoff "$(risk_handoff | jq '.mode = "round"')"
+  rejected "unlisted key for kind risk: mode"
+}
+
+@test "rejects a relative aggregate_findings_file on the risk handoff" {
+  write handoff "$(risk_handoff | jq '.aggregate_findings_file = "findings-round-4.json"')"
+  rejected "aggregate_findings_file is not an absolute path"
+}
+
+@test "rejects a .. escape of aggregate_findings_file on the risk handoff" {
+  write handoff "$(risk_handoff | jq --arg wd "$WD" '.aggregate_findings_file = ($wd + "/../findings-round-4.json")')"
+  rejected "path resolves outside the work-dir"
+}
+
+@test "rejects a symlink escape of aggregate_findings_file on the risk handoff" {
+  mkdir -p "$BATS_TEST_TMPDIR/outside"
+  ln -s "$BATS_TEST_TMPDIR/outside" "$WD/link"
+  write handoff "$(risk_handoff | jq --arg wd "$WD" '.aggregate_findings_file = ($wd + "/link/findings-round-4.json")')"
+  rejected "path resolves outside the work-dir"
+}
+
+@test "accepts a risk worktree_root outside the work-dir (not a work-dir path)" {
+  round_trip handoff "$(risk_handoff | jq '.worktree_root = "/opt/elsewhere/checkout"')" handoff-4-risk.json
+}
+
+@test "rejects a risk verdict ok with a null risk_file" {
+  write verdict "$(risk_verdict_ok | jq '.risk_file = null')"
+  rejected "risk_file is not an absolute path on outcome ok"
+}
+
+@test "rejects a risk verdict ok with a negative assessed_count" {
+  write verdict "$(risk_verdict_ok | jq '.assessed_count = -1')"
+  rejected "assessed_count is not a non-negative integer on outcome ok"
+}
+
+@test "rejects a risk verdict ok with a non-integer assessed_count" {
+  write verdict "$(risk_verdict_ok | jq '.assessed_count = 2.5')"
+  rejected "assessed_count is not a non-negative integer on outcome ok"
+  write verdict "$(risk_verdict_ok | jq '.assessed_count = "5"')"
+  rejected "assessed_count is not a non-negative integer on outcome ok"
+}
+
+@test "rejects a risk_file outside the work-dir" {
+  write verdict "$(risk_verdict_ok | jq '.risk_file = "/tmp/risk-4.json"')"
+  rejected "path resolves outside the work-dir"
+}
+
+@test "rejects a failed risk verdict with a non-null risk_file" {
+  write verdict "$(risk_verdict_failed assessment-failed | jq --arg wd "$WD" '.risk_file = ($wd + "/risk-4.json")')"
+  rejected "risk_file and assessed_count are not null on outcome failed"
+}
+
+@test "rejects a failed risk verdict with a non-null assessed_count" {
+  write verdict "$(risk_verdict_failed wrong-worktree-root | jq '.assessed_count = 0')"
+  rejected "risk_file and assessed_count are not null on outcome failed"
+}
+
+@test "rejects a risk verdict with outcome not_applicable" {
+  write verdict "$(risk_verdict_failed assessment-failed | jq '.outcome = "not_applicable"')"
+  rejected "outcome not_applicable on kind risk"
+}
+
+@test "rejects a risk verdict with a cause from another kind" {
+  write verdict "$(risk_verdict_failed cannot-fix)"
+  rejected "unknown cause for kind risk"
+}
+
+@test "read rejects a risk verdict read from a file named for another kind" {
+  risk_verdict_ok | jq -c . > "$WD/verdict-4-decide.json"
+  run --separate-stderr zsh "$S" read-verdict --file "$WD/verdict-4-decide.json"
+  [ "$status" -eq 3 ]
+  [ -z "$output" ]
+  contains "$stderr" "does not match its round and kind"
 }
 
 # --- usage -------------------------------------------------------------------

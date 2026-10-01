@@ -602,7 +602,7 @@ byte-frozen, so the correction is recorded here rather than edited into it.
 **The sub-loop's rounds dispatch the same panel and fix subagents (#1935).** The
 span above has the conductor run each sub-loop round's panel and fix pass
 itself. Like the blocking phase's rounds, they are now dispatched as the
-**panel**, **decide** and **fix** subagents, through the same handoff and
+**panel**, **decide**, **risk** and **fix** subagents, through the same handoff and
 verdict files:
 `reference/review-loop.md` § *Round subagents — the conductor reads only
 verdicts (#1935)* governs. The seed procedure and its step-7 verification stay

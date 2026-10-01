@@ -108,7 +108,7 @@ load_fix_brief() {
   arch="$(squeeze < "$REPO_ROOT/ARCHITECTURE.md")"
   contains "$arch" '**Subagent dispatch mechanism.**'
   case "$arch" in
-    *'The three subagent kinds ship as **plugin agents**'*) probe_passed=1 ;;
+    *'The four subagent kinds ship as **plugin agents**'*) probe_passed=1 ;;
   esac
   if [ "$probe_passed" -eq 1 ]; then
     [ -f "$AGENTS/round-panel.md" ]
@@ -370,10 +370,12 @@ load_fix_brief() {
   contains "$section" 'the promotion seed procedure with its step-7 verification'
 }
 
-@test "AC15: the risk pass is the one exception that is not human-driven; the decided pass is no exception" {
+@test "AC15: neither the decided pass nor the risk pass is an exception (#1936, #2025)" {
   load_section
   contains "$section" 'There are two named exceptions, both human-driven'
-  contains "$section" 'The risk pass (#1921) is the one exception that is not human-driven: while `corner_case_risk_threshold` is on, the conductor reads the round'"'"'s aggregate to assess its `CRITICAL` and `WARNING` findings and write `risk-<R>.json`, as *The risk pass* above says, and reads nothing else from it; when the threshold is off or ignored it opens nothing. #2025 moves it into a subagent.'
+  contains "$section" 'The risk pass (#1921) is not an exception: while `corner_case_risk_threshold` is on, the risk subagent assesses the aggregate and the conductor passes its verdict'"'"'s `risk_file` as `--risk` unopened; when the threshold is off or ignored, no risk subagent is dispatched.'
+  lacks "$section" 'The risk pass (#1921) is the one exception that is not human-driven'
+  lacks "$section" '#2025 moves it into a subagent.'
   lacks "$section" 'The decided pass is a temporary third exception'
   lacks "$section" 'so it sits inside that exception too'
 }
@@ -408,7 +410,7 @@ load_decided_pass() {
   local arch
   arch="$(squeeze < "$REPO_ROOT/ARCHITECTURE.md")"
   case "$arch" in
-    *'The three subagent kinds ship as **plugin agents**'*)
+    *'The four subagent kinds ship as **plugin agents**'*)
       [ -f "$AGENTS/round-decide.md" ]
       [ "$(grep -cx 'name: round-decide' "$AGENTS/round-decide.md")" -eq 1 ]
       [ "$(grep -cx 'tools: Read, Edit, Write, Grep, Glob, Bash' "$AGENTS/round-decide.md")" -eq 1 ]
@@ -428,7 +430,7 @@ load_decided_pass() {
   # The depth budget's own bullet, pinned with its list neighbour: the brief
   # repeats the sentence, so a bare needle could not see the bullet go.
   load_section
-  contains "$section" '- the fix subagent dispatches nothing; - the decide subagent dispatches nothing.'
+  contains "$section" '- the fix subagent dispatches nothing; - the decide subagent dispatches nothing;'
 }
 
 @test "#1936 AC3: the dispatch point and the decide handoff" {
@@ -481,7 +483,8 @@ load_decided_pass() {
   contains "$decide" 'Run the risk pass only after reading an `ok` decide verdict.'
   contains "$decide" 'Once the decide verdict is `ok`, pass the panel verdict'"'"'s `aggregate_findings_file` as `--findings-file`.'
   contains "$decide" 'On a promotion sub-loop'"'"'s round 1, pass instead the seeded file built from that decided aggregate (`reference/promotion.md`).'
-  contains "$decide" 'Open neither the aggregate, `decides-ran-<R>.txt` nor `decides-retired.txt`, except through the risk pass, as the structural criterion says.'
+  contains "$decide" 'Open neither the aggregate, `decides-ran-<R>.txt` nor `decides-retired.txt`.'
+  lacks "$decide" 'except through the risk pass, as the structural criterion says'
   load_section
   contains "$section" 'and then an `ok` decide verdict where the round'"'"'s decided pass runs'
 }
@@ -540,12 +543,12 @@ load_decided_pass() {
   close_line="$(grep -n '^<!-- /moved: suggestion-promotion -->$' "$PROMO" | cut -d: -f1)"
   [ -n "$close_line" ]
   after="$(tail -n +"$((close_line + 1))" "$PROMO" | squeeze)"
-  contains "$after" 'they are now dispatched as the **panel**, **decide** and **fix** subagents'
+  contains "$after" 'they are now dispatched as the **panel**, **decide**, **risk** and **fix** subagents'
   contains "$after" 'On sub-loop round 1, `<pre-seed-round-1.json>` is the panel verdict'"'"'s `aggregate_findings_file`, `<promotion-work-dir>/findings-round-1.json` — inside the work-dir, not at a path of its own, so the decide handoff can name it'
   contains "$after" 'The decide subagent runs over `<pre-seed-round-1.json>` first: build the seeded file (step 3) only after an `ok` decide verdict, from the decided file.'
   contains "$after" 'The decide pass'"'"'s atomic rewrite is the one overwrite step 1 permits — it changes stamps and severities only, never a finding'"'"'s `file`, `dimension` or line, so step 2 classifies against a baseline that is still valid.'
   load_section
-  contains "$section" 'A promotion sub-loop'"'"'s rounds dispatch the same panel, decide and fix subagents'
+  contains "$section" 'A promotion sub-loop'"'"'s rounds dispatch the same panel, decide, risk and fix subagents'
 }
 
 # --- #1937: verdict recovery arms ---------------------------------------------
@@ -694,4 +697,125 @@ load_carry_section() {
   lacks "$carry" 'you then merge the two arrays into'
   contains "$carry" 'rebuild `carry-round-R.json` from them with the panel brief'"'"'s `carry-repair` mode'
   contains "$carry" 'the panel brief'"'"'s `carry-redispatch` mode merges the two arrays into `findings-round-R.json`'
+}
+
+# --- #2025: the risk subagent -------------------------------------------------
+#
+# One test per acceptance criterion of #2025 that lives in prose, anchored like
+# the rest. The contract and validator half is tests/round-handoff.bats.
+
+load_risk_brief() {
+  riskb="$(section_of "$PROTO" '#### Risk subagent brief' '#### |### |## ' | squeeze)"
+  [ -n "$riskb" ]
+}
+load_risk_pass() {
+  riskp="$(section_of "$PROTO" '### The risk pass — assess every blocking finding before consolidating (#1921)' '### |## ' | squeeze)"
+  [ -n "$riskp" ]
+}
+
+@test "#2025 AC1: the Risk subagent brief sits once inside the Round subagents section, outside every frozen span" {
+  [ "$(grep -cxF '#### Risk subagent brief' "$PROTO")" -eq 1 ]
+  load_section
+  contains "$section" '#### Risk subagent brief'
+  local brief_line tail_line
+  brief_line="$(grep -nxF '#### Risk subagent brief' "$PROTO" | cut -d: -f1)"
+  tail_line="$(grep -n '^<!-- /moved: ' "$PROTO" | tail -1 | cut -d: -f1)"
+  [ "$brief_line" -gt "$tail_line" ]
+  load_risk_brief
+  contains "$riskb" 'is *The risk pass* above and `reference/residue.md` § *1. Assess every residual blocker*, and is restated by neither'
+  lacks "$riskb" 'is exactly one of the four anchors'
+}
+
+@test "#2025 AC2: round-risk ships as a plugin agent with no Agent tool, dispatched in the foreground" {
+  [ -f "$AGENTS/round-risk.md" ]
+  [ "$(grep -cx 'name: round-risk' "$AGENTS/round-risk.md")" -eq 1 ]
+  [ "$(grep -cx 'tools: Read, Write, Grep, Glob, Bash' "$AGENTS/round-risk.md")" -eq 1 ]
+  lacks "$(grep '^tools:' "$AGENTS/round-risk.md")" 'Agent'
+  contains "$(squeeze < "$AGENTS/round-risk.md")" '*Risk subagent brief*'
+  load_risk_brief
+  contains "$riskb" 'The conductor dispatches `subagent_type: round-risk`, in the foreground (`run_in_background: false`), one fresh subagent per job; the risk subagent dispatches nothing.'
+  load_section
+  contains "$section" '- the decide subagent dispatches nothing; - the risk subagent dispatches nothing.'
+  contains "$section" 'so the four kinds ship as plugin agents:'
+  contains "$section" '`development/agents/round-risk.md`'
+  contains "$(squeeze < "$REPO_ROOT/ARCHITECTURE.md")" 'The four subagent kinds ship as **plugin agents**'
+}
+
+@test "#2025 AC3: the threshold decides whether a risk subagent runs at all" {
+  load_risk_brief
+  contains "$riskb" '**Off** or **ignored**, or **hook mode**: dispatch no risk subagent and pass no `--risk`; ignored keeps its narration line and PR Summary note.'
+  contains "$riskb" '**On**, in step mode: dispatch it every round, the promotion sub-loop'"'"'s rounds and the closing sweep included.'
+}
+
+@test "#2025 AC4: the three-part sequencing rule" {
+  load_risk_brief
+  contains "$riskb" '1. Dispatch the risk subagent only after reading an `ok` decide verdict for the round'"'"'s latest decide dispatch.'
+  contains "$riskb" '2. Pass `--risk` only with the `risk_file` of an `ok` risk verdict whose dispatch came after that decide verdict.'
+  contains "$riskb" '3. Whenever the aggregate changes after a risk dispatch — a fresh decide dispatch (the CADENCE sequence) or a carry recovery'"'"'s merge — re-dispatch the risk subagent before the next invocation that passes `--risk`.'
+}
+
+@test "#2025 AC5: the risk handoff and the clear before every risk dispatch" {
+  load_risk_brief
+  contains "$riskb" 'Write `handoff-<R>-risk.json` with `round-handoff.zsh write-handoff`: `aggregate_findings_file` the file the round passes as `--findings-file` (*Risk pass, then consolidation* above; on a promotion sub-loop'"'"'s round 1, the seeded file, built in the work-dir),'
+  contains "$riskb" 'and `tree_id` the round'"'"'s `T`.'
+  contains "$riskb" 'Delete `<work-dir>/verdict-<R>-risk.json` and `<work-dir>/risk-<R>.json`. A delete that fails is report-and-stop.'
+}
+
+@test "#2025 AC6: the risk subagent checks its tree, assesses afresh and writes the risk file once, atomically" {
+  load_risk_brief
+  contains "$riskb" '`git -C <worktree_root> rev-parse --show-toplevel` must print that path. If it does not, write nothing and return `failed` / `wrong-worktree-root`.'
+  contains "$riskb" 'afresh, never copied from an earlier round, with `p`, `impact` and both rationales'
+  contains "$riskb" '**Write `<work-dir>/risk-<R>.json` once, atomically**, in the #1920 shape — the identity verbatim, a digit-string `line` as the number it spells, `[]` when nothing is eligible — to a temporary file in the work-dir, then `mv` it into place.'
+  contains "$riskb" 'When you cannot read or parse the aggregate, or cannot assess an eligible finding, write no risk file and return `failed` / `assessment-failed`.'
+  contains "$riskb" 'The risk subagent edits no repository file, and never commits, pushes or runs the gate.'
+}
+
+@test "#2025 AC7: the risk verdict holds only the risk file and its count" {
+  load_risk_brief
+  contains "$riskb" '`ok` with `cause: null`, `risk_file` = `<work-dir>/risk-<R>.json` and `assessed_count` the number of entries in it.'
+  contains "$riskb" 'A `failed` verdict carries `risk_file` and `assessed_count` both `null`.'
+}
+
+@test "#2025 AC8: the conductor passes the risk file on unopened and narrates from the verdict" {
+  load_risk_brief
+  contains "$riskb" 'pass the verdict'"'"'s `risk_file` as `--risk` unopened, and the handoff'"'"'s `aggregate_findings_file` as `--findings-file`. Open neither file.'
+  contains "$riskb" 'Narrate from `assessed_count`, the `risk-<R>.json` path, the status JSON and the progress block'
+}
+
+@test "#2025 AC9: a not-ok risk verdict is report-and-stop, the stall retry is unchanged, and there is no fallback to off" {
+  load_risk_brief
+  contains "$riskb" 'A risk verdict that validates but is not `ok` is report-and-stop.'
+  contains "$riskb" 'The stall retry above applies unchanged: one fresh re-dispatch on a `read-verdict` exit 3, then report-and-stop.'
+  contains "$riskb" 'Never fall back to threshold off, and never invoke the loop without `--risk` while the threshold is on.'
+}
+
+@test "#2025 AC10: a loop exit 2 naming --risk gets one fresh risk dispatch carrying the stderr line" {
+  load_risk_brief
+  contains "$riskb" 'make one fresh risk dispatch whose prompt carries that stderr line verbatim, then re-invoke the same round with the same flags. A second such exit 2 in the same round is report-and-stop.'
+}
+
+@test "#2025 AC11: the risk-pass section is edited at exactly its three named places" {
+  load_risk_pass
+  contains "$riskp" 'While the threshold is on, the risk subagent (*Risk subagent brief* below) makes the assessment this section describes, and the conductor dispatches it and passes `--risk`.'
+  contains "$riskp" 're-dispatch the risk subagent over the merged aggregate before you re-invoke.'
+  lacks "$riskp" 'assess the merged findings too and rewrite'
+  contains "$riskp" 'make one fresh risk dispatch whose prompt carries that stderr line verbatim, then re-invoke the same round with the same flags; a second such exit 2 in the same round is report-and-stop.'
+  lacks "$riskp" 'fix it and re-invoke the same round with the same flags'
+  # untouched: the section's opening rule
+  contains "$riskp" '**Assess the round'"'"'s blockers against `corner_case_risk_threshold` after the decided pass and before the step-2 invocation.**'
+}
+
+@test "#2025 AC12: the decide brief no longer reserves a risk-pass read" {
+  load_decide_brief
+  lacks "$decide" 'except through the risk pass'
+}
+
+@test "#2025 AC13: promotion.md and the Round subagents section name the risk subagent for the sub-loop" {
+  local close_line after
+  close_line="$(grep -n '^<!-- /moved: suggestion-promotion -->$' "$PROMO" | cut -d: -f1)"
+  [ -n "$close_line" ]
+  after="$(tail -n +"$((close_line + 1))" "$PROMO" | squeeze)"
+  contains "$after" '**panel**, **decide**, **risk** and **fix** subagents'
+  load_section
+  contains "$section" 'rounds dispatch the same panel, decide, risk and fix subagents'
 }

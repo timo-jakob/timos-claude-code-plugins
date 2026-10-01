@@ -4,7 +4,7 @@
 # (#1934, epic #1933).
 #
 # Epic #1933 moves each review round's heavy work — the panel, the decided
-# pass, the fix — into fresh subagents, so the conductor's context never holds
+# pass, the risk pass, the fix — into fresh subagents, so the conductor's context never holds
 # reviewer output, findings or diffs. The conductor hands a job over as a
 # HANDOFF file and reads back a small VERDICT file; this script is the only
 # door both go through, so a subagent that writes a malformed verdict is caught
@@ -13,7 +13,7 @@
 # restates only what the code needs to be read.
 #
 # Files, both inside the loop's --work-dir, never in the repository:
-#   <work-dir>/handoff-<N>-<kind>.json   kind ∈ panel | fix | decide
+#   <work-dir>/handoff-<N>-<kind>.json   kind ∈ panel | fix | decide | risk
 #   <work-dir>/verdict-<N>-<kind>.json
 #
 # ONE validator serves the writers and the readers, so nothing a reader would
@@ -120,7 +120,7 @@ def panel_causes: ["dimension-not-run", "render-failed", "fix-verification-null"
 
 def handoff_checks:
   (if .schema != "round-handoff/v1" then "unknown schema: \(.schema | tojson)" else empty end),
-  (if .kind | IN("panel", "fix", "decide") | not then "unknown kind: \(.kind | tojson)" else empty end),
+  (if .kind | IN("panel", "fix", "decide", "risk") | not then "unknown kind: \(.kind | tojson)" else empty end),
   (if .kind != "panel" then empty
    elif has("mode") | not then "missing field: mode"
    elif .mode | IN("round", "carry-redispatch", "carry-repair") | not then "unknown mode: \(.mode | tojson)"
@@ -132,7 +132,8 @@ def handoff_checks:
   ( ["schema", "kind", "round", "tree_id", "work_dir", "status_file"] as $common
     | { panel: ["mode", "delta_base", "carried_finding_ids", "carry_entries", "worktree_root", "base"],
         fix: ["trigger", "grant", "guidance", "rule2_mandatory", "profile_fix_rules", "worktree_root"],
-        decide: ["aggregate_findings_file", "worktree_root", "retired_file"] }[.kind] as $own
+        decide: ["aggregate_findings_file", "worktree_root", "retired_file"],
+        risk: ["aggregate_findings_file", "worktree_root"] }[.kind] as $own
     | ( if .kind == "fix" then (if .trigger == "awaiting-fix" then ["changelist"] else ["gate_log"] end) else [] end ) as $trig
     | ( if .kind == "fix" then ["changelist", "gate_log"] else [] end ) as $optional
     | (has_all($common + $own + $trig) | if length > 0 then "missing field: \(.[0])" else empty end),
@@ -176,15 +177,18 @@ def handoff_checks:
        end) ),
   ( select(.kind == "decide")
     | (if (.aggregate_findings_file | abs) | not then "aggregate_findings_file is not an absolute path" else empty end),
-      (if (.retired_file | abs) | not then "retired_file is not an absolute path" else empty end) );
+      (if (.retired_file | abs) | not then "retired_file is not an absolute path" else empty end) ),
+  ( select(.kind == "risk")
+    | (if (.aggregate_findings_file | abs) | not then "aggregate_findings_file is not an absolute path" else empty end) );
 
 def verdict_checks:
   (if .schema != "round-verdict/v1" then "unknown schema: \(.schema | tojson)" else empty end),
-  (if .kind | IN("panel", "fix", "decide") | not then "unknown kind: \(.kind | tojson)" else empty end),
+  (if .kind | IN("panel", "fix", "decide", "risk") | not then "unknown kind: \(.kind | tojson)" else empty end),
   ( ["schema", "kind", "round", "outcome", "cause"] as $common
     | { panel: ["aggregate_findings_file", "carry_accounting_file", "carry_lines_file", "findings_count"],
         fix: ["fix_applied", "files_changed"],
-        decide: ["decided_red", "decided_green", "malformed", "ran_commands_file"] }[.kind] as $own
+        decide: ["decided_red", "decided_green", "malformed", "ran_commands_file"],
+        risk: ["risk_file", "assessed_count"] }[.kind] as $own
     | (has_all($common + $own) | if length > 0 then "missing field: \(.[0])" else empty end),
       (.kind as $k | ($common + $own) as $listed | [keys[] | select(IN($listed[]) | not)]
         | if length > 0 then "unlisted key for kind \($k): \(.[0])" else empty end) ),
@@ -192,7 +196,8 @@ def verdict_checks:
   (if .outcome | IN("ok", "failed", "not_applicable") | not then "unknown outcome: \(.outcome | tojson)"
    elif .outcome == "not_applicable" and .kind != "panel" then "outcome not_applicable on kind \(.kind)"
    else empty end),
-  ({ panel: panel_causes, fix: ["cannot-fix"], decide: ["wrong-worktree-root"] }[.kind] as $causes
+  ({ panel: panel_causes, fix: ["cannot-fix"], decide: ["wrong-worktree-root"],
+     risk: ["wrong-worktree-root", "assessment-failed"] }[.kind] as $causes
    | if .outcome == "ok" and .cause != null then "cause is set on outcome ok"
      elif .outcome != "ok" and .cause == null then "cause is missing on outcome \(.outcome)"
      elif .cause != null and (.cause | IN($causes[]) | not)
@@ -231,13 +236,23 @@ def verdict_checks:
          (if [.decided_red, .decided_green, .malformed, .ran_commands_file] | any(. != null)
             then "decided_red, decided_green, malformed and ran_commands_file are not null on outcome \(.outcome)"
           else empty end)
+       end) ),
+  ( select(.kind == "risk")
+    | (if .outcome == "ok" then
+         (if (.risk_file | abs) | not then "risk_file is not an absolute path on outcome ok"
+          elif (.assessed_count | nonneg) | not then "assessed_count is not a non-negative integer on outcome ok"
+          else empty end)
+       else
+         (if [.risk_file, .assessed_count] | any(. != null)
+            then "risk_file and assessed_count are not null on outcome \(.outcome)"
+          else empty end)
        end) );
 
 def contained:
   if .schema == "round-handoff/v1" then
-    (if .kind == "decide" then [.aggregate_findings_file] else [] end)
+    (if .kind | IN("decide", "risk") then [.aggregate_findings_file] else [] end)
   else
-    [.aggregate_findings_file, .carry_accounting_file, .carry_lines_file, .ran_commands_file]
+    [.aggregate_findings_file, .carry_accounting_file, .carry_lines_file, .ran_commands_file, .risk_file]
   end | map(select(. != null));
 
 if type != "object" then {error: "not a JSON object"}
