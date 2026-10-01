@@ -1534,8 +1534,9 @@ A read-only reviewer — anything the panel dispatched with `tools: Read, Grep,
 Glob` — cannot run a linter, a suite, a validator or a version-sync script, so
 its evidence rule caps any finding whose claim *is* one of those verdicts at
 `SUGGESTION`, carrying two description lines: `decides: <command>` and
-`proposed-severity: CRITICAL|WARNING`. **You are the one who settles them**,
-because this is the step that already runs tools on the minted tree. (This pass
+`proposed-severity: CRITICAL|WARNING`. **The decide subagent is the one who
+settles them** (*Decide subagent brief* below), because this is the step that
+already runs tools on the minted tree. (This pass
 is repo-type-generic, and so is the **reviewer** half: every panel's read-only
 reviewers carry the rule (#1644), so on any stack a tool-verdict claim arrives
 capped with its `decides:` line. A round whose findings carry none leaves the
@@ -1604,10 +1605,11 @@ Then, for **every** finding in the round's panel aggregate that carries a
 2. **Record it** to `<work-dir>/decided-<R>.log` — one entry per finding, naming
    the finding, the exact command, its **exit status** and the **first lines** of
    its output. That file is the evidence for the promotion, and the only thing
-   that makes a promoted blocker auditable later. **Truncate it on this round's
-   first entry** — the first entry of the round's **first** pass — then append;
-   a re-entry within the same round appends too, since its earlier entries are
-   this round's evidence. The work-dir is reusable, and appending onto a
+   that makes a promoted blocker auditable later. **The conductor truncates
+   it before the round's first decide dispatch** (*Decide subagent brief*
+   below), and every decide pass only appends — a re-entry within the same
+   round included, since its earlier entries are this round's evidence. The
+   work-dir is reusable, and appending onto a
    previous run's file would mix another story's verdicts into this round's.
 
    **Identical commands are run **once**.** A `decides:` command is often the
@@ -1640,8 +1642,8 @@ Then, for **every** finding in the round's panel aggregate that carries a
    promotion phase can still raise.
 5. **The command could not run** — not installed, bad invocation, no such path,
    or it would have written into the tree — → that is **not** a red. Leave the
-   finding `SUGGESTION`, set `"decided": "green"`, and say so in the log and in
-   your round narration: a tool you could not run decides nothing, and reading
+   finding `SUGGESTION`, set `"decided": "green"`, and say so in the log
+   only: a tool you could not run decides nothing, and reading
    "could not execute" as "the tool failed the tree" is the same unobserved
    verdict the rule exists to stop, with the conductor now making the claim.
    `green` therefore means **not red** — the command passed, *or* could not be
@@ -1675,8 +1677,8 @@ reviewer-authored fields, and a model writes them:
 
 In all three cases: run the command, record the verdict as usual, set `decided`
 from it — and **change no severity in either direction**. Leave the reviewer's
-severity exactly as written, and name the malformed finding in the log and the
-round narration. One rule, because both alternatives are wrong in a way the
+severity exactly as written, and name the malformed finding in the log only.
+One rule, because both alternatives are wrong in a way the
 bullets above already name: the conductor never *raises* a severity the reviewer
 did not propose, and never *demotes* one the reviewer did — a `decides:` line is
 evidence a reviewer attached, not a waiver of the severity it chose, and
@@ -1764,8 +1766,8 @@ command was read-only (step 1), the `--findings-tree` identity you attested
 *should*, not a proof, because step 1's read-only test is your classification of
 a model-authored command, not an observation. If the loop nevertheless refuses
 on CADENCE right after this pass, treat a `decides:` command as the writer:
-**retire every `decides:` command this pass ran** for the rest of the run —
-unless the refusal isolates one, and then that one — settling each one's finding
+**retire every `decides:` command this pass ran** for the rest of the run,
+settling each one's finding
 like an unrunnable command (step 5: `SUGGESTION`, `"decided": "green"`, named in
 the log as a writing command), on this pass and every later one. Only then take
 that arm's recovery. *Every*, not "that one": the pass runs many commands and
@@ -2098,7 +2100,8 @@ turns collapsing from advisory into mandatory* and
 ### Round subagents — the conductor reads only verdicts (#1935)
 
 Each round's heavy work runs in **fresh subagents**, not in the conductor's
-context: a **panel** subagent reviews, a **fix** subagent fixes. The conductor
+context: a **panel** subagent reviews, a **decide** subagent settles the
+round's `decides:` claims, a **fix** subagent fixes. The conductor
 keeps the round boundary, the gate, consolidation and every human decision, and
 exchanges work with the subagents only through the `round-handoff/v1` and
 `round-verdict/v1` files (ARCHITECTURE.md, *Round handoff and verdict
@@ -2106,23 +2109,25 @@ contracts*). **Where *Each round* above has the conductor plan and dispatch the
 panel itself (step 1) or apply the fix pass itself (step 3), this section
 governs**: those steps sit in a byte-frozen span, so they are superseded here
 rather than edited. What they say a panel or a fix pass must *do* still holds —
-the two briefs below hand that work to a subagent, they do not change it.
+the briefs below hand that work to a subagent, they do not change it.
 
 **Depth budget.** No implementation adds a layer:
 
 - single-issue flow: conductor (0) → panel subagent (1) → reviewers (2);
 - epic E3 child flow: child conductor (1) → panel (2) → reviewers (3), which is
   Claude Code's default nesting limit;
-- the fix subagent dispatches nothing.
+- the fix subagent dispatches nothing;
+- the decide subagent dispatches nothing.
 
 A panel subagent that has no `Agent` tool cannot dispatch reviewers: it returns
 `failed` / `no-agent-tool`, and the conductor reports and stops.
 
 **Dispatch mechanism.** ARCHITECTURE.md's *Subagent dispatch mechanism*
-paragraph records a probe **pass**, so the two kinds ship as plugin agents:
-`development/agents/round-panel.md` and `development/agents/round-fix.md`. The
-conductor dispatches `subagent_type: round-panel` and `subagent_type:
-round-fix`, one fresh subagent per job — a recovery or a retry is a **new**
+paragraph records a probe **pass**, so the three kinds ship as plugin agents:
+`development/agents/round-panel.md`, `development/agents/round-fix.md` and
+`development/agents/round-decide.md`. The conductor dispatches `subagent_type:
+round-panel` and `subagent_type: round-fix`, and `subagent_type: round-decide`
+for the decided pass, one fresh subagent per job — a recovery or a retry is a **new**
 dispatch, never a resumed one — with a prompt that names the handoff file and
 `<skill-base-dir>`. Each agent body only points at its brief below.
 
@@ -2148,7 +2153,7 @@ report-and-stop.
 `round-handoff/v1` table lists for the kind — the table is the key set. The
 values only the conductor can supply:
 
-- **both kinds:** `round`; `tree_id` is the round's `T`; `worktree_root` is the
+- **every kind:** `round`; `tree_id` is the round's `T`; `worktree_root` is the
   implementation worktree (*Build each reviewer's scope block* above says how to
   identify it), resolved with `:A`;
 - **panel:** `base` is the loop's `--base`, resolved to a commit; `mode` is
@@ -2160,8 +2165,9 @@ values only the conductor can supply:
 A non-zero `round-handoff.zsh write-handoff` exit, or a `read-verdict` exit 1 or
 2, is report-and-stop.
 
-**Consolidation stays with the conductor.** On an `ok` panel verdict the
-conductor runs step-mode `resolve-story-loop.zsh` itself, exactly as step 2
+**Consolidation stays with the conductor.** On an `ok` panel verdict, and then
+an `ok` decide verdict where the round's decided pass runs (*Decide subagent
+brief*), the conductor runs step-mode `resolve-story-loop.zsh` itself, exactly as step 2
 says, passing the verdict's `aggregate_findings_file` as `--findings-file` and,
 when it is non-null, its `carry_accounting_file` as `--carry-accounting`. It
 opens neither file. It narrates the round from the verdict's `findings_count`,
@@ -2217,7 +2223,7 @@ their existing paths, from the status JSON alone — except a mid-run exit 2 on
 the CARRY-UNACCOUNTED arm, which is report-and-stop until #1937: its recovery
 reads per-entry lines the conductor no longer holds. Promotion, residue and
 escalation stay in the conductor, because each needs a human. A promotion
-sub-loop's rounds dispatch the same panel and fix subagents
+sub-loop's rounds dispatch the same panel, decide and fix subagents
 (`reference/promotion.md`).
 
 **The structural criterion.** The conductor reads only verdicts, status JSON and
@@ -2225,11 +2231,12 @@ its work-dir state — never reviewer output, a findings file's contents or a
 diff. There are two named exceptions, both human-driven: NOT APPLICABLE option
 (2) on a full round (step 2), *"you read the story diff yourself"*, which only
 the human can choose; and the promotion seed procedure with its step-7
-verification (`reference/promotion.md`). The decided pass is a temporary third
-exception until #1936: it runs `decides:` commands from the aggregate, between
-the green gate and consolidation, as *The decided pass* above says. The risk
-pass (#1921) reads the same aggregate in the same slot, so it sits inside that
-exception too; #1936 does not move it.
+verification (`reference/promotion.md`). The risk pass (#1921) is the one
+exception that is not human-driven: while `corner_case_risk_threshold` is on,
+the conductor reads the round's aggregate to assess its `CRITICAL` and
+`WARNING` findings and write `risk-<R>.json`, as *The risk pass* above says, and
+reads nothing else from it; when the threshold is off or ignored it opens
+nothing. #2025 moves it into a subagent.
 
 #### Panel subagent brief
 
@@ -2316,3 +2323,98 @@ rules* when the prompt carries them. Then write a `fix` verdict with
 `fix_applied` and `files_changed` (the number of distinct files you edited), or
 `failed` / `cannot-fix` with `fix_applied: false` and `files_changed: 0` when
 you could not fix it. Return to the conductor only that the verdict was written.
+
+#### Decide subagent brief
+
+The decide subagent runs one round's decided pass in place of the conductor.
+This brief states what it does and what the conductor does around it; the
+per-finding procedure — which commands run, how each verdict is settled, the
+malformed shapes and the retirement rule — is *The decided pass* above, and is
+not restated here. The conductor dispatches `subagent_type: round-decide`; the
+decide subagent dispatches nothing.
+
+**The conductor, before the dispatch.**
+
+- **When.** Dispatch it after the boundary's step 5 has judged the gate green,
+  or straight after the panel on a round that runs with no gate — the
+  closing-sweep promotion and the findings-file recovery re-invokes — and
+  straight after the panel a CADENCE recovery re-runs, over its new aggregate.
+  Never on a red gate, and never on a green gate that reported a tree other than
+  `T`.
+- **The handoff.** Write `handoff-<R>-decide.json` with `round-handoff.zsh
+  write-handoff`: `aggregate_findings_file` from the panel verdict,
+  `worktree_root` as *What the conductor puts in a handoff* says for every
+  kind — the same value as the panel handoff's — and `retired_file` =
+  `<work-dir>/decides-retired.txt`.
+- **The file lifecycle.** Create `decides-retired.txt` empty before round 1's
+  panel dispatch, which clears any earlier run's file. Truncate
+  `decided-<R>.log` and `<work-dir>/decides-ran-<R>.txt` before the round's
+  first decide dispatch; every decide subagent only appends to them, re-entries
+  included. An absent retired file reads as empty. None of these writes is a
+  read.
+
+**The decide subagent.** Read your handoff with `round-handoff.zsh read-handoff
+--file <the handoff path your prompt names>`; the scripts are under
+`<skill-base-dir>/scripts/`. Then:
+
+1. **Confirm `worktree_root`**: `git -C <worktree_root> rev-parse
+   --show-toplevel` must print that path. If it does not, run nothing, edit
+   nothing, and return `failed` / `wrong-worktree-root`.
+2. **Settle every retired command as retired, without running it**, before
+   anything runs: each command listed in `retired_file` is settled like an
+   unrunnable one — step 5, `"decided": "green"`, logged as a writing command —
+   including a finding a decide pass already decided.
+3. **Run the decided pass** over `aggregate_findings_file`, as *The decided
+   pass* specifies, in `worktree_root`. Step 2's findings are already settled:
+   never run a command `retired_file` lists. Run every command in the foreground
+   and wait for it; a `decides:` command that names the gate script is a
+   decided-pass command, not the round's gate, which has already returned.
+4. **Append** each finding's entry to `<work-dir>/decided-<R>.log`, and each
+   distinct command you ran to `<work-dir>/decides-ran-<R>.txt`, one per line.
+5. **Write the aggregate once, atomically**, after every verdict is in: write
+   the whole edited aggregate to a temporary file in the work-dir and `mv` it
+   over `aggregate_findings_file`, so a re-dispatch never meets a partly edited
+   aggregate.
+6. **Write a `decide` verdict** with `round-handoff.zsh write-verdict --work-dir
+   <work_dir>`: `ok` with `cause: null` and only `decided_red`, `decided_green`
+   and `malformed` (the counts of findings this pass stamped `red`, stamped
+   `green`, and named malformed) and `ran_commands_file` =
+   `<work-dir>/decides-ran-<R>.txt`; or, from step 1, `failed` /
+   `wrong-worktree-root` with `decided_red`, `decided_green`, `malformed` and
+   `ran_commands_file` all `null`. Return to the conductor only that the
+   verdict was written.
+
+**Any other failure writes no verdict.** If reading the handoff, reading
+`retired_file` or the aggregate, an append, or the aggregate write or `mv` of
+this brief's step 5 fails, write no verdict and return that you failed: the
+conductor's stall retry takes it from there. Never write `ok` unless that `mv`
+succeeded.
+
+**The conductor, after the verdict.**
+
+- **Risk pass, then consolidation.** Run the risk pass only after reading an
+  `ok` decide verdict. Once the decide verdict is `ok`, pass the panel verdict's
+  `aggregate_findings_file` as `--findings-file`. On a promotion sub-loop's
+  round 1, pass instead the seeded file built from that decided aggregate
+  (`reference/promotion.md`). Open neither the aggregate,
+  `decides-ran-<R>.txt` nor `decides-retired.txt`, except through the risk pass,
+  as the structural criterion says.
+- **Narration.** Report the verdict's `decided_red`, `decided_green` and
+  `malformed` counts and the `decided-<R>.log` path. Findings are named in
+  `decided-<R>.log` only.
+- **Non-ok and stall.** A decide verdict that is not `ok` is report-and-stop,
+  with no consolidation. The stall retry above applies unchanged: one fresh
+  re-dispatch on a `read-verdict` exit 3, then report-and-stop.
+- **A CADENCE refusal right after a decide pass**, in this order:
+  1. append `decides-ran-<R>.txt` to `decides-retired.txt` without reading it;
+  2. dispatch a fresh decide subagent over the same aggregate, which re-settles
+     the retired commands' findings and runs none of them — a recovery dispatch,
+     not a stall re-dispatch;
+  3. only then take either of that arm's recoveries. Re-running the panel
+     needs a decide pass over its new aggregate, as *When* says.
+- **A CARRY-UNACCOUNTED refusal naming a tool-verdict carry** (*The decided
+  pass*'s KNOWN LIMITATION). To report the entry and its `decides:` command, the
+  conductor may look up only the `decided-<R'>.log` entries matching a
+  `carry_unconfirmed[]` identity's `file` and `dimension`, reading only their
+  `decides:` command and exit status. That lookup happens only on that
+  report-and-stop path, and it counts as work-dir state.

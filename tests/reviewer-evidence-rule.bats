@@ -560,7 +560,7 @@ $victim" ]
     'end-of-file-fixer' \
     'Record it** to `<work-dir>/decided-<R>.log`' \
     'one entry per finding, naming' \
-    'Truncate it on this round'\''s first entry' \
+    'it before the round'\''s first decide dispatch** (*Decide subagent brief*' \
     'Identical commands are run **once**' \
     'rewrite that finding'\''s `severity` in the aggregate to its' \
     'It now blocks exactly like a reviewer-raised one' \
@@ -574,7 +574,7 @@ $victim" ]
     'Three malformed shapes promote nothing' \
     'already above `SUGGESTION`' \
     'change no severity in either direction' \
-    'name the malformed finding in the log and the round narration' \
+    'name the malformed finding in the log only.' \
     'already decided is not re-decided within the round: skip it' \
     'KNOWN LIMITATION' \
     'nothing re-decides it later (#1647)' \

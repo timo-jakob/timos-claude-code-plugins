@@ -1,14 +1,16 @@
 #!/usr/bin/env bats
 #
-# Round subagents (#1935, epic #1933) — the review loop's panel and fix work
-# runs in fresh subagents, and the conductor reads only their verdicts.
+# Round subagents (#1935, #1936, epic #1933) — the review loop's panel, decide
+# and fix work runs in fresh subagents, and the conductor reads only their
+# verdicts.
 #
 # The rule is prose in `development/skills/resolve-issue/reference/review-loop.md`
 # (*Round subagents — the conductor reads only verdicts (#1935)*, with its
-# *Panel subagent brief* and *Fix subagent brief*) plus two thin plugin agents.
-# Nothing a script runs can see a driving session dispatch a subagent, so a
-# needle sweep is what holds it. One test per acceptance criterion of #1935,
-# each anchored by heading or quoted phrase, never by line number (#1189).
+# *Panel subagent brief*, *Fix subagent brief* and *Decide subagent brief*) plus
+# three thin plugin agents. Nothing a script runs can see a driving session
+# dispatch a subagent, so a needle sweep is what holds it. One test per
+# acceptance criterion of #1935 and of #1936, each anchored by heading or quoted
+# phrase, never by line number (#1189).
 #
 # Every needle is matched against whitespace-squeezed text, so a reflow cannot
 # retire a pin. A needle pins WORDING: a correct rephrase reds it, and the red
@@ -364,8 +366,180 @@ load_fix_brief() {
   contains "$section" 'the promotion seed procedure with its step-7 verification'
 }
 
-@test "AC15: the decided pass is named as a temporary third exception until #1936" {
+@test "AC15: the risk pass is the one exception that is not human-driven; the decided pass is no exception" {
   load_section
-  contains "$section" 'The decided pass is a temporary third exception until #1936'
-  contains "$section" 'The risk pass (#1921) reads the same aggregate in the same slot, so it sits inside that exception too'
+  contains "$section" 'There are two named exceptions, both human-driven'
+  contains "$section" 'The risk pass (#1921) is the one exception that is not human-driven: while `corner_case_risk_threshold` is on, the conductor reads the round'"'"'s aggregate to assess its `CRITICAL` and `WARNING` findings and write `risk-<R>.json`, as *The risk pass* above says, and reads nothing else from it; when the threshold is off or ignored it opens nothing. #2025 moves it into a subagent.'
+  lacks "$section" 'The decided pass is a temporary third exception'
+  lacks "$section" 'so it sits inside that exception too'
+}
+
+# --- #1936: the decide subagent -----------------------------------------------
+#
+# One test per acceptance criterion of #1936, anchored like the rest.
+
+load_decide_brief() {
+  decide="$(section_of "$PROTO" '#### Decide subagent brief' '#### |### |## ' | squeeze)"
+  [ -n "$decide" ]
+}
+load_decided_pass() {
+  decided="$(section_of "$PROTO" \
+    '### The decided pass — run every `decides:` command before consolidating (#1584)' '### |## ' | squeeze)"
+  [ -n "$decided" ]
+}
+
+@test "#1936 AC1: the Decide subagent brief sits once inside the Round subagents section and points at the decided pass" {
+  [ "$(grep -cxF '#### Decide subagent brief' "$PROTO")" -eq 1 ]
+  load_section
+  contains "$section" '#### Decide subagent brief'
+  load_decide_brief
+  contains "$decide" 'the per-finding procedure — which commands run, how each verdict is settled, the malformed shapes and the retirement rule — is *The decided pass* above, and is not restated here'
+  # The brief restates none of the per-finding arms.
+  lacks "$decide" 'Red means the command RAN'
+  lacks "$decide" 'Three malformed shapes promote nothing'
+}
+
+@test "#1936 AC2: exactly one dispatch branch holds for the decide subagent" {
+  load_decide_brief
+  local arch
+  arch="$(squeeze < "$REPO_ROOT/ARCHITECTURE.md")"
+  case "$arch" in
+    *'The three subagent kinds ship as **plugin agents**'*)
+      [ -f "$AGENTS/round-decide.md" ]
+      [ "$(grep -cx 'name: round-decide' "$AGENTS/round-decide.md")" -eq 1 ]
+      [ "$(grep -cx 'tools: Read, Edit, Write, Grep, Glob, Bash' "$AGENTS/round-decide.md")" -eq 1 ]
+      lacks "$(grep '^tools:' "$AGENTS/round-decide.md")" 'Agent'
+      contains "$(squeeze < "$AGENTS/round-decide.md")" '*Decide subagent brief*'
+      contains "$decide" 'The conductor dispatches `subagent_type: round-decide`'
+      lacks "$decide" 'subagent_type: general-purpose'
+      load_section
+      contains "$section" '`subagent_type: round-decide` for the decided pass, one fresh subagent per job'
+      ;;
+    *)
+      [ ! -e "$AGENTS/round-decide.md" ]
+      contains "$decide" 'subagent_type: general-purpose'
+      ;;
+  esac
+  contains "$decide" 'the decide subagent dispatches nothing'
+  # The depth budget's own bullet, pinned with its list neighbour: the brief
+  # repeats the sentence, so a bare needle could not see the bullet go.
+  load_section
+  contains "$section" '- the fix subagent dispatches nothing; - the decide subagent dispatches nothing.'
+}
+
+@test "#1936 AC3: the dispatch point and the decide handoff" {
+  load_decide_brief
+  contains "$decide" 'Dispatch it after the boundary'"'"'s step 5 has judged the gate green, or straight after the panel on a round that runs with no gate'
+  contains "$decide" 'the closing-sweep promotion and the findings-file recovery re-invokes'
+  contains "$decide" 'Never on a red gate, and never on a green gate that reported a tree other than `T`.'
+  contains "$decide" 'the findings-file recovery re-invokes — and straight after the panel a CADENCE recovery re-runs, over its new aggregate.'
+  contains "$decide" 'Write `handoff-<R>-decide.json` with `round-handoff.zsh write-handoff`'
+  contains "$decide" '`aggregate_findings_file` from the panel verdict'
+  contains "$decide" '`worktree_root` as *What the conductor puts in a handoff* says for every kind — the same value as the panel handoff'"'"'s'
+  lacks "$decide" 'from the dispatch descriptor'
+  contains "$decide" '`retired_file` = `<work-dir>/decides-retired.txt`'
+}
+
+@test "#1936 AC4: the decide subagent's duties" {
+  load_decide_brief
+  contains "$decide" 'If it does not, run nothing, edit nothing, and return `failed` / `wrong-worktree-root`.'
+  contains "$decide" '**Run the decided pass** over `aggregate_findings_file`, as *The decided pass* specifies, in `worktree_root`.'
+  contains "$decide" '**Settle every retired command as retired, without running it**, before anything runs'
+  # Retired commands are settled before the decided pass runs, so a retired
+  # writing command never runs again.
+  local after_settle="${decide#*'**Settle every retired command as retired, without running it**'}"
+  [ "$after_settle" != "$decide" ]
+  contains "$after_settle" '**Run the decided pass** over `aggregate_findings_file`'
+  contains "$decide" 'Step 2'"'"'s findings are already settled: never run a command `retired_file` lists.'
+  contains "$decide" 'step 5, `"decided": "green"`, logged as a writing command — including a finding a decide pass already decided'
+  contains "$decide" 'to `<work-dir>/decided-<R>.log`, and each distinct command you ran to `<work-dir>/decides-ran-<R>.txt`, one per line'
+  contains "$decide" '**Write the aggregate once, atomically**, after every verdict is in'
+  contains "$decide" '`mv` it over `aggregate_findings_file`'
+  contains "$decide" '**Write a `decide` verdict** with `round-handoff.zsh write-verdict'
+  contains "$decide" '`ok` with `cause: null` and only `decided_red`, `decided_green` and `malformed` (the counts of findings this pass stamped `red`, stamped `green`, and named malformed)'
+  contains "$decide" 'or, from step 1, `failed` / `wrong-worktree-root` with `decided_red`, `decided_green`, `malformed` and `ran_commands_file` all `null`.'
+  contains "$decide" '**Any other failure writes no verdict.** If reading the handoff, reading `retired_file` or the aggregate, an append, or the aggregate write or `mv` of this brief'"'"'s step 5 fails, write no verdict and return that you failed: the conductor'"'"'s stall retry takes it from there.'
+  contains "$decide" 'Never write `ok` unless that `mv` succeeded.'
+  contains "$decide" '`ran_commands_file` = `<work-dir>/decides-ran-<R>.txt`'
+  contains "$decide" 'Return to the conductor only that the verdict was written.'
+}
+
+@test "#1936 AC5: the file lifecycle" {
+  load_decide_brief
+  contains "$decide" 'Create `decides-retired.txt` empty before round 1'"'"'s panel dispatch, which clears any earlier run'"'"'s file.'
+  contains "$decide" 'Truncate `decided-<R>.log` and `<work-dir>/decides-ran-<R>.txt` before the round'"'"'s first decide dispatch; every decide subagent only appends to them, re-entries included.'
+  contains "$decide" 'An absent retired file reads as empty.'
+  contains "$decide" 'None of these writes is a read.'
+}
+
+@test "#1936 AC6: the risk pass runs only after an ok decide verdict, and the conductor opens nothing else" {
+  load_decide_brief
+  contains "$decide" 'Run the risk pass only after reading an `ok` decide verdict.'
+  contains "$decide" 'Once the decide verdict is `ok`, pass the panel verdict'"'"'s `aggregate_findings_file` as `--findings-file`.'
+  contains "$decide" 'On a promotion sub-loop'"'"'s round 1, pass instead the seeded file built from that decided aggregate (`reference/promotion.md`).'
+  contains "$decide" 'Open neither the aggregate, `decides-ran-<R>.txt` nor `decides-retired.txt`, except through the risk pass, as the structural criterion says.'
+  load_section
+  contains "$section" 'and then an `ok` decide verdict where the round'"'"'s decided pass runs'
+}
+
+@test "#1936 AC7: the CADENCE sequence, in order" {
+  load_decide_brief
+  local seq
+  seq="${decide#*'**A CADENCE refusal right after a decide pass**, in this order:'}"
+  [ "$seq" != "$decide" ]
+  contains "$seq" '1. append `decides-ran-<R>.txt` to `decides-retired.txt` without reading it; 2. dispatch a fresh decide subagent over the same aggregate, which re-settles the retired commands'"'"' findings and runs none of them — a recovery dispatch, not a stall re-dispatch; 3. only then take either of that arm'"'"'s recoveries.'
+  contains "$seq" '3. only then take either of that arm'"'"'s recoveries. Re-running the panel needs a decide pass over its new aggregate, as *When* says.'
+}
+
+@test "#1936 AC8: a non-ok decide verdict is report-and-stop, and the stall retry applies unchanged" {
+  load_decide_brief
+  contains "$decide" 'A decide verdict that is not `ok` is report-and-stop, with no consolidation.'
+  contains "$decide" 'The stall retry above applies unchanged: one fresh re-dispatch on a `read-verdict` exit 3, then report-and-stop.'
+}
+
+@test "#1936 AC9: narration reports only the counts and the log path" {
+  load_decide_brief
+  contains "$decide" 'Report the verdict'"'"'s `decided_red`, `decided_green` and `malformed` counts and the `decided-<R>.log` path.'
+  contains "$decide" 'Findings are named in `decided-<R>.log` only.'
+}
+
+@test "#1936 AC10: the decided-pass section is edited in place at the five phrases" {
+  load_decided_pass
+  contains "$decided" '**The decide subagent is the one who settles them** (*Decide subagent brief* below)'
+  lacks "$decided" 'You are the one who settles them'
+  contains "$decided" '**The conductor truncates it before the round'"'"'s first decide dispatch** (*Decide subagent brief* below), and every decide pass only appends'
+  lacks "$decided" 'Truncate it on this round'"'"'s first entry'
+  lacks "$decided" 'unless the refusal isolates one, and then that one'
+  contains "$decided" 'and say so in the log only: a tool you could not run decides nothing'
+  lacks "$decided" 'in your round narration'
+  contains "$decided" 'name the malformed finding in the log only.'
+  lacks "$decided" 'in the log and the round narration'
+}
+
+@test "#1936 AC11: the KNOWN LIMITATION lookup is a narrow work-dir-state read" {
+  load_decide_brief
+  contains "$decide" 'the conductor may look up only the `decided-<R'"'"'>.log` entries matching a `carry_unconfirmed[]` identity'"'"'s `file` and `dimension`, reading only their `decides:` command and exit status.'
+  contains "$decide" 'That lookup happens only on that report-and-stop path, and it counts as work-dir state.'
+}
+
+@test "#1936 AC12: the risk-pass section keeps its own heading and its slot after the decided pass" {
+  # The section is out of scope for #1936; its heading and its opening rule are
+  # the two things a misplaced edit would most likely move.
+  [ "$(grep -cxF '### The risk pass — assess every blocking finding before consolidating (#1921)' "$PROTO")" -eq 1 ]
+  local risk
+  risk="$(section_of "$PROTO" '### The risk pass — assess every blocking finding before consolidating (#1921)' '### |## ' | squeeze)"
+  contains "$risk" '**Assess the round'"'"'s blockers against `corner_case_risk_threshold` after the decided pass and before the step-2 invocation.**'
+}
+
+@test "#1936 AC13: promotion.md names the decide subagent alongside the panel and fix subagents" {
+  local close_line after
+  close_line="$(grep -n '^<!-- /moved: suggestion-promotion -->$' "$PROMO" | cut -d: -f1)"
+  [ -n "$close_line" ]
+  after="$(tail -n +"$((close_line + 1))" "$PROMO" | squeeze)"
+  contains "$after" 'they are now dispatched as the **panel**, **decide** and **fix** subagents'
+  contains "$after" 'On sub-loop round 1, `<pre-seed-round-1.json>` is the panel verdict'"'"'s `aggregate_findings_file`, `<promotion-work-dir>/findings-round-1.json` — inside the work-dir, not at a path of its own, so the decide handoff can name it'
+  contains "$after" 'The decide subagent runs over `<pre-seed-round-1.json>` first: build the seeded file (step 3) only after an `ok` decide verdict, from the decided file.'
+  contains "$after" 'The decide pass'"'"'s atomic rewrite is the one overwrite step 1 permits — it changes stamps and severities only, never a finding'"'"'s `file`, `dimension` or line, so step 2 classifies against a baseline that is still valid.'
+  load_section
+  contains "$section" 'A promotion sub-loop'"'"'s rounds dispatch the same panel, decide and fix subagents'
 }
