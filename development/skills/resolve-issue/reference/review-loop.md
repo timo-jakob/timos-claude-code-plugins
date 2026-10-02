@@ -2139,7 +2139,15 @@ the risk kind is dispatched as *Risk subagent brief* below says. The conductor d
 round-panel` and `subagent_type: round-fix`, and `subagent_type: round-decide`
 for the decided pass, one fresh subagent per job — a recovery or a retry is a **new**
 dispatch, never a resumed one — with a prompt that names the handoff file and
-`<skill-base-dir>`. Each agent body only points at its brief below.
+`<skill-base-dir>`. Make every `round-panel`, `round-fix`, `round-decide` and
+`round-risk` dispatch in the foreground (`run_in_background: false`), as
+ARCHITECTURE.md's *Subagent dispatch mechanism* records: in the epic E3 child
+flow the conductor is itself a subagent, so its own dispatch is nested and
+defaults to a background launch, which returns before the verdict is written.
+A foreground dispatch returns its verdict in the same turn, so the conductor
+carries straight on: **How to wait** governs only the gate and a dispatch that
+did launch in the background — it is not restated here. Each agent body only
+points at its brief below.
 
 **Contract usage.** The conductor writes every handoff with `round-handoff.zsh
 write-handoff --work-dir <work-dir>` and reads every verdict with

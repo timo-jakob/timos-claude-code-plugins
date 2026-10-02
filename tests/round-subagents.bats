@@ -119,6 +119,12 @@ load_fix_brief() {
     [ "$(grep -cx 'name: round-fix' "$AGENTS/round-fix.md")" -eq 1 ]
     contains "$section" 'The conductor dispatches `subagent_type: round-panel` and `subagent_type: round-fix`'
     contains "$section" 'one fresh subagent per job — a recovery or a retry is a **new** dispatch, never a resumed one'
+    # #2022: the conductor's own round dispatches run in the foreground, since
+    # on an E3 child they are nested and would default to a background launch.
+    contains "$section" 'Make every `round-panel`, `round-fix`, `round-decide` and `round-risk` dispatch in the foreground (`run_in_background: false`), as ARCHITECTURE.md'"'"'s *Subagent dispatch mechanism* records: in the epic E3 child flow the conductor is itself a subagent, so its own dispatch is nested and defaults to a background launch, which returns before the verdict is written.'
+    # …and it carves the foreground dispatch out of #1513's wait rule by
+    # POINTING at it; tests/round-boundary-wait.bats counts it as a pointer site.
+    contains "$section" 'A foreground dispatch returns its verdict in the same turn, so the conductor carries straight on: **How to wait** governs only the gate and a dispatch that did launch in the background — it is not restated here.'
     lacks "$section" 'subagent_type: general-purpose'
   else
     [ -z "$(ls "$AGENTS"/round-*.md 2>/dev/null)" ]
