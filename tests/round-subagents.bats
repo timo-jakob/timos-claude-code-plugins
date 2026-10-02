@@ -202,6 +202,13 @@ load_fix_brief() {
   contains "$panel" 'Run `review-dispatch.zsh plan --repo <worktree_root> --base <base> --round <round>`'
 }
 
+@test "AC7: the panel dispatches the reviewers of the review_skill and of every topic panel" {
+  # #2023: dropping the topic-panel half of this sentence would silently drop
+  # every topic panel from a round, and nothing else pins it.
+  load_panel_brief
+  contains "$panel" "**Dispatch the reviewers** of the plan's \`review_skill\` and of every \`topic_review_skills\` entry (*Topic panels*)"
+}
+
 @test "AC7: the panel dispatches every reviewer in the foreground" {
   load_panel_brief
   contains "$panel" '**Dispatch every reviewer in the foreground** (`run_in_background: false`)'
