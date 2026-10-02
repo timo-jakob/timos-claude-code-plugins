@@ -252,7 +252,7 @@ YAML
   contains "$flat" 'is read like `3`'
   contains "$flat" 'two intended callers'
   contains "$flat" 'no validator CI job is ever rendered into a composition repo'
-  contains "$flat" 'ships **one skill and no agents**'
+  contains "$flat" 'ships **one skill and one agent**'
   # …and the clauses a reader IMPLEMENTS against, each with a needle of its
   # own: the framing sentences above would survive any rewrite of these
   contains "$flat" '`1` a contract violation'
@@ -1714,22 +1714,21 @@ YAML
   contains "$desc" "#1744"
 }
 
-@test "the plugin ships exactly what it claims — one skill, no agents (#1744, #1745, #1747)" {
+@test "the plugin ships exactly what it claims — one skill, one agent (#1744, #1745, #1747, #1748)" {
   # the charter and plugins.md both say so; without this the claim is prose only.
   # templates/ is the skeleton the #1745 scaffold copies into a composition repo;
-  # skills/maintenance is the #1747 dispatcher
+  # skills/maintenance is the #1747 dispatcher; agents/ the #1748 bump triage
   local entries
   # .DS_Store is filtered, not asserted against: Finder drops one into any
   # directory a macOS working copy opens, and an OS artifact must not red a
   # claim about which plugin content ships
   entries="$(ls -A "$PLUGIN_DIR" | grep -v '^\.DS_Store$' | LC_ALL=C sort | tr '\n' ' ')"
-  [ "$entries" = ".claude-plugin scripts skills templates " ]
+  [ "$entries" = ".claude-plugin agents scripts skills templates " ]
   [ "$(ls -A "$PLUGIN_DIR/skills" | grep -v '^\.DS_Store$' | tr '\n' ' ')" = "maintenance " ]
-  [ ! -d "$PLUGIN_DIR/agents" ]
-  # …so the generated commands page carries its section, and the agents page
-  # none until the bump-triage agent (#1748) lands
+  [ "$(ls -A "$PLUGIN_DIR/agents" | grep -v '^\.DS_Store$' | tr '\n' ' ')" = "composition-tag-bump-triage.md " ]
+  # …so both generated pages carry its section
   run -0 grep -qx "## development-composition" "$REPO_ROOT/docs/reference/commands.md"
-  run -1 grep -qx "## development-composition" "$REPO_ROOT/docs/reference/agents.md"
+  run -0 grep -qx "## development-composition" "$REPO_ROOT/docs/reference/agents.md"
 }
 
 @test "the script-tests workflow records the composition tree (#1744)" {

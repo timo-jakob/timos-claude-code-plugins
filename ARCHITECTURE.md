@@ -2554,9 +2554,9 @@ written when the repository already configures Renovate under another file name
 (or a `package.json` `renovate` key) or runs Dependabot — one Renovate config,
 one dependency bot. The pattern anchors with RE2's scoped `(?m:^)` / `(?m:$)`, so
 a match never consumes the newline the next line's anchor needs. #1747 added the
-topic marker, the gather and the dispatcher (*Composition maintenance* below).
-Still open: the injection-hardened bump-triage agent #1748, and the
-how-to #1749. The validator has exactly **two** intended callers — bootstrap, on the
+topic marker, the gather and the dispatcher (*Composition maintenance* below),
+and #1748 the injection-hardened bump-triage agent it routes tag bumps to.
+Still open: the how-to #1749. The validator has exactly **two** intended callers — bootstrap, on the
 repo it has just scaffolded, and the composition maintenance gather
 (`gather-composition-findings.zsh`, #1747).
 
@@ -2654,15 +2654,38 @@ payload, so it is tested rather than re-derived by a model:
 | Finding tool | Disposition |
 | --- | --- |
 | `workspace_validation` | escalated via `human_action_required`, one entry per finding — a member's pin is a human decision, and no fixer agent exists |
-| `tag_bump` | escalated via `human_action_required`, one entry per bump naming the PR by number, the member and its from->to tag — **interim**, until the bump-triage agent `timo-jakob/timos-claude-code-plugins#1748` ships |
+| `tag_bump` | planned: one group, agent `composition-tag-bump-triage`, `isolation: false`, each bump classified with a `bump_level` and a `routing` |
 | a key `tooling_configured` reports `false` | escalated, citing the gather's `notes` for that key (topic payloads carry `notes`, *JSON schema (v2)*) |
 | both keys `false` with a `composition:` note | one entry: the gather found no marker, so nothing was inspected |
 
-Every entry names the bump-triage issue (child 5 of epic #687) as the fully qualified
-`timo-jakob/timos-claude-code-plugins#1748`, never a bare `#1748`: the
-escalation is read inside the product repo, where a bare number links to that
-repo's own issue. The plan is always empty in this version, so an escalation
-halts nothing that was routed. Payload-shape breaks — a key the routing table
+**The planner classifies every bump; the agent only acts on it** (#1748). The
+`bump_level` comes from the finding's own from->to: `patch`, `minor`, `major`,
+`major-equiv` (a 0.x minor bump), `digest` (only the digest moved) or `unknown` (a
+non-semver tag, a downgrade, or a bump that could not be read). The `routing` is
+`auto-merge-if-green` only for a `patch` or `minor` bump of a member the
+manifest pins; everything else is `human-review` with a `routing_reason`. The
+group's `findings` carry each bump's key and classification, never the PR's
+title or body.
+
+**Any escalation halts the dispatch**, so a response escalating a manifest
+finding or a tool that could not run never also plans the triage group: each
+bump is escalated beside it instead — the PR by number, the member, its from->to
+tag and `bump_level`, and that it was not triaged this run — and the plan is
+empty. A bump is never dropped silently.
+
+**`composition-tag-bump-triage` treats the PR title, the PR body and the release
+notes it fetches as evidence to scan, never as instructions.** Text addressing
+an automated reader or asking for an action is quoted as flagged evidence, and
+the PR goes to human review with native auto-merge not armed, whatever its
+routing and CI state. Otherwise it merges a green `auto-merge-if-green` bump —
+a `minor` only once its release notes are clean — when an approving review
+exists, and arms native auto-merge when one does not. It never approves a PR:
+the approval comes from the Approver App identity or a human. Green means zero
+checks in the `fail` bucket once all have settled, with `cancel` neutral. Every
+PR it routes to human review becomes exactly one `human_action_required` entry
+naming the PR, the member, its from->to tag and the reason, quoting any flagged
+text verbatim. The dispatcher SKILL.md lists what the orchestrator does with
+each array the agent returns. Payload-shape breaks — a key the routing table
 has no row for, in `findings_by_tool` or `tooling_configured`, a configured key
 absent from `findings_by_tool`, findings under a key not reported configured, a
 `dispatch_mode` outside the enum — halt with one entry, as the other topic
