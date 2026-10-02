@@ -591,6 +591,9 @@ grep_site() {  # grep_site <file> <fixed-string>
   done
   # ...and ARCHITECTURE's wiring checklist names the sidecar duty by name
   grep_site "$ARCH_PANEL_DUTIES" 'hook-mode sidecar duty'
+  # ...and the split-carry duty (#2010) — a unique needle, because `split-carry`
+  # and `#2010` already occur in the section's one-owner background paragraph
+  grep_site "$ARCH_PANEL_DUTIES" 'since #2010 — the split-carry duty'
 }
 
 @test "the five language panels state the delta-carry block in LOCKSTEP, not merely in fragments (#1434)" {
