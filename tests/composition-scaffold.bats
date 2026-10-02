@@ -1103,6 +1103,12 @@ section_3m() {
   # …in EVERY case, a kept renovate.json beside Dependabot included — not only
   # inside the skipped-file branch
   contains "$s" '**Whatever the scaffold printed for `renovate.json`** — a kept one beside `.github/dependabot.y(a)ml` included — never tell the user'
+  # #1890: the private-image step is keyed on the arming outcome — an armed PR
+  # has already merged, so its failed staging run is re-run, never prevented
+  contains "$s" '**Say it by the arming outcome**: when auto-merge was armed, the bootstrap PR has most likely already merged and run `promote-staging`, which failed to resolve that member'"'"'s digest'
+  contains "$s" 'so say to re-run that run from the **Actions** tab once access is in place'
+  contains "$s" 'a manual run of the workflow promotes `production` only, so it cannot repair the failed `staging` run'
+  contains "$s" 'when arming failed and the PR still needs a manual merge, say to grant access before merging, since that merge would otherwise fail to resolve a digest'
   contains "$s" "never report a scaffold as complete without the exit \`0\` that judged it"
   contains "$s" "Entry is the user's request, never detection"
   contains "$s" "**When it already exists, do not ask**"

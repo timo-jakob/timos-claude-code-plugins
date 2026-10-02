@@ -5167,8 +5167,14 @@ requests the App opens, has no bump to triage — never when it
 **skipped** the file, which the last sentence below covers; and, for any member
 whose image is private, grant this repository read access to that package (or
 add a login step for its registry) — the workflow's own token cannot read
-another repository's private image, and the first merge would otherwise fail to
-resolve a digest — **and** give Renovate its own credentials for that registry,
+another repository's private image. **Say it by the arming outcome**: when
+auto-merge was armed, the bootstrap PR has most likely already merged and run
+`promote-staging`, which failed to resolve that member's digest, so say to
+re-run that run from the **Actions** tab once access is in place — a manual run
+of the workflow promotes `production` only, so it cannot repair the failed
+`staging` run; when arming failed and the PR still needs a manual merge, say to
+grant access before merging, since that merge would otherwise fail to resolve a
+digest — **and** give Renovate its own credentials for that registry,
 since the scaffold writes no `hostRules` and Renovate's lookups do not use the
 workflow's token. When the scaffold **skipped** `renovate.json` (its line says
 why), say that the member pins will not be bumped until: for another **Renovate**
