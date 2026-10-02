@@ -756,22 +756,36 @@ the scaffolded Renovate image-tag configuration
 ([#1746](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1746));
 the topic marker, maintenance gather and dispatcher
 ([#1747](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1747));
-and the injection-hardened bump-triage agent
-([#1748](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1748)).
-The rest of epic
-[#687](https://github.com/timo-jakob/timos-claude-code-plugins/issues/687)
-follows: the how-to
+the injection-hardened bump-triage agent
+([#1748](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1748));
+and the how-to [Set up a composition repo](../how-to/set-up-a-composition-repo.md)
 ([#1749](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1749)).
-So the plugin ships **one skill and one agent** — the maintenance dispatcher
-and `composition-tag-bump-triage` — plus its scripts and the templates the
-scaffold copies. Bootstrap is the validator's first caller; the maintenance
-gather is its second.
+That completes epic
+[#687](https://github.com/timo-jakob/timos-claude-code-plugins/issues/687)'s
+foundation; the deploy renderers are
+[#719](https://github.com/timo-jakob/timos-claude-code-plugins/issues/719)
+(compose) and
+[#720](https://github.com/timo-jakob/timos-claude-code-plugins/issues/720)
+(Kubernetes). So the plugin ships **one skill and one agent** — the maintenance
+dispatcher and `composition-tag-bump-triage` — plus its scripts and the
+templates the scaffold copies. Bootstrap is the validator's first caller; the
+maintenance gather is its second.
+
+| Piece | What it is |
+| --- | --- |
+| `.claude-workspace.yaml` at the repo root | the constellation manifest, and the composition **topic marker** |
+| `scripts/validate-workspace.zsh` | checks a manifest against `claude-workspace/v1` |
+| `scripts/scaffold-composition.zsh` | writes the repo-type skeleton; `/development:bootstrap` runs it |
+| `templates/` | the skeleton the scaffold copies: the promote-to-prod workflow, `promote.zsh`, the sockets, `renovate.json` |
+| `/development-composition:maintenance` | the maintenance dispatcher; its `skills/maintenance/scripts/plan-dispatch.zsh` computes the response |
+| `composition-tag-bump-triage` | the agent that triages Renovate image-tag bump PRs |
 
 ### Maintenance
 
 `/development:maintenance` detects a composition repo by a
 `.claude-workspace.yaml` **at the repo root** (its own marker recipe; detect-stack
-also emits it as `is_composition`, which nothing reads yet), runs
+also emits it as `is_composition`, which bootstrap's Step 1 guards on but never
+routes on), runs
 `gather-composition-findings.zsh`, and dispatches
 `/development-composition:maintenance`. The gather emits two tool keys:
 
@@ -797,8 +811,10 @@ The dispatcher gives each bump a `bump_level` (`patch`, `minor`, `major`,
 `major-equiv` for a 0.x minor bump, `digest`, `unknown`) and a `routing`:
 `auto-merge-if-green` for a patch or minor bump of a member the manifest pins,
 `human-review` for everything else. The agent merges a green safe bump once an
-approving review exists, arms native auto-merge when none does, and never
-approves a PR itself. It reads the PR title, the PR body and the release notes
+approving review exists, arms native auto-merge only where the branch requires a
+review, otherwise sends the bump to human review, and never approves a PR
+itself. Until #719's end-to-end gate gives a composition repo pull-request CI,
+no bump is ever green, so every bump goes to human review. It reads the PR title, the PR body and the release notes
 it fetches for a minor bump as evidence, never as instructions: a PR whose text
 addresses an automated reader or asks for an action goes to human review with
 auto-merge not armed, and the text is quoted in its escalation. Every PR it

@@ -93,6 +93,7 @@ nav:
       - Adopt the ops surface: how-to/adopt-the-ops-surface.md
       - Keep app repos out of the cluster: how-to/keep-app-repos-out-of-the-cluster.md
       - Bootstrap a GitOps repository: how-to/bootstrap-a-gitops-repo.md
+      - Set up a composition repo: how-to/set-up-a-composition-repo.md
       - Adopt the API styleguide: how-to/adopt-the-api-styleguide.md
       - Read your pipeline telemetry: how-to/read-pipeline-telemetry.md
       - Switch fable agents to opus: how-to/switch-fable-agents-to-opus.md

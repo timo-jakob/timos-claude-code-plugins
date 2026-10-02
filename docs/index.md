@@ -27,6 +27,7 @@ separate.
 - [Adopt the standardized ops surface on your service](how-to/adopt-the-ops-surface.md)
 - [Adopt C4 architecture docs on an existing repo](how-to/adopt-c4-architecture-docs.md)
 - [Amend a C4 diagram by hand](how-to/amend-a-c4-diagram.md)
+- [Set up a composition repo (pin a constellation, promote it)](how-to/set-up-a-composition-repo.md)
 - [Read your pipeline telemetry](how-to/read-pipeline-telemetry.md)
 - [Switch fable agents to opus when the fable budget runs out](how-to/switch-fable-agents-to-opus.md)
 - [Set a corner-case risk threshold for review residue](how-to/set-a-corner-case-risk-threshold.md)

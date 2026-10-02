@@ -1730,8 +1730,9 @@ consumer. Patterns we lean on, ranked by leverage:
    which repos belong, their roles, where their contracts live. Lets a
    skill validate that a breaking change has been propagated to all
    consumers, and lets a constellation's conventions be applied from one
-   place. **Realized as `.claude-workspace.yaml`** — see *The
-   `claude-workspace/v1` contract* — with one placement rule that the
+   place. **Realized as `.claude-workspace.yaml`** — see
+   [The `claude-workspace/v1` contract](#the-claude-workspacev1-contract),
+   and the how-to *Set up a composition repo* — with one placement rule that the
    generic description above leaves open: the manifest lives in the
    **composition repo**, never in a member repo, and its presence there
    *is* the composition topic marker (**registered with #1747**), so a
@@ -2556,7 +2557,8 @@ one dependency bot. The pattern anchors with RE2's scoped `(?m:^)` / `(?m:$)`, s
 a match never consumes the newline the next line's anchor needs. #1747 added the
 topic marker, the gather and the dispatcher (*Composition maintenance* below),
 and #1748 the injection-hardened bump-triage agent it routes tag bumps to.
-Still open: the how-to #1749. The validator has exactly **two** intended callers — bootstrap, on the
+The how-to (`docs/how-to/set-up-a-composition-repo.md`, #1749) completes the
+foundation; the renderers are #719/#720. The validator has exactly **two** intended callers — bootstrap, on the
 repo it has just scaffolded, and the composition maintenance gather
 (`gather-composition-findings.zsh`, #1747).
 
@@ -2679,7 +2681,8 @@ an automated reader or asking for an action is quoted as flagged evidence, and
 the PR goes to human review with native auto-merge not armed, whatever its
 routing and CI state. Otherwise it merges a green `auto-merge-if-green` bump —
 a `minor` only once its release notes are clean — when an approving review
-exists, and arms native auto-merge when one does not. It never approves a PR:
+exists, arms native auto-merge only where the branch requires a review, and
+otherwise routes it to human review. It never approves a PR:
 the approval comes from the Approver App identity or a human. Green means zero
 checks in the `fail` bucket once all have settled, with `cancel` neutral. Every
 PR it routes to human review becomes exactly one `human_action_required` entry
