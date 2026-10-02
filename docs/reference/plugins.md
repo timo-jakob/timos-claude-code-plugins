@@ -316,7 +316,7 @@ designed in [#263](https://github.com/timo-jakob/timos-claude-code-plugins/issue
 | claude-plugin-contract-integrity | opus | Review panel, `contract` dimension: dangling skill/agent/script references, prose-vs-script flag/subcommand drift, ARCHITECTURE.md schema drift; severity bounded by the consumer bar (no `>= WARNING` without naming the concrete wrong action a consumer takes) |
 | claude-plugin-script-reviewer | fable | Review panel, `script_quality` dimension: zsh logic review — exit codes, quoting, error paths, unhandled failure modes (not a shellcheck re-run) |
 | claude-plugin-test-reviewer | opus | Review panel, `tests` dimension (core dimension reused): bats coverage for changed scripts, weak assertions, untested failure branches; severity bounded by the mutation bar (no `>= WARNING` without naming a mutation the current suite would pass) |
-| claude-plugin-manifest-check | sonnet | Review panel, `manifest` dimension: `plugin.json` ↔ `marketplace.json` lockstep + semver bump appropriateness |
+| claude-plugin-manifest-check | sonnet | Review panel, `manifest_bump` dimension (full rounds; a delta round only to account for its own carry): semver bump size + stale manifest descriptions. The deterministic `manifest` checks — bump presence, needless bumps, `plugin.json` ↔ `marketplace.json` lockstep, `X.Y.Z` — are the `check-manifests.zsh` script, every round |
 
 > ⚠️ **Cost**: a full maintenance run as a test is a real autonomous
 > child session (tens of thousands of tokens). Narrow `--task` to one

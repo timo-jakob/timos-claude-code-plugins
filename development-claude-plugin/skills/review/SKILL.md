@@ -96,20 +96,49 @@ full round is the loop's CONVERGED condition, and a run that changed nothing
 would converge and open a PR. Report the empty story diff to the caller and
 write no findings file.
 
-## Step 1: Launch All 5 Review Agents in Parallel
+## Step 1: Plan the round, then run its script and launch its agents in parallel
 
-Use the Task tool to spawn all 5 agents below **simultaneously in a single message** with `run_in_background: true`.
-Each agent is defined in the `agents/` directory and already knows what to look for — just pass the review scope.
+The panel has six dimensions: five reviewer agents and one script. **This table is the round's plan** — a
+reviewer runs this round exactly when its **Runs** cell holds. Read `scope_mode` from the round's dispatch
+descriptor (in hook mode, `$REVIEW_SCOPE_MODE`), and the split-carry map as the carry preamble above says; a
+standalone run has no descriptor at all, which the **Runs** cells name as *no plan*.
 
-Launch these 5 agents in one message:
+| Reviewer | Kind | Model | Dimension | Runs |
+| --------------------------------- | ------ | ------ | -------------- | ---- |
+| claude-plugin-prose-logic | agent | fable | prose_logic | every round |
+| claude-plugin-contract-integrity | agent | opus | contract | every round |
+| claude-plugin-script-reviewer | agent | fable | script_quality | every round |
+| claude-plugin-test-reviewer | agent | opus | tests | every round |
+| claude-plugin-manifest-check | agent | sonnet | manifest_bump | `scope_mode` is `"full"`, or no plan; on a `"delta"` round only when the split-carry map holds `manifest_bump` |
+| check-manifests.zsh | script | — | manifest | every round |
 
-| Agent | Model | Dimension |
-| --------------------------------- | ------ | -------------- |
-| claude-plugin-prose-logic | fable | prose_logic |
-| claude-plugin-contract-integrity | opus | contract |
-| claude-plugin-script-reviewer | fable | script_quality |
-| claude-plugin-test-reviewer | opus | tests |
-| claude-plugin-manifest-check | sonnet | manifest |
+**A dimension the table does not plan for this round is not run and produces nothing** — no findings, no
+triple — and that is not a dimension that failed to run. The `manifest_bump` row is the one cell that varies:
+round 1 and every closing sweep plan with `scope_mode: "full"`, so the agent judges bump size on both, and a
+delta round brings it back only to account for its own carried entries (`reference/review-loop.md` in the
+resolve-issue skill, *Carry-driven dispatch (#2008)*).
+
+**Run the script first, with Bash.** It is this skill's
+`scripts/check-manifests.zsh`, in the same plugin cache directory as this `SKILL.md`:
+
+```bash
+<this skill's base dir>/scripts/check-manifests.zsh --repo <the plan's worktree_root, or . standalone> \
+  --base <the plan's base, or origin/main standalone> --round {ROUND}
+```
+
+In hook mode (no descriptor, but not the table's *no plan*), the two values are `$REVIEW_REPO` and `$REVIEW_BASE`.
+
+On a carried round whose split-carry map holds `manifest`, add `--fix-verification <the path the map gives
+manifest> --carry-out <a file beside it>`. Its stdout is the `manifest` dimension's JSON block — a findings
+array already in the Review finding schema, at its real severity, with no `proposed-severity:` line — and the
+`--carry-out` file holds its per-entry carry lines and its triple, which stand for the `manifest` owner's
+report exactly as a reviewer's lines do. It never reports an entry `unconfirmed`. An exit 2 is a malformed
+invocation (or a carried entry this script does not own): fix the call and re-run once. Any other non-zero
+exit, or a second exit 2, means the `manifest` dimension did not run.
+
+Then use the Task tool to spawn **every agent the table plans for this round simultaneously in a single
+message** with `run_in_background: true`. Each agent is defined in the `agents/` directory and already knows
+what to look for — just pass the review scope.
 
 For each agent, use its name as the `subagent_type` (e.g. `subagent_type: claude-plugin-prose-logic`) so it runs
 on the model declared in its definition, and pass the prompt below — substituting that agent's **Dimension** (from
@@ -145,11 +174,18 @@ Nor does a hook-mode round, even when `$REVIEW_SCOPE_MODE` is `delta`: it sees
 no descriptor, so it has no `delta_hunks` to substitute — leave the line out
 and never compute ranges yourself. Substitute the plan's `delta_hunks` array as compact JSON.
 
+**The `Version increments:` line goes to `claude-plugin-manifest-check` alone.** That agent holds no git, and
+both manifests in the tree already carry the new version, so it cannot see the version it is sizing against.
+For each plugin whose `plugin.json` version differs from the base's, read the base version with
+`git show <base>:<plugin>/.claude-plugin/plugin.json` in the script's `--repo` and `--base`, and list
+`<plugin>: <base version> -> <new version>`, comma-separated; write `none` when no plugin's version moved.
+
 ```text
 Review scope: {the review scope}
 Fix verification (round >= 2): {own_fix_verification_path} — the previous round's blockers. Confirm each one actually landed BEFORE looking for anything new. For each carried entry report ONE of confirmed / re-raised / unconfirmed, as one line keyed by the carry's own spelling — carried entry "<title>" (<file>, <dimension>): confirmed at <file:line> | re-raised (see finding) | unconfirmed — re-raising ONLY what you observed still present, at its ORIGINAL severity, citing the carried entry and the file:line plus the unchanged text or passing mutation in the findings file, even when its file is outside this round's scope; never re-raise on the absence of a fix. A re-raise is a finding whose file, dimension and title are the carried entry's own spelling (title verbatim) and whose line is the carried line or null, with what you observed in its description — under a different title it is not matched to the carry and the round is refused. Every entry in that file is of your own dimension ("{DIMENSION}", which the identity includes) and is yours alone to account for: no other reviewer is shown it. End your report with the triple: carried: confirmed N / re-raised M / unconfirmed K of TOTAL, where TOTAL is the number of entries in that file.
 Already waived (round >= 2): {adjudicated_path} — suggestions earlier rounds surfaced and the human waived. Do not re-raise them as Suggestions, EXCEPT in a file the PREVIOUS ROUND'S FIX PASS touched (on a delta round that is this round's scope; on a closing full sweep that NO fix pass preceded the set is empty, so withhold them — but on a sweep the residue promotion earned, a fix pass did run, so the exemption applies as on any round). A genuinely blocking re-raise at CRITICAL/WARNING is always allowed.
 Fix-pass hunks (delta round): {delta_hunks} — the previous fix pass's new-side line ranges, each {file, kind, start, end}: kind "added" is a pure addition, "changed" rewrote or removed lines that existed at the prior tree. Apply them as your agent definition's delta-round rule says; a definition that states no such rule ignores this line.
+Version increments (claude-plugin-manifest-check only): {increments} — each bumped plugin's version at the base and in this tree, as <plugin>: <base version> -> <new version>.
 
 Analyze all plugin content in scope following your instructions. Report every finding using the prose reporting format defined in your agent definition.
 
@@ -158,7 +194,8 @@ Then, after the prose, emit those same findings once more as a single fenced `js
 
 ## Step 2: Collect Results
 
-Wait for all 5 background agents to complete. Read each agent's output.
+Wait for every agent you launched to complete. Read each agent's output, and the script's stdout and
+`--carry-out` file.
 
 ## Step 3: Synthesize the Review
 
@@ -187,7 +224,8 @@ Brief summary of what was reviewed and overall plugin health assessment.
   reviewer's — confirmed, else re-raised when that re-raise is in the findings
   file, else unconfirmed; reproduce each reviewer's per-entry
   lines under this line — they are the source of the accounting records)
-- **Areas reviewed:** Prose Logic, Contract Integrity, Script Quality, Tests, Manifests
+- **Areas reviewed:** Prose Logic, Contract Integrity, Script Quality, Tests, Manifests, and Bump Size when
+  the round planned it
 
 ## Verdict
 One-paragraph overall assessment with the most important action items.
@@ -201,7 +239,8 @@ version and note that it was flagged by multiple reviewers.
 Alongside the human-readable summary above, aggregate the machine-readable JSON
 blocks the agents emitted (schema: ARCHITECTURE.md → *Review finding schema*)
 into one findings array for this round. Each agent emitted a fenced `json` block
-of finding objects; concatenate them all into a single flat array. Every finding
+of finding objects, and the script printed its array on stdout; concatenate them
+all into a single flat array. Every finding
 already carries its own `reviewer`, `dimension`, and `round`, so this is a plain
 concatenation, not a join. Preserve every finding — do not drop the exact-
 duplicate lines you merged in the prose; the machine layer keeps them and the
@@ -222,7 +261,8 @@ jq '[.[].severity] | group_by(.) | map({severity: .[0], count: length})' \
 
 ## The #798 golden fixture
 
-The five agents are prose and cannot be unit-tested, so the panel is measured
+The five agents are prose and cannot be unit-tested — the `manifest` script is,
+by `tests/check-manifests.bats` — so the agents' half of the panel is measured
 against a defect whose answer is already known: **#798**, a prose-logic bug in
 `development/skills/resolve-issue/SKILL.md` as of `4202beb` (pre-fix), whose E1
 terminal case treated "zero open children" as proof an epic's work had merged —

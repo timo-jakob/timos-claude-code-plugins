@@ -439,7 +439,7 @@ _assert_file() {  # _assert_file <path> <test-expr...>
 
 @test "the claude-plugin review skill attaches the Fix-pass hunks line on delta rounds only (#2011)" {
   local skill="$REPO_ROOT/development-claude-plugin/skills/review/SKILL.md"
-  _load_section "$skill" "Step 1: Launch All 5 Review Agents in Parallel"
+  _load_section "$skill" "Step 1: Plan the round, then run its script and launch its agents in parallel"
   # the line itself, inside the launch-prompt template, with its placeholder
   contains "$section" 'Fix-pass hunks (delta round): {delta_hunks} — the previous fix pass'"'"'s new-side line ranges'
   # what each kind means, and what a reviewer with no delta-round rule does

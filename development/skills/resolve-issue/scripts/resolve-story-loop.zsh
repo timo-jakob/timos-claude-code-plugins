@@ -336,7 +336,8 @@
 #                 merges their arrays into the one $REVIEW_FINDINGS and their
 #                 carry records into its one sidecar), $REVIEW_SCOPE_FILE (changed
 #                 files, one per line),
-#                 $REVIEW_REPO, and — since #1434 — $REVIEW_SCOPE_MODE ("full" |
+#                 $REVIEW_REPO, $REVIEW_BASE (the loop's --base, #2008), and —
+#                 since #1434 — $REVIEW_SCOPE_MODE ("full" |
 #                 "delta"), $REVIEW_FIX_VERIFICATION (round >= 2: the previous
 #                 round's blockers, to verify the fix actually landed) and
 #                 $REVIEW_ADJUDICATED (already-waived suggestions the panel must
@@ -3077,7 +3078,7 @@ while (( round <= effective_max )); do
     ( export REVIEW_ROUND="$round" REVIEW_FINDINGS="$findings_path" \
              REVIEW_SKILL="$review_skill" REVIEW_TOPIC_SKILLS="$topic_review_skills" \
              REVIEW_SCOPE_FILE="$scope_file" \
-             REVIEW_REPO="$repo" REVIEW_SCOPE_MODE="$scope_mode" \
+             REVIEW_REPO="$repo" REVIEW_BASE="$base" REVIEW_SCOPE_MODE="$scope_mode" \
              REVIEW_FIX_VERIFICATION="$fix_verification" \
              REVIEW_FIX_VERIFICATION_BY_DIMENSION="$carry_by_dim" \
              REVIEW_ADJUDICATED="$adjudicated_file"; eval "$review_cmd" ) || {

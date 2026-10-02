@@ -3601,10 +3601,23 @@ The claude-plugin panel (`development-claude-plugin:review`, the fallback
 `repo_type` for repos that detect no language — epic #810) extends the enum the
 same way: `prose_logic` (`claude-plugin-prose-logic`), `contract`
 (`claude-plugin-contract-integrity`), `script_quality`
-(`claude-plugin-script-reviewer`), and `manifest` (`claude-plugin-manifest-check`)
-are its extension, while `tests` **reuses** the core dimension and its
-`*-test-reviewer` convention (`claude-plugin-test-reviewer`) — five claude-plugin
-dimensions in total.
+(`claude-plugin-script-reviewer`), `manifest` (`check-manifests.zsh`) and
+`manifest_bump` (`claude-plugin-manifest-check`) are its extension, while `tests`
+**reuses** the core dimension and its `*-test-reviewer` convention
+(`claude-plugin-test-reviewer`) — six claude-plugin dimensions in total (#2008).
+`manifest` is the one dimension produced by a **script** rather than an agent:
+`development-claude-plugin/skills/review/scripts/check-manifests.zsh` owns every
+deterministic manifest check (bump presence, needless bumps, `plugin.json` ↔
+`marketplace.json` lockstep of version, plugin set and `source` path, and
+`X.Y.Z` well-formedness), runs on every round at script cost, emits its findings
+at their real severity, and accounts for its own carried entries — re-raising
+or confirming each, never `unconfirmed`. The agent keeps only what needs
+judgment, bump size and stale descriptions, as `manifest_bump`: it runs on every
+full round (round 1 and every closing sweep) and, on a delta round, only when
+the split-carry map holds `manifest_bump` —
+`development/skills/resolve-issue/reference/review-loop.md`'s *Carry-driven
+dispatch (#2008)* states that rule once. The review skill's Step 1
+table is the round's plan.
 
 `development-react` (#959) is the first **topic** panel: `review-dispatch.zsh
 plan` lists `development-react:review` in `topic_review_skills` when
