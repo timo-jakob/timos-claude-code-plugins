@@ -230,7 +230,7 @@ YAML
   # declaration is, and what maintenance does with a finding today (#1747)
   readme_table="$(grep -E '^\| \*\*development' "$REPO_ROOT/README.md")"
   contains "$readme_table" '(*primary*-eligible: `primary: composition`)'
-  contains "$readme_table" 'manifest findings and Renovate bumps escalated to a human'
+  contains "$readme_table" 'manifest findings escalated to a human, Renovate bumps triaged by an injection-hardened agent'
   contains "$readme_table" 'the bootstrap scaffold with its promote-to-prod workflow'
   contains "$readme_table" 'accepts only `none`'
 
@@ -279,6 +279,72 @@ YAML
   contains "$flat" 'Realized as `.claude-workspace.yaml`'
   contains "$flat" 'never in a member repo'
   contains "$flat" 'registered with #1747'
+  # realized means linked: the item points at the contract section, which exists (#1749)
+  contains "$flat" '[The `claude-workspace/v1` contract](#the-claude-workspacev1-contract)'
+  grep -qx '### The `claude-workspace/v1` contract' "$REPO_ROOT/ARCHITECTURE.md"
+}
+
+@test "the how-to is registered everywhere a reader finds a how-to, and states the foundation honestly (#1749)" {
+  local page="docs/how-to/set-up-a-composition-repo.md" flat
+  [ -f "$REPO_ROOT/$page" ]
+  grep -qF 'Set up a composition repo: how-to/set-up-a-composition-repo.md' "$REPO_ROOT/mkdocs.yml"
+  grep -qF '](how-to/set-up-a-composition-repo.md)' "$REPO_ROOT/docs/index.md"
+  grep -qF '](set-up-a-composition-repo.md)' "$REPO_ROOT/docs/how-to/index.md"
+  flat="$(tr -s '[:space:]' ' ' <"$REPO_ROOT/$page")"
+  # the steps a reader must take by hand, and what deploy_target: none means
+  contains "$flat" 'Create **`staging`**'
+  contains "$flat" 'Create **`production`**'
+  contains "$flat" 'add **required reviewers**'
+  contains "$flat" 'restrict deployments to `main`'
+  contains "$flat" 'records what it would deploy and deploys nothing'
+  contains "$flat" 'nothing deployed — deploy_target: none, no renderer (#719/#720)'
+  contains "$flat" 'No run ever reports a deploy that did not happen.'
+  contains "$flat" '**Enable the Renovate GitHub App**'
+  contains "$flat" 'maintenance triages only the pull requests the App opens'
+  lacks "$flat" 'self-hosted'
+  contains "$flat" 'Never run both bots.'
+  # production re-resolves tags; promote.zsh says the same (#1749)
+  contains "$flat" '`promotes_from` is not enforced yet: a production run resolves every member'
+  grep -qF '`promotes_from` is not read in this release' "$PLUGIN_DIR/templates/scripts/promote.zsh"
+  # a minor bump merges only with clean release notes, as the agent says
+  contains "$flat" 'for a minor, its release notes carry no breaking marker'
+  # the What lands table names every file the scaffold writes, read from the scaffold itself
+  local scaffold="$PLUGIN_DIR/scripts/scaffold-composition.zsh" files f
+  files="$(sed -n '/^readonly -a FIXED_FILES=(/,/)/p' "$scaffold" | tr -d '()' | sed 's/readonly -a FIXED_FILES=//')"
+  [ "$(printf '%s\n' $files | grep -c .)" -ge 6 ]
+  for f in .claude-workspace.yaml $files; do
+    contains "$flat" "| \`$f\` |"
+  done
+  # the quoted notices are the script's own words, not a paraphrase
+  local promote="$PLUGIN_DIR/templates/scripts/promote.zsh"
+  grep -qF 'nothing deployed — deploy_target: none, no renderer (#719/#720)' "$promote"
+  grep -qF 'no deploy renderer present — deploy/ is filled by #719 (compose) / #720 (kubernetes)' "$promote"
+  contains "$flat" 'no deploy renderer present — deploy/ is filled by #719 (compose) / #720 (kubernetes); production was recorded, not deployed'
+  # …and no stale "still to come" for the how-to survives anywhere a reader looks
+  lacks "$(jq -r '.description' "$PLUGIN_JSON")" 'Still to come'
+  lacks "$(cat "$REPO_ROOT/ARCHITECTURE.md")" 'Still open: the how-to #1749'
+}
+
+@test "the plugin reference names every piece the plugin ships (#1749)" {
+  local s
+  s="$(printf '%s' "$PLUGINS_SECTION" | tr -s '[:space:]' ' ')"
+  contains "$s" '| `.claude-workspace.yaml` at the repo root | the constellation manifest, and the composition **topic marker** |'
+  contains "$s" '| `scripts/validate-workspace.zsh` |'
+  contains "$s" '| `scripts/scaffold-composition.zsh` |'
+  contains "$s" '| `/development-composition:maintenance` |'
+  contains "$s" '`skills/maintenance/scripts/plan-dispatch.zsh`'
+  contains "$s" '| `composition-tag-bump-triage` |'
+  contains "$s" '[Set up a composition repo](../how-to/set-up-a-composition-repo.md)'
+  # the triage agent arms auto-merge only where a review is required (agent Step 6)
+  contains "$s" 'arms native auto-merge only where the branch requires a review, otherwise sends the bump to human review'
+  lacks "$s" 'arms native auto-merge when none does'
+  contains "$s" "which bootstrap's Step 1 guards on but never routes on"
+  lacks "$s" 'which nothing reads yet'
+  # every script the table names exists
+  [ -f "$PLUGIN_DIR/scripts/validate-workspace.zsh" ]
+  [ -f "$PLUGIN_DIR/scripts/scaffold-composition.zsh" ]
+  [ -f "$PLUGIN_DIR/skills/maintenance/scripts/plan-dispatch.zsh" ]
+  [ -f "$PLUGIN_DIR/agents/composition-tag-bump-triage.md" ]
 }
 
 @test "the version-bump rosters name this plugin's pinned prefix (#1744)" {

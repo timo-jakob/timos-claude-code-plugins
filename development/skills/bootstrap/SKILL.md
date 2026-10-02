@@ -5155,8 +5155,9 @@ outcome, and the manual steps:
 create the GitHub Environments `staging` and `production` the workflow binds,
 with required reviewers on `production` and its deployments restricted to
 `main`; **when the scaffold printed `wrote renovate.json` or `kept renovate.json`**,
-enable Renovate on the repository (the Renovate GitHub App or a self-hosted
-runner), without which `renovate.json` proposes nothing — never when it
+enable the Renovate GitHub App on the repository, without which
+`renovate.json` proposes nothing and maintenance, which triages only the pull
+requests the App opens, has no bump to triage — never when it
 **skipped** the file, which the last sentence below covers; and, for any member
 whose image is private, grant this repository read access to that package (or
 add a login step for its registry) — the workflow's own token cannot read

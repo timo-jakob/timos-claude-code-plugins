@@ -11,6 +11,7 @@ what you want to achieve.
 - [Adopt the API styleguide (pin the org Spectral ruleset)](adopt-the-api-styleguide.md)
 - [Keep application repos out of the cluster (`no-cluster-deploy`)](keep-app-repos-out-of-the-cluster.md)
 - [Bootstrap a GitOps repository (one gate command)](bootstrap-a-gitops-repo.md)
+- [Set up a composition repo (pin a constellation, promote it)](set-up-a-composition-repo.md)
 - [Adopt C4 architecture docs on an existing repo](adopt-c4-architecture-docs.md)
 - [Amend a C4 diagram by hand](amend-a-c4-diagram.md)
 - [Read your pipeline telemetry](read-pipeline-telemetry.md)
