@@ -1090,8 +1090,16 @@ section_3m() {
   contains "$s" 'the seven files the scaffold writes'
   # …and the plan and report never promise or enable what the scaffold skipped
   contains "$s" '**Promise `renovate.json` only where the scaffold will write it.**'
+  # #1903: the plan states the scaffold's precedence — a Renovate config wins
+  # over Dependabot — so a repo carrying both gets the Renovate reason
+  contains "$s" 'and `.github/dependabot.y(a)ml` only when none of those exists'
+  contains "$s" '**A Renovate config wins over Dependabot**: when one exists, the plan names that file and says to add the image custom manager from `templates/renovate.json` to it, even when a Dependabot config is also present'
+  contains "$s" 'Only when no Renovate config is found does the plan name the Dependabot file'
   contains "$s" '**when the scaffold printed `wrote renovate.json` or `kept renovate.json`**'
   contains "$s" 'never tell the user to enable Renovate while a Dependabot config stays'
+  # …and a skipped renovate.json gets the guidance for its own reason
+  contains "$s" 'is added to it (Renovate is already set up — do not tell the user to enable it)'
+  contains "$s" 'the repository moves to Renovate — remove the Dependabot config, then enable Renovate and add that custom manager'
   # …in EVERY case, a kept renovate.json beside Dependabot included — not only
   # inside the skipped-file branch
   contains "$s" '**Whatever the scaffold printed for `renovate.json`** — a kept one beside `.github/dependabot.y(a)ml` included — never tell the user'
