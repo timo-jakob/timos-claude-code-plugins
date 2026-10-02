@@ -2504,17 +2504,17 @@ STUB_EOF
   # ...and the quotePath flag both need so a non-ASCII path is spelled the same
   # way on both sides (#1435).
   #
-  # EXACT counts, not `-ge`: dispatch has THREE git invocations that list paths
-  # (`diff --name-only`, `ls-files --others`, and the delta `diff-tree`), and a
-  # tolerance of `-ge 2` let any ONE of them lose the flag with this test still
-  # green — while that one invocation then C-quotes a non-ASCII path and the two
-  # sides stop agreeing about the same file. The counts here are LINE counts and
-  # each script mentions the flag once in a comment above the call site, hence
-  # 3 calls + 2 comments in dispatch, 1 call + 1 comment in the loop. The
-  # behavioural pin is the test below; this one localises a deletion to the
-  # line that lost it.
+  # EXACT counts, not `-ge`: dispatch has FOUR git invocations that list paths
+  # (`diff --name-only`, `ls-files --others`, the delta `diff-tree`, and the
+  # #2011 hunk `diff-tree -p`), and a tolerance below that let any ONE of them
+  # lose the flag with this test still green — while that one invocation then
+  # C-quotes a non-ASCII path and the two sides stop agreeing about the same
+  # file. The counts here are LINE counts and each script mentions the flag in
+  # a comment above its call sites, hence 4 calls + 3 comments in dispatch, 1
+  # call + 1 comment in the loop. The behavioural pin is the test below; this
+  # one localises a deletion to the line that lost it.
   [ "$(grep -cF -- 'core.quotePath=false' "$LOOP_REAL")" -eq 3 ]
-  [ "$(grep -cF -- 'core.quotePath=false' "$D")" -eq 5 ]
+  [ "$(grep -cF -- 'core.quotePath=false' "$D")" -eq 7 ]
 }
 
 @test "#1435 a NON-ASCII path is spelled identically in the review scope and the fix-touched set" {

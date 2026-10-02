@@ -58,7 +58,7 @@
 #       Emit the dispatch descriptor JSON on stdout:
 #         { repo_type, review_skill, topic_review_skills[], round, base,
 #           findings_path, changed_files[], worktree_root, original_root, scope_abs[],
-#           scope_mode, scope_empty, prior_tree, delta_files,
+#           scope_mode, scope_empty, prior_tree, delta_files, delta_hunks,
 #           fix_verification_path, adjudicated_path }
 #       worktree_root / original_root / scope_abs are the #1582 path rail. A
 #       reviewer that resolves a repo-relative path against its own cwd reads the
@@ -95,6 +95,15 @@
 #       delta_files is everything differing from --prior-tree — computed whenever
 #       the flag is given, INCLUDING on a full round, because the loop needs it to
 #       invalidate adjudications whose file the last fix pass touched.
+#       delta_hunks (#2011) is the same delta at LINE granularity: `null` exactly
+#       when delta_files is, else an array of `{file, kind, start, end}` new-side
+#       line ranges (1-based, inclusive) from a zero-context diff of the same two
+#       trees. `kind` is "added" for a pure addition (the hunk removed no line
+#       that existed at the prior tree) and "changed" for every other hunk; a
+#       pure deletion has no new-side lines and yields no entry. Only files in
+#       delta_files appear, so the two can never disagree about normalisation or
+#       the #909 exclusions. The test reviewer's delta-round rule reads it, via
+#       the review skill's `Fix-pass hunks (delta round):` prompt line.
 #       scope_empty is `changed_files == []`; it is always present, and it exists
 #       for CALLERS — the driving session plans its own panel and must know a
 #       delta came back empty BEFORE it spawns reviewers. The loop deliberately
@@ -582,8 +591,12 @@ _main_root() {
 # _verify_prior_tree, so a failure here is a genuine git/identity error and must
 # FAIL the scope rather than degrade to an empty delta (the #910 rule: an empty
 # scope the loop would happily converge on is the worst possible fallback).
-_delta_files() {
-  local repo="$1" prior="$2" cur=""
+#
+# The current identity is minted ONCE per plan (_current_tree) and handed to both
+# _delta_files and _delta_hunks, so the file list and the line ranges describe
+# the same tree even if the worktree moves while `plan` runs.
+_current_tree() {
+  local repo="$1" cur=""
   [[ -x "$tree_id_bin" ]] || {
     print -u2 -- "review-dispatch: cannot compute the delta — $tree_id_bin is missing or not executable"
     return 1
@@ -596,12 +609,61 @@ _delta_files() {
     print -u2 -- "review-dispatch: the current working-tree identity for $repo came back empty"
     return 1
   }
+  print -r -- "$cur"
+}
+
+_delta_files() {
+  local repo="$1" prior="$2" cur="$3"
   # same normalisation + #909 exclusions as the full scope — `pipefail` is set,
   # so a failing diff-tree still fails the function rather than yielding an
   # empty delta
   # same `core.quotePath=false` rule as _changed_files above (#1435)
   "$git_bin" -C "$repo" -c core.quotePath=false diff-tree -r --name-only "$prior" "$cur" \
     | _normalise_paths
+}
+
+# --- the delta's new-side line ranges (#2011) --------------------------------
+# One TSV line per hunk — `<file>\t<kind>\t<start>\t<end>` — from a ZERO-context
+# patch of the same two trees _delta_files lists, so each hunk is exactly the
+# lines the fix pass wrote and no neighbour rides along. A hunk header is
+# `@@ -A[,B] +C[,D] @@`, a missing count meaning 1: B == 0 is a pure addition
+# (`added`), anything else rewrote or removed prior-tree lines (`changed`), and
+# D == 0 is a pure deletion with no new-side line to name, so it is skipped.
+# The file comes from the `+++ b/<path>` header, less the trailing TAB git
+# appends to a header whose path holds a space. `core.quotePath=false` and the
+# quoted form's own `"b/` prefix are handled so the path is spelled exactly as
+# `diff-tree --name-only` spells it, which is what the caller filters against.
+# A `+++ ` line is read as a header only BEFORE the file's first `@@`: inside a
+# hunk an added line whose text starts `++ ` is printed as `+++ …` too.
+# Binary and mode-only changes print no hunk, so they contribute no range.
+# Same #910 rule as _delta_files: a failing diff-tree fails the pipeline.
+_delta_hunks() {
+  local repo="$1" prior="$2" cur="$3"
+  "$git_bin" -C "$repo" -c core.quotePath=false diff-tree -r -p -U0 "$prior" "$cur" \
+    | awk '
+      /^diff --git / { path = ""; inhunk = 0; next }
+      !inhunk && /^\+\+\+ / {
+        p = substr($0, 5)
+        sub(/\t$/, "", p)
+        if (p == "/dev/null") path = ""
+        else if (substr(p, 1, 3) == "\"b/") path = "\"" substr(p, 4)
+        else if (substr(p, 1, 2) == "b/") path = substr(p, 3)
+        else path = p
+        next
+      }
+      /^@@ / {
+        inhunk = 1
+        if (path == "") next
+        if (!match($0, /^@@ -[0-9]+(,[0-9]+)? \+[0-9]+(,[0-9]+)? @@/)) next
+        hdr = substr($0, 4, RLENGTH - 6)
+        split(hdr, side, " ")
+        n = split(substr(side[1], 2), o, ",")
+        oldc = (n > 1) ? o[2] + 0 : 1
+        n = split(substr(side[2], 2), w, ",")
+        newc = (n > 1) ? w[2] + 0 : 1
+        if (newc == 0) next
+        printf "%s\t%s\t%d\t%d\n", path, (oldc == 0 ? "added" : "changed"), w[1], w[1] + newc - 1
+      }'
 }
 
 # --- base ref must resolve before it scopes anything (#910) -----------------
@@ -1105,9 +1167,20 @@ cmd_plan() {
   # round: `changed_files` is then still the whole story diff, but the loop reads
   # delta_files to decide which adjudications the last fix pass invalidated, and
   # the closing sweep is exactly a full round that must still do that.
-  local delta_json='null'
+  # delta_hunks (#2011) rides the same condition and the same current tree, and
+  # keeps only files delta_files lists — so it inherits delta_files' path
+  # normalisation and #909 exclusions by construction rather than by a copy.
+  local delta_json='null' hunks_json='null' cur_tree=""
   if [[ -n "$prior_tree" ]]; then
-    delta_json=$(_delta_files "$repo" "$prior_tree" | jq -R . | jq -sc .) || {
+    {
+      cur_tree=$(_current_tree "$repo") \
+        && delta_json=$(_delta_files "$repo" "$prior_tree" "$cur_tree" | jq -R . | jq -sc .) \
+        && hunks_json=$(_delta_hunks "$repo" "$prior_tree" "$cur_tree" \
+          | jq -Rnc --argjson delta "$delta_json" '
+              [ inputs | split("\t")
+                | {file: .[0], kind: .[1], start: (.[2] | tonumber), end: (.[3] | tonumber)}
+                | select(.file as $f | any($delta[]; . == $f)) ]')
+    } || {
       print -u2 -- "plan: could not compute the delta against --prior-tree: $prior_tree"; exit 1
     }
   fi
@@ -1143,6 +1216,7 @@ cmd_plan() {
     --arg scope_mode "$scope_mode" \
     --arg prior_tree "$prior_tree" \
     --argjson delta "$delta_json" \
+    --argjson hunks "$hunks_json" \
     --arg fixver "$fix_verification" \
     --arg adjud "$adjudicated" \
     '{repo_type:$repo_type, review_skill:$review_skill,
@@ -1155,6 +1229,7 @@ cmd_plan() {
       scope_empty:(($changed | length) == 0),
       prior_tree:(if $prior_tree=="" then null else $prior_tree end),
       delta_files:$delta,
+      delta_hunks:$hunks,
       fix_verification_path:(if $fixver=="" then null else $fixver end),
       adjudicated_path:(if $adjud=="" then null else $adjud end)}' || {
     print -u2 -- "plan: could not emit the dispatch descriptor"; exit 1
