@@ -2423,7 +2423,7 @@ EOF
   plan '{"languages":["python"]}' --round 1
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r 'keys_unsorted | join(",")')" = \
-    "repo_type,review_skill,topic_review_skills,round,base,findings_path,changed_files,worktree_root,original_root,scope_abs,scope_mode,scope_empty,prior_tree,delta_files,delta_hunks,fix_verification_path,adjudicated_path" ]
+    "repo_type,review_skill,topic_review_skills,round,base,findings_path,changed_files,worktree_root,original_root,scope_abs,scope_mode,scope_empty,prior_tree,delta_files,delta_hunks,skippable_dimensions,fix_verification_path,adjudicated_path" ]
 }
 
 @test "#1582 --no-relative survives a user-level diff.relative=true" {

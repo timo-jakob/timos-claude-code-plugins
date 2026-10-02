@@ -3616,8 +3616,15 @@ judgment, bump size and stale descriptions, as `manifest_bump`: it runs on every
 full round (round 1 and every closing sweep) and, on a delta round, only when
 the split-carry map holds `manifest_bump` —
 `development/skills/resolve-issue/reference/review-loop.md`'s *Carry-driven
-dispatch (#2008)* states that rule once. The review skill's Step 1
-table is the round's plan.
+dispatch (#2008)* states that rule once. `contract` (#2009) has a schedule of
+its own: it runs on round 1 and on every closing full sweep (`scope_mode:
+"full"`, the residue-promoted sweep and the grant beyond the ceiling included);
+on a delta round it runs unless the plan's `skippable_dimensions` holds
+`contract`, which `review-dispatch.zsh plan` emits only when the pure selector
+`select-contract-dimension.zsh` finds that the fix pass touched no contract
+surface — failing closed, so a delta it cannot judge runs it; and a carried
+`contract` entry brings it back by that same *Carry-driven dispatch (#2008)*
+rule. The review skill's Step 1 table is the round's plan.
 
 `development-react` (#959) is the first **topic** panel: `review-dispatch.zsh
 plan` lists `development-react:review` in `topic_review_skills` when
@@ -4081,6 +4088,7 @@ cannot mint a second artifact path for the same round:
   "prior_tree": null,
   "delta_files": null,
   "delta_hunks": null,
+  "skippable_dimensions": [],
   "fix_verification_path": null,
   "adjudicated_path": null
 }
@@ -4114,6 +4122,14 @@ cannot mint a second artifact path for the same round:
   yields no entry. Only files listed in `delta_files` appear, so the hunk list
   inherits its normalisation and exclusions instead of restating them. It feeds
   the test reviewer's delta-round rule (*Terminating severity bars*).
+  `skippable_dimensions` (#2009) is always present: the dimensions this round's
+  panel may leave out. Only a `claude-plugin` repo on a `"delta"` round consults
+  `select-contract-dimension.zsh`, whose two inputs `plan` builds from
+  `--prior-tree` (a `-U0` patch, with agents and SKILL.md files at whole-file
+  context so their frontmatter fences are visible); it emits `["contract"]` when
+  the selector says `skip`. Every full round, every other repo type and every
+  failure to decide is `[]`. The claude-plugin panel's schedule above is its one
+  reader.
   `scope_empty` is `changed_files == []`, always present,
   and it exists for **callers**: the driving session plans its own panel and
   needs to know a delta came back empty *before* it spawns reviewers. The **loop
@@ -6077,13 +6093,19 @@ later; so a `null` here means "not an escalation", **not** "succeeded", and the
 `escalation` breakdown's null bucket silently contains failed `ERROR` runs —
 read `outcome` when you want success/failure), `rounds`, `max_rounds`,
 `promotion_phase`, `possible_false_trip_auto_continues`, `findings_by_round`,
-`gate_by_round`, `convergence_assessment`, and `fixed`
+`gate_by_round`, `skipped_dimensions_by_round`, `convergence_assessment`, and `fixed`
 (blockers found and cleared) vs `waived` (Low suggestions logged).
 `gate_by_round` (#1973) is `[{round, gate}]`, read from the status JSON's
 `history[]`: each round's gate record (`{scope, attested, wall_s, slowest}`, or
 `null`), described under *Per-round gate telemetry*. It is a separate field
 rather than a key on each `findings_by_round` entry, so the findings lockstep
 below is untouched, and the two join on `round`.
+`skipped_dimensions_by_round` (#2009) is `[{round, skipped_dimensions}]`, read
+from the same `history[]` lines: the dimensions that round's panel was planned
+to leave out — the plan's `skippable_dimensions` less any dimension the round's
+carry forced back in — `[]` for a round that skipped nothing, and `null` for a
+history line that predates the key. It is how often the claude-plugin
+`contract` schedule actually skipped, joined to the findings on `round`.
 `possible_false_trip_auto_continues` (#1498) is copied from the status JSON with
 the same always-present reading stated there.
 `promotion_phase` (#995) is an always-present boolean copied from the status

@@ -2512,17 +2512,18 @@ STUB_EOF
   # ...and the quotePath flag both need so a non-ASCII path is spelled the same
   # way on both sides (#1435).
   #
-  # EXACT counts, not `-ge`: dispatch has FOUR git invocations that list paths
-  # (`diff --name-only`, `ls-files --others`, the delta `diff-tree`, and the
-  # #2011 hunk `diff-tree -p`), and a tolerance below that let any ONE of them
+  # EXACT counts, not `-ge`: dispatch has EIGHT git invocations that list paths
+  # (`diff --name-only`, `ls-files --others`, the delta `diff-tree`, the #2011
+  # hunk `diff-tree -p`, and the four `diff-tree` calls that build the #2009
+  # contract selector's inputs), and a tolerance below that let any ONE of them
   # lose the flag with this test still green — while that one invocation then
   # C-quotes a non-ASCII path and the two sides stop agreeing about the same
   # file. The counts here are LINE counts and each script mentions the flag in
-  # a comment above its call sites, hence 4 calls + 3 comments in dispatch, 1
+  # a comment above its call sites, hence 8 calls + 3 comments in dispatch, 1
   # call + 1 comment in the loop. The behavioural pin is the test below; this
   # one localises a deletion to the line that lost it.
   [ "$(grep -cF -- 'core.quotePath=false' "$LOOP_REAL")" -eq 3 ]
-  [ "$(grep -cF -- 'core.quotePath=false' "$D")" -eq 7 ]
+  [ "$(grep -cF -- 'core.quotePath=false' "$D")" -eq 11 ]
 }
 
 @test "#1435 a NON-ASCII path is spelled identically in the review scope and the fix-touched set" {
@@ -4430,4 +4431,78 @@ JSON
     [ "$(jq -r '.status' "$SNAP/status.json")" = "ERROR" ]
     [ "$(jq -c '.topic_review_skills' "$SNAP/status.json")" = "[]" ]
   done
+}
+
+# --- #2009: skippable_dimensions — the contract dimension on delta rounds
+#
+# A claude-plugin repo whose contract selector is stubbed to answer `skip`: every
+# delta round's plan then carries skippable_dimensions ["contract"], and full
+# rounds carry []. The fix pass edits the story file so round 2 is a real,
+# non-empty delta (an empty one would be re-planned as a full sweep).
+
+plugin_loop() {
+  local sel="$BATS_TEST_TMPDIR/sel-skip.zsh"
+  printf '%s\n' '#!/usr/bin/env zsh' 'print -r -- '"'"'{"contract":"skip","triggers":[]}'"'" > "$sel"
+  chmod +x "$sel"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":[],"is_claude_plugin":true}' \
+    SELECT_CONTRACT_BIN="$sel" \
+    zsh "$S" --repo "$R" --base main --work-dir "$BATS_TEST_TMPDIR/wd" "$@"
+}
+
+@test "#2009 hook mode: a skipped delta round records skipped_dimensions, and the hook is handed REVIEW_SKIPPABLE_DIMENSIONS" {
+  WD="$BATS_TEST_TMPDIR/wd"
+  local tblock="${CRIT/\"bugs\"/\"tests\"}"
+  # round 1 (full) raises a `tests` blocker; round 2 is a delta whose plan omits
+  # contract and whose panel returns no contract verdict — accepted (#2009 AC3);
+  # round 3 is the closing full sweep
+  plugin_loop --max-rounds 3 --status-file "$BATS_TEST_TMPDIR/st.json" \
+    --review-cmd 'printf "%s" "$REVIEW_SKIPPABLE_DIMENSIONS" > "'"$BATS_TEST_TMPDIR"'/skip-$REVIEW_ROUND.json"; if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" '"'"$tblock"'"' > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
+    --fix-cmd 'echo "print(2)" >> "$REVIEW_REPO/app.py"'
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.status' "$BATS_TEST_TMPDIR/st.json")" = "CONVERGED" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/skip-1.json")" = '[]' ]
+  [ "$(cat "$BATS_TEST_TMPDIR/skip-2.json")" = '["contract"]' ]
+  [ "$(cat "$BATS_TEST_TMPDIR/skip-3.json")" = '[]' ]
+  [ "$(cat "$WD/skippable-2.json")" = '["contract"]' ]
+  [ "$(jq -sc '[.[] | .skipped_dimensions]' "$WD/history.jsonl")" = '[[],["contract"],[]]' ]
+  [ "$(jq -c '[.history[] | .skipped_dimensions]' "$BATS_TEST_TMPDIR/st.json")" = '[[],["contract"],[]]' ]
+}
+
+@test "#2009 hook mode: a carried contract entry forces contract back in — owner-accounted, it passes and nothing is recorded skipped" {
+  WD="$BATS_TEST_TMPDIR/wd"
+  local cblock="${CRIT/\"bugs\"/\"contract\"}"
+  # the selector said skip, but the split-carry map holds `contract`, so
+  # contract-integrity is dispatched (Carry-driven dispatch, #2008) and accounts
+  # for its entry
+  plugin_loop --max-rounds 3 --status-file "$BATS_TEST_TMPDIR/st.json" \
+    --review-cmd 'printf "%s" "$REVIEW_FIX_VERIFICATION_BY_DIMENSION" > "'"$BATS_TEST_TMPDIR"'/map-$REVIEW_ROUND.json"; if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" '"'"$cblock"'"' > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; jq "[.[] | {file, dimension, title, confirmed: [\"claude-plugin-contract-integrity\"], re_raised: [], unconfirmed: []}]" "$REVIEW_FIX_VERIFICATION" > "$REVIEW_FINDINGS.carry.json"; fi' \
+    --fix-cmd 'echo "print(2)" >> "$REVIEW_REPO/app.py"'
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.status' "$BATS_TEST_TMPDIR/st.json")" = "CONVERGED" ]
+  [ "$(jq -c 'keys' "$BATS_TEST_TMPDIR/map-2.json")" = '["contract"]' ]
+  [ "$(cat "$WD/skippable-2.json")" = '["contract"]' ]
+  [ "$(jq -c '.round_changelists[1].carry_accounting.confirmed' "$BATS_TEST_TMPDIR/st.json")" = '[{"file":"app.py","dimension":"contract","title":"T"}]' ]
+  [ "$(jq -sc '[.[] | .skipped_dimensions]' "$WD/history.jsonl")" = '[[],[],[]]' ]
+}
+
+@test "#2009 hook mode: the same skipped round with contract-integrity absent is refused CARRY-UNACCOUNTED" {
+  WD="$BATS_TEST_TMPDIR/wd"
+  local cblock="${CRIT/\"bugs\"/\"contract\"}"
+  plugin_loop --max-rounds 3 --status-file "$BATS_TEST_TMPDIR/st.json" \
+    --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" '"'"$cblock"'"' > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; jq "[.[] | {file, dimension, title, confirmed: [], re_raised: [], unconfirmed: []}]" "$REVIEW_FIX_VERIFICATION" > "$REVIEW_FINDINGS.carry.json"; fi' \
+    --fix-cmd 'echo "print(2)" >> "$REVIEW_REPO/app.py"'
+  [ "$status" -eq 2 ]
+  [ "$(jq -r '.status' "$BATS_TEST_TMPDIR/st.json")" = "STALE_FINDINGS" ]
+  contains "$output" 'carry unaccounted: round 2 carried entry "T" (app.py, contract) was neither confirmed nor re-raised by any reviewer'
+  [ ! -e "$WD/verify-3.json" ]
+}
+
+@test "#2009 a python repo's rounds record skipped_dimensions [] and its skippable files hold []" {
+  WD="$BATS_TEST_TMPDIR/wd"
+  loop --max-rounds 3 --status-file "$BATS_TEST_TMPDIR/st.json" \
+    --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
+    --fix-cmd 'echo "print(2)" >> "$REVIEW_REPO/app.py"'
+  [ "$status" -eq 0 ]
+  [ "$(cat "$WD/skippable-2.json")" = '[]' ]
+  [ "$(jq -sc '[.[] | .skipped_dimensions]' "$WD/history.jsonl")" = '[[],[],[]]' ]
 }
