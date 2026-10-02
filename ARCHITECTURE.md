@@ -3702,6 +3702,23 @@ remaining panel reviewers a bar is not done; it belongs to epic #1431, which fil
 this convention, not to #987, which tracks extending the *scope-bounding* rule
 above.
 
+**The mutation bar carries a delta-round rule (#2011).** On a delta round the
+test reviewer demotes an untested branch or an unpinned sentence to `SUGGESTION`
+when it lies inside a range the previous fix pass **added**, and keeps full
+severity inside a range that rewrote or removed prior-tree lines. That is the
+treadmill the bar exists to stop, re-entering through coverage: each guard a fix
+pass adds would otherwise be the next round's `WARNING`. The ranges reach the
+reviewer through two contracts: the plan descriptor's `delta_hunks`, and the
+claude-plugin review skill's `Fix-pass hunks (delta round):` prompt line, which
+it adds only when `scope_mode` is `"delta"`. Round 1 and every full sweep
+therefore review at the unchanged bar. The rule fails closed: no hunks line
+means it does not apply, and a branch or sentence the reviewer cannot place
+keeps full severity. **There is no acceptance-criteria exception.** The panel is
+never handed the issue text, so a reviewer could not apply one, and the closing
+full sweep catches a fix-introduced gap on behaviour the criteria name at the
+full bar before any PR opens. The rule's wording lives in the agent's
+`## The mutation bar` section and is pinned there by the same guard.
+
 **The evidence rule (#1584) is a fourth severity-bounding rule, and the first
 carried by *every one* of this panel's read-only reviewers.** It sits under
 `## The evidence rule (a tool's verdict needs the tool run)` in every reviewer
@@ -4039,6 +4056,7 @@ cannot mint a second artifact path for the same round:
   "scope_empty": false,
   "prior_tree": null,
   "delta_files": null,
+  "delta_hunks": null,
   "fix_verification_path": null,
   "adjudicated_path": null
 }
@@ -4064,6 +4082,14 @@ cannot mint a second artifact path for the same round:
   closing sweep or a re-planned verification-only round the delta is empty by
   construction — no fix pass ran between them — so the invalidation is a no-op
   there, which is the correct outcome, not a reason to skip the computation.
+  `delta_hunks` (#2011) is that same delta at line granularity, `null` exactly
+  when `delta_files` is: an array of `{file, kind, start, end}` new-side line
+  ranges (1-based, inclusive) from a zero-context diff of the same two trees,
+  with `kind` `"added"` for a pure addition and `"changed"` for any hunk that
+  rewrote or removed prior-tree lines. A pure deletion has no new-side line and
+  yields no entry. Only files listed in `delta_files` appear, so the hunk list
+  inherits its normalisation and exclusions instead of restating them. It feeds
+  the test reviewer's delta-round rule (*Terminating severity bars*).
   `scope_empty` is `changed_files == []`, always present,
   and it exists for **callers**: the driving session plans its own panel and
   needs to know a delta came back empty *before* it spawns reviewers. The **loop

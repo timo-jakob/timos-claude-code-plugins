@@ -1452,6 +1452,38 @@ before it is full. (The loop's own refusal of a selected attestation into the
 sweep is the backstop for a session that skipped item 3's gate; its red there
 exits `ERROR`, which is why item 3 starts the gate rather than relying on it.)
 
+### The delta-round test bar — fix-pass hunks (#2011)
+
+On a **delta** round the claude-plugin test reviewer reviews at a lower bar for
+what the previous fix pass just wrote. An untested branch or an unpinned
+sentence inside a range that fix pass **added** is a `SUGGESTION`, not a
+`WARNING`; one inside a range that rewrote or removed prior-tree lines keeps
+full severity. The rule itself — its hunk-shape exception, the fix-introduced
+sentence test and its two fail-closed clauses — lives in that agent's mutation
+bar and is not restated here.
+
+**Where the ranges come from.** `review-dispatch.zsh plan` emits `delta_hunks`
+whenever it is given `--prior-tree` — the same condition as `delta_files`, and
+`null` without it: one `{file, kind, start, end}` entry per new-side range of
+the fix pass's diff, `kind` `"added"` or `"changed"`, pure deletions omitted.
+The claude-plugin review skill's Step 1 adds a `Fix-pass hunks (delta round):`
+line to every reviewer prompt **only when the plan's `scope_mode` is
+`"delta"`**. Both are contracts every caller of the panel already reads, so the
+rule behaves the same whether the conductor or the panel subagent dispatches it,
+and nothing in this file's round protocol changes. Hook mode hands the panel no
+descriptor, so no hunk list reaches it and the rule never applies there.
+
+**Round 1 and every full round keep today's bar.** A closing sweep plans with
+`--prior-tree`, so its descriptor carries a hunk list, but its `scope_mode` is
+`"full"`, so no reviewer is handed one — and that includes the sweep a residue
+promotion earned.
+
+**No acceptance-criteria exception exists, by design.** The panel is never
+handed the issue text, so no reviewer could apply one. A fix-introduced gap on
+behaviour the acceptance criteria name is still caught at the full bar by the
+closing full sweep, before any PR opens, at the cost of at most one more round.
+A demoted finding stays reported, so the promotion phase can still raise it.
+
 ### Topic panels — every `topic_review_skills` entry joins the round (#1072)
 
 **Review panel, in-session** (step 1 above) names one skill, `review_skill`,

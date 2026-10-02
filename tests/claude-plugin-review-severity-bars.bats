@@ -31,7 +31,7 @@
 # and round 3 caught the first version of this very sweep scoped to one
 # directory while its comment claimed the tree.
 #
-# Non-vacuity control. Each of the 40 mutations below was APPLIED to the real
+# Non-vacuity control. Each of the 48 mutations below was APPLIED to the real
 # tree and the suite confirmed RED, then reverted — a record of runs, not a
 # claim. Numbering is contiguous and one number is one mutation, so a gap or a
 # duplicate is itself a defect in the record:
@@ -89,6 +89,18 @@
 #      edit both suites passed before this story
 #  39. append a third severity ("+`SUGGESTION`") to the same list
 #  40. move the sentence out of prose-logic's bar section into `## Your Mission`
+#
+# Added by #2011 (the delta-round rule), each red against this file:
+#  41. delete the test reviewer's "no Fix-pass hunks line" fail-closed clause
+#  42. drop "even when those prior-tree lines came from an earlier round of the
+#      same story" from the hunk-shape exception
+#  43. re-key the review skill's Fix-pass hunks condition on `delta_hunks` being
+#      non-null instead of on `scope_mode`
+#  44. delete the `Fix-pass hunks (delta round):` line from the Step 1 template
+#  45. delete review-loop.md's "No acceptance-criteria exception exists" lead
+#  46. delete ARCHITECTURE.md's "The mutation bar carries a delta-round rule" lead
+#  47. delete the template line's `kind "added" … "changed" …` definitions
+#  48. delete its "a definition that states no such rule ignores this line" tail
 #
 # A caveat worth keeping, because it bit twice while building this control: the
 # clauses above are re-wrapped across source lines, so a line-oriented
@@ -398,6 +410,85 @@ _assert_file() {  # _assert_file <path> <test-expr...>
   contains "$flat" '**Nothing here tells you not to report something.**'
   contains "$flat" 'the promotion path (#994) can still raise it'
   contains "$flat" 'This bounds severity, not coverage.'
+}
+
+@test "claude-plugin-test-reviewer's mutation bar states the delta-round rule (#2011)" {
+  # Scoped to the bar's own section: the rule demotes, so a copy of it sitting
+  # in another section would not bound the severities the table sets.
+  _load_section "$TEST_REVIEWER" "The mutation bar (severity rule — this bounds you)"
+  # the rule itself — what is demoted, where, and to what
+  contains "$section_flat" '**The delta-round rule (#2011).** On a delta round, an untested branch or an unpinned sentence that lies inside an `added` range of the Fix-pass hunks is a `SUGGESTION`'
+  # what makes a round a delta round for the reviewer: the prompt line, not a guess
+  contains "$section_flat" 'A delta round is one whose prompt carries a `Fix-pass hunks (delta round):` line.'
+  # the fix-introduced-sentence test
+  contains "$section_flat" 'A sentence is fix-introduced when any of its lines falls inside an `added` range and none inside a `changed` range, in any file in scope.'
+  # the rule's precedence over the scope-bounded carve-outs
+  contains "$section_flat" 'the *Scope-bounded severity* carve-outs (1) and (2) below do not restore the severity this rule removes.'
+  # the location tested is the branch's or sentence's source, not the report's
+  contains "$section_flat" 'Where a branch or sentence lies is read off its own source lines, never off the file:line you report the finding at.'
+  # the only exception, keyed on hunk shape, including the earlier-round clause
+  contains "$section_flat" '**Hunk shape is its only exception.** A branch or sentence with any line inside a `changed` range keeps full severity'
+  contains "$section_flat" 'even when those prior-tree lines came from an earlier round of the same story.'
+  # both fail-closed clauses
+  contains "$section_flat" '**When your prompt carries no Fix-pass hunks line, the rule does not apply.**'
+  contains "$section_flat" '**When you cannot tell whether those source lines fall inside an `added` range, keep full severity.**'
+  # why no acceptance-criteria exception exists
+  contains "$section_flat" 'There is deliberately no exception for behaviour the acceptance criteria name'
+  contains "$section_flat" 'the closing full sweep still catches a fix-introduced gap on that behaviour before any PR opens'
+}
+
+@test "the claude-plugin review skill attaches the Fix-pass hunks line on delta rounds only (#2011)" {
+  local skill="$REPO_ROOT/development-claude-plugin/skills/review/SKILL.md"
+  _load_section "$skill" "Step 1: Launch All 5 Review Agents in Parallel"
+  # the line itself, inside the launch-prompt template, with its placeholder
+  contains "$section" 'Fix-pass hunks (delta round): {delta_hunks} — the previous fix pass'"'"'s new-side line ranges'
+  # what each kind means, and what a reviewer with no delta-round rule does
+  contains "$section" 'kind "added" is a pure addition, "changed" rewrote or removed lines that existed at the prior tree.'
+  contains "$section" 'a definition that states no such rule ignores this line.'
+  # its condition is scope_mode, never the field being non-null — a closing
+  # sweep plans with --prior-tree and so carries a non-null hunk list
+  contains "$section_flat" 'add it only when the plan'"'"'s `scope_mode` is `"delta"` (#2011).** Never key it on `delta_hunks` being non-null'
+  # hook mode has no descriptor, so no hunk list: the line is left out there
+  contains "$section_flat" 'Nor does a hook-mode round, even when `$REVIEW_SCOPE_MODE` is `delta`'
+  contains "$section_flat" 'leave the line out and never compute ranges yourself.'
+}
+
+@test "ARCHITECTURE.md and review-loop.md document the delta-round rule and delta_hunks (#2011)" {
+  local arch="$REPO_ROOT/ARCHITECTURE.md"
+  local loop="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md"
+  [ -f "$arch" ]
+  [ -f "$loop" ]
+  # ARCHITECTURE's severity-bars section, scoped exactly as the #1433 test
+  # above scopes it, carries the rule and the reason it has no AC exception
+  local sec flat
+  sec="$(awk '/^### Terminating severity bars \(#1433\)/ { f = 1; next } f && /^###? / { exit } f' "$arch")"
+  [ -n "$sec" ]
+  flat="$(printf '%s' "$sec" | LC_ALL=C tr -s '[:space:]' ' ')"
+  contains "$flat" '**The mutation bar carries a delta-round rule (#2011).**'
+  contains "$flat" 'which it adds only when `scope_mode` is `"delta"`'
+  contains "$flat" '**There is no acceptance-criteria exception.** The panel is never handed the issue text'
+  # the plan-descriptor documentation names the field and its shape — scoped
+  # to the descriptor's own bullet, which opens on the #1434 iteration rule
+  sec="$(awk '/^- \*\*Rounds after the first are an ITERATION/ { f = 1 } f && /^- \*\*Neither failure/ { exit } f' "$arch")"
+  [ -n "$sec" ]
+  flat="$(printf '%s' "$sec" | LC_ALL=C tr -s '[:space:]' ' ')"
+  contains "$flat" '`delta_hunks` (#2011) is that same delta at line granularity, `null` exactly when `delta_files` is'
+  contains "$flat" '`kind` `"added"` for a pure addition and `"changed"` for any hunk that rewrote or removed prior-tree lines'
+  # review-loop.md's own subsection, which sits after every byte-frozen
+  # `moved:` span — a copy inside one would be the edit those spans forbid
+  sec="$(awk '/^### The delta-round test bar — fix-pass hunks \(#2011\)/ { f = 1; next } f && /^###? / { exit } f' "$loop")"
+  [ -n "$sec" ]
+  flat="$(printf '%s' "$sec" | LC_ALL=C tr -s '[:space:]' ' ')"
+  contains "$flat" 'line to every reviewer prompt **only when the plan'"'"'s `scope_mode` is `"delta"`**'
+  contains "$flat" 'Hook mode hands the panel no descriptor, so no hunk list reaches it and the rule never applies there.'
+  contains "$flat" '**No acceptance-criteria exception exists, by design.**'
+  contains "$flat" 'still caught at the full bar by the closing full sweep, before any PR opens'
+  local heading_line last_moved
+  heading_line="$(grep -n '^### The delta-round test bar' "$loop" | cut -d: -f1)"
+  last_moved="$(grep -n '^<!-- /moved: ' "$loop" | tail -n 1 | cut -d: -f1)"
+  [ -n "$heading_line" ]
+  [ -n "$last_moved" ]
+  [ "$heading_line" -gt "$last_moved" ]
 }
 
 @test "claude-plugin-contract-integrity states the consumer bar (#1433)" {
