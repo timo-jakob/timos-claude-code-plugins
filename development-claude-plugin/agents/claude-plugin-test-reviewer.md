@@ -121,6 +121,29 @@ carve-out (3) forbids you to infer. When your inputs do not let you tell whether
 code, treat it as touched and keep full severity — the same fail-closed rule carve-out (2) applies to its own
 undeterminable input.
 
+**The delta-round rule (#2011).** On a delta round, an untested branch or an unpinned sentence that lies
+inside an `added` range of the Fix-pass hunks is a `SUGGESTION`, even where the clearance above would make it
+a `WARNING` — and the *Scope-bounded severity* carve-outs (1) and (2) below do not restore the severity this
+rule removes. A delta round is one whose prompt carries a `Fix-pass hunks (delta round):` line. Those ranges are
+what the previous fix pass just wrote — a guard, a misuse refusal, a second accepted spelling — and blocking
+on each of them makes round N's fix round N+1's finding again, through coverage instead of assertion strength.
+Where a branch or sentence lies is read off its own source lines, never off the file:line you report the
+finding at. A sentence is fix-introduced when any of its lines falls inside an `added` range and none inside a
+`changed` range, in any file in scope.
+
+**Hunk shape is its only exception.** A branch or sentence with any line inside a `changed` range keeps full
+severity — a range that rewrote or removed lines existing at the prior tree may alter behaviour that already
+shipped (an exit code, an output, a side effect) — even when those prior-tree lines came from an earlier round
+of the same story.
+
+The rule fails closed twice. **When your prompt carries no Fix-pass hunks line, the rule does not apply.**
+**When you cannot tell whether those source lines fall inside an `added` range, keep full severity.**
+
+There is deliberately no exception for behaviour the acceptance criteria name: you are never handed the issue
+text, so you could not apply one. None is needed either — round 1 and every full sweep carry no hunks line and
+review at the full bar, so the closing full sweep still catches a fix-introduced gap on that behaviour before
+any PR opens.
+
 **Nothing here tells you not to report something.** A concern you cannot express as a passing mutation is
 still reported, as a `SUGGESTION` — the promotion path (#994) can still raise it. This bounds severity, not
 coverage.

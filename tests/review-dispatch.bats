@@ -143,6 +143,8 @@ tree_id() {  # echo the current working-tree identity of $R
   [ "$(echo "$output" | jq -r .scope_empty)" = "false" ]
   [ "$(echo "$output" | jq -r .prior_tree)" = "null" ]
   [ "$(echo "$output" | jq -r .delta_files)" = "null" ]
+  # #2011: the hunk list is null exactly when delta_files is — no --prior-tree
+  [ "$(echo "$output" | jq -r .delta_hunks)" = "null" ]
   [ "$(echo "$output" | jq -r .fix_verification_path)" = "null" ]
   [ "$(echo "$output" | jq -r .adjudicated_path)" = "null" ]
   # unchanged from before #1434: the whole story diff
@@ -292,7 +294,7 @@ EOF
 
 @test "plan: #1434 an unusable tree-id computation is exit 1 with a named line, never an empty delta" {
   # A git whose write-tree prints nothing. git-tree-id.zsh itself fails closed
-  # on an empty identity (exit 1), so this lands on _delta_files' "could not
+  # on an empty identity (exit 1), so this lands on _current_tree's "could not
   # compute" arm rather than its "came back empty" one — the latter stays as
   # defence in depth for a future tree-id that exits 0 with no output, and is
   # deliberately not reachable through this seam. What matters either way is the
@@ -355,6 +357,94 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -c '.changed_files')" = '[]' ]
   [ "$(echo "$output" | jq -r .scope_empty)" = "true" ]
+}
+
+# ---- delta_hunks: the fix pass's new-side line ranges (#2011)
+#
+# The claude-plugin test reviewer's delta-round rule demotes a finding inside a
+# pure ADDITION of the previous fix pass, and keeps full severity inside a hunk
+# that rewrote prior-tree lines. These cases pin the shape that rule reads.
+
+@test "plan: #2011 a fix pass that adds a guard yields an added hunk covering it; --final is a full sweep" {
+  # the story's own work, BEFORE the prior tree: a script with a usage branch
+  printf '%s\n' '#!/usr/bin/env zsh' 'app_id="$1"' 'print -r -- "$app_id"' > "$R/dispatch.zsh"
+  local t1; t1="$(tree_id)"
+  # the fix pass inserts a two-line guard after line 2, touching nothing else
+  printf '%s\n' '#!/usr/bin/env zsh' 'app_id="$1"' \
+    'test -n "$app_id" ||' '  { print -u2 -- "app_id is required"; exit 2 }' \
+    'print -r -- "$app_id"' > "$R/dispatch.zsh"
+  plan '{"languages":["python"]}' --round 3 --prior-tree "$t1"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .scope_mode)" = "delta" ]
+  # exactly one range, the guard's own two lines, marked as a pure addition
+  [ "$(echo "$output" | jq -c .delta_hunks)" = \
+    '[{"file":"dispatch.zsh","kind":"added","start":3,"end":4}]' ]
+  # the same two trees on the closing sweep: scope_mode full, so the review
+  # skill attaches no Fix-pass hunks line and the delta-round rule cannot apply
+  plan '{"languages":["python"]}' --round 4 --final --prior-tree "$t1"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .scope_mode)" = "full" ]
+  [ "$(echo "$output" | jq -c .delta_hunks)" = \
+    '[{"file":"dispatch.zsh","kind":"added","start":3,"end":4}]' ]
+}
+
+@test "plan: #2011 a rewritten line is changed, a pure deletion yields no entry, delta_files' exclusions apply" {
+  printf '%s\n' one two three four > "$R/rewrite.zsh"
+  printf '%s\n' keep drop > "$R/shrink.md"
+  local t1; t1="$(tree_id)"
+  # rewrite line 3 in place: the hunk replaced a prior-tree line → changed
+  printf '%s\n' one two THREE four > "$R/rewrite.zsh"
+  # delete line 2 only: no new-side line exists to name → no entry at all
+  printf '%s\n' keep > "$R/shrink.md"
+  # the loop's own artifacts are in neither delta_files nor delta_hunks
+  mkdir -p "$R/.review" "$R/.claude/telemetry"
+  printf '%s\n' '[]' > "$R/.review/findings-round-2.json"
+  printf '%s\n' '{}' > "$R/.claude/telemetry/telemetry.jsonl"
+  plan '{"languages":["python"]}' --round 3 --prior-tree "$t1"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c .delta_files)" = '["rewrite.zsh","shrink.md"]' ]
+  [ "$(echo "$output" | jq -c .delta_hunks)" = \
+    '[{"file":"rewrite.zsh","kind":"changed","start":3,"end":3}]' ]
+}
+
+@test "plan: #2011 hunk paths are spelled as delta_files spells them, and +++ content is not a header" {
+  printf '%s\n' a b c d e f > "$R/plus.md"
+  local t1; t1="$(tree_id)"
+  # a path holding a space: git ends that file's `+++ b/…` header with a TAB,
+  # which must not become part of the path (it would then match no delta_files
+  # entry and the hunk would be filtered out)
+  printf '%s\n' a b > "$R/with space.md"
+  # an added line whose text starts `++ ` prints as `+++ …` inside the first
+  # hunk. Read as a header, it renames the file before the SECOND hunk, which
+  # then names no delta_files entry and is silently dropped.
+  printf '%s\n' a '++ looks like a header' b c d e F > "$R/plus.md"
+  plan '{"languages":["python"]}' --round 3 --prior-tree "$t1"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c .delta_hunks)" = \
+    '[{"file":"plus.md","kind":"added","start":2,"end":2},{"file":"plus.md","kind":"changed","start":7,"end":7},{"file":"with space.md","kind":"added","start":1,"end":2}]' ]
+}
+
+@test "plan: #2011 a failed hunk diff is exit 1 with no descriptor, never a null or empty hunk list" {
+  # Only the PATCH form of diff-tree fails, so delta_files alone would have
+  # succeeded: the failure must still fail the plan (#910), not emit a
+  # descriptor whose delta_hunks silently lost the fix pass's ranges.
+  echo "print(1)" > "$R/app.py"
+  local t1; t1="$(tree_id)"
+  echo "print(2)" > "$R/helper.py"
+  local fakegit="$BATS_TEST_TMPDIR/git-no-patch"
+  cat > "$fakegit" <<'EOF'
+#!/usr/bin/env bash
+for a in "$@"; do
+  if [ "$a" = "-p" ]; then echo "boom" >&2; exit 128; fi
+done
+exec git "$@"
+EOF
+  chmod +x "$fakegit"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    GIT_BIN="$fakegit" zsh "$S" plan --repo "$R" --base main --round 3 --prior-tree "$t1"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q -- 'could not compute the delta against --prior-tree'
 }
 
 @test "plan: #1434 scope_empty is reported on a FULL round too, not only a delta one" {
@@ -2333,7 +2423,7 @@ EOF
   plan '{"languages":["python"]}' --round 1
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r 'keys_unsorted | join(",")')" = \
-    "repo_type,review_skill,topic_review_skills,round,base,findings_path,changed_files,worktree_root,original_root,scope_abs,scope_mode,scope_empty,prior_tree,delta_files,fix_verification_path,adjudicated_path" ]
+    "repo_type,review_skill,topic_review_skills,round,base,findings_path,changed_files,worktree_root,original_root,scope_abs,scope_mode,scope_empty,prior_tree,delta_files,delta_hunks,fix_verification_path,adjudicated_path" ]
 }
 
 @test "#1582 --no-relative survives a user-level diff.relative=true" {
