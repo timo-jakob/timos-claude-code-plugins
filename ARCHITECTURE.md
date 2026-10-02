@@ -3467,9 +3467,13 @@ omission surface as a refusal instead of a silently unverified round.
 All nine panels (`claude-plugin`, `python`, `java`, `go`, `swift`, `javascript`,
 `kubernetes`, `opentofu`, and the `react` topic panel)
 carry **both rules**, with the empty-scope one's two qualifications, the
-confirmation-count report and — since #1583 — the hook-mode sidecar duty (write
-the per-entry accounting to `$REVIEW_FINDINGS.carry.json`, or the loop refuses
-the round); a new panel is not wired up until it states them all. A topic panel
+confirmation-count report and two later duties: since #1583 —
+the hook-mode sidecar duty (write the per-entry accounting to
+`$REVIEW_FINDINGS.carry.json`, or the loop refuses the round), and
+since #2010 — the split-carry duty (split the round's carry with
+`review-dispatch.zsh split-carry` and hand each reviewer only the path its own
+dimension maps to, never the whole-round `fix_verification_path`); a new panel
+is not wired up until it states them all. A topic panel
 running **beside** a language panel writes both that sidecar and its findings
 array only to paths given to that panel specifically, and otherwise returns them
 for the joiner to merge into the round's one file and one sidecar — so it never
