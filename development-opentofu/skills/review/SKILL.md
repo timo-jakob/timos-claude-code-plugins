@@ -145,7 +145,7 @@ and a delta round claims two things: that nothing that provisions moved since
 the previous round, *and* that the previous round's fixes landed. The carve-out
 covers only the first. So when the plan names a `fix_verification_path` holding
 **at least one** entry, this round is never a bare `[]` — **dispatch the agents
-anyway** with the carry, so they can confirm the carried fixes against the files
+anyway**, each with its own dimension's carry, so they can confirm the carried fixes against the files
 named in each entry. There is no second path: without an agent observation
 nothing can be confirmed or re-raised, so every entry would be unconfirmed and
 the loop would refuse the round. For each carried entry the agents report ONE
@@ -155,10 +155,21 @@ Never re-raise on the absence of a fix. An unconfirmed entry
 goes into the report only, never into the findings file; the loop, not you,
 decides what a carried entry nobody confirmed or re-raised means (#1583).
 
-**Report the triple whenever the carry is non-empty** — say in your report that
+**Report the triple whenever your own carry is non-empty** — say in your report that
 you confirmed N carried entries, re-raised M and left K unconfirmed, of TOTAL —
 **whatever you write to the findings file**, `[]` or otherwise. Omitting it is
 treated as a failed round.
+
+**Each reviewer is handed only its own dimension's carry (#2010).** Split the
+carry with `review-dispatch.zsh split-carry --fix-verification <path>`: it
+prints a `{dimension: path}` map (in hook mode the loop exports that map as
+`$REVIEW_FIX_VERIFICATION_BY_DIMENSION`), and each reviewer's Fix
+verification line names only the path its own dimension maps to. A reviewer
+whose dimension is not in the map gets no Fix verification line and reports
+no triple, so every carried entry is accounted for by exactly one reviewer,
+its owner, and the reviewers' TOTALs sum to the length of the carry. The
+caller-slip rule below is judged against the whole-round carry, never
+against one dimension's file.
 
 **A `null` or unreadable carry on a round ≥ 2 is a caller slip, not an empty
 carry.** Read it from the plan's `fix_verification_path` **or, in hook mode,
@@ -173,7 +184,7 @@ empty one.
 **In hook mode, write the accounting too (#1583).** The loop's hook mode reads
 the per-entry records behind the triple from `$REVIEW_FINDINGS.carry.json` — an
 array of `{file, dimension, title, confirmed[], re_raised[], unconfirmed[]}`
-records, one per carried entry, naming the reviewers in the three arrays — and
+records, one per carried entry, naming its owning reviewer (#2010) — and
 refuses the round (CARRY-UNACCOUNTED) without it whenever the carry is
 non-empty. In step mode the driving session assembles the same records from the
 agents' per-entry lines and passes them as `--carry-accounting`.
@@ -217,6 +228,9 @@ When the **review loop** drives this panel from round 2 on, its dispatch plan
 also carries `fix_verification_path` and `adjudicated_path`. Bind the two carry
 lines below, filling each only when the plan names a **non-null** path for it —
 that one test covers a standalone run (no descriptor at all) and round 1 alike.
+The Fix verification line carries the path the split-carry map (above) gives the
+agent's **own** dimension, never `fix_verification_path` itself, and is added
+only when the map holds that dimension (#2010).
 
 For each agent, use its name as the `subagent_type` and pass the prompt below,
 substituting **all seven** placeholders, plus one line per **non-null** carry
@@ -237,7 +251,7 @@ so the reviewer definitions stay pure prose:
     Source repository root: {REPO} — read the WHOLE non-pruned .tf tree under it (everything outside .terraform/, node_modules/, vendor/ and .git/) before reporting any absence; the scope bounds what you report on, never what you read.
     Changed source files in scope: {CHANGED FILES}
     Pre-dispatch gate: {GATE} — a "degraded" verdict means the roots listed as source-only were NOT validated: say so wherever a finding depends on it, and never claim tofu validate passed for them.
-    Fix verification (round >= 2): {FIX VERIFICATION} — the previous round's blockers. Confirm each one actually landed BEFORE looking for anything new. For each carried entry report ONE of confirmed / re-raised / unconfirmed, as one line keyed by the carry's own spelling — carried entry "<title>" (<file>, <dimension>): confirmed at <file:line> | re-raised (see finding) | unconfirmed — re-raising ONLY what you observed still present, at its ORIGINAL severity, citing the carried entry and the file:line plus the unchanged text in the findings file, even when its file is outside this round's scope; never re-raise on the absence of a fix. A re-raise is a finding whose file, dimension and title are the carried entry's own spelling (title verbatim) and whose line is the carried line or null, with what you observed in its description — under a different title it is not matched to the carry and the round is refused. Re-raise only carried entries of your own dimension ("{DIMENSION}", which the identity includes); an entry of another dimension that you see still present is reported unconfirmed, with what you saw in prose. End your report with the triple: carried: confirmed N / re-raised M / unconfirmed K of TOTAL.
+    Fix verification (round >= 2): {FIX VERIFICATION} — the previous round's blockers. Confirm each one actually landed BEFORE looking for anything new. For each carried entry report ONE of confirmed / re-raised / unconfirmed, as one line keyed by the carry's own spelling — carried entry "<title>" (<file>, <dimension>): confirmed at <file:line> | re-raised (see finding) | unconfirmed — re-raising ONLY what you observed still present, at its ORIGINAL severity, citing the carried entry and the file:line plus the unchanged text in the findings file, even when its file is outside this round's scope; never re-raise on the absence of a fix. A re-raise is a finding whose file, dimension and title are the carried entry's own spelling (title verbatim) and whose line is the carried line or null, with what you observed in its description — under a different title it is not matched to the carry and the round is refused. Every entry in that file is of your own dimension ("{DIMENSION}", which the identity includes) and is yours alone to account for: no other reviewer is shown it. End your report with the triple: carried: confirmed N / re-raised M / unconfirmed K of TOTAL, where TOTAL is the number of entries in that file.
     Already waived (round >= 2): {ADJUDICATED} — suggestions earlier rounds surfaced and the human waived. Do not re-raise them as Suggestions, EXCEPT in a file the PREVIOUS ROUND'S FIX PASS touched (on a delta round that is this round's scope; on a closing full sweep that NO fix pass preceded the set is empty, so withhold them — but on a sweep the residue promotion earned, a fix pass did run, so the exemption applies as on any round). A genuinely blocking re-raise at CRITICAL/WARNING is always allowed.
 
     Analyze the OpenTofu sources in scope following your instructions. Report every finding using the prose reporting format defined in your agent definition.

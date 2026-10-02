@@ -3425,11 +3425,17 @@ must not re-litigate. Each panel also states that when it DOES verify a
 non-empty carry it **reports how many carried entries it confirmed**, how many
 it re-raised and how many it left unconfirmed — on ANY
 round whose `fix_verification_path` holds entries, and whatever it writes to the
-findings file, `[]` or otherwise. Since #1583 each carried entry has exactly
-one of three outcomes per reviewer — confirmed, re-raised, unconfirmed: a
-re-raise cites what the reviewer observed still present (the file:line and the
-unchanged text, or the passing mutation), never the absence of a fix, and an
-unconfirmed entry is a count the reviewer reports, never a finding it writes.
+findings file, `[]` or otherwise. Since #2010 each carried entry has exactly
+one owner — the reviewer of its own dimension, the only reviewer shown it
+(`review-dispatch.zsh split-carry` hands each reviewer only its own
+dimension's entries) — and exactly one of three outcomes from that owner —
+confirmed, re-raised, unconfirmed: a re-raise cites what the reviewer observed
+still present (the file:line and the unchanged text, or the passing mutation),
+never the absence of a fix, and an unconfirmed entry is a count the reviewer
+reports, never a finding it writes. Each reviewer's triple counts its own
+entries, so the TOTALs sum to the carry's length. *(Retired by #2010: the #1583
+rule that every reviewer accounts for every entry, one outcome per reviewer,
+with one confirmation from any of them deciding the entry.)*
 That triple is what tells a result which passed
 verification from one that skipped it, and `/development:resolve-issue` §3.5
 step 2 keys a recovery arm on its absence — so scoping the duty to a clean `[]`
@@ -3443,10 +3449,11 @@ correctly wired without them. Not on a **full** round: there an empty scope
 means the story diff itself is empty, and `[]` would be the CONVERGED condition
 over a story that changed nothing. And not when the round's
 `fix_verification_path` holds entries — a bare `[]` would retire carried
-blockers with no agent confirming them, so the panel dispatches with the carry
-and accounts for every entry as one of confirmed, re-raised, unconfirmed; the
-loop, not the panel, refuses a round in which an entry is neither confirmed nor
-re-raised (the CARRY-UNACCOUNTED arm, below). A `null` or unreadable carry on a round ≥ 2
+blockers with no agent confirming them, so the panel dispatches each reviewer
+with its own dimension's carry, and every entry is accounted for by its owner
+as one of confirmed, re-raised, unconfirmed; the loop, not the panel, refuses a
+round in which an entry is neither confirmed nor re-raised by its owner (the
+CARRY-UNACCOUNTED arm, below). A `null` or unreadable carry on a round ≥ 2
 is a **different** case, not merely "the same as non-empty" — and it is read
 from the descriptor's `fix_verification_path` **or** hook mode's
 `$REVIEW_FIX_VERIFICATION`, since a hook-mode panel sees no descriptor at all
@@ -4275,6 +4282,16 @@ earlier in the story but not since the previous round is exactly the kind the
 delta round exists to surface, and filtering it by the delta would silently drop
 it.
 
+**`split-carry --fix-verification PATH`** (#2010) splits a carry by owner: it
+writes each dimension's carried entries to `<PATH-sans-.json>-<dimension>.json`
+and prints the `{dimension: path}` map (`{}` for an empty carry), leaving PATH
+byte-unchanged — it stays the loop's carry. It reads no repository. An entry
+with no dimension, or one whose dimension is not spelled
+`[A-Za-z0-9_][A-Za-z0-9_.-]*`, is exit 1 rather than dropped, since an ownerless
+entry is the one thing the split must never let through; a missing flag or a
+PATH not ending in `.json` is exit 2. The panel hands each reviewer only the
+path its own dimension maps to (*Review finding schema* above).
+
 **An unsupported or ambiguous repo type is a typed escalation, not a crash.**
 `plan` prints a JSON error object (`{"error":"unsupported_repo_type", …}` or
 `{"error":"ambiguous_repo_type", …}`) and exits `3`; the orchestrator surfaces
@@ -4602,7 +4619,9 @@ beside `.findings-digest-*`, `.findings-empty-*` and `.promote`, adopted on
 **not** under the repo-internal `.review/`, where writing every round would move
 the tree identity and defeat the #981 attestation this depends on):
 `verify-<N>.json` (the previous round's `.blocking`, passed as
-`--fix-verification` and exported as `REVIEW_FIX_VERIFICATION`, and written at
+`--fix-verification` and exported as `REVIEW_FIX_VERIFICATION` — beside its
+`split-carry` map, exported as `REVIEW_FIX_VERIFICATION_BY_DIMENSION` (#2010) —
+and written at
 the **end** of round N-1 rather than the start of round N — in step mode the
 round's panel runs between invocations, so a file first created at round N's
 start would be written after the reviewers meant to read it had finished; the
@@ -5029,11 +5048,13 @@ cannot reach it. Since #1583 a third wiring-independent arm,
 `verify-<R+1>.json` is written: a round with a non-empty carry whose
 accounting — step mode's `--carry-accounting FILE`, hook mode's
 `<findings-path>.carry.json` sidecar, either an array of `{file, dimension,
-title, confirmed[], re_raised[], unconfirmed[]}` records naming reviewers — is
-missing, malformed, names no carried identity, claims a re-raise the findings
+title, confirmed[], re_raised[], unconfirmed[]}` records each naming its entry's
+owning reviewer (#2010) — is missing, malformed (a record naming more than one
+distinct reviewer included), names no carried identity, claims a re-raise the findings
 file does not carry (refused by name — the accounting alone is not evidence —
 and this ground populates nothing), or leaves a carried identity neither
-confirmed nor re-raised by any reviewer (a carried entry the findings file
+confirmed nor re-raised by its owner, on every round, the closing sweep and the
+final round included (a carried entry the findings file
 re-raised — a blocking entry at that identity: same file, dimension and title,
 whatever its line, or one the consolidator matched to the carried prior — counts
 as re-raised whether or not a record says so). The status

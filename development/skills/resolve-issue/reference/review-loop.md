@@ -1970,48 +1970,60 @@ the #1571 correction above — the rule that replaces them is recorded here
 rather than edited into the span. **Where the span and this section disagree, this
 section governs.**
 
-Each reviewer reports ONE of three outcomes per carried entry: **confirmed**
-(it names where the fix is); **re-raised** (it observed the defect **still
-present** and cites what it saw — the file:line and the unchanged text, or the
-passing mutation — never the absence of a fix; the re-raise goes into the
-findings file at its original severity, citing the carried entry, *even when
-its file is outside this round's delta*); or **unconfirmed** (it could not
-establish either). An unconfirmed entry is a count, not a defect: it never
-enters the findings file and never becomes a blocking finding on its own.
-**One confirmation decides the accounting outcome whatever another reviewer
-reports** — but a re-raise in the findings file is a finding like any other:
-aggregate it unchanged, never drop it because a colleague confirmed; the loop
-carries it forward on its own evidence. **A re-raise comes only from the
-reviewer of the entry's own dimension** (the identity the loop matches on
-includes the dimension, and a finding stamped with another dimension is a
-different identity): a reviewer of another dimension that sees a carried
-defect still present reports it `unconfirmed` and says what it saw in prose. A
-reviewer silent about an entry contributes nothing either way, since the entry
-may be outside its dimension. What is refused — by the loop, not by you — is a
-carried entry that no reviewer confirmed **and** no reviewer re-raised, silent
-or reported-unconfirmed alike.
+**Every carried entry has exactly one owner (#2010): the reviewer of its own
+dimension.** The panel splits the carry with `review-dispatch.zsh split-carry
+--fix-verification <work_dir>/verify-<R>.json`, which writes each dimension's
+entries to `verify-<R>-<dimension>.json` and prints the `{dimension: path}`
+map, and hands each reviewer only its own dimension's path; a reviewer whose
+dimension is not in the map gets no Fix verification line at all. No reviewer
+is ever shown another dimension's entry, so each entry is verified once, by the
+one reviewer that can act on it. *(Retired: until #2010 every reviewer was
+handed every entry and accounted for each one, and one confirmation from any of
+them decided the outcome — about five verifications per entry, almost all of
+them `unconfirmed` reports from reviewers that could not re-raise it.)*
 
-**Tell each reviewer to account for every carried entry by the carry's own
-spelling, one line per entry, before its triple** (the panels' prompt-template
-line says so): `carried entry "<title>" (<file>, <dimension>): confirmed at
-<file:line> | re-raised (see finding) | unconfirmed`, then `carried: confirmed N
-/ re-raised M / unconfirmed K of TOTAL`. The per-entry lines are what you
-assemble; the triple is the checksum that the list is complete. A reviewer that
-reports no per-entry lines at all on a carried round took the wrong branch —
-re-dispatch **the panel** for that reviewer's dimension (you never spawn a
-reviewer agent directly: the panel's Step 1 is what wires the JSON layer and
-the fix-verification line into its prompt), never invent a record; one that
-reports `unconfirmed` (or nothing) for an entry outside its dimension is fine,
-and counts as silent for that entry.
+The owner reports ONE of three outcomes for each of its entries:
+**confirmed** (it names where the fix is); **re-raised** (it observed the
+defect **still present** and cites what it saw — the file:line and the
+unchanged text, or the passing mutation — never the absence of a fix; the
+re-raise goes into the findings file at its original severity, citing the
+carried entry, *even when its file is outside this round's delta*); or
+**unconfirmed** (it could not establish either). An unconfirmed entry is a
+count, not a defect: it never enters the findings file and never becomes a
+blocking finding on its own. **The owner's report decides the accounting
+outcome** — and a re-raise in the findings file is a finding like any other:
+aggregate it unchanged; the loop carries it forward on its own evidence. A
+re-raise keeps the entry's own dimension, since the identity the loop matches
+on includes it. Cross-dimension observations are no longer a duty: a reviewer
+that sees a problem in the same code raises it, if at all, as a finding of its
+own dimension. What is refused — by the loop, not by you — is a carried entry
+its owner neither confirmed **nor** re-raised, silent or reported-unconfirmed
+alike, and that includes an entry whose owning dimension was not dispatched or
+contributed no record: fail-closed on every round, the closing sweep and the
+final round included.
+
+**Tell each reviewer to account for every carried entry of its own dimension
+by the carry's own spelling, one line per entry, before its triple** (the
+panels' prompt-template line says so): `carried entry "<title>" (<file>,
+<dimension>): confirmed at <file:line> | re-raised (see finding) |
+unconfirmed`, then `carried: confirmed N / re-raised M / unconfirmed K of
+TOTAL`, where TOTAL is the length of its own dimension's file. The per-entry
+lines are what you assemble; each triple is the checksum that its reviewer's
+list is complete, and the reviewers' TOTALs together sum to the length of
+the file the split ran on. A reviewer that leaves any entry of its own
+dimension's file without a per-entry line took the wrong branch —
+re-dispatch **the panel** for that reviewer's dimension only (you never spawn
+a reviewer agent directly: the panel's Step 1 is what wires the JSON layer and
+the fix-verification line into its prompt), never invent a record.
 
 **Supply the accounting — without it the loop refuses.** On every round whose
 `verify-<R>.json` is non-empty, assemble one file from the reviewers' per-entry
 lines — an array of per-identity records, one per entry of `verify-<R>.json`,
-naming the reviewers under each outcome:
+each naming its owning reviewer under the one outcome it reported:
 
 ```json
 [{"file": "…", "dimension": "…", "title": "…",
-  "confirmed": ["<reviewer>", "…"], "re_raised": ["<reviewer>", "…"], "unconfirmed": ["<reviewer>", "…"]}]
+  "confirmed": ["<owning reviewer>"], "re_raised": [], "unconfirmed": []}]
 ```
 
 — and pass it as `--carry-accounting <carry-round-R.json>`, kept **outside**
@@ -2034,10 +2046,11 @@ renders it as `carried: confirmed N / re-raised M / unconfirmed K of T`), and
 refuses the round as `STALE_FINDINGS` — the **CARRY-UNACCOUNTED** arm, fired
 **before** `verify-<R+1>.json` is written, so `verify-<R>.json` stays the carry
 and the accumulators are untouched — when: no accounting was supplied; the file
-is not that shape; a record names no carried identity; a record claims a
+is not that shape (since #2010 that includes a record whose three arrays name
+more than one distinct reviewer); a record names no carried identity; a record claims a
 re-raise the findings file does not carry (the accounting alone is not
 evidence); or a carried identity has **no confirmation and no re-raise** from
-any reviewer. Its stderr names each such entry (`carry unaccounted: round R
+its owner. Its stderr names each such entry (`carry unaccounted: round R
 carried entry "…" (…) was neither confirmed nor re-raised by any reviewer
 (unconfirmed by: … | no reviewer reported it)`) and the status JSON lists them
 in `carry_unconfirmed[]` — never in `.blocking` (a record-only re-raise is
@@ -2055,8 +2068,9 @@ already ran and its per-entry lines are in `carry-lines-R.txt`: rebuild
 re-invoke; no reviewer runs. For an
 **unevidenced re-raise** the reviewer's finding sits under the wrong identity:
 re-dispatch **the panel** for that entry, quoting the carried `{file,
-dimension, title}` verbatim and saying the finding must carry it, with an
-**empty** scope (a delta-round panel reviews nothing and only accounts for the
+dimension, title}` verbatim and saying the finding must carry it — the re-dispatch
+reaches **only the owning dimension's reviewer** (#2010), never the whole
+panel — with an **empty** scope (a delta-round panel reviews nothing and only accounts for the
 carry) and a `fix_verification_path` naming only that entry. For an entry
 **neither confirmed nor re-raised**, re-dispatch the panel the same way for
 those entries only — **except a tool-verdict carry** (one stamped
@@ -2076,8 +2090,9 @@ re-raise that never reaches `.blocking` never reaches the next carry).
 Re-assemble the accounting from all the per-entry lines and re-invoke. If the
 re-run again leaves an entry unaccounted, report it in the conversation and
 stop. A confirmed-clean `[]` is legitimate and says so in its triple; the
-`kubernetes` panel's not-applicable arm above likewise dispatches with the carry
-and accounts for each entry as one of confirmed, re-raised, unconfirmed.
+`kubernetes` panel's not-applicable arm above likewise dispatches each agent with
+its own dimension's carry, and each owner accounts for its entries as one of
+confirmed, re-raised, unconfirmed.
 
 **One consequence the procedure above still states the old way.** Its parking
 rule concludes that "Residue cannot rescue it either: a parked blocker sits in a
@@ -2401,22 +2416,35 @@ modes* names.
    --round <round>`. From round 2 on, add `--prior-tree <delta_base>`,
    `--fix-verification <work_dir>/verify-<round>.json` and `--adjudicated
    <work_dir>/adjudicated.json`. Step 1 above governs when to add `--final`, the
-   plan's exit codes, and the `worktree_root` check.
+   plan's exit codes, and the `worktree_root` check. **On a carried round, split
+   the carry by owner (#2010):** run `review-dispatch.zsh split-carry
+   --fix-verification <work_dir>/verify-<round>.json` and keep the
+   `{dimension: path}` map it prints; never write `verify-<round>.json`, which
+   stays the loop's carry. Its exit 2 is your own malformed invocation — fix it
+   and re-run once; an exit 1, or a second exit 2, is `failed` /
+   `fix-verification-unreadable`.
 2. **Dispatch the reviewers** of the plan's `review_skill` and of every
    `topic_review_skills` entry (*Topic panels*), exactly as each skill's own
    Step 1 says. Its `SKILL.md` is in the same plugin cache as `<skill-base-dir>`:
    `<plugin-root>/<plugin>[/<version>]/skills/<skill>/SKILL.md`. Build each
-   prompt as step 1 and *Build each reviewer's scope block* say, carry included.
+   prompt as step 1 and *Build each reviewer's scope block* say, carry included
+   — each reviewer's Fix verification line names only the path the map gives
+   its own dimension, and a reviewer whose dimension the map does not hold gets
+   no such line (*Carry accounting*).
    **Dispatch every reviewer in the foreground** (`run_in_background: false`),
    all in one message, whatever that skill's Step 1 says: a background dispatch
    returns before the reviewer replies (ARCHITECTURE.md, *Subagent dispatch
    mechanism*).
 3. **On a carried round, settle the carry before writing anything.** Check that
-   every reviewer accounted for the carry; re-dispatch that reviewer once when it
-   gave no per-entry lines, with the prompt step 2 built for it — inside the
-   panel subagent, that is what *Carry accounting*'s "re-dispatch the panel"
-   means — and keep only its second reply. Then append every reviewer's
-   per-entry lines to `<work-dir>/carry-lines-<R>.txt` and assemble
+   every carried entry was accounted for by its owning dimension's reviewer —
+   judged by the per-entry lines, whose checksum is that the reviewers' TOTALs
+   sum to the length of the file step 1 split;
+   re-dispatch, once, only a reviewer that left any entry of its own
+   dimension's file without a per-entry line, with the prompt step 2 built
+   for it — inside the panel subagent, that is what *Carry accounting*'s
+   "re-dispatch the panel" means — and keep only its second reply. Then append
+   every reviewer's per-entry lines to `<work-dir>/carry-lines-<R>.txt` — one
+   owner's line per entry — and assemble
    `<work-dir>/carry-round-<R>.json` from them, as *Carry accounting* says.
 4. **Write the aggregate once** — every panel's findings joined unchanged, a
    re-dispatched reviewer's from its second reply — to
@@ -2448,7 +2476,8 @@ arms are yours, not the conductor's:
 
 **Carry modes.** Both write a `panel` verdict exactly as step 5 does.
 
-- **`carry-repair`** dispatches no reviewers. Read `<work-dir>/carry-lines-<R>.txt`,
+- **`carry-repair`** dispatches no reviewers. Read `<work-dir>/carry-lines-<R>.txt`
+  — one owning reviewer's line per entry since #2010 —
   rebuild `<work-dir>/carry-round-<R>.json` from those lines, and leave
   `findings-round-<R>.json` byte-unchanged. On success the verdict is `ok` with
   that untouched aggregate and its length, the rebuilt `carry-round-<R>.json`
@@ -2461,7 +2490,13 @@ arms are yours, not the conductor's:
   `verify-<R>.json`, which stays the loop's carry. Step 1 then plans with
   `--prior-tree <tree_id>` in place of `<delta_base>`, so the delta is empty,
   and `--fix-verification <work-dir>/verify-<R>-carry.json`, and never adds
-  `--final`. Steps 3 and 4 keep their re-dispatch and quoted-heredoc rules on
+  `--final`. Step 1's split runs on `verify-<R>-carry.json` instead, so
+  `carry_entries` are grouped by `dimension` and step 2 dispatches **only**
+  each group's owning reviewer (#2010) — never the whole panel, and a
+  dimension with no group is not dispatched, which is not
+  `dimension-not-run`; the handoff's
+  `carry_entries` stay the flat `round-handoff/v1` array.
+  Steps 3 and 4 keep their re-dispatch and quoted-heredoc rules on
   these paths: write their output to `<work-dir>/findings-round-<R>-carry.json`,
   merge it into `findings-round-<R>.json` (`jq -s 'add'`) once, atomically,
   append their per-entry lines to `carry-lines-<R>.txt`, and re-assemble

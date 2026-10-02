@@ -177,6 +177,20 @@
 #       "findings outside the story's diff do not appear" contract downstream of
 #       whatever the panel reported.
 #
+#   split-carry --fix-verification PATH
+#       One owner per carried entry (#2010). Read the carry at PATH (a JSON
+#       array of carried entries, `verify-<R>.json` or a carry-redispatch
+#       projection) and write each dimension's entries to
+#       `<PATH-sans-.json>-<dimension>.json`; print a `{dimension: path}` map on
+#       stdout (`{}` for an empty carry). PATH itself is never modified — it
+#       stays the loop's carry. The panel hands each reviewer only the path its
+#       own dimension maps to, so every entry is verified exactly once. Takes no
+#       `--repo`: it reads no repository. Exit 2 on a usage error (a missing
+#       flag, or a PATH not ending in `.json`); exit 1 when PATH is missing,
+#       unreadable, empty or not an array of entries that each name a
+#       dimension spelled `[A-Za-z0-9_][A-Za-z0-9_.-]*` (an ownerless entry is
+#       refused, never dropped), or a per-dimension file cannot be written.
+#
 # Seams (for tests / non-PATH installs):
 #   DETECT_STACK_BIN  overrides the detect-stack.sh binary (must emit the same
 #                     JSON, at least the `.languages` array; `.is_claude_plugin`,
@@ -1336,12 +1350,66 @@ cmd_scope_findings() {
   }
 }
 
-[[ $# -ge 1 ]] || die_usage "usage: review-dispatch.zsh <plan|detect|scope-findings> [flags]"
+cmd_split_carry() {
+  # One owner per carried entry (#2010): each reviewer is handed only its own
+  # dimension's entries, so the carry is split here rather than by each caller.
+  # Pure: no repo, no git — it reads one file and writes one file per dimension
+  # beside it.
+  local fixver=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --fix-verification) need_value "split-carry" "$@"; fixver="$2"; shift 2 ;;
+    -*) die_usage "split-carry: unknown flag: $1" ;;
+    *) die_usage "split-carry: unexpected argument: $1" ;;
+    esac
+  done
+  [[ -n "$fixver" ]] || die_usage "split-carry: --fix-verification is required"
+  # the output names are `<path-sans-.json>-<dimension>.json`; a path with no
+  # `.json` suffix has no stem to derive them from
+  [[ "$fixver" == *.json ]] || die_usage "split-carry: --fix-verification must name a .json file (got: $fixver)"
+  [[ -f "$fixver" && -r "$fixver" && -s "$fixver" ]] || {
+    print -u2 -- "split-carry: the carry is missing, unreadable or empty: $fixver"; exit 1 }
+  # A dimension becomes part of a file name, so it is held to a name-safe
+  # spelling: a `/` or a leading `.` would write outside the carry's directory
+  # or onto a hidden file. An entry with no dimension has no owner, and an
+  # ownerless entry is exactly what this split exists to rule out — refused,
+  # never dropped (dropping it would let the round converge with it unverified).
+  # -s + `length == 1`, like every sibling guard: a multi-value file must not
+  # pass on one value while the split below reads another.
+  jq -e -s 'length == 1 and (.[0] | type == "array" and all(.[];
+           type == "object" and (.dimension | type) == "string"
+           and (.dimension | test("^[A-Za-z0-9_][A-Za-z0-9_.-]*$"))))' \
+     < "$fixver" >/dev/null 2>&1 || {
+    print -u2 -- "split-carry: $fixver is not an array of carried entries that each name a dimension ([A-Za-z0-9_][A-Za-z0-9_.-]*)"; exit 1 }
+  local -a dims
+  dims=( ${(f)"$(jq -r '[ .[].dimension ] | unique | .[]' < "$fixver")"} ) || {
+    print -u2 -- "split-carry: could not read the dimensions of $fixver"; exit 1 }
+  local stem="${fixver%.json}" d out map='{}'
+  for d in "${dims[@]}"; do
+    [[ -n "$d" ]] || continue
+    out="${stem}-${d}.json"
+    # never the input itself — the input stays the loop's carry
+    [[ "${out:A}" != "${fixver:A}" ]] || {
+      print -u2 -- "split-carry: dimension $d would overwrite the carry $fixver"; exit 1 }
+    # written beside its final name and moved, so a failed write never leaves a
+    # truncated per-dimension file a reviewer would read as a short carry
+    jq -c --arg d "$d" '[ .[] | select(.dimension == $d) ]' < "$fixver" > "$out.tmp" \
+      && mv -f -- "$out.tmp" "$out" || {
+      rm -f -- "$out.tmp"
+      print -u2 -- "split-carry: could not write $out"; exit 1 }
+    map=$(jq -c --arg d "$d" --arg p "$out" '. + {($d): $p}' <<< "$map") || {
+      print -u2 -- "split-carry: could not build the dimension map"; exit 1 }
+  done
+  print -r -- "$map"
+}
+
+[[ $# -ge 1 ]] || die_usage "usage: review-dispatch.zsh <plan|detect|scope-findings|split-carry> [flags]"
 local sub="$1"; shift
 case "$sub" in
   plan) cmd_plan "$@" ;;
   detect) cmd_detect "$@" ;;
   scope-findings) cmd_scope_findings "$@" ;;
-  -h|--help) print -r -- "usage: review-dispatch.zsh <plan|detect|scope-findings> [flags]"; exit 0 ;;
-  *) die_usage "unknown subcommand: $sub (expected plan|detect|scope-findings)" ;;
+  split-carry) cmd_split_carry "$@" ;;
+  -h|--help) print -r -- "usage: review-dispatch.zsh <plan|detect|scope-findings|split-carry> [flags]"; exit 0 ;;
+  *) die_usage "unknown subcommand: $sub (expected plan|detect|scope-findings|split-carry)" ;;
 esac

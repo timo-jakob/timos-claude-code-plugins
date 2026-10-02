@@ -343,7 +343,12 @@
 #                 not re-raise). $REVIEW_FIX_VERIFICATION is EMPTY on round 1,
 #                 which has nothing to verify; $REVIEW_ADJUDICATED is ALWAYS a
 #                 path — the file simply holds `[]` until something is waived —
-#                 so test its CONTENTS, never its presence. Missing/empty
+#                 so test its CONTENTS, never its presence. Since #2010
+#                 $REVIEW_FIX_VERIFICATION_BY_DIMENSION is the
+#                 `review-dispatch.zsh split-carry` map of that carry,
+#                 {dimension: path}, `{}` when nothing is carried: each
+#                 reviewer is handed only its own dimension's path, so every
+#                 carried entry has one owner. Missing/empty
 #                 output is treated as "no findings" on a DELTA round only; on
 #                 a FULL round it is refused as STALE_FINDINGS (#1434), since
 #                 zero blockers there is the CONVERGED condition. A full round
@@ -353,8 +358,10 @@
 #                 on a round where $REVIEW_FIX_VERIFICATION holds entries it
 #                 must ALSO write the carry accounting — an array of
 #                 {file, dimension, title, confirmed[], re_raised[],
-#                 unconfirmed[]} records (reviewer names in the three arrays),
-#                 one per carried entry — to $REVIEW_FINDINGS.carry.json; the
+#                 unconfirmed[]} records (the owning reviewer's name in the
+#                 array of its outcome — a record naming two distinct
+#                 reviewers is refused, #2010), one per carried entry — to
+#                 $REVIEW_FINDINGS.carry.json; the
 #                 loop clears that sidecar before the hook runs and refuses the
 #                 round (CARRY-UNACCOUNTED) without it.
 #   --fix-cmd     applies the blockers. Sees $REVIEW_ROUND, $REVIEW_REPO,
@@ -1555,15 +1562,19 @@ _pft_auto_continue() {   # $1 = round, $2 = this round's changelist
 # Carry accounting (#1583) — the CARRY-UNACCOUNTED arm of STALE_FINDINGS.
 #
 # From round 2 on the panel is handed the previous round's blockers to verify
-# (`verify-<R>.json`, #1434). Each reviewer reports ONE of three outcomes per
-# carried entry: CONFIRMED (it names where the fix is), RE-RAISED (it observed
-# the defect still present, with evidence, and the re-raise is in the findings
-# file) or UNCONFIRMED (it could not establish either). A reviewer's ignorance
-# is a count, not a defect: an unconfirmed entry never becomes a blocking
-# finding on its own, and the union rule stands — ONE confirmation retires the
-# entry whatever another reviewer reports. What the loop refuses is a carried
-# identity that NO reviewer confirmed and NO reviewer re-raised, silent or
-# reported-unconfirmed alike, because consuming such a round would drop it from
+# (`verify-<R>.json`, #1434). Since #2010 each carried entry has ONE owner — the
+# reviewer of its own dimension, the only one shown it (`review-dispatch.zsh
+# split-carry`) — and that reviewer reports ONE of three outcomes for it:
+# CONFIRMED (it names where the fix is), RE-RAISED (it observed the defect
+# still present, with evidence, and the re-raise is in the findings file) or
+# UNCONFIRMED (it could not establish either). (Retired: before #2010 every
+# reviewer accounted for every entry and one confirmation from any of them
+# retired it.) An owner's ignorance is a count, not a defect: an unconfirmed
+# entry never becomes a blocking finding on its own. What the loop refuses is
+# a carried identity that its owner neither confirmed nor re-raised — silent,
+# reported-unconfirmed, or never dispatched alike (fail-closed on EVERY round,
+# the closing sweep and the final round included), and a record naming more
+# than one reviewer — because consuming such a round would drop it from
 # `verify-<R+1>.json` (written from `.blocking`) and the run could converge with
 # the blocker unfixed.
 #
@@ -1588,7 +1599,9 @@ _pft_auto_continue() {   # $1 = round, $2 = this round's changelist
 # accumulators untouched — the round simply re-runs on --resume. Every refusal
 # here is a caller mistake, resumable, so it takes the STALE_FINDINGS door:
 #   * a non-empty carry with NO accounting supplied;
-#   * an accounting file that is not the shape above;
+#   * an accounting file that is not the shape above — including, since
+#     #2010, a record whose three arrays together name more than one distinct
+#     reviewer (the retired every-reviewer shape);
 #   * an accounting entry that names no carried identity (a typo, or a stale
 #     file from another round — silently ignoring it would let the real entry
 #     go unaccounted);
@@ -1646,6 +1659,29 @@ _carry_account() {   # $1 = round; reads $fix_verification, $changelist, $findin
              and ((.re_raised // []) | type) == "array" and ((.unconfirmed // []) | type) == "array"))' \
        -- "$src" >/dev/null 2>&1 || \
       refuse_stale_findings "carry unaccounted: round $r's carry accounting $src is not an array of {file, dimension, title, confirmed[], re_raised[], unconfirmed[]} records — verify-$(( r + 1 )).json was NOT written and verify-$r.json remains the carry."
+    # One owner per carried entry (#2010): the records of one carried identity
+    # speak for ONE reviewer, the owner of its dimension, so records whose arrays
+    # together name two distinct reviewers — in one record or split across
+    # several, which the accounting below merges — are the pre-#2010
+    # every-reviewer shape: the same wrong-shape ground as above, so they take
+    # the same carry-repair recovery. Grouped by the identity the accounting
+    # matches on.
+    local multi=""
+    multi=$(jq -r '
+      def safe: tostring | gsub("[\r\n`\\\\]"; " ") | .[0:200];
+      def normtitle: ((. // "") | tostring | ascii_downcase | gsub("\\s+"; " ")
+        | sub("^ +"; "") | sub(" +$"; ""));
+      def normfile: ((. // "") | tostring | sub("^\\./"; ""));
+      def names: [ (.confirmed // [])[], (.re_raised // [])[], (.unconfirmed // [])[] ] | map(tostring);
+      [ group_by([ (.file | normfile), ((.dimension // "") | tostring), (.title | normtitle) ])[]
+        | select(([ .[] | names[] ] | unique | length) > 1)
+        | .[0] as $r
+        | "\"\($r.title | safe)\" (\($r.file | safe), \($r.dimension | safe)) names "
+          + ([ .[] | names[] ] | unique | map(safe) | join(", ")) ]
+      | join("; ")' -- "$src") || {
+      print -u2 -- "resolve-story-loop: could not read the carry accounting at round $r"; exit 1 }
+    [[ -z "$multi" ]] || \
+      refuse_stale_findings "carry unaccounted: round $r's carry accounting $src is not an array of {file, dimension, title, confirmed[], re_raised[], unconfirmed[]} records with one reviewer each — every carried entry is accounted for by its owning dimension's reviewer alone, and these records name more than one: $multi — verify-$(( r + 1 )).json was NOT written and verify-$r.json remains the carry."
     # NB: no apostrophes in this block — the jq program is single-quoted. Element
     # equality is tested with any(), never index(): on an array-of-arrays input
     # jq's index() searches for a SUBSEQUENCE, not an element.
@@ -3028,11 +3064,22 @@ while (( round <= effective_max )); do
     # so only what this round's panel writes is consulted.
     rm -f -- "$findings_path.carry.json" || {
       print -u2 -- "resolve-story-loop: could not clear the stale carry-accounting sidecar $findings_path.carry.json at round $round"; exit 1 }
+    # One owner per carried entry (#2010): the same split the step-mode panel
+    # brief runs, so a hook hands each reviewer only its own dimension's file.
+    # `{}` when nothing is carried (round 1, or an empty carry). The whole-round
+    # carry is still exported unchanged — the caller-slip rule is judged on it.
+    local carry_by_dim='{}'
+    if [[ -n "$fix_verification" && -s "$fix_verification" ]] \
+       && [[ "$(jq 'length' -- "$fix_verification" 2>/dev/null)" != 0 ]]; then
+      carry_by_dim=$("$DISPATCH" split-carry --fix-verification "$fix_verification") || {
+        print -u2 -- "resolve-story-loop: could not split the fix-verification carry $fix_verification by dimension at round $round"; exit 1 }
+    fi
     ( export REVIEW_ROUND="$round" REVIEW_FINDINGS="$findings_path" \
              REVIEW_SKILL="$review_skill" REVIEW_TOPIC_SKILLS="$topic_review_skills" \
              REVIEW_SCOPE_FILE="$scope_file" \
              REVIEW_REPO="$repo" REVIEW_SCOPE_MODE="$scope_mode" \
              REVIEW_FIX_VERIFICATION="$fix_verification" \
+             REVIEW_FIX_VERIFICATION_BY_DIMENSION="$carry_by_dim" \
              REVIEW_ADJUDICATED="$adjudicated_file"; eval "$review_cmd" ) || {
       print -u2 -- "resolve-story-loop: --review-cmd failed at round $round"; exit 1 }
   fi
