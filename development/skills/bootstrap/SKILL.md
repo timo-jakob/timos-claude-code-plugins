@@ -5071,13 +5071,19 @@ conflict.
    ```
 
    **Promise `renovate.json` only where the scaffold will write it.** Check,
-   before the plan, the places the scaffold checks: `renovate.json5`,
-   `.github/renovate.json(5)`, `.gitlab/renovate.json(5)`, `.renovaterc`,
-   `.renovaterc.json(5)`, a `renovate` key in `package.json`, and
-   `.github/dependabot.y(a)ml`. When any exists (and `renovate.json` itself does
-   not), the plan lists the other six files plus `renovate.json: skipped — <the
-   file> already configures Renovate / Dependabot`, and for Dependabot says the
-   member pins will not be bumped until the repository moves to Renovate.
+   before the plan, the places the scaffold checks, in the scaffold's order: the
+   Renovate configs first — `renovate.json5`, `.github/renovate.json(5)`,
+   `.gitlab/renovate.json(5)`, `.renovaterc`, `.renovaterc.json(5)`, then a
+   `renovate` key in `package.json` — and `.github/dependabot.y(a)ml` only when
+   none of those exists. When any exists (and `renovate.json` itself does not),
+   the plan lists the other six files plus `renovate.json: skipped — <the file>
+   already configures Renovate / Dependabot`. **A Renovate config wins over
+   Dependabot**: when one exists, the plan names that file and says to add the
+   image custom manager from `templates/renovate.json` to it, even when a
+   Dependabot config is also present — the same file the scaffold's `skipped
+   renovate.json` line names. Only when no Renovate config is found does the plan
+   name the Dependabot file and say the member pins will not be bumped until the
+   repository moves to Renovate.
 
 4. This section, in place of the rest of Step 3.
 5. Step 4d (initial commit), then Step 4e (the finishing flow) and Step 4g
