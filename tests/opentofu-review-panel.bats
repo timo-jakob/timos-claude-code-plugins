@@ -215,7 +215,7 @@ agent_section() {
   [ -n "$s" ]
   contains "$s" '**On a loop-driven DELTA round that carries NOTHING, every NOT-APPLICABLE shape writes `[]`**'
   contains "$s" '**"Carries nothing" is a precondition, not a detail'
-  contains "$s" '**dispatch the agents anyway** with the carry'
+  contains "$s" '**dispatch the agents anyway**, each with its own dimension'"'"'s carry'
   contains "$s" '**On a loop-driven FULL round the not-applicable terminal stands as written'
   contains "$s" '**In hook mode, write the accounting too (#1583).**'
   contains "$s" '**A FAILED round keeps the terminal on every round, delta or full**'

@@ -30,8 +30,8 @@ its arms.
 claims two things, not one: that nothing changed since the previous round, *and*
 that the previous round's fixes landed. An empty scope covers only the first. So
 when the plan names a `fix_verification_path` holding at least one entry, do not
-write a bare `[]`: account for every carried entry. For each carried entry report
-ONE of: confirmed (name the file:line where the fix is), re-raised (name the
+write a bare `[]`: account for every carried entry of your own dimension. For each
+carried entry report ONE of: confirmed (name the file:line where the fix is), re-raised (name the
 file:line and the unchanged text or the passing mutation you observed still
 present), unconfirmed (you could not establish either).
 Never re-raise on the absence of a fix. A re-raise goes into the findings file
@@ -44,12 +44,23 @@ when some carried entries are unconfirmed: the triple, not the findings file,
 carries the unconfirmed count, and the loop decides what it means. The rule
 forbids a `[]` that skipped the verification, not one that reported it.
 
-**Report the triple whenever the carry is non-empty** — `say in your report that
+**Report the triple whenever your own carry is non-empty** — `say in your report that
 you confirmed N carried entries, re-raised M and left K unconfirmed, of TOTAL` —
 **whatever you write to the findings file**, `[]` or otherwise. That count is the
 only thing that tells a caller a result which passed verification from one that
 skipped it, so a round that confirms the carry and *also* finds new blockers
 still owes it. Omitting it is treated as a failed round.
+
+**Each reviewer is handed only its own dimension's carry (#2010).** Split the
+carry with `review-dispatch.zsh split-carry --fix-verification <path>`: it
+prints a `{dimension: path}` map (in hook mode the loop exports that map as
+`$REVIEW_FIX_VERIFICATION_BY_DIMENSION`), and each reviewer's Fix
+verification line names only the path its own dimension maps to. A reviewer
+whose dimension is not in the map gets no Fix verification line and reports
+no triple, so every carried entry is accounted for by exactly one reviewer,
+its owner, and the reviewers' TOTALs sum to the length of the carry. The
+caller-slip rule below is judged against the whole-round carry, never
+against one dimension's file.
 
 **A `null` or unreadable carry on a round ≥ 2 is a caller slip, not an empty
 carry.** Read it from the plan's `fix_verification_path` **or, in hook mode,
@@ -68,7 +79,7 @@ evidence of an empty one.
 **In hook mode, write the accounting too (#1583).** The loop's hook mode reads
 the per-entry records behind your triple from `$REVIEW_FINDINGS.carry.json` — an
 array of `{file, dimension, title, confirmed[], re_raised[], unconfirmed[]}`
-records, one per carried entry, naming the reviewers in the three arrays — and
+records, one per carried entry, naming its owning reviewer (#2010) — and
 refuses the round (CARRY-UNACCOUNTED) without it whenever the carry is
 non-empty. In step mode the driving session assembles the same records from
 your per-entry lines and passes them as `--carry-accounting`.
@@ -116,10 +127,13 @@ descriptor at all, and on round 1 the loop's own caller passes no
 loop's own `plan` call passes `--adjudicated` on every round, so a loop-side
 descriptor may name it from round 1. The driving session's round-1 plan does
 not — and either way the non-null test gives the right answer.)
+The Fix verification line carries the path the split-carry map (above) gives the
+reviewer's **own** dimension, never `fix_verification_path` itself, and is
+added only when the map holds that dimension (#2010).
 
 ```text
 Review scope: {the review scope}
-Fix verification (round >= 2): {fix_verification_path} — the previous round's blockers. Confirm each one actually landed BEFORE looking for anything new. For each carried entry report ONE of confirmed / re-raised / unconfirmed, as one line keyed by the carry's own spelling — carried entry "<title>" (<file>, <dimension>): confirmed at <file:line> | re-raised (see finding) | unconfirmed — re-raising ONLY what you observed still present, at its ORIGINAL severity, citing the carried entry and the file:line plus the unchanged text or passing mutation in the findings file, even when its file is outside this round's scope; never re-raise on the absence of a fix. A re-raise is a finding whose file, dimension and title are the carried entry's own spelling (title verbatim) and whose line is the carried line or null, with what you observed in its description — under a different title it is not matched to the carry and the round is refused. Re-raise only carried entries of your own dimension ("{DIMENSION}", which the identity includes); an entry of another dimension that you see still present is reported unconfirmed, with what you saw in prose. End your report with the triple: carried: confirmed N / re-raised M / unconfirmed K of TOTAL.
+Fix verification (round >= 2): {own_fix_verification_path} — the previous round's blockers. Confirm each one actually landed BEFORE looking for anything new. For each carried entry report ONE of confirmed / re-raised / unconfirmed, as one line keyed by the carry's own spelling — carried entry "<title>" (<file>, <dimension>): confirmed at <file:line> | re-raised (see finding) | unconfirmed — re-raising ONLY what you observed still present, at its ORIGINAL severity, citing the carried entry and the file:line plus the unchanged text or passing mutation in the findings file, even when its file is outside this round's scope; never re-raise on the absence of a fix. A re-raise is a finding whose file, dimension and title are the carried entry's own spelling (title verbatim) and whose line is the carried line or null, with what you observed in its description — under a different title it is not matched to the carry and the round is refused. Every entry in that file is of your own dimension ("{DIMENSION}", which the identity includes) and is yours alone to account for: no other reviewer is shown it. End your report with the triple: carried: confirmed N / re-raised M / unconfirmed K of TOTAL, where TOTAL is the number of entries in that file.
 Already waived (round >= 2): {adjudicated_path} — suggestions earlier rounds surfaced and the human waived. Do not re-raise them as Suggestions, EXCEPT in a file the PREVIOUS ROUND'S FIX PASS touched (on a delta round that is this round's scope; on a closing full sweep that NO fix pass preceded the set is empty, so withhold them — but on a sweep the residue promotion earned, a fix pass did run, so the exemption applies as on any round). A genuinely blocking re-raise at CRITICAL/WARNING is always allowed.
 
 Analyze all Java code in scope following your instructions. Report every finding using the prose reporting format defined in your agent definition.
@@ -154,9 +168,9 @@ Brief summary of what was reviewed and overall code health assessment.
 - **Total findings:** X (Y critical, Z warnings, W suggestions)
 - **Carried entries:** confirmed N / re-raised M / unconfirmed K of TOTAL — required
   on any round whose `fix_verification_path` holds entries, whatever this
-  report's findings are (#1583: per-entry UNION outcomes — an entry is confirmed
-  if any reviewer confirmed it, else re-raised if any reviewer's re-raise is in
-  the findings file, else unconfirmed; reproduce each reviewer's per-entry
+  report's findings are (#1583, #2010: each entry's outcome is its owning
+  reviewer's — confirmed, else re-raised when that re-raise is in the findings
+  file, else unconfirmed; reproduce each reviewer's per-entry
   lines under this line — they are the source of the accounting records)
 - **Areas reviewed:** Bugs, Security, Performance, Code Quality, Tests, Resilience
 

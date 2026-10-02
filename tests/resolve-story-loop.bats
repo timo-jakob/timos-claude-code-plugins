@@ -3917,6 +3917,75 @@ resume_clean() {   # resume_clean <work-dir> <max-rounds>
   [ "$(jq -r '.final_changelist.blocking[0].title' "$BATS_TEST_TMPDIR/st.json")" = "T" ]
 }
 
+# --- #2010: one owner per carried entry
+
+@test "#2010 (a) hook mode: an entry accounted for by its owner alone passes, and the hook is handed the per-dimension split" {
+  WD="$BATS_TEST_TMPDIR/wd"
+  # round 2's panel records the split map it was handed, then confirms the one
+  # carried entry under ONE reviewer — the owner of the "bugs" dimension
+  loop --max-rounds 3 --status-file "$BATS_TEST_TMPDIR/st.json" \
+    --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"; else printf "%s" "$REVIEW_FIX_VERIFICATION_BY_DIMENSION" > "'"$BATS_TEST_TMPDIR"'/map-$REVIEW_ROUND.json"; printf "[]" > "$REVIEW_FINDINGS"; jq "[.[] | {file, dimension, title, confirmed: [\"bug-hunter\"], re_raised: [], unconfirmed: []}]" "$REVIEW_FIX_VERIFICATION" > "$REVIEW_FINDINGS.carry.json"; fi' \
+    --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.status' "$BATS_TEST_TMPDIR/st.json")" = "CONVERGED" ]
+  [ "$(jq -c '.round_changelists[1].carry_accounting.confirmed' "$BATS_TEST_TMPDIR/st.json")" = '[{"file":"app.py","dimension":"bugs","title":"T"}]' ]
+  # the hook saw the split map beside the unchanged whole-round carry
+  [ "$(jq -c 'keys' "$BATS_TEST_TMPDIR/map-2.json")" = '["bugs"]' ]
+  [ "$(jq -r '.bugs' "$BATS_TEST_TMPDIR/map-2.json")" = "$WD/verify-2-bugs.json" ]
+  [ "$(jq -c '[.[].dimension] | unique' "$WD/verify-2-bugs.json")" = '["bugs"]' ]
+}
+
+@test "#2010 (b) hook mode: an entry its owner never accounted for is refused CARRY-UNACCOUNTED, on the final round too" {
+  WD="$BATS_TEST_TMPDIR/wd"
+  # --max-rounds 2: round 2 is the run's LAST round, and the refusal still fires
+  # — no round is exempt from the one-owner rule (fail-closed)
+  loop --max-rounds 2 --status-file "$BATS_TEST_TMPDIR/st.json" \
+    --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; jq "[.[] | {file, dimension, title, confirmed: [], re_raised: [], unconfirmed: []}]" "$REVIEW_FIX_VERIFICATION" > "$REVIEW_FINDINGS.carry.json"; fi' \
+    --fix-cmd 'true'
+  [ "$status" -eq 2 ]
+  [ "$(jq -r '.status' "$BATS_TEST_TMPDIR/st.json")" = "STALE_FINDINGS" ]
+  contains "$output" 'carry unaccounted: round 2 carried entry "T" (app.py, bugs) was neither confirmed nor re-raised by any reviewer (no reviewer reported it)'
+  [ "$(jq -c '.carry_unconfirmed' "$BATS_TEST_TMPDIR/st.json")" = '[{"file":"app.py","dimension":"bugs","title":"T"}]' ]
+  [ ! -e "$WD/verify-3.json" ]
+}
+
+@test "#2010 (c) hook mode: a record naming two distinct reviewers is refused on the wrong-shape ground" {
+  WD="$BATS_TEST_TMPDIR/wd"
+  # the retired every-reviewer shape: the owner confirms AND a second reviewer
+  # reports the same entry unconfirmed. Before #2010 this was accepted (one
+  # confirmation retired the entry); now it is the wrong shape.
+  loop --max-rounds 3 --status-file "$BATS_TEST_TMPDIR/st.json" \
+    --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; jq "[.[] | {file, dimension, title, confirmed: [\"bug-hunter\"], re_raised: [], unconfirmed: [\"security-reviewer\"]}]" "$REVIEW_FIX_VERIFICATION" > "$REVIEW_FINDINGS.carry.json"; fi' \
+    --fix-cmd 'true'
+  [ "$status" -eq 2 ]
+  [ "$(jq -r '.status' "$BATS_TEST_TMPDIR/st.json")" = "STALE_FINDINGS" ]
+  contains "$output" 'records with one reviewer each'
+  contains "$output" '"T" (app.py, bugs) names bug-hunter, security-reviewer'
+  # the wrong-shape ground, not the unconfirmed one: nothing is listed as unconfirmed
+  [ "$(jq -c '.carry_unconfirmed' "$BATS_TEST_TMPDIR/st.json")" = "[]" ]
+  [ ! -e "$WD/verify-3.json" ]
+  [ "$(jq 'length' "$WD/verify-2.json")" -eq 1 ]
+}
+
+@test "#2010 hook mode: a carry split-carry refuses stops the loop before the panel runs" {
+  WD="$BATS_TEST_TMPDIR/wd"
+  local crit_sp="${CRIT/\"bugs\"/\"prose logic\"}"
+  loop --max-rounds 3 --status-file "$BATS_TEST_TMPDIR/st.json" \
+    --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" '"'$crit_sp'"' > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
+    --fix-cmd 'true'
+  [ "$status" -eq 1 ]
+  contains "$output" 'could not split the fix-verification carry'
+  [ ! -e "$WD/verify-3.json" ]
+}
+
+@test "#2010 hook mode: REVIEW_FIX_VERIFICATION_BY_DIMENSION is {} on round 1, where nothing is carried" {
+  loop --max-rounds 1 --status-file "$BATS_TEST_TMPDIR/st.json" \
+    --review-cmd 'printf "%s" "$REVIEW_FIX_VERIFICATION_BY_DIMENSION" > "'"$BATS_TEST_TMPDIR"'/map-$REVIEW_ROUND.json"; printf "[]" > "$REVIEW_FINDINGS"' \
+    --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/map-1.json")" = "{}" ]
+}
+
 @test "#1583 hook mode: a sidecar left at the findings path by an EARLIER run is cleared before the panel runs, and a directory there fails loudly" {
   # The findings path is per round (.review/findings-round-N.json), so nothing
   # stale survives WITHIN a run — the hazard is a second run in the same repo.

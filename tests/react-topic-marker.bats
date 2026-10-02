@@ -499,17 +499,21 @@ write_pkg() {
   [ "$status" -eq 1 ]
 }
 
-@test "the development-react plugin.json exists at v0.3.0 and marketplace.json matches it in lockstep" {
+@test "the development-react plugin.json exists at v0.3.x and marketplace.json matches it in lockstep" {
+  # The slice label is pinned (0.3.), the patch digit is not: a content change
+  # to the react panel moves only the patch (#2010), and an exact pin here would
+  # red on every one of them. Lockstep is asserted as equality between the two.
   plugin="$REPO_ROOT/development-react/.claude-plugin/plugin.json"
   [ -f "$plugin" ]
   run jq -er '.version' "$plugin"
   [ "$status" -eq 0 ]
-  [ "$output" = "0.3.0" ]
+  printf '%s\n' "$output" | grep -Eq '^0\.3\.[0-9]+$'
+  local pv="$output"
 
   run jq -er '.plugins[] | select(.name == "development-react") | .version' \
     "$REPO_ROOT/.claude-plugin/marketplace.json"
   [ "$status" -eq 0 ]
-  [ "$output" = "0.3.0" ]
+  [ "$output" = "$pv" ]
 }
 
 @test "the marketplace entry points at ./development-react" {

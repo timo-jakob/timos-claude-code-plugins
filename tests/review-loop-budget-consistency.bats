@@ -494,7 +494,7 @@ grep_site() {  # grep_site <file> <fixed-string>
   # as a presence check.
   grep_site "$ARCH_PANEL_DUTIES" '`fix_verification_path` holds entries'
   grep_site "$ARCH_PANEL_DUTIES" 'would retire carried'
-  grep_site "$ARCH_PANEL_DUTIES" 'the panel dispatches with the carry'
+  grep_site "$ARCH_PANEL_DUTIES" 'the panel dispatches each reviewer'
   grep_site "$ARCH_PANEL_DUTIES" 'reports how many carried entries it confirmed'
   grep_site "$ARCH_PANEL_DUTIES" 'confirmation-count report'
   # (2) the SCOPE of the count duty — the widening itself, not merely that a
@@ -554,13 +554,28 @@ grep_site() {  # grep_site <file> <fixed-string>
     # ...and the prompt-template line ends with the triple the conductor
     # assembles into the loop's --carry-accounting file (#1583)
     grep_site "$REPO_ROOT/$panel" 'carried: confirmed N / re-raised M / unconfirmed K of TOTAL'
-    # ...the re-raise IDENTITY rule and the own-dimension restriction on that
-    # same line (#1583 round-1 fix): a re-raise under any other spelling is not
-    # matched to the carry and the round is refused, and a reviewer of another
-    # dimension reports the entry unconfirmed rather than filing it under its
-    # own dimension (which would be exactly such an unmatched re-raise)
+    # ...the re-raise IDENTITY rule on that same line (#1583 round-1 fix): a
+    # re-raise under any other spelling is not matched to the carry and the
+    # round is refused
     grep_site "$REPO_ROOT/$panel" "the carried entry's own spelling (title verbatim)"
-    grep_site "$REPO_ROOT/$panel" 'Re-raise only carried entries of your own dimension'
+    # ...and the one-owner rule (#2010): the reviewer is handed only its own
+    # dimension's entries, the triple is own-carry, and the retired clause that
+    # made every reviewer report other dimensions' entries is gone
+    grep_site "$REPO_ROOT/$panel" 'is yours alone to account for: no other reviewer is shown it'
+    grep_site "$REPO_ROOT/$panel" 'where TOTAL is the number of entries in that file'
+    grep_site "$REPO_ROOT/$panel" '**Report the triple whenever your own carry is non-empty**'
+    grep_site "$REPO_ROOT/$panel" 'split-carry --fix-verification <path>'
+    grep_site "$REPO_ROOT/$panel" 'caller-slip rule below is judged against the whole-round carry'
+    run -1 grep -Fq -e 'an entry of another dimension that you see still present is reported unconfirmed' -- "$REPO_ROOT/$panel"
+    # ...and each reviewer's Fix verification line names only its own
+    # dimension's carry path, never the whole-round one (#2010)
+    grep_site "$REPO_ROOT/$panel" 'verification line names only the path its own dimension maps to'
+    grep_site "$REPO_ROOT/$panel" 'never `fix_verification_path` itself'
+    run -1 grep -Fq -e 'Fix verification (round >= 2): {fix_verification_path}' -- "$REPO_ROOT/$panel"
+    case "$panel" in
+      development-kubernetes/*|development-opentofu/*) ;;
+      *) grep_site "$REPO_ROOT/$panel" 'Fix verification (round >= 2): {own_fix_verification_path}' ;;
+    esac
     grep_site "$REPO_ROOT/$panel" 'suggestions earlier rounds surfaced and the human waived'
   done
   # the Metrics bullet of the five report-writing panels (kubernetes and
@@ -898,7 +913,7 @@ _outside_moved_spans() {  # $1 = file
     "development/skills/resolve-issue/reference/review-loop.md|Carry accounting — confirmed, re-raised, unconfirmed"
     "development/skills/resolve-issue/reference/review-loop.md|from the excerpt, as one of confirmed, re-raised, unconfirmed"
     "development/skills/resolve-issue/reference/review-loop.md|confirmed, re-raised, unconfirmed — **even when its file is outside this"
-    "ARCHITECTURE.md|one of three outcomes per reviewer — confirmed, re-raised, unconfirmed"
+    "ARCHITECTURE.md|and exactly one of three outcomes from that owner —"
     "ARCHITECTURE.md|accounts for each entry as one of confirmed, re-raised, unconfirmed"
     # the four single-site rules the round-1 fix pass added (no lockstep copy
     # exists, so nothing else pins them): the kubernetes panel's carried-re-raise
@@ -906,7 +921,7 @@ _outside_moved_spans() {  # $1 = file
     # and the addendum's panel re-dispatch and its separate output path
     "development-kubernetes/skills/review/SKILL.md|A re-raise of a CARRIED entry is the one exception"
     "development-kubernetes/skills/review/SKILL.md|reproduce each agent's per-entry lines verbatim"
-    "development/skills/resolve-issue/reference/review-loop.md|re-dispatch **the panel** for that reviewer's dimension"
+    "development/skills/resolve-issue/reference/review-loop.md|re-dispatch **the panel** for that reviewer's dimension only"
     "development/skills/resolve-issue/reference/review-loop.md|A re-dispatch writes to its own path"
   )
   local p
@@ -925,6 +940,13 @@ _outside_moved_spans() {  # $1 = file
   [ "$matched" -eq 21 ]
   # ...and the sites really are 8 distinct files
   [ "$(printf '%s\n' "${sites[@]}" | cut -d'|' -f1 | sort -u | wc -l | tr -d ' ')" -eq 8 ]
+  # Carry accounting's re-dispatch trigger (outside the counted sites: it is
+  # the recovery rule, not a three-outcome site): an owner that answers only
+  # some of its entries is re-dispatched too, and the old "no per-entry lines"
+  # trigger, which let a partial answer through, does not come back
+  local loop="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md"
+  grep_site "$loop" "dimension's file without a per-entry line took the wrong branch"
+  run -1 grep -Fq -e 'reports no per-entry lines' -- "$loop"
 }
 
 @test "#1583 AC 9: the explanation page states the unconfirmed outcome and carries no retired spelling" {

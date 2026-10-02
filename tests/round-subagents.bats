@@ -187,7 +187,25 @@ load_fix_brief() {
   load_panel_brief
   contains "$panel" '`<work-dir>/carry-lines-<R>.txt`'
   contains "$panel" '`<work-dir>/carry-round-<R>.json`'
-  contains "$panel" 'Check that every reviewer accounted for the carry'
+  contains "$panel" 'Check that every carried entry was accounted for by its owning dimension'"'"'s reviewer'
+  # #2010: one owner per entry — the TOTALs are the checksum across owners
+  contains "$panel" 'judged by the per-entry lines, whose checksum is that the reviewers'"'"' TOTALs sum to the length of the file step 1 split;'
+  lacks "$panel" 'Check that every reviewer accounted for the carry'
+}
+
+@test "#2010: the panel splits the carry by owner and hands each reviewer only its own dimension's path" {
+  load_panel_brief
+  contains "$panel" '**On a carried round, split the carry by owner (#2010):** run `review-dispatch.zsh split-carry --fix-verification <work_dir>/verify-<round>.json`'
+  contains "$panel" 'never write `verify-<round>.json`, which stays the loop'"'"'s carry'
+  # a split failure takes an EXISTING cause — the verdict vocabulary is unchanged
+  contains "$panel" 'an exit 1, or a second exit 2, is `failed` / `fix-verification-unreadable`'
+  contains "$panel" 'each reviewer'"'"'s Fix verification line names only the path the map gives its own dimension, and a reviewer whose dimension the map does not hold gets no such line'
+  # carry-redispatch: grouped by dimension, owners only, flat v1 handoff kept
+  contains "$panel" 'Step 1'"'"'s split runs on `verify-<R>-carry.json` instead, so `carry_entries` are grouped by `dimension` and step 2 dispatches **only** each group'"'"'s owning reviewer (#2010) — never the whole panel'
+  contains "$panel" 'a dimension with no group is not dispatched, which is not `dimension-not-run`'
+  contains "$panel" 'the handoff'"'"'s `carry_entries` stay the flat `round-handoff/v1` array'
+  # carry-repair still rebuilds from the lines, now one owner's line per entry
+  contains "$panel" 'Read `<work-dir>/carry-lines-<R>.txt` — one owning reviewer'"'"'s line per entry since #2010 — rebuild `<work-dir>/carry-round-<R>.json` from those lines'
 }
 
 @test "AC7: the panel writes a panel verdict" {
@@ -217,13 +235,13 @@ load_fix_brief() {
 @test "AC7: the panel never authors findings, and re-dispatches a silent carry reviewer once" {
   load_panel_brief
   contains "$panel" "Never author a finding, edit one, or write \`[]\` on a reviewer's behalf."
-  contains "$panel" 're-dispatch that reviewer once when it gave no per-entry lines'
+  contains "$panel" 're-dispatch, once, only a reviewer that left any entry of its own dimension'"'"'s file without a per-entry line'
   contains "$panel" "write every file in steps 3 and 4 with a quoted heredoc"
   contains "$panel" "\`cat > <file> <<'EOF'\` to create one, \`cat >> <file> <<'EOF'\` only to append each reviewer's lines to \`carry-lines-<R>.txt\`"
   contains "$panel" 'never an unquoted one or an interpolated string'
   contains "$panel" '**On a carried round, settle the carry before writing anything.**'
   contains "$panel" 'and keep only its second reply'
-  contains "$panel" 're-dispatch that reviewer once when it gave no per-entry lines, with the prompt step 2 built for it'
+  contains "$panel" 're-dispatch, once, only a reviewer that left any entry of its own dimension'"'"'s file without a per-entry line, with the prompt step 2 built for it'
   contains "$panel" '**Write the aggregate once** — every panel'"'"'s findings joined unchanged, a re-dispatched reviewer'"'"'s from its second reply'
 }
 
