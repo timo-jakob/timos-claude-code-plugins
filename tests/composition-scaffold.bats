@@ -299,6 +299,12 @@ stub_path_with() {
   contains "$output" "unknown argument: --bogus"
 }
 
+@test "a missing --repo is a usage error" {
+  run zsh "$SCAFFOLD" --member "$MEMBER_API"
+  [ "$status" -eq 2 ]
+  contains "$output" "--repo is required"
+}
+
 @test "a --repo that is not a directory is a usage error" {
   run zsh "$SCAFFOLD" --repo "$BATS_TEST_TMPDIR/nope" --member "$MEMBER_API"
   [ "$status" -eq 2 ]
@@ -1092,6 +1098,7 @@ section_3m() {
   contains "$s" '**Promise `renovate.json` only where the scaffold will write it.**'
   # #1903: the plan states the scaffold's precedence — a Renovate config wins
   # over Dependabot — so a repo carrying both gets the Renovate reason
+  contains "$s" 'the Renovate configs first — `renovate.json5`, `.github/renovate.json(5)`, `.gitlab/renovate.json(5)`, `.renovaterc`, `.renovaterc.json(5)`, then a `renovate` key in `package.json`'
   contains "$s" 'and `.github/dependabot.y(a)ml` only when none of those exists'
   contains "$s" '**A Renovate config wins over Dependabot**: when one exists, the plan names that file and says to add the image custom manager from `templates/renovate.json` to it, even when a Dependabot config is also present'
   contains "$s" 'Only when no Renovate config is found does the plan name the Dependabot file'
