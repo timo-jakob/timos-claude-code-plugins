@@ -2122,6 +2122,34 @@ The normative statement, with the reasoning and what is deliberately not
 changed, is in `residue.md` § *Condition 2 — removed; the story-diff rail is
 upstream (#1571)*.
 
+### Carry-driven dispatch (#2008)
+
+A panel may skip a dimension on **delta** rounds — its review skill's Step 1
+table says which, and when. Skipping must never strand that dimension's carried
+entries, because only the owner can account for them, and an entry its owner
+never saw is refused as CARRY-UNACCOUNTED (*Carry accounting*). So the generic
+rule is:
+
+**A dimension skipped on delta rounds is dispatched on a delta round exactly
+when #2010's split-carry map holds its key.** The map is what `review-dispatch.zsh
+split-carry` prints for the round's `verify-<R>.json` — in hook mode,
+`$REVIEW_FIX_VERIFICATION_BY_DIMENSION`. Holding the key is the whole test:
+it means the round carries at least one entry of that dimension, so its owner
+is present to confirm or re-raise each one. A delta round whose map does not
+hold the key does not dispatch the dimension, and that is a dimension not
+planned for the round — not `dimension-not-run` (*Panel subagent brief*).
+
+The rule only ever **adds** a dispatch. Full rounds — round 1 and every closing
+sweep, `scope_mode: "full"` — run every dimension their table plans for them,
+whatever the carry holds. A dimension dispatched only for its carry still
+reviews the round's scope like any other reviewer; the carry is why it runs,
+not a limit on what it may raise.
+
+Where it applies today: the claude-plugin panel's `manifest_bump` dimension
+(`claude-plugin-manifest-check`), which runs on full rounds and, on a delta
+round, only by this rule. A panel that adds another delta-skipped dimension
+cites this subsection rather than restating it.
+
 ### The third histogram state — present, below the threshold (#1510)
 
 Step 3's fix-pass trigger above closes two histogram states with an explicit
@@ -2444,7 +2472,11 @@ modes* names.
    for it — inside the panel subagent, that is what *Carry accounting*'s
    "re-dispatch the panel" means — and keep only its second reply. Then append
    every reviewer's per-entry lines to `<work-dir>/carry-lines-<R>.txt` — one
-   owner's line per entry — and assemble
+   owner's line per entry. A script reviewer counts as one (#2008): the
+   claude-plugin panel's `check-manifests.zsh` writes its per-entry lines and
+   triple to its `--carry-out` file, which you append to `carry-lines-<R>.txt`
+   unchanged, and its records name `check-manifests.zsh` as the `manifest`
+   owner. Then assemble
    `<work-dir>/carry-round-<R>.json` from them, as *Carry accounting* says.
 4. **Write the aggregate once** — every panel's findings joined unchanged, a
    re-dispatched reviewer's from its second reply — to
@@ -2509,7 +2541,7 @@ non-`ok` verdict instead, and write no findings file:
 
 | Situation | `outcome` / `cause` |
 |---|---|
-| a reviewer dimension did not run | `failed` / `dimension-not-run` |
+| a planned dimension did not run | `failed` / `dimension-not-run` |
 | a reviewer prompt or a review skill could not be rendered or found | `failed` / `render-failed` |
 | round ≥ 2 and the plan's `fix_verification_path` is `null` | `failed` / `fix-verification-null` |
 | that path is set but a reviewer could not read it | `failed` / `fix-verification-unreadable` |
@@ -2520,6 +2552,14 @@ non-`ok` verdict instead, and write no findings file:
 | a full round whose story diff is empty | `not_applicable` / `story-diff-empty` |
 | the language panel reported NOT APPLICABLE on a full round | `not_applicable` / `not-applicable` |
 | you have no `Agent` tool | `failed` / `no-agent-tool` |
+
+**Planned** is the review skill's own Step 1 table, read for this round (#2008).
+A dimension that table does not plan this round produces no verdict at all —
+it is neither run nor missing, so it never raises `dimension-not-run`. Rounds
+are told apart by the plan's `scope_mode` and the split-carry map, never by the
+round number alone (round 1 and every closing sweep are both `"full"`); a
+dimension skipped on delta rounds comes back by *Carry-driven dispatch
+(#2008)*. `round-verdict/v1` and the cause vocabulary above are unchanged.
 
 Never author a finding, edit one, or write `[]` on a reviewer's behalf.
 

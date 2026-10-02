@@ -739,3 +739,15 @@ $victim" ]
     }
   done
 }
+
+@test "#2008 the manifest split: the script is no carrier, and manifest-check stays one as manifest_bump" {
+  # The evidence rule caps an UNRUN tool verdict. check-manifests.zsh IS the
+  # tool run, so it ships under skills/, never agents/, and is no carrier; the
+  # agent keeps the rule for the bump-size judgment it still makes.
+  [ -f "$REPO_ROOT/development-claude-plugin/skills/review/scripts/check-manifests.zsh" ]
+  carriers="$(carriers_in "$REPO_ROOT")"
+  grep -qxF 'development-claude-plugin/agents/claude-plugin-manifest-check.md' <<< "$carriers"
+  run ! grep -q 'check-manifests' <<< "$carriers"
+  grep -qF 'The manifest_bump dimension of /development-claude-plugin:review' \
+    "$REPO_ROOT/development-claude-plugin/agents/claude-plugin-manifest-check.md"
+}

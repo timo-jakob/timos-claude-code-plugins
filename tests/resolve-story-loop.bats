@@ -167,6 +167,14 @@ ambiguous_run() {   # -> ESCALATE_AMBIGUOUS (pre-loop: two languages)
   [ "$(jq '.summary.blocking' "$BATS_TEST_TMPDIR/wd/changelist-2.json")" -eq 0 ]
 }
 
+@test "#2008 hook mode: the review hook sees the loop's --base as \$REVIEW_BASE" {
+  export SNAP="$BATS_TEST_TMPDIR"
+  loop --review-cmd 'printf "%s" "$REVIEW_BASE" > "$SNAP/base-r$REVIEW_ROUND.txt"; printf "[]" > "$REVIEW_FINDINGS"' \
+       --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/base-r1.txt")" = 'main' ]
+}
+
 @test "#1485 hook mode: a FULL round over an EMPTY story diff is refused even on a written []" {
   # The twin of the no-findings-file arm above: this panel DOES write `[]`, so
   # only the round's scope tells "found nothing" from "saw nothing". Hook mode
@@ -3903,11 +3911,11 @@ resume_clean() {   # resume_clean <work-dir> <max-rounds>
 @test "#1583 hook mode: an UNCONFIRMED sidecar refuses the round naming the entry, and lists it in carry_unconfirmed" {
   WD="$BATS_TEST_TMPDIR/wd"
   loop --max-rounds 3 --status-file "$BATS_TEST_TMPDIR/st.json" \
-    --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; jq "[.[] | {file, dimension, title, confirmed: [], re_raised: [], unconfirmed: [\"manifest-check\"]}]" "$REVIEW_FIX_VERIFICATION" > "$REVIEW_FINDINGS.carry.json"; fi' \
+    --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; jq "[.[] | {file, dimension, title, confirmed: [], re_raised: [], unconfirmed: [\"bug-hunter\"]}]" "$REVIEW_FIX_VERIFICATION" > "$REVIEW_FINDINGS.carry.json"; fi' \
     --fix-cmd 'true'
   [ "$status" -eq 2 ]
   [ "$(jq -r '.status' "$BATS_TEST_TMPDIR/st.json")" = "STALE_FINDINGS" ]
-  contains "$output" 'carry unaccounted: round 2 carried entry "T" (app.py, bugs) was neither confirmed nor re-raised by any reviewer (unconfirmed by: manifest-check)'
+  contains "$output" 'carry unaccounted: round 2 carried entry "T" (app.py, bugs) was neither confirmed nor re-raised by any reviewer (unconfirmed by: bug-hunter)'
   [ "$(jq -c '.carry_unconfirmed' "$BATS_TEST_TMPDIR/st.json")" = '[{"file":"app.py","dimension":"bugs","title":"T"}]' ]
   [ ! -e "$WD/verify-3.json" ]
   [ "$(jq '.round_changelists | length' "$BATS_TEST_TMPDIR/st.json")" -eq 1 ]

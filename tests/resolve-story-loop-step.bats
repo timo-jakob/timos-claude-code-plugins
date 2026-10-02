@@ -3414,10 +3414,10 @@ carry_record() {  # carry_record <confirmed[]> <re_raised[]> <unconfirmed[]>
   local before; before="$(shasum -a 256 "$WD/verify-2.json")"
   printf '[]' > "$F"
   step --resume --status-file "$BATS_TEST_TMPDIR/st.json" \
-    --carry-accounting "$(carry_record '[]' '[]' '["claude-plugin-manifest-check"]')"
+    --carry-accounting "$(carry_record '[]' '[]' '["python-bug-hunter"]')"
   [ "$status" -eq 2 ]
   [ "$(jq -r '.status' "$BATS_TEST_TMPDIR/st.json")" = "STALE_FINDINGS" ]
-  contains "$output" 'carry unaccounted: round 2 carried entry "T" (app.py, bugs) was neither confirmed nor re-raised by any reviewer (unconfirmed by: claude-plugin-manifest-check)'
+  contains "$output" 'carry unaccounted: round 2 carried entry "T" (app.py, bugs) was neither confirmed nor re-raised by any reviewer (unconfirmed by: python-bug-hunter)'
   contains "$output" 'verify-3.json was NOT written and verify-2.json remains the carry'
   [ "$(jq -c '.carry_unconfirmed' "$BATS_TEST_TMPDIR/st.json")" = '[{"file":"app.py","dimension":"bugs","title":"T"}]' ]
   # AC 4, never in .blocking: the refused round was consumed by NOTHING — no
@@ -3436,9 +3436,25 @@ carry_record() {  # carry_record <confirmed[]> <re_raised[]> <unconfirmed[]>
   grep -q -- '^\*\*Refused (round 2):\*\* stale findings — carry unaccounted: round 2 carried entry "T"' "$WD/progress.md"
   # the recovery: the panel is re-dispatched for that entry, confirms it, and
   # the same --resume is accepted
-  step --resume --carry-accounting "$(carry_record '["claude-plugin-manifest-check"]' '[]' '[]')"
+  step --resume --carry-accounting "$(carry_record '["python-bug-hunter"]' '[]' '[]')"
   [ "$status" -eq 20 ]
   [ "$(echo "$output" | jq -c '.carry_unconfirmed')" = "[]" ]
+}
+
+@test "#2008 a script owner: a carried manifest entry confirmed by check-manifests.zsh is accepted, unchanged" {
+  # check-manifests.zsh owns the claude-plugin panel's `manifest` dimension, and
+  # its --carry-out lines become ordinary per-identity records — the loop's
+  # carry accounting takes a script owner exactly as it takes an agent one.
+  printf '%s' '[{"severity":"CRITICAL","dimension":"manifest","file":"app.py","line":null,"title":"fixture: content changed with no version bump","description":"d","suggested_fix":"","reviewer":"check-manifests.zsh","round":1}]' > "$F"
+  step
+  [ "$status" -eq 20 ]
+  printf '[]' > "$F"
+  local rec="$BATS_TEST_TMPDIR/carry-manifest.json"
+  printf '[{"file":"app.py","dimension":"manifest","title":"fixture: content changed with no version bump","confirmed":["check-manifests.zsh"],"re_raised":[],"unconfirmed":[]}]' > "$rec"
+  step --resume --status-file "$BATS_TEST_TMPDIR/st.json" --carry-accounting "$rec"
+  [ "$status" -eq 20 ]
+  [ "$(jq -c '.carry_unconfirmed' "$BATS_TEST_TMPDIR/st.json")" = "[]" ]
+  [ "$(jq '.round_changelists[1].carry_accounting.confirmed | length' "$BATS_TEST_TMPDIR/st.json")" -eq 1 ]
 }
 
 @test "#1583 AC 3(d) nobody mentions X at all -> the same refusal, 'no reviewer reported it'" {

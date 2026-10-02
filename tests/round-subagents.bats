@@ -252,7 +252,8 @@ load_fix_brief() {
 
 @test "AC7: the panel brief maps every stop situation to its outcome and cause" {
   load_panel_brief
-  contains "$panel" '| a reviewer dimension did not run | `failed` / `dimension-not-run` |'
+  contains "$panel" '| a planned dimension did not run | `failed` / `dimension-not-run` |'
+  lacks "$panel" 'a reviewer dimension did not run'
   contains "$panel" '| a reviewer prompt or a review skill could not be rendered or found | `failed` / `render-failed` |'
   contains "$panel" "| round ≥ 2 and the plan's \`fix_verification_path\` is \`null\` | \`failed\` / \`fix-verification-null\` |"
   contains "$panel" '| that path is set but a reviewer could not read it | `failed` / `fix-verification-unreadable` |'

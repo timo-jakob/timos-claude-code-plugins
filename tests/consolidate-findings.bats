@@ -1226,7 +1226,7 @@ EOF
   # but forgot the rewrite must NOT block — otherwise the field quietly becomes a
   # second, undocumented promotion path that no severity bar governs.
   cat > "$F" <<'EOF'
-[{"severity":"SUGGESTION","dimension":"contract","file":"docs/b.md","line":12,"title":"version check would mismatch","description":"decides: zsh scripts/check-marketplace-sync.zsh","reviewer":"claude-plugin-manifest-check","decided":"red"}]
+[{"severity":"SUGGESTION","dimension":"contract","file":"docs/b.md","line":12,"title":"version check would mismatch","description":"decides: zsh scripts/check-marketplace-sync.zsh","reviewer":"claude-plugin-contract-integrity","decided":"red"}]
 EOF
   con
   [ "$status" -eq 0 ]
