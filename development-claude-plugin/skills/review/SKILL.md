@@ -106,17 +106,22 @@ standalone run has no descriptor at all, which the **Runs** cells name as *no pl
 | Reviewer | Kind | Model | Dimension | Runs |
 | --------------------------------- | ------ | ------ | -------------- | ---- |
 | claude-plugin-prose-logic | agent | fable | prose_logic | every round |
-| claude-plugin-contract-integrity | agent | opus | contract | every round |
+| claude-plugin-contract-integrity | agent | opus | contract | `scope_mode` is `"full"`, or no plan, or `contract` is not in `skippable_dimensions`, or the split-carry map holds `contract` |
 | claude-plugin-script-reviewer | agent | fable | script_quality | every round |
 | claude-plugin-test-reviewer | agent | opus | tests | every round |
 | claude-plugin-manifest-check | agent | sonnet | manifest_bump | `scope_mode` is `"full"`, or no plan; on a `"delta"` round only when the split-carry map holds `manifest_bump` |
 | check-manifests.zsh | script | — | manifest | every round |
 
 **A dimension the table does not plan for this round is not run and produces nothing** — no findings, no
-triple — and that is not a dimension that failed to run. The `manifest_bump` row is the one cell that varies:
-round 1 and every closing sweep plan with `scope_mode: "full"`, so the agent judges bump size on both, and a
-delta round brings it back only to account for its own carried entries (`reference/review-loop.md` in the
-resolve-issue skill, *Carry-driven dispatch (#2008)*).
+triple — and that is not a dimension that failed to run. Two cells vary. The `manifest_bump` row: round 1 and
+every closing sweep plan with `scope_mode: "full"`, so the agent judges bump size on both, and a delta round
+brings it back only to account for its own carried entries (`reference/review-loop.md` in the resolve-issue
+skill, *Carry-driven dispatch (#2008)*). The `contract` row (#2009): it runs on every full round, and on a
+`"delta"` round unless the plan's `skippable_dimensions` holds `contract` — the plan puts it there when a pure
+selector finds that the round's fix pass touched no contract surface. Read `skippable_dimensions` from the
+dispatch descriptor (in hook mode, `$REVIEW_SKIPPABLE_DIMENSIONS`, a JSON array string); a standalone run has
+neither, which is the *no plan* case. A carried `contract` entry still brings it back, by the same
+*Carry-driven dispatch (#2008)* rule.
 
 **Run the script first, with Bash.** It is this skill's
 `scripts/check-manifests.zsh`, in the same plugin cache directory as this `SKILL.md`:
@@ -224,8 +229,8 @@ Brief summary of what was reviewed and overall plugin health assessment.
   reviewer's — confirmed, else re-raised when that re-raise is in the findings
   file, else unconfirmed; reproduce each reviewer's per-entry
   lines under this line — they are the source of the accounting records)
-- **Areas reviewed:** Prose Logic, Contract Integrity, Script Quality, Tests, Manifests, and Bump Size when
-  the round planned it
+- **Areas reviewed:** Prose Logic, Script Quality, Tests, Manifests, and Contract Integrity and Bump Size
+  when the round planned them
 
 ## Verdict
 One-paragraph overall assessment with the most important action items.

@@ -2147,8 +2147,35 @@ not a limit on what it may raise.
 
 Where it applies today: the claude-plugin panel's `manifest_bump` dimension
 (`claude-plugin-manifest-check`), which runs on full rounds and, on a delta
-round, only by this rule. A panel that adds another delta-skipped dimension
-cites this subsection rather than restating it.
+round, only by this rule; and its `contract` dimension on a delta round the plan
+marks skippable (*Skippable dimensions*, below). A panel that adds another
+delta-skipped dimension cites this subsection rather than restating it.
+
+### Skippable dimensions (#2009)
+
+`review-dispatch.zsh plan` always emits `skippable_dimensions`, a JSON array of
+the dimensions this round's panel may leave out. It is `[]` on every full round
+and for every repo type but `claude-plugin`. On a claude-plugin **delta** round
+the plan runs `select-contract-dimension.zsh` — a pure selector over the delta's
+name-status list and its patch — and emits `["contract"]` when the fix pass
+touched no contract surface (no `ARCHITECTURE.md`, no `.claude-plugin/` path, no
+agent or SKILL.md frontmatter, no script flag or subcommand, no added, deleted,
+renamed or copied shipped file, no removed heading in a shipped `.md`). Any input
+it cannot judge, and any failure to decide, leaves the field `[]`: the dimension
+runs. Hook mode exports it as `$REVIEW_SKIPPABLE_DIMENSIONS`.
+
+The plan only **offers** the skip; the panel's Step 1 table decides, and a
+skipped dimension comes back for its carried entries by *Carry-driven dispatch
+(#2008)* above. A delta round whose plan omitted `contract` returns no contract
+verdict and is consumed like any other round — the loop adds no check of its
+own. A round whose table planned `contract` and did not run it is still the
+`failed` / `dimension-not-run` row of the *Panel subagent brief*.
+
+Each round's line in `<work-dir>/history.jsonl` records `skipped_dimensions`:
+the plan's field less every dimension the round's carry forced back in, `[]`
+when none. The loop keeps the plan's field per round in
+`<work-dir>/skippable-<R>.json`, and `build-telemetry-record.zsh` reports the
+history as `skipped_dimensions_by_round`.
 
 ### The third histogram state — present, below the threshold (#1510)
 

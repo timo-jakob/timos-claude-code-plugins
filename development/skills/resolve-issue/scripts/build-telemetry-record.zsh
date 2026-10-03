@@ -227,6 +227,13 @@ jq -c '
       # round), and a history line that predates the key reads null too.
       gate_by_round: [ ($s.history // [])[] | select(type == "object")
                        | {round, gate: (.gate // null)} ],
+      # #2009: the dimensions each round s panel was planned to leave out (the
+      # plan s skippable_dimensions less any the carry forced back in), read
+      # from the same per-round history lines. [] is a round that skipped
+      # nothing; null is a history line that predates the key, never read as
+      # [] because nobody recorded what that round skipped.
+      skipped_dimensions_by_round: [ ($s.history // [])[] | select(type == "object")
+                                     | {round, skipped_dimensions: (.skipped_dimensions // null)} ],
       fixed:  ( [ $seen[]
                   | select(.priority=="Critical" or .priority=="High")
                   | ("\(.file)|\(.line)|\(.dimension)|\(.title)") as $k

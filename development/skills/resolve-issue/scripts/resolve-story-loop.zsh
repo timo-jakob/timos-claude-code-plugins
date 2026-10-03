@@ -349,7 +349,12 @@
 #                 `review-dispatch.zsh split-carry` map of that carry,
 #                 {dimension: path}, `{}` when nothing is carried: each
 #                 reviewer is handed only its own dimension's path, so every
-#                 carried entry has one owner. Missing/empty
+#                 carried entry has one owner. Since #2009
+#                 $REVIEW_SKIPPABLE_DIMENSIONS is the plan's
+#                 skippable_dimensions as a JSON array string (`[]` on every
+#                 full round and every non-claude-plugin repo); the round's
+#                 line in history.jsonl records it as skipped_dimensions, less
+#                 any dimension the carry forced back in. Missing/empty
 #                 output is treated as "no findings" on a DELTA round only; on
 #                 a FULL round it is refused as STALE_FINDINGS (#1434), since
 #                 zero blockers there is the CONVERGED condition. A full round
@@ -2576,7 +2581,7 @@ local fix_base_tree=""
 local digest="" prev_digest_file=""
 local prev_findings_empty=0
 local blocking=0 conflict=0 nonconv=0 nconf=0 verdict="" ftrips=0
-local adj_dropped=0 gate_rec='null'
+local adj_dropped=0 gate_rec='null' skippable_json='[]' skipped_rec='[]' carry_dims='[]'
 local cur_tree="" prior_tree="" prior_tree_file="" fix_verification=""
 local scope_mode="" replanned_scope_mode="" delta_json="" carried=0
 local is_final=0 is_closing_sweep=0 is_empty_delta=0 empty_delta_note=""
@@ -2815,6 +2820,15 @@ while (( round <= effective_max )); do
   # whenever a prior tree was given — which is exactly the closing sweep.
   delta_json=$(print -r -- "$rp" | jq -c '.delta_files // []') || {
     print -u2 -- "resolve-story-loop: could not read delta_files at round $round"; exit 1 }
+  # skippable_dimensions (#2009), read AFTER any re-plan for the same reason:
+  # an empty-delta round re-planned with --final is a full round, whose field is
+  # `[]`. Persisted per round so the history line below can record what this
+  # round actually skipped, and exported to a hook-mode panel. A descriptor
+  # predating the field reads `[]` — nothing skipped, the fail-closed answer.
+  skippable_json=$(print -r -- "$rp" | jq -c '.skippable_dimensions // []') || {
+    print -u2 -- "resolve-story-loop: could not read skippable_dimensions at round $round"; exit 1 }
+  print -r -- "$skippable_json" > "$work_dir/skippable-$round.json" || {
+    print -u2 -- "resolve-story-loop: could not write $work_dir/skippable-$round.json"; exit 1 }
 
   # --- INVALIDATE the adjudications the last fix pass disturbed (#1434) -----
   # Every entry whose file appears in this round's delta_files goes, because a
@@ -3081,6 +3095,7 @@ while (( round <= effective_max )); do
              REVIEW_REPO="$repo" REVIEW_BASE="$base" REVIEW_SCOPE_MODE="$scope_mode" \
              REVIEW_FIX_VERIFICATION="$fix_verification" \
              REVIEW_FIX_VERIFICATION_BY_DIMENSION="$carry_by_dim" \
+             REVIEW_SKIPPABLE_DIMENSIONS="$skippable_json" \
              REVIEW_ADJUDICATED="$adjudicated_file"; eval "$review_cmd" ) || {
       print -u2 -- "resolve-story-loop: --review-cmd failed at round $round"; exit 1 }
   fi
@@ -3283,10 +3298,27 @@ while (( round <= effective_max )); do
     gate_rec=$(jq -ce 'if type == "object" then . else null end' -- "$work_dir/gate-$round.json" 2>/dev/null) || gate_rec='null'
     [[ -n "$gate_rec" ]] || gate_rec='null'
   fi
+  # skipped_dimensions (#2009): what the plan let this round's panel leave out,
+  # minus every dimension its carry forced back in (*Carry-driven dispatch
+  # (#2008)*: a dimension holding a carried entry runs whatever the plan says).
+  # `[]` when nothing was skipped. Like `gate`, it is telemetry and never costs
+  # the history line: an unreadable skippable file or carry reads as `[]`.
+  skipped_rec='[]'
+  if [[ -f "$work_dir/skippable-$round.json" && -s "$work_dir/skippable-$round.json" ]]; then
+    carry_dims='[]'
+    if [[ -n "$fix_verification" && -s "$fix_verification" ]]; then
+      carry_dims=$(jq -c '[ .[]? | .dimension? // empty ] | unique' -- "$fix_verification" 2>/dev/null) || carry_dims='[]'
+      [[ -n "$carry_dims" ]] || carry_dims='[]'
+    fi
+    skipped_rec=$(jq -ce --argjson carried "$carry_dims" \
+      'if type == "array" then [ .[] | select(. as $d | any($carried[]; . == $d) | not) ] else empty end' \
+      -- "$work_dir/skippable-$round.json" 2>/dev/null) || skipped_rec='[]'
+    [[ -n "$skipped_rec" ]] || skipped_rec='[]'
+  fi
   jq -c --argjson r "$round" --argjson b "$blocking" --argjson c "$nconf" --argjson nc "$nonconv" \
-     --argjson ft "$ftrips" --argjson ad "$adj_dropped" --argjson g "$gate_rec" \
+     --argjson ft "$ftrips" --argjson ad "$adj_dropped" --argjson g "$gate_rec" --argjson sk "$skipped_rec" \
      '{round:$r, blocking:$b, conflicts:$c, non_converging:($nc==1), false_trips:$ft,
-       adjudicated_dropped:$ad, gate:$g}' <<< '{}' >> "$history_file" || {
+       adjudicated_dropped:$ad, gate:$g, skipped_dimensions:$sk}' <<< '{}' >> "$history_file" || {
     print -u2 -- "resolve-story-loop: could not append the round $round history line to $history_file"; exit 1 }
 
   # ...and ONLY NOW record this round's suggestions as adjudicated. The append

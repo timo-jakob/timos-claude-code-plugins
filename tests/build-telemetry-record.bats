@@ -70,7 +70,36 @@ EOF
   done
   # ...and exactly the payload keys it does own
   [ "$(echo "$output" | jq -c 'keys_unsorted | sort')" = \
-    '["convergence_assessment","escalation","findings_by_round","fixed","gate_by_round","max_rounds","possible_false_trip_auto_continues","promotion_phase","rounds","status","waived"]' ]
+    '["convergence_assessment","escalation","findings_by_round","fixed","gate_by_round","max_rounds","possible_false_trip_auto_continues","promotion_phase","rounds","skipped_dimensions_by_round","status","waived"]' ]
+}
+
+@test "skipped_dimensions_by_round is read from history[] — a skipped round, a carry-forced round, a full round (#2009)" {
+  # round 1 full (nothing skippable), round 2 a delta whose plan skipped
+  # contract, round 3 a delta whose carry forced contract back in (recorded
+  # []), round 4 the closing full sweep
+  printf '%s\n' '{"status":"CONVERGED","rounds":4,"max_rounds":5,"history":[' \
+    '{"round":1,"blocking":2,"skipped_dimensions":[]},' \
+    '{"round":2,"blocking":1,"skipped_dimensions":["contract"]},' \
+    '{"round":3,"blocking":0,"skipped_dimensions":[]},' \
+    '{"round":4,"blocking":0,"skipped_dimensions":[]}],' \
+    '"round_changelists":[],"final_changelist":{"blocking":[]}}' > "$ST"
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.skipped_dimensions_by_round == [
+    {round:1, skipped_dimensions:[]}, {round:2, skipped_dimensions:["contract"]},
+    {round:3, skipped_dimensions:[]}, {round:4, skipped_dimensions:[]}]'
+}
+
+@test "skipped_dimensions_by_round: a history line predating the key reads null, never []; no history is []" {
+  printf '%s\n' '{"status":"CONVERGED","rounds":1,"max_rounds":5,"history":[{"round":1,"blocking":0}],' \
+    '"round_changelists":[],"final_changelist":{"blocking":[]}}' > "$ST"
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.skipped_dimensions_by_round == [{round:1, skipped_dimensions:null}]'
+  printf '%s\n' '{"status":"SKIPPED","rounds":0,"max_rounds":5}' > "$ST"
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.skipped_dimensions_by_round == []'
 }
 
 @test "gate_by_round is read from history[].gate, null where a round has none (#1973)" {
