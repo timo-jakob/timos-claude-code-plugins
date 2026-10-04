@@ -2159,10 +2159,11 @@ and for every repo type but `claude-plugin`. On a claude-plugin **delta** round
 the plan runs `select-contract-dimension.zsh` — a pure selector over the delta's
 name-status list and its patch — and emits `["contract"]` when the fix pass
 touched no contract surface (no `ARCHITECTURE.md`, no `.claude-plugin/` path, no
-agent or SKILL.md frontmatter, no script flag or subcommand, no added, deleted,
-renamed or copied shipped file, no removed heading in a shipped `.md`). Any input
-it cannot judge, and any failure to decide, leaves the field `[]`: the dimension
-runs. Hook mode exports it as `$REVIEW_SKIPPABLE_DIMENSIONS`.
+agent or SKILL.md frontmatter, no script flag, subcommand, exit code, output key
+or env seam, no added, deleted, renamed or copied shipped file, no removed
+heading in a shipped `.md`). Any input it cannot judge, and any failure to
+decide, leaves the field `[]`: the dimension runs.
+Hook mode exports it as `$REVIEW_SKIPPABLE_DIMENSIONS`.
 
 The plan only **offers** the skip; the panel's Step 1 table decides, and a
 skipped dimension comes back for its carried entries by *Carry-driven dispatch

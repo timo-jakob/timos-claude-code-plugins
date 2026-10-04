@@ -36,7 +36,19 @@
 #   script-interface        in a shipped *.zsh / *.sh / *.bash, a changed line is
 #                           a case-arm label, or contains getopts, zparseopts or
 #                           (case-insensitively) usage — internal case statements
-#                           over-fire, which is accepted
+#                           over-fire, which is accepted. A changed line that is
+#                           not a comment (first non-blank character `#`) also
+#                           fires on three more grounds (#2051): an exit code
+#                           (a literal `exit N`, `exit 0` included), an env seam
+#                           (an uppercase `${VAR:-…}`, `${VAR-…}`, `${VAR:=…}` or
+#                           `${VAR=…}` default) and an output key (a bare or
+#                           quoted key at line start, or after a `{` or `,` that
+#                           does not open a `${`, followed by a value). The
+#                           comment-line exclusion applies to those three only.
+#                           All three over-fire on internal code, which is
+#                           accepted; `return N` and `exit $var` are not
+#                           detected, and the closing full sweep, which always
+#                           runs contract-integrity, covers them
 #   path-change             a shipped file has status A, D, R or C (no citation
 #                           lookup: a content edit to a cited file does not fire)
 #   heading                 in a shipped .md, a removed line `#{1,6} …`
@@ -180,6 +192,10 @@ sections=$(awk '
     s = substr($0, 2)
     if (c == "+" || c == "-") {
       if (is_arm(s) || index(s, "getopts") || index(s, "zparseopts") || index(tolower(s), "usage")) iface = 1
+      # exit code, env seam, output key — on a non-comment line only (#2051)
+      if (s !~ /^[ \t]*#/ && (s ~ /(^|[^A-Za-z0-9_])exit[ \t]+[0-9]/ \
+          || s ~ /\$\{[A-Z_][A-Z0-9_]*:?[-=]/ \
+          || s ~ /(^[ \t]*|(^|[^$])[{,][ \t]*)"?[A-Za-z_][A-Za-z0-9_]*"?[ \t]*:[ \t]*[^-+=?0-9 \t:\/]/)) iface = 1
       if (c == "-" && match(s, /^#+ /) && RLENGTH - 1 <= 6) heading = 1
     }
     if (nhunks == 1 && (c == " " || c == "+" || c == "-")) { nb++; bt[nb] = c; bs[nb] = s }
