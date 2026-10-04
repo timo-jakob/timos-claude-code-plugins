@@ -133,6 +133,121 @@ expect() {
   expect skip '[]'
 }
 
+# The exit-code, env-seam and output-key grounds (#2051): each fires on an
+# appended non-comment line, and none fires on a comment line.
+append() { printf '%s\n' "$1" >> "$R/dev/scripts/tool.zsh"; }
+
+@test "script-interface: an appended exit 3 runs contract" {
+  append 'exit 3'
+  judge
+  expect run '["script-interface"]'
+}
+
+@test "script-interface: an appended exit 0 runs contract" {
+  append 'exit 0'
+  judge
+  expect run '["script-interface"]'
+}
+
+@test "script-interface: an exit 2 inside a guard's braces runs contract" {
+  append '[[ -n $x ]] || { print -u2 bad; exit 2 }'
+  judge
+  expect run '["script-interface"]'
+}
+
+@test "script-interface: exit as the tail of a longer word skips" {
+  append 'myexit 3'
+  judge
+  expect skip '[]'
+}
+
+@test "script-interface: an indented line-start key of a multi-line object runs contract" {
+  append '  verdict: $v,'
+  judge
+  expect run '["script-interface"]'
+}
+
+@test "script-interface: an indented quoted line-start key runs contract" {
+  append '  "verdict": $v'
+  judge
+  expect run '["script-interface"]'
+}
+
+@test "script-interface: a key after a comma, with no brace on the line, runs contract" {
+  append '  .a, total: $t'
+  judge
+  expect run '["script-interface"]'
+}
+
+@test "script-interface: an appended jq key with a variable value runs contract" {
+  append '{result: $r}'
+  judge
+  expect run '["script-interface"]'
+}
+
+@test "script-interface: an appended quoted key with a string value runs contract" {
+  append '{"contract":"skip"}'
+  judge
+  expect run '["script-interface"]'
+}
+
+@test "script-interface: an appended uppercase env-seam default runs contract" {
+  append '${TOOL_BIN:-/usr/bin/true}'
+  judge
+  expect run '["script-interface"]'
+}
+
+@test "script-interface: a usage comment line still runs contract (the comment exclusion is the new grounds' only)" {
+  append '# usage: tool --new'
+  judge
+  expect run '["script-interface"]'
+}
+
+@test "script-interface: an appended return 1 skips" {
+  append 'return 1'
+  judge
+  expect skip '[]'
+}
+
+@test "script-interface: an appended exit with a variable code skips" {
+  append 'exit $rc'
+  judge
+  expect skip '[]'
+}
+
+@test "script-interface: a colon inside a quoted string skips" {
+  append 'print -r -- "$f:$line"'
+  judge
+  expect skip '[]'
+}
+
+@test "script-interface: a p:a path modifier skips" {
+  append 'print -r -- "${p:a}"'
+  judge
+  expect skip '[]'
+}
+
+@test "script-interface: a lowercase count default skips" {
+  append 'local n="${count:-0}"'
+  judge
+  expect skip '[]'
+}
+
+@test "script-interface: a comment line carrying an exit code, a seam and a key skips" {
+  append '# note: exit 1 ${FOO:-x} key: $x'
+  judge
+  expect skip '[]'
+}
+
+@test "the header and review-loop.md name the exit-code, env-seam and output-key grounds (#2051)" {
+  local loop="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md"
+  contains "$(cat "$SEL")" 'fires on three more grounds (#2051): an exit code'
+  contains "$(cat "$SEL")" '(a literal `exit N`, `exit 0` included), an env seam'
+  contains "$(cat "$SEL")" 'comment-line exclusion applies to those three only.'
+  contains "$(cat "$SEL")" 'accepted; `return N` and `exit $var` are not'
+  contains "$(cat "$loop")" 'no script flag, subcommand, exit code, output key'
+}
+
 @test "path-change: an added shipped file runs contract" {
   printf 'new\n' > "$R/dev/new.txt"
   judge
