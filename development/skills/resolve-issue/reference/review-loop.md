@@ -1746,13 +1746,16 @@ Until it lands, two things are on you, and both are actionable:
   red for a finding at that entry's `file` and `dimension`, treat the entry as a
   tool-verdict carry even though it carries no stamp.
 - **Do not read the panel's "confirmed" on one as evidence the tool now
-  passes**, and, on a CARRY-UNACCOUNTED refusal naming such an entry, do **not**
-  take the carry recovery's re-dispatch: it cannot succeed until #1647 lands,
-  because the reviewers it re-dispatches are the ones the evidence rule forbids
-  from stating that verdict, so it burns a full panel round to arrive at the
-  same refusal. Report the entry and its `decides:` command — taking it from the
-  log of the round that **decided** it, `<work-dir>/decided-<R>.log`, **not**
-  this round's, since the command was not run this round — and stop.
+  passes**, and, on a CARRY-UNACCOUNTED refusal on the *neither confirmed nor
+  re-raised* ground that names such an entry in `carry_unconfirmed[]`, do
+  **not** take the carry recovery's re-dispatch: it cannot succeed until #1647
+  lands, because the reviewers it re-dispatches are the ones the evidence rule
+  forbids from stating that verdict, so it burns a full panel round to arrive at
+  the same refusal. Report the entry and its `decides:` command — taking it from
+  the log of the round that **decided** it, `<work-dir>/decided-<R>.log`,
+  **not** this round's, since the command was not run this round — and stop.
+  Every other ground, an unevidenced re-raise of such an entry included, takes
+  its own recovery (*Verdict recovery arms*).
 
 `decided` is additive and defaulted in `consolidate-findings.zsh` — a finding
 without it consolidates exactly as before. It is not what **promotes**: the
@@ -2406,12 +2409,16 @@ never-ran.
 
 **CARRY-UNACCOUNTED.** A mid-run exit 2 on that arm takes this section. Read the
 ground from the loop's refusal stderr and the status JSON's
-`carry_unconfirmed[]` — loop output, never reviewer output. First apply
-the #1647 tool-verdict exception: an entry stamped `"decided": "red"` in
+`carry_unconfirmed[]` — loop output, never reviewer output. The #1647
+tool-verdict exception applies only on the *neither confirmed nor re-raised*
+ground, and only to an entry the refusal names in `carry_unconfirmed[]`: such
+an entry stamped `"decided": "red"` in
 `verify-<R>.json`, or one the *Decide subagent brief*'s narrow `decided-<R'>.log`
 lookup finds a red for, is a tool-verdict carry — report it and its `decides:`
-command and stop, dispatching nothing. Otherwise, by ground (*Carry accounting →
-Recover by ground*):
+command and stop, dispatching nothing. It reaches no other entry and no other
+ground: the three `carry-repair` grounds and an unevidenced re-raise never take
+it, whatever else `verify-<R>.json` holds. Otherwise, by ground (*Carry
+accounting → Recover by ground*):
 
 - **no accounting supplied, a file of the wrong shape, a record naming no
   carried identity** → one panel in **`carry-repair`** mode, `carry_entries`
@@ -2702,8 +2709,9 @@ succeeded.
      not a stall re-dispatch;
   3. only then take either of that arm's recoveries. Re-running the panel
      needs a decide pass over its new aggregate, as *When* says.
-- **A CARRY-UNACCOUNTED refusal naming a tool-verdict carry** (*The decided
-  pass*'s KNOWN LIMITATION). To report the entry and its `decides:` command, the
+- **A CARRY-UNACCOUNTED refusal on the *neither confirmed nor re-raised* ground
+  naming a tool-verdict carry** (*The decided pass*'s KNOWN LIMITATION;
+  *Verdict recovery arms*). To report the entry and its `decides:` command, the
   conductor may look up only the `decided-<R'>.log` entries matching a
   `carry_unconfirmed[]` identity's `file` and `dimension`, reading only their
   `decides:` command and exit status. That lookup happens only on that

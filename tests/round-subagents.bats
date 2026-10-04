@@ -647,10 +647,26 @@ load_carry_section() {
   contains "$arms" 'A panel that was dispatched and returned no valid verdict is a stall, not never-ran.'
 }
 
-@test "#1937 AC6: CARRY-UNACCOUNTED reads its ground from loop output and applies the tool-verdict exception first" {
+@test "#1937 AC6: CARRY-UNACCOUNTED reads its ground from loop output and scopes the tool-verdict exception (#2032)" {
   load_arms
   contains "$arms" 'Read the ground from the loop'"'"'s refusal stderr and the status JSON'"'"'s `carry_unconfirmed[]` — loop output, never reviewer output.'
   contains "$arms" 'an entry stamped `"decided": "red"` in `verify-<R>.json`, or one the *Decide subagent brief*'"'"'s narrow `decided-<R'"'"'>.log` lookup finds a red for, is a tool-verdict carry — report it and its `decides:` command and stop, dispatching nothing.'
+  # #2032: the exception is scoped to the refused entries on the
+  # neither-confirmed ground, exactly as *Recover by ground* states it.
+  contains "$arms" 'The #1647 tool-verdict exception applies only on the *neither confirmed nor re-raised* ground, and only to an entry the refusal names in `carry_unconfirmed[]`: such an entry stamped'
+  contains "$arms" 'It reaches no other entry and no other ground: the three `carry-repair` grounds and an unevidenced re-raise never take it, whatever else `verify-<R>.json` holds.'
+  lacks "$arms" 'First apply the #1647 tool-verdict exception'
+  # #2032: the decided pass's KNOWN LIMITATION and the decide brief's lookup
+  # licence state the same scope, so no second copy keeps the unscoped stop.
+  load_decided_pass
+  contains "$decided" 'on a CARRY-UNACCOUNTED refusal on the *neither confirmed nor re-raised* ground that names such an entry in `carry_unconfirmed[]`, do **not** take the carry recovery'"'"'s re-dispatch'
+  contains "$decided" 'it cannot succeed until #1647 lands'
+  contains "$decided" 'taking it from the log of the round that **decided** it, `<work-dir>/decided-<R>.log`, **not** this round'"'"'s, since the command was not run this round — and stop.'
+  contains "$decided" 'Every other ground, an unevidenced re-raise of such an entry included, takes its own recovery (*Verdict recovery arms*).'
+  lacks "$decided" 'on a CARRY-UNACCOUNTED refusal naming such an entry'
+  load_decide_brief
+  contains "$decide" '**A CARRY-UNACCOUNTED refusal on the *neither confirmed nor re-raised* ground naming a tool-verdict carry** (*The decided pass*'"'"'s KNOWN LIMITATION; *Verdict recovery arms*).'
+  lacks "$decide" '**A CARRY-UNACCOUNTED refusal naming a tool-verdict carry**'
 }
 
 @test "#1937 AC7: each ground takes its carry mode, with its own cap" {
