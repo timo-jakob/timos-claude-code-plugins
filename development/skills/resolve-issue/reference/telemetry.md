@@ -121,7 +121,7 @@ covers the promotion sub-loop and each of its resumes. A missed invocation
 leaves that loop's record unparented and, under a sink flag, in the wrong file,
 and the emitter exits 0 either way, so nothing surfaces the loss.
 
-The promotion enrichment (`reference/promotion.md` step 3) emits through the
+The promotion enrichment (`reference/promotion/step-3-select.md` step 3) emits through the
 emitter directly, not through the loop. Pass it the same `--telemetry-file` and
 `--telemetry-dir` the run was given, so it lands beside the record it enriches.
 It stays joined to its loop record by that record's `run_id`, as before, and it

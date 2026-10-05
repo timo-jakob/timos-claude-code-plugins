@@ -2386,7 +2386,7 @@ _moved_needles() {
 }
 
 @test "#1504 the conductor keeps the §4 heading the frozen references resolve to" {
-  # `promotion.md` (2 occurrences) and `interactive.md` (1) cross-reference
+  # `promotion/step-7-terminal.md` (2 occurrences, #2057) and `interactive.md` (1) cross-reference
   # `§4 (Version bump)` from INSIDE byte-frozen sentinel spans that cannot be
   # edited. Only §4's body moved; its heading is the anchor. A COUNT, not a
   # floor — with `-ge 1` two of the three could vanish silently.
@@ -2401,7 +2401,7 @@ _moved_needles() {
   hits="$(_ref_files | while IFS= read -r r; do cat "$r"; done | grep -cF -- '§4 (Version bump)' || true)"
   [ "$files" -eq 2 ] || {
     printf '%s reference file(s) cross-reference §4 (Version bump), expected 2\n' "$files" >&2
-    printf '(promotion.md and interactive.md). The heading is their anchor — if the\n' >&2
+    printf '(promotion/step-7-terminal.md and interactive.md). The heading is their anchor — if the\n' >&2
     printf 'set really changed, update this count in the same PR.\n' >&2
     return 1
   }

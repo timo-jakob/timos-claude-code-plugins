@@ -24,7 +24,9 @@ load assertions
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development/skills/resolve-issue/scripts/suggestions-enabled.zsh"
-  PROMO="$REPO_ROOT/development/skills/resolve-issue/reference/promotion.md"
+  # #2057 split promotion.md: the gate and its enable_suggestions amendment are
+  # in reference/promotion/gate.md.
+  PROMO="$REPO_ROOT/development/skills/resolve-issue/reference/promotion/gate.md"
   CONDUCTOR="$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
   HOWTO="$REPO_ROOT/docs/how-to/turn-off-suggestion-prompts.md"
 }

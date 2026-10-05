@@ -121,7 +121,7 @@ resolve-story-loop.zsh … --resume --findings-file <…> \
 - The round's progress block names it.
 - The PR dossier lists it in its own table, above the waived suggestions.
 - The suggestion-promotion prompt offers it back like any other waived
-  suggestion — under `promotion.md`'s own derivation, which keeps a finding's
+  suggestion — under `reference/promotion/gate.md`'s own derivation, which keeps a finding's
   earliest occurrence, so a finding that blocked in an earlier round and was
   demoted later is listed in the dossier table but not offered. With
   `enable_suggestions` off there is no prompt, and the progress block and the

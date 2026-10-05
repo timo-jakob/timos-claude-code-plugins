@@ -49,23 +49,28 @@ setup() {
   # #2056 split residue.md into reference/residue/, in that index's read order.
   EXPECTED_RESIDUE_SHARDS=(branch.md risk-threshold.md step-1-plan.md steps-2-3.md
     steps-4-5.md condition-2-removed.md)
+  # #2057 split promotion.md into reference/promotion/, in that index's read order.
+  EXPECTED_PROMOTION_SHARDS=(gate.md step-3-select.md step-4-sub-loop.md
+    step-7-terminal.md step-8-status-files.md)
 }
 
 # Build a synthetic skill tree at $1 holding SKILL.md plus the named reference
 # files (defaults to the declared roster) and, always, the declared review-loop
-# shards (#2055) and residue shards (#2056) — so a case about the top-level
-# roster is not tripped by a shard tripwire instead.
+# shards (#2055), residue shards (#2056) and promotion shards (#2057) — so a
+# case about the top-level roster is not tripped by a shard tripwire instead.
 _synth() {
   local root="$1"; shift
   local base="$root/development/skills/resolve-issue"
   mkdir -p "$base/reference/review-loop/briefs"
   mkdir -p "$base/reference/residue"
+  mkdir -p "$base/reference/promotion"
   printf 'conductor\n' > "$base/SKILL.md"
   local f
   if [ "$#" -eq 0 ]; then set -- "${EXPECTED_REFS[@]}"; fi
   for f in "$@"; do printf 'body of %s\n' "$f" > "$base/reference/$f"; done
   for f in "${EXPECTED_SHARDS[@]}"; do printf 'body of %s\n' "$f" > "$base/reference/review-loop/$f"; done
   for f in "${EXPECTED_RESIDUE_SHARDS[@]}"; do printf 'body of %s\n' "$f" > "$base/reference/residue/$f"; done
+  for f in "${EXPECTED_PROMOTION_SHARDS[@]}"; do printf 'body of %s\n' "$f" > "$base/reference/promotion/$f"; done
 }
 
 # --- the roster ---------------------------------------------------------------
@@ -76,16 +81,18 @@ _synth() {
   run -0 resolve_issue_files "$root"
   local base="$root/development/skills/resolve-issue"
   local want
-  local -a shard_paths residue_paths
+  local -a shard_paths residue_paths promotion_paths
   local s
   for s in "${EXPECTED_SHARDS[@]}"; do shard_paths+=("$base/reference/review-loop/$s"); done
   for s in "${EXPECTED_RESIDUE_SHARDS[@]}"; do residue_paths+=("$base/reference/residue/$s"); done
+  for s in "${EXPECTED_PROMOTION_SHARDS[@]}"; do promotion_paths+=("$base/reference/promotion/$s"); done
   want="$(printf '%s\n' "$base/SKILL.md" \
     "$base/reference/review-loop.md" \
     "${shard_paths[@]}" \
     "$base/reference/residue.md" \
     "${residue_paths[@]}" \
     "$base/reference/promotion.md" \
+    "${promotion_paths[@]}" \
     "$base/reference/escalation.md" \
     "$base/reference/interactive.md" \
     "$base/reference/sequential.md" \
@@ -139,6 +146,24 @@ _synth() {
   contains "$output" "condition-2-removed.md"
 }
 
+@test "#2057 an UNDECLARED promotion shard makes the roster refuse, naming the promotion roster" {
+  local root="$BATS_TEST_TMPDIR/extra-promotion"
+  _synth "$root"
+  printf 'notes\n' > "$root/development/skills/resolve-issue/reference/promotion/notes.md"
+  run -1 resolve_issue_files "$root"
+  contains "$output" "reference/promotion/ holds"
+  contains "$output" "notes.md"
+  contains "$output" '`promotion_shards`'
+}
+
+@test "#2057 a MISSING declared promotion shard makes the roster refuse" {
+  local root="$BATS_TEST_TMPDIR/short-promotion"
+  _synth "$root"
+  rm "$root/development/skills/resolve-issue/reference/promotion/step-7-terminal.md"
+  run -1 resolve_issue_files "$root"
+  contains "$output" "step-7-terminal.md"
+}
+
 @test "#1546 a MISSING declared reference file makes the roster refuse" {
   local root="$BATS_TEST_TMPDIR/short"
   _synth "$root" review-loop.md residue.md promotion.md escalation.md
@@ -162,7 +187,7 @@ _synth() {
   # than transcribed a third time: a sixth reference file correctly added to both
   # rosters must not red here with an opaque count mismatch.
   run -0 resolve_issue_files "$REPO_ROOT"
-  [ "$(printf '%s\n' "$output" | grep -c .)" -eq "$(( ${#EXPECTED_REFS[@]} + ${#EXPECTED_SHARDS[@]} + ${#EXPECTED_RESIDUE_SHARDS[@]} + 1 ))" ]
+  [ "$(printf '%s\n' "$output" | grep -c .)" -eq "$(( ${#EXPECTED_REFS[@]} + ${#EXPECTED_SHARDS[@]} + ${#EXPECTED_RESIDUE_SHARDS[@]} + ${#EXPECTED_PROMOTION_SHARDS[@]} + 1 ))" ]
 }
 
 # --- the corpus ---------------------------------------------------------------
@@ -176,11 +201,13 @@ _synth() {
   # `cat member; printf '\n'` per member, so each 1-line member contributes its
   # line plus a blank separator.
   # The #2055 shards follow the index, each with its own separator.
-  # The #2056 residue shards follow theirs the same way.
-  local want shard_bodies="" residue_bodies="" s
+  # The #2056 residue shards and the #2057 promotion shards follow theirs the
+  # same way.
+  local want shard_bodies="" residue_bodies="" promotion_bodies="" s
   for s in "${EXPECTED_SHARDS[@]}"; do shard_bodies+="body of $s"$'\n\n'; done
   for s in "${EXPECTED_RESIDUE_SHARDS[@]}"; do residue_bodies+="body of $s"$'\n\n'; done
-  want="$(printf 'conductor\n\nbody of review-loop.md\n\n%sbody of residue.md\n\n%sbody of promotion.md\n\nbody of escalation.md\n\nbody of interactive.md\n\nbody of sequential.md\n\nbody of telemetry.md\n' "$shard_bodies" "$residue_bodies")"
+  for s in "${EXPECTED_PROMOTION_SHARDS[@]}"; do promotion_bodies+="body of $s"$'\n\n'; done
+  want="$(printf 'conductor\n\nbody of review-loop.md\n\n%sbody of residue.md\n\n%sbody of promotion.md\n\n%sbody of escalation.md\n\nbody of interactive.md\n\nbody of sequential.md\n\nbody of telemetry.md\n' "$shard_bodies" "$residue_bodies" "$promotion_bodies")"
   [ "$(cat "$out")" = "$want" ]
 }
 

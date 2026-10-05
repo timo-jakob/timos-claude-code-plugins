@@ -81,6 +81,11 @@ resolve_issue_files() {
   local -a residue_shards
   residue_shards=(branch.md risk-threshold.md step-1-plan.md steps-2-3.md
     steps-4-5.md condition-2-removed.md)
+  # #2057 split promotion.md the same way, into reference/promotion/. Its roster,
+  # in that index's read order, under the same discipline.
+  local -a promotion_shards
+  promotion_shards=(gate.md step-3-select.md step-4-sub-loop.md step-7-terminal.md
+    step-8-status-files.md)
 
   for f in "$base"/reference/*.md; do
     [ -e "$f" ] || continue
@@ -98,6 +103,7 @@ resolve_issue_files() {
 
   _shard_roster_agrees "$base" review-loop shards "${shards[@]}" || return 1
   _shard_roster_agrees "$base" residue residue_shards "${residue_shards[@]}" || return 1
+  _shard_roster_agrees "$base" promotion promotion_shards "${promotion_shards[@]}" || return 1
 
   printf '%s\n' "$base/SKILL.md"
   for f in "${ordered[@]}"; do
@@ -107,6 +113,8 @@ resolve_issue_files() {
         for s in "${shards[@]}"; do printf '%s\n' "$base/reference/review-loop/$s"; done ;;
       residue.md)
         for s in "${residue_shards[@]}"; do printf '%s\n' "$base/reference/residue/$s"; done ;;
+      promotion.md)
+        for s in "${promotion_shards[@]}"; do printf '%s\n' "$base/reference/promotion/$s"; done ;;
     esac
   done
 }

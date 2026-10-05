@@ -33,11 +33,14 @@ setup() {
     review-loop
     residue.md
     residue
+    promotion.md
+    promotion
   )
   # Split files: NAME:BASE — the former file and the commit its headings are read at.
   SPLIT=(
     review-loop.md:98e51ea59858a3cf247d10cc841ca5f31239f985
     residue.md:98e51ea59858a3cf247d10cc841ca5f31239f985
+    promotion.md:98e51ea59858a3cf247d10cc841ca5f31239f985
   )
 }
 
@@ -144,6 +147,29 @@ home_problems_in() {
   grep -vxF -- "$h" "$fx/residue/condition-2-removed.md" > "$fx/tmp" && mv -- "$fx/tmp" "$fx/residue/condition-2-removed.md"
   run home_problems_in "$fx"
   [ "$output" = "residue.md heading appears 0 times across reference/ (want 1): $h" ]
+}
+
+@test "#2057 MUTATION: the guards cover reference/promotion/ — an oversized shard, an over-long index, a dropped heading" {
+  local fx="$BATS_TEST_TMPDIR/ref" h
+  cp -R "$REPO_ROOT/$REF_REL" "$fx"
+  [ -z "$(size_problems_in "$fx")" ]
+  [ -z "$(home_problems_in "$fx")" ]
+
+  head -c 20001 /dev/zero | tr '\0' 'x' > "$fx/promotion/planted.md"
+  run size_problems_in "$fx"
+  [ "$output" = 'promotion/planted.md is 20001 bytes (max 20000)' ]
+  rm -- "$fx/promotion/planted.md"
+
+  cp -- "$fx/promotion.md" "$fx/promotion.md.orig"
+  head -c 3001 /dev/zero | tr '\0' 'x' > "$fx/promotion.md"
+  run size_problems_in "$fx"
+  [ "$output" = 'index promotion.md is 3001 bytes (max 3000)' ]
+  mv -- "$fx/promotion.md.orig" "$fx/promotion.md"
+
+  h='## Suggestion promotion on convergence — human-curated, opt-in (#994)'
+  grep -vxF -- "$h" "$fx/promotion/gate.md" > "$fx/tmp" && mv -- "$fx/tmp" "$fx/promotion/gate.md"
+  run home_problems_in "$fx"
+  [ "$output" = "promotion.md heading appears 0 times across reference/ (want 1): $h" ]
 }
 
 @test "#2055 MUTATION: the single-home guard reds on a dropped heading and a duplicated one" {

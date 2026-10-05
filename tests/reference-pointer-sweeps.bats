@@ -343,7 +343,7 @@ refptr_problems_in() {
 # name the shard holding it (the re-pointing rules in ARCHITECTURE.md); a
 # mention of the file as a whole stays on the index. Each later split appends
 # its file here.
-SPLIT_FILES=(review-loop.md residue.md)
+SPLIT_FILES=(review-loop.md residue.md promotion.md)
 
 # The guard's universe: the reference-pointer sweep's files plus docs/.
 split_mention_files_in() {
@@ -673,4 +673,15 @@ EOF
   run split_mentions_in "$fx"
   [ "$(printf '%s\n' "$output" | wc -l | tr -d ' ')" -eq 1 ]
   [ "$(printf '%s\n' "$output" | cut -f1,2)" = "$(printf '%s\tresidue.md' "$SKILL_REL")" ]
+}
+
+@test "#2057 MUTATION: a planted promotion.md step 3 mention reds the guard" {
+  local fx="$BATS_TEST_TMPDIR/repo"
+  make_fixture_repo "$fx"
+  run split_mentions_in "$fx"
+  [ -z "$output" ] || { printf 'the untouched copy is not clean:\n%s\n' "$output" >&2; return 1; }
+  printf '\nThe enrichment is `reference/promotion.md` step 3 of the phase.\n' >> "$fx/$SKILL_REL"
+  run split_mentions_in "$fx"
+  [ "$(printf '%s\n' "$output" | wc -l | tr -d ' ')" -eq 1 ]
+  [ "$(printf '%s\n' "$output" | cut -f1,2)" = "$(printf '%s\tpromotion.md' "$SKILL_REL")" ]
 }
