@@ -206,49 +206,52 @@ _all_raw_pointer_count() {
 # line as a path relative to $1. Prints nothing when all are reached.
 #
 # The scope, since #2055 split review-loop.md into shards under
-# reference/review-loop/ and left an INDEX at the old path:
+# reference/review-loop/ and left an INDEX at the old path (and #2056 did the
+# same for residue.md under reference/residue/):
 #   - a top-level reference file is reached only by a pointer naming it;
-#   - the review-loop/ directory is ONE unit. The conductor's pointers go
-#     straight to its shards, never to the index, and the remaining shards are
-#     reached through the index's read order (and the loop's `next_ref`), not
-#     through `see` pointers. So the index is reached when some pointer lands
-#     in review-loop/, and a shard is reached when a pointer names it OR the
-#     index lists it — by its full `reference/review-loop/<path>` in backticks,
-#     or, for a shard in a subdirectory, by its `<basename>` in backticks inside
-#     the index entry naming `reference/review-loop/<dir>/`.
+#   - each split directory in SPLIT_DIRS is ONE unit with its index. The
+#     conductor's pointers go straight to its shards, never to the index, and
+#     the remaining shards are reached through the index's read order (and the
+#     loop's `next_ref`), not through `see` pointers. So the index is reached
+#     when some pointer lands in its directory, and a shard is reached when a
+#     pointer names it OR the index lists it — by its full
+#     `reference/<dir>/<path>` in backticks, or, for a shard in a subdirectory,
+#     by its `<basename>` in backticks inside the index entry naming
+#     `reference/<dir>/<sub>/`.
 # That keeps an orphan shard (in no pointer, not in the index) red — which a
 # "the index exists" check alone would not.
+SPLIT_DIRS=(review-loop residue)
 _unreached_reference_files() {
-  local dir="$1" targets rel f index dir_part base block
+  local dir="$1" targets rel f index top dir_part base block d
   targets="$(cat)"
-  index="$dir/review-loop.md"
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     rel="${f#"$dir/"}"
-    case "$rel" in
-      review-loop.md)
-        grep -q '^review-loop/' <<< "$targets" || printf '%s\n' "$rel"
-        ;;
-      review-loop/*)
-        grep -qxF -- "$rel" <<< "$targets" && continue
-        [ -f "$index" ] || { printf '%s\n' "$rel"; continue; }
-        grep -qF -- "\`reference/$rel\`" "$index" && continue
-        dir_part="${rel%/*}"; base="${rel##*/}"
-        if [ "$dir_part" != review-loop ]; then
-          # the index entry naming the subdirectory: from its line up to the
-          # next numbered entry or blank line
-          block="$(awk -v d="\`reference/$dir_part/\`" '
-            f && (/^[0-9]+\. / || /^$/) { exit }
-            index($0, d) { f = 1 }
-            f { print }' "$index")"
-          grep -qF -- "\`$base\`" <<< "$block" && continue
-        fi
-        printf '%s\n' "$rel"
-        ;;
-      *)
-        grep -qxF -- "$rel" <<< "$targets" || printf '%s\n' "$rel"
-        ;;
-    esac
+    top="${rel%%/*}"
+    for d in "${SPLIT_DIRS[@]}"; do
+      if [ "$rel" = "$d.md" ]; then
+        grep -q "^$d/" <<< "$targets" || printf '%s\n' "$rel"
+        continue 2
+      fi
+      [ "$top" = "$d" ] && [ "$rel" != "$top" ] || continue
+      index="$dir/$d.md"
+      grep -qxF -- "$rel" <<< "$targets" && continue 2
+      [ -f "$index" ] || { printf '%s\n' "$rel"; continue 2; }
+      grep -qF -- "\`reference/$rel\`" "$index" && continue 2
+      dir_part="${rel%/*}"; base="${rel##*/}"
+      if [ "$dir_part" != "$d" ]; then
+        # the index entry naming the subdirectory: from its line up to the
+        # next numbered entry or blank line
+        block="$(awk -v s="\`reference/$dir_part/\`" '
+          f && (/^[0-9]+\. / || /^$/) { exit }
+          index($0, s) { f = 1 }
+          f { print }' "$index")"
+        grep -qF -- "\`$base\`" <<< "$block" && continue 2
+      fi
+      printf '%s\n' "$rel"
+      continue 2
+    done
+    grep -qxF -- "$rel" <<< "$targets" || printf '%s\n' "$rel"
   done < <(find "$dir" -type f -name '*.md' | LC_ALL=C sort)
 }
 
@@ -339,6 +342,10 @@ _unreached_reference_files() {
   # heading, *The round protocol*, moved to reference/review-loop/core.md
   # (which `_ref_headings` now reads), and the index left at the old path
   # carries only an `#` title.
+  #
+  # Still TEN after #2056 split residue.md the same way: its three `##` headings
+  # moved to reference/residue/branch.md, condition-2-removed.md and
+  # risk-threshold.md, and its index carries only an `#` title.
   local n
   n="$(_ref_headings | grep -c .)"
   [ "$n" -eq 10 ]
@@ -442,7 +449,7 @@ _unreached_reference_files() {
 
 @test "#1503 non-vacuity: a pointer at a renamed heading reds the sweep" {
   local probe="$BATS_TEST_TMPDIR/probe.md" f h
-  printf 'see `reference/residue.md` § No Such Heading At All\n' > "$probe"
+  printf 'see `reference/residue/branch.md` § No Such Heading At All\n' > "$probe"
   local resolved=0
   while IFS=$'\t' read -r f h; do
     _headings_of "$REF_DIR/$f" | grep -qxF -- "$h" && resolved=1
@@ -450,7 +457,7 @@ _unreached_reference_files() {
   [ "$resolved" -eq 0 ]
   # ...and the same machinery DOES resolve the real thing, so the control is
   # measuring the sweep rather than a broken extractor
-  printf 'see `reference/residue.md` § Residue branch — file the remainder, then ship (#1435)\n' > "$probe"
+  printf 'see `reference/residue/branch.md` § Residue branch — file the remainder, then ship (#1435)\n' > "$probe"
   resolved=0
   while IFS=$'\t' read -r f h; do
     _headings_of "$REF_DIR/$f" | grep -qxF -- "$h" && resolved=1
@@ -501,6 +508,26 @@ _unreached_reference_files() {
   # (c) nothing points into review-loop/ at all: the index is unreached too
   bad="$(printf '%s\n' "$targets" | grep -v '^review-loop/' | _unreached_reference_files "$REF_DIR")"
   printf '%s\n' "$bad" | grep -qxF -- 'review-loop.md'
+}
+
+@test "#2056 non-vacuity: the residue directory is judged as one unit with its index" {
+  local fake="$BATS_TEST_TMPDIR/ref-copy-residue" targets bad
+  cp -R "$REF_DIR" "$fake"
+  targets="$(_all_pointers | cut -f1 | sort -u)"
+  bad="$(printf '%s\n' "$targets" | _unreached_reference_files "$fake")"
+  [ -z "$bad" ]
+  # (a) an orphan residue shard
+  printf 'orphan\n' > "$fake/residue/orphan.md"
+  bad="$(printf '%s\n' "$targets" | _unreached_reference_files "$fake")"
+  [ "$bad" = 'residue/orphan.md' ]
+  rm "$fake/residue/orphan.md"
+  # (b) a shard the index stops listing, and no pointer names
+  sed '/`reference\/residue\/condition-2-removed\.md`/d' "$REF_DIR/residue.md" > "$fake/residue.md"
+  bad="$(printf '%s\n' "$targets" | _unreached_reference_files "$fake")"
+  [ "$bad" = 'residue/condition-2-removed.md' ]
+  # (c) nothing points into residue/ at all: the index is unreached too
+  bad="$(printf '%s\n' "$targets" | grep -v '^residue/' | _unreached_reference_files "$REF_DIR")"
+  printf '%s\n' "$bad" | grep -qxF -- 'residue.md'
 }
 
 # --- the read-once rule (#2055) ---------------------------------------------
@@ -570,9 +597,9 @@ _unreached_reference_files() {
   else
     skip "no .git at $REPO_ROOT — cannot stage a throwaway tree"
   fi
-  printf 'MUTATED\n' >> "$fake/development/skills/resolve-issue/reference/residue.md"
+  printf 'MUTATED\n' >> "$fake/development/skills/resolve-issue/reference/residue/branch.md"
   # the mutation must land INSIDE the sentinels to be seen, so splice it in
-  python3 - "$fake/development/skills/resolve-issue/reference/residue.md" <<'PY'
+  python3 - "$fake/development/skills/resolve-issue/reference/residue/branch.md" <<'PY'
 import io, sys
 p = sys.argv[1]
 s = io.open(p, encoding="utf-8").read()

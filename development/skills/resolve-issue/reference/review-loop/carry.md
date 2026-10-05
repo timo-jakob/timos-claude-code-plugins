@@ -161,7 +161,7 @@ sibling at a colliding spot, losing a residual blocker the dossier claims was
 filed. Do not attempt it here.
 
 The normative statement, with the reasoning and what is deliberately not
-changed, is in `residue.md` § *Condition 2 — removed; the story-diff rail is
+changed, is in `reference/residue/condition-2-removed.md` § *Condition 2 — removed; the story-diff rail is
 upstream (#1571)*.
 
 ### Carry-driven dispatch (#2008)

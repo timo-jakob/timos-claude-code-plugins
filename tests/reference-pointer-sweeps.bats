@@ -335,6 +335,41 @@ refptr_problems_in() {
 }
 
 # ---------------------------------------------------------------------------
+# 4. step and section mentions of a split file (#2056)
+# ---------------------------------------------------------------------------
+
+# The split files: each is now an index at its old path, with its text in
+# shards under reference/<name>/. A mention of a STEP or a SECTION of one must
+# name the shard holding it (the re-pointing rules in ARCHITECTURE.md); a
+# mention of the file as a whole stays on the index. Each later split appends
+# its file here.
+SPLIT_FILES=(review-loop.md residue.md)
+
+# The guard's universe: the reference-pointer sweep's files plus docs/.
+split_mention_files_in() {
+  { refptr_files_in "$1"; git -C "$1" ls-files -- 'docs/**'; } | sort -u
+}
+
+# One row per step or section mention of a split file under root $1:
+# file TAB name TAB the mention's opening text. Read flattened, so a mention
+# wrapped across a line still counts. The name, bare or path-prefixed, followed
+# by an optional closing backtick and then `§`, `step <N>`, `, section`, or `'s`
+# … `rule` within the clause.
+split_mentions_in() {
+  local root="$1" f name
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    for name in "${SPLIT_FILES[@]}"; do
+      SPLIT_NAME="$name" SPLIT_FILE="$f" perl -0777 -ne '
+        my $n = $ENV{SPLIT_NAME}; s/\s+/ /g;
+        while (/(?<![\w-])\Q$n\E`?(?: ?§| step \d|, section|\x27s (?:[^.;:]{0,80}? )?rule\b)/g) {
+          print "$ENV{SPLIT_FILE}\t$n\t", substr($_, $-[0], 60), "\n";
+        }' "$root/$f" </dev/null
+    done
+  done < <(split_mention_files_in "$root")
+}
+
+# ---------------------------------------------------------------------------
 # helpers shared by the tripwires and the mutation controls
 # ---------------------------------------------------------------------------
 
@@ -593,4 +628,49 @@ EOF
   run refptr_problems_in "$fx"
   [ -n "$output" ]
   [ "$(printf '%s\n' "$output" | grep -vc 'core.md § The round protocol.* names no heading in that file')" -eq 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# tests — step and section mentions of a split file (#2056)
+# ---------------------------------------------------------------------------
+
+@test "#2056 no step or section mention of a split file remains, across the pointer-sweep files and docs/" {
+  [ -n "$(split_mention_files_in "$REPO_ROOT" | grep '^docs/')" ]   # non-vacuity: docs/ is read
+  run split_mentions_in "$REPO_ROOT"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ] || { printf 'step/section mention of a split file — name the shard:\n%s\n' "$output" >&2; return 1; }
+}
+
+@test "#2056 the split-mention pattern: each form, wrapped or path-prefixed, and never a whole-file or shard mention" {
+  local fx="$BATS_TEST_TMPDIR/sm"
+  mkdir -p "$fx/docs" && git -C "$fx" init -q
+  printf '%s\n' \
+    'see `residue.md` § *Risk threshold*' \
+    'as `reference/residue.md` step 4 does' \
+    'in `residue.md`, section *Risk threshold — assess before filing*' \
+    "by \`reference/residue.md\`'s remainder" \
+    'rule, wrapped' \
+    '`development/skills/resolve-issue/reference/residue.md` is repo-type-agnostic' \
+    'see `reference/residue/risk-threshold.md` § *Risk threshold*' \
+    'not `foo-residue.md` § either' > "$fx/docs/page.md"
+  git -C "$fx" add -A
+  run split_mentions_in "$fx"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | wc -l | tr -d ' ')" -eq 4 ]
+  [ "$(printf '%s\n' "$output" | cut -f1 | sort -u)" = 'docs/page.md' ]
+  printf '%s\n' "$output" | cut -f3 | grep -qF 'residue.md` § *Risk threshold*'
+  printf '%s\n' "$output" | cut -f3 | grep -qF 'residue.md` step 4 does'
+  printf '%s\n' "$output" | cut -f3 | grep -qF 'residue.md`, section *Risk threshold'
+  printf '%s\n' "$output" | cut -f3 | grep -qF "residue.md\`'s remainder rule, wrapped"
+}
+
+@test "#2056 MUTATION: a planted residue.md § Risk threshold mention reds the guard" {
+  local fx="$BATS_TEST_TMPDIR/repo"
+  make_fixture_repo "$fx"
+  run split_mentions_in "$fx"
+  [ -z "$output" ] || { printf 'the untouched copy is not clean:\n%s\n' "$output" >&2; return 1; }
+  printf '\nRead `residue.md` § *Risk threshold* first.\n' >> "$fx/$SKILL_REL"
+  run split_mentions_in "$fx"
+  [ "$(printf '%s\n' "$output" | wc -l | tr -d ' ')" -eq 1 ]
+  [ "$(printf '%s\n' "$output" | cut -f1,2)" = "$(printf '%s\tresidue.md' "$SKILL_REL")" ]
 }

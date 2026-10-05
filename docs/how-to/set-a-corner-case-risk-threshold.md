@@ -132,4 +132,4 @@ there is #1932.
 The procedures the run follows are in `development/skills/resolve-issue/reference/`:
 
 - `review-loop/risk-pass.md`, section *The risk pass*;
-- `residue.md`, section *Risk threshold — assess before filing*.
+- `residue/risk-threshold.md`, section *Risk threshold — assess before filing*.

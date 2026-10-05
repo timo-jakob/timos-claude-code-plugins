@@ -863,7 +863,7 @@ before the escalation terminal, so it is listed here rather than reachable only
 through the file that comes after it. The escalation terminal is where the run
 is handed to a human ([an automated state machine](https://timo-jakob.github.io/timos-claude-code-plugins/explanation/philosophy/#pillar-3)):
 
-- see `reference/residue.md` § Residue branch — file the remainder, then ship (#1435)
+- see `reference/residue/branch.md` § Residue branch — file the remainder, then ship (#1435)
 - see `reference/promotion.md` § Suggestion promotion on convergence — human-curated, opt-in (#994)
 - see `reference/interactive.md` § Interactive extension (#562-resume)
 - see `reference/escalation.md` § Escalation (any `ESCALATE_*` / `BUDGET_EXHAUSTED` status) — typed, no PR (#564)
@@ -948,7 +948,7 @@ filed as a labelled follow-up issue", and per dimension "N still open (filed as
 follow-up issue(s))" — is gated on the **status alone**, so it renders
 identically whether the filing succeeded or never happened; `build-dossier.zsh`
 has no way to learn which. What the Summary owes on top of the counts is decided
-by **`reference/residue.md`'s remainder rule** — count how much of
+by **`reference/residue/step-1-plan.md`'s remainder rule** — count how much of
 `final_changelist.blocking` is
 filed (created AND parented, from this run or an earlier one) and take that row:
 none → the verbatim override sentence above the dossier; some → the

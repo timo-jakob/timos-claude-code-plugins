@@ -31,10 +31,13 @@ setup() {
   COVERED=(
     review-loop.md
     review-loop
+    residue.md
+    residue
   )
   # Split files: NAME:BASE — the former file and the commit its headings are read at.
   SPLIT=(
     review-loop.md:98e51ea59858a3cf247d10cc841ca5f31239f985
+    residue.md:98e51ea59858a3cf247d10cc841ca5f31239f985
   )
 }
 
@@ -118,6 +121,29 @@ home_problems_in() {
   head -c 3001 /dev/zero | tr '\0' 'x' > "$fx/review-loop.md"
   run size_problems_in "$fx"
   [ "$output" = 'index review-loop.md is 3001 bytes (max 3000)' ]
+}
+
+@test "#2056 MUTATION: the guards cover reference/residue/ — an oversized shard, an over-long index, a dropped heading" {
+  local fx="$BATS_TEST_TMPDIR/ref" h
+  cp -R "$REPO_ROOT/$REF_REL" "$fx"
+  [ -z "$(size_problems_in "$fx")" ]
+  [ -z "$(home_problems_in "$fx")" ]
+
+  head -c 20001 /dev/zero | tr '\0' 'x' > "$fx/residue/planted.md"
+  run size_problems_in "$fx"
+  [ "$output" = 'residue/planted.md is 20001 bytes (max 20000)' ]
+  rm -- "$fx/residue/planted.md"
+
+  cp -- "$fx/residue.md" "$fx/residue.md.orig"
+  head -c 3001 /dev/zero | tr '\0' 'x' > "$fx/residue.md"
+  run size_problems_in "$fx"
+  [ "$output" = 'index residue.md is 3001 bytes (max 3000)' ]
+  mv -- "$fx/residue.md.orig" "$fx/residue.md"
+
+  h='## Condition 2 — removed; the story-diff rail is upstream (#1571)'
+  grep -vxF -- "$h" "$fx/residue/condition-2-removed.md" > "$fx/tmp" && mv -- "$fx/tmp" "$fx/residue/condition-2-removed.md"
+  run home_problems_in "$fx"
+  [ "$output" = "residue.md heading appears 0 times across reference/ (want 1): $h" ]
 }
 
 @test "#2055 MUTATION: the single-home guard reds on a dropped heading and a duplicated one" {

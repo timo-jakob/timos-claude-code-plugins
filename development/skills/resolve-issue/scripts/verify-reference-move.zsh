@@ -184,7 +184,13 @@ MANIFEST=(
 "
 "round-protocol-steps-3-4	review-loop/exit-20-awaiting-fix.md	3. **On \`AWAITING_FIX\` (exit 20)** — the round is over and the run continues.	   is how the two statements of it came to disagree once already.
 "
-"residue-branch	residue.md	Runs **only** on \`CONVERGED_WITH_RESIDUE\` (exit 14). The loop has already	  them, and do not read the story's own work as unstartable.
+"residue-branch	residue/branch.md	Runs **only** on \`CONVERGED_WITH_RESIDUE\` (exit 14). The loop has already	blocking phase from scratch and will re-derive them.
+"
+"residue-branch-step-1	residue/step-1-plan.md	1. **Build the plan.** Deterministic, and it creates nothing:	   is, pass it on rather than paraphrasing it as \"the read failed\".
+"
+"residue-branch-steps-2-3	residue/steps-2-3.md	2. **Always run \`--dry-run\` too, and diff the two lengths.** The real plan is	   issues filed\" there is the silent loss this whole branch exists to prevent.
+"
+"residue-branch-steps-4-5	residue/steps-4-5.md	4. **Create each issue, then attach it as a native sub-issue.** One \`gh issue	  them, and do not read the story's own work as unstartable.
 "
 "suggestion-promotion	promotion.md	Low suggestions never block, so every one the panel raises is **waived** the	   exactly the history it exists to attest.
 "
@@ -534,17 +540,28 @@ else
   fi
 fi
 
-# --- the tail's re-cut covers it with no gap and no overlap (#2055) ----------
-# The former `round-protocol-tail` is cut into four chunks, one per step shard.
-# Each is byte-checked on its own above, which proves nothing about the SEAMS:
-# move one chunk's last anchor up and its neighbour's first anchor stays put, and
-# the lines between them leave the verified region with every comparison green.
-# So, for each consecutive pair, the earlier chunk's LAST anchor and the later
-# chunk's FIRST anchor must be adjacent modulo blank lines in the pinned commit —
-# the same exact statement the head/tail block above makes — and the later first
-# anchor must come AFTER the earlier last one, which is what rules out overlap.
-# Anchors are read out of the MANIFEST, for the reason that block gives.
-typeset -a TAIL_CUTS=(round-protocol-tail round-protocol-step-2 round-protocol-recover round-protocol-steps-3-4)
+# --- each re-cut span covers its source with no gap and no overlap -----------
+# A frozen span re-cut into chunks across several shards: the former
+# `round-protocol-tail`, cut into four, one per step shard (#2055), and the
+# former `residue-branch`, cut into four across reference/residue/ (#2056).
+# Each chunk is byte-checked on its own above, which proves nothing about the
+# SEAMS: move one chunk's last anchor up and its neighbour's first anchor stays
+# put, and the lines between them leave the verified region with every
+# comparison green. So, for each consecutive pair within a group, the earlier
+# chunk's LAST anchor and the later chunk's FIRST anchor must be adjacent modulo
+# blank lines in the pinned commit — the same exact statement the head/tail
+# block above makes — and the later first anchor must come AFTER the earlier
+# last one, which is what rules out overlap. Anchors are read out of the
+# MANIFEST, for the reason that block gives.
+#
+# CUT_GROUPS is the extendable list: one space-separated group per re-cut span,
+# its chunks in source order. A later split that re-cuts a span appends its
+# group here.
+typeset -a CUT_GROUPS=(
+  "round-protocol-tail round-protocol-step-2 round-protocol-recover round-protocol-steps-3-4"
+  "residue-branch residue-branch-step-1 residue-branch-steps-2-3 residue-branch-steps-4-5"
+)
+typeset -a CUT_NAMES=(${=CUT_GROUPS})
 typeset -A cut_first cut_last
 typeset cname crow
 for crow in "${MANIFEST[@]}"; do
@@ -552,36 +569,40 @@ for crow in "${MANIFEST[@]}"; do
   typeset crow_tabs="${crow//[^$'\t']/}"
   (( ${#crow_tabs} >= 3 )) || continue
   cname="${crow%%$'\t'*}"
-  (( ${TAIL_CUTS[(Ie)$cname]} )) || continue
+  (( ${CUT_NAMES[(Ie)$cname]} )) || continue
   cut_first[$cname]="${${crow#*$'\t'}#*$'\t'}"; cut_first[$cname]="${cut_first[$cname]%%$'\t'*}"
   cut_last[$cname]="${${${crow#*$'\t'}#*$'\t'}#*$'\t'}"
 done
 # Declared ONCE, outside the loop: a bare `typeset seam` on a parameter that
 # already exists PRINTS it, which would leak `seam=''` onto stdout every pass.
 typeset -i ci seam_rc
-typeset prev_c next_c seam
-for (( ci = 1; ci < ${#TAIL_CUTS}; ci++ )); do
-  prev_c="${TAIL_CUTS[$ci]}" next_c="${TAIL_CUTS[$(( ci + 1 ))]}"
-  if [[ -z "${cut_last[$prev_c]-}" || -z "${cut_first[$next_c]-}" ]]; then
-    print -u2 -- "FAIL: the manifest no longer declares both $prev_c and $next_c, so their seam cannot be checked"
-    (( sweep_failures++ ))
-    continue
-  fi
-  seam_rc=0
-  seam=$(awk -v h="${cut_last[$prev_c]}" -v t="${cut_first[$next_c]}" '
-    !seen && $0 == h { seen = 1; next }
-    seen && $0 == t  { done = 1; exit }
-    seen && $0 ~ /[^[:space:]]/ { print }
-    END { if (!seen || !done) exit 3 }
-  ' <<< "$pre") || seam_rc=$?
-  if (( seam_rc )); then
-    print -u2 -- "FAIL: the seam $prev_c → $next_c is not in order in ${base}:${SKILL_REL} — last <<${cut_last[$prev_c]}>>, first <<${cut_first[$next_c]}>>"
-    (( sweep_failures++ ))
-  elif [[ -n "$seam" ]]; then
-    print -u2 -- "FAIL: the seam $prev_c → $next_c leaves original lines uncovered in ${base}:${SKILL_REL}:"
-    print -u2 -- "$seam"
-    (( sweep_failures++ ))
-  fi
+typeset prev_c next_c seam cgroup
+typeset -a group_cuts
+for cgroup in "${CUT_GROUPS[@]}"; do
+  group_cuts=(${=cgroup})
+  for (( ci = 1; ci < ${#group_cuts}; ci++ )); do
+    prev_c="${group_cuts[$ci]}" next_c="${group_cuts[$(( ci + 1 ))]}"
+    if [[ -z "${cut_last[$prev_c]-}" || -z "${cut_first[$next_c]-}" ]]; then
+      print -u2 -- "FAIL: the manifest no longer declares both $prev_c and $next_c, so their seam cannot be checked"
+      (( sweep_failures++ ))
+      continue
+    fi
+    seam_rc=0
+    seam=$(awk -v h="${cut_last[$prev_c]}" -v t="${cut_first[$next_c]}" '
+      !seen && $0 == h { seen = 1; next }
+      seen && $0 == t  { done = 1; exit }
+      seen && $0 ~ /[^[:space:]]/ { print }
+      END { if (!seen || !done) exit 3 }
+    ' <<< "$pre") || seam_rc=$?
+    if (( seam_rc )); then
+      print -u2 -- "FAIL: the seam $prev_c → $next_c is not in order in ${base}:${SKILL_REL} — last <<${cut_last[$prev_c]}>>, first <<${cut_first[$next_c]}>>"
+      (( sweep_failures++ ))
+    elif [[ -n "$seam" ]]; then
+      print -u2 -- "FAIL: the seam $prev_c → $next_c leaves original lines uncovered in ${base}:${SKILL_REL}:"
+      print -u2 -- "$seam"
+      (( sweep_failures++ ))
+    fi
+  done
 done
 
 # An EMPTIED MANIFEST (a bad merge, a botched edit to the multi-line array

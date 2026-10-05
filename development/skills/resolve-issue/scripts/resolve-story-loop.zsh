@@ -804,7 +804,7 @@ emit_and_exit() {
   case "$st" in
     AWAITING_FIX)           next_ref="reference/review-loop/exit-20-awaiting-fix.md" ;;
     STALE_FINDINGS)         next_ref="reference/review-loop/exit-2-stale-findings.md" ;;
-    CONVERGED_WITH_RESIDUE) next_ref="reference/residue.md" ;;
+    CONVERGED_WITH_RESIDUE) next_ref="reference/residue/branch.md" ;;
     ESCALATE_*|BUDGET_EXHAUSTED) next_ref="reference/escalation.md" ;;
   esac
   out=$(jq -nc \
