@@ -3508,7 +3508,7 @@ while (( round <= effective_max )); do
   # set is the whole point of that story.
   # ...and on every GRANTABLE ESCALATING terminal too, not only AWAITING_FIX. An
   # interactive run can be GRANTED more rounds there, and the interactive
-  # extension's step 5 (`reference/interactive.md`) requires a
+  # extension's step 5 (`reference/interactive/extension-grant.md`) requires a
   # fix pass BEFORE the resume — so a fix pass really does follow those exits,
   # and without a stamp its touched set is unrecoverable. The visible cost of
   # omitting it is that the round after a grant carries no `class` at all: no

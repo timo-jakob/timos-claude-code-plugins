@@ -266,7 +266,7 @@ above, and has no remediation — what happens next depends on who is driving:
 
 **Interactive remediation.** Read it when this step rejects with shape (i) and
 a human is present:
-see `reference/interactive.md` § Interactive remediation — offer to clear the blockage (#586, #587)
+see `reference/interactive/remediation.md` § Interactive remediation — offer to clear the blockage (#586, #587)
 
 ### 0b. Readiness gate — is the story ready to build? (do NOT skip)
 
@@ -865,7 +865,7 @@ is handed to a human ([an automated state machine](https://timo-jakob.github.io/
 
 - see `reference/residue/branch.md` § Residue branch — file the remainder, then ship (#1435)
 - see `reference/promotion/gate.md` § Suggestion promotion on convergence — human-curated, opt-in (#994)
-- see `reference/interactive.md` § Interactive extension (#562-resume)
+- see `reference/interactive/extension.md` § Interactive extension (#562-resume)
 - see `reference/escalation.md` § Escalation (any `ESCALATE_*` / `BUDGET_EXHAUSTED` status) — typed, no PR (#564)
 
 ### 4. Version bump (plugin content only)

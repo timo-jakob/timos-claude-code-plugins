@@ -34,9 +34,10 @@ setup() {
   # this file asks WHERE a sentence lives, so all of them read a single file and
   # none reads the corpus — hence no corpus build here.
   # #2055 split review-loop.md into shards; every #1498 sentence it held now
-  # lives in the AWAITING_FIX shard.
+  # lives in the AWAITING_FIX shard. #2058 split interactive.md the same way;
+  # the extension's #1498 arm lives in reference/interactive/extension.md.
   PROTO="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop/exit-20-awaiting-fix.md"
-  EXTENSION="$REPO_ROOT/development/skills/resolve-issue/reference/interactive.md"
+  EXTENSION="$REPO_ROOT/development/skills/resolve-issue/reference/interactive/extension.md"
   ARCH="$REPO_ROOT/ARCHITECTURE.md"
   EXPL="$REPO_ROOT/docs/explanation/review-loop.md"
   # AC 19's site list, as paths. REAL paths, never the corpus: the per-site
@@ -167,8 +168,9 @@ meaning the blockers may be fresh rather than stuck).'
 
 @test "#1498 AC18 the interactive extension explains why the exit a human sees differs" {
   # Split from the round-protocol test above (#1503): these needles live in
-  # reference/interactive.md, and a session that reaches the extension loads THAT
-  # file and nothing else. Asserting both halves against one flattened corpus
+  # reference/interactive.md — since #2058 in its shard
+  # reference/interactive/extension.md — and a session that reaches the
+  # extension loads THAT file and nothing else. Asserting both halves against one flattened corpus
   # would let the extension arm migrate into review-loop.md — where the reader
   # never sees it — with the suite still green.
   local t; t="$(flat "$EXTENSION")"
@@ -259,8 +261,9 @@ meaning the blockers may be fresh rather than stuck).'
   # #1503 moved the review-loop procedure into reference/*.md, so the roster
   # names those files where the text now lives — the same sites, re-homed.
   # #2055 split review-loop.md into shards; only the AWAITING_FIX one names it.
+  # #2058 split interactive.md; only its extension.md shard names it.
   [ "$found" = "ARCHITECTURE.md
-development/skills/resolve-issue/reference/interactive.md
+development/skills/resolve-issue/reference/interactive/extension.md
 development/skills/resolve-issue/reference/review-loop/exit-20-awaiting-fix.md
 docs/explanation/review-loop.md" ] || {
     echo "roster drift — the sites naming the #1498 auto-continue are now:"

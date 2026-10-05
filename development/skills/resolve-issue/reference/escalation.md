@@ -32,7 +32,7 @@ tell the human the opposite of what happened.
 
 Read the extension first when the run is interactive and the loop exited
 `BUDGET_EXHAUSTED` or `ESCALATE_NO_CONVERGENCE`:
-see `reference/interactive.md` § Interactive extension (#562-resume)
+see `reference/interactive/extension.md` § Interactive extension (#562-resume)
 
 <!-- moved: escalation-terminal -->
 If the interactive extension ended in `CONVERGED`, skip the terminal below,

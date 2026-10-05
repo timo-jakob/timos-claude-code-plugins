@@ -99,7 +99,7 @@
 # adding. Be precise about what its absence costs, because the earlier wording
 # here was wrong and #1551 carries the correction: an emptied MANIFEST against
 # the REAL reference tree is still caught, by the stray-sentinel sweep, which
-# finds eighteen sentinels no manifest row declares and exits 1 — measured, not
+# finds nineteen sentinels no manifest row declares and exits 1 — measured, not
 # reasoned. The guard is the second net for the case where BOTH were lost
 # together (an emptied manifest AND a reference tree carrying no sentinels),
 # which is the only state that would otherwise reach `all 0 declared chunks are
@@ -336,16 +336,16 @@ _gap_text() {  # $1 = the reference/review-loop/ directory
 
 # --- the happy path, and that it is not vacuous ------------------------------
 
-@test "#1547 the real tree verifies, reporting all eighteen declared chunks" {
+@test "#1547 the real tree verifies, reporting all nineteen declared chunks" {
   _require_pre_move_commit
   run -0 zsh "$VERIFY" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
-  contains "$output" "all 18 declared chunks are byte-identical"
+  contains "$output" "all 19 declared chunks are byte-identical"
 }
 
 @test "#1547 --quiet suppresses the ok lines and the summary, leaving stdout empty" {
   # `--quiet` is what CI and the conductor invoke, and every other invocation in
   # the tree — here and in resolve-issue-conductor-budget.bats — reads only the
-  # status. So `--quiet) quiet=0 ;;` would make the flag a no-op, print eighteen
+  # status. So `--quiet) quiet=0 ;;` would make the flag a no-op, print nineteen
   # `ok` lines and the summary on every quiet run, and no test would notice.
   # Paired with the case above, which pins that they ARE printed without it.
   _require_pre_move_commit
@@ -370,7 +370,7 @@ _gap_text() {  # $1 = the reference/review-loop/ directory
   _require_pre_move_commit
   cd "$BATS_TEST_TMPDIR"
   run -0 zsh "$VERIFY" --base "$PRE_MOVE_SHA"
-  contains "$output" "all 18 declared chunks are byte-identical"
+  contains "$output" "all 19 declared chunks are byte-identical"
 }
 
 # --- per-chunk failures ------------------------------------------------------
@@ -879,14 +879,15 @@ PY
   # check, which is backwards on both counts.
 }
 
-@test "#1582 the split still verifies byte-identical, at eighteen chunks" {
-  # Eighteen since #2057 re-cut the suggestion-promotion span into five across
-  # reference/promotion/; fourteen after #2056 re-cut the residue branch into
+@test "#1582 the split still verifies byte-identical, at nineteen chunks" {
+  # Nineteen since #2058 re-cut the interactive-extension span into two across
+  # reference/interactive/; eighteen after #2057 re-cut the suggestion-promotion
+  # span into five across reference/promotion/; fourteen after #2056 re-cut the residue branch into
   # four across reference/residue/; eleven after #2055 re-cut the round-protocol
   # tail into four.
   _require_pre_move_commit
   run -0 zsh "$VERIFY" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
-  contains "$output" "all 18 declared chunks are byte-identical"
+  contains "$output" "all 19 declared chunks are byte-identical"
   # every round-protocol chunk accounted for, IN its shard, so a row silently
   # dropped from the manifest cannot leave this green
   contains "$output" "ok   round-protocol-head"
@@ -1157,6 +1158,59 @@ _mutate_anchor() {
   contains "$stderr$output" "the seam residue-branch-steps-2-3 → residue-branch-steps-4-5 leaves original lines uncovered"
 }
 
+# --- #2058: the interactive procedures, split across reference/interactive/ ----
+
+@test "#2058 interactive-remediation stays whole, and the extension span is re-cut into two, each IN its shard" {
+  local v="$REPO_ROOT/development/skills/resolve-issue/scripts/verify-reference-move.zsh"
+  local ref="$REPO_ROOT/development/skills/resolve-issue/reference"
+  # interactive-remediation is still the FIRST manifest row (the short-row and
+  # extra-tab cases mutate the first row), now naming its shard
+  [ "$(grep -m1 -E '^"[a-z0-9-]+	' "$v" | cut -f1,2)" = "$(printf '"interactive-remediation\tinteractive/remediation.md')" ]
+  # the outer bounds of the former single extension chunk, pinned in full: the
+  # first chunk keeps the old FIRST anchor, the second the old LAST anchor
+  grep -qF -- "\"interactive-extension	interactive/extension.md	**Interactive extension (human present, \\\`BUDGET_EXHAUSTED\\\` /	" "$v"
+  grep -qF -- "\"interactive-extension-steps-5-7	interactive/extension-grant.md	5. **If they granted rounds**" "$v"
+  grep -qF -- "	   later with \\\`/development:resolve-issue <N>\\\`." "$v"
+  local n shard
+  for n in interactive-remediation:remediation.md interactive-extension:extension.md \
+           interactive-extension-steps-5-7:extension-grant.md; do
+    shard="${n#*:}"; n="${n%%:*}"
+    grep -qF -- "\"$n	interactive/$shard	" "$v"
+    [ "$(grep -rxF -- "<!-- moved: $n -->" "$ref" | wc -l | tr -d ' ')" -eq 1 ]
+    [ "$(grep -rxF -- "<!-- /moved: $n -->" "$ref" | wc -l | tr -d ' ')" -eq 1 ]
+    [ "$(grep -cxF -- "<!-- moved: $n -->" "$ref/interactive/$shard")" -eq 1 ]
+    [ "$(grep -cxF -- "<!-- /moved: $n -->" "$ref/interactive/$shard")" -eq 1 ]
+  done
+  # the index carries no frozen text of its own, and neither does the ceiling shard
+  run grep -qE -- '^<!-- moved: .+ -->$' "$ref/interactive.md"
+  [ "$status" -ne 0 ]
+  run grep -qE -- '^<!-- moved: .+ -->$' "$ref/interactive/extension-ceiling.md"
+  [ "$status" -ne 0 ]
+  # and each chunk verified, in its shard
+  _require_pre_move_commit
+  run -0 zsh "$VERIFY" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
+  contains "$output" "ok   interactive-remediation — "
+  contains "$output" "→ reference/interactive/remediation.md"
+  contains "$output" "ok   interactive-extension — "
+  contains "$output" "→ reference/interactive/extension.md"
+  contains "$output" "ok   interactive-extension-steps-5-7 — "
+  contains "$output" "→ reference/interactive/extension-grant.md"
+}
+
+@test "#2058 the seam check FIRES on the extension seam when the first chunk's last anchor moves up" {
+  # The mutant moves interactive-extension's LAST anchor to the line above it,
+  # inside its own chunk, so the original line below falls out of the verified
+  # region while both chunks still byte-compare green.
+  _require_pre_move_commit
+  local m="$BATS_TEST_TMPDIR/verify-interactive-seam.zsh"
+  _mutate_anchor "$m" '   side-channel).' \
+    '   and escalation already read comments — reuse that, do not invent an env'
+  run zsh "$m" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
+  [ "$status" -eq 1 ]
+  contains "$stderr$output" "the seam interactive-extension → interactive-extension-steps-5-7 leaves original lines uncovered"
+  contains "$stderr$output" "side-channel)."
+}
+
 # --- #2057: the suggestion-promotion span, re-cut into five across reference/promotion/ ----
 
 @test "#2057 the suggestion-promotion span is re-cut into five chunks, each IN the shard its row names" {
@@ -1308,11 +1362,11 @@ _mutate_anchor() {
   local mutant="$BATS_TEST_TMPDIR/verify-short-row.zsh"
   # Drop the REF_FILE field from the first manifest row, leaving three fields.
   # The first row, so no other row is processed before the guard fires.
-  sed 's|^"interactive-remediation	interactive.md	|"interactive-remediation	|' \
+  sed 's|^"interactive-remediation	interactive/remediation.md	|"interactive-remediation	|' \
     "$VERIFY" > "$mutant"
   # the mutation must have applied, or this case proves nothing (`run !`, since
   # a bare `!` is inert in bats, #829)
-  run ! grep -qF '"interactive-remediation	interactive.md	' "$mutant"
+  run ! grep -qF '"interactive-remediation	interactive/remediation.md	' "$mutant"
 
   run zsh "$mutant" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
   [ "$status" -eq 1 ]
@@ -1339,7 +1393,7 @@ _mutate_anchor() {
   # Append a tab plus a token to the FIRST row's last field. The row now has four
   # tabs; the anchor no longer matches the pinned commit, so the run still fails —
   # but it must fail as an unlocatable RANGE, never as a malformed row.
-  sed 's|^\("interactive-remediation	interactive.md	[^	]*	.*\)$|\1	TRAILING|' \
+  sed 's|^\("interactive-remediation	interactive/remediation.md	[^	]*	.*\)$|\1	TRAILING|' \
     "$VERIFY" > "$mutant"
   run ! grep -qF '	TRAILING' "$VERIFY"
   run -0 grep -qF '	TRAILING' "$mutant"

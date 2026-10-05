@@ -207,8 +207,9 @@ _all_raw_pointer_count() {
 #
 # The scope, since #2055 split review-loop.md into shards under
 # reference/review-loop/ and left an INDEX at the old path (and #2056 did the
-# same for residue.md under reference/residue/, and #2057 for promotion.md under
-# reference/promotion/):
+# same for residue.md under reference/residue/, #2057 for promotion.md under
+# reference/promotion/, and #2058 for interactive.md under
+# reference/interactive/):
 #   - a top-level reference file is reached only by a pointer naming it;
 #   - each split directory in SPLIT_DIRS is ONE unit with its index. The
 #     conductor's pointers go straight to its shards, never to the index, and
@@ -221,7 +222,7 @@ _all_raw_pointer_count() {
 #     `reference/<dir>/<sub>/`.
 # That keeps an orphan shard (in no pointer, not in the index) red — which a
 # "the index exists" check alone would not.
-SPLIT_DIRS=(review-loop residue promotion)
+SPLIT_DIRS=(review-loop residue promotion interactive)
 _unreached_reference_files() {
   local dir="$1" targets rel f index top dir_part base block d
   targets="$(cat)"
@@ -330,7 +331,9 @@ _unreached_reference_files() {
   # EIGHT since #1226: the new reference/telemetry.md declares ONE `##` section,
   # *Story telemetry (#1226)*. Its #1226 correction notes in
   # reference/promotion/gate.md and reference/promotion/step-8-status-files.md,
-  # interactive.md and review-loop.md are PARAGRAPHS, for the reason above.
+  # reference/interactive/remediation.md and
+  # reference/interactive/extension-ceiling.md, and review-loop.md are
+  # PARAGRAPHS, for the reason above.
   #
   # NINE since #1920: residue.md gained ONE `##` section, *Risk threshold —
   # assess before filing (#1920)*, which amends the frozen residue branch from
@@ -351,6 +354,10 @@ _unreached_reference_files() {
   #
   # Still TEN after #2057 split promotion.md: its one `##` heading moved to
   # reference/promotion/gate.md, and its index carries only an `#` title.
+  #
+  # Still TEN after #2058 split interactive.md: its two `##` headings moved to
+  # reference/interactive/remediation.md and extension.md, and its index
+  # carries only an `#` title.
   local n
   n="$(_ref_headings | grep -c .)"
   [ "$n" -eq 10 ]
@@ -555,6 +562,26 @@ _unreached_reference_files() {
   printf '%s\n' "$bad" | grep -qxF -- 'promotion.md'
 }
 
+@test "#2058 non-vacuity: the interactive directory is judged as one unit with its index" {
+  local fake="$BATS_TEST_TMPDIR/ref-copy-interactive" targets bad
+  cp -R "$REF_DIR" "$fake"
+  targets="$(_all_pointers | cut -f1 | sort -u)"
+  bad="$(printf '%s\n' "$targets" | _unreached_reference_files "$fake")"
+  [ -z "$bad" ]
+  # (a) an orphan interactive shard
+  printf 'orphan\n' > "$fake/interactive/orphan.md"
+  bad="$(printf '%s\n' "$targets" | _unreached_reference_files "$fake")"
+  [ "$bad" = 'interactive/orphan.md' ]
+  rm "$fake/interactive/orphan.md"
+  # (b) a shard the index stops listing, and no pointer names
+  sed '/`reference\/interactive\/extension-ceiling\.md`/d' "$REF_DIR/interactive.md" > "$fake/interactive.md"
+  bad="$(printf '%s\n' "$targets" | _unreached_reference_files "$fake")"
+  [ "$bad" = 'interactive/extension-ceiling.md' ]
+  # (c) nothing points into interactive/ at all: the index is unreached too
+  bad="$(printf '%s\n' "$targets" | grep -v '^interactive/' | _unreached_reference_files "$REF_DIR")"
+  printf '%s\n' "$bad" | grep -qxF -- 'interactive.md'
+}
+
 # --- gate.md's own route (#2057) ---------------------------------------------
 #
 # SKILL.md points straight at reference/promotion/gate.md, whose frozen block
@@ -585,6 +612,22 @@ _unreached_reference_files() {
   contains "$before" '(`reference/promotion/step-3-select.md` and `reference/promotion/step-4-sub-loop.md`)'
   contains "$before" "The enrichment of step 3 passes the run's \`--telemetry-dir\` as well as its \`--telemetry-file\`"
   contains "$before" "every sub-loop invocation of step 4 carries the run's \`loop_args\`"
+}
+
+# SKILL.md and escalation.md point straight at reference/interactive/
+# extension.md, whose frozen block ends at step 4, so its two unfrozen routes
+# are the only way on to steps 5-7 and to the step-5 amendments (#2058).
+
+@test "#2058 extension.md routes on to extension-grant.md, then extension-ceiling.md, read before step 5" {
+  local ext="$REF_DIR/interactive/extension.md" before after rest
+  grep -qxF -- '<!-- /moved: interactive-extension -->' "$ext"
+  before="$(awk '/^<!-- moved: interactive-extension -->$/ {exit} {sub(/^> ?/, ""); print}' "$ext" | LC_ALL=C tr -s '[:space:]' ' ')"
+  contains "$before" 'Read the #1576 amendment in `reference/interactive/extension-ceiling.md` BEFORE acting on step 5'
+  after="$(awk 'seen {print} /^<!-- \/moved: interactive-extension -->$/ {seen=1}' "$ext" | LC_ALL=C tr -s '[:space:]' ' ')"
+  contains "$after" '**Read on, in this order.**'
+  contains "$after" '`reference/interactive/extension-ceiling.md`'
+  rest="${after%%'`reference/interactive/extension-ceiling.md`'*}"
+  contains "$rest" '`reference/interactive/extension-grant.md`'
 }
 
 # --- the read-once rule (#2055) ---------------------------------------------

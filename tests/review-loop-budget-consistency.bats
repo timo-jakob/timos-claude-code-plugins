@@ -58,7 +58,12 @@ setup() {
   #     (the AWAITING_FIX branch it is decided on; since #2055 its shard
   #     reference/review-loop/exit-20-awaiting-fix.md);
   #   - the +3 increment, the worked ceiling and the soft-cap nudge →
-  #     reference/interactive.md (the interactive extension).
+  #     reference/interactive.md (the interactive extension). Since #2058 split
+  #     it, the offer texts and the bookkeeping note sit in
+  #     reference/interactive/extension.md (steps 1-4), the increment's ceiling
+  #     semantics, the worked ceiling and the soft cap in extension-grant.md
+  #     (steps 5-7), and the #1583 carried-round addendum in
+  #     extension-ceiling.md.
   # So the sweeps below name THOSE files. Naming the conductor instead would
   # leave every needle unfindable — or, worse, findable in a corpus while
   # nothing pinned which file it landed in.
@@ -67,7 +72,9 @@ setup() {
   # AWAITING_FIX shard, and the #1583 carry-accounting addendum in carry.md.
   SKILL="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop/exit-20-awaiting-fix.md"
   CARRY="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop/carry.md"
-  EXTENSION="$REPO_ROOT/development/skills/resolve-issue/reference/interactive.md"
+  EXTENSION="$REPO_ROOT/development/skills/resolve-issue/reference/interactive/extension.md"
+  EXTENSION_GRANT="$REPO_ROOT/development/skills/resolve-issue/reference/interactive/extension-grant.md"
+  EXTENSION_CEILING="$REPO_ROOT/development/skills/resolve-issue/reference/interactive/extension-ceiling.md"
   ARCH="$REPO_ROOT/ARCHITECTURE.md"
   # The panel-duties block of ARCHITECTURE.md, extracted ONCE and asserted
   # against instead of the whole file (#1434). Every ARCH needle in the
@@ -729,20 +736,22 @@ grep_site() {  # grep_site <file> <fixed-string>
   # Digit-terminal needles go through grep_num (both boundaries), so a drift to
   # "+30" / "by 30" cannot satisfy them; the rest are plain fixed strings.
   #
-  # reference/interactive.md — the offer texts, the bookkeeping note, the
-  # ceiling semantics and the invocation that implements them (#1503 moved the
+  # reference/interactive/ — the offer texts, the bookkeeping note, the ceiling
+  # semantics and the invocation that implements them (#1503 moved the
   # interactive extension there byte-for-byte; the conductor keeps the exit-code
-  # table and a pointer, neither of which states a number)
+  # table and a pointer, neither of which states a number). #2058 split it: the
+  # offer texts and the bookkeeping note in extension.md, the ceiling semantics
+  # and the invocation in extension-grant.md.
   grep_num "$EXTENSION" "Grant \+$INCREMENT rounds"
   grep_num "$EXTENSION" "Grant \+$INCREMENT with guidance"
   grep_num "$EXTENSION" "retry \(\+$INCREMENT\)"
   grep_num "$EXTENSION" "\+$INCREMENT/.grants. bookkeeping"
-  grep -Fq 'exactly three more rounds' "$EXTENSION"
+  grep -Fq 'exactly three more rounds' "$EXTENSION_GRANT"
   grep -Fq 'grant "three more rounds"' "$EXTENSION"
-  grep_num "$EXTENSION" "ceiling raised by $INCREMENT"
-  grep_num "$EXTENSION" "raises the \*ceiling\* by $INCREMENT"
-  grep -Fq 'leaves more than three' "$EXTENSION"
-  grep_num "$EXTENSION" "prev_max \+ $INCREMENT"
+  grep_num "$EXTENSION_GRANT" "ceiling raised by $INCREMENT"
+  grep_num "$EXTENSION_GRANT" "raises the \*ceiling\* by $INCREMENT"
+  grep -Fq 'leaves more than three' "$EXTENSION_GRANT"
+  grep_num "$EXTENSION_GRANT" "prev_max \+ $INCREMENT"
   # ARCHITECTURE.md — the contract restatement, in both spellings
   grep_num "$ARCH" "offers \+$INCREMENT to the round ceiling"
   grep_num "$ARCH" "raises the ceiling in force by $INCREMENT"
@@ -761,8 +770,8 @@ grep_site() {  # grep_site <file> <fixed-string>
   # SKILL.md illustrates both exits with concrete numbers; recompute them so a
   # retune of the cap or the increment cannot leave a stale example behind
   local first_ceiling=$(( MAXR + INCREMENT ))
-  grep_num "$EXTENSION" "ceiling $first_ceiling after the default budget, rounds $(( MAXR + 1 ))-$first_ceiling"
-  grep_num "$EXTENSION" "ceiling $first_ceiling after a round-2 exit = $(( first_ceiling - 2 )) rounds left"
+  grep_num "$EXTENSION_GRANT" "ceiling $first_ceiling after the default budget, rounds $(( MAXR + 1 ))-$first_ceiling"
+  grep_num "$EXTENSION_GRANT" "ceiling $first_ceiling after a round-2 exit = $(( first_ceiling - 2 )) rounds left"
 }
 
 @test "no stale +2 increment spelling survives in the live instructions (#993)" {
@@ -783,28 +792,28 @@ grep_site() {  # grep_site <file> <fixed-string>
   # first byte of '×' into an unbraced variable name.
   local ceiling=$(( MAXR + SOFTCAP * INCREMENT ))
   local site
-  for site in "$EXPLAIN" "$EXTENSION" "$ARCH"; do
+  for site in "$EXPLAIN" "$EXTENSION_GRANT" "$ARCH"; do
     grep_num "$site" "$MAXR \+ ${SOFTCAP}×$INCREMENT = $ceiling"
   done
   # SKILL.md also restates the derived number on its own; recompute it too
-  grep_num "$EXTENSION" "$ceiling-round figure"
+  grep_num "$EXTENSION_GRANT" "$ceiling-round figure"
 }
 
 @test "the soft cap is a nudge at every site that states it (#993)" {
   local site
-  for site in "$EXTENSION" "$ARCH" "$EXPLAIN"; do
+  for site in "$EXTENSION_GRANT" "$ARCH" "$EXPLAIN"; do
     grep_site "$site" 'not a hard stop'
   done
   # and the cap's own value agrees with what build-escalation.zsh renders,
   # in the digit form...
-  grep_num "$EXTENSION" "grants >= $SOFTCAP"
+  grep_num "$EXTENSION_GRANT" "grants >= $SOFTCAP"
   grep_num "$ARCH" "$SOFTCAP-grant soft cap"
   # ...and in the word form the human-facing prose uses. Both spellings, or the
   # unguarded one drifts (the whole point of this file).
   [ "$SOFTCAP" -eq 5 ]   # the word forms below are spelled for this value
   grep -Fq 'five grants' "$EXPLAIN"
   grep -Fq 'five-grant point' "$EXPLAIN"
-  grep -Fq 'by the fifth grant' "$EXTENSION"
+  grep -Fq 'by the fifth grant' "$EXTENSION_GRANT"
   grep -Fq 'by the fifth grant' "$ARCH"
 }
 
@@ -996,8 +1005,10 @@ _outside_moved_spans() {  # $1 = file
   grep_site "$CONDUCTOR" 'the findings file is panel output — never'
   # the interactive extension's granted resume is a carried round, so its
   # (frozen) template is read with the flag: the addendum says so by name
-  grep_site "$EXTENSION" 'A granted resume is a carried round'
-  grep_site "$EXTENSION" "$flag <carry-round-R.json>"
+  grep_site "$EXTENSION_CEILING" 'A granted resume is a carried round'
+  grep_site "$EXTENSION_CEILING" "$flag <carry-round-R.json>"
+  # ...and the resume is verified by the NUMBER, never by max_rounds_source
+  grep_site "$EXTENSION_CEILING" "when \`effective_max_rounds\` is at least \`record-grant.zsh\`'s **echoed**"
   # ...and the -h line of the loop lists the flag the prose names
   run zsh "$LOOP" --help
   [ "$status" -eq 0 ]
