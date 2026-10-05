@@ -75,11 +75,14 @@ setup() {
   # the count below impossible to write.
   POINTER='How to wait (this section) governs the wait'
   # #2022's scope pointer, in the Round subagents section: it carves the
-  # conductor's foreground dispatches out of the rule and points at it. Its own
+  # conductor's round dispatches out of the rule and points at it. Its own
   # needle, NOT a third use of $POINTER — it does not sit beside the paragraph,
   # so "(this section)" would be false there, and the between-the-pointers pin
-  # below would then measure the wrong pair.
-  SCOPE_POINTER='How to wait governs only the gate and a dispatch that did launch in the background — it is not restated here'
+  # below would then measure the wrong pair. #2034 narrowed it to the gate
+  # alone: a round dispatch that launched in the background is waited on
+  # in-turn, never by ending the turn, which an E3 child conductor — itself a
+  # subagent — could never be re-invoked from.
+  SCOPE_POINTER='How to wait governs only the gate — it is not restated here'
   # The bare phrase, for the roster tripwire and the SKILL-wide count.
   # Deliberately WITHOUT the issue number, so the tripwire sees a new site that
   # names the rule in prose as readily as one that cites it.
@@ -423,6 +426,9 @@ _roster_hits() {
   esac
   body="$(prose_window "$PROTO" "$((ln + 3))" 3)"
   contains "$body" "$SCOPE_POINTER"
+  # #2034: the background half left the rule, so the pointer must not carry it
+  # back — that wording sent an E3 child conductor to end its turn mid-round.
+  lacks "$body" 'and a dispatch that did launch in the background'
   for needle in "${RESTATEMENT_NEEDLES[@]}"; do
     lacks "$body" "$needle"
   done

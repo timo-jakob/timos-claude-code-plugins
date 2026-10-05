@@ -2251,8 +2251,9 @@ ARCHITECTURE.md's *Subagent dispatch mechanism* records: in the epic E3 child
 flow the conductor is itself a subagent, so its own dispatch is nested and
 defaults to a background launch, which returns before the verdict is written.
 A foreground dispatch returns its verdict in the same turn, so the conductor
-carries straight on: **How to wait** governs only the gate and a dispatch that
-did launch in the background — it is not restated here. Each agent body only
+carries straight on: **How to wait** governs only the gate — it is not restated
+here. A round dispatch that launched in the background anyway is waited on
+in-turn, as *A background round dispatch* below says. Each agent body only
 points at its brief below.
 
 **Contract usage.** The conductor writes every handoff with `round-handoff.zsh
@@ -2348,6 +2349,24 @@ read-verdict` exit 3, a missing file included. It gets exactly one re-dispatch,
 then report-and-stop — a fresh subagent with a freshly written handoff. A
 verdict that validates but is not `ok` is not a stall, and recovery dispatches
 (#1937's) don't count against the retry.
+
+**A background round dispatch is waited on in-turn, never by ending the turn
+(#2034).** When a `round-panel`, `round-fix`, `round-decide` or `round-risk`
+dispatch launched in the background anyway — the flag left out, or ignored —
+the conductor waits for that dispatch's `<work-dir>/verdict-<R>-<kind>.json`
+with one bounded `Monitor` call for that file, never a Bash poll, then reads it
+with `round-handoff.zsh read-verdict`. That call's timeout is the bound: set it
+generous enough for that kind's whole job — a panel, which fans out to
+reviewers, is routinely the longest — since a bound that expires on a healthy
+subagent spends the stall retry. This holds on the single-issue flow and the
+epic E3 child flow alike: an E3 child conductor is itself a subagent, and one
+that ended its turn would return to its parent mid-round, with no verdict read
+and its gate left running, and never be re-invoked. A verdict still missing
+when the bound expires is a stall, but the stall retry above applies to it only
+once that background dispatch is stopped and confirmed ended, so no two
+subagents of one round and kind ever run at once; the re-dispatch is made in
+the foreground. A background dispatch that cannot be stopped is
+report-and-stop, never re-dispatched.
 
 **Everything else is unchanged.** Exit codes 0, 14, 10, 11, 12, 13, 2 and 1 take
 their existing paths, from the status JSON alone — except a mid-run exit 2 on
