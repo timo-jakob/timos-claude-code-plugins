@@ -1285,6 +1285,22 @@ partial_toolchain() {
   [ -z "$(verdict_lines "$output")" ]
 }
 
+@test "an older mikefarah yq printing a bare 'yq version 4.x' passes the preflight and runs (#1610)" {
+  # the second accepted spelling: pre-~v4.24 mikefarah prints no URL; the stub
+  # reports that spelling and delegates every real call to the pinned yq, so
+  # the argocd stage proves the dialect, not just the probe
+  prepare kubernetes-repo
+  local stub="$BATS_TEST_TMPDIR/stub-bin"
+  mkdir -p "$stub"
+  printf '#!/bin/sh\n[ "$1" = --version ] && { echo "yq version 4.20.2"; exit 0; }\nexec "%s" "$@"\n' \
+    "$IAC_BIN/yq" > "$stub/yq"
+  chmod +x "$stub/yq"
+  GATE_PATH_PREFIX="$stub"
+  run run_gate
+  [ "$status" -eq 0 ]
+  [ "$(verdict_lines "$output")" = "$(expected_all_ok)" ]
+}
+
 @test "the argocd stage refuses a vacuous pass when the yq expression cannot run (#1603)" {
   # a yq that passes the flavour probe but evaluates nothing: without the probe
   # document the stage would warn per file, extract zero paths and report ok
