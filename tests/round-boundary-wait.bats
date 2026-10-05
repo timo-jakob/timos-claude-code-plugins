@@ -328,6 +328,65 @@ _roster_hits() {
   contains "$body" 'One call, never one probe per turn.'
 }
 
+# The #2113 carve-out in reference file $1: its wording, and its POSITION. A
+# helper rather than an inline body so the non-vacuity control below drives the
+# SAME assertion over its mutated fixture, never a hand-written copy of it.
+#
+# Why it is not in the normative paragraph: that paragraph sits inside the
+# byte-frozen `round-protocol-head` span (#1503), and so does the panel step's
+# pointer, in `round-protocol-tail` — verify-reference-move.zsh reds on a single
+# changed byte in either. The one editable prose between them is the #1582 gap,
+# which ends right where the panel step begins: the last thing a driver reads
+# before that step's pointer sends it to the paragraph's "end it". So the pin is
+# the position as much as the words — moved out of the gap, the carve-out stops
+# meeting the driver at the pointer it limits.
+_round_dispatch_carveout() {
+  local ln head_end tail_start panel body _v
+  ln="$(prose_gate_lines "$1" 'The end-the-turn wait that step 1')"
+  # The sentinels by WHOLE-LINE match on the raw file: the file's header names
+  # both in backticks, which prose normalisation strips, so a prose locator
+  # would find each twice.
+  head_end="$(grep -nxF '<!-- /moved: round-protocol-head -->' "$1" | cut -d: -f1)"
+  tail_start="$(grep -nxF '<!-- moved: round-protocol-tail -->' "$1" | cut -d: -f1)"
+  panel="$(prose_gate_lines "$1" 'Review panel, in-session. Get the dispatch plan (review-dispatch.zsh')"
+  for _v in "$ln" "$head_end" "$tail_start" "$panel"; do
+    case "$_v" in ''|*[!0-9]*)
+      printf 'carve-out locator missing or ambiguous: %s\n' "$_v" >&2; return 1 ;;
+    esac
+  done
+  # In the unfrozen gap, and the gap's LAST prose before the panel step.
+  if [ "$ln" -le "$head_end" ] || [ "$ln" -ge "$tail_start" ] || [ "$tail_start" -ge "$panel" ]; then
+    printf 'the carve-out is at line %s, not in the gap (%s..%s) before the panel step (%s)\n' \
+      "$ln" "$head_end" "$tail_start" "$panel" >&2
+    return 1
+  fi
+  if [ "$((tail_start - ln))" -gt 5 ]; then
+    printf 'the carve-out (line %s) is not directly before the panel step sentinel (%s)\n' \
+      "$ln" "$tail_start" >&2
+    return 1
+  fi
+  # Forward-only: the carve-out paragraph and nothing past the sentinel.
+  body="$(prose_window "$1" "$((ln + 2))" 2)"
+  contains "$body" "The end-the-turn wait that step 1's pointer names never covers a round subagent dispatch (#2113)." \
+    || return 1
+  contains "$body" 'round-panel, round-fix, round-decide or round-risk dispatch that launched in the background' \
+    || return 1
+  contains "$body" 'is waited on in-turn, as A background round dispatch (Round subagents) says' || return 1
+  contains "$body" 'not by ending the turn' || return 1
+  # …and it stays a pointer at the #2034 paragraph, never a copy of that wait
+  lacks "$body" 'one bounded Monitor call' || return 1
+}
+
+@test "#2113 round subagent dispatches are carved out of the end-the-turn wait, before the panel step" {
+  # #2034 narrowed the Round subagents scope pointer to "the gate alone", but
+  # the panel-dispatch step's frozen pointer still sends a driver to the
+  # normative paragraph, whose end-the-turn clause carves out only the gate. An
+  # E3 child conductor whose round-panel dispatch launched in the background
+  # therefore read "end it" — and, being itself a subagent, returned to its
+  # parent mid-round and was never re-invoked.
+  _round_dispatch_carveout "$PROTO"
+}
+
 # --- AC2: the two consuming sites point, and do not restate -----------------
 
 @test "#1513 AC2 exactly two SKILL.md sites carry the pointer" {
@@ -627,6 +686,38 @@ _roster_hits() {
   for needle in "${RESTATEMENT_NEEDLES[@]}"; do
     contains "$body" "$needle"
   done
+}
+
+@test "#2113 non-vacuity: a removed or relocated carve-out reds the pin" {
+  # Two mutations, one per half of the pin, each asserted on the real helper's
+  # status. REMOVED: the paragraph cut, the shape a "tidy" of the gap produces.
+  local F="$BATS_TEST_TMPDIR/proto-no-carveout.md" G="$BATS_TEST_TMPDIR/proto-moved-carveout.md" rc
+  perl -0pe 's/\*\*The end-the-turn wait that step 1.*?not by ending the turn\.\n\n//s' "$PROTO" > "$F"
+  # the mutation really happened — else the red below would prove nothing
+  if cmp -s "$PROTO" "$F"; then
+    printf 'removal fixture is identical to the source\n' >&2
+    return 1
+  fi
+  rc=0
+  _round_dispatch_carveout "$F" 2>/dev/null || rc=$?
+  if [ "$rc" -ne 1 ]; then
+    printf 'expected the pin to fail (1) on the removal fixture, got %s\n' "$rc" >&2
+    return 1
+  fi
+  # RELOCATED: the same paragraph moved to the top of the gap, wording intact —
+  # the words pass, so only the position half can red it.
+  perl -0pe 's/(\*\*The end-the-turn wait that step 1.*?not by ending the turn\.\n\n)//s and $p = $1;
+             s/(<!-- \/moved: round-protocol-head -->\n\n)/$1$p/' "$PROTO" > "$G"
+  if cmp -s "$PROTO" "$G"; then
+    printf 'relocation fixture is identical to the source\n' >&2
+    return 1
+  fi
+  rc=0
+  _round_dispatch_carveout "$G" 2>/dev/null || rc=$?
+  if [ "$rc" -ne 1 ]; then
+    printf 'expected the pin to fail (1) on the relocation fixture, got %s\n' "$rc" >&2
+    return 1
+  fi
 }
 
 @test "#1513 non-vacuity: a doc site that loses its §3.5 pointer reds" {

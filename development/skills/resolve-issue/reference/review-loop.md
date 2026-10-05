@@ -12,7 +12,8 @@ pinned pre-move commit, and is what keeps this file honest.
 
 **Two regions are outside that proof**, and both are NEW prose the gate does not
 check. The text between `<!-- /moved: round-protocol-head -->` and
-`<!-- moved: round-protocol-tail -->` is #1582's reviewer-path rule — the gate
+`<!-- moved: round-protocol-tail -->` is #1582's reviewer-path rule, closed by the
+round-dispatch carve-out from the end-the-turn wait (#2113) — the gate
 proves only that no *original* line migrated into it, by asserting the two
 anchors stay adjacent in the pinned commit. And **everything after
 `<!-- /moved: round-protocol-tail -->`** is unproven too: the #1571 correction, the #1485 empty-story-diff note,
@@ -511,6 +512,11 @@ still empty, report it and stop.
 Without the marking, a reviewer reports the round FAILED or raises a finding
 about a missing file, and step 2's FAILED recovery then re-runs a panel that
 fails the same way.
+
+**The end-the-turn wait that step 1's pointer names never covers a round
+subagent dispatch (#2113).** A `round-panel`, `round-fix`, `round-decide` or
+`round-risk` dispatch that launched in the background is waited on in-turn, as
+*A background round dispatch* (Round subagents) says — not by ending the turn.
 
 <!-- moved: round-protocol-tail -->
 1. **Review panel, in-session.** Get the dispatch plan (`review-dispatch.zsh
