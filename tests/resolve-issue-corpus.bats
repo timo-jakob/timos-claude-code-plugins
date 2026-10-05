@@ -39,18 +39,28 @@ setup() {
   # copy outside the helper, and it is what makes the "roster changed" case below
   # a real assertion rather than a tautology.
   EXPECTED_REFS=(review-loop.md residue.md promotion.md escalation.md interactive.md sequential.md telemetry.md)
+  # #2055 split review-loop.md into shards under reference/review-loop/; the
+  # shard roster is transcribed once here for the same reason, in the index's
+  # read order.
+  EXPECTED_SHARDS=(core.md scope-block.md step-1-panel.md step-2-invocation.md
+    exit-2-stale-findings.md exit-20-awaiting-fix.md delta-rounds.md
+    topic-panels.md decided-pass.md risk-pass.md carry.md subagents.md
+    briefs/panel.md briefs/fix.md briefs/decide.md briefs/risk.md)
 }
 
 # Build a synthetic skill tree at $1 holding SKILL.md plus the named reference
-# files (defaults to the declared roster).
+# files (defaults to the declared roster) and, always, the declared review-loop
+# shards (#2055) — so a case about the top-level roster is not tripped by the
+# shard tripwire instead.
 _synth() {
   local root="$1"; shift
   local base="$root/development/skills/resolve-issue"
-  mkdir -p "$base/reference"
+  mkdir -p "$base/reference/review-loop/briefs"
   printf 'conductor\n' > "$base/SKILL.md"
   local f
   if [ "$#" -eq 0 ]; then set -- "${EXPECTED_REFS[@]}"; fi
   for f in "$@"; do printf 'body of %s\n' "$f" > "$base/reference/$f"; done
+  for f in "${EXPECTED_SHARDS[@]}"; do printf 'body of %s\n' "$f" > "$base/reference/review-loop/$f"; done
 }
 
 # --- the roster ---------------------------------------------------------------
@@ -61,8 +71,12 @@ _synth() {
   run -0 resolve_issue_files "$root"
   local base="$root/development/skills/resolve-issue"
   local want
+  local -a shard_paths
+  local s
+  for s in "${EXPECTED_SHARDS[@]}"; do shard_paths+=("$base/reference/review-loop/$s"); done
   want="$(printf '%s\n' "$base/SKILL.md" \
     "$base/reference/review-loop.md" \
+    "${shard_paths[@]}" \
     "$base/reference/residue.md" \
     "$base/reference/promotion.md" \
     "$base/reference/escalation.md" \
@@ -80,6 +94,24 @@ _synth() {
   run -1 resolve_issue_files "$root"
   contains "$output" "notes.md"
   contains "$output" "update"
+}
+
+@test "#2055 an UNDECLARED review-loop shard, at any depth, makes the roster refuse" {
+  local root="$BATS_TEST_TMPDIR/extra-shard"
+  _synth "$root"
+  mkdir -p "$root/development/skills/resolve-issue/reference/review-loop/deep/er"
+  printf 'notes\n' > "$root/development/skills/resolve-issue/reference/review-loop/deep/er/notes.md"
+  run -1 resolve_issue_files "$root"
+  contains "$output" "deep/er/notes.md"
+  contains "$output" "shard roster"
+}
+
+@test "#2055 a MISSING declared review-loop shard makes the roster refuse" {
+  local root="$BATS_TEST_TMPDIR/short-shard"
+  _synth "$root"
+  rm "$root/development/skills/resolve-issue/reference/review-loop/briefs/risk.md"
+  run -1 resolve_issue_files "$root"
+  contains "$output" "briefs/risk.md"
 }
 
 @test "#1546 a MISSING declared reference file makes the roster refuse" {
@@ -105,7 +137,7 @@ _synth() {
   # than transcribed a third time: a sixth reference file correctly added to both
   # rosters must not red here with an opaque count mismatch.
   run -0 resolve_issue_files "$REPO_ROOT"
-  [ "$(printf '%s\n' "$output" | grep -c .)" -eq "$(( ${#EXPECTED_REFS[@]} + 1 ))" ]
+  [ "$(printf '%s\n' "$output" | grep -c .)" -eq "$(( ${#EXPECTED_REFS[@]} + ${#EXPECTED_SHARDS[@]} + 1 ))" ]
 }
 
 # --- the corpus ---------------------------------------------------------------
@@ -118,8 +150,10 @@ _synth() {
   [ "$output" = "$out" ]
   # `cat member; printf '\n'` per member, so each 1-line member contributes its
   # line plus a blank separator.
-  local want
-  want="$(printf 'conductor\n\nbody of review-loop.md\n\nbody of residue.md\n\nbody of promotion.md\n\nbody of escalation.md\n\nbody of interactive.md\n\nbody of sequential.md\n\nbody of telemetry.md\n')"
+  # The #2055 shards follow the index, each with its own separator.
+  local want shard_bodies="" s
+  for s in "${EXPECTED_SHARDS[@]}"; do shard_bodies+="body of $s"$'\n\n'; done
+  want="$(printf 'conductor\n\nbody of review-loop.md\n\n%sbody of residue.md\n\nbody of promotion.md\n\nbody of escalation.md\n\nbody of interactive.md\n\nbody of sequential.md\n\nbody of telemetry.md\n' "$shard_bodies")"
   [ "$(cat "$out")" = "$want" ]
 }
 

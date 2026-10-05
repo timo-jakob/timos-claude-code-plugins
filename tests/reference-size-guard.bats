@@ -1,0 +1,137 @@
+#!/usr/bin/env bats
+#
+# #2055 — the resolve-issue reference layout's two guards. The conductor re-read
+# its whole reference docs on later rounds; the fix splits each oversized file
+# into a directory of shards with a short index at the old path. These guards
+# keep that true:
+#
+#   1. SIZE — every covered file is at most 20,000 bytes, and every index at the
+#      old path of a split file is at most 3,000.
+#   2. SINGLE HOME — every H2–H4 heading of a split file, as it stood at the
+#      split's base commit, appears exactly once across reference/**: no heading
+#      dropped by the split, none duplicated into two shards.
+#
+# COVERED is the extendable list: each later split (#2056 residue.md, #2057
+# promotion.md, #2058 interactive.md) appends its index and directory, and its
+# file and base to SPLIT, until the size guard covers all of reference/**.
+#
+# MUTATION CONTROLS run the same functions over a throwaway copy: a planted
+# 20,001-byte shard, an over-long index, a dropped heading, a duplicated one.
+
+bats_require_minimum_version 1.5.0
+
+setup() {
+  unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE
+  export LC_ALL=C
+  REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+  REF_REL='development/skills/resolve-issue/reference'
+  MAX_BYTES=20000
+  MAX_INDEX_BYTES=3000
+  # Covered paths, relative to REF_REL: an index file, or a shard directory.
+  COVERED=(
+    review-loop.md
+    review-loop
+  )
+  # Split files: NAME:BASE — the former file and the commit its headings are read at.
+  SPLIT=(
+    review-loop.md:98e51ea59858a3cf247d10cc841ca5f31239f985
+  )
+}
+
+# Every covered file under reference root $1, one absolute path per line.
+covered_files_in() {
+  local root="$1" c
+  for c in "${COVERED[@]}"; do
+    if [ -d "$root/$c" ]; then
+      find "$root/$c" -type f -name '*.md'
+    else
+      printf '%s\n' "$root/$c"
+    fi
+  done | sort
+}
+
+# One problem per line for reference root $1; nothing when every limit holds.
+size_problems_in() {
+  local root="$1" f n s name
+  while IFS= read -r f; do
+    [ -f "$f" ] || { printf 'covered path is missing: %s\n' "${f#"$root"/}"; continue; }
+    n="$(wc -c < "$f" | tr -d ' ')"
+    [ "$n" -le "$MAX_BYTES" ] || printf '%s is %s bytes (max %s)\n' "${f#"$root"/}" "$n" "$MAX_BYTES"
+  done < <(covered_files_in "$root")
+  for s in "${SPLIT[@]}"; do
+    name="${s%%:*}"
+    f="$root/$name"
+    [ -f "$f" ] || { printf 'the index of %s is missing\n' "$name"; continue; }
+    n="$(wc -c < "$f" | tr -d ' ')"
+    [ "$n" -le "$MAX_INDEX_BYTES" ] || printf 'index %s is %s bytes (max %s)\n' "$name" "$n" "$MAX_INDEX_BYTES"
+  done
+  return 0
+}
+
+# The H2–H4 heading lines of a split file at its base commit.
+base_headings() {
+  git -C "$REPO_ROOT" show "$2:$REF_REL/$1" | grep -E '^#{2,4} ' || true
+}
+
+# Every base heading that does not appear exactly once across reference root $1.
+home_problems_in() {
+  local root="$1" s name base h n
+  for s in "${SPLIT[@]}"; do
+    name="${s%%:*}" base="${s#*:}"
+    while IFS= read -r h; do
+      [ -n "$h" ] || continue
+      n="$(find "$root" -type f -name '*.md' -exec grep -hxF -- "$h" {} + | wc -l | tr -d ' ')"
+      [ "$n" -eq 1 ] || printf '%s heading appears %s times across reference/ (want 1): %s\n' "$name" "$n" "$h"
+    done < <(base_headings "$name" "$base")
+  done
+  return 0
+}
+
+@test "#2055 every covered reference file is at most 20,000 bytes, and every index at most 3,000" {
+  [ -n "$(covered_files_in "$REPO_ROOT/$REF_REL")" ]   # non-vacuity
+  [ "$(covered_files_in "$REPO_ROOT/$REF_REL" | wc -l | tr -d ' ')" -gt "${#COVERED[@]}" ]
+  run size_problems_in "$REPO_ROOT/$REF_REL"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ] || { printf '%s\n' "$output" >&2; return 1; }
+}
+
+@test "#2055 every H2-H4 heading of a split file at its base commit appears exactly once across reference/" {
+  local s
+  for s in "${SPLIT[@]}"; do
+    [ -n "$(base_headings "${s%%:*}" "${s#*:}")" ] || { echo "no base headings for $s" >&2; return 1; }
+  done
+  run home_problems_in "$REPO_ROOT/$REF_REL"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ] || { printf '%s\n' "$output" >&2; return 1; }
+}
+
+@test "#2055 MUTATION: the size guard reds on a 20,001-byte shard and an over-long index" {
+  local fx="$BATS_TEST_TMPDIR/ref"
+  cp -R "$REPO_ROOT/$REF_REL" "$fx"
+  [ -z "$(size_problems_in "$fx")" ]
+
+  head -c 20001 /dev/zero | tr '\0' 'x' > "$fx/review-loop/planted.md"
+  run size_problems_in "$fx"
+  [ "$output" = 'review-loop/planted.md is 20001 bytes (max 20000)' ]
+  rm -- "$fx/review-loop/planted.md"
+
+  head -c 3001 /dev/zero | tr '\0' 'x' > "$fx/review-loop.md"
+  run size_problems_in "$fx"
+  [ "$output" = 'index review-loop.md is 3001 bytes (max 3000)' ]
+}
+
+@test "#2055 MUTATION: the single-home guard reds on a dropped heading and a duplicated one" {
+  local fx="$BATS_TEST_TMPDIR/ref" h
+  cp -R "$REPO_ROOT/$REF_REL" "$fx"
+  [ -z "$(home_problems_in "$fx")" ]
+  h='### The risk pass — assess every blocking finding before consolidating (#1921)'
+  [ "$(grep -cxF -- "$h" "$fx/review-loop/risk-pass.md")" -eq 1 ]
+
+  grep -vxF -- "$h" "$fx/review-loop/risk-pass.md" > "$fx/tmp" && mv -- "$fx/tmp" "$fx/review-loop/risk-pass.md"
+  run home_problems_in "$fx"
+  [ "$output" = "review-loop.md heading appears 0 times across reference/ (want 1): $h" ]
+
+  printf '%s\n' "$h" "$h" >> "$fx/review-loop/carry.md"
+  run home_problems_in "$fx"
+  [ "$output" = "review-loop.md heading appears 2 times across reference/ (want 1): $h" ]
+}

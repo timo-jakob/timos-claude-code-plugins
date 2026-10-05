@@ -70,7 +70,7 @@ These are the §3 rules for this repo type. The conductor's generic bullet says
     which the loop accepts as an attestation only into a delta round. Round 1,
     the closing sweep (the grant beyond the ceiling included), the loop's own
     `--test-cmd`, hook mode, §E4 and CI stay on the whole suite. When and how is
-    *Selected gates for delta rounds* in `reference/review-loop.md`; this
+    *Selected gates for delta rounds* in `reference/review-loop/delta-rounds.md`; this
     profile restates none of it.
 - **Relay a DEGRADED gate to the user, up front (#980).** `run-gate.zsh`'s
   stdout summary carries a `"mode"` field. When it is `"sequential-degraded"`
@@ -128,9 +128,9 @@ evidence rule (#1584): a finding whose claim is a tool's verdict names the comma
 that decides it, and the conductor runs that command before consolidating.** Both
 halves live elsewhere — the rule with each agent, the conductor's
 run-and-promote step stated **once** in that skill's
-`reference/review-loop.md`, under
+`reference/review-loop/decided-pass.md`, under
 *The decided pass* in its round protocol
-(`development/skills/resolve-issue/reference/review-loop.md`). This is the
+(`development/skills/resolve-issue/reference/review-loop/decided-pass.md`). This is the
 pointer; neither half is restated here, severity included.
 
 ## Fix-pass rules

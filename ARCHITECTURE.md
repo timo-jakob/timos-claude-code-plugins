@@ -3513,7 +3513,7 @@ fields:
 consolidation the **conductor** may stamp a tenth field, `decided:
 "red"|"green"`, onto a finding whose claim was a tool run's verdict and whose
 deciding command it ran — the *decided pass*, stated once in
-`development/skills/resolve-issue/reference/review-loop.md`. It is written
+`development/skills/resolve-issue/reference/review-loop/decided-pass.md`. It is written
 **after** the panel, into the conductor's own aggregate (never the
 `.review/` dispatch sink), so the nine fields above remain exactly what a
 reviewer emits, and `consolidate-findings.zsh` accepts the tenth additively.
@@ -3615,7 +3615,7 @@ or confirming each, never `unconfirmed`. The agent keeps only what needs
 judgment, bump size and stale descriptions, as `manifest_bump`: it runs on every
 full round (round 1 and every closing sweep) and, on a delta round, only when
 the split-carry map holds `manifest_bump` —
-`development/skills/resolve-issue/reference/review-loop.md`'s *Carry-driven
+`development/skills/resolve-issue/reference/review-loop/carry.md`'s *Carry-driven
 dispatch (#2008)* states that rule once. `contract` (#2009) has a schedule of
 its own: it runs on round 1 and on every closing full sweep (`scope_mode:
 "full"`, the residue-promoted sweep and the grant beyond the ceiling included);
@@ -3944,7 +3944,7 @@ because §3.5 dispatches the descriptor's value and one fact needs one owner.
 
 **Every heading has a settled dereference role (#1805).** **Gate** is
 dereferenced at §3 and E4, **Version bump** at §4, **Fix-pass rules** at §3.5's
-fix pass (`development/skills/resolve-issue/reference/review-loop.md`, recorded
+fix pass (`development/skills/resolve-issue/reference/review-loop/exit-20-awaiting-fix.md`, recorded
 beside the byte-frozen span that holds the fix pass), and **Documentation
 expectations** at §2's same-PR user-docs step. Those last two sites apply the
 heading's rule unless its body begins with `none` (the conductor's §1b test).
@@ -4174,7 +4174,7 @@ cannot mint a second artifact path for the same round:
   replaces it — a finding's `.file` stays **repo-relative**, because that is the
   spelling `scope-findings` filters on (an absolute one is silently discarded).
   **The rail is loop-side today**: the resolve-issue driving session builds each
-  reviewer's prompt directly (`reference/review-loop.md` § *The round protocol*)
+  reviewer's prompt directly (`reference/review-loop/scope-block.md`, the scope block)
   and is what hands reviewers a scope block carrying **both** spellings plus the
   verbatim opener — **two** sentences, one naming which tree to read and one
   requiring the finding's `file` to be reported under the repo-relative name.
@@ -4259,7 +4259,7 @@ cannot mint a second artifact path for the same round:
   `ambiguous_repo_type`: both exit 3 before any topic is read, and `detect`
   still emits only `repo_type`. Every listed panel runs **in the same round
   against the same descriptor**, and the conductor joins their findings into the
-  one `findings_path` — `reference/review-loop.md`, *Topic panels*, states the
+  one `findings_path` — `reference/review-loop/topic-panels.md`, *Topic panels*, states the
   per-panel outcome and carry rules. Nothing about convergence
   changes: the severity map, the blocking rule, the dedup key and the round cap
   are `consolidate-findings.zsh`'s and the loop's, and a round counts once however
@@ -4563,7 +4563,7 @@ before escalating. `--max-rounds N` still overrides it.
 **Where the procedure lives (#1503).** `resolve-issue`'s `SKILL.md` is a
 **conductor**: for the review loop it carries the exit-code table, the one-line
 branch per exit and a pointer — not the procedure, and not the loop's own
-command block, which moved with it into `reference/review-loop.md`. (Step 0's
+command block, which moved with it into `reference/review-loop/step-2-invocation.md`. (Step 0's
 classification and the Epic flow still carry their
 own procedure inline; carving those out is separate work.) The
 procedure behind each branch lives in
@@ -4586,17 +4586,36 @@ verified by nothing: the gate proves only that no *original* line migrated into
 it, by asserting the two anchors stay adjacent in the pinned commit. The
 carve-out is owed by the **shape of the claim**, not by which file the claim is
 about: it belongs wherever a statement would otherwise read as covering a
-gap-containing file **as a whole** — `reference/review-loop.md`'s preamble
-("keeps this file honest") and the script's own header ("what it does not
+gap-containing file **as a whole** — the `reference/review-loop.md` index's
+preamble ("Everything outside those blocks is outside that proof") and the script's own header ("what it does not
 prove") both make such a claim and both carry it, and the header records an
 earlier unqualified wording as its own past mistake. A claim scoped to **each
 declared chunk** does not need it, being true and untouched by the gap — which
 is why the other `reference/*.md` preambles and `tests/resolve-issue-corpus.bash`
-do not carry it, even though the corpus's own sweep covers `review-loop.md`.
+do not carry it, even though the corpus's own sweep covers `review-loop/`.
 Keying on the file would say the opposite for that last one. Stated as a
 condition rather than a site roster, and without a chunk count: #1582 already
 moved that number from seven to eight, and nothing compares the prose to the
 manifest.
+
+**The reference layout — shards, an index, a size limit, read once (#2055).**
+A reference file the conductor would otherwise re-read whole on later rounds is
+split into a **directory per former file**, `reference/<name>/`, with one shard
+per exit, arm or step the conductor reaches, and a short **index left at the old
+path** that names the shards in read order. Every shard is at most **20,000
+bytes** and the index at most 3,000. `review-loop.md` is the first so split:
+`reference/review-loop/` holds `core.md` (`## The round protocol`), the step and
+exit shards, the passes, `carry.md`, `subagents.md` and `briefs/<name>.md`, one
+per round subagent, which `development/agents/round-<name>.md` points at. A
+frozen span is re-cut along the same seams: one `moved:` chunk per shard, and
+`verify-reference-move.zsh` checks each seam stays adjacent in the pinned commit,
+so no original line falls out of the verified region. `tests/reference-size-guard.bats`
+holds the size limit and the rule that every H2–H4 heading of a split file lands
+in exactly one place. Its covered-path list is extended by each later split.
+`tests/reference-pointer-sweeps.bats` holds every
+``reference/<path>.md`` mention to an existing file, and every `§ <title>` after
+one to a heading in it. The conductor **reads each reference file once**, with
+the loop's `next_ref` naming the shard an exit needs; SKILL.md states that rule.
 
 **The agentic steps run in-session — step mode is canonical (#971).** Running
 the panel and applying the fix pass are model-driven, so the driving session
@@ -4737,7 +4756,7 @@ verification-only round, and **both** wirings re-plan it with `--final` and
 record the **full story diff** as its scope — because in both the round really
 is reviewed against that diff: hook mode's `--review-cmd` runs *after* the
 re-plan, and step mode's session-side panel was told the same by
-`resolve-issue`'s `reference/review-loop.md`. Recording the delta's empty scope instead would
+`resolve-issue`'s `reference/review-loop/step-1-panel.md`. Recording the delta's empty scope instead would
 contradict what was reviewed and mark the round **blind** — the loop's own
 record would say the panel saw nothing when it saw everything, and every
 downstream reader of that record (the empty-findings marker below, the progress
@@ -4882,7 +4901,7 @@ likely buy), and `build-telemetry-record.zsh`
 **The histogram also gates the FIX pass, skill-side (#1496).** The loop refuses
 no fix and never will — what a fix pass may add, and the class condition that
 turns collapsing from advisory into mandatory, is stated once in
-`development/skills/resolve-issue/reference/review-loop.md` § The round protocol, step 3
+`development/skills/resolve-issue/reference/review-loop/exit-20-awaiting-fix.md`, round step 3
 (*A fix pass subtracts*); `class` is how compliance is measured, not enforced,
 and nothing here restates the rule.
 
@@ -4942,7 +4961,7 @@ passed** — a plugin repo — because the round boundary runs the gate and the
 panel **concurrently** over a single tree minted before either starts (#1497).
 Off plugin repos only `--findings-tree` is passed, exactly as above: the
 concurrency is an ordering, not a flag pair that exists everywhere. The ordering
-is the session's, stated in `development/skills/resolve-issue/reference/review-loop.md`
+is the session's, stated in `development/skills/resolve-issue/reference/review-loop/core.md`
 § The round protocol, and restated nowhere else; the loop itself is unchanged by it.
 
 **Filing the remainder** is `build-residue-issues.zsh`, on the same
@@ -5047,7 +5066,17 @@ status JSON (`{status, rounds, max_rounds, effective_max_rounds,
 max_rounds_source, promotion_phase,
 closing_sweep_granted, possible_false_trip_auto_continues, carry_unconfirmed, repo_type,
 review_skill, topic_review_skills, escalation_reasons, residue_replaced_reasons, history,
-round_changelists, final_changelist}`), where `topic_review_skills` (#1072) is the
+round_changelists, final_changelist, next_ref}`), where `next_ref` (#2055) is
+the reference shard the conductor reads for the exit just taken — a path
+relative to the resolve-issue skill's base directory, never to the repo under
+work, since the plugin lives in the plugin cache. It is **always present** and
+set by a closed table: `AWAITING_FIX` →
+`reference/review-loop/exit-20-awaiting-fix.md`; `STALE_FINDINGS`, every cause →
+`reference/review-loop/exit-2-stale-findings.md`; `CONVERGED_WITH_RESIDUE` →
+`reference/residue.md`; every `ESCALATE_*` and `BUDGET_EXHAUSTED` →
+`reference/escalation.md`; every other status (`CONVERGED`, `SKIPPED`,
+`ERROR`) → `null`. A usage error writes no status JSON, so it carries none —
+and where `topic_review_skills` (#1072) is the
 dispatch plan's array, **always present** (`[]` on every exit before the plan is
 read), and where `effective_max_rounds` (an integer — the ceiling
 actually in force) and `max_rounds_source` (`"flag"` or `"work-dir"`) are
@@ -7568,7 +7597,7 @@ file more (epic #1795: 3 children became 21).
 
 The procedures are `development/skills/resolve-issue/reference/residue.md`,
 § *Risk threshold — assess before filing (#1920)*, which amends the frozen
-residue branch without editing it, and `reference/review-loop.md`, § *The risk
+residue branch without editing it, and `reference/review-loop/risk-pass.md`, § *The risk
 pass* (#1921). User-facing docs: [how-to: set a corner-case risk
 threshold](docs/how-to/set-a-corner-case-risk-threshold.md).
 

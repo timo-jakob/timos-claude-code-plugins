@@ -6,7 +6,6 @@ tools: Read, Edit, Write, Grep, Glob, Bash
 ---
 
 You are the **round fix pass**. Your whole procedure is the *Fix subagent
-brief* in the resolve-issue skill's `reference/review-loop.md`, under *Round
-subagents — the conductor reads only verdicts (#1935)*. Your prompt names the
-handoff file and `<skill-base-dir>`; read the brief at
-`<skill-base-dir>/reference/review-loop.md` and follow it exactly.
+brief* in the resolve-issue skill's `reference/review-loop/briefs/fix.md`. Your
+prompt names the handoff file and `<skill-base-dir>`; read the brief at
+`<skill-base-dir>/reference/review-loop/briefs/fix.md` and follow it exactly.

@@ -62,8 +62,28 @@ setup() {
   # COUNT sites across the skill read the corpus; sweeps that pin WHERE a
   # sentence lives read the one file it lives in. See resolve-issue-corpus.bash.
   CONDUCTOR="$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
-  PROTO="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md"
+  # #2055 split reference/review-loop.md into reference/review-loop/ shards.
+  # The normative paragraph and the gate-launch pointer live in core.md, the
+  # panel-step pointer and the #2113 carve-out in step-1-panel.md, the #2022
+  # scope pointer in subagents.md; INDEX is what review-loop.md became.
+  INDEX="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md"
+  SHARDS="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop"
+  CORE="$SHARDS/core.md"
+  STEP1="$SHARDS/step-1-panel.md"
+  SUBAGENTS="$SHARDS/subagents.md"
   SKILL="$(resolve_issue_corpus "$REPO_ROOT" "$BATS_TEST_TMPDIR/resolve-issue-corpus.md")"
+  # #2055: the corpus helper walks reference/*.md flat, so the shards are not in
+  # it. Append every shard it did not already list — the COUNTING sweeps below
+  # must read every site — and stay idempotent once the helper learns them.
+  local _listed _shards _s
+  _listed="$(resolve_issue_files "$REPO_ROOT")" || return 1
+  _shards="$(find "$SHARDS" -type f -name '*.md' | LC_ALL=C sort)" || return 1
+  [ -n "$_shards" ]
+  while IFS= read -r _s; do
+    grep -qxF -e "$_s" <<< "$_listed" && continue
+    cat "$_s" >> "$SKILL" || return 1
+    printf '\n' >> "$SKILL" || return 1
+  done <<< "$_shards"
   EXPLAIN="$REPO_ROOT/docs/explanation/review-loop.md"
 
   # The banner of the one normative statement. It carries the issue number, so
@@ -216,12 +236,16 @@ _roster_hits() {
   #
   # Needles carry no leading marker: prose_gate_lines strips one comment marker,
   # so a needle spelled with the heading's hashes could never match.
-  local sec next banner ptr first last _v
-  sec="$(prose_gate_lines "$PROTO" 'The round protocol')"
-  # The section runs to the end of the reference file, so the upper bound is one
-  # past its last line — derived, never a transcribed number.
-  next="$(( $(grep -c '' "$PROTO") + 1 ))"
-  banner="$(prose_gate_lines "$PROTO" "$BANNER")"
+  #
+  # #2055 split the section into shards: `## The round protocol` opens core.md,
+  # which holds the paragraph and the gate-launch pointer; the panel-step
+  # pointer is in step-1-panel.md, which the index orders after core.md.
+  local sec next banner ptr first last _v core_at step1_at
+  sec="$(prose_gate_lines "$CORE" 'The round protocol')"
+  # The paragraph must sit in core.md, so the upper bound is one past that
+  # shard's last line — derived, never a transcribed number.
+  next="$(( $(grep -c '' "$CORE") + 1 ))"
+  banner="$(prose_gate_lines "$CORE" "$BANNER")"
   # One assertion per line, never an `&&` chain: bash's errexit exempts every
   # command in an AND list but the last, so a chained guard whose FIRST operand
   # fails merely returns 1 and the body runs on. The comparisons below then get
@@ -246,17 +270,25 @@ _roster_hits() {
   # …and BETWEEN the two pointers, which is the precise claim "(this section)"
   # makes: a paragraph that drifted above the gate-launch step, or below the
   # panel step, would still be inside 3.5 and still read as pointed-at.
-  ptr="$(prose_gate_lines "$PROTO" "$POINTER")"
-  first="$(printf '%s\n' "$ptr" | head -1)"
-  last="$(printf '%s\n' "$ptr" | tail -1)"
-  for _v in "$first" "$last"; do
+  # The first pointer (gate launch) precedes it in core.md; the second (panel
+  # step) is in step-1-panel.md, after core.md in the index's read order.
+  first="$(prose_gate_lines "$CORE" "$POINTER")"
+  last="$(prose_gate_lines "$STEP1" "$POINTER")"
+  core_at="$(grep -n 'reference/review-loop/core\.md' "$INDEX" | head -1 | cut -d: -f1)"
+  step1_at="$(grep -n 'reference/review-loop/step-1-panel\.md' "$INDEX" | head -1 | cut -d: -f1)"
+  for _v in "$first" "$last" "$core_at" "$step1_at"; do
     case "$_v" in ''|*[!0-9]*)
       printf 'pointer locator missing or ambiguous: %s\n' "$_v" >&2; return 1 ;;
     esac
   done
-  if [ "$banner" -le "$first" ] || [ "$banner" -ge "$last" ]; then
-    printf 'the paragraph is at line %s, not between its pointers (%s, %s)\n' \
-      "$banner" "$first" "$last" >&2
+  if [ "$banner" -le "$first" ]; then
+    printf 'the paragraph is at line %s, not after the gate-launch pointer (%s)\n' \
+      "$banner" "$first" >&2
+    return 1
+  fi
+  if [ "$core_at" -ge "$step1_at" ]; then
+    printf 'the index reads step-1-panel.md (%s) before core.md (%s)\n' \
+      "$step1_at" "$core_at" >&2
     return 1
   fi
 }
@@ -266,7 +298,7 @@ _roster_hits() {
   # problem at length and never say what to do, which is how the #1497 prose
   # licensed the poll it was meant to prevent.
   local ln body
-  ln="$(prose_gate_lines "$SKILL" "$BANNER")"
+  ln="$(prose_gate_lines "$CORE" "$BANNER")"
   [ -n "$ln" ]
   # FORWARD-ONLY and paragraph-tight — [banner, banner+18], which is exactly the
   # paragraph. A symmetric span reaches twenty lines back into the attestation
@@ -274,7 +306,7 @@ _roster_hits() {
   # would be satisfiable by prose that is not the rule: move the exception
   # sentence up into the attestation paragraph and these pins stay green while
   # AC1 is false. The AC2 and AC4 pins are forward-only for the same reason.
-  body="$(prose_window "$SKILL" "$((ln + 9))" 9)"
+  body="$(prose_window "$CORE" "$((ln + 9))" 9)"
   contains "$body" 'there is nothing left for this turn to do, so end it'
   # …and WHY ending is safe, which is the fact a driver has to believe before
   # it will stop polling: the notifications bring it back.
@@ -293,9 +325,9 @@ _roster_hits() {
   # satisfying a rule that banned polling in the abstract. A generic ban is
   # what a driver argues its way past; a list of four is not.
   local ln body
-  ln="$(prose_gate_lines "$SKILL" "$BANNER")"
+  ln="$(prose_gate_lines "$CORE" "$BANNER")"
   [ -n "$ln" ]
-  body="$(prose_window "$SKILL" "$((ln + 9))" 9)"
+  body="$(prose_window "$CORE" "$((ln + 9))" 9)"
   contains "$body" 'it does not run date, sleep, echo, git status or any other heartbeat'
   # the scheduled-wakeup half — a different mechanism, and the one the harness
   # itself calls out; without it the ban reads as being about shell commands
@@ -308,9 +340,9 @@ _roster_hits() {
   # per-turn probes. Pinned with its scope (a signal the harness does not
   # deliver), its bound (one call), and its single sanctioned form.
   local ln body
-  ln="$(prose_gate_lines "$SKILL" "$BANNER")"
+  ln="$(prose_gate_lines "$CORE" "$BANNER")"
   [ -n "$ln" ]
-  body="$(prose_window "$SKILL" "$((ln + 9))" 9)"
+  body="$(prose_window "$CORE" "$((ln + 9))" 9)"
   contains "$body" 'for a signal the harness does not deliver'
   contains "$body" 'it is one bounded blocking call'
   # ONE form, carrying its own bound. Offering a second, unbounded shell form
@@ -341,23 +373,29 @@ _roster_hits() {
 # the position as much as the words — moved out of the gap, the carve-out stops
 # meeting the driver at the pointer it limits.
 _round_dispatch_carveout() {
-  local ln head_end tail_start panel body _v
+  #
+  # #2055 split the gap: the #1582 scope block is now scope-block.md, and the
+  # carve-out heads step-1-panel.md, before that shard's `round-protocol-tail`
+  # sentinel. `round-protocol-head` closes in core.md, so "in the gap" is now
+  # "before the FIRST moved sentinel of this shard, and that sentinel is the
+  # tail's".
+  local ln first_sentinel tail_start panel body _v
   ln="$(prose_gate_lines "$1" 'The end-the-turn wait that step 1')"
-  # The sentinels by WHOLE-LINE match on the raw file: the file's header names
-  # both in backticks, which prose normalisation strips, so a prose locator
-  # would find each twice.
-  head_end="$(grep -nxF '<!-- /moved: round-protocol-head -->' "$1" | cut -d: -f1)"
+  # The sentinels by WHOLE-LINE match on the raw file, never a prose locator: a
+  # header that names one in backticks would normalise to a second hit.
+  first_sentinel="$(grep -m1 -nE '^<!-- /?moved: [a-z0-9-]+ -->$' "$1" | cut -d: -f1)"
   tail_start="$(grep -nxF '<!-- moved: round-protocol-tail -->' "$1" | cut -d: -f1)"
   panel="$(prose_gate_lines "$1" 'Review panel, in-session. Get the dispatch plan (review-dispatch.zsh')"
-  for _v in "$ln" "$head_end" "$tail_start" "$panel"; do
+  for _v in "$ln" "$first_sentinel" "$tail_start" "$panel"; do
     case "$_v" in ''|*[!0-9]*)
       printf 'carve-out locator missing or ambiguous: %s\n' "$_v" >&2; return 1 ;;
     esac
   done
   # In the unfrozen gap, and the gap's LAST prose before the panel step.
-  if [ "$ln" -le "$head_end" ] || [ "$ln" -ge "$tail_start" ] || [ "$tail_start" -ge "$panel" ]; then
-    printf 'the carve-out is at line %s, not in the gap (%s..%s) before the panel step (%s)\n' \
-      "$ln" "$head_end" "$tail_start" "$panel" >&2
+  if [ "$first_sentinel" -ne "$tail_start" ] || [ "$ln" -ge "$tail_start" ] \
+    || [ "$tail_start" -ge "$panel" ]; then
+    printf 'the carve-out is at line %s, not in the gap before the tail sentinel (%s; first sentinel %s) and the panel step (%s)\n' \
+      "$ln" "$tail_start" "$first_sentinel" "$panel" >&2
     return 1
   fi
   if [ "$((tail_start - ln))" -gt 5 ]; then
@@ -384,7 +422,7 @@ _round_dispatch_carveout() {
   # E3 child conductor whose round-panel dispatch launched in the background
   # therefore read "end it" — and, being itself a subagent, returned to its
   # parent mid-round and was never re-invoked.
-  _round_dispatch_carveout "$PROTO"
+  _round_dispatch_carveout "$STEP1"
 }
 
 # --- AC2: the two consuming sites point, and do not restate -----------------
@@ -408,7 +446,9 @@ _round_dispatch_carveout() {
   # The banner, the two pointers and #2022's scope pointer, and nothing else.
   # This is the tripwire the counts above cannot be: a FIFTH mention that is
   # none of them — a paraphrase in some other step, or a restatement that
-  # dropped the pointer wording — passes all of them and reds only here.
+  # dropped the pointer wording — passes all of them and reds only here. Counted
+  # over the corpus plus the #2055 shards; the split's navigation text (the
+  # index and the shard headers) deliberately does not name the rule.
   local n
   n="$(_hits "$SKILL" "$ROSTER_NEEDLE")" || return 1
   case "$n" in ''|*[!0-9]*)
@@ -425,14 +465,14 @@ _round_dispatch_carveout() {
   # Anchored on the step's own heading text, per the #1189 convention — never
   # on a step ordinal, which this epic renumbers.
   local ln body needle
-  ln="$(prose_gate_lines "$SKILL" 'Review panel, in-session. Get the dispatch plan (review-dispatch.zsh')"
+  ln="$(prose_gate_lines "$STEP1" 'Review panel, in-session. Get the dispatch plan (review-dispatch.zsh')"
   [ -n "$ln" ]
   # FORWARD-ONLY, and it is load-bearing: the normative paragraph sits a few
   # lines ABOVE this step, so a symmetric window would satisfy the `contains`
   # from the rule itself and trip the `lacks` on it — a pin that passes whether
   # or not this step points at anything. Centring at `ln + span` makes the
   # window exactly [ln, ln + 2*span].
-  body="$(prose_window "$SKILL" "$((ln + 6))" 6)"
+  body="$(prose_window "$STEP1" "$((ln + 6))" 6)"
   contains "$body" "$POINTER"
   contains "$body" 'it is not restated here'
   for needle in "${RESTATEMENT_NEEDLES[@]}"; do
@@ -445,12 +485,12 @@ _round_dispatch_carveout() {
   # gate-launch step. Its body deliberately gives no `run-gate.zsh` invocation,
   # so the invocation could never have been the anchor.
   local ln body needle
-  ln="$(prose_gate_lines "$SKILL" 'Start the gate out of band, so that it runs without blocking the panel —')"
+  ln="$(prose_gate_lines "$CORE" 'Start the gate out of band, so that it runs without blocking the panel —')"
   [ -n "$ln" ]
   # Forward-only (see the panel pin), and wide: the pointer sits at the far end
   # of a step whose body runs four properties deep, so the window is
   # [ln, ln + 56] and a tighter span would silently stop pinning it.
-  body="$(prose_window "$SKILL" "$((ln + 28))" 28)"
+  body="$(prose_window "$CORE" "$((ln + 28))" 28)"
   contains "$body" "$POINTER"
   contains "$body" 'it is not restated here'
   # The TRIGGER, which is the half a pointer alone gets wrong here: this step
@@ -479,11 +519,11 @@ _round_dispatch_carveout() {
   # …and it stays a POINTER: anchored on its own lead sentence, forward-only so
   # the window holds the carve-out and not the normative paragraph, and free of
   # every clause a restatement would carry.
-  ln="$(prose_gate_lines "$PROTO" 'A foreground dispatch returns its verdict in the same turn, so the conductor')"
+  ln="$(prose_gate_lines "$SUBAGENTS" 'A foreground dispatch returns its verdict in the same turn, so the conductor')"
   case "$ln" in ''|*[!0-9]*)
     printf 'scope pointer locator missing or ambiguous: %s\n' "$ln" >&2; return 1 ;;
   esac
-  body="$(prose_window "$PROTO" "$((ln + 3))" 3)"
+  body="$(prose_window "$SUBAGENTS" "$((ln + 3))" 3)"
   contains "$body" "$SCOPE_POINTER"
   # #2034: the background half left the rule, so the pointer must not carry it
   # back — that wording sent an E3 child conductor to end its turn mid-round.
@@ -540,7 +580,7 @@ _round_dispatch_carveout() {
 
 # --- roster tripwire --------------------------------------------------------
 
-@test "#1513 exactly two tracked markdown sites name the rule" {
+@test "#1513 exactly four tracked markdown sites name the rule" {
   # Derived, not transcribed. `docs/superpowers/` is vendored and restates
   # nothing of ours — the same exclusion the sibling sweeps use. SHIPPED
   # TEMPLATES are in scope: `approver-policy-core.md.tmpl` already restates
@@ -569,15 +609,21 @@ _round_dispatch_carveout() {
   case "$n" in ''|*[!0-9]*)
     printf 'roster tripwire: grep produced no count\n' >&2; return 1 ;;
   esac
-  if [ "$n" -ne 2 ]; then
-    printf 'expected 2 markdown sites naming the rule, found %s:\n%s\n' "$n" "$hits" >&2
+  # #2055 split review-loop.md into shards: its one site became the banner and
+  # gate-launch pointer (core.md), the panel-step pointer (step-1-panel.md) and
+  # the #2022 scope pointer (subagents.md) — three files where there was one, so
+  # four sites in all. The index (review-loop.md) does not name the rule.
+  if [ "$n" -ne 4 ]; then
+    printf 'expected 4 markdown sites naming the rule, found %s:\n%s\n' "$n" "$hits" >&2
     return 1
   fi
   # …and they are the roster the story named, so a swap reds here too. -F
   # because an unanchored `.` in a path is a regex wildcard.
   # #1503 moved the review-loop procedure into reference/*.md, so the roster
   # names those files where the text now lives — the same sites, re-homed.
-  printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/review-loop.md'
+  printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/review-loop/core.md'
+  printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/review-loop/step-1-panel.md'
+  printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/review-loop/subagents.md'
   printf '%s\n' "$hits" | grep -qxF 'docs/explanation/review-loop.md'
 }
 
@@ -666,7 +712,7 @@ _round_dispatch_carveout() {
          print "   blocking call: Monitor, with a timeout generous enough for the wait."
          print "   One call, never one probe per turn — then take the boundary'"'"'s own"
          print "   signal-never-arrived arm instead of blocking again." }' \
-    "$SKILL" > "$F"
+    "$CORE" > "$F"
   ln="$(prose_gate_lines "$F" 'Start the gate out of band, so that it runs without blocking the panel —')"
   [ -n "$ln" ]
   # the same forward-only window the real pin uses, or the control would be
@@ -691,10 +737,16 @@ _round_dispatch_carveout() {
 @test "#2113 non-vacuity: a removed or relocated carve-out reds the pin" {
   # Two mutations, one per half of the pin, each asserted on the real helper's
   # status. REMOVED: the paragraph cut, the shape a "tidy" of the gap produces.
-  local F="$BATS_TEST_TMPDIR/proto-no-carveout.md" G="$BATS_TEST_TMPDIR/proto-moved-carveout.md" rc
-  perl -0pe 's/\*\*The end-the-turn wait that step 1.*?not by ending the turn\.\n\n//s' "$PROTO" > "$F"
+  #
+  # #2055: the carve-out lives in step-1-panel.md, so every fixture mutates that
+  # shard. The gap it heads used to begin with the #1582 scope block, now
+  # scope-block.md, so "moved to the top of the gap" is re-derived as that
+  # block's opening paragraph landing between the carve-out and the sentinel.
+  local F="$BATS_TEST_TMPDIR/step1-no-carveout.md" G="$BATS_TEST_TMPDIR/step1-moved-carveout.md"
+  local H="$BATS_TEST_TMPDIR/step1-pushed-carveout.md" rc scope_para
+  perl -0pe 's/\*\*The end-the-turn wait that step 1.*?not by ending the turn\.\n\n//s' "$STEP1" > "$F"
   # the mutation really happened — else the red below would prove nothing
-  if cmp -s "$PROTO" "$F"; then
+  if cmp -s "$STEP1" "$F"; then
     printf 'removal fixture is identical to the source\n' >&2
     return 1
   fi
@@ -704,11 +756,11 @@ _round_dispatch_carveout() {
     printf 'expected the pin to fail (1) on the removal fixture, got %s\n' "$rc" >&2
     return 1
   fi
-  # RELOCATED: the same paragraph moved to the top of the gap, wording intact —
-  # the words pass, so only the position half can red it.
+  # RELOCATED past the frozen span, wording intact — the words pass, so only the
+  # position half (before the tail sentinel) can red it.
   perl -0pe 's/(\*\*The end-the-turn wait that step 1.*?not by ending the turn\.\n\n)//s and $p = $1;
-             s/(<!-- \/moved: round-protocol-head -->\n\n)/$1$p/' "$PROTO" > "$G"
-  if cmp -s "$PROTO" "$G"; then
+             s/(<!-- \/moved: round-protocol-tail -->\n)/$1\n$p/' "$STEP1" > "$G"
+  if cmp -s "$STEP1" "$G"; then
     printf 'relocation fixture is identical to the source\n' >&2
     return 1
   fi
@@ -716,6 +768,27 @@ _round_dispatch_carveout() {
   _round_dispatch_carveout "$G" 2>/dev/null || rc=$?
   if [ "$rc" -ne 1 ]; then
     printf 'expected the pin to fail (1) on the relocation fixture, got %s\n' "$rc" >&2
+    return 1
+  fi
+  # PUSHED to the top of the gap: the scope block's opening paragraph planted
+  # between the carve-out and the sentinel — still in the gap, still before the
+  # panel step, so only the directly-before half can red it.
+  # the first paragraph after the shard's header comment, however many lines
+  # that header wraps to
+  scope_para="$(awk '!hdr { if (/-->$/) hdr = 1; next }
+                     /^$/ { if (seen) exit; next }
+                     { seen = 1; print }' "$SHARDS/scope-block.md")"
+  [ "$(printf '%s\n' "$scope_para" | grep -c .)" -gt 5 ]
+  SCOPE_PARA="$scope_para" perl -0pe \
+    's/(<!-- moved: round-protocol-tail -->\n)/$ENV{SCOPE_PARA}\n\n$1/' "$STEP1" > "$H"
+  if cmp -s "$STEP1" "$H"; then
+    printf 'push-up fixture is identical to the source\n' >&2
+    return 1
+  fi
+  rc=0
+  _round_dispatch_carveout "$H" 2>/dev/null || rc=$?
+  if [ "$rc" -ne 1 ]; then
+    printf 'expected the pin to fail (1) on the push-up fixture, got %s\n' "$rc" >&2
     return 1
   fi
 }

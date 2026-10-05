@@ -795,7 +795,20 @@ emit_and_exit() {
   # BUDGET_EXHAUSTED line, build-telemetry-record.zsh's payload) would silently
   # change meaning. On a run with no grant the two agree, which is why a
   # consumer can read `max_rounds` exactly as before.
+  # next_ref (#2055) is ALWAYS present: the reference shard the conductor reads
+  # for the exit just taken, a path relative to the resolve-issue SKILL's base
+  # directory — never to the target repo, since the plugin lives in the plugin
+  # cache and a repo-relative path would resolve nowhere. The table is closed;
+  # every status it does not name (CONVERGED, SKIPPED, ERROR) carries null.
+  local next_ref=""
+  case "$st" in
+    AWAITING_FIX)           next_ref="reference/review-loop/exit-20-awaiting-fix.md" ;;
+    STALE_FINDINGS)         next_ref="reference/review-loop/exit-2-stale-findings.md" ;;
+    CONVERGED_WITH_RESIDUE) next_ref="reference/residue.md" ;;
+    ESCALATE_*|BUDGET_EXHAUSTED) next_ref="reference/escalation.md" ;;
+  esac
   out=$(jq -nc \
+    --arg next_ref "$next_ref" \
     --arg status "$st" --argjson rounds "$rounds" --argjson max "$max_rounds" \
     --argjson effmax "$effective_max" --arg maxsrc "$max_rounds_source" \
     --arg repo_type "$repo_type" --arg review_skill "$review_skill" \
@@ -814,7 +827,8 @@ emit_and_exit() {
       topic_review_skills:$topics,
       escalation_reasons:$esc, residue_replaced_reasons:$residue_replaced,
       history:$history, round_changelists:$clists,
-      final_changelist:$final}')
+      final_changelist:$final,
+      next_ref:(if $next_ref=="" then null else $next_ref end)}')
   print -r -- "$out"
   [[ -n "$status_file" ]] && print -r -- "$out" > "$status_file"
 
@@ -2774,7 +2788,7 @@ while (( round <= effective_max )); do
       # BOTH wirings re-plan and re-derive the SCOPE, because in both the round
       # is reviewed against the whole story diff: hook mode's `--review-cmd`
       # runs below, after this, and step mode's session-side panel was told the
-      # same by `reference/review-loop.md` ("re-plan with `--final` and review the
+      # same by `reference/review-loop/step-1-panel.md` ("re-plan with `--final` and review the
       # whole story diff"). Recording the delta's empty scope here would contradict what was
       # actually reviewed: the loop's own record of the round would say the
       # panel saw nothing when it saw everything, and every downstream reader of
@@ -2876,7 +2890,7 @@ while (( round <= effective_max )); do
   # (#974) refuse the alias BEFORE truncating: findings_path is the round's
   # internal sink, and the very next line zero-bytes it. A session that passed
   # the dispatch plan's findings_path as --findings-file (instead of its own
-  # findings-round-R.json, per `reference/review-loop.md` *Each round* step 2)
+  # findings-round-R.json, per `reference/review-loop/step-2-invocation.md`)
   # would have its real panel output destroyed here, then be told "the panel
   # never ran" — a confidently wrong verdict, and the cp below would fail on
   # identical files anyway. Name the

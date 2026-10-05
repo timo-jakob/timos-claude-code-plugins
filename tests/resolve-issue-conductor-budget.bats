@@ -29,6 +29,8 @@
 
 bats_require_minimum_version 1.5.0
 
+load assertions
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   SKILL_DIR="$REPO_ROOT/development/skills/resolve-issue"
@@ -43,7 +45,10 @@ setup() {
   # lines; #1504 re-measured 1 484 after moving the plugin-only rules into
   # `development-claude-plugin:resolve-profile`, adding the §1b load step, and
   # adding the no-profile floors §3, §4 and E4 need for the fallback path.
-  CEILING=1635
+  # Later stories grew it to exactly 1 635, the ceiling itself, and #2055
+  # re-measured 1 643 after adding the read-once / `next_ref` rule, which is what
+  # lets the conductor stop re-reading its reference files.
+  CEILING=1810
 
   VERIFY="$SKILL_DIR/scripts/verify-reference-move.zsh"
   # The pre-move commit, READ OUT OF THE SCRIPT rather than transcribed here.
@@ -59,9 +64,21 @@ setup() {
 
 # --- helpers ----------------------------------------------------------------
 
+# Every reference file, at ANY depth, one per line in a stable order. #2055
+# split review-loop.md into shards under reference/review-loop/ (the old path
+# is now an index), so a top-level `reference/*.md` glob would silently drop
+# every shard — including the one that now carries `## The round protocol`.
+_ref_files() {
+  find "$REF_DIR" -type f -name '*.md' | LC_ALL=C sort
+}
+
 # Every `## ` heading text across the reference files, one per line.
 _ref_headings() {
-  grep -h '^## ' "$REF_DIR"/*.md | sed 's/^## //'
+  local f
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    grep -h '^## ' "$f" | sed 's/^## //'
+  done < <(_ref_files)
 }
 
 # Every heading text in a markdown file, at any level, one per line.
@@ -162,11 +179,8 @@ _raw_pointer_count() {
 # conductor alone while the sweeps it guards read all six files.
 _all_pointer_files() {
   printf '%s\n' "$CONDUCTOR"
-  local r
-  for r in "$REF_DIR"/*.md; do
-    [ -e "$r" ] || continue
-    printf '%s\n' "$r"
-  done
+  # every reference file at any depth — #2055's review-loop shards included
+  _ref_files
 }
 
 # Every pointer across that universe, as `file<TAB>heading`.
@@ -185,6 +199,57 @@ _all_raw_pointer_count() {
     total=$(( total + n ))
   done < <(_all_pointer_files)
   printf '%s\n' "$total"
+}
+
+# Print every reference file under $1 (a reference/ dir) that nothing reaches,
+# given the pointer targets on stdin (paths relative to reference/), one per
+# line as a path relative to $1. Prints nothing when all are reached.
+#
+# The scope, since #2055 split review-loop.md into shards under
+# reference/review-loop/ and left an INDEX at the old path:
+#   - a top-level reference file is reached only by a pointer naming it;
+#   - the review-loop/ directory is ONE unit. The conductor's pointers go
+#     straight to its shards, never to the index, and the remaining shards are
+#     reached through the index's read order (and the loop's `next_ref`), not
+#     through `see` pointers. So the index is reached when some pointer lands
+#     in review-loop/, and a shard is reached when a pointer names it OR the
+#     index lists it — by its full `reference/review-loop/<path>` in backticks,
+#     or, for a shard in a subdirectory, by its `<basename>` in backticks inside
+#     the index entry naming `reference/review-loop/<dir>/`.
+# That keeps an orphan shard (in no pointer, not in the index) red — which a
+# "the index exists" check alone would not.
+_unreached_reference_files() {
+  local dir="$1" targets rel f index dir_part base block
+  targets="$(cat)"
+  index="$dir/review-loop.md"
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    rel="${f#"$dir/"}"
+    case "$rel" in
+      review-loop.md)
+        grep -q '^review-loop/' <<< "$targets" || printf '%s\n' "$rel"
+        ;;
+      review-loop/*)
+        grep -qxF -- "$rel" <<< "$targets" && continue
+        [ -f "$index" ] || { printf '%s\n' "$rel"; continue; }
+        grep -qF -- "\`reference/$rel\`" "$index" && continue
+        dir_part="${rel%/*}"; base="${rel##*/}"
+        if [ "$dir_part" != review-loop ]; then
+          # the index entry naming the subdirectory: from its line up to the
+          # next numbered entry or blank line
+          block="$(awk -v d="\`reference/$dir_part/\`" '
+            f && (/^[0-9]+\. / || /^$/) { exit }
+            index($0, d) { f = 1 }
+            f { print }' "$index")"
+          grep -qF -- "\`$base\`" <<< "$block" && continue
+        fi
+        printf '%s\n' "$rel"
+        ;;
+      *)
+        grep -qxF -- "$rel" <<< "$targets" || printf '%s\n' "$rel"
+        ;;
+    esac
+  done < <(find "$dir" -type f -name '*.md' | LC_ALL=C sort)
 }
 
 # --- the ceiling ------------------------------------------------------------
@@ -269,6 +334,11 @@ _all_raw_pointer_count() {
   #
   # TEN since epic_strictly_sequential: the new reference/sequential.md declares
   # ONE `##` section, *Strictly sequential mode*; its gate rule is a `###`.
+  #
+  # Still TEN after #2055, which split review-loop.md into shards: its one `##`
+  # heading, *The round protocol*, moved to reference/review-loop/core.md
+  # (which `_ref_headings` now reads), and the index left at the old path
+  # carries only an `#` title.
   local n
   n="$(_ref_headings | grep -c .)"
   [ "$n" -eq 10 ]
@@ -398,12 +468,66 @@ _all_raw_pointer_count() {
   # counts. That is true of the tree today (all five are pointed at from the
   # conductor directly), but it does mean a pair of orphans pointing at each
   # other would satisfy this check.
-  local targets r bad=""
-  targets="$(_all_pointers | cut -f1 | sort -u)"
-  for r in "$REF_DIR"/*.md; do
-    printf '%s\n' "$targets" | grep -qxF -- "${r##*/}" || bad+="${r##*/}"$'\n'
-  done
+  #
+  # Scope since #2055 (see `_unreached_reference_files`): every top-level
+  # reference file must be a pointer target; the review-loop/ shards and the
+  # index at the old review-loop.md path are judged as one directory.
+  local bad
+  bad="$(_all_pointers | cut -f1 | sort -u | _unreached_reference_files "$REF_DIR")"
   [ -z "$bad" ] || { printf 'reference file(s) nothing points at:\n%s\n' "$bad" >&2; return 1; }
+}
+
+@test "#2055 non-vacuity: an orphan shard, or a shard the index stops listing, reds the reachability sweep" {
+  # Both arms of the shard rule, over a COPY of the reference tree with the real
+  # pointer targets, so the control exercises the same detector as the sweep.
+  local fake="$BATS_TEST_TMPDIR/ref-copy" targets bad
+  cp -R "$REF_DIR" "$fake"
+  targets="$(_all_pointers | cut -f1 | sort -u)"
+  # the unmutated copy is clean, so a red below is the mutation's doing
+  bad="$(printf '%s\n' "$targets" | _unreached_reference_files "$fake")"
+  [ -z "$bad" ]
+  # (a) a shard nothing points at and the index does not list
+  printf 'orphan\n' > "$fake/review-loop/orphan.md"
+  bad="$(printf '%s\n' "$targets" | _unreached_reference_files "$fake")"
+  printf '%s\n' "$bad" | grep -qxF -- 'review-loop/orphan.md'
+  rm "$fake/review-loop/orphan.md"
+  # (b) a listed shard whose index entry is deleted — one top-level shard and one
+  # in the briefs/ subdirectory (listed by basename under its directory entry)
+  sed -e '/`reference\/review-loop\/risk-pass\.md`/d' -e 's/`risk\.md`/`gone.md`/' \
+    "$REF_DIR/review-loop.md" > "$fake/review-loop.md"
+  bad="$(printf '%s\n' "$targets" | _unreached_reference_files "$fake")"
+  printf '%s\n' "$bad" | grep -qxF -- 'review-loop/risk-pass.md'
+  printf '%s\n' "$bad" | grep -qxF -- 'review-loop/briefs/risk.md'
+  # (c) nothing points into review-loop/ at all: the index is unreached too
+  bad="$(printf '%s\n' "$targets" | grep -v '^review-loop/' | _unreached_reference_files "$REF_DIR")"
+  printf '%s\n' "$bad" | grep -qxF -- 'review-loop.md'
+}
+
+# --- the read-once rule (#2055) ---------------------------------------------
+#
+# The shards only save tokens if the conductor reads each one once, and reads
+# the index's whole order before round 1. Both rules are prose, so a needle
+# holds each clause, matched against whitespace-squeezed text so a reflow
+# cannot retire a pin.
+
+@test "#2055 the conductor reads each reference file once, and only next_ref adds a read" {
+  local skill
+  skill="$(LC_ALL=C tr -s '[:space:]' ' ' < "$CONDUCTOR")"
+  contains "$skill" '**Read each reference file once (#2055).**'
+  contains "$skill" '**The one exception is `next_ref`.**'
+  contains "$skill" "read it and every later shard in the index's order that has also left your context, once each, before acting on the exit."
+  contains "$skill" 'A `null` `next_ref` names nothing to read.'
+  contains "$skill" "relative to this skill's base directory, never to the repo under work."
+}
+
+@test "#2055 the review-loop index orders every shard read before round 1, briefs included" {
+  # The sentence ends at "step 1." on purpose: an exclusion appended there would
+  # skip the conductor halves of briefs/decide.md and briefs/risk.md, which no
+  # other shard states.
+  local idx
+  idx="$(LC_ALL=C tr -s '[:space:]' ' ' < "$REF_DIR/review-loop.md")"
+  contains "$idx" "read every shard below in this order before round 1's step 1. The loop's"
+  contains "$idx" "The loop's status JSON names the shard each exit needs in \`next_ref\`."
 }
 
 # --- the move is still byte-preserving --------------------------------------

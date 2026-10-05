@@ -115,7 +115,7 @@ standalone run has no descriptor at all, which the **Runs** cells name as *no pl
 **A dimension the table does not plan for this round is not run and produces nothing** — no findings, no
 triple — and that is not a dimension that failed to run. Two cells vary. The `manifest_bump` row: round 1 and
 every closing sweep plan with `scope_mode: "full"`, so the agent judges bump size on both, and a delta round
-brings it back only to account for its own carried entries (`reference/review-loop.md` in the resolve-issue
+brings it back only to account for its own carried entries (`reference/review-loop/carry.md` in the resolve-issue
 skill, *Carry-driven dispatch (#2008)*). The `contract` row (#2009): it runs on every full round, and on a
 `"delta"` round unless the plan's `skippable_dimensions` holds `contract` — the plan puts it there when a pure
 selector finds that the round's fix pass touched no contract surface. Read `skippable_dimensions` from the

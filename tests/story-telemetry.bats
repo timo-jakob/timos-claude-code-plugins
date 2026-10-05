@@ -775,7 +775,9 @@ advised() {
   # A missed invocation loses parentage silently (the emitter exits 0), so the
   # instruction must stay present wherever an invocation template lives.
   local base="$REPO_ROOT/development/skills/resolve-issue"
-  grep -qF "Every loop invocation carries the run's \`loop_args\` (#1226)" "$base/reference/review-loop.md"
+  # #2055 split review-loop.md into shards; the invocation template and its
+  # note live in the step-2 shard.
+  grep -qF "Every loop invocation carries the run's \`loop_args\` (#1226)" "$base/reference/review-loop/step-2-invocation.md"
   grep -qF "A granted resume carries the run's \`loop_args\` too (#1226)" "$base/reference/interactive.md"
   grep -qF "Every sub-loop invocation also carries the run's \`loop_args\`" "$base/reference/promotion.md"
   grep -qF "the run's \`loop_args\` (Step 0) on every invocation" "$base/SKILL.md"

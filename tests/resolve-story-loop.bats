@@ -4400,7 +4400,7 @@ JSON
   clean_loop
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r 'keys_unsorted | join(",")')" = \
-    "status,rounds,max_rounds,effective_max_rounds,max_rounds_source,promotion_phase,closing_sweep_granted,possible_false_trip_auto_continues,carry_unconfirmed,repo_type,review_skill,topic_review_skills,escalation_reasons,residue_replaced_reasons,history,round_changelists,final_changelist" ]
+    "status,rounds,max_rounds,effective_max_rounds,max_rounds_source,promotion_phase,closing_sweep_granted,possible_false_trip_auto_continues,carry_unconfirmed,repo_type,review_skill,topic_review_skills,escalation_reasons,residue_replaced_reasons,history,round_changelists,final_changelist,next_ref" ]
 }
 
 @test "#1072 a plan whose topic_review_skills is missing or not an array of strings is an internal error, never exported" {
@@ -4505,4 +4505,72 @@ plugin_loop() {
   [ "$status" -eq 0 ]
   [ "$(cat "$WD/skippable-2.json")" = '[]' ]
   [ "$(jq -sc '[.[] | .skipped_dimensions]' "$WD/history.jsonl")" = '[[],[],[]]' ]
+}
+
+# ---------------------------------------------------------------------------
+# #2055 next_ref — the closed exit table
+# ---------------------------------------------------------------------------
+
+# The table, as the loop states it: one `STATUS-PATTERN<TAB>VALUE` row per arm of
+# the `case "$st"` that sets next_ref in emit_and_exit.
+next_ref_table() {
+  awk '
+    /local next_ref=""/ { on = 1; next }
+    on && /^[[:space:]]*esac/ { exit }
+    on && /\)/ {
+      line = $0; sub(/^[[:space:]]*/, "", line)
+      pat = line; sub(/\).*/, "", pat)
+      val = line; sub(/^[^"]*"/, "", val); sub(/".*/, "", val)
+      printf "%s\t%s\n", pat, val
+    }' "$LOOP_REAL"
+}
+
+@test "#2055 the next_ref table: every non-null value names an existing file under resolve-issue/" {
+  local skill_dir="$REPO_ROOT/development/skills/resolve-issue" pat val rows=0
+  while IFS=$'\t' read -r pat val; do
+    [ -n "$pat" ] || continue
+    rows=$((rows + 1))
+    [ -n "$val" ] || { echo "row $pat has no value" >&2; return 1; }
+    case "$val" in /*|../*|*/../*) echo "next_ref $val is not skill-relative" >&2; return 1 ;; esac
+    [ -f "$skill_dir/$val" ] || { echo "next_ref $val ($pat) names no file under $skill_dir" >&2; return 1; }
+  done < <(next_ref_table)
+  # the closed table: AWAITING_FIX, STALE_FINDINGS, CONVERGED_WITH_RESIDUE, ESCALATE_*|BUDGET_EXHAUSTED
+  [ "$rows" -eq 4 ]
+}
+
+@test "#2055 next_ref on every hook-mode exit carries the tabled value" {
+  local row producer want
+  # producer:expected next_ref (`null` for the statuses the table leaves out).
+  # An array, never a heredoc on the loop's stdin: every producer runs the loop
+  # script, which would be free to read that stdin away.
+  local -a rows=(
+    'clean:null'
+    'stuck:reference/escalation.md'
+    'budget:reference/escalation.md'
+    'conflict:reference/escalation.md'
+    'ambiguous:reference/escalation.md'
+    'skipped:null'
+  )
+  for row in "${rows[@]}"; do
+    producer="${row%%:*}" want="${row#*:}"
+    case "$producer" in
+      clean)     clean_loop ;;
+      stuck)     stuck_loop ;;
+      budget)    budget_loop --max-rounds 2 ;;
+      conflict)  conflict_loop ;;
+      ambiguous) ambiguous_run ;;
+      skipped)   run zsh "$S" --no-review ;;
+    esac
+    [ "$(echo "$output" | jq -r '.next_ref')" = "$want" ] || {
+      echo "$producer: next_ref $(echo "$output" | jq -c '.next_ref'), want $want" >&2; return 1; }
+    # the key is always PRESENT, null included
+    echo "$output" | jq -e 'has("next_ref")' >/dev/null
+  done
+}
+
+@test "#2055 next_ref on CONVERGED_WITH_RESIDUE (exit 14) is the residue reference" {
+  residue_setup
+  loop --max-rounds 2 --review-cmd "$(residue_review touched.py)" --fix-cmd "$residue_fix"
+  [ "$status" -eq 14 ]
+  [ "$(echo "$output" | jq -r '.next_ref')" = "reference/residue.md" ]
 }

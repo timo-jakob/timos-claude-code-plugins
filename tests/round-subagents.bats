@@ -24,6 +24,11 @@ setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   REF="$REPO_ROOT/development/skills/resolve-issue/reference"
   PROTO="$REF/review-loop.md"
+  # #2055 split review-loop.md into shards under review-loop/: the Round
+  # subagents section is subagents.md plus the four briefs/*.md, in that order.
+  RL="$REF/review-loop"
+  SUBS="$RL/subagents.md"
+  BRIEFS="$RL/briefs"
   PROMO="$REF/promotion.md"
   AGENTS="$REPO_ROOT/development/agents"
   HEADING='### Round subagents — the conductor reads only verdicts (#1935)'
@@ -47,17 +52,34 @@ section_of() {
 
 squeeze() { LC_ALL=C tr -s '[:space:]' ' '; }
 
-# The whole Round subagents section (its #### briefs included), squeezed.
+# Every file of the split review loop (#2055): the index and every shard.
+loop_files() { printf '%s\n' "$PROTO" "$RL"/*.md "$BRIEFS"/*.md; }
+# How many lines across the whole split review loop equal $1 exactly.
+loop_count() { loop_files | xargs cat | grep -cxF -- "$1"; }
+# A shard carries no frozen-span sentinel, open or close (#2055: the section's
+# shards replace "after the last frozen span closes and opens none").
+no_sentinels() { [ -z "$(grep -E '^<!-- /?moved: ' "$1")" ]; }
+
+# The whole Round subagents section (its #### briefs included), squeezed. After
+# #2055 it is subagents.md's section followed by the four brief shards, each
+# from its #### heading to the next ### or ## heading, as before the split.
 load_section() {
-  section="$(section_of "$PROTO" "$HEADING" '### |## ' | squeeze)"
+  local b part
+  section="$(section_of "$SUBS" "$HEADING" '### |## ')" || return 1
+  for b in Panel Fix Decide Risk; do
+    part="$(section_of "$BRIEFS/$(printf '%s' "$b" | tr '[:upper:]' '[:lower:]').md" \
+      "#### $b subagent brief" '### |## ')" || return 1
+    section="$section"$'\n'"$part"
+  done
+  section="$(printf '%s' "$section" | squeeze)"
   [ -n "$section" ]
 }
 load_panel_brief() {
-  panel="$(section_of "$PROTO" '#### Panel subagent brief' '#### |### |## ' | squeeze)"
+  panel="$(section_of "$BRIEFS/panel.md" '#### Panel subagent brief' '#### |### |## ' | squeeze)"
   [ -n "$panel" ]
 }
 load_fix_brief() {
-  fix="$(section_of "$PROTO" '#### Fix subagent brief' '#### |### |## ' | squeeze)"
+  fix="$(section_of "$BRIEFS/fix.md" '#### Fix subagent brief' '#### |### |## ' | squeeze)"
   [ -n "$fix" ]
 }
 
@@ -85,20 +107,23 @@ _background_wait_pins() {
 # --- AC 1: the section, its two briefs, outside every frozen span -------------
 
 @test "AC1: review-loop.md has the Round subagents heading and both brief sub-headings, once each" {
-  [ "$(grep -cxF "$HEADING" "$PROTO")" -eq 1 ]
-  [ "$(grep -cxF '#### Panel subagent brief' "$PROTO")" -eq 1 ]
-  [ "$(grep -cxF '#### Fix subagent brief' "$PROTO")" -eq 1 ]
+  # #2055: once across the split review loop, each in its own shard.
+  [ "$(loop_count "$HEADING")" -eq 1 ]
+  [ "$(loop_count '#### Panel subagent brief')" -eq 1 ]
+  [ "$(loop_count '#### Fix subagent brief')" -eq 1 ]
+  [ "$(grep -cxF "$HEADING" "$SUBS")" -eq 1 ]
+  [ "$(grep -cxF '#### Panel subagent brief' "$BRIEFS/panel.md")" -eq 1 ]
+  [ "$(grep -cxF '#### Fix subagent brief' "$BRIEFS/fix.md")" -eq 1 ]
 }
 
 @test "AC1: the section sits after the last frozen span closes and opens none" {
-  local head_line tail_line
-  head_line="$(grep -nxF "$HEADING" "$PROTO" | cut -d: -f1)"
-  tail_line="$(grep -n '^<!-- /moved: ' "$PROTO" | tail -1 | cut -d: -f1)"
-  [ -n "$head_line" ]
-  [ -n "$tail_line" ]
-  [ "$head_line" -gt "$tail_line" ]
-  # No frozen span opens anywhere after the section's heading.
-  [ -z "$(tail -n +"$head_line" "$PROTO" | grep '^<!-- moved: ')" ]
+  # #2055: the frozen spans live in the step shards; the section's own shards
+  # (subagents.md and every brief) carry no sentinel, open or close.
+  local f
+  [ -n "$(loop_files | xargs grep -l '^<!-- /moved: ')" ]
+  for f in "$SUBS" "$BRIEFS"/*.md; do
+    no_sentinels "$f"
+  done
 }
 
 @test "AC1: both briefs sit inside the Round subagents section" {
@@ -404,7 +429,7 @@ _background_wait_pins() {
   contains "$section" '`delta_base` is the tree identity **read from** `<work-dir>/tree-<R-1>.txt` on every round ≥ 2 — its content, never the path — and `null` on round 1'
   load_panel_brief
   contains "$panel" 'From round 2 on, add `--prior-tree <delta_base>`'
-  contains "$panel" 'Step 1 above governs when to add `--final`'
+  contains "$panel" 'Round step 1 governs when to add `--final`'
   contains "$section" 'A non-zero `round-handoff.zsh write-handoff` exit, or a `read-verdict` exit 1 or 2, is report-and-stop.'
   contains "$section" "the dispatch prompt carries that heading's body, since the subagent cannot load a skill"
 }
@@ -496,21 +521,22 @@ _background_wait_pins() {
 # One test per acceptance criterion of #1936, anchored like the rest.
 
 load_decide_brief() {
-  decide="$(section_of "$PROTO" '#### Decide subagent brief' '#### |### |## ' | squeeze)"
+  decide="$(section_of "$BRIEFS/decide.md" '#### Decide subagent brief' '#### |### |## ' | squeeze)"
   [ -n "$decide" ]
 }
 load_decided_pass() {
-  decided="$(section_of "$PROTO" \
+  decided="$(section_of "$RL/decided-pass.md" \
     '### The decided pass — run every `decides:` command before consolidating (#1584)' '### |## ' | squeeze)"
   [ -n "$decided" ]
 }
 
 @test "#1936 AC1: the Decide subagent brief sits once inside the Round subagents section and points at the decided pass" {
-  [ "$(grep -cxF '#### Decide subagent brief' "$PROTO")" -eq 1 ]
+  [ "$(loop_count '#### Decide subagent brief')" -eq 1 ]
+  [ "$(grep -cxF '#### Decide subagent brief' "$BRIEFS/decide.md")" -eq 1 ]
   load_section
   contains "$section" '#### Decide subagent brief'
   load_decide_brief
-  contains "$decide" 'the per-finding procedure — which commands run, how each verdict is settled, the malformed shapes and the retirement rule — is *The decided pass* above, and is not restated here'
+  contains "$decide" 'the per-finding procedure — which commands run, how each verdict is settled, the malformed shapes and the retirement rule — is *The decided pass* (`<skill-base-dir>/reference/review-loop/decided-pass.md`), and is not restated here'
   # The brief restates none of the per-finding arms.
   lacks "$decide" 'Red means the command RAN'
   lacks "$decide" 'Three malformed shapes promote nothing'
@@ -643,9 +669,11 @@ load_decided_pass() {
 @test "#1936 AC12: the risk-pass section keeps its own heading and its slot after the decided pass" {
   # The section is out of scope for #1936; its heading and its opening rule are
   # the two things a misplaced edit would most likely move.
-  [ "$(grep -cxF '### The risk pass — assess every blocking finding before consolidating (#1921)' "$PROTO")" -eq 1 ]
+  # #2055: once across the split review loop, in risk-pass.md.
+  [ "$(loop_count '### The risk pass — assess every blocking finding before consolidating (#1921)')" -eq 1 ]
+  [ "$(grep -cxF '### The risk pass — assess every blocking finding before consolidating (#1921)' "$RL/risk-pass.md")" -eq 1 ]
   local risk
-  risk="$(section_of "$PROTO" '### The risk pass — assess every blocking finding before consolidating (#1921)' '### |## ' | squeeze)"
+  risk="$(section_of "$RL/risk-pass.md" '### The risk pass — assess every blocking finding before consolidating (#1921)' '### |## ' | squeeze)"
   contains "$risk" '**Assess the round'"'"'s blockers against `corner_case_risk_threshold` after the decided pass and before the step-2 invocation.**'
 }
 
@@ -667,29 +695,29 @@ load_decided_pass() {
 # One test per acceptance criterion of #1937, anchored like the rest.
 
 load_arms() {
-  arms="$(section_of "$PROTO" '#### Verdict recovery arms (#1937)' '#### |### |## ' | squeeze)"
+  arms="$(section_of "$SUBS" '#### Verdict recovery arms (#1937)' '#### |### |## ' | squeeze)"
   [ -n "$arms" ]
 }
 load_carry_section() {
-  carry="$(section_of "$PROTO" '### Carry accounting — confirmed, re-raised, unconfirmed (#1583)' '### |## ' | squeeze)"
+  carry="$(section_of "$RL/carry.md" '### Carry accounting — confirmed, re-raised, unconfirmed (#1583)' '### |## ' | squeeze)"
   [ -n "$carry" ]
 }
 
 @test "#1937 AC1: the Verdict recovery arms sub-heading sits once inside the Round subagents section, outside every frozen span" {
-  [ "$(grep -cxF '#### Verdict recovery arms (#1937)' "$PROTO")" -eq 1 ]
+  [ "$(loop_count '#### Verdict recovery arms (#1937)')" -eq 1 ]
+  [ "$(grep -cxF '#### Verdict recovery arms (#1937)' "$SUBS")" -eq 1 ]
   load_section
   contains "$section" '#### Verdict recovery arms (#1937)'
-  local arms_line tail_line
-  arms_line="$(grep -nxF '#### Verdict recovery arms (#1937)' "$PROTO" | cut -d: -f1)"
-  tail_line="$(grep -n '^<!-- /moved: ' "$PROTO" | tail -1 | cut -d: -f1)"
-  [ "$arms_line" -gt "$tail_line" ]
+  # #2055: subagents.md, which holds the arms, carries no frozen-span sentinel.
+  no_sentinels "$SUBS"
   load_arms
   contains "$arms" 'This is the one statement of what the conductor does with a non-`ok` panel verdict, and with the loop'"'"'s CARRY-UNACCOUNTED, CADENCE and never-ran refusals.'
   contains "$arms" 'for its reasoning read that arm, which is not restated here'
 }
 
 @test "#1937 AC2: review-loop.md says 'until #1937' nowhere" {
-  [ -z "$(grep -F 'until #1937' "$PROTO")" ]
+  # #2055: nowhere across the index and every shard.
+  [ -z "$(loop_files | xargs grep -F 'until #1937')" ]
 }
 
 @test "#1937 AC3: a non-ok verdict stops the gate first, and the outcome/cause pairing is closed" {
@@ -714,9 +742,11 @@ load_carry_section() {
   contains "$arms" '| `not-applicable` | `not_applicable` | the **NOT APPLICABLE on a full round** arm: autonomous, stop with no commit and no PR; interactive, its three options, none taken without an explicit choice. Never coerced to `[]`, and the panel is not re-run |'
   contains "$arms" '| `story-diff-empty` | `not_applicable` | the **empty story diff** shape: go back to **§2 (Implement)**'
   contains "$arms" 'The three NOT APPLICABLE options are never offered, and, per the #1485 note, neither the re-invoke arm nor the panel re-run arm is taken |'
-  # the quoted arms really exist where the table says they do
-  contains "$(squeeze < "$PROTO")" 'if the re-run again reports no confirmation count, report it in the conversation and stop'
-  contains "$(squeeze < "$PROTO")" 'fails the same way.'
+  # the quoted arms really exist where the table says they do (#2055: the
+  # missing-confirmation arm is in exit-2-stale-findings.md, the #1582
+  # empty-excerpt rule in scope-block.md)
+  contains "$(squeeze < "$RL/exit-2-stale-findings.md")" 'if the re-run again reports no confirmation count, report it in the conversation and stop'
+  contains "$(squeeze < "$RL/scope-block.md")" 'fails the same way.'
 }
 
 @test "#1937 AC5: the never-ran arm is a shown absence of dispatch, and a dispatched-but-silent panel is a stall" {
@@ -832,24 +862,23 @@ load_carry_section() {
 # the rest. The contract and validator half is tests/round-handoff.bats.
 
 load_risk_brief() {
-  riskb="$(section_of "$PROTO" '#### Risk subagent brief' '#### |### |## ' | squeeze)"
+  riskb="$(section_of "$BRIEFS/risk.md" '#### Risk subagent brief' '#### |### |## ' | squeeze)"
   [ -n "$riskb" ]
 }
 load_risk_pass() {
-  riskp="$(section_of "$PROTO" '### The risk pass — assess every blocking finding before consolidating (#1921)' '### |## ' | squeeze)"
+  riskp="$(section_of "$RL/risk-pass.md" '### The risk pass — assess every blocking finding before consolidating (#1921)' '### |## ' | squeeze)"
   [ -n "$riskp" ]
 }
 
 @test "#2025 AC1: the Risk subagent brief sits once inside the Round subagents section, outside every frozen span" {
-  [ "$(grep -cxF '#### Risk subagent brief' "$PROTO")" -eq 1 ]
+  [ "$(loop_count '#### Risk subagent brief')" -eq 1 ]
+  [ "$(grep -cxF '#### Risk subagent brief' "$BRIEFS/risk.md")" -eq 1 ]
   load_section
   contains "$section" '#### Risk subagent brief'
-  local brief_line tail_line
-  brief_line="$(grep -nxF '#### Risk subagent brief' "$PROTO" | cut -d: -f1)"
-  tail_line="$(grep -n '^<!-- /moved: ' "$PROTO" | tail -1 | cut -d: -f1)"
-  [ "$brief_line" -gt "$tail_line" ]
+  # #2055: briefs/risk.md carries no frozen-span sentinel.
+  no_sentinels "$BRIEFS/risk.md"
   load_risk_brief
-  contains "$riskb" 'is *The risk pass* above and `reference/residue.md` § *1. Assess every residual blocker*, and is restated by neither'
+  contains "$riskb" 'is *The risk pass* (`<skill-base-dir>/reference/review-loop/risk-pass.md`) and `reference/residue.md` § *1. Assess every residual blocker*, and is restated by neither'
   lacks "$riskb" 'is exactly one of the four anchors'
 }
 

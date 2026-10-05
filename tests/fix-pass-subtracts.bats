@@ -59,7 +59,12 @@ setup() {
   # COUNT sites across the skill read the corpus; sweeps that pin WHERE a
   # sentence lives read the one file it lives in. See resolve-issue-corpus.bash.
   CONDUCTOR="$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
-  PROTO="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md"
+  # #2055 split review-loop.md into shards: the rule block, its trigger and
+  # step 3's pointer now live in the AWAITING_FIX shard, and #1510's third
+  # histogram state in carry.md. The windowed locality pins below read the
+  # shard, not the corpus, so a window can never spill across a member edge.
+  PROTO="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop/exit-20-awaiting-fix.md"
+  CARRY="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop/carry.md"
   SKILL="$(resolve_issue_corpus "$REPO_ROOT" "$BATS_TEST_TMPDIR/resolve-issue-corpus.md")"
   EXPLAIN="$REPO_ROOT/docs/explanation/review-loop.md"
   ARCH="$REPO_ROOT/ARCHITECTURE.md"
@@ -176,9 +181,9 @@ _roster_hits() {
   # rule bans. The window is generous because the list carries rationale
   # between its items.
   local ln body needle
-  ln="$(prose_gate_lines "$SKILL" "$RULE_HEADING")"
+  ln="$(prose_gate_lines "$PROTO" "$RULE_HEADING")"
   [ -n "$ln" ]
-  body="$(prose_window "$SKILL" "$ln" 60)"
+  body="$(prose_window "$PROTO" "$ln" 60)"
   for needle in "${RULE_NEEDLES[@]}"; do
     contains "$body" "$needle"
   done
@@ -190,9 +195,9 @@ _roster_hits() {
   # ESCALATE_NO_CONVERGENCE — where no terminal arm fires and a
   # file-it-at-the-terminal rule would file nothing at all.
   local ln body
-  ln="$(prose_gate_lines "$SKILL" "$RULE_HEADING")"
+  ln="$(prose_gate_lines "$PROTO" "$RULE_HEADING")"
   [ -n "$ln" ]
-  body="$(prose_window "$SKILL" "$ln" 70)"
+  body="$(prose_window "$PROTO" "$ln" 70)"
   contains "$body" 'File it NOW, not at a terminal.'
   contains "$body" 'open its follow-up with gh issue create'
   # the exact write, since neither named artifact would accept a note
@@ -212,9 +217,9 @@ _roster_hits() {
 @test "#1496 §3.5 states the class trigger that makes collapsing MANDATORY" {
   local ln body
   # gate on the condition itself, which the source keeps on one line
-  ln="$(prose_gate_lines "$SKILL" 'incomplete_propagation + under_assertion >= new_defect')"
+  ln="$(prose_gate_lines "$PROTO" 'incomplete_propagation + under_assertion >= new_defect')"
   [ -n "$ln" ]
-  body="$(prose_window "$SKILL" "$ln" 20)"
+  body="$(prose_window "$PROTO" "$ln" 20)"
   contains "$body" "rule 2's collapse is MANDATORY for this round"
   # the ARITHMETIC: summed vs per-round give opposite verdicts on the same
   # histogram, and no script computes an aggregate to settle it
@@ -240,9 +245,9 @@ _roster_hits() {
   # rendered table, and the round would be scored 0/0/0 — precisely the reading
   # the same sentence forbids.
   local ln body
-  ln="$(prose_gate_lines "$SKILL" 'incomplete_propagation + under_assertion >= new_defect')"
+  ln="$(prose_gate_lines "$PROTO" 'incomplete_propagation + under_assertion >= new_defect')"
   [ -n "$ln" ]
-  body="$(prose_window "$SKILL" "$ln" 20)"
+  body="$(prose_window "$PROTO" "$ln" 20)"
   contains "$body" 'a – cell — an en dash, as that script emits — is the stamp-less sentinel'
 }
 
@@ -254,12 +259,15 @@ _roster_hits() {
   # so the binding is recorded AFTER the span (as #1571 and #1583 are) and must
   # say it governs where the span disagrees. Gated on the section's own heading
   # in the one file it lives in: the trigger's 20-line window cannot reach it.
+  # #2055 moved it into carry.md, which holds no frozen span at all — "after
+  # the span" is now "in a shard that carries no moved: sentinel".
+  run ! grep -qE '^<!-- /?moved: ' "$CARRY"
   local ln body
-  ln="$(prose_gate_lines "$PROTO" 'The third histogram state — present, below the threshold (#1510)')"
+  ln="$(prose_gate_lines "$CARRY" 'The third histogram state — present, below the threshold (#1510)')"
   [ -n "$ln" ]
-  # FORWARD-ONLY: the #1583 section sits immediately above the gate line, and a
+  # FORWARD-ONLY: another section sits immediately above the gate line, and a
   # centred span would let every needle below be satisfied from its tail.
-  body="$(prose_window "$PROTO" "$((ln + 20))" 20)"
+  body="$(prose_window "$CARRY" "$((ln + 20))" 20)"
   # the BINDING: advisory, same as absent — the threshold alone makes it mandatory
   contains "$body" 'A present histogram whose totals fall below the threshold binds rule 2 no harder than an absent one'
   contains "$body" 'the threshold is the only thing that makes collapsing mandatory'
@@ -280,11 +288,11 @@ _roster_hits() {
   # widen rule 2's threshold, invert rule 3's remedy, drop rule 4's bar — all
   # green. These are the clauses that decide what a fix pass actually does.
   local ln body
-  ln="$(prose_gate_lines "$SKILL" "$RULE_HEADING")"
+  ln="$(prose_gate_lines "$PROTO" "$RULE_HEADING")"
   [ -n "$ln" ]
   # 80, not 70: the binding paragraph sits at the far edge of the block and a
   # tighter span would silently stop pinning it after any reflow
-  body="$(prose_window "$SKILL" "$ln" 80)"
+  body="$(prose_window "$PROTO" "$ln" 80)"
   # rule 1's overrides — without them the rule refuses work a human asked for
   contains "$body" 'Three things override this, and all three are somebody asking for the surface on purpose'
   contains "$body" "the story's own acceptance criteria, a human's granted-round guidance, and a human-promoted suggestion"
@@ -313,13 +321,13 @@ _roster_hits() {
   # than by pinning the word "Four", since a bare tally is the stale-count
   # shape rule 3 itself bans.
   local ln n
-  ln="$(prose_gate_lines "$SKILL" "$RULE_HEADING")"
+  ln="$(prose_gate_lines "$PROTO" "$RULE_HEADING")"
   [ -n "$ln" ]
   # Any indent, any emphasis: pinning the one shape the four rules happen to
   # use today would let an unemphasised or re-indented fifth item land green.
   # Widening only ever fails CLOSED — a re-indent of the existing four still
   # counts 4.
-  n="$(sed -n "${ln},$((ln + 70))p" "$SKILL" | grep -cE '^[[:space:]]*[0-9]+\.[[:space:]]' || true)"
+  n="$(sed -n "${ln},$((ln + 70))p" "$PROTO" | grep -cE '^[[:space:]]*[0-9]+\.[[:space:]]' || true)"
   # a grep that ERRORS prints nothing, and `[ "" -ne 4 ]` inside an `if`
   # condition is exempt from errexit — the branch is skipped and this
   # load-bearing pin reports ok having counted nothing
@@ -459,8 +467,9 @@ _roster_hits() {
   contains "$body" 'A fix pass subtracts'
   # #1503 re-homed this citation from "SKILL.md §3.5's round protocol step 3" to
   # the file the rule now lives in. The claim — ARCHITECTURE points AT the rule
-  # rather than restating it — is unchanged.
-  contains "$body" "development/skills/resolve-issue/reference/review-loop.md § The round protocol, step 3"
+  # rather than restating it — is unchanged. #2055 re-pointed it again, at the
+  # shard that now holds step 3.
+  contains "$body" "development/skills/resolve-issue/reference/review-loop/exit-20-awaiting-fix.md, round step 3"
   # #1510's post-span section quotes this clause verbatim as one of the two
   # summary sites it leaves unedited; pinned at its source so a reword here reds
   # where a fixer can see the citation needs updating too.
@@ -474,7 +483,7 @@ _roster_hits() {
 
 # --- roster tripwire --------------------------------------------------------
 
-@test "#1496 exactly five tracked markdown sites name the rule" {
+@test "#1496 exactly seven tracked markdown sites name the rule" {
   # Derived, not transcribed. `docs/superpowers/` is vendored and restates
   # nothing of ours — the same exclusion the sibling sweeps use. SHIPPED
   # TEMPLATES are in scope: `approver-policy-core.md.tmpl` already restates
@@ -505,8 +514,12 @@ _roster_hits() {
   case "$n" in ''|*[!0-9]*)
     printf 'roster tripwire: grep produced no count\n' >&2; return 1 ;;
   esac
-  if [ "$n" -ne 5 ]; then
-    printf 'expected 5 markdown sites naming the rule, found %s:\n%s\n' "$n" "$hits" >&2
+  # #2055 split review-loop.md into shards, and its three mentions of the rule
+  # fell into three of them: the rule block (exit-20-awaiting-fix.md), the fix
+  # brief's pointer (briefs/fix.md) and the scope block's aside (scope-block.md).
+  # Five sites became seven with no new mention anywhere.
+  if [ "$n" -ne 7 ]; then
+    printf 'expected 7 markdown sites naming the rule, found %s:\n%s\n' "$n" "$hits" >&2
     return 1
   fi
   # …and they are the roster the story named, so a swap reds here too. -F
@@ -514,8 +527,11 @@ _roster_hits() {
   # #1503 moved the review-loop procedure into reference/*.md, so the roster
   # names those files where the text now lives — the same sites, re-homed. The
   # conductor keeps the exit-code table and a pointer, neither of which states
-  # the rule, so SKILL.md is legitimately no longer on it.
-  printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/review-loop.md'
+  # the rule, so SKILL.md is legitimately no longer on it. #2055 split
+  # review-loop.md into the three shards below.
+  printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/review-loop/exit-20-awaiting-fix.md'
+  printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/review-loop/briefs/fix.md'
+  printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/review-loop/scope-block.md'
   printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/promotion.md'
   printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/interactive.md'
   printf '%s\n' "$hits" | grep -qxF 'docs/explanation/review-loop.md'
@@ -571,7 +587,7 @@ _roster_hits() {
   awk '{ print }
        /never a new helper, fixture family or counter/ {
          print "   5. A finding you disagree with is dropped. Not a rule." }' \
-    "$SKILL" > "$F"
+    "$PROTO" > "$F"
   ln="$(prose_gate_lines "$F" "$RULE_HEADING")"
   [ -n "$ln" ]
   n="$(sed -n "${ln},$((ln + 70))p" "$F" | grep -cE '^[[:space:]]*[0-9]+\.[[:space:]]' || true)"

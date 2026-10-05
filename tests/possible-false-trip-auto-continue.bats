@@ -33,7 +33,9 @@ setup() {
   # #1503 split this skill into a conductor plus reference/*.md. Every pin in
   # this file asks WHERE a sentence lives, so all of them read a single file and
   # none reads the corpus — hence no corpus build here.
-  PROTO="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md"
+  # #2055 split review-loop.md into shards; every #1498 sentence it held now
+  # lives in the AWAITING_FIX shard.
+  PROTO="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop/exit-20-awaiting-fix.md"
   EXTENSION="$REPO_ROOT/development/skills/resolve-issue/reference/interactive.md"
   ARCH="$REPO_ROOT/ARCHITECTURE.md"
   EXPL="$REPO_ROOT/docs/explanation/review-loop.md"
@@ -149,7 +151,8 @@ meaning the blockers may be fresh rather than stuck).'
   # the round the auto-continue buys is spent patching around an incomplete fix.
   #
   # Read from $PROTO, not the corpus (#1503): the sentence has to be in the file
-  # a session doing the fix pass has open, which is reference/review-loop.md.
+  # a session doing the fix pass has open, which is (since #2055) the
+  # reference/review-loop/exit-20-awaiting-fix.md shard.
   grep -qF "treat it on its own merits, and where the previous round's fix for the matched prior was incomplete, finish that rather than patch around it" \
     <<< "$(flat "$PROTO")" || {
     echo "the round protocol does not say what the fix pass owes an ambiguous match"; return 1; }
@@ -255,9 +258,10 @@ meaning the blockers may be fresh rather than stuck).'
            | sed "s#^$REPO_ROOT/##" | sort)"
   # #1503 moved the review-loop procedure into reference/*.md, so the roster
   # names those files where the text now lives — the same sites, re-homed.
+  # #2055 split review-loop.md into shards; only the AWAITING_FIX one names it.
   [ "$found" = "ARCHITECTURE.md
 development/skills/resolve-issue/reference/interactive.md
-development/skills/resolve-issue/reference/review-loop.md
+development/skills/resolve-issue/reference/review-loop/exit-20-awaiting-fix.md
 docs/explanation/review-loop.md" ] || {
     echo "roster drift — the sites naming the #1498 auto-continue are now:"
     printf '%s\n' "$found"

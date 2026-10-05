@@ -36,6 +36,15 @@ flow, plus the epic orchestration.
 the optional telemetry sink flags `--telemetry-file PATH` / `--telemetry-dir DIR`
 (#1226) and `--no-review` (§3.5), in any position.
 
+**Read each reference file once (#2055).** A `reference/` file whose text is
+still in your context is not read again: a re-read only adds its rules a second
+time. **The one exception is `next_ref`.** Every status JSON the review loop
+writes carries it. When it names a shard whose text is not in your context, read
+it and every later shard in the index's order that has also left your context,
+once each, before acting on the exit. A `null` `next_ref`
+names nothing to read. The path is relative to this skill's
+base directory, never to the repo under work.
+
 ## Step 0 — classify the target
 
 **First, parse `$ARGUMENTS`** with `story-telemetry.zsh args`, each word
@@ -350,7 +359,7 @@ be one more copy to drift.
 **Every heading in that declared order has a settled role** (ARCHITECTURE.md
 states them). §3 and E4 point at the first, §4 at the second. The **third**
 merely *records* the panel `review-dispatch.zsh plan` already computes. §3.5's
-fix pass (`reference/review-loop.md`) points at the fourth, and §2's same-PR
+fix pass (`reference/review-loop/exit-20-awaiting-fix.md`) points at the fourth, and §2's same-PR
 user-docs step at the fifth. The **sixth** is a record no step dereferences,
 because the residue procedure is the same for every repo type — so:
 
@@ -612,7 +621,7 @@ suite. Where the *suite itself* writes, §3.5's *The `<full gate>` SUITE writes
 into the tree* bullet governs instead and the mint follows the gate. Detect what
 applies and run it — the boundary's own procedure, including the mint command,
 the launch properties and the four `--gate-attest` rules, is on-demand reading:
-see `reference/review-loop.md` § The round protocol
+see `reference/review-loop/core.md` § The round protocol
 
 - pre-commit hooks (`pre-commit run --all-files`, or the staged subset),
 - tests for the stack — the **whole suite**, never a subset (#604, below). The
@@ -690,7 +699,7 @@ tests whose fixtures exercise it, unseen until CI / the Approver has spent CI
 minutes on the bot PR. **#1973 amends this for intermediate (delta) review
 rounds only:** a plugin repo's gate before a *delta* round runs
 `run-gate.zsh --select-base <base>`; round 1's gate (this one), the closing
-sweep, hook mode and CI stay on the whole suite — `reference/review-loop.md`,
+sweep, hook mode and CI stay on the whole suite — `reference/review-loop/delta-rounds.md`,
 *Selected gates for delta rounds (#1973)*. Anywhere else, run everything.
 
 **When a `story-spec/v1` block was consumed (#577), its `acceptance_criteria` and
@@ -731,7 +740,7 @@ round to `<work-dir>/progress.md` — say so once, e.g. "follow along with
 **The round protocol.** The round boundary, each round's panel, the loop
 invocation template, the `AWAITING_FIX` turn and the hand-off to a terminal are
 on-demand reading, taken when you reach this step:
-see `reference/review-loop.md` § The round protocol
+see `reference/review-loop/core.md` § The round protocol
 
 (Hook mode — `--review-cmd`/`--fix-cmd` — still exists as the bats test seam
 only. Never wire it to a headless `claude`.)
@@ -818,10 +827,10 @@ with a status JSON + code:
   re-running the panel — an empty delta with nothing carried, an aliased
   `--findings-file`, a panel that reported NOT APPLICABLE on a full round, and
   an empty story diff, which goes back to §2 (Implement) per
-  `reference/review-loop.md`'s #1485 note (that note governs over step 2) —
+  `reference/review-loop/exit-2-stale-findings.md`'s #1485 note (that note governs over step 2) —
   while the cadence cause is cleared *only* by re-running it (against the current
   tree) or by discarding the fix that moved the tree, and the carry cause per
-  `reference/review-loop.md` § *Carry accounting — confirmed, re-raised,
+  `reference/review-loop/carry.md` § *Carry accounting — confirmed, re-raised,
   unconfirmed (#1583)* — which governs where step 2's own carry arm disagrees —
   by ground: repair the accounting file for a missing, malformed or unmatched
   record, and re-dispatch the panel for an entry it left unaccounted **or

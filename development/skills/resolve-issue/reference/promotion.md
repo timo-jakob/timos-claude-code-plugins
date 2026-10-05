@@ -604,7 +604,7 @@ span above has the conductor run each sub-loop round's panel and fix pass
 itself. Like the blocking phase's rounds, they are now dispatched as the
 **panel**, **decide**, **risk** and **fix** subagents, through the same handoff and
 verdict files:
-`reference/review-loop.md` § *Round subagents — the conductor reads only
+`reference/review-loop/subagents.md` § *Round subagents — the conductor reads only
 verdicts (#1935)* governs. The seed procedure and its step-7 verification stay
 with the conductor — one of that section's two named exceptions. On sub-loop
 round 1, `<pre-seed-round-1.json>` is the panel verdict's
