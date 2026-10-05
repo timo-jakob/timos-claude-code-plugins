@@ -591,7 +591,7 @@ passed, and a granted round **always** carries entries: the terminal round it
 extends still held blockers, which is what was escalated. So read both
 invocations as carrying `--carry-accounting <carry-round-R.json>`, assembled
 from the granted round's panel exactly as on any other carried round, per
-`reference/review-loop.md` § *Carry accounting — confirmed, re-raised,
+`reference/review-loop/carry.md` § *Carry accounting — confirmed, re-raised,
 unconfirmed (#1583)* — which also governs the refusal's recovery. Omitting it
 burns the grant on a refusal round-trip: the loop consolidates the granted
 round, then refuses it before `verify-<R+1>.json` is written, and the human's

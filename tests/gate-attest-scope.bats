@@ -363,11 +363,12 @@ jq '[.[] | {file, dimension, title, confirmed:[\"r\"], re_raised:[], unconfirmed
 
 flat() { tr '\n' ' ' | tr -s ' '; }
 
-# the #1973 section of review-loop.md, up to the next H3
+# the #1973 section of review-loop.md, up to the next H3 — since #2055 split
+# review-loop.md into shards, the section lives in review-loop/delta-rounds.md
 selected_section() {
   awk '/^### Selected gates for delta rounds \(#1973\)$/ { on = 1; next }
        on && /^### / { exit } on { print }' \
-    "$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md" | flat
+    "$REPO_ROOT/development/skills/resolve-issue/reference/review-loop/delta-rounds.md" | flat
 }
 
 @test "review-loop.md: the selected-gate section pins its scope rule and its overrides" {

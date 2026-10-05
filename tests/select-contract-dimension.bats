@@ -240,7 +240,9 @@ append() { printf '%s\n' "$1" >> "$R/dev/scripts/tool.zsh"; }
 }
 
 @test "the header and review-loop.md name the exit-code, env-seam and output-key grounds (#2051)" {
-  local loop="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md"
+  # #2055 split review-loop.md into shards; the skippable-dimensions rule that
+  # names these grounds lives in carry.md.
+  local loop="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop/carry.md"
   contains "$(cat "$SEL")" 'fires on three more grounds (#2051): an exit code'
   contains "$(cat "$SEL")" '(a literal `exit N`, `exit 0` included), an env seam'
   contains "$(cat "$SEL")" 'comment-line exclusion applies to those three only.'

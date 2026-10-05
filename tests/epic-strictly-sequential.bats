@@ -92,7 +92,7 @@ run_s() {
   contains "$mode" '**E3 resolves every child sequentially, in this session.**'
   contains "$mode" 'provably-disjoint set is not parallelised'
   contains "$mode" '**Every review-loop round boundary is serial, with the gate in the'
-  contains "$mode" '**Every wait is a foreground call.**'
+  contains "$mode" '**Every PR-check wait is a foreground call.**'
   contains "$mode" 'E1b still gates **every** child'
 }
 

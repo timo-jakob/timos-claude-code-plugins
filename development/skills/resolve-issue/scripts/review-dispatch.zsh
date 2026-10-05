@@ -162,7 +162,7 @@
 #       a Go repo carrying a Helm chart is reviewed exactly as before. Every
 #       listed panel runs in the same round against this same descriptor, and
 #       the conductor joins their findings into the one findings_path
-#       (reference/review-loop.md, *Topic panels*).
+#       (reference/review-loop/topic-panels.md, *Topic panels*).
 #       The panel writes its aggregate findings JSON (issue #558 schema) to
 #       findings_path, which defaults to
 #       `<worktree_root>/.review/findings-round-<N>.json` — ABSOLUTE, and the

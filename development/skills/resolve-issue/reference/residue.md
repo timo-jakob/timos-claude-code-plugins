@@ -573,7 +573,7 @@ though its sweeps were zero-CRITICAL twice.
 it was. It still feeds `consolidate-findings.zsh --fix-touched`, which stamps
 each blocker's `class` (`new_defect` / `incomplete_propagation`) for the progress
 histogram and the grant decision, and it still keys the waived-suggestion
-exemption in `review-loop.md`. Those are different consumers; deleting the
+exemption in `review-loop/step-1-panel.md`. Those are different consumers; deleting the
 capture because the residue predicate stopped reading it would blank every
 blocker's `class`. `scope-findings` is not changed either — this rule *relies*
 on it, and pins it with a test rather than touching it.
@@ -616,7 +616,7 @@ filed.
 ### 1. Assess every residual blocker — before step 1
 
 **Assess only what the loop has not already assessed (#1921).** With the
-threshold on, the loop's risk pass (`review-loop.md` § *The risk pass*) assessed
+threshold on, the loop's risk pass (`review-loop/risk-pass.md` § *The risk pass*) assessed
 every blocking finding afresh each round, and the consolidator stamped each
 one's changelist entry with `risk_assessment` — so the final changelist carries
 the final round's judgement. A residual blocker that carries that stamp is **not
@@ -801,8 +801,8 @@ finding).
 What this section does **not** change: which runs reach the residue terminal,
 and the dossier's residue counts. What the loop fixes before it gets there is
 now shaped by the same threshold — a `WARNING` below it is demoted to a
-suggestion in the round that raises it (#1921, `review-loop.md` § *The risk
-pass*), so it never reaches this section as residue at all; the blockers the
+suggestion in the round that raises it (#1921, `review-loop/risk-pass.md` § *The
+risk pass*), so it never reaches this section as residue at all; the blockers the
 loop never demotes reach it with their stamp, and section 1 says what happens
 to them. The dossier's
 hidden block still counts a finding dropped **here** in its `open`, which

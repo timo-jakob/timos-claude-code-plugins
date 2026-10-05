@@ -13,8 +13,8 @@
 #      slot in its Reporting Format — unless it is listed, with a reason, in
 #      tests/reviewer-evidence-rule.exemptions (#1644).
 #   2. The conductor's run-the-command-before-consolidating step is stated
-#      EXACTLY ONCE, in development/skills/resolve-issue/reference/review-loop.md,
-#      and docs/explanation/review-loop.md points at it instead of restating it.
+#      EXACTLY ONCE, in development/skills/resolve-issue/reference/review-loop/
+#      decided-pass.md (a shard of reference/review-loop.md since #2055), and docs/explanation/review-loop.md points at it instead of restating it.
 #
 # The roster in half 1 is DERIVED from the frontmatter, never a hard-coded list:
 # a closed list rots the moment another read-only reviewer is added, and the new
@@ -47,7 +47,8 @@ setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   # repo-relative, so the non-vacuity fixture can resolve it inside its own tree
   EXEMPTIONS_REL='tests/reviewer-evidence-rule.exemptions'
-  REFERENCE="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md"
+  # #2055 split review-loop.md into shards; the decided pass is its own shard.
+  REFERENCE="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop/decided-pass.md"
   EXPLANATION="$REPO_ROOT/docs/explanation/review-loop.md"
   PROFILE="$REPO_ROOT/development-claude-plugin/skills/resolve-profile/SKILL.md"
   HEADING="## The evidence rule (a tool's verdict needs the tool run)"
@@ -523,7 +524,7 @@ $victim" ]
   [ "$n" -gt 0 ]
 }
 
-@test "#1584 the conductor's run-before-consolidate step is stated EXACTLY ONCE, in reference/review-loop.md" {
+@test "#1584 the conductor's run-before-consolidate step is stated EXACTLY ONCE, in reference/review-loop/decided-pass.md" {
   needle='**Decide every `decides:` claim before you consolidate (#1584).**'
   [ "$(grep -cF -- "$needle" "$REFERENCE")" -eq 1 ]
   # the heading both pointers name must exist IN THE TARGET, or they dangle
@@ -532,7 +533,7 @@ $victim" ]
   # …and nowhere else in the repo: one normative site is the whole point.
   run bash -c "cd '$REPO_ROOT' && git grep -lF -- '$needle' -- ':(exclude)tests/' | sort"
   [ "$status" -eq 0 ]
-  [ "$output" = "development/skills/resolve-issue/reference/review-loop.md" ]
+  [ "$output" = "development/skills/resolve-issue/reference/review-loop/decided-pass.md" ]
 }
 
 @test "#1584 every load-bearing clause of the normative step is pinned, SECTION-scoped" {
@@ -666,7 +667,7 @@ $victim" ]
   flat="$(printf '%s' "$section" | flatten)"
   for needle in \
     'tools: Read, Grep, Glob' \
-    'development/skills/resolve-issue/reference/review-loop.md' \
+    'development/skills/resolve-issue/reference/review-loop/decided-pass.md' \
     "$POINTER_NAME"
   do
     printf '%s' "$flat" | grep -qF -- "$needle" || {

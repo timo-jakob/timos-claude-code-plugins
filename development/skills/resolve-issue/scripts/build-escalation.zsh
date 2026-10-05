@@ -159,7 +159,7 @@ ESCALATE_NO_CONVERGENCE)
   # `non_converging`, and the consolidator stamps `possible_false_trip` exactly
   # when NO exact title matched — so within it, FLAGGED is the ambiguous case,
   # where the loop cannot tell a reworded survivor from a new neighbour, and it
-  # carries the same instruction `reference/review-loop.md` § The round protocol
+  # carries the same instruction `reference/review-loop/core.md` § The round protocol
   # gives that shape rather than the opposite one. UNFLAGGED is the VERIFIED
   # survivor, an exact-title match, and the arm's hedge below covers only a
   # pre-#969 status file carrying no stamp at all. A #983 identity-cleared

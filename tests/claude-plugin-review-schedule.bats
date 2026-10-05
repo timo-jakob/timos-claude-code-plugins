@@ -16,7 +16,12 @@ setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   SKILL="$REPO_ROOT/development-claude-plugin/skills/review/SKILL.md"
   AGENT="$REPO_ROOT/development-claude-plugin/agents/claude-plugin-manifest-check.md"
-  LOOP_REF="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md"
+  # #2055 split review-loop.md into shards: the carry-driven dispatch and
+  # skippable-dimensions sections live in carry.md, the panel-verdict table in
+  # the panel subagent brief. LOOP_DIR is the whole of what the file was.
+  LOOP_DIR="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop"
+  LOOP_REF="$LOOP_DIR/carry.md"
+  LOOP_BRIEF="$LOOP_DIR/briefs/panel.md"
   ARCH="$REPO_ROOT/ARCHITECTURE.md"
   BUMP_CELL='`scope_mode` is `"full"`, or no plan; on a `"delta"` round only when the split-carry map holds `manifest_bump`'
   CONTRACT_CELL='`scope_mode` is `"full"`, or no plan, or `contract` is not in `skippable_dimensions`, or the split-carry map holds `contract`'
@@ -130,7 +135,7 @@ NO_CONTRACT="manifest prose_logic script_quality tests"
   contains "$sec" 'A delta round whose plan omitted `contract` returns no contract'
   contains "$sec" 'verdict and is consumed like any other round — the loop adds no check of its'
   contains "$sec" '`failed` / `dimension-not-run` row of the *Panel subagent brief*.'
-  contains "$(cat "$LOOP_REF")" '| a planned dimension did not run | `failed` / `dimension-not-run` |'
+  contains "$(cat "$LOOP_BRIEF")" '| a planned dimension did not run | `failed` / `dimension-not-run` |'
   # cited, never restated: the carry rule's bold sentence lives only in its own section
   lacks "$sec" 'is dispatched on a delta round exactly'
   contains "$sec" '`<work-dir>/skippable-<R>.json`'
@@ -184,10 +189,14 @@ NO_CONTRACT="manifest prose_logic script_quality tests"
   contains "$(cat "$LOOP_REF")" '### Carry-driven dispatch (#2008)'
   contains "$(cat "$LOOP_REF")" '**A dimension skipped on delta rounds is dispatched on a delta round exactly'
   contains "$(cat "$LOOP_REF")" 'when #2010'"'"'s split-carry map holds its key.**'
-  contains "$(cat "$LOOP_REF")" '| a planned dimension did not run | `failed` / `dimension-not-run` |'
-  lacks "$(cat "$LOOP_REF")" 'a reviewer dimension did not run'
-  contains "$(cat "$LOOP_REF")" 'it is neither run nor missing, so it never raises `dimension-not-run`'
-  contains "$(cat "$LOOP_REF")" 'which you append to `carry-lines-<R>.txt`'
+  contains "$(cat "$LOOP_BRIEF")" '| a planned dimension did not run | `failed` / `dimension-not-run` |'
+  # the retired row wording, banned from every shard and the index — the
+  # contains guards against an empty haystack passing the lacks vacuously
+  local all; all="$(find "$LOOP_DIR" "$LOOP_DIR.md" -type f -name '*.md' -exec cat {} +)"
+  contains "$all" '### Carry-driven dispatch (#2008)'
+  lacks "$all" 'a reviewer dimension did not run'
+  contains "$(cat "$LOOP_BRIEF")" 'it is neither run nor missing, so it never raises `dimension-not-run`'
+  contains "$(cat "$LOOP_BRIEF")" 'which you append to `carry-lines-<R>.txt`'
 }
 
 @test "ARCHITECTURE.md's claude-plugin panel passage names six dimensions, manifest from the script" {

@@ -38,6 +38,11 @@ setup() {
   SKILL_DIR="$REPO_ROOT/development/skills/resolve-issue"
   CONDUCTOR="$SKILL_DIR/SKILL.md"
   REF_DIR="$SKILL_DIR/reference"
+  # #2055 split review-loop.md into shards under reference/review-loop/. The
+  # step-2 shard holds the frozen duplicate the exemption test pins; the
+  # AWAITING_FIX shard holds the fix-pass profile pointer.
+  STEP2_SHARD="$REF_DIR/review-loop/step-2-invocation.md"
+  FIXPASS_SHARD="$REF_DIR/review-loop/exit-20-awaiting-fix.md"
   DISPATCH="$SKILL_DIR/scripts/review-dispatch.zsh"
   PROFILE="$REPO_ROOT/development-claude-plugin/skills/resolve-profile/SKILL.md"
   ARCH="$REPO_ROOT/ARCHITECTURE.md"
@@ -655,12 +660,21 @@ _name_of() {
 # red on day one for text this story is contractually forbidden to edit — while
 # a sweep scoped to `SKILL.md` alone would miss a rule pasted into a reference
 # file OUTSIDE a span, which is the regression that matters.
+#
+# Every reference file, at ANY depth: #2055 split review-loop.md into shards
+# under reference/review-loop/ (the frozen duplicate now sits in its step-2
+# shard), and a top-level `reference/*.md` glob would silently drop every shard
+# from the corpus — the sweep narrowing to an index with nothing in it.
+_ref_files() {
+  find "$REF_DIR" -type f -name '*.md' | LC_ALL=C sort
+}
+
 _conductor_outside_frozen() {
   local out="$1" f
   : > "$out"
   cat "$CONDUCTOR" >> "$out"
   printf '\n' >> "$out"
-  for f in "$REF_DIR"/*.md; do
+  while IFS= read -r f; do
     [ -e "$f" ] || continue
     awk '
       /^<!-- moved: /    { skip = 1; next }
@@ -668,7 +682,7 @@ _conductor_outside_frozen() {
       !skip              { print }
     ' "$f" >> "$out"
     printf '\n' >> "$out"
-  done
+  done <<< "$(_ref_files)"
 }
 
 # The body of ARCHITECTURE.md's profile-contract section, flattened to one line.
@@ -2227,10 +2241,16 @@ _moved_needles() {
   # only if the text it skips is exactly that, and this reds if the span ever
   # stops holding it (the exemption became unnecessary) or if the stripper stops
   # stripping (the sweep silently narrowed).
+  #
+  # #2055 split review-loop.md into shards and cut that span again: the needle
+  # now sits in `<!-- moved: round-protocol-step-2 -->`, in the step-2 shard.
   local corpus="$BATS_TEST_TMPDIR/exemption-corpus.md"
   _conductor_outside_frozen "$corpus"
   # present in the raw reference file...
-  grep -qF -- 'run-gate.zsh --tests-dir tests' "$REF_DIR/review-loop.md"
+  grep -qF -- 'run-gate.zsh --tests-dir tests' "$STEP2_SHARD"
+  # ...and INSIDE that shard's frozen span, not merely somewhere in the file
+  awk '/^<!-- moved: round-protocol-step-2 -->/{s=1;next} /^<!-- \/moved: /{s=0} s' "$STEP2_SHARD" \
+    | grep -qF -- 'run-gate.zsh --tests-dir tests'
   # ...and gone once the frozen span is stripped, which is the stripper working
   run grep -qF -- 'run-gate.zsh --tests-dir tests' "$corpus"
   [ "$status" -ne 0 ]
@@ -2242,13 +2262,18 @@ _moved_needles() {
   # EOF, and the negative sweep above would then examine a smaller corpus and
   # report clean over text it never read. The exemption test proves the stripper
   # strips; this bounds how much.
-  local f opens closes bad=""
-  for f in "$REF_DIR"/*.md; do
+  # Every reference file at any depth (#2055's shards included), the same set
+  # the stripper reads.
+  local f opens closes bad="" seen=0
+  while IFS= read -r f; do
     [ -e "$f" ] || continue
+    seen=$(( seen + 1 ))
     opens="$(grep -c '^<!-- moved: ' "$f" || true)"
     closes="$(grep -c '^<!-- /moved: ' "$f" || true)"
-    [ "$opens" -eq "$closes" ] || bad+="${f##*/}: $opens open, $closes closed"$'\n'
-  done
+    [ "$opens" -eq "$closes" ] || bad+="${f#"$REF_DIR/"}: $opens open, $closes closed"$'\n'
+  done <<< "$(_ref_files)"
+  # the shards really were enumerated, not just the seven top-level files
+  [ "$seen" -gt 7 ]
   [ -z "$bad" ] || { printf 'unbalanced sentinel span(s):\n%s\n' "$bad" >&2; return 1; }
   # ...and the stripped corpus still holds the connective prose that lives
   # OUTSIDE every span, so the stripper is not silently eating whole files.
@@ -2272,7 +2297,12 @@ _moved_needles() {
   # §3, §4 and §E4 are #1504's vacated sites; §2 and review-loop.md's fix-pass
   # note are #1805's settled ones. review-loop.md is counted on its own, since
   # its pointer sits outside the conductor.
-  local n loop="$REF_DIR/review-loop.md"
+  #
+  # #2055 split review-loop.md into shards: the pointer now sits in the
+  # AWAITING_FIX shard, and it is counted twice — once there, and once across
+  # the index plus EVERY shard, so a second copy pasted into a sibling shard
+  # still reds the "expected 1".
+  local n loop="$FIXPASS_SHARD"
   n="$(grep -oF -- "$POINTER" "$CONDUCTOR" | grep -c . || true)"
   [ "$n" -eq 4 ] || {
     printf 'the conductor carries %s profile pointer(s), expected 4 (§2, §3, §4, §E4).\n' "$n" >&2
@@ -2280,7 +2310,17 @@ _moved_needles() {
   }
   n="$(grep -oF -- "$POINTER" "$loop" | grep -c . || true)"
   [ "$n" -eq 1 ] || {
-    printf 'review-loop.md carries %s profile pointer(s), expected 1 (the fix pass).\n' "$n" >&2
+    printf '%s carries %s profile pointer(s), expected 1 (the fix pass).\n' "${loop#"$REF_DIR/"}" "$n" >&2
+    return 1
+  }
+  local -a rl_files=("$REF_DIR/review-loop.md")
+  local rl
+  while IFS= read -r rl; do [ -n "$rl" ] && rl_files+=("$rl"); done \
+    <<< "$(find "$REF_DIR/review-loop" -type f -name '*.md' | LC_ALL=C sort)"
+  [ "${#rl_files[@]}" -gt 1 ]
+  n="$(cat "${rl_files[@]}" | grep -oF -- "$POINTER" | grep -c . || true)"
+  [ "$n" -eq 1 ] || {
+    printf 'review-loop.md and its shards carry %s profile pointer(s), expected 1 (the fix pass).\n' "$n" >&2
     return 1
   }
   # ...and they name headings the profile actually has, so a renamed heading
@@ -2296,7 +2336,8 @@ _moved_needles() {
 }
 
 @test "#1805 the two new dereference sites skip a none heading, and the roles are settled" {
-  local sec flat loop="$REF_DIR/review-loop.md"
+  # #2055: the fix-pass site is in the AWAITING_FIX shard of review-loop.md
+  local sec flat loop="$FIXPASS_SHARD"
   # §2's site: the `none` qualifier, and it applies even when the generic
   # user-docs step no-oped (else every unrefined issue skips it).
   sec="$BATS_TEST_TMPDIR/step-2.md"
@@ -2350,12 +2391,14 @@ _moved_needles() {
   # edited. Only §4's body moved; its heading is the anchor. A COUNT, not a
   # floor — with `-ge 1` two of the three could vanish silently.
   grep -qF -- '### 4. Version bump (plugin content only)' "$CONDUCTOR"
+  # Over every reference file at any depth (#2055's review-loop shards too).
   local r files=0 hits n
-  for r in "$REF_DIR"/*.md; do
+  while IFS= read -r r; do
+    [ -n "$r" ] || continue
     n="$(grep -cF -- '§4 (Version bump)' "$r" || true)"
     [ "$n" -eq 0 ] || files=$(( files + 1 ))
-  done
-  hits="$(cat "$REF_DIR"/*.md | grep -cF -- '§4 (Version bump)' || true)"
+  done <<< "$(_ref_files)"
+  hits="$(_ref_files | while IFS= read -r r; do cat "$r"; done | grep -cF -- '§4 (Version bump)' || true)"
   [ "$files" -eq 2 ] || {
     printf '%s reference file(s) cross-reference §4 (Version bump), expected 2\n' "$files" >&2
     printf '(promotion.md and interactive.md). The heading is their anchor — if the\n' >&2

@@ -50,13 +50,22 @@ setup() {
   export LC_ALL=C
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   SKILL_REL='development/skills/resolve-issue/SKILL.md'
-  LOOP_REF_REL='development/skills/resolve-issue/reference/review-loop.md'
+  LOOP_DIR_REL='development/skills/resolve-issue/reference/review-loop'
+  # Since #2055 the round protocol is sharded: the step-2 item opens in
+  # STEP2_SHARD and its recovery arms continue in RECOVER_SHARD, step 3 opens in
+  # STEP3_SHARD, and `## The round protocol` heads CORE_SHARD.
+  CORE_SHARD="$LOOP_DIR_REL/core.md"
+  STEP2_SHARD="$LOOP_DIR_REL/step-2-invocation.md"
+  RECOVER_SHARD="$LOOP_DIR_REL/exit-2-stale-findings.md"
+  STEP3_SHARD="$LOOP_DIR_REL/exit-20-awaiting-fix.md"
+  ARTIFACT_SHARD="$LOOP_DIR_REL/step-1-panel.md"
   SCRIPT_REL='development/skills/resolve-issue/scripts/resolve-story-loop.zsh'
   STEP2_TITLE='2. **One loop invocation.**'
   STEP3_TITLE='3. **On `AWAITING_FIX`'
-  ROUTE='see `reference/review-loop.md` § The round protocol'
+  ROUTE='see `reference/review-loop/core.md` § The round protocol'
   POINTER_ROW='**resolve-issue section pointers**'
   ARTIFACT_ROW='**Work-dir artifact names**'
+  REFPTR_ROW='**resolve-issue reference pointers**'
 }
 
 # Every swept file in the git work tree $1, repo-relative, one per line.
@@ -124,28 +133,42 @@ step2_pointers_in() {
   return 0
 }
 
-# The step-2 item's span in review-loop.md: from the line beginning with its
-# title up to (not including) the line beginning with step 3's title.
+# Every file of the review-loop shard tree in work tree $1, repo-relative.
+loop_shards_in() {
+  (cd "$1" && find "$LOOP_DIR_REL" -type f -name '*.md' | sort)
+}
+
+# Every shard of $1 whose lines BEGIN with $2, one per line, once per occurrence.
+title_sites_in() {
+  local root="$1" title="$2" f
+  while IFS= read -r f; do
+    awk -v a="$title" -v f="$f" 'index($0, a) == 1 { print f }' "$root/$f"
+  done < <(loop_shards_in "$root")
+}
+
+# The step-2 item's span across the cut (#2055): STEP2_SHARD from the line
+# beginning with its title to that file's end, then the whole of RECOVER_SHARD,
+# where step 2's recovery arms continue.
 step2_span_in() {
-  awk -v a="$STEP2_TITLE" -v b="$STEP3_TITLE" '
-    index($0, a) == 1 { on = 1 }
-    on && index($0, b) == 1 { exit }
-    on { print }' "$1/$LOOP_REF_REL"
+  awk -v a="$STEP2_TITLE" 'index($0, a) == 1 { on = 1 } on { print }' "$1/$STEP2_SHARD"
+  cat -- "$1/$RECOVER_SHARD"
 }
 
 # What is wrong with the step-2 target, one problem per line; nothing when sound.
 step2_target_problems_in() {
-  local root="$1" titles ends span
-  titles="$(awk -v a="$STEP2_TITLE" 'index($0, a) == 1 { n++ } END { print n + 0 }' "$root/$LOOP_REF_REL")"
-  [ "$titles" = 1 ] || { printf 'step-2 title appears %s times in %s (want 1)\n' "$titles" "$LOOP_REF_REL"; return 0; }
-  ends="$(awk -v a="$STEP2_TITLE" -v b="$STEP3_TITLE" '
-    index($0, a) == 1 { on = 1 } on && index($0, b) == 1 { print "end"; exit }' "$root/$LOOP_REF_REL")"
-  [ "$ends" = end ] || { printf 'no step-3 item closes the step-2 span in %s\n' "$LOOP_REF_REL"; return 0; }
-  # the far end of SKILL.md's route: the item must sit under `## The round protocol`
-  local under
-  under="$(awk -v a="$STEP2_TITLE" '/^## / { h = $0 } index($0, a) == 1 { print h; exit }' "$root/$LOOP_REF_REL")"
-  [ "$under" = '## The round protocol' ] \
-    || printf 'step-2 item sits under %s, not ## The round protocol\n' "${under:-no ## heading}"
+  local root="$1" sites span
+  sites="$(title_sites_in "$root" "$STEP2_TITLE")"
+  [ "$sites" = "$STEP2_SHARD" ] || {
+    printf 'step-2 title must appear exactly once across %s, in %s (found: %s)\n' \
+      "$LOOP_DIR_REL" "$STEP2_SHARD" "$(printf '%s' "$sites" | tr '\n' ' ')"; return 0; }
+  sites="$(title_sites_in "$root" "$STEP3_TITLE")"
+  [ "$sites" = "$STEP3_SHARD" ] || {
+    printf 'step-3 title must appear exactly once across %s, in %s (found: %s)\n' \
+      "$LOOP_DIR_REL" "$STEP3_SHARD" "$(printf '%s' "$sites" | tr '\n' ' ')"; return 0; }
+  # the far end of SKILL.md's route: `## The round protocol` heads the core shard
+  sites="$(title_sites_in "$root" '## The round protocol')"
+  [ "$sites" = "$CORE_SHARD" ] \
+    || printf '## The round protocol does not sit in %s (found: %s)\n' "$CORE_SHARD" "$(printf '%s' "$sites" | tr '\n' ' ')"
   span="$(step2_span_in "$root" | tr '\n' ' ' | tr -s ' ')"
   local needle
   # each needle is the arm's own title, unique in the span — a bare
@@ -237,6 +260,81 @@ artifact_problems_in() {
 }
 
 # ---------------------------------------------------------------------------
+# 3. reference/<path>.md pointers (#2055)
+# ---------------------------------------------------------------------------
+
+# The files whose `reference/<path>.md` mentions name resolve-issue's own
+# reference tree: SKILL.md, every file under reference/, the resolve-issue
+# scripts, the round subagents, every resolve profile, ARCHITECTURE.md and
+# MAINTAINING.md. Other skills' docs name `docs/reference/…`, which the mention
+# pattern below already excludes by its left boundary.
+refptr_files_in() {
+  git -C "$1" ls-files -- \
+    'development/skills/resolve-issue/SKILL.md' \
+    'development/skills/resolve-issue/reference/**' \
+    'development/skills/resolve-issue/scripts/*' \
+    'development/agents/round-*.md' \
+    '*/skills/resolve-profile/SKILL.md' \
+    ARCHITECTURE.md MAINTAINING.md | sort
+}
+
+# One row per mention: file TAB path TAB title (empty when no `§` follows).
+# A mention is `reference/<path>.md`, optionally prefixed by
+# `development/skills/resolve-issue/`, `resolve-issue/` or `<skill-base-dir>/`,
+# and otherwise never preceded by a path character — so `docs/reference/x.md` is
+# not one. A title is the `§` that follows (after an
+# optional closing backtick and comma, across a line break): an italic
+# `*…*` title, whitespace-flattened, or else the rest of that line.
+refptr_mentions_in() {
+  local root="$1" f
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    # The name rides in the environment: under `-n`, a second ARGV entry would
+    # be opened as an input file rather than read as the name.
+    REFPTR_FILE="$f" perl -0777 -ne '
+      my $f = $ENV{REFPTR_FILE};
+      while (/(?:(?<![\w.\/-])(?:development\/skills\/)?resolve-issue\/|<skill-base-dir>\/|(?<![\w.\/-]))reference\/([\w\/.-]+?\.md)(`?,?[ \t]*\n?[ \t]*(?:[#>][ \t]*)?§[ \t]*(?:\*([^*]+)\*|([^\n]*)))?/g) {
+        my ($p, $t) = ($1, defined $3 ? $3 : (defined $4 ? $4 : ""));
+        $t =~ s/\s+/ /g; $t =~ s/^ | $//g;
+        print "$f\treference/$p\t$t\n";
+      }' "$root/$f" </dev/null
+  done < <(refptr_files_in "$root")
+}
+
+# The headings of a reference file, `#`s and surrounding `*` stripped.
+headings_of() {
+  awk '/^#{1,6} / { sub(/^#+ +/, ""); gsub(/^[*]|[*]$/, ""); print }' "$1"
+}
+
+# Every mention whose file does not exist under resolve-issue/, and every title
+# that names no heading of that file. A title matches a heading it equals, or
+# shares a word-bounded prefix with: the title begins with the heading — so
+# `§ The round protocol, step 3` resolves to `## The round protocol` — or the
+# heading begins with the title — so the short form `§ *The risk pass*` resolves
+# to `### The risk pass — assess every blocking finding …`. In both directions
+# the character after the shorter one must not be a word character, so a title
+# never matches a heading that merely shares its first letters.
+refptr_problems_in() {
+  local root="$1" f p t target heads
+  while IFS=$'\t' read -r f p t; do
+    [ -n "$p" ] || continue
+    target="$root/development/skills/resolve-issue/$p"
+    [ -f "$target" ] || { printf '%s: %s does not exist\n' "$f" "$p"; continue; }
+    [ -n "$t" ] || continue
+    heads="$(headings_of "$target")"
+    T="$t" H="$heads" perl -e '
+      my $t = $ENV{T};
+      for my $h (split /\n/, $ENV{H}) {
+        exit 0 if $t eq $h;
+        exit 0 if index($t, $h) == 0 && substr($t, length $h, 1) !~ /\w/;
+        exit 0 if index($h, $t) == 0 && substr($h, length $t, 1) !~ /\w/;
+      }
+      exit 1' || printf '%s: %s § %s names no heading in that file\n' "$f" "$p" "$t"
+  done < <(refptr_mentions_in "$root")
+  return 0
+}
+
+# ---------------------------------------------------------------------------
 # helpers shared by the tripwires and the mutation controls
 # ---------------------------------------------------------------------------
 
@@ -248,7 +346,10 @@ row_figure() {
 # Build a throwaway git work tree under $1 holding every swept file that carries
 # a pointer or an artifact reference, plus the targets and MAINTAINING.md, at
 # their real repo-relative paths. Files carrying neither contribute nothing to
-# any derivation, so every derived figure is the real one.
+# any derivation, so every derived figure is the real one. The `|| true` on the
+# filtering loop is load-bearing: under errexit a LAST file with no match ends
+# that pipeline at 1 and aborts the whole group, silently dropping every listing
+# after it — which went unseen while every target also carried a pointer (#2055).
 make_fixture_repo() {
   local dest="$1" f
   mkdir -p "$dest"
@@ -260,8 +361,10 @@ make_fixture_repo() {
   done < <({
     swept_files_in "$REPO_ROOT" | while IFS= read -r f; do
       grep -qE -e '§[0-9]' -e '<work-dir>/' "$REPO_ROOT/$f" && printf '%s\n' "$f"
-    done
-    printf '%s\n' "$SKILL_REL" "$LOOP_REF_REL" "$SCRIPT_REL" MAINTAINING.md
+    done || true
+    printf '%s\n' "$SKILL_REL" "$SCRIPT_REL" MAINTAINING.md
+    loop_shards_in "$REPO_ROOT"
+    refptr_files_in "$REPO_ROOT"
   } | sort -u)
   git -C "$dest" add -A
 }
@@ -348,22 +451,28 @@ replace_first() {
   [ -n "$output" ]
   git -C "$fx" checkout -q -- "$SKILL_REL"
 
-  # (d) removed arm
-  grep -vF 'NOT APPLICABLE on a full round' "$fx/$LOOP_REF_REL" > "$fx/tmp" && mv -- "$fx/tmp" "$fx/$LOOP_REF_REL"
+  # (d) removed arm — it sits past the cut, in the recover shard
+  grep -vF 'NOT APPLICABLE on a full round' "$fx/$RECOVER_SHARD" > "$fx/tmp" && mv -- "$fx/tmp" "$fx/$RECOVER_SHARD"
   run step2_target_problems_in "$fx"
   [ "$output" = 'step-2 span lacks the arm: NOT APPLICABLE on a full round' ]
-  git -C "$fx" checkout -q -- "$LOOP_REF_REL"
+  git -C "$fx" checkout -q -- "$RECOVER_SHARD"
 
   # (e) removed STALE_FINDINGS arm: its title goes, the span's passing mentions stay
-  grep -vF '**`STALE_FINDINGS` (exit 2' "$fx/$LOOP_REF_REL" > "$fx/tmp" && mv -- "$fx/tmp" "$fx/$LOOP_REF_REL"
+  grep -vF '**`STALE_FINDINGS` (exit 2' "$fx/$STEP2_SHARD" > "$fx/tmp" && mv -- "$fx/tmp" "$fx/$STEP2_SHARD"
   run step2_target_problems_in "$fx"
   [ "$output" = 'step-2 span lacks the arm: **`STALE_FINDINGS` (exit 2' ]
-  git -C "$fx" checkout -q -- "$LOOP_REF_REL"
+  git -C "$fx" checkout -q -- "$STEP2_SHARD"
 
   # (f) renamed round-protocol heading: SKILL.md's route now points at nothing
-  replace_first "$fx/$LOOP_REF_REL" '## The round protocol' '## The round procedure'
+  replace_first "$fx/$CORE_SHARD" '## The round protocol' '## The round procedure'
   run step2_target_problems_in "$fx"
-  [ "$output" = 'step-2 item sits under ## The round procedure, not ## The round protocol' ]
+  [ "$output" = "## The round protocol does not sit in $CORE_SHARD (found: )" ]
+  git -C "$fx" checkout -q -- "$CORE_SHARD"
+
+  # (g) the step-2 item moved into the wrong shard: its title now opens a second file
+  printf '%s\n' "$STEP2_TITLE" >> "$fx/$CORE_SHARD"
+  run step2_target_problems_in "$fx"
+  [ "${output#step-2 title must appear exactly once}" != "$output" ]
 }
 
 # ---------------------------------------------------------------------------
@@ -413,15 +522,75 @@ EOF
   [ -z "$(artifact_problems_in "$fx")" ]
   [ "$(prose_stems_in "$fx")" = "$(prose_stems_in "$REPO_ROOT")" ]
 
-  # (a) prose site: review-loop.md names a tree file the script never writes
-  replace_first "$fx/$LOOP_REF_REL" '<work-dir>/tree-' '<work-dir>/trees-'
+  # (a) prose site: a review-loop shard names a tree file the script never writes
+  replace_first "$fx/$ARTIFACT_SHARD" '<work-dir>/tree-' '<work-dir>/trees-'
   run artifact_problems_in "$fx"
-  [ "$output" = "$LOOP_REF_REL: <work-dir>/trees-<N>.txt is not a stem resolve-story-loop.zsh writes" ]
-  git -C "$fx" checkout -q -- "$LOOP_REF_REL"
+  [ "$output" = "$ARTIFACT_SHARD: <work-dir>/trees-<N>.txt is not a stem resolve-story-loop.zsh writes" ]
+  git -C "$fx" checkout -q -- "$ARTIFACT_SHARD"
 
   # (b) code site: the script stops writing .closing-sweep, so every prose site naming it reds
   replace_first "$fx/$SCRIPT_REL" '$work_dir/.closing-sweep' '$work_dir/.closing-sweep-flag'
   run artifact_problems_in "$fx"
   [ -n "$output" ]
   [ "$(printf '%s\n' "$output" | grep -vc '/.closing-sweep is not a stem')" -eq 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# tests — reference/<path>.md pointer sweep (#2055)
+# ---------------------------------------------------------------------------
+
+@test "#2055 every reference/<path>.md mention resolves to a file, and every § title to a heading in it" {
+  [ -n "$(refptr_mentions_in "$REPO_ROOT")" ]   # non-vacuity
+  run refptr_problems_in "$REPO_ROOT"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ] || { printf '%s\n' "$output" >&2; return 1; }
+}
+
+@test "#2055 the mention pattern: a wrapped italic title, a bare title, a <skill-base-dir>/ prefix, and docs/reference/ excluded" {
+  local fx="$BATS_TEST_TMPDIR/m"
+  mkdir -p "$fx" && git -C "$fx" init -q
+  printf '%s\n' \
+    'see `reference/review-loop/core.md` § The round protocol' \
+    'and `reference/review-loop/carry.md` § *Carry accounting — confirmed,' \
+    're-raised, unconfirmed (#1583)* governs; `docs/reference/commands.md` is not one' \
+    'read `<skill-base-dir>/reference/review-loop/briefs/fix.md`' > "$fx/ARCHITECTURE.md"
+  git -C "$fx" add -A
+  run refptr_mentions_in "$fx"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | wc -l | tr -d ' ')" -eq 3 ]
+  [ "$(printf '%s\n' "$output" | sed -n 3p)" = "$(printf 'ARCHITECTURE.md\treference/review-loop/briefs/fix.md\t')" ]
+  [ "$(printf '%s\n' "$output" | sed -n 1p)" = "$(printf 'ARCHITECTURE.md\treference/review-loop/core.md\tThe round protocol')" ]
+  [ "$(printf '%s\n' "$output" | sed -n 2p)" = "$(printf 'ARCHITECTURE.md\treference/review-loop/carry.md\tCarry accounting — confirmed, re-raised, unconfirmed (#1583)')" ]
+}
+
+@test "#2055 TRIPWIRE: the mention and titled-pointer counts equal the reference-pointer row's figures" {
+  local mentions titled s_mentions s_titled
+  mentions="$(refptr_mentions_in "$REPO_ROOT" | wc -l | tr -d ' ')"
+  titled="$(refptr_mentions_in "$REPO_ROOT" | awk -F'\t' '$3 != ""' | wc -l | tr -d ' ')"
+  s_mentions="$(row_figure "$REPO_ROOT" "$REFPTR_ROW" 'reference mentions')"
+  s_titled="$(row_figure "$REPO_ROOT" "$REFPTR_ROW" 'titled pointers')"
+  [ -n "$s_mentions" ] && [ -n "$s_titled" ] || {
+    echo "MAINTAINING.md's reference-pointer row is missing or states no figures" >&2; return 1; }
+  [ "$mentions" = "$s_mentions" ] || { echo "row says $s_mentions reference mentions, derived $mentions" >&2; return 1; }
+  [ "$titled" = "$s_titled" ] || { echo "row says $s_titled titled pointers, derived $titled" >&2; return 1; }
+}
+
+@test "#2055 MUTATION: the reference-pointer sweep reds on a missing file and a renamed heading" {
+  local fx="$BATS_TEST_TMPDIR/repo"
+  make_fixture_repo "$fx"
+  run refptr_problems_in "$fx"
+  [ -z "$output" ] || { printf 'the untouched copy is not clean:\n%s\n' "$output" >&2; return 1; }
+  [ "$(refptr_mentions_in "$fx")" = "$(refptr_mentions_in "$REPO_ROOT")" ]
+
+  # (a) a mention whose file is gone
+  replace_first "$fx/$SKILL_REL" 'reference/review-loop/core.md' 'reference/review-loop/kore.md'
+  run refptr_problems_in "$fx"
+  [ "$output" = "$SKILL_REL: reference/review-loop/kore.md does not exist" ]
+  git -C "$fx" checkout -q -- "$SKILL_REL"
+
+  # (b) the heading a § title names is renamed: every pointer at it reds
+  replace_first "$fx/$CORE_SHARD" '## The round protocol' '## The round procedure'
+  run refptr_problems_in "$fx"
+  [ -n "$output" ]
+  [ "$(printf '%s\n' "$output" | grep -vc 'core.md § The round protocol.* names no heading in that file')" -eq 0 ]
 }

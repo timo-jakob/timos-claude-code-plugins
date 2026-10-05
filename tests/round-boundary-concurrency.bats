@@ -79,8 +79,29 @@ setup() {
   # COUNT sites across the skill read the corpus; sweeps that pin WHERE a
   # sentence lives read the one file it lives in. See resolve-issue-corpus.bash.
   CONDUCTOR="$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
-  PROTO="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md"
+  # #2055 split reference/review-loop.md into reference/review-loop/ shards. The
+  # boundary block (banner, seven steps, invariant) lives in core.md; the
+  # canonical consolidation invocation in step-2-invocation.md; the consuming
+  # pointers in step-1-panel.md and exit-20-awaiting-fix.md. Locality pins read
+  # the shard that holds the sentence.
+  SHARDS="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop"
+  CORE="$SHARDS/core.md"
+  STEP1="$SHARDS/step-1-panel.md"
+  STEP2="$SHARDS/step-2-invocation.md"
+  EXIT20="$SHARDS/exit-20-awaiting-fix.md"
   SKILL="$(resolve_issue_corpus "$REPO_ROOT" "$BATS_TEST_TMPDIR/resolve-issue-corpus.md")"
+  # #2055: the corpus helper walks reference/*.md flat, so the shards are not in
+  # it. Append every shard it did not already list — the COUNTING sweeps below
+  # must read every site — and stay idempotent once the helper learns them.
+  local _listed _shards _s
+  _listed="$(resolve_issue_files "$REPO_ROOT")" || return 1
+  _shards="$(find "$SHARDS" -type f -name '*.md' | LC_ALL=C sort)" || return 1
+  [ -n "$_shards" ]
+  while IFS= read -r _s; do
+    grep -qxF -e "$_s" <<< "$_listed" && continue
+    cat "$_s" >> "$SKILL" || return 1
+    printf '\n' >> "$SKILL" || return 1
+  done <<< "$_shards"
   EXPLAIN="$REPO_ROOT/docs/explanation/review-loop.md"
   ARCH="$REPO_ROOT/ARCHITECTURE.md"
   # #1504 moved §3's plugin-repo gate rules — the attestation bullet among them —
@@ -246,9 +267,9 @@ _roster_hits() {
   # Without it a reader is licensed to weaken the gate in the name of the
   # overlap, which is the one thing the story forbids.
   local ln body
-  ln="$(prose_gate_lines "$SKILL" "$BANNER")"
+  ln="$(prose_gate_lines "$CORE" "$BANNER")"
   [ -n "$ln" ]
-  body="$(prose_window "$SKILL" "$ln" 10)"
+  body="$(prose_window "$CORE" "$ln" 10)"
   contains "$body" 'the whole suite still runs on every round that applied a fix, a red gate still blocks consolidation'
   contains "$body" 'the boundary starts them together instead of making the panel queue behind the gate'
   # …and the measured figure, because docs/explanation/review-loop.md defers to
@@ -264,13 +285,13 @@ _roster_hits() {
   # The regression position catches and presence cannot: swap items 3 and 4 and
   # the panel queues behind the gate again while every needle still matches.
   local needle ln prev end
-  prev="$(prose_gate_lines "$SKILL" "$BANNER")"
+  prev="$(prose_gate_lines "$CORE" "$BANNER")"
   [ -n "$prev" ]
-  end="$(prose_gate_lines "$SKILL" 'At a round boundary the attestation pair is the invariant.')"
+  end="$(prose_gate_lines "$CORE" 'At a round boundary the attestation pair is the invariant.')"
   [ -n "$end" ]
   local out
   for needle in "${STEP_GATES[@]}"; do
-    out="$(prose_gate_lines "$SKILL" "$needle")" || return 1
+    out="$(prose_gate_lines "$CORE" "$needle")" || return 1
     ln="$(printf '%s\n' "$out" | head -1)"
     if [ -z "$ln" ]; then
       printf 'ordering pin: no line carries the gate "%s"\n' "$needle" >&2
@@ -294,9 +315,9 @@ _roster_hits() {
   # and the same sentence tells the session to pass a flag SKILL.md's own four
   # rules forbid off plugin repos.
   local ln body
-  ln="$(prose_gate_lines "$SKILL" '5. Green → consolidate (the Each round loop-invocation step below),')"
+  ln="$(prose_gate_lines "$CORE" '5. Green → consolidate (the Each round loop-invocation step below),')"
   [ -n "$ln" ]
-  body="$(prose_window "$SKILL" "$ln" 22)"
+  body="$(prose_window "$CORE" "$ln" 22)"
   contains "$body" 'a plugin repo whose <full gate> is run-gate.zsh and reported a tree — the only stack that reports one — additionally requires that tree to equal T, and passes --gate-attest "$T"'
   # …and the COMPOUND arm, without which arm 1 captures a plugin repo whose gate
   # is compound and the loop skips the whole compound on a tree match
@@ -324,12 +345,12 @@ _roster_hits() {
   # the blind spot the seven numbered steps already close. Counted structurally
   # between step 5's gate line and step 6's, the way that pin counts.
   local start end n
-  start="$(prose_gate_lines "$SKILL" '5. Green → consolidate (the Each round loop-invocation step below),')"
+  start="$(prose_gate_lines "$CORE" '5. Green → consolidate (the Each round loop-invocation step below),')"
   [ -n "$start" ]
-  end="$(prose_gate_lines "$SKILL" '6. Red → the round is not consolidated and neither attest is passed.')"
+  end="$(prose_gate_lines "$CORE" '6. Red → the round is not consolidated and neither attest is passed.')"
   [ -n "$end" ]
   # any indent: pinning today's one would let a re-indented fifth arm land green
-  n="$(sed -n "${start},${end}p" "$SKILL" | grep -acE '^[[:space:]]*-[[:space:]]' || true)"
+  n="$(sed -n "${start},${end}p" "$CORE" | grep -acE '^[[:space:]]*-[[:space:]]' || true)"
   # a grep that ERRORS prints nothing, and `[ "" -ne 4 ]` inside an `if` is
   # exempt from errexit — the branch is skipped and the pin reports ok having
   # counted nothing
@@ -348,9 +369,9 @@ _roster_hits() {
   # forward disarms `--gate-attest` silently and aborts the loop on
   # `--findings-tree` with a usage error that names neither cause.
   local ln body
-  ln="$(prose_gate_lines "$SKILL" '1. Mint the tree identity once, before either activity starts.')"
+  ln="$(prose_gate_lines "$CORE" '1. Mint the tree identity once, before either activity starts.')"
   [ -n "$ln" ]
-  body="$(prose_window "$SKILL" "$ln" 18)"
+  body="$(prose_window "$CORE" "$ln" 18)"
   contains "$body" 'prints nothing and exits non-zero when it cannot compute an identity'
   contains "$body" 'An unmintable T is a report-and-stop, never a restart'
   contains "$body" 'would silently disarm --gate-attest while aborting the loop on --findings-tree'
@@ -368,9 +389,9 @@ _roster_hits() {
   # pre-gate mint. Fixing `pre-commit` hooks are explicitly NOT that case: §3
   # runs them before the mint and they are never part of `<full gate>`.
   local ln body
-  ln="$(prose_gate_lines "$SKILL" 'Two kinds of round take a different boundary, and both are stated here rather')"
+  ln="$(prose_gate_lines "$CORE" 'Two kinds of round take a different boundary, and both are stated here rather')"
   [ -n "$ln" ]
-  body="$(prose_window "$SKILL" "$ln" 48)"
+  body="$(prose_window "$CORE" "$ln" 48)"
   contains "$body" 'No fix pass ran since the last boundary'
   contains "$body" 'The tree has not moved: mint nothing and skip steps 2 and 4'
   # …and step 3 is NOT skipped on the promotion: its full-diff panel is the
@@ -427,11 +448,11 @@ _roster_hits() {
   # green. Counted structurally between the list's heading and the invariant
   # paragraph, the same shape as step 5's arm-closure pin.
   local start end n
-  start="$(prose_gate_lines "$SKILL" 'Two kinds of round take a different boundary, and both are stated here rather')"
+  start="$(prose_gate_lines "$CORE" 'Two kinds of round take a different boundary, and both are stated here rather')"
   [ -n "$start" ]
-  end="$(prose_gate_lines "$SKILL" 'At a round boundary the attestation pair is the invariant.')"
+  end="$(prose_gate_lines "$CORE" 'At a round boundary the attestation pair is the invariant.')"
   [ -n "$end" ]
-  n="$(sed -n "${start},${end}p" "$SKILL" | grep -acE '^[[:space:]]*-[[:space:]]' || true)"
+  n="$(sed -n "${start},${end}p" "$CORE" | grep -acE '^[[:space:]]*-[[:space:]]' || true)"
   # a grep that ERRORS prints nothing, and `[ "" -ne 2 ]` inside an `if` is
   # exempt from errexit — the branch is skipped and the pin reports ok having
   # counted nothing
@@ -450,9 +471,9 @@ _roster_hits() {
   # starts a second full-suite gate over the first — both worse than the serial
   # shape the overlap replaced.
   local ln body
-  ln="$(prose_gate_lines "$SKILL" '3. Plan and dispatch the panel (the Each round panel step below) against')"
+  ln="$(prose_gate_lines "$CORE" '3. Plan and dispatch the panel (the Each round panel step below) against')"
   [ -n "$ln" ]
-  body="$(prose_window "$SKILL" "$ln" 22)"
+  body="$(prose_window "$CORE" "$ln" 22)"
   contains "$body" 'If that step refuses or aborts the round'
   # kill, not merely ignore: a second gate over a live one oversubscribes the
   # host, and a byte the abandoned suite writes lands after the next mint
@@ -482,9 +503,9 @@ _roster_hits() {
   # #981 and #1435 §10 each forbid, which matches trivially and certifies
   # nothing.
   local ln body
-  ln="$(prose_gate_lines "$SKILL" 'At a round boundary the attestation pair is the invariant.')"
+  ln="$(prose_gate_lines "$CORE" 'At a round boundary the attestation pair is the invariant.')"
   [ -n "$ln" ]
-  body="$(prose_window "$SKILL" "$ln" 12)"
+  body="$(prose_window "$CORE" "$ln" 12)"
   contains "$body" 'name the same minted tree, minted before both the gate and the panel start'
   contains "$body" 'matches the working tree trivially and certifies nothing'
   # …that this is an ordering, not new machinery — the story's own bound
@@ -574,9 +595,9 @@ _roster_hits() {
   # never proved; drop "discarded" and it consolidates findings about a
   # superseded tree, which is exactly what the #1435 §10 cadence guard refuses.
   local ln body
-  ln="$(prose_gate_lines "$SKILL" '6. Red → the round is not consolidated and neither attest is passed.')"
+  ln="$(prose_gate_lines "$CORE" '6. Red → the round is not consolidated and neither attest is passed.')"
   [ -n "$ln" ]
-  body="$(prose_window "$SKILL" "$ln" 10)"
+  body="$(prose_window "$CORE" "$ln" 10)"
   contains "$body" 'Red → the round is not consolidated and neither attest is passed.'
   contains "$body" 'restart this boundary from its step 1'
   contains "$body" "this round's panel findings describe the superseded tree and are discarded"
@@ -590,9 +611,9 @@ _roster_hits() {
   # cwd, a work-dir inside the repo) discards a panel every round with nothing
   # to fix, until the budget is gone.
   local ln body
-  ln="$(prose_gate_lines "$SKILL" '7. Green on a REPORTED tree that is not T — reachable on a plugin repo')"
+  ln="$(prose_gate_lines "$CORE" '7. Green on a REPORTED tree that is not T — reachable on a plugin repo')"
   [ -n "$ln" ]
-  body="$(prose_window "$SKILL" "$ln" 12)"
+  body="$(prose_window "$CORE" "$ln" 12)"
   # the stack scope, which this arm inherits: off plugin repos no `tree` is
   # reported at all, so an unscoped arm would swallow every green round
   contains "$body" 'reachable on a plugin repo only, and only when a tree was actually reported'
@@ -610,10 +631,10 @@ _roster_hits() {
   # two names is the defect. `_flag_placeholder` returns 1 on an absent flag, so
   # "both missing" can never read as "both equal".
   local ln g f
-  ln="$(grep -n '^2\. \*\*One loop invocation\.\*\*' "$SKILL" | head -1 | cut -d: -f1)"
+  ln="$(grep -n '^2\. \*\*One loop invocation\.\*\*' "$STEP2" | head -1 | cut -d: -f1)"
   [ -n "$ln" ]
-  g="$(_flag_placeholder "$SKILL" "$ln" 11 '--gate-attest')"
-  f="$(_flag_placeholder "$SKILL" "$ln" 11 '--findings-tree')"
+  g="$(_flag_placeholder "$STEP2" "$ln" 11 '--gate-attest')"
+  f="$(_flag_placeholder "$STEP2" "$ln" 11 '--findings-tree')"
   if [ "$g" != "$f" ]; then
     printf 'canonical block: --gate-attest %s but --findings-tree %s\n' "$g" "$f" >&2
     return 1
@@ -698,7 +719,9 @@ _roster_hits() {
   # --gate-attest two pages earlier
   contains "$body" 'Off plugin repos only --findings-tree is passed'
   contains "$body" 'the concurrency is an ordering, not a flag pair that exists everywhere'
-  contains "$body" "development/skills/resolve-issue/reference/review-loop.md § The round protocol"
+  # #2055 split review-loop.md; the round protocol's heading is in core.md, and
+  # ARCHITECTURE's pointer names that shard.
+  contains "$body" "development/skills/resolve-issue/reference/review-loop/core.md § The round protocol"
   # The load-bearing half: the ordering is the SESSION's, so the loop enforces
   # nothing here. A doc that said otherwise would licence a reader to assume a
   # mechanical guard that does not exist.
@@ -773,7 +796,7 @@ _roster_hits() {
 
 # --- roster tripwire --------------------------------------------------------
 
-@test "#1497 exactly five tracked markdown sites state the cadence" {
+@test "#1497 exactly six tracked markdown sites state the cadence" {
   # Derived, not transcribed. `docs/superpowers/` is vendored and restates
   # nothing of ours — the same exclusion the sibling sweeps use. SHIPPED
   # TEMPLATES are in scope: `approver-policy-core.md.tmpl` already restates
@@ -802,8 +825,11 @@ _roster_hits() {
   case "$n" in ''|*[!0-9]*)
     printf 'roster tripwire: grep produced no count\n' >&2; return 1 ;;
   esac
-  if [ "$n" -ne 5 ]; then
-    printf 'expected 5 markdown sites stating the cadence, found %s:\n%s\n' "$n" "$hits" >&2
+  # #2055 split review-loop.md into shards: its one site became two files —
+  # core.md (the boundary) and step-2-invocation.md (step 2's mint-before rule) — so
+  # the same statements now count six files, not five.
+  if [ "$n" -ne 6 ]; then
+    printf 'expected 6 markdown sites stating the cadence, found %s:\n%s\n' "$n" "$hits" >&2
     return 1
   fi
   # …and they are the roster the story named, so a swap reds here too. -F
@@ -811,7 +837,8 @@ _roster_hits() {
   # #1503 moved the review-loop procedure into reference/*.md, so the roster
   # names those files where the text now lives — the same sites, re-homed.
   printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/SKILL.md'
-  printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/review-loop.md'
+  printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/review-loop/core.md'
+  printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/review-loop/step-2-invocation.md'
   printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/interactive.md'
   printf '%s\n' "$hits" | grep -qxF 'docs/explanation/review-loop.md'
   printf '%s\n' "$hits" | grep -qxF 'ARCHITECTURE.md'
@@ -824,14 +851,14 @@ _roster_hits() {
   # reinstate the exact wait this story removed. Counted structurally, the way
   # `tests/fix-pass-subtracts.bats` closes its own list.
   local start end n
-  start="$(prose_gate_lines "$SKILL" "$BANNER")"
+  start="$(prose_gate_lines "$CORE" "$BANNER")"
   [ -n "$start" ]
-  end="$(prose_gate_lines "$SKILL" 'At a round boundary the attestation pair is the invariant.')"
+  end="$(prose_gate_lines "$CORE" 'At a round boundary the attestation pair is the invariant.')"
   [ -n "$end" ]
   # Any indent, any emphasis: pinning the one shape the seven happen to use
   # today would let a re-indented eighth land green. Widening only ever fails
   # CLOSED — a re-indent of the existing seven still counts 7.
-  n="$(sed -n "${start},${end}p" "$SKILL" | grep -cE '^[[:space:]]*[0-9]+\.[[:space:]]' || true)"
+  n="$(sed -n "${start},${end}p" "$CORE" | grep -cE '^[[:space:]]*[0-9]+\.[[:space:]]' || true)"
   # a grep that ERRORS prints nothing, and `[ "" -ne 7 ]` inside an `if`
   # condition is exempt from errexit — the branch is skipped and this
   # load-bearing pin reports ok having counted nothing
@@ -888,9 +915,9 @@ _roster_hits() {
   # rule licensed a foreground poll and consolidating a gate that never
   # returned.
   local ln body
-  ln="$(prose_gate_lines "$SKILL" '2. Start the gate out of band, so that it runs without blocking the panel')"
+  ln="$(prose_gate_lines "$CORE" '2. Start the gate out of band, so that it runs without blocking the panel')"
   [ -n "$ln" ]
-  body="$(prose_window "$SKILL" "$ln" 42)"
+  body="$(prose_window "$CORE" "$ln" 42)"
   # The step states PROPERTIES and points at the one implementation that has
   # them; it deliberately does not restate the recipe. Three fix passes in a row
   # found fresh holes in a prescribed recipe rather than in the story, which is
@@ -941,9 +968,9 @@ _roster_hits() {
   # bytes under the tree between the mint and the gate's hashing
   contains "$body" 'Everything it writes goes outside the repo'
 
-  ln="$(prose_gate_lines "$SKILL" "4. Observe the gate's completion before consolidating")"
+  ln="$(prose_gate_lines "$CORE" "4. Observe the gate's completion before consolidating")"
   [ -n "$ln" ]
-  body="$(prose_window "$SKILL" "$ln" 18)"
+  body="$(prose_window "$CORE" "$ln" 18)"
   contains "$body" "wait for step 2's signal, with a generous bound (a full suite runs minutes, not hours)"
   # the ban is SCOPED — an unqualified one would forbid the only wait a
   # signal-file mechanism has
@@ -970,9 +997,11 @@ _roster_hits() {
   contains "$body" 'that identity is the T minted before this gate was started'
   contains "$body" 'this profile restates none of it'
 
-  ln="$(prose_gate_lines "$SKILL" 'is concurrent (§3.5) — which mints T, starts the full gate and dispatches')"
+  # #2055: the review-loop sites below read the shard that now holds them; the
+  # interactive.md sites never lived in review-loop.md and keep the corpus.
+  ln="$(prose_gate_lines "$EXIT20" 'is concurrent (§3.5) — which mints T, starts the full gate and dispatches')"
   [ -n "$ln" ]
-  body="$(prose_window "$SKILL" "$ln" 4)"
+  body="$(prose_window "$EXIT20" "$ln" 4)"
   contains "$body" "starts the full gate and dispatches that round's panel together"
 
   ln="$(prose_gate_lines "$SKILL" "T, starts the gate and dispatches that round's panel in-session together,")"
@@ -994,9 +1023,9 @@ _roster_hits() {
   # held by the pointer COUNT alone. Each needle spans the insertion point, so
   # a "gate to green, then" clause added beside an intact pointer breaks the
   # contiguous match rather than sailing past a count that is still 8.
-  ln="$(prose_gate_lines "$SKILL" "anything other than this round's number + 1 → an ordinary fix turn. Fix,")"
+  ln="$(prose_gate_lines "$EXIT20" "anything other than this round's number + 1 → an ordinary fix turn. Fix,")"
   [ -n "$ln" ]
-  body="$(prose_window "$SKILL" "$ln" 4)"
+  body="$(prose_window "$EXIT20" "$ln" 4)"
   contains "$body" "an ordinary fix turn. Fix, take the next round's boundary — The round boundary is concurrent (§3.5) — and plan that round without --final"
 
   ln="$(prose_gate_lines "$SKILL" 'On AWAITING_FIX (20) → continue the §3.5 round protocol (narrate, fix')"
@@ -1008,9 +1037,9 @@ _roster_hits() {
   # serial restatement into a pointer. The pointer COUNT alone was holding it:
   # rewriting the site to "re-run §3's gate to green and re-dispatch" keeps the
   # pointer phrase, so the count stays 8 and the serial shape comes back green.
-  ln="$(prose_gate_lines "$SKILL" 'concurrent (§3.5) — which mints T, starts the gate and re-dispatches this')"
+  ln="$(prose_gate_lines "$STEP1" 'concurrent (§3.5) — which mints T, starts the gate and re-dispatches this')"
   [ -n "$ln" ]
-  body="$(prose_window "$SKILL" "$ln" 4)"
+  body="$(prose_window "$STEP1" "$ln" 4)"
   contains "$body" "starts the gate and re-dispatches this round's panel together"
   contains "$body" 'do not gate to green first'
 }
@@ -1073,7 +1102,7 @@ _roster_hits() {
     serial == 1 && index($0, "Each round:") > 0 { serial = 0 }
     serial == 1 { next }
     { print }
-  ' "$SKILL" > "$F"
+  ' "$CORE" > "$F"
   # the banner is gone, so the gate phrase finds nothing at all and every clause
   # pin above is unreachable
   ln="$(prose_gate_lines "$F" "$BANNER")"
@@ -1101,7 +1130,7 @@ _roster_hits() {
   # branch the serial-wording control already covers — leaving the order
   # comparison, which is the only thing this control exists to exercise,
   # untouched.
-  step4="$(grep -n '^4\. \*\*Observe the gate' "$SKILL" | head -1 | cut -d: -f2-)"
+  step4="$(grep -n '^4\. \*\*Observe the gate' "$CORE" | head -1 | cut -d: -f2-)"
   [ -n "$step4" ]
   awk -v s4="$step4" '
     index($0, "4. **Observe the gate") > 0 { dropped = 1; next }
@@ -1113,7 +1142,7 @@ _roster_hits() {
         exit 1
       }
     }
-  ' "$SKILL" > "$F"
+  ' "$CORE" > "$F"
   # Walk the way the pin does — capturing the helper status BEFORE the pipe,
   # since `| head -1` hands back head's (always 0) and a dead helper call would
   # otherwise set the flag for a reason that proves nothing.
@@ -1137,7 +1166,7 @@ _roster_hits() {
   # and a round that consolidates panel findings against an already-fixed tree
   # is precisely what the #1435 §10 guard refuses, one refusal per round.
   local F="$BATS_TEST_TMPDIR/skill-keeps-findings.md" ln body
-  sed 's/\*\*discarded\*\*\./**kept**./' "$SKILL" > "$F"
+  sed 's/\*\*discarded\*\*\./**kept**./' "$CORE" > "$F"
   ln="$(prose_gate_lines "$F" '6. Red → the round is not consolidated and neither attest is passed.')"
   [ -n "$ln" ]
   body="$(prose_window "$F" "$ln" 10)"
@@ -1151,7 +1180,7 @@ _roster_hits() {
   # boundary unsatisfiable off plugin repos.
   local F="$BATS_TEST_TMPDIR/skill-unscoped.md" ln body
   sed 's/every other stack emits no `tree` at all/every stack reports a `tree`/' \
-    "$SKILL" > "$F"
+    "$CORE" > "$F"
   ln="$(prose_gate_lines "$F" '5. Green → consolidate (the Each round loop-invocation step below),')"
   [ -n "$ln" ]
   body="$(prose_window "$F" "$ln" 22)"
@@ -1164,7 +1193,7 @@ _roster_hits() {
   # The one clause that distinguishes the invariant from a self-attestation.
   local F="$BATS_TEST_TMPDIR/skill-late-mint.md" ln body
   sed 's/same minted tree, minted before both/same minted tree, minted at some point around/' \
-    "$SKILL" > "$F"
+    "$CORE" > "$F"
   ln="$(prose_gate_lines "$F" 'At a round boundary the attestation pair is the invariant.')"
   [ -n "$ln" ]
   body="$(prose_window "$F" "$ln" 12)"
@@ -1187,7 +1216,7 @@ _roster_hits() {
 
 @test "#1497 non-vacuity: a canonical block split back into two placeholders reds AC3" {
   local F="$BATS_TEST_TMPDIR/skill-split.md" ln g f spellings
-  sed 's/\[--findings-tree <T>\]/[--findings-tree <panel-T>]/' "$SKILL" > "$F"
+  sed 's/\[--findings-tree <T>\]/[--findings-tree <panel-T>]/' "$STEP2" > "$F"
   ln="$(grep -n '^2\. \*\*One loop invocation\.\*\*' "$F" | head -1 | cut -d: -f1)"
   [ -n "$ln" ]
   g="$(_flag_placeholder "$F" "$ln" 11 '--gate-attest')"
@@ -1221,7 +1250,7 @@ _roster_hits() {
   # block and two empty strings compare equal. `_flag_placeholder`'s typed 1 is
   # what closes it, and this control is what proves the typed 1 is honoured.
   local F="$BATS_TEST_TMPDIR/skill-no-flags.md" ln
-  sed -e 's/\[--gate-attest <T>\]//' -e 's/\[--findings-tree <T>\]//' "$SKILL" > "$F"
+  sed -e 's/\[--gate-attest <T>\]//' -e 's/\[--findings-tree <T>\]//' "$STEP2" > "$F"
   ln="$(grep -n '^2\. \*\*One loop invocation\.\*\*' "$F" | head -1 | cut -d: -f1)"
   [ -n "$ln" ]
   run _flag_placeholder "$F" "$ln" 11 '--gate-attest'
@@ -1329,7 +1358,7 @@ _roster_hits() {
   awk '{ print }
        index($0, "- **The `<full gate>` SUITE writes into the tree**") > 0 {
          print "- **A compound gate whose embedded run-gate.zsh proved T** — pass the held attest." }' \
-    "$SKILL" > "$F"
+    "$CORE" > "$F"
   start="$(prose_gate_lines "$F" 'Two kinds of round take a different boundary, and both are stated here rather')"
   [ -n "$start" ]
   end="$(prose_gate_lines "$F" 'At a round boundary the attestation pair is the invariant.')"
@@ -1345,7 +1374,7 @@ _roster_hits() {
   awk '{ print }
        index($0, "a plugin repo whose reported") > 0 {
          print "   - a compound gate whose embedded run-gate.zsh matched may pass it." }' \
-    "$SKILL" > "$F"
+    "$CORE" > "$F"
   start="$(prose_gate_lines "$F" '5. Green → consolidate (the Each round loop-invocation step below),')"
   [ -n "$start" ]
   end="$(prose_gate_lines "$F" '6. Red → the round is not consolidated and neither attest is passed.')"
@@ -1361,7 +1390,7 @@ _roster_hits() {
   awk '{ print }
        index($0, "3. **Plan and dispatch the panel") > 0 {
          print "8. **Block on the gate before dispatching** — not a real step." }' \
-    "$SKILL" > "$F"
+    "$CORE" > "$F"
   start="$(prose_gate_lines "$F" "$BANNER")"
   [ -n "$start" ]
   end="$(prose_gate_lines "$F" 'At a round boundary the attestation pair is the invariant.')"
@@ -1417,12 +1446,15 @@ _roster_hits() {
 @test "#1497 non-vacuity: the empty-full-scope site re-serialised reds its clause pin" {
   # Keeps the pointer — so the count stays 8 — and restores exactly the serial
   # ordering round 1 blocked on.
-  local F="$BATS_TEST_TMPDIR/skill-scope-serial.md" ln body n
+  local F="$BATS_TEST_TMPDIR/skill-scope-serial.md" G="$BATS_TEST_TMPDIR/step1-scope-serial.md" ln body n
   sed "s/starts the gate and re-dispatches this/re-runs §3's gate to green, then re-dispatches this/" \
     "$CADENCE" > "$F"
-  ln="$(prose_gate_lines "$F" "concurrent (§3.5) — which mints T, re-runs §3's gate to green, then re-dispatches this")"
+  # #2055: the clause pin reads step-1-panel.md, so its control mutates that shard
+  sed "s/starts the gate and re-dispatches this/re-runs §3's gate to green, then re-dispatches this/" \
+    "$STEP1" > "$G"
+  ln="$(prose_gate_lines "$G" "concurrent (§3.5) — which mints T, re-runs §3's gate to green, then re-dispatches this")"
   [ -n "$ln" ]
-  body="$(prose_window "$F" "$ln" 4)"
+  body="$(prose_window "$G" "$ln" 4)"
   lacks "$body" "starts the gate and re-dispatches this round's panel together"
   # …and the pointer count is untouched, which is why the clause pin is needed
   n="$(_body_hits "$F" "$POINTER")"
@@ -1447,7 +1479,7 @@ _roster_hits() {
   local F="$BATS_TEST_TMPDIR/skill-wide-licence.md" ln body
   # target ONE source line: the clause wraps, and sed is per line
   sed 's/stand in, but only where it is documented to outlive the turn \*and\*/stand in —/' \
-    "$SKILL" > "$F"
+    "$CORE" > "$F"
   ln="$(prose_gate_lines "$F" '2. Start the gate out of band, so that it runs without blocking the panel')"
   [ -n "$ln" ]
   body="$(prose_window "$F" "$ln" 42)"
@@ -1463,7 +1495,7 @@ _roster_hits() {
   # green gate, while 'with a generous bound' still matches.
   local F="$BATS_TEST_TMPDIR/skill-short-bound.md" ln body
   sed 's/(a full suite runs minutes, not hours)/(a full suite runs seconds, not minutes)/' \
-    "$SKILL" > "$F"
+    "$CORE" > "$F"
   ln="$(prose_gate_lines "$F" "4. Observe the gate's completion before consolidating")"
   [ -n "$ln" ]
   body="$(prose_window "$F" "$ln" 18)"
@@ -1478,7 +1510,7 @@ _roster_hits() {
   local F="$BATS_TEST_TMPDIR/skill-no-wrapper-note.md" ln body
   # one source line, since the clause wraps
   sed 's/easy mistake: the reference shape prints its \*wrapper.s\* pid, so a/easy mistake, so a/' \
-    "$SKILL" > "$F"
+    "$CORE" > "$F"
   ln="$(prose_gate_lines "$F" '2. Start the gate out of band, so that it runs without blocking the panel')"
   [ -n "$ln" ]
   body="$(prose_window "$F" "$ln" 42)"
@@ -1493,7 +1525,7 @@ _roster_hits() {
   local F="$BATS_TEST_TMPDIR/skill-runner.md" ln body
   # target ONE source line: the clause wraps after "**a shape reference,"
   sed 's/never a runner you hand the gate to\./reuse it directly./' \
-    "$SKILL" > "$F"
+    "$CORE" > "$F"
   ln="$(prose_gate_lines "$F" '2. Start the gate out of band, so that it runs without blocking the panel')"
   [ -n "$ln" ]
   body="$(prose_window "$F" "$ln" 42)"
@@ -1505,7 +1537,7 @@ _roster_hits() {
   # survives, and only the clause that says the panel does not wait is gone.
   local F="$BATS_TEST_TMPDIR/skill-step3-serial.md" ln body
   sed 's/that same tree, while the gate is still running\./that same tree, once the gate has come back green./' \
-    "$SKILL" > "$F"
+    "$CORE" > "$F"
   ln="$(prose_gate_lines "$F" '3. Plan and dispatch the panel (the Each round panel step below) against')"
   [ -n "$ln" ]
   body="$(prose_window "$F" "$ln" 12)"

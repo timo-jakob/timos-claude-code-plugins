@@ -97,7 +97,8 @@
 #  43. re-key the review skill's Fix-pass hunks condition on `delta_hunks` being
 #      non-null instead of on `scope_mode`
 #  44. delete the `Fix-pass hunks (delta round):` line from the Step 1 template
-#  45. delete review-loop.md's "No acceptance-criteria exception exists" lead
+#  45. delete review-loop/delta-rounds.md's "No acceptance-criteria exception
+#      exists" lead (review-loop.md until #2055 split it into shards)
 #  46. delete ARCHITECTURE.md's "The mutation bar carries a delta-round rule" lead
 #  47. delete the template line's `kind "added" … "changed" …` definitions
 #  48. delete its "a definition that states no such rule ignores this line" tail
@@ -455,7 +456,9 @@ _assert_file() {  # _assert_file <path> <test-expr...>
 
 @test "ARCHITECTURE.md and review-loop.md document the delta-round rule and delta_hunks (#2011)" {
   local arch="$REPO_ROOT/ARCHITECTURE.md"
-  local loop="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md"
+  # #2055 split review-loop.md into shards; the #2011 subsection is in
+  # delta-rounds.md
+  local loop="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop/delta-rounds.md"
   [ -f "$arch" ]
   [ -f "$loop" ]
   # ARCHITECTURE's severity-bars section, scoped exactly as the #1433 test
@@ -474,7 +477,7 @@ _assert_file() {  # _assert_file <path> <test-expr...>
   flat="$(printf '%s' "$sec" | LC_ALL=C tr -s '[:space:]' ' ')"
   contains "$flat" '`delta_hunks` (#2011) is that same delta at line granularity, `null` exactly when `delta_files` is'
   contains "$flat" '`kind` `"added"` for a pure addition and `"changed"` for any hunk that rewrote or removed prior-tree lines'
-  # review-loop.md's own subsection, which sits after every byte-frozen
+  # review-loop.md's own subsection, which sits outside every byte-frozen
   # `moved:` span — a copy inside one would be the edit those spans forbid
   sec="$(awk '/^### The delta-round test bar — fix-pass hunks \(#2011\)/ { f = 1; next } f && /^###? / { exit } f' "$loop")"
   [ -n "$sec" ]
@@ -483,12 +486,12 @@ _assert_file() {  # _assert_file <path> <test-expr...>
   contains "$flat" 'Hook mode hands the panel no descriptor, so no hunk list reaches it and the rule never applies there.'
   contains "$flat" '**No acceptance-criteria exception exists, by design.**'
   contains "$flat" 'still caught at the full bar by the closing full sweep, before any PR opens'
-  local heading_line last_moved
-  heading_line="$(grep -n '^### The delta-round test bar' "$loop" | cut -d: -f1)"
-  last_moved="$(grep -n '^<!-- /moved: ' "$loop" | tail -n 1 | cut -d: -f1)"
-  [ -n "$heading_line" ]
-  [ -n "$last_moved" ]
-  [ "$heading_line" -gt "$last_moved" ]
+  # "after the last frozen span" was a line-order claim inside one file; since
+  # #2055 the subsection's shard carries no frozen span at all, so the claim is
+  # that delta-rounds.md holds no `moved:` sentinel, opening or closing
+  grep -q '^### The delta-round test bar' "$loop"
+  run grep -cE '^<!-- /?moved: ' "$loop"
+  [ "$output" = 0 ]
 }
 
 @test "claude-plugin-contract-integrity states the consumer bar (#1433)" {
@@ -677,14 +680,15 @@ _assert_file() {  # _assert_file <path> <test-expr...>
   # exemption list, the one place a read-only agent may go without the rule
   contains "$flat" 'tests/reviewer-evidence-rule.exemptions'
   [ -f "$REPO_ROOT/tests/reviewer-evidence-rule.exemptions" ]
-  # ARCHITECTURE cites a rule the REFERENCE carries; pin the citation here and
+  # ARCHITECTURE cites a rule the REFERENCE carries (since #2055 split
+  # review-loop.md, its decided-pass shard); pin the citation here and
   # the rule there, so an edit to either side reds rather than leaving this
   # sentence pointing at text the reference no longer has.
   contains "$flat" 'the reference tells the conductor to treat a `decided: "red"` carry entry as'
   # FLATTENED: the cited sentence is hard-wrapped prose, so a line-oriented grep
   # would pass or fail on where the author's wrap landed.
   run bash -c "grep -qF 'treat the entry as a tool-verdict carry' <<< \"\$(tr '\n' ' ' < \"\$1\" | tr -s ' ')\"" \
-    _ "$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md"
+    _ "$REPO_ROOT/development/skills/resolve-issue/reference/review-loop/decided-pass.md"
   [ "$status" -eq 0 ]
   [ -f "$REPO_ROOT/tests/reviewer-evidence-rule.bats" ]
   # the heading ARCHITECTURE quotes must be the one the agents and the sweep

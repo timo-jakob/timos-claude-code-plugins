@@ -180,7 +180,7 @@ SWEEP_NEAR_TERMINAL='CONVERGED_WITH_RESIDUE.{0,250}(full sweep|closing sweep)|(f
   grep -qiE "$SWEEP_NEAR_TERMINAL" <<< "$(flat "$near")"
 }
 
-@test "#1435 roster tripwire: exactly eleven markdown sites name the terminal" {
+@test "#1435 roster tripwire: exactly twelve markdown sites name the terminal" {
   # A derived sweep answers "do the sites agree?", never "did a site appear or
   # vanish?" — so the roster is recorded here and a site that appears or vanishes
   # reds until this file is updated in the same PR.
@@ -204,6 +204,8 @@ SWEEP_NEAR_TERMINAL='CONVERGED_WITH_RESIDUE.{0,250}(full sweep|closing sweep)|(f
   # are the same sites re-homed: the conductor keeps the exit-code table (hence
   # SKILL.md stays on the roster) while residue.md, promotion.md, escalation.md,
   # interactive.md and review-loop.md carry the procedure behind each branch.
+  # #2055 split review-loop.md into shards, and its mentions fell into two of
+  # them: delta-rounds.md and exit-20-awaiting-fix.md. Eleven became twelve.
   [ "$found" = "ARCHITECTURE.md
 development/skills/bootstrap/templates/common/approver-policy-core.md.tmpl
 development/skills/open-pr/SKILL.md
@@ -212,10 +214,11 @@ development/skills/resolve-issue/reference/escalation.md
 development/skills/resolve-issue/reference/interactive.md
 development/skills/resolve-issue/reference/promotion.md
 development/skills/resolve-issue/reference/residue.md
-development/skills/resolve-issue/reference/review-loop.md
+development/skills/resolve-issue/reference/review-loop/delta-rounds.md
+development/skills/resolve-issue/reference/review-loop/exit-20-awaiting-fix.md
 docs/explanation/review-loop.md
 docs/reference/commands.md" ] || {
-    echo "markdown roster changed; expected the eleven known sites, got:"
+    echo "markdown roster changed; expected the twelve known sites, got:"
     echo "$found"; return 1; }
 }
 
@@ -461,8 +464,9 @@ docs/reference/commands.md" ] || {
   # #1503 moved the AWAITING_FIX branch into reference/review-loop.md, so that is
   # the file the invariant must live in; reading the corpus instead would let it
   # drift into the conductor, which a session reaching AWAITING_FIX has already
-  # left behind for the reference.
-  local F="$RI_REF/review-loop.md"
+  # left behind for the reference. #2055 split review-loop.md into shards; the
+  # AWAITING_FIX branch is now reference/review-loop/exit-20-awaiting-fix.md.
+  local F="$RI_REF/review-loop/exit-20-awaiting-fix.md"
   local t; t="$(flat "$F")"
   grep -q 'a round.s findings reach the loop BEFORE that round.s fix pass runs, always' <<< "$t"
   # ...and it names the mechanical half, or the invariant is advice with no teeth
@@ -570,10 +574,12 @@ docs/reference/commands.md" ] || {
     return 1
   fi
   # ...and every site that is NOT excluded really does state it, including the
-  # loop itself and the round protocol the declaring round lives in.
+  # loop itself and the round protocol the declaring round lives in — since
+  # #2055, both review-loop/ shards that name the terminal.
   for f in "$SCRIPTS/resolve-story-loop.zsh" \
            "$REPO_ROOT/development/skills/resolve-issue/SKILL.md" \
-           "$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md" \
+           "$REPO_ROOT/development/skills/resolve-issue/reference/review-loop/delta-rounds.md" \
+           "$REPO_ROOT/development/skills/resolve-issue/reference/review-loop/exit-20-awaiting-fix.md" \
            "$REPO_ROOT/ARCHITECTURE.md" \
            "$REPO_ROOT/docs/explanation/review-loop.md" \
            "$REPO_ROOT/docs/reference/commands.md"; do
@@ -992,7 +998,9 @@ sweepable() {
   # the negative sweep needles literals that appear nowhere in the frozen span.
   # Deleting the whole note passed the suite, leaving the file a session reads on
   # EVERY round telling it a parked-only run escalates by design.
-  local t; t="$(flat "$RI_REF/review-loop.md")"
+  # #2055 split review-loop.md into shards; the note now follows the frozen
+  # span in reference/review-loop/exit-20-awaiting-fix.md.
+  local t; t="$(flat "$RI_REF/review-loop/exit-20-awaiting-fix.md")"
   grep -q 'Residue condition 2 was removed (#1571)' <<< "$t" || {
     echo "review-loop.md no longer records that condition 2 was removed"; return 1; }
   grep -q 'takes \*\*two\*\* conditions' <<< "$t" || {
@@ -1000,7 +1008,9 @@ sweepable() {
   grep -q 'Only the residue predicate stopped reading it' <<< "$t" || {
     echo "review-loop.md no longer says the fix-touched set is still load-bearing elsewhere"; return 1; }
   # ...and the correction to the frozen parking rule, which is the one claim in
-  # that span this story makes false
+  # that span this story makes false. #2055 put that correction (and the #1581
+  # deferral below) in carry.md, beside the carry rules it amends.
+  t="$(flat "$RI_REF/review-loop/carry.md")"
   grep -q 'do not read a parked-only run as escalating by design' <<< "$t" || {
     echo "review-loop.md no longer retires the frozen parked-only inference"; return 1; }
   # Pin the DEFERRAL's claim, not the bare number: `grep '#1581'` matches the
@@ -1016,8 +1026,9 @@ sweepable() {
     echo "review-loop.md no longer forbids improvising the parked match"; return 1; }
   grep -q '#1581' <<< "$t" || {
     echo "review-loop.md no longer defers the parked handling to #1581"; return 1; }
-  # ...and the file must NOT carry the instruction the deferral replaced
-  run ! grep -q 'has to drop those' "$RI_REF/review-loop.md"
+  # ...and neither the index nor ANY shard may carry the instruction the
+  # deferral replaced — the whole of what review-loop.md was before #2055
+  run ! grep -rq 'has to drop those' "$RI_REF/review-loop.md" "$RI_REF/review-loop"
 }
 
 @test "#1571 the skill frontmatter and its generated page carry a positive pin" {
@@ -1149,11 +1160,18 @@ sweepable() {
 }
 
 @test "#1921 AC11 reference/review-loop.md states the risk pass after the decided pass, by content" {
-  local f="$RI_REF/review-loop.md"
+  # #2055 split review-loop.md into shards, one per pass: each heading is now
+  # pinned in its own shard, and "after" is the index's read order, which is
+  # the only order three separate files have.
+  local L="$RI_REF/review-loop"
+  local f="$L/risk-pass.md"
+  grep -qxF '### The decided pass — run every `decides:` command before consolidating (#1584)' "$L/decided-pass.md"
+  grep -qxF '### The risk pass — assess every blocking finding before consolidating (#1921)' "$f"
+  grep -qxF '### Carry accounting — confirmed, re-raised, unconfirmed (#1583)' "$L/carry.md"
   local decided risk carry
-  decided=$(grep -nxF '### The decided pass — run every `decides:` command before consolidating (#1584)' "$f" | cut -d: -f1)
-  risk=$(grep -nxF '### The risk pass — assess every blocking finding before consolidating (#1921)' "$f" | cut -d: -f1)
-  carry=$(grep -nxF '### Carry accounting — confirmed, re-raised, unconfirmed (#1583)' "$f" | cut -d: -f1)
+  decided=$(grep -nF '`reference/review-loop/decided-pass.md`' "$RI_REF/review-loop.md" | cut -d: -f1)
+  risk=$(grep -nF '`reference/review-loop/risk-pass.md`' "$RI_REF/review-loop.md" | cut -d: -f1)
+  carry=$(grep -nF '`reference/review-loop/carry.md`' "$RI_REF/review-loop.md" | cut -d: -f1)
   [ -n "$decided" ]
   [ -n "$risk" ]
   [ -n "$carry" ]

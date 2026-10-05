@@ -55,14 +55,18 @@ setup() {
   # reference/*.md carrying the procedure behind each branch. Every budget
   # statement this file sweeps moved with its procedure, byte-for-byte:
   #   - the closing full sweep's one-round grant → reference/review-loop.md
-  #     (the AWAITING_FIX branch it is decided on);
+  #     (the AWAITING_FIX branch it is decided on; since #2055 its shard
+  #     reference/review-loop/exit-20-awaiting-fix.md);
   #   - the +3 increment, the worked ceiling and the soft-cap nudge →
   #     reference/interactive.md (the interactive extension).
   # So the sweeps below name THOSE files. Naming the conductor instead would
   # leave every needle unfindable — or, worse, findable in a corpus while
   # nothing pinned which file it landed in.
   CONDUCTOR="$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
-  SKILL="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md"
+  # #2055 split review-loop.md into shards: the grant now sits in the
+  # AWAITING_FIX shard, and the #1583 carry-accounting addendum in carry.md.
+  SKILL="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop/exit-20-awaiting-fix.md"
+  CARRY="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop/carry.md"
   EXTENSION="$REPO_ROOT/development/skills/resolve-issue/reference/interactive.md"
   ARCH="$REPO_ROOT/ARCHITECTURE.md"
   # The panel-duties block of ARCHITECTURE.md, extracted ONCE and asserted
@@ -878,7 +882,10 @@ _outside_moved_spans() {  # $1 = file
   # a broken enumeration (a failed cd, a pathspec typo) must not read as clean:
   # a floor on the swept set, and the one file the story is about must be in it
   [ "${#swept[@]}" -ge 50 ]
-  printf '%s\n' "${swept[@]}" | grep -qx 'development/skills/resolve-issue/reference/review-loop.md'
+  # #2055 split review-loop.md: the rule now lives in the carry.md shard, and
+  # the retired spelling the frozen span still carries in step-1-panel.md
+  printf '%s\n' "${swept[@]}" | grep -qx 'development/skills/resolve-issue/reference/review-loop/carry.md'
+  printf '%s\n' "${swept[@]}" | grep -qx 'development/skills/resolve-issue/reference/review-loop/step-1-panel.md'
   if [ "${#found[@]}" -ne 0 ]; then
     printf 'retired carry rule still present:\n' >&2
     printf '  %s\n' "${found[@]}" >&2
@@ -892,7 +899,11 @@ _outside_moved_spans() {  # $1 = file
   # the frozen-span exclusion is itself controlled: the same spelling INSIDE a
   # span is not found, so the exclusion is real rather than a no-op.
   local scratch="$BATS_TEST_TMPDIR/control.md"
-  cp "$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md" "$scratch"
+  # #2055: the shard whose frozen span still carries 'cannot confirm landed',
+  # so the first assertion proves the span exclusion hides a REAL occurrence
+  # (the precondition below pins that it is there).
+  cp "$REPO_ROOT/development/skills/resolve-issue/reference/review-loop/step-1-panel.md" "$scratch"
+  grep -Fq -e 'cannot confirm landed' -- "$scratch"
   run -1 grep -Fq -e 'cannot confirm landed' <<< "$(_outside_moved_spans "$scratch")"
   printf '\n<!-- moved: control -->\nor re-raises what it could not confirm.\n<!-- /moved: control -->\n' >> "$scratch"
   run -1 grep -Fq -e 're-raises what it could not confirm' <<< "$(_outside_moved_spans "$scratch")"
@@ -902,20 +913,21 @@ _outside_moved_spans() {  # $1 = file
   grep -Fq -e 're-raises what it could not confirm' <<< "$(_outside_moved_spans "$scratch")"
 }
 
-@test "#1583 AC 1: the three-outcome rule stands at all 21 expected sites in 8 files (paired sweep, positive half)" {
+@test "#1583 AC 1: the three-outcome rule stands at all 21 expected sites in 9 files (paired sweep, positive half)" {
   # One (file, needle) pair per site, each needle chosen to be unique to the
   # site it pins — so a deleted site cannot be covered by a neighbour's copy,
   # and the count is a real count rather than a sum of constants.
-  # review-loop.md's three sites are the #1583 addendum after the frozen tail
-  # span (its heading), and the two #1582-gap paragraphs the story could edit
-  # in place: the [DELETED by this story] scoping paragraph and the carried-
-  # section sentence. The frozen `fix_verification_path` bullet and step-2 arm
+  # review-loop.md's three sites (since #2055 split it: carry.md and
+  # scope-block.md) are the #1583 addendum after the frozen tail span (its
+  # heading), and the two #1582-gap paragraphs the story could edit in place:
+  # the [DELETED by this story] scoping paragraph and the carried-section
+  # sentence. The frozen `fix_verification_path` bullet and step-2 arm
   # inside the span are superseded by the addendum, not edited (see the
   # negative half).
   local -a sites=(
-    "development/skills/resolve-issue/reference/review-loop.md|Carry accounting — confirmed, re-raised, unconfirmed"
-    "development/skills/resolve-issue/reference/review-loop.md|from the excerpt, as one of confirmed, re-raised, unconfirmed"
-    "development/skills/resolve-issue/reference/review-loop.md|confirmed, re-raised, unconfirmed — **even when its file is outside this"
+    "development/skills/resolve-issue/reference/review-loop/carry.md|Carry accounting — confirmed, re-raised, unconfirmed"
+    "development/skills/resolve-issue/reference/review-loop/scope-block.md|from the excerpt, as one of confirmed, re-raised, unconfirmed"
+    "development/skills/resolve-issue/reference/review-loop/scope-block.md|confirmed, re-raised, unconfirmed — **even when its file is outside this"
     "ARCHITECTURE.md|and exactly one of three outcomes from that owner —"
     "ARCHITECTURE.md|accounts for each entry as one of confirmed, re-raised, unconfirmed"
     # the four single-site rules the round-1 fix pass added (no lockstep copy
@@ -924,8 +936,8 @@ _outside_moved_spans() {  # $1 = file
     # and the addendum's panel re-dispatch and its separate output path
     "development-kubernetes/skills/review/SKILL.md|A re-raise of a CARRIED entry is the one exception"
     "development-kubernetes/skills/review/SKILL.md|reproduce each agent's per-entry lines verbatim"
-    "development/skills/resolve-issue/reference/review-loop.md|re-dispatch **the panel** for that reviewer's dimension only"
-    "development/skills/resolve-issue/reference/review-loop.md|A re-dispatch writes to its own path"
+    "development/skills/resolve-issue/reference/review-loop/carry.md|re-dispatch **the panel** for that reviewer's dimension only"
+    "development/skills/resolve-issue/reference/review-loop/carry.md|A re-dispatch writes to its own path"
   )
   local p
   for p in development-claude-plugin development-go development-java development-python development-swift development-kubernetes; do
@@ -941,13 +953,14 @@ _outside_moved_spans() {  # $1 = file
     if grep_site "$REPO_ROOT/$f" "$needle"; then matched=$(( matched + 1 )); fi
   done
   [ "$matched" -eq 21 ]
-  # ...and the sites really are 8 distinct files
-  [ "$(printf '%s\n' "${sites[@]}" | cut -d'|' -f1 | sort -u | wc -l | tr -d ' ')" -eq 8 ]
+  # ...and the sites really are 9 distinct files — 8 before #2055 split
+  # review-loop.md, whose sites now sit in two shards (scope-block.md, carry.md)
+  [ "$(printf '%s\n' "${sites[@]}" | cut -d'|' -f1 | sort -u | wc -l | tr -d ' ')" -eq 9 ]
   # Carry accounting's re-dispatch trigger (outside the counted sites: it is
   # the recovery rule, not a three-outcome site): an owner that answers only
   # some of its entries is re-dispatched too, and the old "no per-entry lines"
   # trigger, which let a partial answer through, does not come back
-  local loop="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md"
+  local loop="$CARRY"
   grep_site "$loop" "dimension's file without a per-entry line took the wrong branch"
   run -1 grep -Fq -e 'reports no per-entry lines' -- "$loop"
 }
@@ -972,8 +985,8 @@ _outside_moved_spans() {  # $1 = file
   [ "$(printf '%s\n' "$flag" | wc -l | tr -d ' ')" -eq 1 ]
   # the reference: the invocation instruction, the addendum's own template, and
   # the round-1 template's flag
-  grep_site "$SKILL" "pass it as \`$flag <carry-round-R.json>\`"
-  grep_site "$SKILL" "  $flag <carry-round-R.json>"
+  grep_site "$CARRY" "pass it as \`$flag <carry-round-R.json>\`"
+  grep_site "$CARRY" "  $flag <carry-round-R.json>"
   # the conductor's STALE_FINDINGS bullet names the arm and routes to the addendum
   grep_site "$CONDUCTOR" 'the CARRY-UNACCOUNTED arm'
   grep_site "$CONDUCTOR" 'Carry accounting — confirmed, re-raised,'

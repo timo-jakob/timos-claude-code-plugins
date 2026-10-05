@@ -174,9 +174,15 @@ typeset -a MANIFEST
 MANIFEST=(
 "interactive-remediation	interactive.md	Applies **only** with a human present, and only to a **shape (i)**	  what the gate exists to prevent.
 "
-"round-protocol-head	review-loop.md	**The round boundary is concurrent — one minted tree, two readers (#1497).**	Each round:
+"round-protocol-head	review-loop/core.md	**The round boundary is concurrent — one minted tree, two readers (#1497).**	Each round:
 "
-"round-protocol-tail	review-loop.md	1. **Review panel, in-session.** Get the dispatch plan (\`review-dispatch.zsh	   is how the two statements of it came to disagree once already.
+"round-protocol-tail	review-loop/step-1-panel.md	1. **Review panel, in-session.** Get the dispatch plan (\`review-dispatch.zsh	     Critical nobody reported.
+"
+"round-protocol-step-2	review-loop/step-2-invocation.md	2. **One loop invocation.**	     actually read. The stderr names both identities and the files that moved.
+"
+"round-protocol-recover	review-loop/exit-2-stale-findings.md	   **Recover by cause, then re-invoke** — the round is not lost. One arm below	   dispatch \`findings_path\`) needs no digest tool and always applies.
+"
+"round-protocol-steps-3-4	review-loop/exit-20-awaiting-fix.md	3. **On \`AWAITING_FIX\` (exit 20)** — the round is over and the run continues.	   is how the two statements of it came to disagree once already.
 "
 "residue-branch	residue.md	Runs **only** on \`CONVERGED_WITH_RESIDUE\` (exit 14). The loop has already	  them, and do not read the story's own work as unstartable.
 "
@@ -433,29 +439,33 @@ done
 # anchor and the tail's FIRST anchor must be ADJACENT modulo blank lines, since
 # nothing sits between them there. Assert that, and no original line can enter
 # the gap undetected regardless of how the new prose grows.
-typeset rp_file="$REF_DIR/review-loop.md"
+# Since #2055 the two halves sit in DIFFERENT shards of `reference/review-loop/`
+# — the head in `core.md`, the tail in `step-1-panel.md` — so each sentinel is
+# counted across the whole reference tree and required in its own shard. The
+# same-file line-order comparison this block used to make is gone: two files
+# have no line order between them, and the shard a sentinel sits in is what
+# now says which half it is.
+typeset head_shard="$REF_DIR/review-loop/core.md" tail_shard="$REF_DIR/review-loop/step-1-panel.md"
 typeset -a hc_hits to_hits
-# Captured as ARRAYS and required to be exactly one: `grep -n … | cut` emits one
-# line per match, so a DUPLICATED sentinel would assign a multi-line string to an
-# integer-attributed parameter — a bad-math abort, or a silently wrong line
-# number compared against the wrong pair. The stray sweep above cannot catch it
-# either: it greps only the OPENING form, so a duplicated `/moved:` closer is
-# seen by nothing else in this script.
+# Captured as ARRAYS and required to be exactly one: a DUPLICATED sentinel —
+# in the right shard or in any other — must fail rather than be read as the one
+# expected. The stray sweep above cannot catch it either: it greps only the
+# OPENING form, so a duplicated `/moved:` closer is seen by nothing else in this
+# script. `-l` lists each FILE once, so a duplicate inside one shard is counted
+# by the `-c` read below instead.
 # stderr is NOT discarded, the same rule the sentinel sweep above states: an
-# unreadable `review-loop.md` (mode 000, an ACL, a bad checkout) would otherwise
-# be reported as "head-close: 0, tail-open: 0" — a verdict about the file's
-# CONTENT derived from a read that never happened. `-f` is true for an
-# unreadable regular file, so the guard above does not cover it.
-hc_hits=("${(@f)$(grep -nxF -- '<!-- /moved: round-protocol-head -->' "$rp_file")}")
-to_hits=("${(@f)$(grep -nxF -- '<!-- moved: round-protocol-tail -->'  "$rp_file")}")
+# unreadable shard (mode 000, an ACL, a bad checkout) would otherwise be
+# reported as "head-close: 0, tail-open: 0" — a verdict about the file's
+# CONTENT derived from a read that never happened.
+hc_hits=("${(@f)$(grep -rxF -- '<!-- /moved: round-protocol-head -->' "$REF_DIR")}")
+to_hits=("${(@f)$(grep -rxF -- '<!-- moved: round-protocol-tail -->'  "$REF_DIR")}")
 hc_hits=(${hc_hits:#}); to_hits=(${to_hits:#})
 if (( ${#hc_hits} != 1 || ${#to_hits} != 1 )); then
-  print -u2 -- "FAIL: the round-protocol split sentinels must appear exactly once each in review-loop.md (head-close: ${#hc_hits}, tail-open: ${#to_hits})"
+  print -u2 -- "FAIL: the round-protocol split sentinels must appear exactly once each across reference/ (head-close: ${#hc_hits}, tail-open: ${#to_hits})"
   (( sweep_failures++ ))
 else
-  typeset -i hc="${hc_hits[1]%%:*}" to="${to_hits[1]%%:*}"
-  if (( to <= hc )); then
-    print -u2 -- "FAIL: round-protocol-tail opens at line $to, at or before head closes at $hc — the split halves are out of order"
+  if [[ "${hc_hits[1]%%:*}" != "$head_shard" || "${to_hits[1]%%:*}" != "$tail_shard" ]]; then
+    print -u2 -- "FAIL: the round-protocol split sentinels are in the wrong shards — head-close in ${hc_hits[1]%%:*} (want review-loop/core.md), tail-open in ${to_hits[1]%%:*} (want review-loop/step-1-panel.md)"
     (( sweep_failures++ ))
   else
     # The EXACT invariant: in the pre-move conductor, nothing but blank lines
@@ -516,13 +526,63 @@ else
         print -u2 -- "FAIL: the split anchors named by the manifest are not both present in ${base}:${SKILL_REL} — head-last <<${head_last}>>, tail-first <<${tail_first}>>"
         (( sweep_failures++ ))
       elif [[ -n "$between" ]]; then
-        print -u2 -- "FAIL: the round-protocol split anchors are no longer adjacent in ${base}:${SKILL_REL} — original prose now sits between them, so the gap in review-loop.md is not new text alone:"
+        print -u2 -- "FAIL: the round-protocol split anchors are no longer adjacent in ${base}:${SKILL_REL} — original prose now sits between them, so the gap in review-loop/ is not new text alone:"
         print -u2 -- "$between"
         (( sweep_failures++ ))
       fi
     fi
   fi
 fi
+
+# --- the tail's re-cut covers it with no gap and no overlap (#2055) ----------
+# The former `round-protocol-tail` is cut into four chunks, one per step shard.
+# Each is byte-checked on its own above, which proves nothing about the SEAMS:
+# move one chunk's last anchor up and its neighbour's first anchor stays put, and
+# the lines between them leave the verified region with every comparison green.
+# So, for each consecutive pair, the earlier chunk's LAST anchor and the later
+# chunk's FIRST anchor must be adjacent modulo blank lines in the pinned commit —
+# the same exact statement the head/tail block above makes — and the later first
+# anchor must come AFTER the earlier last one, which is what rules out overlap.
+# Anchors are read out of the MANIFEST, for the reason that block gives.
+typeset -a TAIL_CUTS=(round-protocol-tail round-protocol-step-2 round-protocol-recover round-protocol-steps-3-4)
+typeset -A cut_first cut_last
+typeset cname crow
+for crow in "${MANIFEST[@]}"; do
+  crow="${crow%$'\n'}"
+  typeset crow_tabs="${crow//[^$'\t']/}"
+  (( ${#crow_tabs} >= 3 )) || continue
+  cname="${crow%%$'\t'*}"
+  (( ${TAIL_CUTS[(Ie)$cname]} )) || continue
+  cut_first[$cname]="${${crow#*$'\t'}#*$'\t'}"; cut_first[$cname]="${cut_first[$cname]%%$'\t'*}"
+  cut_last[$cname]="${${${crow#*$'\t'}#*$'\t'}#*$'\t'}"
+done
+# Declared ONCE, outside the loop: a bare `typeset seam` on a parameter that
+# already exists PRINTS it, which would leak `seam=''` onto stdout every pass.
+typeset -i ci seam_rc
+typeset prev_c next_c seam
+for (( ci = 1; ci < ${#TAIL_CUTS}; ci++ )); do
+  prev_c="${TAIL_CUTS[$ci]}" next_c="${TAIL_CUTS[$(( ci + 1 ))]}"
+  if [[ -z "${cut_last[$prev_c]-}" || -z "${cut_first[$next_c]-}" ]]; then
+    print -u2 -- "FAIL: the manifest no longer declares both $prev_c and $next_c, so their seam cannot be checked"
+    (( sweep_failures++ ))
+    continue
+  fi
+  seam_rc=0
+  seam=$(awk -v h="${cut_last[$prev_c]}" -v t="${cut_first[$next_c]}" '
+    !seen && $0 == h { seen = 1; next }
+    seen && $0 == t  { done = 1; exit }
+    seen && $0 ~ /[^[:space:]]/ { print }
+    END { if (!seen || !done) exit 3 }
+  ' <<< "$pre") || seam_rc=$?
+  if (( seam_rc )); then
+    print -u2 -- "FAIL: the seam $prev_c → $next_c is not in order in ${base}:${SKILL_REL} — last <<${cut_last[$prev_c]}>>, first <<${cut_first[$next_c]}>>"
+    (( sweep_failures++ ))
+  elif [[ -n "$seam" ]]; then
+    print -u2 -- "FAIL: the seam $prev_c → $next_c leaves original lines uncovered in ${base}:${SKILL_REL}:"
+    print -u2 -- "$seam"
+    (( sweep_failures++ ))
+  fi
+done
 
 # An EMPTIED MANIFEST (a bad merge, a botched edit to the multi-line array
 # literal) would otherwise leave every counter at 0 and print "all 0 declared

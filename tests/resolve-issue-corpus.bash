@@ -50,7 +50,7 @@
 resolve_issue_files() {
   local base="$1/development/skills/resolve-issue"
   local -a found
-  local f
+  local f s
 
   # ONE roster, in declared order — review-loop first because it is the branch
   # every run takes, then the terminals, then the interactive procedures, then
@@ -64,6 +64,18 @@ resolve_issue_files() {
   # later.)
   local -a ordered
   ordered=(review-loop.md residue.md promotion.md escalation.md interactive.md sequential.md telemetry.md)
+
+  # #2055 split review-loop.md into shards under reference/review-loop/ and left
+  # the old path as an INDEX. The shards are members too — a sweep over the
+  # corpus that missed them would have stopped looking at the round protocol
+  # entirely. Same discipline as `ordered`: ONE roster, in the index's own read
+  # order, which is both the tripwire's expected set and what is emitted, right
+  # after the index that lists it.
+  local -a shards
+  shards=(core.md scope-block.md step-1-panel.md step-2-invocation.md
+    exit-2-stale-findings.md exit-20-awaiting-fix.md delta-rounds.md
+    topic-panels.md decided-pass.md risk-pass.md carry.md subagents.md
+    briefs/panel.md briefs/fix.md briefs/decide.md briefs/risk.md)
 
   for f in "$base"/reference/*.md; do
     [ -e "$f" ] || continue
@@ -79,9 +91,32 @@ resolve_issue_files() {
     return 1
   fi
 
+  # The shard set is derived from the WHOLE subtree (any depth), so a shard
+  # added under a new subdirectory trips this too rather than escaping a
+  # one-level glob.
+  local -a found_shards
+  if [ -d "$base/reference/review-loop" ]; then
+    while IFS= read -r f; do
+      [ -n "$f" ] || continue
+      found_shards+=("${f#"$base/reference/review-loop/"}")
+    done <<< "$(find "$base/reference/review-loop" -type f -name '*.md')"
+  fi
+  got_s="$(printf '%s\n' "${found_shards[@]}" | sort | tr '\n' ' ')"
+  exp_s="$(printf '%s\n' "${shards[@]}" | sort | tr '\n' ' ')"
+  if [ "$got_s" != "$exp_s" ]; then
+    printf 'resolve_issue_files: reference/review-loop/ holds [%s] but the shard roster declares [%s] — update `shards` in resolve-issue-corpus.bash in the same PR\n' \
+      "$got_s" "$exp_s" >&2
+    return 1
+  fi
+
   printf '%s\n' "$base/SKILL.md"
   for f in "${ordered[@]}"; do
     printf '%s\n' "$base/reference/$f"
+    if [ "$f" = review-loop.md ]; then
+      for s in "${shards[@]}"; do
+        printf '%s\n' "$base/reference/review-loop/$s"
+      done
+    fi
   done
 }
 
@@ -132,12 +167,15 @@ resolve_issue_corpus() {
     # its own span from BOTH ends of its member. The binding case is the one
     # against a member's START, not its end, and it is the tighter of the two:
     # round-boundary-concurrency.bats's `2. Start the gate out of band` anchor,
-    # in reference/review-loop.md with span 42, whose window's low bound clears
-    # that member's start by ~8 lines — and what it would spill into is the
-    # CONDUCTOR's tail. (The tightest
+    # now in reference/review-loop/core.md (#2055 split review-loop.md into
+    # shards) with span 42. Since the split its window's low bound NO LONGER
+    # clears that member's start — it reaches ~8 lines back into the preceding
+    # member, the review-loop.md index's tail — so that corpus window is not
+    # member-local today. (The tightest
     # end-of-member margin belongs to fix-pass-subtracts.bats's `A fix pass
-    # subtracts (#1496)` anchor with its span of 80, in reference/review-loop.md;
-    # it currently clears the member's end by ~56 lines.
+    # subtracts (#1496)` anchor with its span of 80, now in
+    # reference/review-loop/exit-20-awaiting-fix.md; it clears the member's end
+    # by ~35 lines.
     #
     # BOTH margins are stated as a MARGIN and an anchor NAME rather than as
     # absolute line numbers — said once here, for both, rather than once per
@@ -151,10 +189,11 @@ resolve_issue_corpus() {
     # 80 in fix-pass-subtracts.bats — so a window that size anchored anywhere in
     # it necessarily spills into both neighbours; smaller spans spill only within
     # `span` lines of an edge.) I measured all of those rather than reasoning
-    # them. They are accidents of current file lengths, not a mechanism: shorten
-    # review-loop.md's preamble by more than that ~8-line margin and the span-42
-    # window's low bound walks off the front of the member into the conductor's
-    # last lines, where its `contains` needles can pass on a file the assertion
+    # them. They are accidents of current file lengths, not a mechanism: the
+    # span-42 window used to clear review-loop.md's start by ~8 lines, and the
+    # #2055 split — which put the anchor 34 lines into core.md — is exactly the
+    # kind of re-cut that walked it off the front of its member, into a
+    # neighbour where its `contains` needles can pass on a file the assertion
     # was never about. Expressed against the margin rather than as a pair of
     # delete-N-lines thresholds for the reason above — the thresholds were
     # absolute figures in disguise, and #1582's preamble insert moved them by
@@ -164,7 +203,8 @@ resolve_issue_corpus() {
     # The order rule reads as an absolute prohibition and is likewise not what
     # the tree does: round-boundary-concurrency.bats pins the seven-step ordering
     # by comparing `prose_gate_lines` line numbers across the corpus. That holds
-    # only because every endpoint happens to land in review-loop.md. A
+    # only because every endpoint happens to land in one member — since #2055,
+    # reference/review-loop/core.md. A
     # cross-member ordering pin would be meaningless — the declared file order
     # reproduces no document order, as the paragraph above explains.
     # `|| return 1` like the two writes above it (#1588). This was the one write

@@ -6,7 +6,6 @@ tools: Read, Write, Grep, Glob, Bash
 ---
 
 You are the **round risk pass**. Your whole procedure is the *Risk subagent
-brief* in the resolve-issue skill's `reference/review-loop.md`, under *Round
-subagents — the conductor reads only verdicts (#1935)*. Your prompt names the
-handoff file and `<skill-base-dir>`; read the brief at
-`<skill-base-dir>/reference/review-loop.md` and follow it exactly.
+brief* in the resolve-issue skill's `reference/review-loop/briefs/risk.md`. Your
+prompt names the handoff file and `<skill-base-dir>`; read the brief at
+`<skill-base-dir>/reference/review-loop/briefs/risk.md` and follow it exactly.

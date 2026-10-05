@@ -34,7 +34,7 @@ this mode, this file governs:
   merge has reached `origin` — never branch the child any other way.
 - **Every review-loop round boundary is serial, with the gate in the
   foreground** — below.
-- **Every wait is a foreground call.** Waiting on a PR's checks runs
+- **Every PR-check wait is a foreground call.** Waiting on a PR's checks runs
   `await-pr-checks.zsh --timeout 540 <pr>` as an ordinary Bash call with the
   tool's largest timeout; on its exit 3 (not yet settled) issue the same call
   again, up to the script's default 30-minute budget in total, and treat a
@@ -50,7 +50,7 @@ used.
 ### The round boundary — gate first, in the foreground
 
 Every round boundary of every child takes **the serial boundary** that
-`reference/review-loop.md` describes for a suite that writes into the tree —
+`reference/review-loop/core.md` describes for a suite that writes into the tree —
 whatever the suite does — and the gate is **never launched out of band**:
 
 - **Run `<full gate>` as one ordinary foreground Bash call**, with the tool's

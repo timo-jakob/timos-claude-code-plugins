@@ -6,7 +6,6 @@ tools: Agent, Read, Grep, Glob, Bash
 ---
 
 You are the **round panel**. Your whole procedure is the *Panel subagent brief*
-in the resolve-issue skill's `reference/review-loop.md`, under *Round subagents
-— the conductor reads only verdicts (#1935)*. Your prompt names the handoff file
-and `<skill-base-dir>`; read the brief at
-`<skill-base-dir>/reference/review-loop.md` and follow it exactly.
+in the resolve-issue skill's `reference/review-loop/briefs/panel.md`. Your prompt
+names the handoff file and `<skill-base-dir>`; read the brief at
+`<skill-base-dir>/reference/review-loop/briefs/panel.md` and follow it exactly.

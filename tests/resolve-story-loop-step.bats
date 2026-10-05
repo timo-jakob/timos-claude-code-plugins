@@ -3907,3 +3907,21 @@ RISK_APP='[{"file":"app.py","line":1,"dimension":"bugs","title":"print without f
     cmp "$WD/changelist-1.json" "$BATS_TEST_TMPDIR/wd-plain/changelist-1.json"
   done
 }
+
+@test "#2055 next_ref: AWAITING_FIX names exit-20's shard, STALE_FINDINGS exit-2's" {
+  local skill_dir="$REPO_ROOT/development/skills/resolve-issue"
+  printf '%s' "$CRIT" > "$F"
+  step
+  [ "$status" -eq 20 ]
+  [ "$(jq -r '.next_ref' <<<"$output")" = "reference/review-loop/exit-20-awaiting-fix.md" ]
+  [ -f "$skill_dir/$(jq -r '.next_ref' <<<"$output")" ]
+  # re-passing the same findings file is the byte-identical STALE_FINDINGS refusal
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" --resume
+  [ "$status" -eq 2 ]
+  local json
+  json="$(printf '%s\n' "$output" | grep '^{' | tail -1)"
+  [ "$(jq -r '.status' <<<"$json")" = "STALE_FINDINGS" ]
+  [ "$(jq -r '.next_ref' <<<"$json")" = "reference/review-loop/exit-2-stale-findings.md" ]
+  [ -f "$skill_dir/$(jq -r '.next_ref' <<<"$json")" ]
+}
