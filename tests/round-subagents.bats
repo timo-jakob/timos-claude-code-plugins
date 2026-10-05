@@ -61,6 +61,27 @@ load_fix_brief() {
   [ -n "$fix" ]
 }
 
+# #2034: a round dispatch that launched in the background anyway is waited on
+# in-turn for its verdict file — never by ending the turn, which on an E3 child
+# returns the child conductor to its parent mid-round — and a verdict still
+# missing at the bound is a stall. Asserted over $1 rather than $section so the
+# mutation controls below drive the SAME pins over a mutated copy. Every line
+# carries `|| return 1`: under `run` a failed helper must end the function, not
+# fall through to a later passing pin.
+_background_wait_pins() {
+  local s="$1"
+  # the scope pointer hands the background case here, not to How to wait
+  contains "$s" '**How to wait** governs only the gate — it is not restated here. A round dispatch that launched in the background anyway is waited on in-turn, as *A background round dispatch* below says.' || return 1
+  lacks "$s" 'governs only the gate and a dispatch that did launch in the background' || return 1
+  contains "$s" '**A background round dispatch is waited on in-turn, never by ending the turn (#2034).**' || return 1
+  contains "$s" 'the conductor waits for that dispatch'"'"'s `<work-dir>/verdict-<R>-<kind>.json` with one bounded `Monitor` call for that file, never a Bash poll, then reads it with `round-handoff.zsh read-verdict`.' || return 1
+  contains "$s" 'This holds on the single-issue flow and the epic E3 child flow alike: an E3 child conductor is itself a subagent, and one that ended its turn would return to its parent mid-round' || return 1
+  contains "$s" 'When a `round-panel`, `round-fix`, `round-decide` or `round-risk` dispatch launched in the background anyway — the flag left out, or ignored — the conductor waits' || return 1
+  contains "$s" 'That call'"'"'s timeout is the bound: set it generous enough for that kind'"'"'s whole job — a panel, which fans out to reviewers, is routinely the longest — since a bound that expires on a healthy subagent spends the stall retry.' || return 1
+  contains "$s" 'A verdict still missing when the bound expires is a stall, but the stall retry above applies to it only once that background dispatch is stopped and confirmed ended, so no two subagents of one round and kind ever run at once; the re-dispatch is made in the foreground.' || return 1
+  contains "$s" 'A background dispatch that cannot be stopped is report-and-stop, never re-dispatched.' || return 1
+}
+
 # --- AC 1: the section, its two briefs, outside every frozen span -------------
 
 @test "AC1: review-loop.md has the Round subagents heading and both brief sub-headings, once each" {
@@ -124,12 +145,70 @@ load_fix_brief() {
     contains "$section" 'Make every `round-panel`, `round-fix`, `round-decide` and `round-risk` dispatch in the foreground (`run_in_background: false`), as ARCHITECTURE.md'"'"'s *Subagent dispatch mechanism* records: in the epic E3 child flow the conductor is itself a subagent, so its own dispatch is nested and defaults to a background launch, which returns before the verdict is written.'
     # …and it carves the foreground dispatch out of #1513's wait rule by
     # POINTING at it; tests/round-boundary-wait.bats counts it as a pointer site.
-    contains "$section" 'A foreground dispatch returns its verdict in the same turn, so the conductor carries straight on: **How to wait** governs only the gate and a dispatch that did launch in the background — it is not restated here.'
+    # #2034 narrowed it to the gate alone.
+    contains "$section" 'A foreground dispatch returns its verdict in the same turn, so the conductor carries straight on: **How to wait** governs only the gate — it is not restated here.'
+    _background_wait_pins "$section"
     lacks "$section" 'subagent_type: general-purpose'
   else
     [ -z "$(ls "$AGENTS"/round-*.md 2>/dev/null)" ]
     contains "$section" 'subagent_type: general-purpose'
   fi
+}
+
+@test "#2034 AC3 non-vacuity: restoring the scope pointer's background half reds the pins" {
+  # The pre-#2034 wording, which sent a background round dispatch to How to
+  # wait's end-the-turn rule.
+  load_section
+  local old new mutated
+  old='**How to wait** governs only the gate — it is not restated here.'
+  new='**How to wait** governs only the gate and a dispatch that did launch in the background — it is not restated here.'
+  mutated="${section/"$old"/"$new"}"
+  [ "$mutated" != "$section" ]
+  run _background_wait_pins "$mutated"
+  [ "$status" -ne 0 ]
+}
+
+@test "#2034 AC3 non-vacuity: a background round dispatch that ends the turn reds the pins" {
+  load_section
+  local old new mutated
+  old='is waited on in-turn, never by ending the turn (#2034).'
+  new='is waited on by ending the turn (#2034).'
+  mutated="${section/"$old"/"$new"}"
+  [ "$mutated" != "$section" ]
+  run _background_wait_pins "$mutated"
+  [ "$status" -ne 0 ]
+}
+
+@test "#2034 AC3 non-vacuity: dropping the stall clause reds the pins" {
+  load_section
+  local old mutated
+  old='A verdict still missing when the bound expires is a stall, but the stall retry above applies to it only once that background dispatch is stopped and confirmed ended, so no two subagents of one round and kind ever run at once; the re-dispatch is made in the foreground.'
+  mutated="${section/"$old"/}"
+  [ "$mutated" != "$section" ]
+  run _background_wait_pins "$mutated"
+  [ "$status" -ne 0 ]
+}
+
+@test "#2034 AC3 non-vacuity: a stall retry that skips stopping the background dispatch reds the pins" {
+  load_section
+  local old new mutated
+  old='applies to it only once that background dispatch is stopped and confirmed ended, so no two subagents of one round and kind ever run at once;'
+  new='applies to it unchanged;'
+  mutated="${section/"$old"/"$new"}"
+  [ "$mutated" != "$section" ]
+  run _background_wait_pins "$mutated"
+  [ "$status" -ne 0 ]
+}
+
+@test "#2034 AC3 non-vacuity: dropping the decide and risk kinds from the rule reds the pins" {
+  load_section
+  local old new mutated
+  old='When a `round-panel`, `round-fix`, `round-decide` or `round-risk` dispatch'
+  new='When a `round-panel` or `round-fix` dispatch'
+  mutated="${section/"$old"/"$new"}"
+  [ "$mutated" != "$section" ]
+  run _background_wait_pins "$mutated"
+  [ "$status" -ne 0 ]
 }
 
 @test "AC3: round-fix's tools line carries no Agent" {
