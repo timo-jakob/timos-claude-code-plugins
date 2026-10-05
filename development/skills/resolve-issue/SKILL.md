@@ -39,10 +39,13 @@ the optional telemetry sink flags `--telemetry-file PATH` / `--telemetry-dir DIR
 **Read each reference file once (#2055).** A `reference/` file whose text is
 still in your context is not read again: a re-read only adds its rules a second
 time. **The one exception is `next_ref`.** Every status JSON the review loop
-writes carries it. When it names a shard whose text is not in your context, read
-it and every later shard in the index's order that has also left your context,
-once each, before acting on the exit. A `null` `next_ref`
-names nothing to read. The path is relative to this skill's
+writes carries it. When it names a file whose text is not in your context, read
+that file once before acting on the exit. Before any step that re-enters the
+round protocol — the next round's boundary, a panel re-run, or a `--resume`
+invocation — also read every shard in `reference/review-loop.md`'s index whose
+text has left your context, once each, in the index's order. A compaction
+summary that says a file was read does not put its text back in your context.
+A `null` `next_ref` names nothing to read. The path is relative to this skill's
 base directory, never to the repo under work.
 
 ## Step 0 — classify the target

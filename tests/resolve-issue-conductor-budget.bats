@@ -514,8 +514,15 @@ _unreached_reference_files() {
   local skill
   skill="$(LC_ALL=C tr -s '[:space:]' ' ' < "$CONDUCTOR")"
   contains "$skill" '**Read each reference file once (#2055).**'
+  contains "$skill" 'A `reference/` file whose text is still in your context is not read again: a re-read only adds its rules a second time.'
   contains "$skill" '**The one exception is `next_ref`.**'
-  contains "$skill" "read it and every later shard in the index's order that has also left your context, once each, before acting on the exit."
+  contains "$skill" 'When it names a file whose text is not in your context, read that file once before acting on the exit.'
+  contains "$skill" "Before any step that re-enters the round protocol — the next round's boundary, a panel re-run, or a \`--resume\` invocation — also read every shard in \`reference/review-loop.md\`'s index whose text has left your context, once each, in the index's order."
+  contains "$skill" 'A compaction summary that says a file was read does not put its text back in your context.'
+  # #2116: the old trigger re-read only the shards AFTER next_ref's position, so
+  # an exit-20 resume skipped core.md, scope-block.md, step-1-panel.md and
+  # step-2-invocation.md — exactly the shards the next round's boundary needs.
+  lacks "$skill" "every later shard in the index's order"
   contains "$skill" 'A `null` `next_ref` names nothing to read.'
   contains "$skill" "relative to this skill's base directory, never to the repo under work."
 }
