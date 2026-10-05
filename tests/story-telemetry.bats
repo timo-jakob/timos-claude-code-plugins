@@ -779,7 +779,7 @@ advised() {
   # note live in the step-2 shard.
   grep -qF "Every loop invocation carries the run's \`loop_args\` (#1226)" "$base/reference/review-loop/step-2-invocation.md"
   grep -qF "A granted resume carries the run's \`loop_args\` too (#1226)" "$base/reference/interactive.md"
-  grep -qF "Every sub-loop invocation also carries the run's \`loop_args\`" "$base/reference/promotion.md"
+  grep -qF "Every sub-loop invocation also carries the run's \`loop_args\`" "$base/reference/promotion/step-8-status-files.md"
   grep -qF "the run's \`loop_args\` (Step 0) on every invocation" "$base/SKILL.md"
 }
 

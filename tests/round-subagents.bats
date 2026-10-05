@@ -29,7 +29,9 @@ setup() {
   RL="$REF/review-loop"
   SUBS="$RL/subagents.md"
   BRIEFS="$RL/briefs"
-  PROMO="$REF/promotion.md"
+  # #2057 split promotion.md: the notes after its frozen span are in
+  # reference/promotion/step-8-status-files.md, after the step-8 chunk.
+  PROMO="$REF/promotion/step-8-status-files.md"
   AGENTS="$REPO_ROOT/development/agents"
   HEADING='### Round subagents — the conductor reads only verdicts (#1935)'
 }
@@ -487,7 +489,7 @@ _background_wait_pins() {
 
 @test "AC14: promotion.md, after its frozen span, points sub-loop rounds at the same subagents" {
   local close_line after
-  close_line="$(grep -n '^<!-- /moved: suggestion-promotion -->$' "$PROMO" | cut -d: -f1)"
+  close_line="$(grep -n '^<!-- /moved: suggestion-promotion-step-8 -->$' "$PROMO" | cut -d: -f1)"
   [ -n "$close_line" ]
   after="$(tail -n +"$((close_line + 1))" "$PROMO" | squeeze)"
   contains "$after" "The sub-loop's rounds dispatch the same panel and fix subagents (#1935)."
@@ -679,7 +681,7 @@ load_decided_pass() {
 
 @test "#1936 AC13: promotion.md names the decide subagent alongside the panel and fix subagents" {
   local close_line after
-  close_line="$(grep -n '^<!-- /moved: suggestion-promotion -->$' "$PROMO" | cut -d: -f1)"
+  close_line="$(grep -n '^<!-- /moved: suggestion-promotion-step-8 -->$' "$PROMO" | cut -d: -f1)"
   [ -n "$close_line" ]
   after="$(tail -n +"$((close_line + 1))" "$PROMO" | squeeze)"
   contains "$after" 'they are now dispatched as the **panel**, **decide**, **risk** and **fix** subagents'
@@ -971,7 +973,7 @@ load_risk_pass() {
 
 @test "#2025 AC13: promotion.md and the Round subagents section name the risk subagent for the sub-loop" {
   local close_line after
-  close_line="$(grep -n '^<!-- /moved: suggestion-promotion -->$' "$PROMO" | cut -d: -f1)"
+  close_line="$(grep -n '^<!-- /moved: suggestion-promotion-step-8 -->$' "$PROMO" | cut -d: -f1)"
   [ -n "$close_line" ]
   after="$(tail -n +"$((close_line + 1))" "$PROMO" | squeeze)"
   contains "$after" '**panel**, **decide**, **risk** and **fix** subagents'

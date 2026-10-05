@@ -95,21 +95,22 @@ emit_promotion() {   # $1 = run_id · $2 = offered · $3 = promoted
 # silently never joined. Same doc/executable guard the refine-issue suite
 # applies to its Step 7 fence.
 skill_promotion_emit_fence() {
-  # #1503 moved the promotion phase into reference/promotion.md, byte-for-byte.
+  # #1503 moved the promotion phase into reference/promotion.md, byte-for-byte,
+  # and #2057 split that file: step 3 is reference/promotion/step-3-select.md.
   # Read it THERE rather than through the corpus: this helper narrows to one
   # fence, and a file-wide scan of the whole skill would return whichever
   # indented fence came first.
-  local sk="$REPO_ROOT/development/skills/resolve-issue/reference/promotion.md" section out
-  # narrow to the step-3 record block first — SKILL.md has many indented fences,
-  # and a file-wide fence scan would return whichever came first
-  section="$(sed -n '/Record the offered-vs-promoted pair/,/^4\. \*\*Write the promote file/p' "$sk")"
+  local sk="$REPO_ROOT/development/skills/resolve-issue/reference/promotion/step-3-select.md" section out
+  # narrow to the step-3 record block first — from its heading to the end of
+  # the shard, which step 4 no longer shares
+  section="$(sed -n '/Record the offered-vs-promoted pair/,$p' "$sk")"
   [ -n "$section" ] || {
-    echo "promotion-phase step-3 record block not found in reference/promotion.md" >&2; return 1; }
+    echo "promotion-phase step-3 record block not found in reference/promotion/step-3-select.md" >&2; return 1; }
   [ "$(printf '%s\n' "$section" | grep -c '^   ```bash')" -eq 1 ] || {
     echo "the step-3 record block must contain exactly one bash fence" >&2; return 1; }
   out="$(printf '%s\n' "$section" | sed -n '/^   ```bash/,/^   ```$/p')"
   # a renamed step or a moved fence must REDDEN, never pass vacuously
-  [ -n "$out" ] || { echo "promotion-phase emit fence not found in reference/promotion.md" >&2; return 1; }
+  [ -n "$out" ] || { echo "promotion-phase emit fence not found in reference/promotion/step-3-select.md" >&2; return 1; }
   printf '%s\n' "$out"
 }
 

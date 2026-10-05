@@ -150,14 +150,16 @@ SWEEP_NEAR_TERMINAL='CONVERGED_WITH_RESIDUE.{0,250}(full sweep|closing sweep)|(f
   # residue.md and promotion.md joined this list with #1503: each INTRODUCES the
   # terminal (residue.md's whole subject is it), so each owes the exit code
   # beside it. Since #2056 the residue site is reference/residue/branch.md, the
-  # shard exit 14's next_ref opens. review-loop.md deliberately does not — it names the terminal only
+  # shard exit 14's next_ref opens. Since #2057 the promotion site is
+  # reference/promotion/step-7-terminal.md, the shard that states the exit.
+  # review-loop.md deliberately does not — it names the terminal only
   # as a hand-off from the AWAITING_FIX branch, and the conductor's exit table is
   # what introduces it with its code.
   local f
   for f in "$SCRIPTS/resolve-story-loop.zsh" \
            "$REPO_ROOT/development/skills/resolve-issue/SKILL.md" \
            "$REPO_ROOT/development/skills/resolve-issue/reference/residue/branch.md" \
-           "$REPO_ROOT/development/skills/resolve-issue/reference/promotion.md" \
+           "$REPO_ROOT/development/skills/resolve-issue/reference/promotion/step-7-terminal.md" \
            "$REPO_ROOT/development/skills/open-pr/SKILL.md" \
            "$REPO_ROOT/ARCHITECTURE.md" \
            "$REPO_ROOT/docs/explanation/review-loop.md" \
@@ -181,7 +183,7 @@ SWEEP_NEAR_TERMINAL='CONVERGED_WITH_RESIDUE.{0,250}(full sweep|closing sweep)|(f
   grep -qiE "$SWEEP_NEAR_TERMINAL" <<< "$(flat "$near")"
 }
 
-@test "#1435 roster tripwire: exactly fifteen markdown sites name the terminal" {
+@test "#1435 roster tripwire: exactly seventeen markdown sites name the terminal" {
   # A derived sweep answers "do the sites agree?", never "did a site appear or
   # vanish?" — so the roster is recorded here and a site that appears or vanishes
   # reds until this file is updated in the same PR.
@@ -210,13 +212,18 @@ SWEEP_NEAR_TERMINAL='CONVERGED_WITH_RESIDUE.{0,250}(full sweep|closing sweep)|(f
   # #2056 split residue.md: its index still names the terminal, and its mentions
   # fell into three shards — branch.md, condition-2-removed.md and
   # step-1-plan.md. Twelve became fifteen.
+  # #2057 split promotion.md: its index no longer names the terminal, and its
+  # mentions fell into three shards — gate.md, step-4-sub-loop.md and
+  # step-7-terminal.md. Fifteen became seventeen.
   [ "$found" = "ARCHITECTURE.md
 development/skills/bootstrap/templates/common/approver-policy-core.md.tmpl
 development/skills/open-pr/SKILL.md
 development/skills/resolve-issue/SKILL.md
 development/skills/resolve-issue/reference/escalation.md
 development/skills/resolve-issue/reference/interactive.md
-development/skills/resolve-issue/reference/promotion.md
+development/skills/resolve-issue/reference/promotion/gate.md
+development/skills/resolve-issue/reference/promotion/step-4-sub-loop.md
+development/skills/resolve-issue/reference/promotion/step-7-terminal.md
 development/skills/resolve-issue/reference/residue.md
 development/skills/resolve-issue/reference/residue/branch.md
 development/skills/resolve-issue/reference/residue/condition-2-removed.md
@@ -225,7 +232,7 @@ development/skills/resolve-issue/reference/review-loop/delta-rounds.md
 development/skills/resolve-issue/reference/review-loop/exit-20-awaiting-fix.md
 docs/explanation/review-loop.md
 docs/reference/commands.md" ] || {
-    echo "markdown roster changed; expected the fifteen known sites, got:"
+    echo "markdown roster changed; expected the seventeen known sites, got:"
     echo "$found"; return 1; }
 }
 
@@ -557,6 +564,12 @@ docs/reference/commands.md" ] || {
   #   - reference/residue/{branch,step-1-plan}.md JOINED this set with #2056.
   #     They hold only the frozen residue-branch span, cut by step, for the same
   #     reason as the procedure files above.
+  #   - reference/promotion.md LEFT this set with #2057: its index no longer
+  #     names the terminal. The shards that do — reference/promotion/{gate,
+  #     step-4-sub-loop,step-7-terminal}.md — JOINED it in its place: they carry
+  #     the same procedure, the frozen suggestion-promotion span cut by step
+  #     (plus gate.md's enable_suggestions note, which names the terminal only
+  #     as a hand-off to the residue branch), for the same reason.
   #
   # The exclusion set is itself asserted, so a NEW site naming the terminal
   # without the precondition reds here instead of quietly joining the excluded.
@@ -566,7 +579,9 @@ docs/reference/commands.md" ] || {
     'development/skills/open-pr/SKILL.md' \
     'development/skills/resolve-issue/reference/escalation.md' \
     'development/skills/resolve-issue/reference/interactive.md' \
-    'development/skills/resolve-issue/reference/promotion.md' \
+    'development/skills/resolve-issue/reference/promotion/gate.md' \
+    'development/skills/resolve-issue/reference/promotion/step-4-sub-loop.md' \
+    'development/skills/resolve-issue/reference/promotion/step-7-terminal.md' \
     'development/skills/resolve-issue/reference/residue/branch.md' \
     'development/skills/resolve-issue/reference/residue/step-1-plan.md' | sort)"
   got=""

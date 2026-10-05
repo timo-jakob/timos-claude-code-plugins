@@ -207,7 +207,8 @@ _all_raw_pointer_count() {
 #
 # The scope, since #2055 split review-loop.md into shards under
 # reference/review-loop/ and left an INDEX at the old path (and #2056 did the
-# same for residue.md under reference/residue/):
+# same for residue.md under reference/residue/, and #2057 for promotion.md under
+# reference/promotion/):
 #   - a top-level reference file is reached only by a pointer naming it;
 #   - each split directory in SPLIT_DIRS is ONE unit with its index. The
 #     conductor's pointers go straight to its shards, never to the index, and
@@ -220,7 +221,7 @@ _all_raw_pointer_count() {
 #     `reference/<dir>/<sub>/`.
 # That keeps an orphan shard (in no pointer, not in the index) red — which a
 # "the index exists" check alone would not.
-SPLIT_DIRS=(review-loop residue)
+SPLIT_DIRS=(review-loop residue promotion)
 _unreached_reference_files() {
   local dir="$1" targets rel f index top dir_part base block d
   targets="$(cat)"
@@ -327,7 +328,8 @@ _unreached_reference_files() {
   # round-boundary-wait.bats' section locator ambiguous.)
   #
   # EIGHT since #1226: the new reference/telemetry.md declares ONE `##` section,
-  # *Story telemetry (#1226)*. Its #1226 correction notes in promotion.md,
+  # *Story telemetry (#1226)*. Its #1226 correction notes in
+  # reference/promotion/gate.md and reference/promotion/step-8-status-files.md,
   # interactive.md and review-loop.md are PARAGRAPHS, for the reason above.
   #
   # NINE since #1920: residue.md gained ONE `##` section, *Risk threshold —
@@ -346,6 +348,9 @@ _unreached_reference_files() {
   # Still TEN after #2056 split residue.md the same way: its three `##` headings
   # moved to reference/residue/branch.md, condition-2-removed.md and
   # risk-threshold.md, and its index carries only an `#` title.
+  #
+  # Still TEN after #2057 split promotion.md: its one `##` heading moved to
+  # reference/promotion/gate.md, and its index carries only an `#` title.
   local n
   n="$(_ref_headings | grep -c .)"
   [ "$n" -eq 10 ]
@@ -528,6 +533,58 @@ _unreached_reference_files() {
   # (c) nothing points into residue/ at all: the index is unreached too
   bad="$(printf '%s\n' "$targets" | grep -v '^residue/' | _unreached_reference_files "$REF_DIR")"
   printf '%s\n' "$bad" | grep -qxF -- 'residue.md'
+}
+
+@test "#2057 non-vacuity: the promotion directory is judged as one unit with its index" {
+  local fake="$BATS_TEST_TMPDIR/ref-copy-promotion" targets bad
+  cp -R "$REF_DIR" "$fake"
+  targets="$(_all_pointers | cut -f1 | sort -u)"
+  bad="$(printf '%s\n' "$targets" | _unreached_reference_files "$fake")"
+  [ -z "$bad" ]
+  # (a) an orphan promotion shard
+  printf 'orphan\n' > "$fake/promotion/orphan.md"
+  bad="$(printf '%s\n' "$targets" | _unreached_reference_files "$fake")"
+  [ "$bad" = 'promotion/orphan.md' ]
+  rm "$fake/promotion/orphan.md"
+  # (b) a shard the index stops listing, and no pointer names
+  sed '/`reference\/promotion\/step-7-terminal\.md`/d' "$REF_DIR/promotion.md" > "$fake/promotion.md"
+  bad="$(printf '%s\n' "$targets" | _unreached_reference_files "$fake")"
+  [ "$bad" = 'promotion/step-7-terminal.md' ]
+  # (c) nothing points into promotion/ at all: the index is unreached too
+  bad="$(printf '%s\n' "$targets" | grep -v '^promotion/' | _unreached_reference_files "$REF_DIR")"
+  printf '%s\n' "$bad" | grep -qxF -- 'promotion.md'
+}
+
+# --- gate.md's own route (#2057) ---------------------------------------------
+#
+# SKILL.md points straight at reference/promotion/gate.md, whose frozen block
+# ends at step 2. The reachability sweep above counts a shard as reached when
+# the index lists it, so it cannot see the two unfrozen routes gate.md itself
+# carries: the read-on paragraph after the frozen block, and the #1226 pointer
+# before it. Both are matched on whitespace-squeezed text, so a reflow cannot
+# retire a pin.
+
+@test "#2057 gate.md's read-on paragraph names steps 3, 4, 7 and 8 in order, after the frozen block" {
+  local gate="$REF_DIR/promotion/gate.md" after rest p prev=-1
+  grep -qxF -- '<!-- /moved: suggestion-promotion -->' "$gate"
+  after="$(awk 'seen {print} /^<!-- \/moved: suggestion-promotion -->$/ {seen=1}' "$gate" | LC_ALL=C tr -s '[:space:]' ' ')"
+  contains "$after" '**Read on, in this order.**'
+  for p in step-3-select step-4-sub-loop step-7-terminal step-8-status-files; do
+    contains "$after" "\`reference/promotion/$p.md\`"
+    rest="${after%%"\`reference/promotion/$p.md\`"*}"
+    [ "${#rest}" -gt "$prev" ] || { echo "$p.md is out of order in the read-on paragraph" >&2; return 1; }
+    prev="${#rest}"
+  done
+}
+
+@test "#2057 gate.md's #1226 pointer sends the conductor to step 8 before steps 3 and 4" {
+  local gate="$REF_DIR/promotion/gate.md" before
+  grep -qxF -- '<!-- moved: suggestion-promotion -->' "$gate"
+  before="$(awk '/^<!-- moved: suggestion-promotion -->$/ {exit} {sub(/^> ?/, ""); print}' "$gate" | LC_ALL=C tr -s '[:space:]' ' ')"
+  contains "$before" 'Read the #1226 amendment in `reference/promotion/step-8-status-files.md` BEFORE acting on steps 3 and 4'
+  contains "$before" '(`reference/promotion/step-3-select.md` and `reference/promotion/step-4-sub-loop.md`)'
+  contains "$before" "The enrichment of step 3 passes the run's \`--telemetry-dir\` as well as its \`--telemetry-file\`"
+  contains "$before" "every sub-loop invocation of step 4 carries the run's \`loop_args\`"
 }
 
 # --- the read-once rule (#2055) ---------------------------------------------

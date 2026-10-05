@@ -528,11 +528,12 @@ _roster_hits() {
   # names those files where the text now lives — the same sites, re-homed. The
   # conductor keeps the exit-code table and a pointer, neither of which states
   # the rule, so SKILL.md is legitimately no longer on it. #2055 split
-  # review-loop.md into the three shards below.
+  # review-loop.md into the three shards below. #2057 split promotion.md, and
+  # its one mention fell into step-4-sub-loop.md, so the count is unchanged.
   printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/review-loop/exit-20-awaiting-fix.md'
   printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/review-loop/briefs/fix.md'
   printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/review-loop/scope-block.md'
-  printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/promotion.md'
+  printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/promotion/step-4-sub-loop.md'
   printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/interactive.md'
   printf '%s\n' "$hits" | grep -qxF 'docs/explanation/review-loop.md'
   printf '%s\n' "$hits" | grep -qxF 'ARCHITECTURE.md'

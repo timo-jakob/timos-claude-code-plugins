@@ -4441,7 +4441,8 @@ reliable but the merging needs semantics:
   at its current line; seeding a duplicate from the blocking phase's stale line
   would survive dedup and raise the same defect twice). Each key is classified
   against the fresh panel's **pre-seed** aggregate — never against the seeded
-  round, which matches by construction (resolve-issue `reference/promotion.md`, "Suggestion promotion", step 4). Without
+  round, which matches by construction (resolve-issue `reference/promotion/step-4-sub-loop.md`,
+  "Suggestion promotion", step 4). Without
   `--promote`, or with an empty array, the emitted changelist is **byte-identical**
   to a run without the flag — which is what keeps autonomous/headless runs
   provably unchanged. Bad input is typed, and every refusal names the PROMOTE file rather
@@ -4609,7 +4610,10 @@ exit shards, the passes, `carry.md`, `subagents.md` and `briefs/<name>.md`, one
 per round subagent, which `development/agents/round-<name>.md` points at.
 `residue.md` is the second (#2056): `reference/residue/` holds `branch.md` (the
 exit-14 entry point), `risk-threshold.md`, `step-1-plan.md`, `steps-2-3.md`,
-`steps-4-5.md` and `condition-2-removed.md`. A
+`steps-4-5.md` and `condition-2-removed.md`. `promotion.md` is the third
+(#2057): `reference/promotion/` holds `gate.md` (the gate and steps 1–2),
+`step-3-select.md`, `step-4-sub-loop.md` (steps 4–6), `step-7-terminal.md` and
+`step-8-status-files.md`. A
 frozen span is re-cut along the same seams: one `moved:` chunk per shard, and
 `verify-reference-move.zsh` checks each seam stays adjacent in the pinned commit,
 so no original line falls out of the verified region; its `CUT_GROUPS` list names
@@ -6277,7 +6281,7 @@ The cross-pipeline cut needs no payload at all — that is what the 4-value
 `waived` answers *how many Low findings did the loop log?* — it can never answer
 *did a human act on them?*, because the phase-1 run record is on disk before the
 prompt is ever shown. That fact is recorded as an **append-only enrichment**
-joined to the run, emitted by `resolve-issue`'s `reference/promotion.md` step 3 once the human's
+joined to the run, emitted by `resolve-issue`'s `reference/promotion/step-3-select.md` step 3 once the human's
 multi-select answer is known:
 
 ```json

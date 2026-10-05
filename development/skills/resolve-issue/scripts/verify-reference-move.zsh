@@ -192,7 +192,15 @@ MANIFEST=(
 "
 "residue-branch-steps-4-5	residue/steps-4-5.md	4. **Create each issue, then attach it as a native sub-issue.** One \`gh issue	  them, and do not read the story's own work as unstartable.
 "
-"suggestion-promotion	promotion.md	Low suggestions never block, so every one the panel raises is **waived** the	   exactly the history it exists to attest.
+"suggestion-promotion	promotion/gate.md	Low suggestions never block, so every one the panel raises is **waived** the	   entitled to know that before they pick, not after.
+"
+"suggestion-promotion-step-3	promotion/step-3-select.md	3. **Multi-select** which to promote (0..N) with \`AskUserQuestion\`	     run does.
+"
+"suggestion-promotion-step-4	promotion/step-4-sub-loop.md	4. **Write the promote file and run the sub-loop.** The selected identity keys	   gate normally.
+"
+"suggestion-promotion-step-7	promotion/step-7-terminal.md	7. **Terminal.** The sub-loop clearing the promoted set is the run's final	     in the conversation and stop.
+"
+"suggestion-promotion-step-8	promotion/step-8-status-files.md	8. **Keep BOTH status files — the dossier covers both phases (#1064).** The	   exactly the history it exists to attest.
 "
 "escalation-head	escalation.md	A bad escalation costs a human an afternoon; a good one costs two minutes. On	tell the human the opposite of what happened.
 "
@@ -543,7 +551,9 @@ fi
 # --- each re-cut span covers its source with no gap and no overlap -----------
 # A frozen span re-cut into chunks across several shards: the former
 # `round-protocol-tail`, cut into four, one per step shard (#2055), and the
-# former `residue-branch`, cut into four across reference/residue/ (#2056).
+# former `residue-branch`, cut into four across reference/residue/ (#2056), and
+# the former `suggestion-promotion`, cut into five across reference/promotion/
+# (#2057).
 # Each chunk is byte-checked on its own above, which proves nothing about the
 # SEAMS: move one chunk's last anchor up and its neighbour's first anchor stays
 # put, and the lines between them leave the verified region with every
@@ -560,6 +570,7 @@ fi
 typeset -a CUT_GROUPS=(
   "round-protocol-tail round-protocol-step-2 round-protocol-recover round-protocol-steps-3-4"
   "residue-branch residue-branch-step-1 residue-branch-steps-2-3 residue-branch-steps-4-5"
+  "suggestion-promotion suggestion-promotion-step-3 suggestion-promotion-step-4 suggestion-promotion-step-7 suggestion-promotion-step-8"
 )
 typeset -a CUT_NAMES=(${=CUT_GROUPS})
 typeset -A cut_first cut_last

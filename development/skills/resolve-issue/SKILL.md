@@ -864,7 +864,7 @@ through the file that comes after it. The escalation terminal is where the run
 is handed to a human ([an automated state machine](https://timo-jakob.github.io/timos-claude-code-plugins/explanation/philosophy/#pillar-3)):
 
 - see `reference/residue/branch.md` § Residue branch — file the remainder, then ship (#1435)
-- see `reference/promotion.md` § Suggestion promotion on convergence — human-curated, opt-in (#994)
+- see `reference/promotion/gate.md` § Suggestion promotion on convergence — human-curated, opt-in (#994)
 - see `reference/interactive.md` § Interactive extension (#562-resume)
 - see `reference/escalation.md` § Escalation (any `ESCALATE_*` / `BUDGET_EXHAUSTED` status) — typed, no PR (#564)
 

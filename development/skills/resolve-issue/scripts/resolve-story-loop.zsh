@@ -944,7 +944,7 @@ emit_and_exit() {
             rid=$(print -r -- "$rec" | jq -r '.run_id // empty' 2>/dev/null) || rid=""
             # only a non-empty id is worth persisting: an empty file would read
             # as "there is an id" to a naive consumer, and the
-            # `reference/promotion.md` step 3 guard treats absent and empty
+            # `reference/promotion/step-3-select.md` step 3 guard treats absent and empty
             # identically for exactly that reason.
             # brace-group the redirection so a failure to OPEN the sidecar path
             # (a read-only work-dir, a directory at that path) is swallowed too
