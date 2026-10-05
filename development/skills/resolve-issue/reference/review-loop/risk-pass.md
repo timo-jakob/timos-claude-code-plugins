@@ -23,7 +23,7 @@ conversation shows it:
 printenv corner_case_risk_threshold   # exit 1 → unset
 ```
 
-Then take exactly one of the three states `reference/residue.md` § *Risk
+Then take exactly one of the three states `reference/residue/risk-threshold.md` § *Risk
 threshold — assess before filing (#1920)* defines, which the scripts parse with
 one shared parser (`scripts/risk-threshold-lib.zsh`):
 
@@ -31,7 +31,7 @@ one shared parser (`scripts/risk-threshold-lib.zsh`):
   assessment and pass no `--risk`. The round consolidates exactly as before.
 - **Ignored** (not a decimal in [0, 1] with at most three decimals): behave as
   off, say so once in your narration, and write the one-line PR Summary note
-  naming the value that `residue.md` prescribes for this state, once per run,
+  naming the value that `reference/residue/risk-threshold.md` prescribes for this state, once per run,
   whichever terminal the run reaches.
 - **On**: in step mode, everything below applies, every round, including the
   promotion sub-loop's rounds and the closing sweep. Hook mode supplies no
@@ -44,7 +44,7 @@ from demotion, but a stamp still records its risk. Do not assess `SUGGESTION`
 findings; they already do not block.
 
 **How to assess.** Record `p` and `impact` with a one-line rationale for each.
-Use the definitions `residue.md` § *1. Assess every residual blocker* gives and
+Use the definitions `reference/residue/risk-threshold.md` § *1. Assess every residual blocker* gives and
 do not restate or vary them here:
 
 - `p` is two decimals, with the test-strength definition for `tests` findings
@@ -129,4 +129,4 @@ resolve-story-loop.zsh … --resume --findings-file <…> \
   pass: the consolidator demotes before its promotion overlay, which raises the
   pick again.
 - The residue branch reuses the final round's stamp instead of assessing a
-  blocker a second time (`residue.md` § *Risk threshold*).
+  blocker a second time (`reference/residue/risk-threshold.md` § *Risk threshold*).

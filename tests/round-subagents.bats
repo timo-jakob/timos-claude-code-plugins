@@ -878,7 +878,7 @@ load_risk_pass() {
   # #2055: briefs/risk.md carries no frozen-span sentinel.
   no_sentinels "$BRIEFS/risk.md"
   load_risk_brief
-  contains "$riskb" 'is *The risk pass* (`<skill-base-dir>/reference/review-loop/risk-pass.md`) and `reference/residue.md` § *1. Assess every residual blocker*, and is restated by neither'
+  contains "$riskb" 'is *The risk pass* (`<skill-base-dir>/reference/review-loop/risk-pass.md`) and `reference/residue/risk-threshold.md` § *1. Assess every residual blocker*, and is restated by neither'
   lacks "$riskb" 'is exactly one of the four anchors'
 }
 

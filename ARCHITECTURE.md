@@ -4606,16 +4606,36 @@ path** that names the shards in read order. Every shard is at most **20,000
 bytes** and the index at most 3,000. `review-loop.md` is the first so split:
 `reference/review-loop/` holds `core.md` (`## The round protocol`), the step and
 exit shards, the passes, `carry.md`, `subagents.md` and `briefs/<name>.md`, one
-per round subagent, which `development/agents/round-<name>.md` points at. A
+per round subagent, which `development/agents/round-<name>.md` points at.
+`residue.md` is the second (#2056): `reference/residue/` holds `branch.md` (the
+exit-14 entry point), `risk-threshold.md`, `step-1-plan.md`, `steps-2-3.md`,
+`steps-4-5.md` and `condition-2-removed.md`. A
 frozen span is re-cut along the same seams: one `moved:` chunk per shard, and
 `verify-reference-move.zsh` checks each seam stays adjacent in the pinned commit,
-so no original line falls out of the verified region. `tests/reference-size-guard.bats`
+so no original line falls out of the verified region; its `CUT_GROUPS` list names
+each re-cut span. `tests/reference-size-guard.bats`
 holds the size limit and the rule that every H2–H4 heading of a split file lands
 in exactly one place. Its covered-path list is extended by each later split.
 `tests/reference-pointer-sweeps.bats` holds every
 ``reference/<path>.md`` mention to an existing file, and every `§ <title>` after
 one to a heading in it. The conductor **reads each reference file once**, with
 the loop's `next_ref` naming the shard an exit needs; SKILL.md states that rule.
+
+A split re-points every mention of the file it splits, by three rules:
+
+1. **A pointer-text needle moves with its pointer.** A bats needle whose text is
+   itself a pointer at the split file changes with that pointer, and only in the
+   path it names. Every other needle keeps its text.
+2. **A step or section mention names the shard.** A mention of a step or a
+   section of the split file — `§ <title>`, `step N`, `, section <title>`,
+   `'s <rule>`, bare or path-prefixed — names the full
+   `reference/<name>/<shard>.md` path of the shard holding it. A mention of the
+   file as a whole stays on the index path. `tests/reference-pointer-sweeps.bats`
+   holds this for every split file it lists: no step or section mention of one
+   remains.
+3. **The same holds inside the split file.** Outside a `moved:` block, a
+   positional reference across a shard boundary (*above*, *below*, *at the end
+   of this file*) names the shard instead; moved blocks stay byte-identical.
 
 **The agentic steps run in-session — step mode is canonical (#971).** Running
 the panel and applying the fix pass are model-driven, so the driving session
@@ -4968,7 +4988,7 @@ is the session's, stated in `development/skills/resolve-issue/reference/review-l
 build-vs-post split `build-escalation.zsh` uses: it **builds** a JSON array of
 `{title, body, labels, parent}` (one entry per residual blocking finding, each
 body naming the file, line, dimension, severity and derived class) and
-`resolve-issue`'s `reference/residue.md` step 4 makes the `gh issue create` calls. Linkage is a
+`resolve-issue`'s `reference/residue/steps-4-5.md` step 4 makes the `gh issue create` calls. Linkage is a
 **native sub-issue** — of the story's **epic** when it has one, of the **story**
 otherwise — and every residue issue carries **both** `review-residue` and
 `needs-refinement`. Idempotency is pinned on **label + exact title**: a candidate
@@ -4986,7 +5006,7 @@ finding. The union admits one deliberate over-suppression in exchange: a
 labelled issue under a **different** parent whose rendered title collides exactly
 (the title carries file, line and dimension, so a collision means the same
 finding in the same place). Consumers that classify a candidate against the
-parent-scoped read **alone** — `resolve-issue`'s `reference/residue.md` step 3 does — therefore see
+parent-scoped read **alone** — `resolve-issue`'s `reference/residue/steps-2-3.md` step 3 does — therefore see
 a builder-filtered candidate as *unmatched*; that means created-but-unparented
 (re-attach it) or the cross-parent collision (do not), never a wrong
 `--changelist`. Those two reads are the script's only network use — `--dry-run`
@@ -5073,7 +5093,7 @@ work, since the plugin lives in the plugin cache. It is **always present** and
 set by a closed table: `AWAITING_FIX` →
 `reference/review-loop/exit-20-awaiting-fix.md`; `STALE_FINDINGS`, every cause →
 `reference/review-loop/exit-2-stale-findings.md`; `CONVERGED_WITH_RESIDUE` →
-`reference/residue.md`; every `ESCALATE_*` and `BUDGET_EXHAUSTED` →
+`reference/residue/branch.md`; every `ESCALATE_*` and `BUDGET_EXHAUSTED` →
 `reference/escalation.md`; every other status (`CONVERGED`, `SKIPPED`,
 `ERROR`) → `null`. A usage error writes no status JSON, so it carries none —
 and where `topic_review_skills` (#1072) is the
@@ -7595,7 +7615,7 @@ file more (epic #1795: 3 children became 21).
     Approver folds it into its risk register; only the rendered waived list
     leaves them out.
 
-The procedures are `development/skills/resolve-issue/reference/residue.md`,
+The procedures are `development/skills/resolve-issue/reference/residue/risk-threshold.md`,
 § *Risk threshold — assess before filing (#1920)*, which amends the frozen
 residue branch without editing it, and `reference/review-loop/risk-pass.md`, § *The risk
 pass* (#1921). User-facing docs: [how-to: set a corner-case risk

@@ -76,6 +76,11 @@ resolve_issue_files() {
     exit-2-stale-findings.md exit-20-awaiting-fix.md delta-rounds.md
     topic-panels.md decided-pass.md risk-pass.md carry.md subagents.md
     briefs/panel.md briefs/fix.md briefs/decide.md briefs/risk.md)
+  # #2056 split residue.md the same way, into reference/residue/. Its roster, in
+  # that index's read order, under the same discipline.
+  local -a residue_shards
+  residue_shards=(branch.md risk-threshold.md step-1-plan.md steps-2-3.md
+    steps-4-5.md condition-2-removed.md)
 
   for f in "$base"/reference/*.md; do
     [ -e "$f" ] || continue
@@ -91,33 +96,43 @@ resolve_issue_files() {
     return 1
   fi
 
-  # The shard set is derived from the WHOLE subtree (any depth), so a shard
-  # added under a new subdirectory trips this too rather than escaping a
-  # one-level glob.
-  local -a found_shards
-  if [ -d "$base/reference/review-loop" ]; then
-    while IFS= read -r f; do
-      [ -n "$f" ] || continue
-      found_shards+=("${f#"$base/reference/review-loop/"}")
-    done <<< "$(find "$base/reference/review-loop" -type f -name '*.md')"
-  fi
-  got_s="$(printf '%s\n' "${found_shards[@]}" | sort | tr '\n' ' ')"
-  exp_s="$(printf '%s\n' "${shards[@]}" | sort | tr '\n' ' ')"
-  if [ "$got_s" != "$exp_s" ]; then
-    printf 'resolve_issue_files: reference/review-loop/ holds [%s] but the shard roster declares [%s] — update `shards` in resolve-issue-corpus.bash in the same PR\n' \
-      "$got_s" "$exp_s" >&2
-    return 1
-  fi
+  _shard_roster_agrees "$base" review-loop shards "${shards[@]}" || return 1
+  _shard_roster_agrees "$base" residue residue_shards "${residue_shards[@]}" || return 1
 
   printf '%s\n' "$base/SKILL.md"
   for f in "${ordered[@]}"; do
     printf '%s\n' "$base/reference/$f"
-    if [ "$f" = review-loop.md ]; then
-      for s in "${shards[@]}"; do
-        printf '%s\n' "$base/reference/review-loop/$s"
-      done
-    fi
+    case "$f" in
+      review-loop.md)
+        for s in "${shards[@]}"; do printf '%s\n' "$base/reference/review-loop/$s"; done ;;
+      residue.md)
+        for s in "${residue_shards[@]}"; do printf '%s\n' "$base/reference/residue/$s"; done ;;
+    esac
   done
+}
+
+# Compare the shard directory reference/$2/ under skill dir $1 with the declared
+# roster ($4…, named $3 in the message). Returns 1, naming both sets, when they
+# differ. The found set is derived from the WHOLE subtree (any depth), so a
+# shard added under a new subdirectory trips this too rather than escaping a
+# one-level glob.
+_shard_roster_agrees() {
+  local base="$1" dir="$2" var="$3" f got_s exp_s
+  shift 3
+  local -a found_shards
+  if [ -d "$base/reference/$dir" ]; then
+    while IFS= read -r f; do
+      [ -n "$f" ] || continue
+      found_shards+=("${f#"$base/reference/$dir/"}")
+    done <<< "$(find "$base/reference/$dir" -type f -name '*.md')"
+  fi
+  got_s="$(printf '%s\n' "${found_shards[@]}" | sort | tr '\n' ' ')"
+  exp_s="$(printf '%s\n' "$@" | sort | tr '\n' ' ')"
+  if [ "$got_s" != "$exp_s" ]; then
+    printf 'resolve_issue_files: reference/%s/ holds [%s] but the shard roster declares [%s] — update `%s` in resolve-issue-corpus.bash in the same PR\n' \
+      "$dir" "$got_s" "$exp_s" "$var" >&2
+    return 1
+  fi
 }
 
 # Build the corpus at $2 and echo that path. Returns non-zero — loudly — if any

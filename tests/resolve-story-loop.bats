@@ -3839,7 +3839,7 @@ resume_clean() {   # resume_clean <work-dir> <max-rounds>
 
 @test "#1571 the upstream rail holds AT THE LOOP: an out-of-diff blocker never becomes residue" {
   # This is the guarantee #1571 traded condition 2 for, pinned where it actually
-  # has to hold. reference/residue.md says removal is safe because
+  # has to hold. reference/residue/condition-2-removed.md says removal is safe because
   # `scope-findings` confines every round's findings to the story diff and
   # `$scoped` is the ONLY input to the changelist's `.blocking`. Nothing tested
   # that JOIN: tests/review-dispatch.bats pins the filter as a unit, and every
@@ -4568,9 +4568,9 @@ next_ref_table() {
   done
 }
 
-@test "#2055 next_ref on CONVERGED_WITH_RESIDUE (exit 14) is the residue reference" {
+@test "#2055 next_ref on CONVERGED_WITH_RESIDUE (exit 14) is the residue branch shard (#2056)" {
   residue_setup
   loop --max-rounds 2 --review-cmd "$(residue_review touched.py)" --fix-cmd "$residue_fix"
   [ "$status" -eq 14 ]
-  [ "$(echo "$output" | jq -r '.next_ref')" = "reference/residue.md" ]
+  [ "$(echo "$output" | jq -r '.next_ref')" = "reference/residue/branch.md" ]
 }

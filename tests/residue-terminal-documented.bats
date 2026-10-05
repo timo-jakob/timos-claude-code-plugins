@@ -149,13 +149,14 @@ SWEEP_NEAR_TERMINAL='CONVERGED_WITH_RESIDUE.{0,250}(full sweep|closing sweep)|(f
   # suite green.
   # residue.md and promotion.md joined this list with #1503: each INTRODUCES the
   # terminal (residue.md's whole subject is it), so each owes the exit code
-  # beside it. review-loop.md deliberately does not — it names the terminal only
+  # beside it. Since #2056 the residue site is reference/residue/branch.md, the
+  # shard exit 14's next_ref opens. review-loop.md deliberately does not — it names the terminal only
   # as a hand-off from the AWAITING_FIX branch, and the conductor's exit table is
   # what introduces it with its code.
   local f
   for f in "$SCRIPTS/resolve-story-loop.zsh" \
            "$REPO_ROOT/development/skills/resolve-issue/SKILL.md" \
-           "$REPO_ROOT/development/skills/resolve-issue/reference/residue.md" \
+           "$REPO_ROOT/development/skills/resolve-issue/reference/residue/branch.md" \
            "$REPO_ROOT/development/skills/resolve-issue/reference/promotion.md" \
            "$REPO_ROOT/development/skills/open-pr/SKILL.md" \
            "$REPO_ROOT/ARCHITECTURE.md" \
@@ -180,7 +181,7 @@ SWEEP_NEAR_TERMINAL='CONVERGED_WITH_RESIDUE.{0,250}(full sweep|closing sweep)|(f
   grep -qiE "$SWEEP_NEAR_TERMINAL" <<< "$(flat "$near")"
 }
 
-@test "#1435 roster tripwire: exactly twelve markdown sites name the terminal" {
+@test "#1435 roster tripwire: exactly fifteen markdown sites name the terminal" {
   # A derived sweep answers "do the sites agree?", never "did a site appear or
   # vanish?" — so the roster is recorded here and a site that appears or vanishes
   # reds until this file is updated in the same PR.
@@ -206,6 +207,9 @@ SWEEP_NEAR_TERMINAL='CONVERGED_WITH_RESIDUE.{0,250}(full sweep|closing sweep)|(f
   # interactive.md and review-loop.md carry the procedure behind each branch.
   # #2055 split review-loop.md into shards, and its mentions fell into two of
   # them: delta-rounds.md and exit-20-awaiting-fix.md. Eleven became twelve.
+  # #2056 split residue.md: its index still names the terminal, and its mentions
+  # fell into three shards — branch.md, condition-2-removed.md and
+  # step-1-plan.md. Twelve became fifteen.
   [ "$found" = "ARCHITECTURE.md
 development/skills/bootstrap/templates/common/approver-policy-core.md.tmpl
 development/skills/open-pr/SKILL.md
@@ -214,11 +218,14 @@ development/skills/resolve-issue/reference/escalation.md
 development/skills/resolve-issue/reference/interactive.md
 development/skills/resolve-issue/reference/promotion.md
 development/skills/resolve-issue/reference/residue.md
+development/skills/resolve-issue/reference/residue/branch.md
+development/skills/resolve-issue/reference/residue/condition-2-removed.md
+development/skills/resolve-issue/reference/residue/step-1-plan.md
 development/skills/resolve-issue/reference/review-loop/delta-rounds.md
 development/skills/resolve-issue/reference/review-loop/exit-20-awaiting-fix.md
 docs/explanation/review-loop.md
 docs/reference/commands.md" ] || {
-    echo "markdown roster changed; expected the twelve known sites, got:"
+    echo "markdown roster changed; expected the fifteen known sites, got:"
     echo "$found"; return 1; }
 }
 
@@ -314,27 +321,28 @@ docs/reference/commands.md" ] || {
   # real issues. Without this, deleting the residue branch's code block leaves
   # the suite green while a shipped script becomes dead code and residue runs
   # file nothing. #1503 moved that branch, byte-for-byte, into
-  # reference/residue.md — read it THERE rather than through the corpus, so the
-  # invocation cannot drift back into the conductor unnoticed.
-  local S="$RI_REF/residue.md"
-  grep -q 'scripts/build-residue-issues.zsh' "$S"
+  # reference/residue.md, and #2056 split it across reference/residue/ — read
+  # each claim in the SHARD that holds it rather than through the corpus, so the
+  # invocation cannot drift back into the conductor unnoticed: step 1 builds the
+  # plan (step-1-plan.md), step 4 creates and attaches (steps-4-5.md).
+  local S1="$RI_REF/residue/step-1-plan.md" S4="$RI_REF/residue/steps-4-5.md"
+  grep -q 'scripts/build-residue-issues.zsh' "$S1"
   # the label pair the builder EMITS and the pair the skill APPLIES must not
   # drift apart — they are two halves of the same idempotency key
-  grep -q -- '--label review-residue' "$S"
-  grep -q -- '--label needs-refinement' "$S"
+  grep -q -- '--label review-residue' "$S4"
+  grep -q -- '--label needs-refinement' "$S4"
   # ...and the attach that makes the idempotency read able to see them at all
-  grep -q 'sub_issues' "$S"
+  grep -q 'sub_issues' "$S4"
 
   # The POSITIVE counterpart to the two negative sweeps below. Those ban literal
   # transcriptions of the OLD claims, so a REWORDED revert slips past them; these
   # require the current claims to be present, which a revert cannot satisfy
   # however it is phrased.
-  local t; t="$(flat "$S")"
   # the union key itself
-  grep -q 'unparented issue IS matched by the idempotency key' <<< "$t"
+  grep -q 'unparented issue IS matched by the idempotency key' <<< "$(flat "$S4")"
   # ...and the fourth-combination diagnostic's stated half, whose only other
   # coverage is the script's own tests — deleting it here is invisible otherwise
-  grep -q 'losing only the \*\*parent\*\* read leaves the plan filtered on the repo-wide half' <<< "$t"
+  grep -q 'losing only the \*\*parent\*\* read leaves the plan filtered on the repo-wide half' <<< "$(flat "$S1")"
 }
 
 @test "#1435 open-pr carries BOTH residue rules, pinned independently" {
@@ -543,7 +551,12 @@ docs/reference/commands.md" ] || {
   #     outside the span states it while explaining which condition was removed —
   #     so the file now satisfies the sweep on its own text. It is listed nowhere
   #     here on purpose: re-adding it would re-permit a residue.md that never
-  #     names the precondition.
+  #     names the precondition. #2056 split it: the #1571 section is now
+  #     reference/residue/condition-2-removed.md, and the index at the old path
+  #     states the precondition itself, so neither is listed either.
+  #   - reference/residue/{branch,step-1-plan}.md JOINED this set with #2056.
+  #     They hold only the frozen residue-branch span, cut by step, for the same
+  #     reason as the procedure files above.
   #
   # The exclusion set is itself asserted, so a NEW site naming the terminal
   # without the precondition reds here instead of quietly joining the excluded.
@@ -553,7 +566,9 @@ docs/reference/commands.md" ] || {
     'development/skills/open-pr/SKILL.md' \
     'development/skills/resolve-issue/reference/escalation.md' \
     'development/skills/resolve-issue/reference/interactive.md' \
-    'development/skills/resolve-issue/reference/promotion.md' | sort)"
+    'development/skills/resolve-issue/reference/promotion.md' \
+    'development/skills/resolve-issue/reference/residue/branch.md' \
+    'development/skills/resolve-issue/reference/residue/step-1-plan.md' | sort)"
   got=""
   while IFS= read -r f; do
     [ -n "$f" ] || continue
@@ -651,7 +666,7 @@ docs/reference/commands.md" ] || {
   # point — the sites disagreed precisely because each carried its own copy.
   #
   # Counted across the whole skill (#1503), not the conductor alone: the rule
-  # itself moved to reference/residue.md while §6's pointer stayed in SKILL.md,
+  # itself moved to reference/residue/step-1-plan.md while §6's pointer stayed in SKILL.md,
   # so a conductor-only count would read 0 canonical statements and a
   # reference-only count would miss a copy planted back in the conductor.
   local F="$SKILL"
@@ -674,7 +689,7 @@ docs/reference/commands.md" ] || {
   # #1503 re-homed §6's pointer from "§3.5's remainder rule" to the file the rule
   # now lives in; the claim it makes — §6 POINTS rather than restating — is
   # unchanged.
-  grep -q 'decided by \*\*.reference/residue.md..s remainder rule\*\*' <<< "$t"
+  grep -q 'decided by \*\*.reference/residue/step-1-plan.md..s remainder rule\*\*' <<< "$t"
 }
 
 @test "#1435 the arm-vs-remainder distinction is stated where the mistake is made" {
@@ -683,19 +698,19 @@ docs/reference/commands.md" ] || {
   # the two sites most likely to shortcut it repeat the warning locally — that is
   # a pointer with a reason attached, not a restatement of the rows.
   #
-  # Read from reference/residue.md, NOT the corpus (#1503): the test's whole
-  # claim is WHERE the warning sits, and residue.md is the only file a session
-  # reaching CONVERGED_WITH_RESIDUE opens. On the corpus these three sentences
-  # could migrate into the conductor with the suite still green, leaving the
-  # residue branch without the warning at the two arms where both prior
-  # CRITICALs were made.
-  local F="$RI_REF/residue.md"
-  local t; t="$(flat "$F")"
-  grep -q 'The antecedent is the remainder, never the arm you arrived by' <<< "$t"
+  # Read from the residue shards, NOT the corpus (#1503): the test's whole claim
+  # is WHERE the warning sits, and since #2056 the residue shards are the only
+  # files a session reaching CONVERGED_WITH_RESIDUE opens — reference/residue/
+  # branch.md first (exit 14's next_ref), then risk-threshold.md, step-1-plan.md,
+  # steps-2-3.md and steps-4-5.md, in the index's read order. On the corpus these
+  # three sentences could migrate into the conductor with the suite still green,
+  # leaving the residue branch without the warning at the two arms where both
+  # prior CRITICALs were made. Each is read in the shard holding it.
+  grep -q 'The antecedent is the remainder, never the arm you arrived by' <<< "$(flat "$RI_REF/residue/step-1-plan.md")"
   # step 4's create/attach prose, the site that restated it wrongly last round
-  grep -q '"every create failed" is a route, not a row' <<< "$t"
+  grep -q '"every create failed" is a route, not a row' <<< "$(flat "$RI_REF/residue/steps-4-5.md")"
   # step 3's unmatched arm, the other one
-  grep -q 'this arm is a route, not a row' <<< "$t"
+  grep -q 'this arm is a route, not a row' <<< "$(flat "$RI_REF/residue/steps-2-3.md")"
 }
 
 @test "#1435 non-vacuity: a second copy of the rule reds the count pin" {
@@ -913,30 +928,31 @@ sweepable() {
   done
 }
 
-@test "#1571 reference/residue.md states the SURVIVING pair and the upstream rail, by content" {
+@test "#1571 reference/residue/condition-2-removed.md states the SURVIVING pair and the upstream rail, by content" {
   # residue.md left the §9 exclusion set in #1571, but the derived detector is
   # proximity-based and matches its HISTORICAL sentence, not its normative one —
   # the same accidental-proximity shape this file already pins per-site for
-  # ARCHITECTURE.md and the explanation page. residue.md is the one file a
-  # session that reaches the terminal actually opens, so pin it too.
-  local t; t="$(flat "$RI_REF/residue.md")"
+  # ARCHITECTURE.md and the explanation page. The residue reference is what a
+  # session that reaches the terminal actually opens, so pin it too — since
+  # #2056, in the shard holding the #1571 section.
+  local t; t="$(flat "$RI_REF/residue/condition-2-removed.md")"
   # Pin what the conditions ARE, not just their numbers: a needle that stops at
   # "and condition 3" leaves the parenthetical saying what condition 3 IS
   # deletable with the whole suite green — the proximity sweep is satisfied by
   # this file's HISTORICAL sentence, not by its normative one.
   grep -q 'condition 1 (the last two rounds are both zero-CRITICAL) and condition 3' <<< "$t" || {
-    echo "residue.md no longer states which two conditions survived"; return 1; }
+    echo "residue/condition-2-removed.md no longer states which two conditions survived"; return 1; }
   grep -q 'condition 3 (the declaring round ran as a full sweep)' <<< "$t" || {
-    echo "residue.md names condition 3 without saying it is the full sweep"; return 1; }
-  # Pin the RAIL SENTENCE, not the bare tool name: residue.md says
+    echo "residue/condition-2-removed.md names condition 3 without saying it is the full sweep"; return 1; }
+  # Pin the RAIL SENTENCE, not the bare tool name: condition-2-removed.md says
   # `scope-findings` twice, and the second is a different claim (what this story
   # did NOT change). A bare-name needle is satisfied by that one, so the rail
   # could be narrowed to a single round and this test would stay green — and a
   # one-round rail is exactly the reading that does not justify the removal.
   grep -q 'filters \*\*every\*\* round.s findings to the story diff' <<< "$t" || {
-    echo "residue.md no longer states that scope-findings filters EVERY round's findings"; return 1; }
+    echo "residue/condition-2-removed.md no longer states that scope-findings filters EVERY round's findings"; return 1; }
   grep -q 'only\*\* input to the changelist' <<< "$t" || {
-    echo "residue.md no longer states that \$scoped is the only input to .blocking"; return 1; }
+    echo "residue/condition-2-removed.md no longer states that \$scoped is the only input to .blocking"; return 1; }
 }
 
 @test "#1571 non-vacuity: AC2's negative needles red on a predicate that DID read the set" {
@@ -1057,21 +1073,21 @@ sweepable() {
 }
 
 @test "#1571 the cross-file pointer resolves — both ends pinned" {
-  # The explanation page tells the reader to open a section of residue.md BY
+  # The explanation page tells the reader to open a section of the residue reference BY
   # NAME. Nothing asserted either end: rename the heading (leaving every body
   # sentence intact) or delete the pointer, and the suite stayed green while a
   # user-facing instruction named a section that does not exist. (The parked
   # section's pointer went to #1581 with the rest of that handling, so this is
   # the only pointer of the shape left in-tree — the pin stands on its own.)
   local heading='Condition 2 — removed; the story-diff rail is upstream'
-  grep -qF "## $heading (#1571)" "$RI_REF/residue.md" || {
-    echo "residue.md's #1571 section heading changed — the explanation page points at it by name"
+  grep -qF "## $heading (#1571)" "$RI_REF/residue/condition-2-removed.md" || {
+    echo "residue/condition-2-removed.md's #1571 section heading changed — the explanation page points at it by name"
     return 1; }
   grep -qF "$heading" "$REPO_ROOT/docs/explanation/review-loop.md" || {
-    echo "the explanation page no longer points at residue.md's #1571 section"; return 1; }
+    echo "the explanation page no longer points at residue/condition-2-removed.md's #1571 section"; return 1; }
 }
 
-@test "#1920 reference/residue.md states the risk-threshold procedure, by content" {
+@test "#1920 reference/residue/ states the risk-threshold procedure, by content" {
   # The procedure lives OUTSIDE the frozen residue-branch span, so nothing that
   # verifies the span guards it. Each needle is one clause a session at the
   # residue terminal must meet: the pointer that makes it read the section at
@@ -1079,9 +1095,23 @@ sweepable() {
   # definitions, all four impact anchors, the keep rule, every amendment to the
   # frozen steps, and the fixed PR paragraph that overrides the dossier claim of
   # filing.
-  local t; t="$(flat "$RI_REF/residue.md")"
+  #
+  # Since #2056 the pointer sits in reference/residue/branch.md — the shard exit
+  # 14's next_ref opens — and names the risk-threshold shard; the old one said
+  # "at the end of this file", a position a split cannot keep. Every other
+  # clause is pinned in reference/residue/risk-threshold.md.
+  grep -qF -- 'Before step 1, read `reference/residue/risk-threshold.md` § *Risk threshold — assess before filing (#1920)*' \
+    <<< "$(flat "$RI_REF/residue/branch.md")" || {
+    echo "residue/branch.md no longer sends the session to the risk threshold before step 1"; return 1; }
+  # Both routes on to the step shards: branch.md ends with the frozen block, so
+  # without these sentences a session following next_ref never reaches step 1.
+  grep -qF -- 'Then read the steps: `reference/residue/step-1-plan.md`, `reference/residue/steps-2-3.md` and `reference/residue/steps-4-5.md`' \
+    <<< "$(flat "$RI_REF/residue/branch.md")" || {
+    echo "residue/branch.md no longer routes the session on to the step shards"; return 1; }
+  local t; t="$(flat "$RI_REF/residue/risk-threshold.md")"
+  grep -qF -- 'They are in `reference/residue/step-1-plan.md`, `reference/residue/steps-2-3.md` and `reference/residue/steps-4-5.md`' <<< "$t" || {
+    echo "residue/risk-threshold.md no longer names the step shards"; return 1; }
   local -a needles=(
-    'read § *Risk threshold — assess before filing (#1920)* at the end of this file FIRST'
     'printenv corner_case_risk_threshold'
     'Skip the rest of this section: make no assessment, pass no new flag'
     'say so in the PR Summary in one line naming the value'
@@ -1127,20 +1157,21 @@ sweepable() {
   )
   local n
   for n in "${needles[@]}"; do
-    grep -qF -- "$n" <<< "$t" || { echo "residue.md lost the #1920 clause: $n"; return 1; }
+    grep -qF -- "$n" <<< "$t" || { echo "residue/risk-threshold.md lost the #1920 clause: $n"; return 1; }
   done
   # ...and the heading the pointer above names. The pointer is prose, not a
-  # `see reference/X.md §` pointer, so no pointer sweep checks it; the
-  # ARCHITECTURE.md section and the how-to page name the same heading.
-  grep -qxF '## Risk threshold — assess before filing (#1920)' "$RI_REF/residue.md" || {
-    echo "residue.md renamed the #1920 section heading that its pointer, ARCHITECTURE.md and the how-to name"
+  # `see reference/X.md §` pointer, so the conductor-budget pointer sweep does
+  # not check it; the ARCHITECTURE.md section and the how-to page name the
+  # same heading.
+  grep -qxF '## Risk threshold — assess before filing (#1920)' "$RI_REF/residue/risk-threshold.md" || {
+    echo "residue/risk-threshold.md renamed the #1920 section heading that its pointer, ARCHITECTURE.md and the how-to name"
     return 1; }
 }
 
-@test "#1921 AC10 reference/residue.md assesses only unstamped residual blockers, and passes [] when none" {
+@test "#1921 AC10 reference/residue/risk-threshold.md assesses only unstamped residual blockers, and passes [] when none" {
   # the in-loop stamp is reused, never re-assessed — the residue step's half of
   # "assessed once between the loop and residue"
-  local t; t="$(flat "$RI_REF/residue.md")"
+  local t; t="$(flat "$RI_REF/residue/risk-threshold.md")"
   local -a needles=(
     '**Assess only what the loop has not already assessed (#1921).**'
     'A residual blocker that carries that stamp is **not assessed again**'
@@ -1152,7 +1183,7 @@ sweepable() {
   )
   local n
   for n in "${needles[@]}"; do
-    grep -qF -- "$n" <<< "$t" || { echo "residue.md lost the #1921 clause: $n"; return 1; }
+    grep -qF -- "$n" <<< "$t" || { echo "residue/risk-threshold.md lost the #1921 clause: $n"; return 1; }
   done
   # the pre-#1921 claim that the loop is untouched, and #1921 as future work, are gone
   lacks "$t" 'what the loop fixes before it gets there, and the dossier itself'
@@ -1183,7 +1214,7 @@ sweepable() {
     '**Off** (unset, empty, any spelling of zero): skip this pass.'
     '**Ignored** (not a decimal in [0, 1] with at most three decimals): behave as off'
     'whose severity is `CRITICAL` or `WARNING` after the decided pass'
-    'Use the definitions `residue.md` § *1. Assess every residual blocker* gives'
+    'Use the definitions `reference/residue/risk-threshold.md` § *1. Assess every residual blocker* gives'
     '**Severity and impact are independent.**'
     '**Assess afresh every round.** A finding re-raised in a later round is assessed again'
     '`<work-dir>/risk-<R>.json`'

@@ -7,7 +7,7 @@ The risk subagent makes one round's risk assessment in place of the conductor.
 This brief states what it does and what the conductor does around it; the
 assessment itself — what is eligible, how `p` and `impact` are judged, the
 `risk-<R>.json` shape — is *The risk pass*
-(`<skill-base-dir>/reference/review-loop/risk-pass.md`) and `reference/residue.md` §
+(`<skill-base-dir>/reference/review-loop/risk-pass.md`) and `reference/residue/risk-threshold.md` §
 *1. Assess every residual blocker*, and is restated by neither. The conductor
 dispatches `subagent_type: round-risk`, in the foreground
 (`run_in_background: false`), one fresh subagent per job; the risk subagent
