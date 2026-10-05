@@ -20,28 +20,37 @@
 #       failing).
 #
 #   story-telemetry.zsh start --run-file FILE [--telemetry-file PATH]
-#       [--telemetry-dir DIR] [--ts EPOCH]
+#       [--telemetry-dir DIR] [--parent-run-id ID] [--ts EPOCH]
 #       Stamp the run's start and PRE-MINT its run_id in the emitter's own
 #       format, `resolve-issue-<ts>-<4 hex>`, so the id can be handed to every
 #       review-loop invocation as --parent-run-id BEFORE the run's own record
-#       exists. Writes {run_id, ts, telemetry_file, telemetry_dir, loop_args} to
-#       FILE (a scratch path outside the repo) and prints it; the paths are made
-#       absolute exactly as `args` does (a leading `~` expanded first).
-#       `loop_args` is the exact flag list to append to EVERY
-#       resolve-story-loop.zsh invocation of this run. Every call mints a NEW
+#       exists. Writes {run_id, ts, parent_run_id, telemetry_file,
+#       telemetry_dir, loop_args, child_start_args} to FILE (a scratch path
+#       outside the repo) and prints it; the paths are made absolute exactly as
+#       `args` does (a leading `~` expanded first). `loop_args` is the exact
+#       flag list to append to EVERY resolve-story-loop.zsh invocation of this
+#       run. `child_start_args` is the same list for the `start` of a run nested
+#       under this one — an epic run's children (#1227): --parent-run-id this
+#       run's id, plus its sink flags. --parent-run-id stores the PARENT's id
+#       (null without it), and `emit` hands it to the emitter, so a child run's
+#       own record joins its epic run. Every call mints a NEW
 #       run and overwrites FILE: `start` cannot tell a fresh invocation from a
 #       re-entry, so it is called exactly once per invocation, and a re-entering
 #       skill re-reads FILE instead of calling it again. Touches no sink.
 #
 #   story-telemetry.zsh emit --run-file FILE --state FILE --repo-dir DIR
-#       --issue N [--repo-type T] [--loop-work-dir DIR ...] [--now EPOCH]
-#       Build the payload (build-story-telemetry-record.zsh), narrow the outcome,
+#       --issue N [--epic] [--repo-type T] [--loop-work-dir DIR ...] [--now EPOCH]
+#       Build the payload (build-story-telemetry-record.zsh — or, with --epic,
+#       build-epic-telemetry-record.zsh for an Epic-flow invocation, #1227),
+#       narrow the outcome,
 #       and emit ONE `kind: "run"` record through the shared emitter with
 #       `--pipeline resolve-issue`, the pre-minted `--run-id`, `--ts` = the start
-#       stamp, and the run's sink flags. Each --loop-work-dir contributes the ids
+#       stamp, the run file's parent_run_id when it has one, and the run's sink
+#       flags. Each --loop-work-dir contributes the ids
 #       in its `.telemetry-run-ids` ledger (written by resolve-story-loop.zsh) to
 #       payload.review_loop_run_ids; a --loop-work-dir that is not a directory at
-#       all is warned about and contributes nothing. Prints the emitted record on
+#       all is warned about and contributes nothing. An epic run drives no loop
+#       of its own, so --epic with --loop-work-dir is a usage error. Prints the emitted record on
 #       success, and marks the run file `emitted: true`, so a repeated `emit` for
 #       the same run is refused with the advisory instead of appending a second
 #       record under the same run_id.
@@ -57,6 +66,7 @@
 # RESOLVE_LOOP_PAYLOAD_BIN convention:
 #   STORY_TELEMETRY_EMITTER_BIN  the emitter (a PATH)
 #   STORY_TELEMETRY_BUILDER_BIN  the payload builder (a PATH)
+#   STORY_TELEMETRY_EPIC_BUILDER_BIN  the epic payload builder (a PATH)
 #
 # Exit codes: 0 ok (and every never-fatal emit outcome) · 2 usage · 1 internal,
 # from `args` (jq) and `start` (a clock it cannot read, a run file it cannot
@@ -70,14 +80,16 @@ setopt nounset pipefail
 local self_dir="${0:A:h}"
 local EMITTER="${STORY_TELEMETRY_EMITTER_BIN:-${self_dir}/../../../scripts/telemetry/emit-telemetry.zsh}"
 local BUILDER="${STORY_TELEMETRY_BUILDER_BIN:-${self_dir}/build-story-telemetry-record.zsh}"
+local EPIC_BUILDER="${STORY_TELEMETRY_EPIC_BUILDER_BIN:-${self_dir}/build-epic-telemetry-record.zsh}"
 
 local invocation_help="usage: /development:resolve-issue <issue-number|url> [--telemetry-file PATH] [--telemetry-dir DIR] [--no-review]
   flags may appear in any position; sink precedence is --telemetry-file >
   --telemetry-dir (DIR/<repo-slug>.jsonl) > .claude/telemetry/telemetry.jsonl"
 
 local usage="usage: story-telemetry.zsh args [WORD ...]
-       story-telemetry.zsh start --run-file FILE [--telemetry-file PATH] [--telemetry-dir DIR] [--ts EPOCH]
-       story-telemetry.zsh emit --run-file FILE --state FILE --repo-dir DIR --issue N
+       story-telemetry.zsh start --run-file FILE [--telemetry-file PATH] [--telemetry-dir DIR]
+                                 [--parent-run-id ID] [--ts EPOCH]
+       story-telemetry.zsh emit --run-file FILE --state FILE --repo-dir DIR --issue N [--epic]
                                 [--repo-type T] [--loop-work-dir DIR ...] [--now EPOCH]"
 
 # A sink path made absolute ONCE, against this call's cwd. A leading `~` is
@@ -162,12 +174,13 @@ _rand4() {
 }
 
 _cmd_start() {
-  local run_file="" tfile="" tdir="" ts=""
+  local run_file="" tfile="" tdir="" ts="" parent=""
   while (( $# > 0 )); do
     case "$1" in
     --run-file) _need_val "$1" $# "${2:-}"; run_file="$2"; shift 2 ;;
     --telemetry-file) _need_val "$1" $# "${2:-}"; tfile="$2"; shift 2 ;;
     --telemetry-dir) _need_val "$1" $# "${2:-}"; tdir="$2"; shift 2 ;;
+    --parent-run-id) _need_val "$1" $# "${2:-}"; parent="$2"; shift 2 ;;
     --ts) _need_val "$1" $# "${2:-}"; ts="$2"; shift 2 ;;
     *) print -u2 -- "story-telemetry start: unknown argument: $1"; exit 2 ;;
     esac
@@ -190,17 +203,24 @@ _cmd_start() {
   # literal invocation, where `null` could only be a real path.
   [[ "$tfile" != "null" ]] || tfile=""
   [[ "$tdir" != "null" ]] || tdir=""
+  # the same hazard once more: a child's parent id is read out of the epic's run
+  # file, and a `jq -r` of an epic run that has none prints `null` — a parent
+  # id that would join nothing, for good
+  [[ "$parent" != "null" ]] || parent=""
   [[ -n "$tfile" ]] && tfile="$(_abs_path "$tfile")"
   [[ -n "$tdir" ]] && tdir="$(_abs_path "$tdir")"
   local run_id="resolve-issue-${ts}-$(_rand4)"
   local doc=""
-  doc=$(jq -nc --arg id "$run_id" --argjson ts "$ts" --arg f "$tfile" --arg d "$tdir" '
-    {run_id:$id, ts:$ts,
-     telemetry_file:(if $f == "" then null else $f end),
-     telemetry_dir:(if $d == "" then null else $d end),
-     loop_args:(["--parent-run-id", $id]
-                + (if $f == "" then [] else ["--telemetry-file", $f] end)
-                + (if $d == "" then [] else ["--telemetry-dir", $d] end))}') || {
+  doc=$(jq -nc --arg id "$run_id" --argjson ts "$ts" --arg f "$tfile" --arg d "$tdir" \
+    --arg p "$parent" '
+    (  (if $f == "" then [] else ["--telemetry-file", $f] end)
+     + (if $d == "" then [] else ["--telemetry-dir", $d] end)) as $sinks
+    | {run_id:$id, ts:$ts,
+       parent_run_id:(if $p == "" then null else $p end),
+       telemetry_file:(if $f == "" then null else $f end),
+       telemetry_dir:(if $d == "" then null else $d end),
+       loop_args:(["--parent-run-id", $id] + $sinks),
+       child_start_args:(["--parent-run-id", $id] + $sinks)}') || {
     print -u2 -- "story-telemetry start: failed to build the run file"; exit 1 }
   { print -r -- "$doc" > "$run_file" } 2>/dev/null || {
     print -u2 -- "story-telemetry start: cannot write the run file: $run_file"; exit 1 }
@@ -210,10 +230,11 @@ _cmd_start() {
 # --- emit -------------------------------------------------------------------
 
 _cmd_emit() {
-  local run_file="" state_file="" repo_dir="" issue="" repo_type="" now=""
+  local run_file="" state_file="" repo_dir="" issue="" repo_type="" now="" epic=0
   local -a loop_wds=()
   while (( $# > 0 )); do
     case "$1" in
+    --epic) epic=1; shift ;;
     --run-file) _need_val "$1" $# "${2:-}"; run_file="$2"; shift 2 ;;
     --state) _need_val "$1" $# "${2:-}"; state_file="$2"; shift 2 ;;
     --repo-dir) _need_val "$1" $# "${2:-}"; repo_dir="$2"; shift 2 ;;
@@ -233,6 +254,11 @@ _cmd_emit() {
     print -u2 -- "story-telemetry emit: --issue must be a non-negative integer (got: $issue)"; exit 2 }
   [[ -z "$now" || ( "$now" == <-> && ${#now} -le 18 ) ]] || {
     print -u2 -- "story-telemetry emit: --now must be a non-negative integer (got: $now)"; exit 2 }
+  # an epic run's loops all belong to its CHILD runs, which list them in their
+  # own records; listing one here too would count it under two runs
+  (( ! epic || ${#loop_wds} == 0 )) || {
+    print -u2 -- "story-telemetry emit: --epic takes no --loop-work-dir (the child runs list their loops)"; exit 2 }
+  (( ! epic )) || BUILDER="$EPIC_BUILDER"
 
   # From here on nothing is fatal: the run has finished, and its telemetry is a
   # by-product that must never change what the run reports.
@@ -247,8 +273,9 @@ _cmd_emit() {
 
   command -v jq >/dev/null 2>&1 || _advise "jq not found on PATH"
   [[ -f "$run_file" && -r "$run_file" ]] || _advise "no readable run file at $run_file (was 'start' run?)"
-  local run_id="" ts="" tfile="" tdir="" emitted=""
+  local run_id="" ts="" tfile="" tdir="" emitted="" parent=""
   run_id=$(jq -r '.run_id // empty' "$run_file" 2>/dev/null) || run_id=""
+  parent=$(jq -r '.parent_run_id // empty' "$run_file" 2>/dev/null) || parent=""
   ts=$(jq -r '.ts // empty' "$run_file" 2>/dev/null) || ts=""
   tfile=$(jq -r '.telemetry_file // empty' "$run_file" 2>/dev/null) || tfile=""
   tdir=$(jq -r '.telemetry_dir // empty' "$run_file" 2>/dev/null) || tdir=""
@@ -281,9 +308,13 @@ _cmd_emit() {
       '$acc + (split("\n") | map(select(length > 0)))' "$ledger" 2>/dev/null) || \
       _advise "could not read the loop run-id ledger at $ledger"
   done
-  jq -c --argjson ids "$ids_json" \
-    '.review_loop_run_ids = ((.review_loop_run_ids // []) + $ids)' "$state_file" \
-    > "$tmp_state" 2>/dev/null || _advise "the state file is not a JSON object"
+  if (( epic )); then
+    jq -c '.' "$state_file" > "$tmp_state" 2>/dev/null || _advise "the state file is not JSON"
+  else
+    jq -c --argjson ids "$ids_json" \
+      '.review_loop_run_ids = ((.review_loop_run_ids // []) + $ids)' "$state_file" \
+      > "$tmp_state" 2>/dev/null || _advise "the state file is not a JSON object"
+  fi
 
   local outcome="" pr=""
   "$BUILDER" --state "$tmp_state" > "$tmp_payload" || _advise "the payload builder rejected the state"
@@ -291,7 +322,8 @@ _cmd_emit() {
     _advise "the payload builder could not narrow the outcome"
   # the builder accepts any integer-valued number, so normalise the spelling:
   # jq keeps a literal `413.0` as written, which the emitter's --pr refuses
-  pr=$(jq -r '.pr // empty | if type == "number" then (floor | tostring) else . end' \
+  # an epic record's pr is null whatever its state carries
+  (( epic )) || pr=$(jq -r '.pr // empty | if type == "number" then (floor | tostring) else . end' \
     "$tmp_state" 2>/dev/null) || pr=""
 
   [[ -n "$now" ]] || now=$(date +%s 2>/dev/null) || now=""
@@ -305,6 +337,8 @@ _cmd_emit() {
     --run-id "$run_id" --ts "$ts" --wall-s "$wall_s" --issue "$issue"
     --repo-dir "$repo_dir" --payload "$tmp_payload")
   [[ -n "$pr" ]] && emit_args+=(--pr "$pr")
+  # a run nested under an epic run joins it through its own parent_run_id
+  [[ -n "$parent" ]] && emit_args+=(--parent-run-id "$parent")
   # `!= "null"` as well as non-empty, exactly as resolve-story-loop.zsh guards
   # the same emitter flag: the conductor reads repo_type out of JSON, and a
   # `jq -r` of an absent one prints the four-character string `null`, which

@@ -358,9 +358,13 @@ _unreached_reference_files() {
   # Still TEN after #2058 split interactive.md: its two `##` headings moved to
   # reference/interactive/remediation.md and extension.md, and its index
   # carries only an `#` title.
+  #
+  # ELEVEN since #1227: the new reference/epic-telemetry.md declares ONE `##`
+  # section, *Epic telemetry (#1227)*, the Epic flow's own procedure; its steps
+  # are `###`.
   local n
   n="$(_ref_headings | grep -c .)"
-  [ "$n" -eq 10 ]
+  [ "$n" -eq 11 ]
 }
 
 # --- pointers resolve -------------------------------------------------------
@@ -408,9 +412,10 @@ _unreached_reference_files() {
   local rows
   rows="$(_all_pointers | grep -c .)"
   # 8 until #1226 added the two story-telemetry pointers (Step 0 and §7), and 10
-  # until the Epic flow pointed at reference/sequential.md (epic_strictly_sequential).
-  if [ "$rows" -ne 11 ]; then
-    printf 'the skill carries %s pointer(s), expected 11.\n' "$rows" >&2
+  # until the Epic flow pointed at reference/sequential.md (epic_strictly_sequential),
+  # and 11 until the Epic flow pointed at its own telemetry procedure (#1227).
+  if [ "$rows" -ne 12 ]; then
+    printf 'the skill carries %s pointer(s), expected 12.\n' "$rows" >&2
     printf 'A pointer was added or removed — update this count in the same PR,\n' >&2
     printf 'and check the step that gained or lost one still reaches its procedure.\n' >&2
     _all_pointers >&2

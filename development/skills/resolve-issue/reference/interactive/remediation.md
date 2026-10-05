@@ -6,7 +6,7 @@
 > **Read the #1226 amendment at the end of this section BEFORE running a rung.**
 > A rung that runs the Single-issue flow is its own telemetry run: it calls
 > `start` before its step 0a, which the frozen text below does not say. An
-> epic-kind rung has no run.
+> epic-kind rung is an epic run of its own (#1227).
 
 <!-- moved: interactive-remediation -->
 Applies **only** with a human present, and only to a **shape (i)**
@@ -214,8 +214,9 @@ Then, per the chosen option:
 each blocker's run start "at its own step 0a". It predates story-mode telemetry
 and is byte-frozen, so the amendment is recorded here. It applies only to a rung
 that runs the **Single-issue flow**. An **epic-kind** rung runs the Epic flow
-and, like any epic, has no run: it calls no `start`, its children's loops get
-no `loop_args`, and it emits no record (`reference/telemetry.md`, step 1).
+and, like any epic, stamps an **epic** run with the same sink flags, starts a
+story run for each child it drives, and emits its own epic record
+(`reference/epic-telemetry.md`).
 Before a single-issue rung's step 0a, it calls `story-telemetry.zsh start`
 with its **own** run file,
 `<scratch>/story-run-<blocker>.json`, and the **same** sink flags the named

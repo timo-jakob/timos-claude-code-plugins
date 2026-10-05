@@ -877,3 +877,150 @@ _nojq_path() {
   [ "$(jq -c '.loop_args | length' <<<"$output")" -eq 2 ]
   [ ! -e "$BATS_TEST_TMPDIR/null" ]
 }
+
+# --- epic mode (#1227) ----------------------------------------------------------
+
+EPIC_RUN_STATE='{"outcome":"parked","e1_classification":"native_children","children":{"total":3,"completed_before":0,"resolved_this_run":1,"escalated":0,"parked":0,"queued":2},"split":{"parallel":0,"sequential":1},"child_run_ids":["resolve-issue-1752403100-1a2b"],"e4":{"ran":false,"result":null}}'
+
+@test "start: --parent-run-id is stored; without it parent_run_id is null" {
+  run --separate-stderr zsh "$D" start --run-file "$RUN" --ts 1 --parent-run-id resolve-issue-1-abcd
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.parent_run_id' "$RUN")" = "resolve-issue-1-abcd" ]
+  # the run's OWN loops are parented to the run, never to its parent
+  [ "$(jq -r '.loop_args[1]' "$RUN")" = "$(jq -r '.run_id' "$RUN")" ]
+  run --separate-stderr zsh "$D" start --run-file "$RUN" --ts 1
+  [ "$(jq -r '.parent_run_id' "$RUN")" = "null" ]
+  # a literal null read out of a parent's run file joins nothing, so it is dropped
+  run --separate-stderr zsh "$D" start --run-file "$RUN" --ts 1 --parent-run-id null
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.parent_run_id' "$RUN")" = "null" ]
+  run --separate-stderr zsh "$D" start --run-file "$RUN" --parent-run-id ""
+  [ "$status" -eq 2 ]
+}
+
+@test "start: child_start_args carries --parent-run-id this run plus exactly its sink flags" {
+  run --separate-stderr zsh "$D" start --run-file "$RUN" --ts 1 --telemetry-file "$BATS_TEST_TMPDIR/f.jsonl" --telemetry-dir "$TDIR"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '.child_start_args' "$RUN")" = "$(jq -c --arg f "$BATS_TEST_TMPDIR/f.jsonl" --arg d "$TDIR" '["--parent-run-id", .run_id, "--telemetry-file", $f, "--telemetry-dir", $d]' "$RUN")" ]
+}
+
+@test "emit: a child run's record carries its epic run's id as parent_run_id, and the join resolves from both ends" {
+  local ERUN="$BATS_TEST_TMPDIR/epic-run.json" ESTATE="$BATS_TEST_TMPDIR/epic-state.json"
+  zsh "$D" start --run-file "$ERUN" --ts 1752403000 --telemetry-dir "$TDIR" >/dev/null
+  local -a cargs=()
+  local a
+  while IFS= read -r a; do cargs+=("$a"); done < <(jq -r '.child_start_args[]' "$ERUN")
+  zsh "$D" start --run-file "$RUN" --ts 1752403100 "${cargs[@]}" >/dev/null
+  state "$SUCCESS"
+  emit
+  [ "$status" -eq 0 ]
+  local epic_id child_id
+  epic_id="$(jq -r '.run_id' "$ERUN")"
+  child_id="$(jq -r '.run_id' "$RUN")"
+  # the child inherited the epic's sink, and names the epic as its parent
+  [ "$(jq -r '.parent_run_id' "$SLUG_SINK")" = "$epic_id" ]
+  jq -c --arg c "$child_id" '.child_run_ids = [$c]' <<<"$EPIC_RUN_STATE" > "$ESTATE"
+  run --separate-stderr zsh "$D" emit --epic --run-file "$ERUN" --state "$ESTATE" --repo-dir "$R" --issue 741
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '' "$SLUG_SINK")" -eq 2 ]
+  # from the epic end: its record lists the child; from the child end: the parent
+  [ "$(jq -r --arg e "$epic_id" 'select(.run_id == $e) | .payload.child_run_ids[0]' "$SLUG_SINK")" = "$child_id" ]
+  [ "$(jq -r --arg c "$child_id" 'select(.run_id == $c) | .parent_run_id' "$SLUG_SINK")" = "$epic_id" ]
+  # the epic run itself has no parent
+  [ "$(jq -r --arg e "$epic_id" 'select(.run_id == $e) | .parent_run_id' "$SLUG_SINK")" = "null" ]
+  zsh "$VALIDATE" "$SLUG_SINK" --require-records
+}
+
+@test "emit: a story run started without --parent-run-id emits a null parent_run_id" {
+  zsh "$D" start --run-file "$RUN" >/dev/null
+  state "$SUCCESS"
+  emit
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.parent_run_id' "$DEFAULT_SINK")" = "null" ]
+}
+
+@test "emit --epic: one valid epic-mode record, wall_s covering the whole invocation, no pr" {
+  zsh "$D" start --run-file "$RUN" --ts 1752403000 >/dev/null
+  # a state carrying a pr still emits a null one: the children's PRs are their own
+  state "$(jq -c '.child_run_ids = ["resolve-issue-1752403100-1a2b"] | .pr = 5' <<<"$EPIC_RUN_STATE")"
+  run --separate-stderr zsh "$D" emit --epic --run-file "$RUN" --state "$ST" --repo-dir "$R" --issue 741 \
+    --now 1752410200 --repo-type claude-plugin
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '' "$DEFAULT_SINK")" -eq 1 ]
+  local rec; rec="$(cat "$DEFAULT_SINK")"
+  [ "$(jq -r '.pipeline' <<<"$rec")" = "resolve-issue" ]
+  [ "$(jq -r '.kind' <<<"$rec")" = "run" ]
+  [ "$(jq -r '.payload.mode' <<<"$rec")" = "epic" ]
+  [ "$(jq -r '.outcome' <<<"$rec")" = "parked" ]
+  [ "$(jq '.issue' <<<"$rec")" -eq 741 ]
+  [ "$(jq -r '.pr' <<<"$rec")" = "null" ]
+  [ "$(jq '.wall_s' <<<"$rec")" -eq 7200 ]
+  [ "$(jq -r '.run_id' <<<"$rec")" = "$(jq -r '.run_id' "$RUN")" ]
+  [ "$(jq -r '.emitted' "$RUN")" = "true" ]
+  zsh "$VALIDATE" "$DEFAULT_SINK" --require-records
+}
+
+@test "emit --epic: a second invocation on the same epic appends its own record" {
+  local R2="$BATS_TEST_TMPDIR/run-2.json"
+  zsh "$D" start --run-file "$RUN" --ts 100 >/dev/null
+  state "$EPIC_RUN_STATE"
+  run --separate-stderr zsh "$D" emit --epic --run-file "$RUN" --state "$ST" --repo-dir "$R" --issue 741 --now 200
+  [ "$status" -eq 0 ]
+  # the second run starts from what the first one landed
+  zsh "$D" start --run-file "$R2" --ts 300 >/dev/null
+  state '{"outcome":"success","e1_classification":"native_children","children":{"total":3,"completed_before":1,"resolved_this_run":2,"escalated":0,"parked":0,"queued":0},"split":{"parallel":1,"sequential":1},"child_run_ids":["resolve-issue-301-aaaa","resolve-issue-302-bbbb"],"e4":{"ran":true,"result":"green"},"e5_closed":true,"readiness_preflight":{"gated":2,"needs_refinement":0}}'
+  run --separate-stderr zsh "$D" emit --epic --run-file "$R2" --state "$ST" --repo-dir "$R" --issue 741 --now 400
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '' "$DEFAULT_SINK")" -eq 2 ]
+  [ "$(jq -s -r '[.[].run_id] | unique | length' "$DEFAULT_SINK")" -eq 2 ]
+  [ "$(jq -s -r '.[1].payload.children.completed_before' "$DEFAULT_SINK")" -eq 1 ]
+  [ "$(jq -s -r '.[1].outcome' "$DEFAULT_SINK")" = "success" ]
+  zsh "$VALIDATE" "$DEFAULT_SINK" --require-records
+}
+
+@test "emit --epic: a state the builder refuses appends nothing and exits 0" {
+  zsh "$D" start --run-file "$RUN" >/dev/null
+  # success claimed for an epic that never closed
+  state "$(jq -c '.outcome = "success"' <<<"$EPIC_RUN_STATE")"
+  run --separate-stderr zsh "$D" emit --epic --run-file "$RUN" --state "$ST" --repo-dir "$R" --issue 741
+  advised
+  contains "$stderr" "success needs e5_closed: true"
+}
+
+@test "emit --epic: a missing epic builder costs the record, never the run" {
+  zsh "$D" start --run-file "$RUN" >/dev/null
+  state "$EPIC_RUN_STATE"
+  STORY_TELEMETRY_EPIC_BUILDER_BIN="$BATS_TEST_TMPDIR/no-builder" \
+    run --separate-stderr zsh "$D" emit --epic --run-file "$RUN" --state "$ST" --repo-dir "$R" --issue 741
+  advised
+}
+
+@test "emit --epic: a story state is refused by the epic builder rather than emitted as an epic" {
+  zsh "$D" start --run-file "$RUN" >/dev/null
+  state "$SUCCESS"
+  run --separate-stderr zsh "$D" emit --epic --run-file "$RUN" --state "$ST" --repo-dir "$R" --issue 741
+  advised
+}
+
+@test "emit --epic with --loop-work-dir is a usage error: the child runs list their loops" {
+  zsh "$D" start --run-file "$RUN" >/dev/null
+  state "$EPIC_RUN_STATE"
+  mkdir -p "$BATS_TEST_TMPDIR/wd"
+  run --separate-stderr zsh "$D" emit --epic --run-file "$RUN" --state "$ST" --repo-dir "$R" --issue 741 \
+    --loop-work-dir "$BATS_TEST_TMPDIR/wd"
+  [ "$status" -eq 2 ]
+  [ ! -e "$DEFAULT_SINK" ]
+}
+
+@test "a failed epic start: a child still gets its own run and the sink flags, with no parent" {
+  # the epic's run file was never written, so the child's start takes the sink
+  # flags from args and passes no --parent-run-id
+  run --separate-stderr zsh "$D" start --run-file "$BATS_TEST_TMPDIR/no/such/dir/epic.json"
+  [ "$status" -eq 1 ]
+  zsh "$D" start --run-file "$RUN" --telemetry-dir "$TDIR" >/dev/null
+  state "$SUCCESS"
+  emit
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '' "$SLUG_SINK")" -eq 1 ]
+  [ "$(jq -r '.parent_run_id' "$SLUG_SINK")" = "null" ]
+}

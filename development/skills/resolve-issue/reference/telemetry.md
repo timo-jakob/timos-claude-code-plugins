@@ -2,7 +2,8 @@
 
 On-demand reference for `development/skills/resolve-issue/SKILL.md` — read it
 when the step that points here is reached, never up front. The conductor points
-here from Step 0 and from the Single-issue flow's endings. The contract this
+here from Step 0 and from the Single-issue flow's endings; the Epic flow's own
+record is `reference/epic-telemetry.md`. The contract this
 implements — the payload keys, the outcome mapping and the per-pipeline
 conventions every later pipeline copies — is stated in ARCHITECTURE.md,
 *Resolve-issue telemetry (#1226)*; this file is only the procedure.
@@ -59,12 +60,10 @@ is not `OPEN`, an issue outside the session repo, a failed classification, and
 the near-miss halt all stop before Step 0a, so never call `start` or `emit`
 for them.
 
-**An epic takes no part in this.** A target classified as an epic takes the
-Epic flow and emits no resolve-issue record. The children E3 drives through the
-Single-issue flow emit none either, and their loops get **no** `loop_args`: no
-`--parent-run-id` and none of the sink flags. Epic-mode records and their
-parentage are child (b) of epic #741. Until it lands, an epic's sink flags are
-parsed and unused, and its loop records go to the local default sink.
+**An epic is not stamped here.** A target classified as an epic takes the Epic
+flow, which stamps a run of its own before E1 and starts a story run for each
+child E3 drives — `reference/epic-telemetry.md`. Keep `args`' sink flags:
+the epic run takes them.
 
 ### 2. Once the target is a single issue — stamp the start
 
@@ -106,6 +105,10 @@ the Single-issue flow on a blocker, that rung calls `start` with its **own**
 issue's run file (`story-run-<blocker>.json`) and the **same** sink flags this
 run was given. It emits its own record. It never overwrites this run's file,
 and so never takes over this run's `run_id`.
+
+**An epic child is started by E3, not here.** Its `start` adds the epic run's
+`--parent-run-id` (`reference/epic-telemetry.md`, step 2); everything after it — the
+`loop_args`, the facts, the one `emit` — is this section, unchanged.
 
 Append the run file's `loop_args` to **every** `resolve-story-loop.zsh`
 invocation of this run. They are `--parent-run-id <run_id>` plus exactly the

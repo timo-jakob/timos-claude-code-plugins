@@ -65,7 +65,7 @@ resolve_issue_files() {
   # looking" failure this derivation exists to prevent, restored one indirection
   # later.)
   local -a ordered
-  ordered=(review-loop.md residue.md promotion.md escalation.md interactive.md sequential.md telemetry.md)
+  ordered=(review-loop.md residue.md promotion.md escalation.md interactive.md sequential.md telemetry.md epic-telemetry.md)
 
   # #2055 split review-loop.md into shards under reference/review-loop/ and left
   # the old path as an INDEX. The shards are members too — a sweep over the
