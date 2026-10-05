@@ -172,7 +172,7 @@ fi
 # from the wrong place and never match.
 typeset -a MANIFEST
 MANIFEST=(
-"interactive-remediation	interactive.md	Applies **only** with a human present, and only to a **shape (i)**	  what the gate exists to prevent.
+"interactive-remediation	interactive/remediation.md	Applies **only** with a human present, and only to a **shape (i)**	  what the gate exists to prevent.
 "
 "round-protocol-head	review-loop/core.md	**The round boundary is concurrent — one minted tree, two readers (#1497).**	Each round:
 "
@@ -204,7 +204,9 @@ MANIFEST=(
 "
 "escalation-head	escalation.md	A bad escalation costs a human an afternoon; a good one costs two minutes. On	tell the human the opposite of what happened.
 "
-"interactive-extension	interactive.md	**Interactive extension (human present, \`BUDGET_EXHAUSTED\` /	   later with \`/development:resolve-issue <N>\`.
+"interactive-extension	interactive/extension.md	**Interactive extension (human present, \`BUDGET_EXHAUSTED\` /	   side-channel).
+"
+"interactive-extension-steps-5-7	interactive/extension-grant.md	5. **If they granted rounds** (with or without guidance): **first apply one fix	   later with \`/development:resolve-issue <N>\`.
 "
 "escalation-terminal	escalation.md	If the interactive extension ended in \`CONVERGED\`, skip the terminal below,	   the next run can converge. No PR exists until it does.
 "
@@ -553,7 +555,8 @@ fi
 # `round-protocol-tail`, cut into four, one per step shard (#2055), and the
 # former `residue-branch`, cut into four across reference/residue/ (#2056), and
 # the former `suggestion-promotion`, cut into five across reference/promotion/
-# (#2057).
+# (#2057), and the former `interactive-extension`, cut into two across
+# reference/interactive/ (#2058).
 # Each chunk is byte-checked on its own above, which proves nothing about the
 # SEAMS: move one chunk's last anchor up and its neighbour's first anchor stays
 # put, and the lines between them leave the verified region with every
@@ -571,6 +574,7 @@ typeset -a CUT_GROUPS=(
   "round-protocol-tail round-protocol-step-2 round-protocol-recover round-protocol-steps-3-4"
   "residue-branch residue-branch-step-1 residue-branch-steps-2-3 residue-branch-steps-4-5"
   "suggestion-promotion suggestion-promotion-step-3 suggestion-promotion-step-4 suggestion-promotion-step-7 suggestion-promotion-step-8"
+  "interactive-extension interactive-extension-steps-5-7"
 )
 typeset -a CUT_NAMES=(${=CUT_GROUPS})
 typeset -A cut_first cut_last

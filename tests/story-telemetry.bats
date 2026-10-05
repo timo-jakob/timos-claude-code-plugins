@@ -776,9 +776,11 @@ advised() {
   # instruction must stay present wherever an invocation template lives.
   local base="$REPO_ROOT/development/skills/resolve-issue"
   # #2055 split review-loop.md into shards; the invocation template and its
-  # note live in the step-2 shard.
+  # note live in the step-2 shard. #2058 split interactive.md: the granted
+  # resume's template sits frozen in extension-grant.md, so its note lives with
+  # the other step-5 amendments in extension-ceiling.md.
   grep -qF "Every loop invocation carries the run's \`loop_args\` (#1226)" "$base/reference/review-loop/step-2-invocation.md"
-  grep -qF "A granted resume carries the run's \`loop_args\` too (#1226)" "$base/reference/interactive.md"
+  grep -qF "A granted resume carries the run's \`loop_args\` too (#1226)" "$base/reference/interactive/extension-ceiling.md"
   grep -qF "Every sub-loop invocation also carries the run's \`loop_args\`" "$base/reference/promotion/step-8-status-files.md"
   grep -qF "the run's \`loop_args\` (Step 0) on every invocation" "$base/SKILL.md"
 }

@@ -215,12 +215,15 @@ SWEEP_NEAR_TERMINAL='CONVERGED_WITH_RESIDUE.{0,250}(full sweep|closing sweep)|(f
   # #2057 split promotion.md: its index no longer names the terminal, and its
   # mentions fell into three shards — gate.md, step-4-sub-loop.md and
   # step-7-terminal.md. Fifteen became seventeen.
+  # #2058 split interactive.md: its index no longer names the terminal, and its
+  # mentions all fell into one shard, extension-grant.md (step 5). Still
+  # seventeen.
   [ "$found" = "ARCHITECTURE.md
 development/skills/bootstrap/templates/common/approver-policy-core.md.tmpl
 development/skills/open-pr/SKILL.md
 development/skills/resolve-issue/SKILL.md
 development/skills/resolve-issue/reference/escalation.md
-development/skills/resolve-issue/reference/interactive.md
+development/skills/resolve-issue/reference/interactive/extension-grant.md
 development/skills/resolve-issue/reference/promotion/gate.md
 development/skills/resolve-issue/reference/promotion/step-4-sub-loop.md
 development/skills/resolve-issue/reference/promotion/step-7-terminal.md
@@ -570,6 +573,11 @@ docs/reference/commands.md" ] || {
   #     the same procedure, the frozen suggestion-promotion span cut by step
   #     (plus gate.md's enable_suggestions note, which names the terminal only
   #     as a hand-off to the residue branch), for the same reason.
+  #   - reference/interactive.md LEFT this set with #2058: its index no longer
+  #     names the terminal. The shard that does —
+  #     reference/interactive/extension-grant.md, step 5 of the frozen
+  #     interactive-extension span — JOINED it in its place, for the same
+  #     reason.
   #
   # The exclusion set is itself asserted, so a NEW site naming the terminal
   # without the precondition reds here instead of quietly joining the excluded.
@@ -578,7 +586,7 @@ docs/reference/commands.md" ] || {
     'development/skills/bootstrap/templates/common/approver-policy-core.md.tmpl' \
     'development/skills/open-pr/SKILL.md' \
     'development/skills/resolve-issue/reference/escalation.md' \
-    'development/skills/resolve-issue/reference/interactive.md' \
+    'development/skills/resolve-issue/reference/interactive/extension-grant.md' \
     'development/skills/resolve-issue/reference/promotion/gate.md' \
     'development/skills/resolve-issue/reference/promotion/step-4-sub-loop.md' \
     'development/skills/resolve-issue/reference/promotion/step-7-terminal.md' \

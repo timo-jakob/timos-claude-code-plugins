@@ -27,8 +27,10 @@
 #
 # The corpus is a CONCATENATION: the conductor first, then the reference files
 # in a FIXED declared order. That order does NOT reproduce pre-move document
-# order and cannot: interactive.md holds two chunks (the §0a remediation and the
-# interactive extension) that were not adjacent in the pre-move file, so no
+# order and cannot: the interactive shards hold two chunks that were not
+# adjacent in the pre-move file — the §0a remediation in
+# reference/interactive/remediation.md, and the interactive extension, cut by
+# #2058 across reference/interactive/extension.md and extension-grant.md — so no
 # file ordering could interleave them correctly. Order-sensitive assertions
 # therefore must NOT use the corpus — use the per-file paths, exactly as the
 # count-vs-locality rule above already says. Within any one member, order is of
@@ -86,6 +88,11 @@ resolve_issue_files() {
   local -a promotion_shards
   promotion_shards=(gate.md step-3-select.md step-4-sub-loop.md step-7-terminal.md
     step-8-status-files.md)
+  # #2058 split interactive.md the same way, into reference/interactive/. Its
+  # roster, in that index's read order, under the same discipline.
+  local -a interactive_shards
+  interactive_shards=(remediation.md extension.md extension-grant.md
+    extension-ceiling.md)
 
   for f in "$base"/reference/*.md; do
     [ -e "$f" ] || continue
@@ -104,6 +111,7 @@ resolve_issue_files() {
   _shard_roster_agrees "$base" review-loop shards "${shards[@]}" || return 1
   _shard_roster_agrees "$base" residue residue_shards "${residue_shards[@]}" || return 1
   _shard_roster_agrees "$base" promotion promotion_shards "${promotion_shards[@]}" || return 1
+  _shard_roster_agrees "$base" interactive interactive_shards "${interactive_shards[@]}" || return 1
 
   printf '%s\n' "$base/SKILL.md"
   for f in "${ordered[@]}"; do
@@ -115,6 +123,8 @@ resolve_issue_files() {
         for s in "${residue_shards[@]}"; do printf '%s\n' "$base/reference/residue/$s"; done ;;
       promotion.md)
         for s in "${promotion_shards[@]}"; do printf '%s\n' "$base/reference/promotion/$s"; done ;;
+      interactive.md)
+        for s in "${interactive_shards[@]}"; do printf '%s\n' "$base/reference/interactive/$s"; done ;;
     esac
   done
 }

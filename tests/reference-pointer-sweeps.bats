@@ -341,9 +341,9 @@ refptr_problems_in() {
 # The split files: each is now an index at its old path, with its text in
 # shards under reference/<name>/. A mention of a STEP or a SECTION of one must
 # name the shard holding it (the re-pointing rules in ARCHITECTURE.md); a
-# mention of the file as a whole stays on the index. Each later split appends
-# its file here.
-SPLIT_FILES=(review-loop.md residue.md promotion.md)
+# mention of the file as a whole stays on the index. Each split appended its
+# file here; with #2058's interactive.md the list names every split file.
+SPLIT_FILES=(review-loop.md residue.md promotion.md interactive.md)
 
 # The guard's universe: the reference-pointer sweep's files plus docs/.
 split_mention_files_in() {
@@ -684,4 +684,15 @@ EOF
   run split_mentions_in "$fx"
   [ "$(printf '%s\n' "$output" | wc -l | tr -d ' ')" -eq 1 ]
   [ "$(printf '%s\n' "$output" | cut -f1,2)" = "$(printf '%s\tpromotion.md' "$SKILL_REL")" ]
+}
+
+@test "#2058 MUTATION: a planted interactive.md step 5 mention reds the guard" {
+  local fx="$BATS_TEST_TMPDIR/repo"
+  make_fixture_repo "$fx"
+  run split_mentions_in "$fx"
+  [ -z "$output" ] || { printf 'the untouched copy is not clean:\n%s\n' "$output" >&2; return 1; }
+  printf '\nThe grant is `reference/interactive.md` step 5 of the extension.\n' >> "$fx/$SKILL_REL"
+  run split_mentions_in "$fx"
+  [ "$(printf '%s\n' "$output" | wc -l | tr -d ' ')" -eq 1 ]
+  [ "$(printf '%s\n' "$output" | cut -f1,2)" = "$(printf '%s\tinteractive.md' "$SKILL_REL")" ]
 }

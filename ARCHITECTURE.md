@@ -4613,13 +4613,18 @@ exit-14 entry point), `risk-threshold.md`, `step-1-plan.md`, `steps-2-3.md`,
 `steps-4-5.md` and `condition-2-removed.md`. `promotion.md` is the third
 (#2057): `reference/promotion/` holds `gate.md` (the gate and steps 1–2),
 `step-3-select.md`, `step-4-sub-loop.md` (steps 4–6), `step-7-terminal.md` and
-`step-8-status-files.md`. A
+`step-8-status-files.md`. `interactive.md` is the fourth and last (#2058):
+`reference/interactive/` holds `remediation.md` (the §0a remediation),
+`extension.md` (the extension and steps 1–4), `extension-grant.md` (steps 5–7)
+and `extension-ceiling.md` (the #1226, #1576 and #1583 amendments to step 5). A
 frozen span is re-cut along the same seams: one `moved:` chunk per shard, and
 `verify-reference-move.zsh` checks each seam stays adjacent in the pinned commit,
 so no original line falls out of the verified region; its `CUT_GROUPS` list names
 each re-cut span. `tests/reference-size-guard.bats`
 holds the size limit and the rule that every H2–H4 heading of a split file lands
-in exactly one place. Its covered-path list is extended by each later split.
+in exactly one place. Since #2058 both guards cover **all of `reference/**`**,
+searched recursively, with no exemption list, so a reference file added later is
+covered without editing the guard.
 `tests/reference-pointer-sweeps.bats` holds every
 ``reference/<path>.md`` mention to an existing file, and every `§ <title>` after
 one to a heading in it. The conductor **reads each reference file once**, with
@@ -4891,7 +4896,7 @@ happens *between* invocations and the loop never observes it, stamps the pre-fix
 identity (`fix-base-<round>.txt`) at `AWAITING_FIX` **and at the two escalating
 terminals a grant can resume from** — `ESCALATE_NO_CONVERGENCE` and
 `BUDGET_EXHAUSTED`, because the interactive extension's step 5
-(`reference/interactive.md`) requires a fix pass *before* the resume a
+(`reference/interactive/extension-grant.md`) requires a fix pass *before* the resume a
 grant buys, so a fix pass really does follow those exits; without the stamp the
 round after the grant carries no `class` at all, i.e. the histogram the grant
 decision reads goes dark one round after the grant was spent. It then diffs at

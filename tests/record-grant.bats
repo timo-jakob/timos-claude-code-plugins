@@ -55,7 +55,7 @@ sidecar_slack() {
 }
 
 @test "#1576 base+delta: a GRANTED closing sweep is already one past max_rounds, so 5+3 is 9" {
-  # reference/interactive.md step 5 says so in prose ("already one past
+  # reference/interactive/extension-grant.md step 5 says so in prose ("already one past
   # max_rounds"); taking .max_rounds alone would silently buy one round fewer
   # than the human was told they were getting.
   seed_status 5 true

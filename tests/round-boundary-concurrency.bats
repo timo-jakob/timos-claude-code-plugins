@@ -836,10 +836,12 @@ _roster_hits() {
   # because an unanchored `.` in a path is a regex wildcard.
   # #1503 moved the review-loop procedure into reference/*.md, so the roster
   # names those files where the text now lives — the same sites, re-homed.
+  # #2058 split interactive.md, and its one site fell into extension-grant.md
+  # (step 5), so the count is unchanged.
   printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/SKILL.md'
   printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/review-loop/core.md'
   printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/review-loop/step-2-invocation.md'
-  printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/interactive.md'
+  printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/interactive/extension-grant.md'
   printf '%s\n' "$hits" | grep -qxF 'docs/explanation/review-loop.md'
   printf '%s\n' "$hits" | grep -qxF 'ARCHITECTURE.md'
 }
@@ -998,7 +1000,9 @@ _roster_hits() {
   contains "$body" 'this profile restates none of it'
 
   # #2055: the review-loop sites below read the shard that now holds them; the
-  # interactive.md sites never lived in review-loop.md and keep the corpus.
+  # interactive sites (step 5, since #2058 in
+  # reference/interactive/extension-grant.md) never lived in review-loop.md and
+  # keep the corpus.
   ln="$(prose_gate_lines "$EXIT20" 'is concurrent (§3.5) — which mints T, starts the full gate and dispatches')"
   [ -n "$ln" ]
   body="$(prose_window "$EXIT20" "$ln" 4)"

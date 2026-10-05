@@ -2,9 +2,10 @@
 # record-grant.zsh — persist a human's round grant as the work-dir's ceiling
 # (issue #1576, epic #1431).
 #
-# Why: `reference/interactive.md` step 5 tells the conductor to resume the loop
-# with "ceiling raised by 3". That number lived ONLY in the conductor's memory,
-# across a context that compacts — and in session b27006c9 (#1558) it was lost:
+# Why: `reference/interactive/extension-grant.md` step 5 tells the conductor to
+# resume the loop with "ceiling raised by 3". That number lived ONLY in the
+# conductor's memory, across a context that compacts — and in session b27006c9
+# (#1558) it was lost:
 # the human granted +3 at round 2 and the loop kept being invoked at the default
 # ceiling of 5 for two more rounds. Had round 5 tripped the ceiling, the run
 # would have reported BUDGET_EXHAUSTED at 5/5 with the grant already spent,

@@ -530,11 +530,13 @@ _roster_hits() {
   # the rule, so SKILL.md is legitimately no longer on it. #2055 split
   # review-loop.md into the three shards below. #2057 split promotion.md, and
   # its one mention fell into step-4-sub-loop.md, so the count is unchanged.
+  # #2058 split interactive.md, and its one mention fell into
+  # extension-grant.md (step 5), so the count is unchanged again.
   printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/review-loop/exit-20-awaiting-fix.md'
   printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/review-loop/briefs/fix.md'
   printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/review-loop/scope-block.md'
   printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/promotion/step-4-sub-loop.md'
-  printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/interactive.md'
+  printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/interactive/extension-grant.md'
   printf '%s\n' "$hits" | grep -qxF 'docs/explanation/review-loop.md'
   printf '%s\n' "$hits" | grep -qxF 'ARCHITECTURE.md'
 }
