@@ -2757,8 +2757,9 @@ dispatches nothing.
 `<skill-base-dir>/scripts/`. Then:
 
 1. **Confirm `worktree_root`**: `git -C <worktree_root> rev-parse
-   --show-toplevel` must print that path. If it does not, write nothing and
-   return `failed` / `wrong-worktree-root`.
+   --show-toplevel` must print that path. If it does not, write no risk file,
+   and write a `failed` / `wrong-worktree-root` verdict with `round-handoff.zsh
+   write-verdict`, carrying `risk_file` and `assessed_count` both `null`.
 2. **Assess** every `CRITICAL` and `WARNING` finding in
    `aggregate_findings_file` as *The risk pass* says: afresh, never copied from
    an earlier round, with `p`, `impact` and both rationales.

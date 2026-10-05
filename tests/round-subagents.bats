@@ -811,7 +811,10 @@ load_risk_pass() {
 
 @test "#2025 AC6: the risk subagent checks its tree, assesses afresh and writes the risk file once, atomically" {
   load_risk_brief
-  contains "$riskb" '`git -C <worktree_root> rev-parse --show-toplevel` must print that path. If it does not, write nothing and return `failed` / `wrong-worktree-root`.'
+  contains "$riskb" '`git -C <worktree_root> rev-parse --show-toplevel` must print that path. If it does not, write no risk file, and write a `failed` / `wrong-worktree-root` verdict with `round-handoff.zsh write-verdict`, carrying `risk_file` and `assessed_count` both `null`.'
+  # #2033: writing the verdict is itself a write, so step 1 must never forbid
+  # it — a wrong-root subagent that writes nothing reads as a stall.
+  lacks "$riskb" 'write nothing and return'
   contains "$riskb" 'afresh, never copied from an earlier round, with `p`, `impact` and both rationales'
   contains "$riskb" '**Write `<work-dir>/risk-<R>.json` once, atomically**, in the #1920 shape — the identity verbatim, a digit-string `line` as the number it spells, `[]` when nothing is eligible — to a temporary file in the work-dir, then `mv` it into place.'
   contains "$riskb" 'When you cannot read or parse the aggregate, or cannot assess an eligible finding, write no risk file and return `failed` / `assessment-failed`.'
