@@ -86,6 +86,13 @@ These are the §3 rules for this repo type. The conductor's generic bullet says
   Step 3; never a bare `bats … | grep -c` that runs the suite twice) — **and**
   `/development-claude-plugin:test` driving the affected skills/agents
   end-to-end (the same pattern used to verify slices by hand).
+- **Run targeted bats files quietly (#2059).** During implementation and fix
+  passes, run a targeted bats file through
+  `<resolve-issue skill-base-dir>/scripts/bats-quiet.zsh <bats-args…>` rather
+  than bare `bats`. It prints `N/M passed`, each `not ok` line, then a `log:`
+  path, and exits with bats' real status. Read the `log:` file only on a
+  non-zero exit. A targeted run is never the gate: never a substitute for
+  `run-gate.zsh`, never a `--test-cmd`, never a `--gate-attest` source.
 
 ## Version bump
 

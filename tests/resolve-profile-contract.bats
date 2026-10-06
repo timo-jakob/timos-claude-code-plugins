@@ -568,6 +568,43 @@ _cut_short_retry_violations() {
   return 0
 }
 
+# Every way profile $1's Gate breaks the targeted-run bullet (#2059), one per
+# line. The bullet is read as the Gate's LAST top-level `- ` bullet, flattened,
+# so a reflow cannot unpin it and a move to the front (the opening bullet is
+# #2014's) or into another bullet reds it. The real assertion and its
+# non-vacuity control both go through this.
+_bats_quiet_violations() {
+  local sec bullets last first prev needle
+  sec="$(_profile_section "$1" "Gate")"
+  # one flattened line per top-level bullet, in order
+  bullets="$(awk '
+    /^- / { if (b != "") print b; b = $0; next }
+    /^  / && b != "" { sub(/^ +/, " "); b = b $0; next }
+    { if (b != "") print b; b = "" }
+    END { if (b != "") print b }
+  ' <<< "$sec" | tr -s ' ')"
+  last="$(tail -n 1 <<< "$bullets")"
+  first="$(head -n 1 <<< "$bullets")"
+  prev="$(awk '{ p = l; l = $0 } END { print p }' <<< "$bullets")"
+  case "$first" in *bats-quiet.zsh*) echo "the targeted-run bullet is the Gate's first bullet" ;; esac
+  case "$prev" in *'Epic verification (§E4) uses the same command'*) : ;;
+    *) echo "the targeted-run bullet does not follow the §E4 bullet" ;; esac
+  for needle in \
+    'During implementation and fix passes' \
+    '`<resolve-issue skill-base-dir>/scripts/bats-quiet.zsh <bats-args…>`' \
+    'rather than bare `bats`' \
+    'It prints `N/M passed`, each `not ok` line, then a `log:` path' \
+    "exits with bats' real status" \
+    'Read the `log:` file only on a non-zero exit' \
+    'A targeted run is never the gate' \
+    'never a substitute for `run-gate.zsh`' \
+    'never a `--test-cmd`' \
+    'never a `--gate-attest` source'; do
+    case "$last" in *"$needle"*) : ;; *) printf 'the targeted-run bullet lost <<%s>>\n' "$needle" ;; esac
+  done
+  return 0
+}
+
 # The profiles with NO attestable single-run runner — derived from the Gate's
 # own content, never a hand-written list. That is the real reason the rule
 # splits: `--gate-attest` (#981) carries a tree identity a runner produced, so a
@@ -2849,4 +2886,44 @@ _roster_sites() {
     'the Gate lost <<if that retry is cut short too, stop retrying and report that no gate verdict exists>>' \
     'the Gate still carries the ambiguous identical-call ban')"
   [ "$bad" = "$expected" ] || { printf 'got [%s]\n' "$bad" >&2; return 1; }
+}
+
+@test "#2059 the claude-plugin Gate's last bullet names bats-quiet.zsh for targeted runs, never the gate" {
+  local bad
+  bad="$(_bats_quiet_violations "$PROFILE")"
+  [ -z "$bad" ] || { printf '%s\n' "$bad" >&2; return 1; }
+}
+
+@test "#2059 non-vacuity: the targeted-run bullet moved to the front reds the guard" {
+  # Cut the bullet and paste it before the Gate's opening bullet, in a copy of
+  # the profile. The copy is checked to differ, so the control cannot pass on a
+  # move that never happened.
+  local planted="$BATS_TEST_TMPDIR/profile.md" bad
+  perl -0pe 'my ($b) = /(- \*\*Run targeted bats files quietly.*?\n)(?=\n## )/s; s/\Q$b\E//; s/(?=- \*\*Run the blessed)/$b/;' \
+    "$PROFILE" > "$planted"
+  run cmp -s "$PROFILE" "$planted"
+  [ "$status" -eq 1 ]
+  bad="$(_bats_quiet_violations "$planted")"
+  grep -qxF -- "the targeted-run bullet is the Gate's first bullet" <<< "$bad"
+  grep -qxF -- "the targeted-run bullet does not follow the §E4 bullet" <<< "$bad"
+}
+
+@test "#2059 non-vacuity: a never-the-gate clause dropped from the bullet reds the guard by name" {
+  local planted="$BATS_TEST_TMPDIR/profile.md" bad
+  perl -0pe 's/never a `--gate-attest` source/never an attestation/' "$PROFILE" > "$planted"
+  run cmp -s "$PROFILE" "$planted"
+  [ "$status" -eq 1 ]
+  bad="$(_bats_quiet_violations "$planted")"
+  [ "$bad" = 'the targeted-run bullet lost <<never a `--gate-attest` source>>' ] \
+    || { printf 'got [%s]\n' "$bad" >&2; return 1; }
+}
+
+@test "#2059 non-vacuity: the bullet's exit contract weakened reds the guard by name" {
+  local planted="$BATS_TEST_TMPDIR/profile.md" bad
+  perl -0pe "s/exits with bats' real status/exits 0/" "$PROFILE" > "$planted"
+  run cmp -s "$PROFILE" "$planted"
+  [ "$status" -eq 1 ]
+  bad="$(_bats_quiet_violations "$planted")"
+  [ "$bad" = "the targeted-run bullet lost <<exits with bats' real status>>" ] \
+    || { printf 'got [%s]\n' "$bad" >&2; return 1; }
 }
