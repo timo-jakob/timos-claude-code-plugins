@@ -85,6 +85,12 @@ Supported flags in `$ARGUMENTS`:
   last completed phase without asking; `--fresh` discards the checkpoint
   and starts over. Mutually exclusive (halt if both). Rejected together
   with `--dry-run` — a dry run neither writes nor consumes checkpoints.
+- `--telemetry-file PATH` / `--telemetry-dir DIR` — where the run's one
+  `telemetry/v1` record goes (#1228; see *Telemetry — stamp the run's start*
+  below). Each takes a value — halt on a missing, empty or `--`-shaped one, or
+  on a repeated flag. Precedence is the emitter's: `--telemetry-file` >
+  `--telemetry-dir` (`DIR/<repo-slug>.jsonl`) > the repo's local
+  `.claude/telemetry/telemetry.jsonl`. Combinable with every other flag.
 
 Anything else: surface the input to the user as "unrecognized
 arguments" and stop.
@@ -151,6 +157,46 @@ worktrees, so it survives the session). Before Phase 1, check for one:
 The checkpoint writes below are one-liners at each phase boundary and are
 **best-effort**: if a save fails, warn and continue — the checkpoint is a
 recovery aid, never a gate.
+
+### Telemetry — stamp the run's start (#1228)
+
+Every invocation that gets past Phase 2's *Proceed / halt* gate appends **exactly
+one** `kind: "run"` record, `pipeline: "maintenance"`, at Phase 9 (*Emit the
+run's record*). A stop **before** this point — in Phase 0, the resume entry,
+Phase 1 or Phase 2 — emits **none**. The contract (payload keys, the two
+contribution tables and the fold) is ARCHITECTURE.md's *Maintenance telemetry
+(#1228)*; never hand-roll an envelope, a run_id or a payload.
+
+When Phase 2's gate lets the run proceed, stamp the start **once per invocation** (a
+re-entry re-reads the run file, never calls `start` again — a second call would
+mint a second run):
+
+```bash
+"<skill-base-dir>/scripts/maintenance-telemetry.zsh" start \
+  --run-file <scratch>/maintenance-run.json \
+  [--telemetry-file <PATH>] [--telemetry-dir <DIR>] \
+  [--checkpoint-dir "$("<skill-base-dir>/scripts/checkpoint.zsh" dir)"] [--resume]
+```
+
+- Pass a sink flag only when Phase 0 was given it. A resumed run takes **this**
+  invocation's sink flags; they are not part of the restored scope.
+- Pass `--checkpoint-dir` on every run except `--dry-run` (which never touches
+  the store), and `--resume` exactly when the resume entry resumed. `start`
+  records the new `run_id` in the store and, on a resume, first reads the
+  interrupted run's id from it as `resumed_from_run_id` (`null` when not
+  recoverable). A resume is its own run: a **fresh** `run_id`, never a child of
+  the run it resumes.
+- **Exit 2** is your own malformed call — fix it and re-run once. **Exit 1**
+  (no clock, an unwritable run file) means this run has no record: say so in
+  one line and **skip the Phase 9 emit**. Nothing else about the run changes.
+
+From here on **every** ending reaches the Phase 9 emit — the `--dry-run` stop
+(Phase 5), a `--no-merge` run (Phase 8 skipped), a Phase 7
+`human_action_required` halt, and the normal ending. An error the orchestrator
+observes and reports — a gather or dispatch failure, or a halt that
+aborts the PR cycle — is noted in the run state's `errors` as you report it,
+and the run still emits before it stops. A session that dies mid-cycle emits
+nothing: the stream undercounts rather than guesses.
 
 ## Phase 1 — detect
 
@@ -792,7 +838,8 @@ nothing about whether a topic marker fired:
 append *"…and the languages listed above have no plugin or gather script yet."*
 The two buckets are separate facts; neither wording may swallow the other.
 
-Otherwise proceed with whatever is supported, and carry any
+Otherwise stamp the run's start (Phase 0, *Telemetry — stamp the run's start*),
+proceed with whatever is supported, and carry any
 `unsupported` languages / `unsupported_topics` into the Phase 9 summary as
 informational notes ("Detected `<X>` but its plugin isn't built yet — not
 processed").
@@ -1496,7 +1543,9 @@ print -r -- "{\"payloads\":[\"payload-<lang>.json\",…]}" \
 
 If `--dry-run`: print each payload (pretty-formatted via `jq .`)
 labeled by language **and topic**, print the pooled notes, list any
-unsupported languages / topics, and stop. Nothing is dispatched or merged.
+unsupported languages / topics, emit the run's record (Phase 9, *Emit the
+run's record* — its outcome folds to `parked`), and stop. Nothing is
+dispatched or merged.
 (Topic payloads are built and printed too, unless `--tool` / `--concern`
 scoped the run — in which case note that topic checks were skipped.)
 
@@ -1704,7 +1753,9 @@ tools ran and found nothing" about `tofu fmt`, `tofu validate`, tflint and
 For any response that contains `human_action_required`, the dispatcher halted
 deliberately. Pass the reasons + recommendations through to the user-facing
 summary and **skip all remaining phases for that dispatch target**. Every other
-target still proceeds.
+target still proceeds. Count each halted target for the run's record
+(`human_action_required`, Phase 9 *Emit the run's record*) — a halt parks the
+run's outcome.
 
 **This is not language-only.** For a *language* plugin the halt means coverage
 was below floor. A **topic** dispatcher halts for its own reasons — a finding
@@ -1760,7 +1811,11 @@ transition:
 spawning the group's agent, after the PR opens (record branch + PR
 number), after each CI-fixer invocation (increment `ci_fix_count`), and
 at the stage's terminal state (the post-merge sync for `merged`; the
-approval gate's outcomes for the rest).
+approval gate's outcomes for the rest). A group the `--batch=N` cap
+defers is recorded too, `{ "group": …, "status": "deferred" }` with no
+`pr`. `pr` is only ever a PR the stage **opened**: a vendor-PR stage acts on
+standing PRs and keeps `pr: null`. This record is also the Phase 9
+telemetry emit's stage input, which counts groups and PRs from it.
 
 **Resuming into Phase 8** (the resume entry already restored the plan
 from `phase6-plan`): reconcile every recorded stage against **GitHub
@@ -1778,6 +1833,10 @@ says what *is*:
   outward happened, so this is safe.
 - **Never** re-open an existing PR, re-dispatch a group whose PR merged,
   or spawn a second agent for a stage that has an open PR.
+- Mark every restored stage that already **merged** or already records a
+  `pr` with `"inherited": true` — an earlier invocation did that work, so this
+  run's telemetry counts neither the group as worked nor the PR as opened. A
+  re-spawned `agent_spawned` stage is this run's work and is not marked.
 
 Stages not yet in the record run normally from the restored plan.
 
@@ -1960,7 +2019,8 @@ below, decide which groups run this round. Sort the full `response.plan` by
 `priority_score` (descending) and keep the **top N**; the remaining `M − N`
 groups are **deferred** — not dispatched, no PR opened, no agent spawned.
 Record each deferred group (tool, description, finding count, priority
-score) for the Phase 9 *"Deferred this batch"* list. The cap counts
+score) for the Phase 9 *"Deferred this batch"* list, and as a `deferred`
+stage in `phase8-stages` (§ Per-stage checkpoint records). The cap counts
 **planner groups only** — Stage 0 (the coverage pre-flight, already merged
 above) is never counted against `N`. When `--batch` is absent the batch is
 the whole plan, so this step is a no-op. Selection is by **priority**;
@@ -3069,6 +3129,66 @@ instead: "No tools are registered for the detected topic(s) yet — nothing was
 inspected." Reporting a no-op as a clean bill of health is the one summary error
 that actively misleads.
 
+### Emit the run's record (#1228)
+
+The last step of Phase 9, **after** the summary is rendered, on every ending
+the start stamp's subsection lists — and exactly once. Skip it only when
+`start` exited 1. Write the run state to `<scratch>/maintenance-state.json`
+from facts noted where each was decided, never reconstructed at the end:
+
+```json
+{ "run_modifiers": { "dry_run": false, "no_merge": false, "batch": 3, "tool": null,
+                     "concern": null, "no_issues": false, "resumed": false },
+  "resumed_from_run_id": null,
+  "languages": { "detected": ["python"], "actionable": ["python"] },
+  "topics": ["claude-plugin"],
+  "payloads": [],
+  "groups_planned": 5,
+  "human_action_required": 0,
+  "errors": [],
+  "coverage_preflight": { "spawned": false, "languages": [] } }
+```
+
+- `run_modifiers` — Phase 0's flags (`resumed`: the resume entry resumed).
+  `resumed_from_run_id` may stay `null`: `emit` takes it from the run file.
+- `languages` — Phase 2's partition; `topics` — the topic plugins that
+  dispatched.
+- `payloads` — leave `[]` and pass each `/tmp/payload-<target>.json` Phase 4
+  built (the files its checkpoint copies; on a resume, those copies in
+  `checkpoint.zsh dir`) as a `--v2-payload` instead, so `findings_by_tool` is
+  counted from exactly what was dispatched (or printed, under `--dry-run`, which
+  writes them too). Pass none only when no payload was built.
+- `groups_planned` — the planner groups the dispatchers returned, summed over
+  targets (before any `--batch` cap), `0` when none returned a plan; `null`
+  **exactly** under `--dry-run`, where the planner never runs. Stage 0 is never
+  a group.
+- `human_action_required` — how many dispatch targets halted in Phase 7.
+- `errors` — one line per error you observed and reported (gather, dispatch,
+  an aborted cycle); `[]` otherwise. An aborted cycle leaves its current stage
+  `agent_spawned` or `pr_opened`, which the builder refuses: set that stage to
+  `escalated` in the scratch copy below, never in the store.
+- `coverage_preflight` — whether **this invocation** spawned Stage 0's improver,
+  and for which languages.
+
+The stages input is the `phase8-stages` record — `checkpoint.zsh load --phase
+phase8-stages` into a scratch file; omit `--stages` when there is none (a
+`--dry-run` or `--no-merge` run never enters Phase 8). Then:
+
+```bash
+"<skill-base-dir>/scripts/maintenance-telemetry.zsh" emit \
+  --run-file <scratch>/maintenance-run.json --state <scratch>/maintenance-state.json \
+  [--stages <scratch>/phase8-stages.json] --repo-dir "<repo.path>" \
+  --v2-payload <payload-file> [--v2-payload <payload-file> …]
+```
+
+The builder folds the outcome — worst contribution wins, over
+`failed` > `escalated` > `parked` > `success` — so never pick it yourself. **Telemetry is never
+fatal**: past argument parsing `emit` exits 0 whatever happens; on any failure
+(a refused state, an absent or failing emitter, a run already emitted) it
+prints one `maintenance record NOT emitted` advisory and appends nothing. Relay
+that line and carry on — the run's summary, exit and PRs stand. An exit 2 is
+your own malformed call: fix it and re-run once; a second costs the record.
+
 ## Phase 10 — track changes and findings as GitHub issues
 
 **Runs by default.** Skip this phase entirely when `--no-issues` was
@@ -3199,7 +3319,7 @@ The run is finished; remove its checkpoint:
 
 A completed run leaves no checkpoint behind — resume is only ever
 offered for *interrupted* runs. When Phase 10 is skipped
-(`--no-issues`), clear at the end of Phase 9 instead. (`--dry-run`
+(`--no-issues`), clear after Phase 9's emit instead. (`--dry-run`
 never wrote one.)
 
 ## What you will NOT do
