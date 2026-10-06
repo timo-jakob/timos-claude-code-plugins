@@ -277,6 +277,13 @@ a_unchanged() {
   drive "$plugin_path"
   [ "$status" -eq 1 ]
   a_unchanged
+
+  # A fourth component is refused too, not truncated: it pins the regex's $
+  # anchor, which the cases above pass without (#1885).
+  side B "$BASE_PLUGIN" '.version="1.193.2.1"'
+  drive "$plugin_path"
+  [ "$status" -eq 1 ]
+  a_unchanged
 }
 
 @test "a PR version that is not a bump of the base exits 1 and leaves <A> unchanged" {
