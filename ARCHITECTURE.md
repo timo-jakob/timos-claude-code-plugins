@@ -3978,6 +3978,40 @@ without shipping its profile reds the suite** (#1505). That is a **build-time**
 requirement only — §1b's runtime behaviour is untouched, and a missing profile
 there remains notice-and-continue.
 
+### Pre-review self-check (#2014)
+
+The claude-plugin profile's **Gate** opens with a self-check the writer runs
+after implementation and before the §3 gate:
+`development-claude-plugin/skills/resolve-profile/scripts/untested-surface.zsh
+--repo PATH [--base REF]` lists the surface the story diff adds that no bats
+case tests and no bats needle pins. It is **advisory, never a gate**: it writes
+nothing but stdout, and exits 0 whenever the diff is read, 2 on a usage error,
+1 when there is no merge-base. The writer redirects it to
+`<worktree_root>/.review/self-check.json`, addresses the items, re-runs it into
+the same path, and adds a waiver to whatever is still listed. Each item is:
+
+```json
+{ "file": "plug/skills/x/scripts/tool.zsh", "kind": "exit", "line": 42,
+  "text": "--dry) exit 3 ;;", "waiver": "defensive guard, not documented behaviour" }
+```
+
+- `file` is repo-relative; `line` is 1-based in the post-change file (a prose
+  item's: the line its sentence starts on); `text` is the added line, or the
+  whitespace-flattened sentence.
+- `kind` is `exit`, `flag`, `case-arm` (from a changed `*.zsh` script, judged
+  against the `tests/*.bats` files that name the script's basename) or
+  `rule-sentence` (from an added `*.md` line under `skills/` or `agents/`,
+  judged against every quoted bats literal of 12+ characters). The script's
+  header states each predicate.
+- `waiver` is **writer-added**, never emitted by the script: a non-empty string
+  on every item still listed after the final re-run. That file — the items plus
+  their waivers — is the waiver record; there is no other.
+
+The file reaches round 1 through the `plan` descriptor's `self_check_path` key
+(*Review-panel invocation contract*, below): the panel brief passes `--self-check` on round 1
+when the file exists, and the review skill's prompt template adds a `Self-check
+waivers (round 1):` line only when that value is non-null.
+
 ## Review-panel invocation contract (#560)
 
 The autonomous review loop's orchestrator (#562) must invoke the right language
@@ -4055,7 +4089,8 @@ subcommands can never disagree about a repo, and `--base` is refused rather than
 accepted-and-ignored.
 
 **`plan --repo PATH [--base REF] [--round N] [--findings-path PATH] [--final]
-[--prior-tree TREE_ID] [--fix-verification PATH] [--adjudicated PATH]`** emits the
+[--prior-tree TREE_ID] [--fix-verification PATH] [--adjudicated PATH]
+[--self-check PATH]`** emits the
 dispatch descriptor. `--findings-path` overrides where the panel is told to write
 its aggregate, defaulting to `<worktree_root>/.review/findings-round-<N>.json` —
 **absolute, and the same for every spelling of `--repo`**, because `--repo` is
@@ -4090,7 +4125,8 @@ cannot mint a second artifact path for the same round:
   "delta_hunks": null,
   "skippable_dimensions": [],
   "fix_verification_path": null,
-  "adjudicated_path": null
+  "adjudicated_path": null,
+  "self_check_path": null
 }
 ```
 
@@ -4142,6 +4178,12 @@ cannot mint a second artifact path for the same round:
   untouched either way. `--fix-verification` / `--adjudicated` are **echoed through** as
   `fix_verification_path` / `adjudicated_path` — this script never reads either
   file, so one descriptor value carries everything a round's panel needs.
+  `--self-check` (#2014) is echoed through the same way as `self_check_path`,
+  the descriptor's **last** key, `null` when absent and never read: the path of
+  the claude-plugin writer's pre-review self-check file (*Pre-review self-check*,
+  below). The panel brief passes it on round 1 only, and only when that file
+  exists, so from round 2 on, and on every repo type whose profile writes no
+  such file, it is `null`.
   `--max-rounds` is deliberately **not** a flag here: finality is the loop's
   rule (the ceiling moves with every human grant), and a second copy of it would
   be a second place to change.

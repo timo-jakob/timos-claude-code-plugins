@@ -326,6 +326,12 @@ _background_wait_pins() {
   contains "$panel" 'Run `review-dispatch.zsh plan --repo <worktree_root> --base <base> --round <round>`'
 }
 
+@test "#2014: the panel passes the self-check file on round 1, only when it exists" {
+  load_panel_brief
+  contains "$panel" 'On round 1, add `--self-check <worktree_root>/.review/self-check.json` when that file exists.'
+  contains "$panel" 'Step 1'"'"'s round-1 "no flags beyond the round" predates #2014 and does not override that.'
+}
+
 @test "AC7: the panel dispatches the reviewers of the review_skill and of every topic panel" {
   # #2023: dropping the topic-panel half of this sentence would silently drop
   # every topic panel from a round, and nothing else pins it.

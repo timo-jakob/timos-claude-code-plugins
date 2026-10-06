@@ -26,6 +26,21 @@ dropped, because the contract's readers key on the roster, not on presence.
 These are the §3 rules for this repo type. The conductor's generic bullet says
 *the whole suite, never a subset*; what follows is how that is spelled here.
 
+- **Run the pre-review self-check before the gate (#2014).** After
+  implementation and before the first gate, run
+  `<this skill's base dir>/scripts/untested-surface.zsh --repo <worktree_root>`,
+  redirecting its stdout to `<worktree_root>/.review/self-check.json` (create
+  `.review/` first; it is git-ignored). It lists
+  the exits, flags, case arms and rule sentences the story adds that no bats
+  case tests and no bats needle pins. Address each item with a bats case or a
+  pin, then re-run the script into the same path. Every item still listed after
+  that final re-run must carry a non-empty `waiver` string you add to it, for
+  example "defensive guard, not documented behaviour"; an item left without one
+  breaks this rule. That file is the waiver record — keep no other. The script is
+  advisory and never a gate. On an exit 2, your own malformed call, fix it and
+  re-run once; on an exit 1 (no merge-base), or a second 2, delete the file the
+  redirect created, so the round-1 panel gets no self-check line rather than an
+  empty one.
 - **Run the blessed single-run parallel gate rather than bare `bats`:**
   `<resolve-issue skill-base-dir>/scripts/run-gate.zsh --tests-dir tests` (#980)
   — it runs the whole `bats tests` suite **exactly once**, parallelised via
