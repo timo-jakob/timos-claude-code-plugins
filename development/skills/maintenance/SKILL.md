@@ -133,6 +133,9 @@ worktrees, so it survives the session). Before Phase 1, check for one:
     checkpoint records: reload each phase's data with
     `checkpoint.zsh load --phase <name>` and re-read copied artifacts
     from `checkpoint.zsh dir` (never from `/tmp` — it didn't survive).
+    A run resumed past `phase4-payload` reads its payloads from the
+    `payload-<target>.json` copies in `checkpoint.zsh dir`, never from
+    `<payload-dir>` or `/tmp`; it creates no `<payload-dir>` of its own.
     Restore the **recorded flags**: a resumed run keeps its original
     scope; if this invocation passes a *different* `--tool`/`--concern`/
     `--batch`, halt — changing scope requires `--fresh`. Continue at the
@@ -1208,7 +1211,7 @@ print -r -- "{\"supported\":[…],\"supported_topics\":[…],
   | "<skill-base-dir>/scripts/checkpoint.zsh" save --phase phase3-gather --data -
 ```
 
-On resume, re-read every findings file from `$ckdir`, not `/tmp`.
+On resume, re-read every findings file from `checkpoint.zsh dir`, not `/tmp`.
 
 ## Phase 4 — construct one payload per supported language
 
@@ -1481,22 +1484,58 @@ differences:
 
 The same no-trim construction discipline applies.
 
-**Checkpoint `phase4-payload`** (skip under `--dry-run`): copy each
-constructed payload into the store and record the list, so a resumed run
-dispatches the exact payloads this run built:
+### Keep each payload in one file (#2148)
+
+Every constructed payload — language and topic alike — is written **once**, to
+one kept file, and every later step that needs it reads that file (or its
+checkpoint copy on a run resumed past `phase4-payload`). This happens on live and `--dry-run` runs
+alike.
+
+First create the run's payload directory, once per run. It prints the path;
+substitute it as `<payload-dir>` in every later step (shell variables do not
+survive between steps — the same reason `<skill-base-dir>` is a placeholder):
+
+```bash
+( umask 077 && mktemp -d "${TMPDIR:-/tmp}/claude-maintenance-payloads.XXXXXXXX" )
+```
+
+Then write each payload with the Write tool to
+`<payload-dir>/payload-<target>.json`, where `<target>` is the language or
+topic name, and give it mode 600, as `write-payload.zsh` does for its
+hand-over temp:
+
+```bash
+chmod 600 "<payload-dir>/payload-<target>.json"
+```
+
+`<payload-dir>` lives until the run ends: *Run complete — clear the checkpoint*
+removes it on a live run, and Phase 5 removes it under `--dry-run`. After a
+crash, or an ending that never reaches *Run complete*, it is left in `$TMPDIR`
+for the OS to reap, as `write-payload.zsh` already does with its temp.
+
+**Checkpoint `phase4-payload`** (skip under `--dry-run`): copy exactly the
+kept files in `<payload-dir>` into the store and record their names, so a
+resumed run dispatches the exact payloads this run built:
 
 ```bash
 ckdir=$("<skill-base-dir>/scripts/checkpoint.zsh" dir)
-cp /tmp/payload-*.json "$ckdir/"
-print -r -- "{\"payloads\":[\"payload-<lang>.json\",…]}" \
+cp "<payload-dir>"/payload-*.json "$ckdir/"
+print -r -- "{\"payloads\":[\"payload-<target>.json\",…]}" \
   | "<skill-base-dir>/scripts/checkpoint.zsh" save --phase phase4-payload --data -
 ```
 
 ## Phase 5 — `--dry-run`?
 
-If `--dry-run`: print each payload (pretty-formatted via `jq .`)
-labeled by language **and topic**, print the pooled notes, list any
-unsupported languages / topics, and stop. Nothing is dispatched or merged.
+If `--dry-run`: print each payload from its kept file
+(`jq . "<payload-dir>/payload-<target>.json"`) labeled by language **and
+topic**, print the pooled notes, list any unsupported languages / topics,
+then remove the payload directory and stop. Nothing is dispatched or merged,
+and nothing was copied into the checkpoint store.
+
+```bash
+rm -rf -- "<payload-dir>"
+```
+
 (Topic payloads are built and printed too, unless `--tool` / `--concern`
 scoped the run — in which case note that topic checks were skipped.)
 
@@ -1513,24 +1552,27 @@ the Skill tool. **The payload is handed over via a temp file**, not
 inline — see ARCHITECTURE.md § "JSON schema (v2)" for the contract.
 
 ```bash
-# 1. Write the payload to a temp file. The helper sets 0600 perms
-#    and prints the absolute path on stdout.
-payload_file=$(print -r -- "$payload_json" \
-  | "<skill-base-dir>/scripts/write-payload.zsh")
+# 1. Hand the kept file (Phase 4) over to a temp file. The helper sets
+#    0600 perms and prints the temp's absolute path; substitute it as
+#    <payload-file> in steps 2 and 3. On a run resumed past
+#    phase4-payload, read the checkpoint copy in `checkpoint.zsh dir` instead.
+"<skill-base-dir>/scripts/write-payload.zsh" \
+  < "<payload-dir>/payload-<lang>.json"
 ```
 
 ```text
-# 2. Dispatch. args= is the path to the file just written.
+# 2. Dispatch. args= is the path step 1 printed.
 Skill(
   skill="development-<lang>:maintenance",
-  args="$payload_file"
+  args="<payload-file>"
 )
 ```
 
 ```bash
 # 3. After the Skill tool returns (success or failure), delete the
-#    temp file. On hard crash the OS reaps it from $TMPDIR.
-rm -f "$payload_file"
+#    hand-over temp — only it, never the kept file. On hard crash the
+#    OS reaps it from $TMPDIR.
+rm -f -- "<payload-file>"
 ```
 
 `<skill-base-dir>` is the maintenance skill's directory (the same
@@ -1551,11 +1593,14 @@ release notes), not `code_scanning_alerts[]`, not any other field.
 Downstream agents parse fields the orchestrator never reads, so
 trimming silently changes routing.
 
-**Self-check before each dispatch:** the JSON written to the temp file
-must be character-for-character identical to the payload you built in
-Phase 4. If you "tidied up," "shortened," "deduplicated," or
-"summarised" anything, the contract is broken — reconstruct from
-`findings-<lang>.json` and dispatch again.
+**Self-check before each dispatch:** the kept file's `tooling_configured`,
+`findings_by_tool` and `coverage` (and, for a topic, `notes`) must equal
+those fields of `findings-<target>.json`. If you "tidied up," "shortened,"
+"deduplicated," or "summarised" anything, the contract is broken — restore
+those fields in the kept file (on a run resumed past `phase4-payload`, its
+checkpoint copy) from
+`findings-<target>.json`, leave the rest as Phase 4 built it, and dispatch
+again.
 
 This rule is incident-driven (the orchestrator trimmed payloads in
 **two real runs**) and payload size is never a justification — v2's
@@ -1628,13 +1673,16 @@ and continue with the rest.
 ### Dispatch to topic plugins
 
 After (or alongside) the language dispatches, dispatch each `topic` in
-`supported_topics` **identically** — same file-handover, same no-trim contract,
-same `Skill(...)`-is-a-step rule:
+`supported_topics` **identically** — same file-handover (from the kept
+`<payload-dir>/payload-<topic>.json`, or its checkpoint copy on a run resumed
+past `phase4-payload`, with the same `rm -f -- "<payload-file>"` of only the
+hand-over temp afterwards),
+same no-trim contract, same `Skill(...)`-is-a-step rule:
 
 ```text
 Skill(
   skill="development-<topic>:maintenance",
-  args="$payload_file"
+  args="<payload-file>"
 )
 ```
 
@@ -1925,22 +1973,26 @@ spawned with `isolation="worktree"`.
 5. **Now re-invoke the dispatcher** with the same payload that drove
    the first dispatch — coverage is now at Required on main, so the
    second invocation lands on Phase B and returns the plan. Use the
-   same three-step file-handover pattern as Phase 6:
+   same three-step file-handover pattern as Phase 6, from the same kept
+   file (or its checkpoint copy in `checkpoint.zsh dir` on a run resumed
+   past `phase4-payload`), substituting the printed temp path as
+   `<payload-file>`:
 
    ```bash
-   payload_file=$(print -r -- "$payload_json" \
-     | "<skill-base-dir>/scripts/write-payload.zsh")
+   "<skill-base-dir>/scripts/write-payload.zsh" \
+     < "<payload-dir>/payload-<lang>.json"
    ```
 
    ```text
    Skill(
      skill="development-<lang>:maintenance",
-     args="$payload_file"
+     args="<payload-file>"
    )
    ```
 
    ```bash
-   rm -f "$payload_file"
+   # only the hand-over temp — never the kept file
+   rm -f -- "<payload-file>"
    ```
 
    The new response will have `plan` and no `improver_result` (that
@@ -3191,16 +3243,23 @@ summary, so the user sees exactly what changed on the issues side.
 
 ### Run complete — clear the checkpoint (#517)
 
-The run is finished; remove its checkpoint:
+The run is finished; remove its checkpoint, then the run's payload
+directory (Phase 4, #2148):
 
 ```bash
 "<skill-base-dir>/scripts/checkpoint.zsh" clear
+rm -rf -- "<payload-dir>"
 ```
+
+Remove `<payload-dir>` only when this session created one. A run resumed
+past `phase4-payload` never did — it read the checkpoint copies — so it
+removes nothing here beyond the checkpoint.
 
 A completed run leaves no checkpoint behind — resume is only ever
 offered for *interrupted* runs. When Phase 10 is skipped
-(`--no-issues`), clear at the end of Phase 9 instead. (`--dry-run`
-never wrote one.)
+(`--no-issues`), clear at the end of Phase 9 instead, with the same
+payload-directory removal. (`--dry-run` never wrote one, and Phase 5
+already removed its payload directory.)
 
 ## What you will NOT do
 
