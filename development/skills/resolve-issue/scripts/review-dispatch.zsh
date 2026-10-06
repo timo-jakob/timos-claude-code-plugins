@@ -54,12 +54,13 @@
 #
 #   plan --repo PATH [--base REF] [--round N] [--findings-path PATH]
 #        [--final] [--prior-tree TREE_ID] [--fix-verification PATH]
-#        [--adjudicated PATH]
+#        [--adjudicated PATH] [--self-check PATH]
 #       Emit the dispatch descriptor JSON on stdout:
 #         { repo_type, review_skill, topic_review_skills[], round, base,
 #           findings_path, changed_files[], worktree_root, original_root, scope_abs[],
 #           scope_mode, scope_empty, prior_tree, delta_files, delta_hunks,
-#           skippable_dimensions, fix_verification_path, adjudicated_path }
+#           skippable_dimensions, fix_verification_path, adjudicated_path,
+#           self_check_path }
 #       worktree_root / original_root / scope_abs are the #1582 path rail. A
 #       reviewer that resolves a repo-relative path against its own cwd reads the
 #       ORIGINAL checkout whenever the run is in a linked worktree — which is how
@@ -125,7 +126,11 @@
 #       --fix-verification / --adjudicated are echoed through as
 #       fix_verification_path / adjudicated_path (null when absent) — this script
 #       never reads either file; the loop writes them and the reviewers consume
-#       them. `--max-rounds` is deliberately NOT a flag here: finality is the
+#       them. --self-check (#2014) is echoed through as self_check_path the
+#       same way (null when absent), never read: the claude-plugin writer's
+#       round-1 self-check waiver file, which the panel brief passes on round 1
+#       only, and only when the file exists.
+#       `--max-rounds` is deliberately NOT a flag here: finality is the
 #       loop's rule, and duplicating the ceiling would mean two places to change.
 #       repo_type ∈ {swift, python, java, go, javascript, claude-plugin, kubernetes};
 #       review_skill is the
@@ -1075,6 +1080,7 @@ cmd_plan() {
   # indistinguishable from "flag omitted" once assigned, and would be waved
   # through, which is precisely the shape the check exists to catch.
   local final=0 prior_tree="" prior_tree_given=0 fix_verification="" adjudicated=""
+  local self_check=""
   while [[ $# -gt 0 ]]; do
     # `need_value` BEFORE the assignment (#1177): this script runs under
     # `setopt nounset`, so a value-taking flag in last position made `"$2"` a raw
@@ -1120,6 +1126,8 @@ cmd_plan() {
     # value (the plan) carry everything a round's panel needs.
     --fix-verification) need_value "plan" "$@"; fix_verification="$2"; shift 2 ;;
     --adjudicated) need_value "plan" "$@"; adjudicated="$2"; shift 2 ;;
+    # #2014: the round-1 self-check waiver file, echoed through the same way.
+    --self-check) need_value "plan" "$@"; self_check="$2"; shift 2 ;;
     -*) die_usage "plan: unknown flag: $1" ;;
     *) die_usage "plan: unexpected argument: $1" ;;
     esac
@@ -1329,6 +1337,7 @@ cmd_plan() {
     --argjson skippable "$skippable_json" \
     --arg fixver "$fix_verification" \
     --arg adjud "$adjudicated" \
+    --arg selfchk "$self_check" \
     '{repo_type:$repo_type, review_skill:$review_skill,
       topic_review_skills:$topics, round:$round, base:$base,
       findings_path:$findings_path, changed_files:$changed,
@@ -1342,7 +1351,8 @@ cmd_plan() {
       delta_hunks:$hunks,
       skippable_dimensions:$skippable,
       fix_verification_path:(if $fixver=="" then null else $fixver end),
-      adjudicated_path:(if $adjud=="" then null else $adjud end)}' || {
+      adjudicated_path:(if $adjud=="" then null else $adjud end),
+      self_check_path:(if $selfchk=="" then null else $selfchk end)}' || {
     print -u2 -- "plan: could not emit the dispatch descriptor"; exit 1
   }
 }

@@ -1497,7 +1497,7 @@ EOF
   # whole suite green.
   local flag
   for flag in --repo --base --round --findings-path \
-              --prior-tree --fix-verification --adjudicated; do
+              --prior-tree --fix-verification --adjudicated --self-check; do
     run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
       zsh "$S" plan "$flag"
     [ "$status" -eq 2 ]
@@ -2423,7 +2423,38 @@ EOF
   plan '{"languages":["python"]}' --round 1
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r 'keys_unsorted | join(",")')" = \
-    "repo_type,review_skill,topic_review_skills,round,base,findings_path,changed_files,worktree_root,original_root,scope_abs,scope_mode,scope_empty,prior_tree,delta_files,delta_hunks,skippable_dimensions,fix_verification_path,adjudicated_path" ]
+    "repo_type,review_skill,topic_review_skills,round,base,findings_path,changed_files,worktree_root,original_root,scope_abs,scope_mode,scope_empty,prior_tree,delta_files,delta_hunks,skippable_dimensions,fix_verification_path,adjudicated_path,self_check_path" ]
+}
+
+@test "#2014 plan echoes --self-check as self_check_path, the last key, null when absent" {
+  echo "print(1)" > "$R/app.py"
+  plan '{"languages":["python"]}' --round 1
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .self_check_path)" = "null" ]
+  # present-and-null, not absent: a consumer reads the key unconditionally
+  [ "$(echo "$output" | jq -r 'has("self_check_path")')" = "true" ]
+  plan '{"languages":["python"]}' --round 1 --self-check "$R/.review/self-check.json"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .self_check_path)" = "$R/.review/self-check.json" ]
+  [ "$(echo "$output" | jq -r 'keys_unsorted | .[-2:] | join(",")')" = \
+    "adjudicated_path,self_check_path" ]
+  # echoed, never read: the file does not exist and the plan still succeeds
+  [ ! -e "$R/.review/self-check.json" ]
+}
+
+@test "#2014 plan --self-check refuses an empty or flag-shaped value with exit 2" {
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$R" --base main --self-check ''
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q -- '--self-check requires a non-empty value'
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$R" --base main --self-check --final
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q -- '--self-check requires a value (got the flag --final)'
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" plan --repo "$R" --base main --self-check
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q -- '--self-check requires a value'
 }
 
 @test "#1582 --no-relative survives a user-level diff.relative=true" {

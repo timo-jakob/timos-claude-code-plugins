@@ -164,6 +164,12 @@ descriptor at all, and on round 1 the loop's own caller passes no
 loop's own `plan` call passes `--adjudicated` on every round, so a loop-side
 descriptor may name it from round 1. The driving session's round-1 plan does
 not — and either way the non-null test gives the right answer.)
+On round 1 the plan may carry a third path, `self_check_path` (#2014) — the
+writer's pre-review self-check items and the waivers on those left untested, so
+a reviewer can see which gaps were consciously accepted. Add the `Self-check
+waivers (round 1):` line only when the plan names a **non-null**
+`self_check_path`, the same test: a standalone run and every round from 2 on
+carry none.
 The Fix verification line carries the path the split-carry map (above) gives the
 reviewer's **own** dimension, never `fix_verification_path` itself, and is
 added only when the map holds that dimension (#2010).
@@ -189,6 +195,7 @@ For each plugin whose `plugin.json` version differs from the base's, read the ba
 Review scope: {the review scope}
 Fix verification (round >= 2): {own_fix_verification_path} — the previous round's blockers. Confirm each one actually landed BEFORE looking for anything new. For each carried entry report ONE of confirmed / re-raised / unconfirmed, as one line keyed by the carry's own spelling — carried entry "<title>" (<file>, <dimension>): confirmed at <file:line> | re-raised (see finding) | unconfirmed — re-raising ONLY what you observed still present, at its ORIGINAL severity, citing the carried entry and the file:line plus the unchanged text or passing mutation in the findings file, even when its file is outside this round's scope; never re-raise on the absence of a fix. A re-raise is a finding whose file, dimension and title are the carried entry's own spelling (title verbatim) and whose line is the carried line or null, with what you observed in its description — under a different title it is not matched to the carry and the round is refused. Every entry in that file is of your own dimension ("{DIMENSION}", which the identity includes) and is yours alone to account for: no other reviewer is shown it. End your report with the triple: carried: confirmed N / re-raised M / unconfirmed K of TOTAL, where TOTAL is the number of entries in that file.
 Already waived (round >= 2): {adjudicated_path} — suggestions earlier rounds surfaced and the human waived. Do not re-raise them as Suggestions, EXCEPT in a file the PREVIOUS ROUND'S FIX PASS touched (on a delta round that is this round's scope; on a closing full sweep that NO fix pass preceded the set is empty, so withhold them — but on a sweep the residue promotion earned, a fix pass did run, so the exemption applies as on any round). A genuinely blocking re-raise at CRITICAL/WARNING is always allowed.
+Self-check waivers (round 1): {self_check_path} — the writer's pre-review self-check: JSON items {file, kind, line, text} for script surface no bats case tests and rule sentences no bats needle pins, each still listed one carrying the writer's "waiver" reason. A waived item is a gap the writer chose to accept; judge it at your own bar, and do not raise it only because it is listed.
 Fix-pass hunks (delta round): {delta_hunks} — the previous fix pass's new-side line ranges, each {file, kind, start, end}: kind "added" is a pure addition, "changed" rewrote or removed lines that existed at the prior tree. Apply them as your agent definition's delta-round rule says; a definition that states no such rule ignores this line.
 Version increments (claude-plugin-manifest-check only): {increments} — each bumped plugin's version at the base and in this tree, as <plugin>: <base version> -> <new version>.
 

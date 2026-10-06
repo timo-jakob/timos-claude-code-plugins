@@ -605,6 +605,35 @@ _bats_quiet_violations() {
   return 0
 }
 
+# Every way profile $1's Gate breaks the pre-review self-check bullet (#2014),
+# one per line. The bullet is read as the Gate's FIRST top-level `- ` bullet,
+# flattened, so a reflow cannot unpin it and a move anywhere else reds it. The
+# real assertion and its non-vacuity controls both go through this.
+_self_check_violations() {
+  local sec first needle
+  sec="$(_profile_section "$1" "Gate")"
+  first="$(awk '
+    /^- / { if (b != "") exit; b = $0; next }
+    /^  / && b != "" { sub(/^ +/, " "); b = b $0; next }
+    b != "" { exit }
+    END { print b }
+  ' <<< "$sec" | tr -s ' ')"
+  for needle in \
+    '**Run the pre-review self-check before the gate (#2014).**' \
+    'After implementation and before the first gate, run `<this skill'"'"'s base dir>/scripts/untested-surface.zsh --repo <worktree_root>`' \
+    'redirecting its stdout to `<worktree_root>/.review/self-check.json`' \
+    'Address each item with a bats case or a pin, then re-run the script into the same path.' \
+    'Every item still listed after that final re-run must carry a non-empty `waiver` string you add to it' \
+    'an item left without one breaks this rule.' \
+    'That file is the waiver record — keep no other.' \
+    'The script is advisory and never a gate.' \
+    'On an exit 2, your own malformed call, fix it and re-run once' \
+    'on an exit 1 (no merge-base), or a second 2, delete the file the redirect created'; do
+    case "$first" in *"$needle"*) : ;; *) printf 'the self-check bullet lost <<%s>>\n' "$needle" ;; esac
+  done
+  return 0
+}
+
 # The profiles with NO attestable single-run runner — derived from the Gate's
 # own content, never a hand-written list. That is the real reason the rule
 # splits: `--gate-attest` (#981) carries a tree identity a runner produced, so a
@@ -2899,7 +2928,7 @@ _roster_sites() {
   # the profile. The copy is checked to differ, so the control cannot pass on a
   # move that never happened.
   local planted="$BATS_TEST_TMPDIR/profile.md" bad
-  perl -0pe 'my ($b) = /(- \*\*Run targeted bats files quietly.*?\n)(?=\n## )/s; s/\Q$b\E//; s/(?=- \*\*Run the blessed)/$b/;' \
+  perl -0pe 'my ($b) = /(- \*\*Run targeted bats files quietly.*?\n)(?=\n## )/s; s/\Q$b\E//; s/(?=- \*\*Run the pre-review self-check)/$b/;' \
     "$PROFILE" > "$planted"
   run cmp -s "$PROFILE" "$planted"
   [ "$status" -eq 1 ]
@@ -2915,6 +2944,37 @@ _roster_sites() {
   [ "$status" -eq 1 ]
   bad="$(_bats_quiet_violations "$planted")"
   [ "$bad" = 'the targeted-run bullet lost <<never a `--gate-attest` source>>' ] \
+    || { printf 'got [%s]\n' "$bad" >&2; return 1; }
+}
+
+@test "#2014 the claude-plugin Gate opens with the pre-review self-check and its waiver rule" {
+  local bad
+  bad="$(_self_check_violations "$PROFILE")"
+  [ -z "$bad" ] || { printf '%s\n' "$bad" >&2; return 1; }
+}
+
+@test "#2014 non-vacuity: the self-check bullet moved off the front reds every needle" {
+  # Cut the bullet and paste it after the Gate's last bullet, in a copy of the
+  # profile; the copy is checked to differ, so the control cannot pass on a
+  # move that never happened.
+  local planted="$BATS_TEST_TMPDIR/profile.md" bad
+  perl -0pe 'my ($b) = /(- \*\*Run the pre-review self-check.*?\n)(?=- \*\*Run the blessed)/s; s/\Q$b\E//; s/(\n)(?=\n## Version bump)/$1$b/;' \
+    "$PROFILE" > "$planted"
+  run cmp -s "$PROFILE" "$planted"
+  [ "$status" -eq 1 ]
+  bad="$(_self_check_violations "$planted")"
+  [ "$(grep -c '^the self-check bullet lost' <<< "$bad")" -eq 10 ] \
+    || { printf 'got [%s]\n' "$bad" >&2; return 1; }
+}
+
+@test "#2014 non-vacuity: the waiver clause dropped from the bullet reds the guard by name" {
+  local planted="$BATS_TEST_TMPDIR/profile.md" bad
+  perl -0pe 's/an item left without one\s+breaks this rule\./an item left without one is fine./' \
+    "$PROFILE" > "$planted"
+  run cmp -s "$PROFILE" "$planted"
+  [ "$status" -eq 1 ]
+  bad="$(_self_check_violations "$planted")"
+  [ "$bad" = 'the self-check bullet lost <<an item left without one breaks this rule.>>' ] \
     || { printf 'got [%s]\n' "$bad" >&2; return 1; }
 }
 

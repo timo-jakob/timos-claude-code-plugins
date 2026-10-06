@@ -454,6 +454,17 @@ _assert_file() {  # _assert_file <path> <test-expr...>
   contains "$section_flat" 'leave the line out and never compute ranges yourself.'
 }
 
+@test "the claude-plugin review skill attaches the Self-check waivers line on round 1, only when non-null (#2014)" {
+  local skill="$REPO_ROOT/development-claude-plugin/skills/review/SKILL.md"
+  _load_section "$skill" "Step 1: Plan the round, then run its script and launch its agents in parallel"
+  # the line itself, inside the launch-prompt template, with its placeholder
+  contains "$section" 'Self-check waivers (round 1): {self_check_path} — the writer'"'"'s pre-review self-check'
+  contains "$section" 'A waived item is a gap the writer chose to accept; judge it at your own bar, and do not raise it only because it is listed.'
+  # the introduction names it as a round-1 path under the same non-null test
+  contains "$section_flat" 'On round 1 the plan may carry a third path, `self_check_path` (#2014)'
+  contains "$section_flat" 'Add the `Self-check waivers (round 1):` line only when the plan names a **non-null** `self_check_path`, the same test: a standalone run and every round from 2 on carry none.'
+}
+
 @test "ARCHITECTURE.md and review-loop.md document the delta-round rule and delta_hunks (#2011)" {
   local arch="$REPO_ROOT/ARCHITECTURE.md"
   # #2055 split review-loop.md into shards; the #2011 subsection is in
