@@ -1,7 +1,8 @@
 # Read your pipeline telemetry
 
-The review loop, `/development:refine-issue` and `/development:resolve-issue` —
-the three pipelines instrumented so far, with more joining incrementally — each
+The review loop, `/development:refine-issue`, `/development:resolve-issue` and
+`/development:maintenance` — the pipelines instrumented so far, with more
+joining incrementally — each
 append one `telemetry/v1` JSONL record per run **ending** to a local sink
 (git-ignored in a bootstrapped repo — see below) —
 an extended review-loop run (escalate → grant more rounds → resume) appends
@@ -196,11 +197,12 @@ Three things to know before you rely on it:
   `/development:resolve-issue 412 --telemetry-dir ~/telemetry-share` sends the
   story's record **and** every review-loop record of that run to
   `~/telemetry-share/<repo-slug>.jsonl`. `--telemetry-file PATH` works the same
-  way and wins when both are given. That holds for a single issue: pointed at an
-  **epic**, resolve-issue ignores the flag for now, and its loops write to the
-  local default. `/development:refine-issue` does **not** forward it yet, so its
-  records always go to the local default. An empty shared directory after an
-  epic or a refine-issue run means *that* gap, not a broken emitter.
+  way and wins when both are given.
+  `/development:maintenance --telemetry-dir DIR` (or `--telemetry-file PATH`)
+  sends its run's record there the same way.
+  `/development:refine-issue` does **not** forward it yet, so its
+  records always go to the local default. An empty shared directory after a
+  refine-issue run means *that* gap, not a broken emitter.
 - **The shared directory is `telemetry/v1`-only.** Every line in it carries a
   `schema` key, which is what lets a consumer skip version sniffing entirely.
   The legacy pre-contract files described above stay where they are — **never copy them
@@ -236,8 +238,9 @@ guesses.
 
 - [Pipeline telemetry](../explanation/pipeline-telemetry.md) — why this data is
   collected, what is deliberately left out, and why it stays on your machine.
-- [The local review loop](../explanation/review-loop.md) — one of the three
+- [The local review loop](../explanation/review-loop.md) — one of the
   pipelines that emit into the sink this page reads (the others are
-  `/development:refine-issue` and `/development:resolve-issue` itself).
+  `/development:refine-issue`, `/development:resolve-issue` itself and
+  `/development:maintenance`).
 - `ARCHITECTURE.md`, "The telemetry/v1 contract" and "Telemetry rollup
   (#1007)" — the normative schema and rollup behaviour this page summarizes.

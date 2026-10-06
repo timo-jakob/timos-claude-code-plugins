@@ -5973,6 +5973,18 @@ pattern is exactly the drift the contract exists to stop.
    pipeline's exit, verdict or report. The emitter appends nothing on a
    non-zero exit, so no partial record reaches a sink.
 7. **`tokens` stays `null`.** Never estimated (the contract's reliability rule).
+8. **A multi-ending run folds its outcome, worst state wins (#1228).** When one
+   run reaches several endings at once — some parts merged, one escalated,
+   one target parked — each part *contributes* an outcome from a table the
+   pipeline states, and the record's single `outcome` is the worst
+   contribution over the precedence `failed` > `escalated` > `parked` >
+   `success`. A run with no contributions is `success`. The tables are the
+   pipeline's to state; the precedence is not, and the fold lives behind the
+   builder's `--print-outcome`, never in skill prose. Without it, a run that
+   matches two rows gets whichever outcome the implementer read first, and both
+   are legal enum members, so nothing downstream would catch the difference.
+   Maintenance is the first adopter (*Maintenance telemetry*, below); the next
+   multi-ending pipeline adopts this fold rather than inventing its own.
 
 ## Telemetry rollup (#1007)
 
@@ -6541,6 +6553,89 @@ A promotion sub-loop, a resumed escalation and the blocking phase all produce
 review-loop records under the same parent, so a query joining on
 `parent_run_id` sees a story's whole review churn. The review-loop metrics above
 are unchanged: they filter `pipeline == "review-loop"`.
+
+## Maintenance telemetry (#1228)
+
+`/development:maintenance` is the family's longest-running pipeline, and its
+tuning questions are the ones a transcript answers worst: which scanners earn
+their runtime, which groups need three ci-fixer rounds, where the run stops for
+a human. Since #1228 every invocation that gets past Phase 2's *Proceed / halt*
+gate appends **exactly one** `kind: "run"` record, `pipeline: "maintenance"`,
+from Phase 9 — the summary phase every ending reaches (the `--dry-run` stop, a
+`--no-merge` run, a Phase 7 `human_action_required` halt, the normal ending). It
+follows *Per-pipeline telemetry instrumentation* above; the procedure is the
+skill's Phase 0 *Telemetry — stamp the run's start* and Phase 9 *Emit the run's
+record*.
+
+**Mechanics.** `scripts/maintenance-telemetry.zsh start` stamps the start and
+pre-mints `maintenance-<ts>-<4 hex>`; it also records that id in the checkpoint
+store (`telemetry-run-id`), so a `--resume` names the run it resumed.
+`maintenance-telemetry.zsh emit` builds the payload with the pure
+`scripts/build-maintenance-telemetry-record.zsh` (the run state and the
+`phase8-stages` record in, the payload out), folds the outcome with its
+`--print-outcome`, and emits through the shared emitter with the run's
+`--telemetry-file` / `--telemetry-dir`. `findings_by_tool` is counted from the
+constructed v2 payload files themselves (`--v2-payload`), so the record and
+what was dispatched never disagree. `emit` is never fatal: past argument
+parsing it exits 0, and any failure costs the record with one advisory line.
+
+**Envelope.** `issue: null` (maintenance is not issue-driven), `pr: null` (a run
+opens many; they are in `payload.prs`), `parent_run_id: null` — maintenance is
+never nested, and a resumed run is a **fresh** run, not a child of the run it
+resumes. `tokens: null`. A session that dies mid-cycle emits nothing.
+
+**Payload.**
+
+| Key | Value |
+|---|---|
+| `run_modifiers` | `{dry_run: bool, no_merge: bool, batch: int\|null, tool: str\|null, concern: str\|null, no_issues: bool, resumed: bool}` — one object, so a new flag adds a key |
+| `resumed_from_run_id` | the interrupted run's `run_id` on a `--resume`, when recoverable; else `null` |
+| `languages` | `{detected: [str], actionable: [str]}` — Phase 2's partition |
+| `topics` | `[str]` — the topic plugins that dispatched |
+| `findings_by_tool` | `{<tool>: int}` — per tool, the findings the constructed v2 payloads carried, summed over targets |
+| `groups` | `{planned: int\|null, worked: int, deferred: int}` — planner groups; `planned` is `null` exactly under `--dry-run`, `0` on a live run no dispatcher returned a plan for; Stage 0 is in none of the three |
+| `prs` | `{opened: [int], merged: [int], awaiting_approval: [int], escalated: [int]}` — PRs **this invocation** opened; the last three partition `opened` |
+| `ci_fixer_rounds` | `{"<pr>": 0..3}` — per opened PR, never above the orchestrator's ceiling of 3 |
+| `escalations` | `{human_action_required: int, ci_fixer_exhausted: [int]}` — halted dispatch targets, and PRs escalated after the third ci-fixer round (each also in `prs.escalated`; the converse does not hold) |
+| `coverage_preflight` | `{spawned: bool, languages: [str], pr: int\|null}` — this invocation's Stage 0 improver and its PR |
+
+Every PR list is sorted ascending. Stage 0's PR is opened by the run, so it is in
+`prs.opened` and in `coverage_preflight.pr`, never in `groups`. A vendor-PR
+stage opens no PR, so it adds a worked group and no `prs` entry. On a `--resume`
+every count is scoped to **this** invocation: a stage restored as already merged,
+or with a PR an earlier invocation opened (`inherited: true` in
+`phase8-stages`), is counted neither as worked nor as opened.
+
+**Outcome — two disjoint tables and one fold.** Table A is read once per
+recorded stage, table B once per run; the record's `outcome` is the worst
+contribution of both, per convention 8 above.
+
+| A. Stage ends | Contributes |
+|---|---|
+| `merged` | `success` |
+| `awaiting_approval` | `success` — on a human-approves repo the pipeline did its whole job and waits on a person |
+| `deferred` (the `--batch=N` cap) | `success` — a cap the operator asked for is a plan honoured |
+| `escalated` | `escalated` |
+
+| B. The run | Contributes |
+|---|---|
+| exhausted its plan, a zero-finding no-op included | `success` |
+| was a `--dry-run` | `parked` |
+| was a `--no-merge` run (Phase 8 skipped, no PRs opened) | `parked` |
+| had any dispatch target halt on `human_action_required` | `parked` |
+| hit an error the orchestrator observed and reported, or aborted the cycle | `failed` |
+
+**Refused states.** The builder refuses (exit 1) rather than file a record
+whose facts contradict each other: a non-terminal stage status (an aborted
+cycle passes its unfinished stage as `escalated`); a
+`ci_fix_count` above 3; a deferred stage with a PR; one PR recorded by two
+stages; `groups_planned` non-`null` under `--dry-run`, or `null` without it;
+stages recorded on a `--dry-run` or `--no-merge` run; a resumed `--dry-run`;
+a `human_action_required` halt under `--dry-run`; `resumed_from_run_id` or an
+`inherited` stage on a run that did not resume; a non-inherited `stage0` without
+`coverage_preflight.spawned`; more groups worked or deferred than planned; and
+a `findings_by_tool` value that is not an array of findings. Every rule is
+checked and every breach reported at once.
 
 ### Epic mode (#1227)
 
