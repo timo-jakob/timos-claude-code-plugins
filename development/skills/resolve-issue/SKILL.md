@@ -55,7 +55,9 @@ single-quoted; a usage error prints the invocation help and stops. Once the
 target classifies as a **single issue**, stamp the run with `start` before
 Step 0a. Every review-loop invocation of the run then carries the run's
 `loop_args`, and the Single-issue flow emits one `resolve-issue` record at
-whichever ending it reaches. A Step 0 stop emits none, and an epic takes no part:
+whichever ending it reaches. A Step 0 stop emits none. An epic stamps a run of
+its own in the Epic flow instead, and each child E3 drives gets a story run
+parented to it (#1227):
 see `reference/telemetry.md` § Story telemetry (#1226)
 
 ```bash
@@ -566,7 +568,8 @@ outcome="$("$B" --state <scratch>/size-verdict.json [--override human] --print-o
   --payload <scratch>/size-payload.json <the run's loop_args>
 ```
 
-`loop_args` are Step 0's (an E3 child has none). Telemetry is never fatal: a
+`loop_args` are the run's — Step 0's, or for an E3 child the child run E3
+started (#1227). Telemetry is never fatal: a
 failure costs the record, never the run. **The stop branch has three terminals**:
 
 - **(a) The human overrides.** Interactive only: one `AskUserQuestion` naming
@@ -774,8 +777,9 @@ join key the promotion enrichment below needs — and appends it to the
 `<work-dir>/.telemetry-run-ids` ledger the run's own record lists (#1226). **Pass
 the run's `loop_args` (Step 0) on every invocation, promotion sub-loop and every
 `--resume` included**: they parent each loop record to this run and send it to
-the sink the run was given. An epic child that E3 drives here has no run, and
-passes none. **Always pass an
+the sink the run was given. An epic child that E3 drives here passes its own
+child run's `loop_args` — the run E3 started for it, never the epic run's
+(#1227). **Always pass an
 explicit `--work-dir` and `--status-file` (paths you remember)**: the work-dir
 is the loop's resumable state and the status file its verdict — the interactive
 extension below re-invokes the loop with `--resume` on the *same* work-dir, and
@@ -1027,13 +1031,20 @@ The Single-issue flow ends in exactly one of five ways — the PR opened here, a
 anything else after Step 0a (a red gate abandoned, a stop in §2, an errored
 step) — and **each** of them, not only this one, emits the run's single
 `resolve-issue` record before reporting. It is never fatal. A Step 0 stop emits
-none, and neither does an epic child that E3 drives, which has no run:
+none. An epic child that E3 drives emits one too — from the child run E3
+started for it, parented to the epic run (#1227):
 see `reference/telemetry.md` § Story telemetry (#1226)
 
 ## Epic flow
 
 You do **not** implement the epic directly — you resolve its children
 conflict-aware, then verify the whole, then **close the epic** (E4/E5).
+
+**Stamp the epic run before E1, and emit its one record at whichever ending this
+invocation reaches** — an E1 halt, the E1b halt, a stop mid-E3, an E4 regression
+or E5's close. Every child E3 drives starts a story run parented to it, and the
+facts the record needs are noted at the step that decides each:
+see `reference/epic-telemetry.md` § Epic telemetry (#1227)
 
 **Before E1, read the mode** — `epic_strictly_sequential` can make E3 wholly sequential:
 see `reference/sequential.md` § Strictly sequential mode

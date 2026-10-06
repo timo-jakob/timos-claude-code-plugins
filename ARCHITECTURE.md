@@ -5885,8 +5885,8 @@ Rules that carry the contract's weight:
     run, which forwards it for each loop record — so one run's records all
     land in `DIR/<repo-slug>.jsonl`. **refine-issue does not**: its Step 7
     passes no sink flag at all, so its records always land in the local
-    default, and that gap stays open. An **epic** target ignores the flag too
-    until epic mode is instrumented (child (b)). The
+    default, and that gap stays open. An **epic** target forwards it too since
+    #1227: to its own epic record and to every child run it starts. The
     other pipelines of epic 2 (#741) take the flag as their own children
     land, under the conventions in *Per-pipeline telemetry instrumentation*
     below. Read an empty shared directory under any other pipeline as that
@@ -6461,8 +6461,8 @@ skill's own review-loop switch, handed back as `no_review: true`.
 **Mechanics — `story-telemetry.zsh`, three deterministic steps.**
 
 - **`start`** runs once Step 0 has classified the target as a **single issue**,
-  before Step 0a. So an epic never has a run, and its children's loops carry no
-  `loop_args` until epic mode is instrumented (child (b)). `start` stamps the
+  before Step 0a. An epic is stamped by the Epic flow instead, before E1, and
+  each child E3 drives by E3 (see *Epic mode* below). `start` stamps the
   start and pre-mints the `run_id` as `resolve-issue-<ts>-<4 hex>`, the
   emitter's format. It writes a scratch run file, keyed by the issue number,
   whose `loop_args` — `--parent-run-id <run_id>` plus exactly the run's sink
@@ -6473,7 +6473,11 @@ skill's own review-loop switch, handed back as `no_review: true`.
   file on re-entry, and a fresh invocation never inherits a run an earlier one
   left un-emitted. A §0a remediation rung that runs the Single-issue flow on a
   blocker is its own run, with its own run file and the same sink flags. An
-  epic-kind rung, like any epic, has none.
+  epic-kind rung, like any epic, is an epic run. `start --parent-run-id ID`
+  (#1227) stores a **parent** for the run itself — an epic child's, set to the
+  epic run's id — which `emit` hands to the emitter; without it the record's
+  `parent_run_id` is `null`. The run file's `child_start_args` is that flag plus
+  the run's sink flags, ready for a nested `start`.
 - **`emit`** runs at the run's ending. It builds the payload with
   `build-story-telemetry-record.zsh`, narrows the outcome with its
   `--print-outcome`, and emits through the shared emitter with `--run-id` = the
@@ -6496,7 +6500,7 @@ record's `run_id`, as it always was.
 
 | `outcome` | When |
 |---|---|
-| *(no record)* | the run stopped in Step 0, before the precheck: empty arguments, a usage error, the issue not `OPEN`, the issue outside the session repo, a classification failure, the near-miss halt — or the target is an epic (epic-mode records are child (b)) |
+| *(no record)* | the run stopped in Step 0, before the precheck: empty arguments, a usage error, the issue not `OPEN`, the issue outside the session repo, a classification failure, the near-miss halt. An epic target gets an **epic** record instead (*Epic mode* below) |
 | `success` | a PR was opened (after `CONVERGED` or `CONVERGED_WITH_RESIDUE`, or after a `--no-review` skip of the loop) |
 | `parked` | the readiness gate returned `NEEDS_REFINEMENT`, or the run ended with its last dependency precheck a rejection — autonomously, on a declined or partial remediation, or on a rejecting re-verification |
 | `escalated` | the run ended on a **loop invocation that exited** `ESCALATE_*` / `BUDGET_EXHAUSTED` |
@@ -6537,6 +6541,96 @@ A promotion sub-loop, a resumed escalation and the blocking phase all produce
 review-loop records under the same parent, so a query joining on
 `parent_run_id` sees a story's whole review churn. The review-loop metrics above
 are unchanged: they filter `pipeline == "review-loop"`.
+
+### Epic mode (#1227)
+
+An **Epic-flow invocation** appends **exactly one** record too, on the same
+`resolve-issue` pipeline, told apart by `payload.mode: "epic"`. It is one record
+per **invocation**, not per epic lifetime: the flow is resumable, so an epic that
+takes three runs leaves three records, each measuring its own run's work. It is
+appended at **every** ending past Step 0's classification — each E1 halt, the
+E1b halt, a stop mid-E3, an E4 regression and E5's close. The procedure is the
+skill's `reference/epic-telemetry.md`.
+
+**Mechanics.** The Epic flow calls `story-telemetry.zsh start` before E1 with
+the sink flags `args` reported, and `emit --epic` at its ending, which builds
+the payload with `build-epic-telemetry-record.zsh` and takes no
+`--loop-work-dir`: the loops belong to the child runs. Every child E3 drives —
+a sequential child or a parallel worktree sub-agent, which receives the epic
+`run_id` and sink flags in its prompt — calls `start` with the epic run file's
+`child_start_args`, so the **child's own** record carries `parent_run_id` = the
+epic run, and the epic record lists the child in `payload.child_run_ids`. The
+join resolves from both ends. The child's loops stay parented to the child run.
+On a failed epic `start` the children still get their own runs and the sink
+flags, with no parent. A child's size pre-flight record is parented to the
+child run, as in story mode.
+
+**Envelope.** `issue` is the epic; `pr` is `null` — the children's PRs are
+their own records' to carry. `outcome` is the **first matching row**, worst
+state first:
+
+| # | `outcome` | When |
+|---|---|---|
+| 1 | `failed` | `e4.result` is `"regression"`, or `failure_cause` is set (the run broke after E1b) |
+| 2 | `escalated` | `children.escalated > 0` |
+| 3 | `parked` | a `halt_*` classification; `readiness_preflight.needs_refinement > 0`; `children.parked + children.queued > 0`; or `e5_closed` false |
+| 4 | `success` | `e5_closed` is true |
+
+An E1 halt, `halt_backfill_error` and `halt_backfill_partial` included, is
+`parked`: the epic is left open for a human. `failed` is reserved for a run
+that broke after work began.
+
+**Payload.**
+
+| Key | Value |
+|---|---|
+| `mode` | `"epic"` |
+| `e1_classification` | the E1 row this invocation took — one value from the closed table below |
+| `children` | `{total, completed_before, resolved_this_run, escalated, parked, queued}` over the invocation's **first** `read-sub-issues.zsh` read (after a successful live backfill's re-read where one ran): `total` and `completed_before` are its `summary.total` and `summary.completed`, and every child open at that read is in exactly one of the other four — `resolved_this_run` (closed as completed this run), `escalated` (a typed escalation), `parked` (by E3's triage), `queued` (everything else still open, a PR awaiting a human merge, a child whose own story run ended `failed` and every child at an E1b halt included). So `total = completed_before + resolved_this_run + escalated + parked + queued`. Review-residue sub-issues filed mid-run are not counted |
+| `split` | `{parallel, sequential}` — only children whose PR E3 opened **this run**, by path: whether worktree parallelism earns its cost |
+| `child_run_ids` | the `run_id` of every child run started this invocation, in start order, escalated and parked ones included; de-duplicated |
+| `e4` | `{ran, result}`: `ran` is true only when E4 reached a verdict; `result` is the last verdict this invocation's E4 reached, `"green"` \| `"regression"`, and `null` exactly when `ran` is false. A regression here is what the per-child gates could not see |
+| `e5_closed` | the epic was closed |
+| `readiness_preflight` | `{gated, needs_refinement}` from E1b; `null` when the run never reached E1b (every E1 halt, and the rows that go straight to E4/E5) |
+| `failure_cause` | `e4_regression` \| `e4_error` (E4 reached no verdict) \| `e5_error` (the close failed) \| `error` (another error in the epic flow's own steps after E1b, never a child's own failed run) \| `null` — the run's final break only |
+
+**`e1_classification`**, the closed table — three continuing rows and one
+`halt_*` value per E1 halting branch. It is decided by the invocation's
+**first** read, so a later run of an epic an earlier one backfilled records
+`native_children`. A backfill exit 2 is the run's own malformed call, fixed and
+re-run, so it has no value.
+
+| Value | E1 branch |
+|---|---|
+| `native_children` | the first read has `total > 0`: the in-progress row **and** the `N == N` row (`resolved_this_run: 0`), with or without inline slices also in the body |
+| `backfilled` | `total: 0`, case 1's dry run passed every vet, the live backfill exited 0 with every child accounted for and `skipped_cross_repo` empty, and the re-read continued |
+| `inline_slices` | `total: 0`, case 2, every slice confirmed merged → E4/E5 |
+| `halt_undecomposed` | case 3: no children filed, no task list |
+| `halt_unrealized_slices` | case 2 with any slice unrealized; also a mixed body's `N == N` row halting on an unrealized slice before E4 |
+| `halt_near_miss` | case 4; case 1's reverse vet; a `skipped_self_ref` line judged a mistyped child |
+| `halt_backfill_vet` | case 1's dry-run halts where the plan is not exactly the genuine children: the forward `would_add` vet, an empty `markdown_children`, or a non-empty `skipped_cross_repo` |
+| `halt_backfill_error` | the backfill dry run exited 1 |
+| `halt_backfill_partial` | after the live run: exit 5 or 1, or `skipped_cross_repo` non-empty |
+| `halt_unclassified` | the otherwise fall-through, a criteria-only body included |
+
+**Consistency refusal.** The builder's state carries the `outcome` the skill
+picked; the builder derives the first matching row from the facts as well, and
+refuses the state — exit 1, nothing emitted, `emit`'s never-fatal advisory —
+when the two disagree or the facts contradict each other. All violations are
+reported at once:
+
+| Refused | Because |
+|---|---|
+| `success` without `e5_closed: true` | only a closed epic is a success |
+| `e5_closed: true` with `e4.result` other than `"green"`, or with `escalated + parked + queued > 0` | E5 closes only after a green E4, over finished work |
+| a `halt_*` classification with `resolved_this_run > 0`, `e4.ran: true`, a non-zero `split`, a non-empty `child_run_ids`, a non-null `readiness_preflight`, or a `failure_cause` | an E1 halt builds nothing and is always `parked` |
+| `readiness_preflight.needs_refinement > 0` with `resolved_this_run > 0` or `e4.ran: true`; or `needs_refinement > gated` | an E1b halt builds nothing |
+| `e4.ran: false` with a non-null `e4.result`, or `e4.ran: true` with a null one | `result` is null exactly when E4 reached no verdict |
+| `failure_cause: "e4_regression"` without `e4.result: "regression"`; `"e4_error"` with `e4.ran: true`; `"e5_error"` with `e5_closed: true` | the cause must match what E4 and E5 recorded |
+| children counts not summing to `total`; `split.parallel + split.sequential` above the number of `child_run_ids` | every open child is in one bucket, and every opened PR had a run |
+| an `outcome` that is not the first matching row | the precedence is the builder's, not the caller's |
+
+Every field is also type- and enum-checked, as in story mode.
 
 ## Story size pre-flight (#1437)
 
@@ -6580,8 +6674,8 @@ as an override:
 | `override_by` | `"human"` on `overridden`, else `null` |
 
 In the Single-issue flow the record is parented to the run (`parent_run_id`)
-and sent to the run's sink. An E3 child has no run, so its record goes
-unparented to the local default sink until epic mode is instrumented. The join
+and sent to the run's sink — for an E3 child, the child run E3 started (#1227),
+so it lands in the epic's sink too. The join
 runs one way, through `parent_run_id`: the story record lists only its review
 loops, so this stream is an exception to rule 4 of *Per-pipeline telemetry
 instrumentation*. A split ends the run under its `failed` row, since the story

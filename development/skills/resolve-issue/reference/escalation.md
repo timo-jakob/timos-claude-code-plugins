@@ -77,4 +77,4 @@ recorded here: an escalation is one of the run's endings. Emit its single
 `escalation_status`) before stopping. An operational-error stop with no typed
 comment is an ending too, and emits `failed`. The procedure is
 `reference/telemetry.md` step 4. It is never fatal, and an epic child that E3
-drives emits nothing.
+drives emits from its own child run (`reference/epic-telemetry.md` step 2).

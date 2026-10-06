@@ -175,5 +175,5 @@ span, so this is recorded here: append the run's `loop_args` (Step 0,
 `--parent-run-id <the run's run_id>` plus exactly the sink flags the run was
 given, so every loop record is parented to the run and lands in its sink.
 When `start` failed there is no run file: pass only the sink flags from the
-`args` output, with no `--parent-run-id`. An epic child that E3 drives passes
-nothing.
+`args` output, with no `--parent-run-id`. An epic child that E3 drives passes its
+own child run's `loop_args` (`reference/epic-telemetry.md` step 2).
