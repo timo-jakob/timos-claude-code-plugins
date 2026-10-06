@@ -197,6 +197,6 @@ H_DONE='### Run complete — clear the checkpoint (#517)'
   [ "$rm_at" -gt "$clear_at" ]
   contains "$s" 'Remove `<payload-dir>` only when this session created one.'
   contains "$s" 'so it removes nothing here beyond the checkpoint.'
-  contains "$s" 'clear at the end of Phase 9 instead, with the same payload-directory removal.'
+  contains "$s" 'clear after the Phase 9 emit instead, with the same payload-directory removal.'
   contains "$s" 'Phase 5 already removed its payload directory.'
 }

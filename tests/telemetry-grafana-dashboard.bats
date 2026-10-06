@@ -1050,13 +1050,14 @@ _mutant_for() {
 }
 
 @test "the page does not present the shared sink as already wired into pipelines" {
-  # Only resolve-issue and its review loop forward --telemetry-dir (#1226;
-  # ARCHITECTURE.md says so); an unqualified page would send a reader of any
+  # Only resolve-issue (with its review loop, #1226) and maintenance (#1228)
+  # forward --telemetry-dir; an unqualified page would send a reader of any
   # other pipeline debugging the emitter or the reporting repo instead of
   # reading the open caller-wiring gap.
   run cat "$REF_PAGE"
   [ "$status" -eq 0 ]
-  contains "$output" "Only resolve-issue and its review loop forward \`--telemetry-dir\` so far"
+  contains "$output" "Only resolve-issue (with its review loop) and maintenance forward"
+  contains "$output" "\`--telemetry-dir\` so far"
   contains "$output" "refine-issue included"
 }
 
