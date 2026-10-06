@@ -918,6 +918,20 @@ assert_skipped_run() {
   contains "$output" "is not writable"
 }
 
+@test "a promotion that cannot create its temporary file is exit 3 before any lookup" {
+  scaffolded_repo
+  # a failing mktemp, not an absent TMPDIR: macOS's mktemp -t falls back to the
+  # per-user temp dir when TMPDIR is unusable, so only a stub reaches the branch
+  # on both hosts
+  mkdir -p "$BATS_TEST_TMPDIR/no-mktemp"
+  printf '#!/bin/sh\nexit 1\n' >"$BATS_TEST_TMPDIR/no-mktemp/mktemp"
+  chmod +x "$BATS_TEST_TMPDIR/no-mktemp/mktemp"
+  run env PATH="$BATS_TEST_TMPDIR/no-mktemp:$STUB_BIN:$PATH" zsh -c "cd '$REPO' && zsh scripts/promote.zsh --sha $SHA --env staging --mode push"
+  [ "$status" -eq 3 ]
+  contains "$output" "could not create a temporary file"
+  [ ! -s "$STUB_LOG" ]
+}
+
 @test "a missing manifest is refused with exit 1" {
   scaffolded_repo
   run promote --env staging --mode push --manifest absent.yaml
