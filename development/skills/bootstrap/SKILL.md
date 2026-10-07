@@ -2531,6 +2531,32 @@ Placement follows the ops-api block's rules, with these payload-specific ones:
   not at the repo root: `DependencyCatalog.load()` reads it from
   `Path(__file__).with_name(...)` so it resolves the same under any working
   directory. `$OPS_DEPENDENCIES_FILE` overrides it for a mounted ConfigMap.
+- **`resilience-dependencies.properties` must reach the INSTALLED package (#2182).**
+  Beside the module is where a source or editable run finds it, but a
+  non-editable install (`pip install .`, the usual container `Dockerfile` shape)
+  ships only the files the build backend packages, and setuptools packages no
+  non-Python file it is not told about. A missing default file reads as *no
+  dependencies declared*, so the first guarded client fails at wiring time with
+  `dependency '<name>' is guarded in code but not declared`: the image cannot
+  start, although every local and editable run works. So, as part of this
+  payload's merge, by build backend:
+  - **`pyproject.toml` builds with setuptools** (its `[build-system]` names
+    setuptools, or it has none, which pip builds with setuptools) → as a
+    confirmed edit under the Python confirmed-edit model (snapshot, parse check,
+    restore), add `"resilience-dependencies.properties"` to the list of the package
+    the file was placed in, under `[tool.setuptools.package-data]` (`aido =
+    ["store/schema.sql", …]` gains it).
+    Create the table, or the package's key, when absent. **Idempotent:** when that
+    list already names the file, or a glob matching it (`"*.properties"`, `"*"`),
+    add nothing, so a re-run never duplicates the entry.
+  - **any other backend, setuptools configured outside `pyproject.toml`**
+    (`setup.py`, `setup.cfg`, `MANIFEST.in`)**, or that edit declined or rolled
+    back** → bootstrap does not edit it. Carry an explicit Step-5 checklist item
+    naming `<package>/resilience-dependencies.properties`
+    as a file the human must include in the built artifact, with this symptom.
+    Never stay silent: the gap shows only in the image.
+  - **no `pyproject.toml`, `setup.py` or `setup.cfg`** (nothing can install the
+    service) → nothing to register; the file beside the module is what it reads.
 - **The shipped `README.md` must NOT take the ops-api block's README rule.** That
   rule ("alongside `ops_api.py`") would put this payload's README at the exact
   path the ops-api payload's README already occupies, and whichever is staged
