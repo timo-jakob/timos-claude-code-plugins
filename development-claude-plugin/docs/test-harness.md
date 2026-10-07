@@ -6,6 +6,11 @@ Operator-facing reference for the test harness shipped in v1 of the
 [`skills/test/scripts/run-headless.zsh`](../skills/test/scripts/run-headless.zsh);
 this file is the human-readable specification of the same behaviour.
 
+**Human-invoked only.** The harness is for a person verifying their own edit,
+never for an autonomous pipeline step: no unattended flow launches a headless
+`claude` child (#2191). `/development:resolve-issue`'s epic verification runs
+its end-to-end half in the session instead.
+
 ## Why it exists
 
 A Claude Code plugin is mostly markdown — skills, agents, and commands that only
@@ -20,21 +25,28 @@ develop in. The harness solves that with a **two-layer design**.
 ## The two layers
 
 ```text
-authoring session  ──spawns──▶  judge subagent  ──launches──▶  headless child `claude -p`
-(you, editing the                (fresh context,                (system under test:
- plugin)                          firewall + judge)               local plugins loaded,
-       ▲                                  │                       runs against a clone)
-       └────────── structured verdict ◀───┘
+authoring session  ──launches + waits──▶  headless child `claude -p`
+(you, editing the                          (system under test: local plugins
+ plugin)                                    loaded, runs against a clone)
+       │                                          │ finished transcript + <out>.exit
+       └──spawns, once <out>.exit exists──▶  judge subagent  ──▶ structured verdict
+                                             (fresh context, firewall + judge)
 ```
 
-1. **Judge subagent (firewall + verdict).** Spawned via the Task tool with a
-   clean context. It launches the child, parses the child's transcript, diffs
-   the clone, and returns only a compact `VERDICT:` block. The raw child
-   transcript never reaches the authoring conversation.
-2. **Headless child session (system under test).** A real `claude -p` process
-   launched by `run-headless.zsh`. It loads the **local, uncommitted** plugins
-   from the worktree via `--plugin-dir`, runs against an isolated clone of the
-   target repo, and emits a `stream-json` transcript the judge parses.
+1. **Headless child session (system under test).** A real `claude -p` process
+   launched by `run-headless.zsh --detach` from the authoring session. It loads
+   the **local, uncommitted** plugins from the worktree via `--plugin-dir`, runs
+   against an isolated clone of the target repo, emits a `stream-json`
+   transcript, and writes its exit code to `<out>.exit` when it finishes.
+2. **The wait belongs to the authoring session.** It waits on `<out>.exit`
+   with its own Monitor until-loop. A main session is re-woken by its own
+   Monitor; a background subagent that ends its turn is not reliably re-woken
+   by its own — which once left a finished child unread for 78 minutes (#2191).
+3. **Judge subagent (firewall + verdict).** Spawned via the Task tool, with a
+   clean context, only once the marker exists. It parses the finished
+   transcript, diffs the clone, and returns only a compact `VERDICT:` block. It
+   launches nothing and waits on nothing. The raw child transcript never
+   reaches the authoring conversation.
 
 ## What gets tested, and against what
 
@@ -93,11 +105,11 @@ run.
   installed version may shadow the local one. Mitigations: bump the local
   plugin's version above the installed one, or temporarily disable the installed
   copy. The judge flags `plugin_loaded: unclear` when it suspects this.
-- **Nested `claude`.** The judge launching a child `claude -p` via Bash is
-  supported in practice but not formally documented. If it's ever blocked, the
-  skill falls back to running the wrapper from the authoring session directly —
-  at the cost of the child transcript entering the authoring context (the
-  firewall is bypassed; the skill says so when this happens).
+- **Nested `claude`.** A session launching a child `claude -p` via Bash is
+  supported in practice but not formally documented. If the judge subagent
+  cannot be spawned, the skill judges the transcript inline instead — at the
+  cost of the child transcript entering the authoring context (the firewall is
+  bypassed; the skill says so when this happens).
 - **macOS / zsh only.** Per the family's scripting conventions, `run-headless.zsh`
   targets zsh on macOS.
 
