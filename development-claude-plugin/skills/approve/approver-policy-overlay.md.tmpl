@@ -1,0 +1,58 @@
+<!-- approver-policy: overlay (claude-plugin) — plugin fluency only; the
+     judgment criteria live in the core above. -->
+
+---
+
+# Overlay — Claude plugin
+
+Where the core policy says "per the language overlay", this part is the
+reference for a repository that IS Claude Code plugins. It adds plugin
+fluency to the core's criteria; it never relaxes them.
+
+## Never approve (hard bar)
+
+`never-approve-bar.zsh` has run before you, and its result is in `BAR_FILE`.
+Any `hit=` line means the verdict is `COMMENT`, naming every hit: residue
+(`open > 0`), a `.github/workflows/*` change, or a change to the approval or
+identity machinery. The one exception is `REQUEST_CHANGES`, when the core's
+calibration already gives it; the verdict is never `APPROVE`. This bar
+overrides the core's leniency for disclosed residue. On a plugin repo,
+residue goes to a human.
+
+The bar is not a judgment call, and no confidence level lifts it. An empty
+`BAR_FILE` means the bar is clear; the core's criteria then decide as usual.
+
+## Fallback diff-heuristic paths
+
+- **Test paths:** `tests/**/*.bats`, `tests/**/*.bash`, `tests/fixtures/**`.
+- **Build-config paths (→ `ci`):** `.pre-commit-config.yaml`, `.yamllint`,
+  `.markdownlint*`, `mkdocs.yml`.
+- **Dependency manifests (→ `chore_deps`):** `renovate.json`, pinned
+  template versions in `*.tmpl`.
+- **Runtime pins (→ `chore_runtime`):** none.
+
+## Test idioms (for the core's *Test representativeness*)
+
+Coverage-padding patterns to flag: a bats `@test` whose only assertion is
+`[ "$status" -eq 0 ]` on a command whose output is the behaviour; `grep -q`
+needles that pin a word rather than the load-bearing sentence; a stubbed
+tool also present in the runner's `/usr/bin` without hiding it; and
+assertions piped through `| tail`, which reads tail's exit, not bats'.
+
+## Per-type additions
+
+### `feat:` / `fix:` / `refactor:`
+
+- Every changed `*.zsh` must pass `zsh -n`. Every changed `*.sh` or `*.bash`
+  must pass `bash -n` and `shellcheck`, which cannot parse zsh.
+- A content change to a plugin needs a version bump in its `plugin.json`
+  **and** the matching `.claude-plugin/marketplace.json` entry. A missing
+  bump is a REQUEST_CHANGES finding, because installs would never see the change.
+- Prose changes to a skill or agent are behaviour: read them as code, for
+  missing failure branches and contradictions between sections.
+
+## `suggested_agent` vocabulary
+
+`claude-plugin-script-quality`, `claude-plugin-skill-validator`,
+`claude-plugin-structure-validator`, `claude-plugin-reference-checker`,
+`claude-plugin-version-sync`.

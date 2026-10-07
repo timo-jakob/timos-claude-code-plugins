@@ -3,7 +3,8 @@
 # The Approver's dry-run contract (#1147 round 5-6).
 #
 # `--dry-run` is parsed by ONE approve skill: `/development-go:approve`. The
-# Java, Python and Swift skills accept an optional PR number and nothing else,
+# Java, Python and Swift skills — and the claude-plugin one (#2132) — accept an
+# optional PR number and nothing else,
 # hardcode `DRY_RUN=false`, and therefore POST a binding review under the
 # `claude-approver-<owner>[bot]` identity on every invocation.
 #
@@ -26,7 +27,11 @@ setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   # Every language shipping an `approve` skill. Go is held separately: it is the
   # only one that parses the flag.
-  POSTING_ONLY=(development-java development-python development-swift)
+  POSTING_ONLY=(development-java development-python development-swift development-claude-plugin)
+  # Posting-only plugins that ship NO operator mirror (docs/<lang>-approver.md).
+  # The mirror test pins each one's absence, so a mirror added later reds there
+  # until it joins the mirror sweep instead of escaping it (#2132).
+  UNMIRRORED=(development-claude-plugin)
 }
 
 # skill_file <plugin> — that plugin's approve SKILL.md.
@@ -129,10 +134,18 @@ flat() {
   # the EXACT swept sentence — a broader needle would still pass on Go's three
   # other `--dry-run` mentions after the swept sentence was reworded away,
   # leaving the three `lacks` below permanently vacuous.
-  local p mirror
+  local p mirror u skip
   contains "$(flat "$REPO_ROOT/development-go/docs/go-approver.md")" \
     'Pass `--dry-run` for a non-binding evaluation'
   for p in "${POSTING_ONLY[@]}"; do
+    skip=false
+    for u in "${UNMIRRORED[@]}"; do
+      if [ "$p" = "$u" ]; then skip=true; fi
+    done
+    if [ "$skip" = true ]; then
+      [ ! -e "$REPO_ROOT/$p/docs/${p#development-}-approver.md" ]
+      continue
+    fi
     mirror="$(flat "$REPO_ROOT/$p/docs/${p#development-}-approver.md")"
     [ -n "$mirror" ]
     lacks "$mirror" 'Pass `--dry-run` for a non-binding evaluation'
