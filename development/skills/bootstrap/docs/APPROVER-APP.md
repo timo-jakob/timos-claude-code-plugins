@@ -114,6 +114,11 @@ mint-approver-token.zsh
   `--stdout` prints the raw token instead. The path-by-default design keeps the
   orchestrator from ever seeing the token value, so it can't be inlined into a
   subagent prompt or echoed into a transcript (#640)
+- `--check-installed` only probes whether the App is installed on the repo and
+  mints no token (#2130): exit `0` installed, a **silent** exit `3` when GitHub
+  answers `Not Found` (no Approver App is a supported way to forbid AI
+  approvals), and exit `2` with the usual diagnostics for an unreachable GitHub
+  or a rejected key — neither of which ever reads as "not installed"
 
 **Used by**: `/development-python:approve` skill
 **No platform account required**: Works with any AI coding assistant

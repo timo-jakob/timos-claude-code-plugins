@@ -1,7 +1,8 @@
 #!/usr/bin/env zsh
 # mint-approver-token.zsh — mint a claude-approver App installation token
 # for the current repo. Writes the token to a mode-600 temp file and prints
-# the FILE PATH (default); `--stdout` prints the raw token instead.
+# the FILE PATH (default); `--stdout` prints the raw token instead;
+# `--check-installed` only probes whether the App is installed on the repo.
 #
 # Used by /development-python:approve (and other language approve skills)
 # to post code review verdicts. The App is invoked locally by the user,
@@ -28,10 +29,25 @@
 #   - Run from inside the target repo's working tree.
 #
 # Exit codes:
-#   0 — success (path printed, or token printed with --stdout)
+#   0 — success (path printed, or token printed with --stdout; with
+#       --check-installed: the App is installed, nothing printed)
 #   1 — prerequisite missing (owner unresolvable, App not registered for the
-#       owner, apps.json still schema 1 — the message names the command)
+#       owner, apps.json still schema 1 — the message names the command);
+#       also bad usage (an unknown, empty or second argument), with a one-line
+#       usage message on stderr and no GitHub request
 #   2 — GitHub API failure (network, expired key, etc.)
+#   3 — --check-installed only: the App is not installed on this repo
+#       (GitHub answered the lookup Not Found). Silent: no stdout, no stderr.
+#
+# --check-installed (#2130): probe only. Signs the JWT and looks up
+#   /repos/<owner>/<repo>/installation, but mints NO token and makes no
+#   access_tokens request. Exit 0 = installed (prints nothing); 3 = not
+#   installed, silently, because "not installed" is the supported way to forbid
+#   AI approvals and must not read as an error; 2 = any other lookup failure
+#   (unreachable GitHub, a rejected key) with the diagnostics below, so neither
+#   ever reads as "not installed". Exit 1 is unchanged. Without the flag a
+#   Not Found stays exit 2 with its message, which /development:open-pr's
+#   fallback keys on.
 #
 # Stdout (default): the path to a mode-600 temp file holding the token
 #   (one line, no trailing newline). The caller owns the file — read it with
@@ -47,8 +63,20 @@ setopt err_exit nounset pipefail
 
 # --- argument parsing --------------------------------------------------------
 emit_stdout=false
-if [[ "${1:-}" == "--stdout" ]]; then
-  emit_stdout=true
+check_installed=false
+# Strict: at most one argument, and only a known one. A typo or a second flag
+# must never fall through to the mint path (a live token for a mere probe).
+readonly SCRIPT_NAME="${0:t}"   # $0 inside a function is the function's name
+usage() { print -u2 -- "usage: ${SCRIPT_NAME} [--stdout|--check-installed]"; exit 1; }
+(( $# <= 1 )) || usage
+if (( $# == 1 )); then
+  case "$1" in
+    --stdout)          emit_stdout=true ;;
+    # Probe only: is the Approver App installed on this repo? No token is minted.
+    --check-installed) check_installed=true ;;
+    "")                usage ;;
+    *)                 usage ;;
+  esac
 fi
 
 readonly APP="claude-approver"
@@ -113,6 +141,15 @@ install_resp=$(curl -sS \
   || true)
 
 install_id=$(printf '%s' "$install_resp" | jq -r '.id // empty' 2>/dev/null || true)
+if [[ "$check_installed" == true ]]; then
+  [[ -n "$install_id" && "$install_id" != "null" ]] && exit 0
+  # Only GitHub's own Not Found is "not installed" — and it is silent.
+  if [[ -n "$install_resp" \
+        && "$(printf '%s' "$install_resp" | jq -r '.message // empty' 2>/dev/null || true)" == "Not Found" ]]; then
+    exit 3
+  fi
+  # Anything else falls through to the diagnostics below (exit 2).
+fi
 if [[ -z "$install_id" || "$install_id" == "null" ]]; then
   # Only GitHub's own 404 means "not installed" (#1683): callers such as
   # /development:open-pr key their fallback on that line, so an unreachable
