@@ -6,9 +6,9 @@ setopt err_exit nounset pipefail
 # capture its stream-json transcript to a file.
 #
 # This is the "system under test" layer of /development-claude-plugin:test. It
-# is invoked by the fresh-context judge subagent (or, as a fallback, directly by
-# the authoring session) so the undocumented "claude launches claude" nesting is
-# isolated to exactly one place.
+# is invoked by the session that invoked the harness, which also waits on it
+# (#2191 — the judge subagent only reads the finished transcript), so the
+# undocumented "claude launches claude" nesting is isolated to exactly one place.
 #
 # Usage:
 #   run-headless.zsh \
@@ -39,9 +39,9 @@ setopt err_exit nounset pipefail
 # blast radius is a disposable copy. Override with --permission-mode acceptEdits
 # plus your own allow-listing if you want a tighter run.
 #
-# NOTE on --detach (#811): a judge subagent can hold a foreground Bash call for
-# at most 10 minutes, and a harness *background* task is killed the moment the
-# subagent's turn ends — SIGTERM-ing a child claude mid-run. So for children
+# NOTE on --detach (#811): a foreground Bash call is capped at 10 minutes, and a
+# harness *background* task is killed the moment the caller's turn ends —
+# SIGTERM-ing a child claude mid-run. So for children
 # that outlive one turn, the script must own the detaching: with --detach it
 # relaunches itself under nohup, disowned, with all stdio off the caller's
 # descriptors, prints `detached_pid=` / `exit_marker=` / `wrapper_log=` on

@@ -99,8 +99,28 @@ These are the §3 rules for this repo type. The conductor's generic bullet says
   single-run gate — `<resolve-issue skill-base-dir>/scripts/run-gate.zsh
   --tests-dir tests` (#980 — same parallel, single-run, real-exit command as
   Step 3; never a bare `bats … | grep -c` that runs the suite twice) — **and**
-  `/development-claude-plugin:test` driving the affected skills/agents
-  end-to-end (the same pattern used to verify slices by hand).
+  an end-to-end half driving the affected skills/agents, which runs **in the
+  session only**: E4 is an unattended step, and no autonomous flow launches a
+  headless `claude` child (#2191). In this order:
+  - **Check the install first.** For every plugin the epic touched, read the
+    installed version — `.version` of every entry for
+    `<plugin>@timos-claude-code-plugins` in
+    `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_plugins.json` that
+    applies here: the user-scope entry and any project-scope entry whose path is
+    this repository's main checkout, not a worktree — and `main`'s, `.version`
+    in `git show origin/main:<plugin>/.claude-plugin/plugin.json` after a
+    `git fetch origin main`. Each must look like semver and equal `main`'s. A
+    missing file or entry, a failed fetch, a non-semver value or a mismatch
+    means the end-to-end half is reported as **not run against `main`**, never
+    as a pass: E4 is then not green, so do not proceed to E5 — leave the epic
+    open and report the versions. Never infer the installed version from the
+    highest plugin cache directory: stale version directories stay there.
+  - **Scripts first.** Run the epic's deterministic scripts directly against a
+    scratch target built outside the repository.
+  - **Then a foreground subagent, only where a model-driven skill must be
+    exercised.** It invokes that skill through the Skill tool against the
+    scratch target, in the foreground only: it never arms a Monitor, never ends
+    its turn while waiting, and never starts a background task.
 - **Run targeted bats files quietly (#2059).** During implementation and fix
   passes, run a targeted bats file through
   `<resolve-issue skill-base-dir>/scripts/bats-quiet.zsh <bats-args…>` rather

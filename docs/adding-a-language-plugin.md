@@ -237,9 +237,11 @@ issue per slice, and resolve them one at a time. Validate each slice on a **real
   && [ -f "$b" ]` is inert too even though no rule flags it — as is
   `contains … || true`, since an `||` tail is an assertion only when its last
   member can itself fail.
-- **End-to-end:** `/development-claude-plugin:test` drives a headless session with
-  the local plugins against an isolated clone of a real repo — use it to verify a
-  slice actually does what you intend.
+- **End-to-end:** `/development-claude-plugin:test` — run by you, by hand — has
+  your session launch a headless session with the local plugins against an
+  isolated clone of a real repo and wait for it, then a judge subagent reads the
+  finished transcript. Use it to verify a slice actually does what you intend.
+  It is human-invoked only: no autonomous pipeline step launches it.
 - The dispatcher/agents are **prompts**, not unit-testable; their independent
   verification is the e2e harness + the per-PR review (and the Approver in app
   repos).

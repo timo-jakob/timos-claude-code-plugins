@@ -2,13 +2,15 @@
 name: test
 description: >
   Test a Claude Code plugin's behaviour end-to-end against a real reference
-  project. Spawns a fresh-context judge subagent that drives a *separate*
-  headless `claude` session — with the LOCAL (uncommitted) plugins loaded via
-  --plugin-dir — against an isolated clone of the target repo, then returns a
-  structured PASS/FAIL verdict plus a transcript digest without flooding the
-  authoring context. Use it to verify a skill/agent/command you just edited
-  actually does what you intend, in any language the family supports. Pass
-  `--target <path>`, `--task "<prompt>"`, and optionally `--expect "<...>"`.
+  project — human-invoked only, never an autonomous pipeline step. The invoking
+  session launches a *separate* headless `claude` session — with the LOCAL
+  (uncommitted) plugins loaded via --plugin-dir — against an isolated clone of
+  the target repo and waits for it to finish; a fresh-context judge subagent
+  then reads the finished transcript and returns a structured PASS/FAIL verdict
+  plus a transcript digest without flooding the authoring context. Use it to
+  verify a skill/agent/command you just edited actually does what you intend,
+  in any language the family supports. Pass `--target <path>`,
+  `--task "<prompt>"`, and optionally `--expect "<...>"`.
 disable-model-invocation: false
 ---
 
@@ -19,15 +21,23 @@ separate session* — without that session's raw transcript polluting this
 
 **User input:** $ARGUMENTS
 
+**Human-invoked only.** This harness is for a person verifying their own edit.
+It is **not** for autonomous pipeline steps — no unattended flow launches a
+headless `claude` child (#2191); `/development:resolve-issue`'s epic
+verification runs its end-to-end half in the session instead.
+
 ## Mental model — two layers
 
 1. **You + a fresh-context judge subagent = the firewall.** You parse args, set
-   up the isolated target, and spawn one subagent. The subagent owns the noisy
-   work (launching the child, parsing its transcript, diffing the clone) and
-   returns only a compact verdict. The raw child transcript never enters this
-   conversation.
-2. **A headless `claude -p` child = the system under test.** Launched by the
-   subagent via `scripts/run-headless.zsh`, it loads the **local** plugins from
+   up the isolated target, launch the child, and **wait for it yourself** — a
+   main session is re-woken by its own Monitor and task notifications, where a
+   background subagent that ends its turn is not reliably re-woken by its own
+   (#2191). Only once the child has finished do you spawn one subagent. The
+   subagent owns the noisy work (parsing the finished transcript, diffing the
+   clone) and returns only a compact verdict. The raw child transcript never
+   enters this conversation.
+2. **A headless `claude -p` child = the system under test.** Launched by you
+   via `scripts/run-headless.zsh`, it loads the **local** plugins from
    this worktree (`--plugin-dir`) and runs against an isolated clone of the
    target repo. This is what makes the test faithful: the skill/agent loads and
    runs exactly as a user would experience it.
@@ -134,62 +144,93 @@ Compose the comma-separated list, e.g.
 > the installed one, or temporarily disable the installed copy. Surface this in
 > the verdict if the child appears to run stale behaviour.
 
-## Step 5 — Spawn the fresh-context judge subagent
+## Step 5 — Launch the child and wait for it yourself
 
-Spawn **one** subagent (Task tool, `general-purpose` type). It runs with a clean
-context and does all the noisy work. Give it this prompt, with the placeholders
-filled from the steps above:
+You — the invoking session — launch the child and wait on it. The judge is not
+spawned yet: a background subagent that ends its turn while waiting is not
+reliably re-woken by its own Monitor, and one that went to sleep stalled a run
+for 78 minutes with the child long finished (#2191).
+
+1. **Snapshot the clone's clean state**, for the judge's diff later:
+
+   ```bash
+   echo "base_head=$(git -C "$CLONE" rev-parse HEAD)"   # fills <BASE_HEAD>
+   git -C "$CLONE" status --porcelain   # expected: empty
+   ```
+
+2. **Launch the child detached** via the wrapper (include `--gh-repo` only when
+   the slug is non-empty, so gh-based gathers resolve the real repo):
+
+   ```bash
+   "$REPO_ROOT/development-claude-plugin/skills/test/scripts/run-headless.zsh" \
+     --detach \
+     --cwd "$CLONE" --out "$OUT" --plugins "<PLUGINS_CSV>" \
+     --gh-repo "$GH_REPO_SLUG" \
+     --permission-mode <PERMISSION_MODE> --prompt "<TASK>"
+   ```
+
+   It returns immediately, printing `exit_marker=<OUT>.exit`. **Never** launch
+   the wrapper as a Bash background task (`run_in_background: true`): #811
+   recorded that such a task is killed the instant the turn that started it
+   ends, SIGTERM-ing the child mid-run. Never rely on a foreground call
+   finishing either — a real child can outlive the foreground cap. `--detach`
+   is the only launch mode that survives a turn boundary.
+
+3. **Wait on the marker file with your own Monitor until-loop** (generous
+   timeout — a full panel run takes 10–20 minutes):
+
+   ```bash
+   until [ -f "$OUT.exit" ] || ! kill -0 <DETACHED_PID> 2>/dev/null; do sleep 10; done
+   [ -f "$OUT.exit" ] && echo "child_exit=$(cat "$OUT.exit")" || echo "no_verdict"
+   ```
+
+   `<DETACHED_PID>` is the launch's `detached_pid=`. You are re-woken when it
+   fires; read the child's exit code from the marker. If the Monitor expires
+   first, re-arm the same wait, for at most 45 minutes in total. On
+   `no_verdict`, or once the 45 minutes are used up, the run produced no
+   verdict — report that, with `<OUT>.log`'s path and whether `<DETACHED_PID>`
+   is still running, and stop. Never spawn the judge, and never read a
+   verdict, without the marker.
+   (`<OUT>.log` holds the wrapper's stderr banner if you need it.)
+
+## Step 6 — Spawn the judge on the finished transcript
+
+Spawn the judge only once the marker exists. It parses a finished transcript
+and diffs the clone; it never launches anything and never waits on anything.
+
+Spawn **one** subagent (Task tool, `general-purpose` type), in the foreground.
+It runs with a clean context and does all the noisy work. Give it this prompt,
+with the placeholders filled from the steps above:
 
 ```text
-You are the JUDGE for a plugin integration test. Run the system under test in a
-separate headless Claude session, then return a STRUCTURED VERDICT. Do not dump
-the raw transcript back — only the structured block below.
+You are the JUDGE for a plugin integration test. The system under test has
+ALREADY RUN to completion in a separate headless Claude session. Read what it
+did and return a STRUCTURED VERDICT. Do not dump the raw transcript back — only
+the structured block below. Launch nothing.
 
 Inputs:
-- Wrapper script: <REPO_ROOT>/development-claude-plugin/skills/test/scripts/run-headless.zsh
-- Clone (cwd for the child): <CLONE>
-- Transcript output path: <OUT>
-- Local plugin dirs: <PLUGINS_CSV>
-- GitHub slug (owner/repo, may be empty): <GH_REPO_SLUG>
-- Permission mode: <PERMISSION_MODE>
-- Task prompt for the child: <TASK>
+- Finished transcript (newline-delimited JSON): <OUT>
+- Child exit code: <CHILD_EXIT>
+- Clone the child ran in: <CLONE>
+- Clone HEAD before the run: <BASE_HEAD>
+- Task prompt the child ran: <TASK>
 - Expectation (PASS criteria): <EXPECT or "none given">
 
 Do this:
-1. Snapshot the clone's clean state: `git -C <CLONE> rev-parse HEAD` and
-   `git -C <CLONE> status --porcelain`.
-2. Launch the child DETACHED via the wrapper (include `--gh-repo <GH_REPO_SLUG>`
-   only when the slug is non-empty, so gh-based gathers resolve the real repo):
-     <REPO_ROOT>/development-claude-plugin/skills/test/scripts/run-headless.zsh \
-       --detach \
-       --cwd <CLONE> --out <OUT> --plugins "<PLUGINS_CSV>" \
-       --gh-repo "<GH_REPO_SLUG>" \
-       --permission-mode <PERMISSION_MODE> --prompt "<TASK>"
-   This returns immediately, printing `exit_marker=<OUT>.exit`. NEVER launch the
-   wrapper as a harness background task (`run_in_background: true`) and NEVER
-   rely on a foreground call finishing: a real child can run past the 10-minute
-   foreground cap, and a background task is killed the instant your turn ends —
-   SIGTERM-ing the child mid-run (#811). `--detach` is the only launch mode that
-   survives your turn boundaries.
-2b. Wait for the marker file with a Monitor until-loop (generous timeout — a
-   full panel run takes 10–20 minutes):
-     until [ -f "<OUT>.exit" ]; do sleep 10; done; echo "child_exit=$(cat <OUT>.exit)"
-   When the marker appears, read the child's exit code from it. If it is
-   non-zero, the verdict is FAIL unless the task was *expected* to exit
-   non-zero. (`<OUT>.log` holds the wrapper's stderr banner if you need it.)
-3. Parse the transcript <OUT> (newline-delimited JSON, one event per line).
-   Extract: which skills/slash-commands fired, which subagents/agents the child
-   spawned (Task tool uses), which tools it used, the final `result` text, and
-   any error events. Read the file with Read/grep; reason about it — do not
-   assume a rigid schema.
-4. Diff the clone to see real effects: `git -C <CLONE> status --porcelain` and
-   `git -C <CLONE> diff --stat`.
-5. Judge PASS/FAIL against the expectation (or, if none, PASS unless the child
-   errored or clearly failed to load the local plugin).
-6. Return EXACTLY this block and nothing else:
+1. Parse the transcript <OUT> (one event per line). Extract: which
+   skills/slash-commands fired, which subagents/agents the child spawned (Task
+   tool uses), which tools it used, the final `result` text, and any error
+   events. Read the file with Read/grep; reason about it — do not assume a
+   rigid schema.
+2. Diff the clone to see real effects: `git -C <CLONE> status --porcelain`,
+   `git -C <CLONE> diff --stat`, and `git -C <CLONE> log --oneline <BASE_HEAD>..HEAD`.
+3. Judge PASS/FAIL against the expectation (or, if none, PASS unless the child
+   errored or clearly failed to load the local plugin). A non-zero exit code is
+   a FAIL unless the task was *expected* to exit non-zero.
+4. Return EXACTLY this block and nothing else:
 
    VERDICT: PASS | FAIL
-   task: <the task you ran>
+   task: <the task the child ran>
    child_exit: <code>
    fired: <comma-separated skills/commands/agents that activated, or "none detected">
    tools: <notable tools the child used>
@@ -199,13 +240,7 @@ Do this:
    mismatch: <if FAIL, the specific way reality diverged from the expectation; else "n/a">
 ```
 
-> **Waiting on the judge (#811):** the judge's tasks and Monitors are
-> context-local — their ids are NOT addressable from this session, so never
-> try `TaskOutput` on a task id the judge mentions. Wait for the judge
-> subagent itself (its task notification); if it stopped without a verdict,
-> `SendMessage` it to resume — the detached child keeps running either way.
-
-## Step 6 — Surface the verdict and clean up
+## Step 7 — Surface the verdict and clean up
 
 Show the subagent's verdict block verbatim to the user, then add a one-line
 interpretation (what to do next: re-run with a different `--task`, file a finding,
@@ -215,8 +250,6 @@ etc.). Finally remove the temp artifacts:
 rm -rf "$(dirname "$CLONE")" "$OUT" "$OUT.exit" "$OUT.log"
 ```
 
-If the subagent could not launch the child at all (the undocumented
-"claude launches claude" nesting was blocked), fall back: run
-`run-headless.zsh` yourself from this session against the clone, then read and
-judge the transcript inline. Note in the result that the firewall was bypassed,
-so this run's transcript did enter the authoring context.
+If the judge subagent cannot be spawned, read and judge the transcript inline
+yourself, and note in the result that the firewall was bypassed, so this run's
+transcript did enter the authoring context.
