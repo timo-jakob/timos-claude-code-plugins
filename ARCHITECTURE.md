@@ -6736,6 +6736,110 @@ reported at once:
 
 Every field is also type- and enum-checked, as in story mode.
 
+## Bootstrap telemetry (#1229)
+
+`/development:bootstrap` has the widest blast radius in the family, and since it
+is idempotent most real runs are partial — some files written, some kept, some
+GitHub-side state reconciled. "It ran" says nothing; the record says what it
+changed, and keeps a step left undone (`skipped`) apart from a step with nothing
+to do (`already_present`). Since #1229 every invocation appends **exactly one**
+`kind: "run"` record, `pipeline: "bootstrap"`, at whichever ending it reaches:
+the normal finish (a run a failed step ended, and State D's no-drift stop, which
+commits nothing, included), and each early stop (a plan declined at Step 2, a
+detection stop, and a precondition park — any other stop before the plan is
+confirmed). It follows *Per-pipeline telemetry instrumentation* above; the
+procedure is the skill's *Telemetry — stamp the run's start* and Step 5's *Emit
+the run's record*.
+
+**Mechanics.** `scripts/bootstrap-telemetry.zsh start` stamps the start (the
+`wall_s` origin), pre-mints `bootstrap-<ts>-<4 hex>` and reads the host into the
+run file. `bootstrap-telemetry.zsh emit` builds the payload with the pure
+`scripts/build-bootstrap-telemetry-record.zsh` (one state JSON in, the payload
+out), folds the outcome with its `--print-outcome`, and emits through the shared
+emitter with the run's `--telemetry-file` / `--telemetry-dir`. `emit` is never
+fatal: past argument parsing it exits 0, and any failure costs the record with
+one advisory line.
+
+**Siting.** Bootstrap is the one pipeline that habitually runs against a repo
+other than the family's own, so the record belongs to the **target**: `emit`
+resolves `--repo-dir` to the target's main checkout — `dirname` of the absolute
+`git rev-parse --git-common-dir`, never a linked worktree, which Step 4g deletes
+— and both the derived envelope `repo` and the local default sink follow it. A
+folder that is not its own checkout's root is used as it is. The emit runs after the
+4d commit, so no commit carries a `.claude/telemetry/` path, and bootstrap never
+edits `.gitignore` for telemetry.
+
+**Envelope.** `issue: null`; `pr` is the PR the 4e finishing flow opened, else
+`null`; `parent_run_id: null`; `tokens: null`.
+
+**Payload.**
+
+| Key | Value |
+|---|---|
+| `mode` | `"fresh"` \| `"gap_fill"` — `gap_fill` on a re-run over a repo a prior bootstrap already stamped |
+| `target_repo` | the `owner/name` bootstrapped, or `null` before it has a GitHub remote — taken from the skill, independently of the envelope `repo`, so a mis-sited record is diagnosable |
+| `visibility` | `"public"` \| `"private"` \| `null` — it selects the scanner toolchain |
+| `languages` | `{primary: str\|null, auxiliary: [str]}`; `{primary: null, auxiliary: []}` exactly when no stack resolved |
+| `topics` / `interfaces` | `[str]` — the topic name of each `is_<topic>` key the final, user-confirmed detection reports `true`, and the `interface` of each of its `interfaces` entries |
+| `host` | `{os, homebrew}` — `start` reads it: `os` from `uname -s` (`macos`, `linux`, else lower-cased), `homebrew` from `brew` on PATH |
+| `steps` | `{<step key>: written \| merged \| skipped \| failed \| already_present}` — one key per **applicable** step; a step whose trigger is absent is absent |
+| `files` | `{written, merged, skipped, failed, already_present}` — counts over the per-file list |
+| `github_state` | `{branch_protection, secrets, sonar_project, apps_installed}`, each `applied` \| `already_present` \| `skipped` \| `refused` (the API answered 401/403) \| `failed` (any other error) |
+| `ending` | `{stack, early_stop, approve_merge}` — the run's ending facts, below |
+
+`ending.stack` is `resolved` \| `none` \| `detection_failed` \| `not_reached`;
+`ending.early_stop` is `null` \| `plan_declined` \| `detection` \|
+`precondition`; `ending.approve_merge` is the 4f drive's terminal state — `null`
+(4e opened no armed bot PR) \| `merged` \| `pending` \| `request_changes` \|
+`red_ci` \| `retry_exhausted`.
+
+**Step keys — a closed list.** The builder refuses any other key, and
+`tests/build-bootstrap-telemetry-record.bats` pins each to its SKILL.md heading:
+`common_artifacts` (3a), `toolchain_artifacts` (3b), `quality_workflows` (3c),
+`container_publishing` (*Container image publishing*), `language_fragments`
+(3d), `approver_artifacts` (3e), `language_artifacts` (3f),
+`acceptance_workflow` (3g), `docs_machinery` (3h), `api_contracts` (3i),
+`anti_corruption_adapter` (3j), `contract_consumer` (3k), `react_overlay`
+(3k.5), `react_query` (3k.6), `iac` (3l), `composition` (3m),
+`provenance_markers` (Step 3.6), `git_hooks` (4a), `build_script` (4c (Java)).
+
+**Files ↔ steps.** The state carries one per-file list, `[{path, step,
+disposition}]`, one entry per file a step touched or considered, with the
+`steps` vocabulary taken from the skill's idempotency rules — a gate rejection is
+one `failed` entry for the file the step would have written (the Maven refusal is
+`build.gradle.kts` under `build_script`). The list is builder input only; the
+record carries no path. `files.<d>` is the number of entries with disposition
+`<d>`; `steps.<k>` is the **worst** disposition among the entries with
+`step: <k>`, by `failed` > `skipped` > `merged` > `written` > `already_present`;
+an applicable step with **zero** entries is `skipped`.
+
+**Outcome — one worst-wins fold** (convention 8 above), first match from the
+top:
+
+| `outcome` | When (any of) |
+|---|---|
+| `failed` | a step is `failed`; a `github_state` target is `failed`; `stack` is `none` or `detection_failed` |
+| `escalated` | `approve_merge` is `request_changes`, `red_ci` or `retry_exhausted` |
+| `parked` | a step is `skipped`; a `github_state` target is `refused`; `early_stop` is `plan_declined` or `precondition`; the host is not macOS with Homebrew (Step 4.5 cannot run) |
+| `success` | none of the above |
+
+So a re-run where the user keeps one differing file — skip is the default — is
+`parked`, not `success`: something applicable was left undone.
+
+**Refused states.** The builder refuses (exit 1) rather than file a record
+whose facts contradict each other, reporting every breach at once: an unknown
+step key or disposition; a `steps` value that is not its entries' worst; a step
+with entries but no `steps` key; an applicable step with no entry that is not
+`skipped`; a path listed twice under one step; a `github_state` without exactly its four
+targets; `languages` other than `{primary: null, auxiliary: []}` when `stack` is
+not `resolved`; `stack` `none` or `detection_failed` without `early_stop:
+"detection"`, or the converse; `stack: "not_reached"` without `early_stop:
+"precondition"`; steps or files on a run stopped at `plan_declined` or
+`detection`; a `github_state` target other than `skipped` on a declined plan; a
+`pr` or `approve_merge` on any early stop; `approve_merge` without a `pr`; and,
+on a host that is not macOS with Homebrew, a Step 4.5 target (`secrets`,
+`sonar_project`, `apps_installed`) other than `skipped`.
+
 ## Story size pre-flight (#1437)
 
 `/development:resolve-issue` §2 checks the **size** of a change before
