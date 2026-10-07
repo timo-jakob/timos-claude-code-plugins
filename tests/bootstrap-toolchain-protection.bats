@@ -500,9 +500,16 @@ run_preflight() {
   # the one normative statement: the live setting counts, only a known "no rule"
   # is false, and every unreadable state asks
   contains "$joined" "\`true\` when \`--signed-commits\` was passed at invocation or \`github_state.branch_protection.required_signatures\` is \`true\`;"
-  contains "$joined" "no rule exists yet (\`branch_protection.state\` is \`missing\`, or there is no \`github_state\`)"
-  contains "$joined" "the field is \`null\`, or \`state\` is \`forbidden\` or \`unknown\`"
-  contains "$joined" 'passed, **ask the user** whether signed commits are required'
+  # #1772: "no rule" must be KNOWN — an empty github_state with a GitHub remote
+  # is detection's probe not running (gh auth status non-zero, curl/jq missing),
+  # so it asks rather than passing false and deleting a live requirement
+  contains "$joined" "either that field is \`false\` or no rule is known to exist (\`branch_protection.state\` is \`missing\`, or \`has_github_remote\` is \`false\`)."
+  contains "$joined" "the field is \`null\`, \`state\` is \`forbidden\` or \`unknown\`, or \`github_state\` is \`{}\` while \`has_github_remote\` is \`true\` (detection's GitHub probe could not run) — and the flag was not passed, **ask the user**"
+  lacks "$joined" "or there is no \`github_state\`"
+  contains "$joined" 'passed, **ask the user** whether signed commits are required, once per run — never default to `false`, because the script clears the requirement on anything but `true`.'
+  # the github_state contract it reads: {} with a remote is "could not probe"
+  contains "$joined" "with a GitHub remote, \`{}\` means the probe could not run, never \"nothing configured\"."
+  contains "$joined" '"files present + Step 4 done" from "files present + Step 4 never ran"'
   # Step 4b's own block takes it too
   local block
   block="$(awk -v s="scripts/branch-protection.sh\" \\\\" 'index($0, s) { on = 1 } on { print } on && !/\\$/ { exit }' "$SKILL")"

@@ -2194,6 +2194,20 @@ missing_has() { jq -r --arg p "$2" '.missing_artifacts | index($p) | type' <<<"$
   [ "$(missing_has "$out" ".github/workflows/scorecard.yml")" = "number" ]
 }
 
+@test "detect-stack #1772: a GitHub remote whose gh auth status fails yields has_github_remote=true with github_state {}" {
+  # the premise of bootstrap's Step 4b signing value: an empty github_state does
+  # NOT mean "no remote" — gh repo view resolves visibility on its own, while
+  # the github_state probe is gated on `gh auth status`, so this pairing is the
+  # could-not-be-read case that must ask rather than clear signed commits
+  stub_gh PUBLIC
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r .has_github_remote <<<"$out")" = "true" ]
+  # positive control: the stubbed gh WAS consulted, so the {} below is the
+  # auth-status gate and not a gh that never ran
+  [ "$(jq -r .visibility <<<"$out")" = "public" ]
+  [ "$(jq -c .github_state <<<"$out")" = "{}" ]
+}
+
 @test "detect-stack #1154: the PRIVATE Sonar/runner scaffolding is held out on an IaC repo" {
   k8s_chart
   stub_gh PRIVATE

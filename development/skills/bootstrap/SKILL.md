@@ -236,10 +236,11 @@ On a zero exit the script reports:
     private repo, no project key in `sonar-project.properties`, or network
     failure).
 
-  Empty `{}` when `has_github_remote=false` or `gh` is not authenticated.
-  This block is the load-bearing input for distinguishing "files present
-  - Step 4 done" from "files present + Step 4 never ran" — see State D
-  handling below.
+  Empty `{}` when `has_github_remote=false`, or any of `gh`, `curl` or `jq`
+  is missing, or `gh auth status` exits non-zero — so with a GitHub remote,
+  `{}` means the probe could not run, never "nothing configured". This block
+  is the load-bearing input for distinguishing "files present + Step 4 done"
+  from "files present + Step 4 never ran" — see State D handling below.
 
 > **A language token can be absent because detection could not see the module,
 > not because the language is absent.** `go` is the case that bites today:
@@ -5474,11 +5475,13 @@ approval):
 `--require-signed-commits` in this skill passes: `true` when `--signed-commits`
 was passed at invocation or `github_state.branch_protection.required_signatures`
 is `true`; `false` when neither holds and either that field is `false` or no
-rule exists yet (`branch_protection.state` is `missing`, or there is no
-`github_state`). When the setting could not be read — the field is `null`, or
-`state` is `forbidden` or `unknown` — and the flag was not passed, **ask the
-user** whether signed commits are required, once per run — never default to
-`false`, because the script clears the requirement on anything but `true`.
+rule is known to exist (`branch_protection.state` is `missing`, or
+`has_github_remote` is `false`). When the setting could not be read — the field
+is `null`, `state` is `forbidden` or `unknown`, or `github_state` is `{}` while
+`has_github_remote` is `true` (detection's GitHub probe could not run) — and the
+flag was not passed, **ask the user** whether signed commits are required, once
+per run — never default to `false`, because the script clears the requirement
+on anything but `true`.
 
 The script applies a single protection rule that:
 
