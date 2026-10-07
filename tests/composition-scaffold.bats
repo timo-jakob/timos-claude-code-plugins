@@ -1115,7 +1115,8 @@ section_3m() {
   contains "$s" 'the Renovate configs first — `renovate.json5`, `.github/renovate.json(5)`, `.gitlab/renovate.json(5)`, `.renovaterc`, `.renovaterc.json(5)`, then a `renovate` key in `package.json`'
   contains "$s" 'and `.github/dependabot.y(a)ml` only when none of those exists'
   contains "$s" '**A Renovate config wins over Dependabot**: when one exists, the plan names that file and says to add the image custom manager from `templates/renovate.json` to it, even when a Dependabot config is also present'
-  contains "$s" 'Only when no Renovate config is found does the plan name the Dependabot file'
+  # #1904: the whole sentence, so its consequence cannot be deleted unseen
+  contains "$s" 'Only when no Renovate config is found does the plan name the Dependabot file and say the member pins will not be bumped until the repository moves to Renovate.'
   contains "$s" '**when the scaffold printed `wrote renovate.json` or `kept renovate.json`**'
   contains "$s" 'never tell the user to enable Renovate while a Dependabot config stays'
   # …and a skipped renovate.json gets the guidance for its own reason
@@ -1136,4 +1137,83 @@ section_3m() {
   contains "$s" "never point the user at \`branch-protection.sh\` here"
   # and Step 1 sends a composition run there before detection
   contains "$(sed -n '/^## Step 1: Detect Repo State/,/^Run the stack detection/p' "$SKILL" | tr -s '[:space:]' ' ')" "read §3m first"
+}
+
+# One `readonly -a NAME=(…)` declaration of the scaffold, one entry per line.
+# Only the declaration is evaluated — the scaffold itself never runs. awk, not a
+# sed range, because a sed range never ends on its own start line, so a
+# single-line declaration would run on into the next one.
+scaffold_array() {
+  local decl
+  decl="$(awk -v n="$1" '
+    index($0, "readonly -a " n "=(") == 1 { f = 1 }
+    f { print }
+    f && /\)[[:space:]]*$/ { exit }' "$SCAFFOLD")"
+  [ -n "$decl" ] || {
+    printf 'readonly -a %s=( not found in %s\n' "$1" "$SCAFFOLD" >&2
+    return 1
+  }
+  zsh -fc "$decl"$'\n'"print -rl -- \"\${$1[@]}\""
+}
+
+# §3m's spelling of an array: X.json beside X.json5 in the SAME array folds to
+# `X.json(5)`, X.yml beside X.yaml to `X.y(a)ml`; any other entry stays literal.
+# Each spelling is backticked, the first member of a pair places it, and the
+# spellings are joined with ', ' in array order.
+prose_spelling() {
+  local -a entries=() out=()
+  local e s joined=""
+  while IFS= read -r e; do entries+=("$e"); done
+  for e in "${entries[@]}"; do
+    s="$e"
+    case "$e" in
+      *.json5) if in_list "${e%5}" "${entries[@]}"; then s="${e%5}(5)"; fi ;;
+      *.json) if in_list "${e}5" "${entries[@]}"; then s="${e}(5)"; fi ;;
+      *.yaml) if in_list "${e%.yaml}.yml" "${entries[@]}"; then s="${e%.yaml}.y(a)ml"; fi ;;
+      *.yml) if in_list "${e%.yml}.yaml" "${entries[@]}"; then s="${e%.yml}.y(a)ml"; fi ;;
+    esac
+    s="\`$s\`"
+    if ! in_list "$s" "${out[@]}"; then out+=("$s"); fi
+  done
+  for s in "${out[@]}"; do joined="${joined:+$joined, }$s"; done
+  printf '%s' "$joined"
+}
+
+in_list() {
+  local needle="$1" x
+  shift
+  for x in "$@"; do
+    [ "$x" != "$needle" ] || return 0
+  done
+  return 1
+}
+
+@test "bootstrap §3m's pre-plan check list and file counts follow the scaffold's arrays" {
+  # #1904: §3m is the consent gate for a renovate.json the scaffold may skip, so
+  # its list of the places checked and its file counts are derived from the
+  # scaffold's own arrays — an entry added there without §3m reds here.
+  local s renovate dependabot fixed n
+  s="$(section_3m)"
+  [ -n "$s" ]
+  renovate="$(scaffold_array OTHER_RENOVATE_CONFIGS)"
+  dependabot="$(scaffold_array DEPENDABOT_CONFIGS)"
+  fixed="$(scaffold_array FIXED_FILES)"
+  [ -n "$renovate" ]
+  [ -n "$dependabot" ]
+  [ -n "$fixed" ]
+
+  # a failing `contains` prints its needle, which is the derived clause — so the
+  # missing or extra entry is visible in the output
+  contains "$s" "the Renovate configs first — $(prose_spelling <<<"$renovate"), then a \`renovate\` key in \`package.json\`"
+  contains "$s" "and $(prose_spelling <<<"$dependabot") only when none of those exists"
+
+  n="$(printf '%s\n' "$fixed" | wc -l | tr -d ' ')"
+  local -a words=(zero one two three four five six seven eight nine ten eleven twelve
+    thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty)
+  [ "$(( n + 1 ))" -lt "${#words[@]}" ] || {
+    printf 'FIXED_FILES holds %s entries; %s is past the word table — extend it\n' "$n" "$(( n + 1 ))" >&2
+    return 1
+  }
+  contains "$s" "the ${words[n + 1]} files the scaffold writes"
+  contains "$s" "the plan lists the other ${words[n]} files plus \`renovate.json: skipped — <the file> already configures Renovate / Dependabot\`"
 }
