@@ -1110,6 +1110,8 @@ section_3m() {
   contains "$s" 'the seven files the scaffold writes'
   # …and the plan and report never promise or enable what the scaffold skipped
   contains "$s" '**Promise `renovate.json` only where the scaffold will write it.**'
+  # #1905: the scaffold's own skip, which the promise rule above rests on
+  contains "$s" 'It skips `renovate.json` — and says so, exit `0` —'
   # #1903: the plan states the scaffold's precedence — a Renovate config wins
   # over Dependabot — so a repo carrying both gets the Renovate reason
   contains "$s" 'the Renovate configs first — `renovate.json5`, `.github/renovate.json(5)`, `.gitlab/renovate.json(5)`, `.renovaterc`, `.renovaterc.json(5)`, then a `renovate` key in `package.json`'
@@ -1118,9 +1120,14 @@ section_3m() {
   # #1904: the whole sentence, so its consequence cannot be deleted unseen
   contains "$s" 'Only when no Renovate config is found does the plan name the Dependabot file and say the member pins will not be bumped until the repository moves to Renovate.'
   contains "$s" '**when the scaffold printed `wrote renovate.json` or `kept renovate.json`**'
+  # #1905: …and never for a skipped file
+  contains "$s" 'never when it **skipped** the file'
   contains "$s" 'never tell the user to enable Renovate while a Dependabot config stays'
   # …and a skipped renovate.json gets the guidance for its own reason
   contains "$s" 'is added to it (Renovate is already set up — do not tell the user to enable it)'
+  # #1905: the instruction itself and its parenthesis, each pinned whole
+  contains "$s" 'the image custom manager from `<development-composition-root>/templates/renovate.json` is added to it'
+  contains "$s" '(Renovate is already set up — do not tell the user to enable it)'
   contains "$s" 'the repository moves to Renovate — remove the Dependabot config, then enable Renovate and add that custom manager'
   # …in EVERY case, a kept renovate.json beside Dependabot included — not only
   # inside the skipped-file branch
@@ -1130,6 +1137,8 @@ section_3m() {
   contains "$s" '**Say it by the arming outcome**: when auto-merge was armed, the bootstrap PR has most likely already merged and run `promote-staging`, which failed to resolve that member'"'"'s digest'
   contains "$s" 'so say to re-run that run from the **Actions** tab once access is in place'
   contains "$s" 'a manual run of the workflow promotes `production` only, so it cannot repair the failed `staging` run'
+  # #1905: Renovate needs its own registry credentials, and why
+  contains "$s" 'give Renovate its own credentials for that registry, since the scaffold writes no `hostRules`'
   contains "$s" 'when arming failed and the PR still needs a manual merge, say to grant access before merging, since that merge would otherwise fail to resolve a digest'
   contains "$s" "never report a scaffold as complete without the exit \`0\` that judged it"
   contains "$s" "Entry is the user's request, never detection"
