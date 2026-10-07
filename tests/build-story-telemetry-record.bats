@@ -263,6 +263,18 @@ refuses() {
   contains "$stderr" "is a directory"
 }
 
+@test "a process-substitution --state (a non-regular FIFO) is read, not refused (#1762)" {
+  # The guard rejects only DIRECTORIES so the documented `--state <(jq -c …)`
+  # idiom keeps working; narrowing it to a regular-file test reds this case.
+  run --separate-stderr zsh "$B" --state <(printf '%s' "$SUCCESS")
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.mode' <<<"$output")" = "story" ]
+  [ "$(jq -r '.gate_verdict' <<<"$output")" = "READY" ]
+  run --separate-stderr zsh "$B" --state <(printf '%s' "$SUCCESS") --print-outcome
+  [ "$status" -eq 0 ]
+  [ "$output" = "success" ]
+}
+
 @test "--help exits 0 with the usage" {
   run zsh "$B" --help
   [ "$status" -eq 0 ]
