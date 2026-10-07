@@ -172,8 +172,20 @@ rule_of() {
   contains "$step1" 'do **not** ask Q4'
   contains "$step1" "do **not** take §3l's conflict branch"
   contains "$step1" '**never** offer to change the recorded primary'
-  # …and it ends the run rather than falling through to the generic path
-  contains "$step1" 'Report that this is a composition repo, ask whether to re-run §3m, and stop'
+  # …and it ends the run rather than falling through to the generic path, split on
+  # what detection ALSO reports (#1929): a marker beside a language or IaC is a mixed
+  # repo §3m itself refuses, so that branch stops WITHOUT offering §3m
+  contains "$step1" '**Detection also reports any language, `is_kubernetes: true` or `is_opentofu: true`**'
+  contains "$step1" 'Report that a `.claude-workspace.yaml` (or a recorded `primary: composition`) sits in a repo holding application code or IaC'
+  contains "$step1" "which the manifest's placement rule forbids, and stop without offering §3m"
+  # the §3m re-run offer survives only in the no-language, no-IaC branch
+  contains "$step1" '**Otherwise** → this is a repo §3m already scaffolded. Report that this is a composition repo, ask whether to re-run §3m, and stop'
+  lacks "$step1" 'already scaffolded: do **not** ask Q4'
+  # "§3m refuses the same mix" holds only while §3m really stops on it
+  local s3m
+  s3m="$(sed -n '/^### 3m\./,/^## Step 4/p' "$skill" | tr -s '[:space:]' ' ')"
+  [ -n "$s3m" ]
+  contains "$s3m" 'when it reports any language, `is_kubernetes: true` or `is_opentofu: true`, **stop the run** — do not fall back to the language or §3l path'
   # the key list describes the same contract, not "emitted only"
   local keylist
   keylist="$(sed -n '/^- `is_composition` —/,/^- `interfaces` —/p' "$skill" | tr -s '[:space:]' ' ')"

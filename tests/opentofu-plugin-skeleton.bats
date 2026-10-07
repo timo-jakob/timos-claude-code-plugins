@@ -735,13 +735,14 @@ setup() {
   # elsewhere.
   run -1 grep -qi 'opentofu' <<<"$skill_3l"
   # both legitimate mentions pinned positively, so neither can be lost — and the
-  # second states the reads-it-nowhere-yet fact #1162 must retire deliberately
+  # second states the refusal-only reading (#1929) that #1162 must widen deliberately
   # whitespace-normalised: the bullet wraps mid-clause, so a raw-file needle
   # would be pinning the line break rather than the sentence
   local skill_flat
   skill_flat="$(tr -s '[:space:]' ' ' < "$skill")"
   contains "$skill_flat" 'is_opentofu: false'
-  contains "$skill_flat" 'Bootstrap reads it nowhere yet'
+  contains "$skill_flat" 'Bootstrap reads it only to refuse a composition repo holding IaC'
+  lacks "$skill_flat" 'reads it nowhere'
 }
 
 @test "ARCHITECTURE.md records the no-approver rationale AND the auto-merge distinction (#1159)" {
