@@ -263,8 +263,11 @@
 #   secrets.names                          []string  (configured Actions secrets)
 #   sonar_project_exists                   bool | null  (null = unknown / private / no project key)
 #
-# `github_state` is `{}` when has_github_remote=false OR gh is not
-# authenticated. State="skipped" means a specific probe didn't run
+# `github_state` is `{}` when has_github_remote=false, OR any of `gh`, `curl`
+# or `jq` is missing, OR `gh auth status` exits non-zero (which it does when
+# any account on any known host has an auth problem, not only when logged
+# out). So `{}` with has_github_remote=true means "could not probe", never
+# "nothing configured" (#1772). State="skipped" means a specific probe didn't run
 # (e.g., no project key for the Sonar probe).
 #
 # All paths are evaluated relative to the current working directory.
@@ -2072,7 +2075,8 @@ missing_json+="]"
 # actually configured on the remote.
 #
 # Behavior:
-#   - Returns {} when has_github_remote=false OR gh is not authenticated.
+#   - Returns {} when has_github_remote=false, OR gh/curl/jq is missing, OR
+#     `gh auth status` exits non-zero (see the github_state shape above).
 #   - Each probe degrades gracefully on auth/network failure; the orchestrator
 #     can distinguish "not yet applied" from "could not check" by reading
 #     the per-probe state field.
