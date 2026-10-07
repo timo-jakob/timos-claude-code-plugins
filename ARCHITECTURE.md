@@ -168,7 +168,16 @@ got different results; recorded, it belongs to the repository. `approval: human`
 renders no Approver policy, installs only the writer App
 (`install-claude-apps.zsh --writer-only`; on the IaC path Step 4e's offer) and
 skips the approve → merge drive. `/development:maintenance` does not read
-`approval:` yet.
+`approval:` yet. One per-session exception exists, and it records nothing (#2131):
+with `CLAUDE_PLUGIN_APPROVER=1` in the environment, the Claude Approver may approve
+a claude-plugin repo's bot PRs, as decided by
+`development/scripts/approval/plugin-approver-override.zsh` — the one place any
+flow is to read that variable, and only a registered and installed Approver App
+turns it on. No flow consults it yet, so a plugin repo stays human-only until the
+open-pr, resolve-issue and maintenance wiring lands (epic #2129). No Approver App
+is a supported setup, never an error:
+not installing the Approver App is the supported way to forbid AI approvals,
+and every flow then takes the human path without an error or a warning.
 
 **Mechanism.** The orchestrator reads `.maintenance.yml` and tags each dispatch
 via the payload's `dispatch_mode` (`"primary"` | `"auxiliary"`). The language /
