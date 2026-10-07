@@ -84,6 +84,77 @@ Supported flags:
     (`resolve-approval.zsh` reports it as `ignored_flag=`), since a default
     needs no warning — nothing was requested.
   See `docs/CLAUDE-APPS.md` for the design and the Apps' permissions.
+- `--telemetry-file PATH` / `--telemetry-dir DIR` — where this run's one
+  telemetry record goes (#1229), in any position. Each takes a value — halt on a
+  missing, empty or `--`-shaped one. Without either, the record lands in the
+  **target** repo's own `.claude/telemetry/telemetry.jsonl`. Precedence is the
+  emitter's: `--telemetry-file` > `--telemetry-dir` > that default.
+
+## Telemetry — stamp the run's start (#1229)
+
+Every invocation appends **exactly one** `kind: "run"` record,
+`pipeline: "bootstrap"` (ARCHITECTURE.md, *Bootstrap telemetry (#1229)*). All of
+it goes through `<skill-base-dir>/scripts/bootstrap-telemetry.zsh` — never
+hand-roll an envelope, a run_id or a payload. Before Step 1, stamp the start
+**once per invocation**, with the run file in the session scratch directory,
+never inside the target repo:
+
+```bash
+"<skill-base-dir>/scripts/bootstrap-telemetry.zsh" start \
+  --run-file <scratch>/bootstrap-run.json \
+  [--telemetry-file <PATH>] [--telemetry-dir <DIR>]
+```
+
+- Pass a sink flag only when the invocation was given it. A re-entry within the
+  same invocation re-reads the run file and never calls `start` again — a second
+  call would mint a second run.
+- **Exit 2** is your own malformed call — fix it and re-run once. **Exit 1** (no
+  clock, an unwritable run file) means this run has no record: say so in one line
+  and **skip the emit**. A failed `start` never stops the bootstrap.
+- Note the target's **main checkout** now — `dirname` of the absolute
+  `git rev-parse --path-format=absolute --git-common-dir`, or the folder itself
+  when it is not its own checkout's root (before State A's `git init`, even
+  inside another repo). That is the `--repo-dir` the emit takes. A linked
+  worktree is never it: Step 4g deletes the worktree before Step 5 emits.
+
+**Every ending emits, through the one emit at the end of Step 5** (*Emit the
+run's record*): the normal finish after 4d / 4e / 4f / 4.5 (after 4e on §3m's
+path, which keeps that emit and no other Step 5 action; State D's no-drift
+"toolchain is current" stop, which commits nothing), each early stop
+**before** you stop — a plan declined at Step 2, a detection that aborted or
+found no stack Q4 could resolve, and a precondition park, which is every other
+stop before the plan is confirmed (State A's `git init` declined, State B's
+stop at a non-GitHub remote, the composition guard's stop, a toolchain or
+approval model that would not resolve, §3m's stops before its scaffold, a
+human-only choice that ends the run at Step 2) — and a failed step that ends
+the run (§3m's non-zero scaffold exit, Step 3's `--record` exiting non-zero),
+which keeps `early_stop` `null` and records the step's `failed` entry. An early
+stop skips the rest of Step 5 but not its emit. A session that dies mid-run
+emits nothing: the stream undercounts rather than guesses.
+
+**Keep the run's facts as you go**, each where it is decided, never
+reconstructed at the end:
+
+- **one per-file entry for every file a step touched or considered** — a
+  rendered template, a hook 4a installed under `.git/hooks/`, or `.git/config`
+  when §3l's 4a sets `core.hooksPath` (`already_present` whenever it read
+  `hooks` before 4a, whatever the gate said or the script did; otherwise
+  `written` when the script set it, `skipped` when the gate failed and the
+  script was skipped, `failed` when the script exited non-zero) —
+  `{path, step, disposition}`, where `step` is the step key of the heading that
+  touched it — `quality-<visibility>.yml` and its `-noop` companion are §3c's
+  (`quality_workflows`), and their `DOCKER` blocks, when kept, are a second
+  entry each under `container_publishing` — one entry per step for a file two
+  steps touch (the table in *Emit the run's record*) and `disposition` is the
+  *Idempotency rules* outcome: absent or overwritten → `written`; content matches
+  → `already_present`; differs and skipped (the default answer) → `skipped`;
+  merged by hand or by the `.gitignore` merge → `merged`; a write error, **or the
+  step rejected by a bootstrap gate** → `failed`;
+- each step that **applied** to this repo — a step whose trigger is absent is
+  left out, and an applicable step that wrote no file (a declined Groovy
+  conversion) is `skipped`;
+- each `github_state` target's result as you run it;
+- how the run ended: an early stop, the 4f drive's terminal state, the PR.
 
 ## Guiding Principles
 
@@ -163,7 +234,9 @@ walk does enter, such as `dist/` or a chart directory). Do not cite
 since #1393 its walk never enters them.
 This is the same wording maintenance SKILL.md's Phase 1 mandates — both skills
 read the same contract off the same suppressed evidence, so they must not give
-the user opposite certainties.
+the user opposite certainties. When the re-run aborts too, the run ends here:
+emit its record (`stack: "detection_failed"`, `early_stop: "detection"`, *Emit
+the run's record*) before you stop.
 
 **This rule binds EVERY `detect-stack.sh` invocation in this skill, not just
 this one** — the `--interfaces` re-run below, State C's re-run before proceeding
@@ -275,7 +348,8 @@ flow. Stop and ask for input wherever marked; do not guess.
 `git_initialized=false`, `languages=[]`, `existing_artifacts={}`.
 
 1. Ask: **"This directory isn't a git repository yet. Initialize one here?"**
-   (yes / no — if no, stop.)
+   (yes / no — if no, emit the record (`early_stop: "precondition"`, *Emit the
+   run's record*) and stop.)
 2. Run `git init -b main`.
 3. Continue to **shared questions** below.
 
@@ -286,7 +360,8 @@ flow. Stop and ask for input wherever marked; do not guess.
 1. If `git remote -v` shows a non-GitHub remote (GitLab, Bitbucket, etc.) →
    inform the user: **"Your remote points at `<host>`. The workflows I generate
    target GitHub Actions, which won't run there. Add a GitHub remote anyway,
-   or stop?"** If they want to stop, do so.
+   or stop?"** If they want to stop, emit the record (`early_stop:
+   "precondition"`, *Emit the run's record*) and stop.
 2. Continue to **shared questions** below.
 
 #### State C: git repo with GitHub remote, but `gh` not authenticated
@@ -1094,7 +1169,12 @@ A stale-base warning here would predict the failure of a scan that never runs.
 Omit the plan's `Docker pre-flight:` line and note the unscanned Dockerfile in
 the Step 5 checklist instead.
 
-Ask for confirmation. Do not proceed until the user explicitly approves.
+Ask for confirmation. Do not proceed until the user explicitly approves. A
+decline ends the run: emit its record (`early_stop: "plan_declined"`, *Emit the
+run's record*) and stop. That record is the decline alone — `steps` `{}`, no
+`files` entry, every `github_state` target `skipped`. The decline governs the
+record, so what State D rendered or reconciled before the plan is not recorded;
+its renders stay in the working tree, uncommitted.
 Confirming this plan **is** the consent for the Step 4e/4f finishing flow — which
 is why the finish line is disclosed here: it is the single gate for the
 commit/push/PR **and the approve → merge drive**, so it must name the commit, the
@@ -5121,12 +5201,13 @@ conflict.
    repository moves to Renovate.
 
 4. This section, in place of the rest of Step 3.
-5. Step 4d (initial commit), then Step 4e (the finishing flow) and Step 4g
-   where it applies. Step 4f does not apply: a composition repo has no Approver.
+5. Step 4d (initial commit), then Step 4e (the finishing flow), Step 4g where
+   it applies, and Step 5's *Emit the run's record* — the one Step 5 action this
+   path keeps. Step 4f does not apply: a composition repo has no Approver.
 
 Steps 2.4–2.5, 3.5–3.6, 4a–4c, 4.5 and 5 key on a language, a toolchain or a
 gate command this repo does not have, and this section's report replaces Step
-5's checklist. **Branch protection (4b) is not applied on this path yet** — the
+5's checklist, not its emit. **Branch protection (4b) is not applied on this path yet** — the
 skeleton renders no check to require. **Report the arming outcome open-pr
 actually returned** — on a failure, that the PR needs a manual
 merge; on a success, that auto-merge is armed on an unprotected branch — and
@@ -5737,7 +5818,9 @@ Then **commit** the generated files (and any 4c (Java) build-script wiring, any
 4a.5 normalization fixups to pre-existing files) using the `/development:commit`
 flow with a suggested message like `Bootstrap project with quality and
 security toolchain`. Whether pushing follows is the **Step 4e finishing
-flow**'s decision — do not push here.
+flow**'s decision — do not push here. **Never stage a `.claude/telemetry/`
+path**: an earlier run's record sits there untracked, and a record is never
+committed (*Emit the run's record*).
 
 **Skip 4d when nothing was written.** If this run rendered, repaired,
 generated or recorded nothing in the working tree — a **GitHub-side-only
@@ -6541,6 +6624,117 @@ message — fix the workflow it names, then re-run `branch-protection.sh`:
   not emit. Build and scan it yourself, or add the language whose pipeline owns
   it.
 ```
+
+### Emit the run's record (#1229)
+
+The last action of every run, **after** the checklist is printed — and, on an
+early stop, the one action taken before stopping. It comes after 4d, so the
+commit never carries a `.claude/telemetry/` path; bootstrap **never** edits
+`.gitignore` for telemetry. Skip it only when `start` failed. Write the facts
+kept since the start (*Telemetry — stamp the run's start*) to
+`<scratch>/bootstrap-state.json`:
+
+```json
+{ "mode": "fresh", "target_repo": "acme/billing", "visibility": "private",
+  "languages": { "primary": "java", "auxiliary": ["go"] },
+  "topics": [], "interfaces": ["rest"],
+  "host": { "os": "macos", "homebrew": true },
+  "steps": { "common_artifacts": "written", "build_script": "failed" },
+  "files": [ { "path": "README.md", "step": "common_artifacts", "disposition": "written" },
+             { "path": "build.gradle.kts", "step": "build_script", "disposition": "failed" } ],
+  "github_state": { "branch_protection": "applied", "secrets": "applied",
+                    "sonar_project": "refused", "apps_installed": "already_present" },
+  "stack": "resolved", "early_stop": null, "approve_merge": null, "pr": 412 }
+```
+
+- `mode` — `gap_fill` on a re-run over a repo a prior bootstrap already stamped
+  (a provenance marker, Step 3.6, or its `.maintenance.yml` on disk), else
+  `fresh` — a first bootstrap through State D's missing-file render included.
+- `target_repo` — the `owner/name` this run bootstrapped (`null` before it has a
+  GitHub remote); `visibility` — `public` | `private`, `null` if never decided.
+- `languages` — `{primary, auxiliary}`: the declared primary and every other
+  detected language; `{primary: null, auxiliary: []}` whenever no stack
+  resolved. `topics` — the topic name of each `is_<topic>` key the final,
+  user-confirmed detection (the one §3h reads) reports `true` (`is_kubernetes`
+  → `kubernetes`); `interfaces` — the `interface` of each of its `interfaces`
+  entries, `library` included.
+- `host` — leave it as you like: `emit` takes it from the run file.
+- `steps` — one key per **applicable** step, from this closed list:
+
+  | Key | SKILL.md heading |
+  |---|---|
+  | `common_artifacts` | 3a. Common artifacts |
+  | `toolchain_artifacts` | 3b. Tool-scoped artifacts |
+  | `quality_workflows` | 3c. The quality workflows are composed per tool |
+  | `container_publishing` | Container image publishing |
+  | `language_fragments` | 3d. Per-language fragments |
+  | `approver_artifacts` | 3e. Claude Approver artifacts |
+  | `language_artifacts` | 3f. Language-specific bootstrap artifacts |
+  | `acceptance_workflow` | 3g. Acceptance-test workflow |
+  | `docs_machinery` | 3h. End-user docs machinery |
+  | `api_contracts` | 3i. API contracts machinery |
+  | `anti_corruption_adapter` | 3j. Multi-major anti-corruption adapter |
+  | `contract_consumer` | 3k. API contract-consumer machinery |
+  | `react_overlay` | 3k.5. React overlay |
+  | `react_query` | 3k.6. React Query binding |
+  | `iac` | 3l. Infrastructure-as-code repos |
+  | `composition` | 3m. Composition repos |
+  | `provenance_markers` | Step 3.6: Stamp provenance markers on tracked files |
+  | `git_hooks` | 4a. Install git hooks |
+  | `build_script` | 4c (Java). Build script |
+
+  Its value is the **worst** disposition among that step's `files` entries, by
+  `failed` > `skipped` > `merged` > `written` > `already_present`; a step with no
+  entry is `skipped` — it chose not to write. A step that failed before writing
+  anything — a gate rejection, a refused scaffold, a render that exited non-zero
+  — is one `failed` entry for the file it would have written: the Maven refusal
+  at the Java build-system gate is `{"path": "build.gradle.kts", "step":
+  "build_script", "disposition": "failed"}`.
+- `files` — the per-file entries. They are builder input only: the record
+  carries their counts, never a path.
+- `github_state` — each of `branch_protection` (4b), `secrets`, `sonar_project`
+  and `apps_installed`, recorded wherever the target was done — State D's
+  gap-fill, 4e's writer install or Step 4.5: `applied`, `already_present`,
+  `skipped` (not run; on a host Step 4.5 cannot run on, `secrets`, `sonar_project`
+  and `apps_installed` are `skipped`, the one value the builder takes there),
+  `refused` (the API
+  answered 401 or 403 — missing credentials or admin rights) or `failed` (any
+  other error).
+- `stack` — `resolved` once the primary is known — as `{{PRIMARY}}` determines
+  it (the placeholder table in Step 3: a language detected or answered at Q4,
+  `claude-plugin`, §3l's `kubernetes` as Q4's IaC answer), as §3m's
+  `composition` (the request that enters that path), or as an existing
+  `.maintenance.yml` records it — and `languages.primary` is that primary;
+  `none` when detection and Q4 resolved no primary; `detection_failed` when
+  `detect-stack.sh` aborted; `not_reached` for a precondition stop before the
+  primary is known (several detected languages, none yet declared), and for the
+  composition guard's stop, which declares nothing.
+- `early_stop` — `null` unless the run stopped at `plan_declined`, `detection`
+  (`stack` is `none` or `detection_failed`) or `precondition`; a run a failed
+  step ended keeps `null` — its `failed` entry is the record.
+- `approve_merge` — the 4f drive's terminal state: `merged`; `request_changes`,
+  `red_ci`, or `retry_exhausted` (the credits gate failed its one retry); or
+  `pending` for a PR left open any other way (deferred, human approval, a merge
+  hold, the Approver App missing) — a human-only repo's armed PR included; `null`
+  only when 4e opened no armed bot PR (arming failed, blocked before a PR, no
+  delta to commit).
+- `pr` — the PR 4e opened, else `null`.
+
+Then emit, with `--repo-dir` the main checkout noted at the start:
+
+```bash
+"<skill-base-dir>/scripts/bootstrap-telemetry.zsh" emit \
+  --run-file <scratch>/bootstrap-run.json --state <scratch>/bootstrap-state.json \
+  --repo-dir "<the target's main checkout>"
+```
+
+The builder folds the outcome — `failed` > `escalated` > `parked` > `success`,
+first match wins — so never pick it yourself. **Telemetry is never fatal**: past
+argument parsing `emit` exits 0 whatever happens; on any failure (a refused
+state, an absent or failing emitter, a run already emitted) it prints one
+`bootstrap record NOT emitted` advisory and appends nothing. Relay that line and
+carry on — what the run wrote, reconciled and reported stands. An exit 2 is your
+own malformed call: fix it and re-run once; a second costs the record.
 
 ## Important Rules
 
