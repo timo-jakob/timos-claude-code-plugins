@@ -438,12 +438,14 @@ EOF
 @test "render: #1651 a blank toolchain flag is a usage error that writes nothing" {
   # a blank value would render `code_scanning: ` — a null that records nothing
   printf 'cs: {{CODE_SCANNING}}\n' > "$T/c.tmpl"
-  local flag
+  local flag bad
   for flag in --static-analysis --vulnerabilities --code-scanning; do
-    run zsh "$SCRIPT" --templates "$T" --out "$OUT" "$flag" ' ' c.tmpl
-    [ "$status" -eq 2 ]
-    contains "$output" "$flag needs a non-blank value"
-    [ ! -e "$OUT/c" ]
+    for bad in '' ' '; do
+      run zsh "$SCRIPT" --templates "$T" --out "$OUT" "$flag" "$bad" c.tmpl
+      [ "$status" -eq 2 ]
+      contains "$output" "$flag needs a non-blank value"
+      [ ! -e "$OUT/c" ]
+    done
   done
 }
 
