@@ -121,11 +121,20 @@ Only the user's request routes a run there: `detect-stack.sh` reports
 
 **It does guard on it.** When the user did **not** ask for a composition repo
 but `is_composition: true` or `.maintenance.yml` records `primary: composition`,
-this is a repo §3m already scaffolded: do **not** ask Q4, do **not** take §3l's
-conflict branch, and **never** offer to change the recorded primary. Report
-that this is a composition repo, ask whether to re-run §3m, and stop — the
-generic path would otherwise ask for a language a composition repo never holds,
-or offer to rewrite `primary: composition` to `kubernetes`.
+do **not** ask Q4, do **not** take §3l's conflict branch, and **never** offer to
+change the recorded primary — the generic path would otherwise ask for a
+language a composition repo never holds, or offer to rewrite
+`primary: composition` to `kubernetes`. Then end the run on what detection
+**also** reports, because §3m refuses the same mix:
+
+- **Detection also reports any language, `is_kubernetes: true` or
+  `is_opentofu: true`** → this is not a repo §3m scaffolded, and offering §3m
+  would send the user down a path that stops on that detection. Report that a
+  `.claude-workspace.yaml` (or a recorded `primary: composition`) sits in a repo
+  holding application code or IaC, which the manifest's placement rule forbids,
+  and stop without offering §3m.
+- **Otherwise** → this is a repo §3m already scaffolded. Report that this is a
+  composition repo, ask whether to re-run §3m, and stop.
 
 Run the stack detection script and capture its JSON output:
 
@@ -186,11 +195,11 @@ On a zero exit the script reports:
 - `is_opentofu` — whether the repo carries the **opentofu topic marker** (any
   `*.tf` outside `.terraform/` and vendored trees). Also a *topic*, so it can be
   `true` alongside any language, and alongside `is_kubernetes`. **Bootstrap
-  reads it nowhere yet**: §3l's IaC path, the `--iac-only` context set and the
-  dual-marker repo are [#1162](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1162)'s,
-  so this key is EMITTED ONLY — nothing reads it yet, here or in the
-  maintenance orchestrator (which re-derives the topic from its own marker
-  recipe), and it is deliberately absent from every branch below
+  reads it only to refuse a composition repo holding IaC** — Step 1's
+  composition guard and §3m stop on it. §3l's IaC path, the `--iac-only`
+  context set and the dual-marker repo are [#1162](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1162)'s,
+  and the maintenance orchestrator re-derives the topic from its own marker
+  recipe
 - `is_composition` — whether the repo carries the **composition topic marker**
   (a `.claude-workspace.yaml` at the repo root, #1747). Bootstrap does not
   **route** on it — §3m is entered on the user's request — but Step 1 **guards**
