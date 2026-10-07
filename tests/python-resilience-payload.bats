@@ -256,6 +256,35 @@ pyrun() {
   done
 }
 
+@test "the SKILL registers the declaration file as package data, or names it for the human (#2182)" {
+  # Without the package-data step a non-editable install (`pip install .`) ships
+  # no declaration file, the default reads as empty, and the image cannot start.
+  # SCOPED to the Python block and each needle asserted unique within it, as the
+  # placement-rules test above does.
+  local block rule
+  block="$(block_between '^\*\*Python resilience + dependency health' '**Java canonical implementation (#935).** For a **non-Spring** Java service repo,' "$SKILL")"
+  for rule in \
+    "must reach the INSTALLED package (#2182)" \
+    "and setuptools packages no" \
+    "under \`[tool.setuptools.package-data]\`" \
+    "bootstrap does not edit it" \
+    "Never stay silent: the gap shows only in the image" \
+    "Create the table, or the package's key, when absent" \
+    "so a re-run never duplicates the entry" \
+    "as a file the human must include in the built artifact" \
+    "nothing to register" \
+    "\`pyproject.toml\` builds with setuptools" \
+    "or it has none, which pip builds with setuptools" \
+    "setuptools configured outside \`pyproject.toml\`" \
+    "or that edit declined or rolled" \
+    "no \`pyproject.toml\`, \`setup.py\` or \`setup.cfg\`"
+  do
+    contains "$block" "$rule"
+    run grep -cF "$rule" <<< "$block"
+    [ "$output" -eq 1 ]
+  done
+}
+
 @test "the resilience payload's gate is a pure function of the ops-api block's outcome" {
   # A second gate here could disagree with the ops-api one and place an OpsConfig
   # wired for components with no DependencyHealth to supply them.
