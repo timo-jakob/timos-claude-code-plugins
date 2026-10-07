@@ -607,6 +607,35 @@ advised() {
   [ -z "$(ls -A "$TD")" ]
 }
 
+@test "never fatal: a scratch file that cannot be created, on either mktemp call" {
+  # emit makes two scratch files (state, then payload), each with its own
+  # advisory arm. A read-only TMPDIR fails the first; a full one can fail only
+  # the second, after the first already exists — so each call gets its own
+  # stub. The stub counts its calls in a file OUTSIDE $TD and fails call
+  # number $FAIL_ON; the calls before it land in $TD, which must end up empty.
+  local TD="$BATS_TEST_TMPDIR/tmp" SB="$BATS_TEST_TMPDIR/mktemp-fail-stub"
+  local N="$BATS_TEST_TMPDIR/mktemp-calls" fail_on
+  mkdir -p "$TD" "$SB"
+  printf '#!/bin/sh\nn=$(($(cat "%s" 2>/dev/null || echo 0) + 1))\necho "$n" > "%s"\n[ "$n" -ge "$FAIL_ON" ] && exit 1\nexec /usr/bin/mktemp "%s/scratch.XXXXXX"\n' \
+    "$N" "$N" "$TD" > "$SB/mktemp"
+  chmod +x "$SB/mktemp"
+
+  for fail_on in 1 2; do
+    rm -f "$N"
+    zsh "$D" start --run-file "$RUN" >/dev/null
+    state "$SUCCESS"
+    run --separate-stderr env FAIL_ON="$fail_on" PATH="$SB:$PATH" zsh "$D" emit \
+      --run-file "$RUN" --state "$ST" --repo-dir "$R" --issue 412
+    echo "# mktemp call $fail_on fails"
+    advised
+    contains "$stderr" "could not create a scratch file"
+    # the stub really was reached exactly up to the failing call
+    [ "$(cat "$N")" -eq "$fail_on" ] || { echo "want $fail_on mktemp calls, got $(cat "$N")"; return 1; }
+    # the state file made before a failing second call is removed, not leaked
+    [ -z "$(ls -A "$TD")" ] || { echo "scratch leaked on call $fail_on: $(ls -A "$TD")"; return 1; }
+  done
+}
+
 # --- the reference's commands match the script --------------------------------
 
 @test "every flag reference/telemetry.md passes to story-telemetry.zsh is one the script accepts" {
