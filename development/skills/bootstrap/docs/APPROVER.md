@@ -25,11 +25,13 @@ If you just want quick links to the underlying specs, skip to
 11. [The author allowlist](#the-author-allowlist)
 12. [Hotfix override](#hotfix-override)
 13. [Multi-language status](#multi-language-status)
-14. [Customisation](#customisation)
-15. [Cost and rate limits](#cost-and-rate-limits)
-16. [Troubleshooting](#troubleshooting)
-17. [Worked examples](#worked-examples)
-18. [Reference docs](#reference-docs)
+14. [Plugin repos: opt-in per session](#plugin-repos-opt-in-per-session)
+    - [Forbidding AI approvals](#forbidding-ai-approvals)
+15. [Customisation](#customisation)
+16. [Cost and rate limits](#cost-and-rate-limits)
+17. [Troubleshooting](#troubleshooting)
+18. [Worked examples](#worked-examples)
+19. [Reference docs](#reference-docs)
 
 ---
 
@@ -578,6 +580,33 @@ App by hand (`scripts/install-claude-apps.zsh`) **and** hand-authoring
 Bootstrap also skips when the primary language is not Approver-capable
 and zero — or more than one — Approver-capable language is detected, and
 on a plugin repo, where the Approver is always skipped.
+
+## Plugin repos: opt-in per session
+
+A claude-plugin repo is human-only by default and records `approval: human`.
+To let the Approver review this session's Maintenance-App PRs, export
+`CLAUDE_PLUGIN_APPROVER=1` (exactly `1`; any other value is off). Then run
+`/development-claude-plugin:approve <pr>` by hand on each PR; on `APPROVE`,
+armed auto-merge merges it. Nothing calls the skill for you yet: wiring it into
+`/development:resolve-issue` and `/development:open-pr` is planned under
+epic #2129.
+
+Three kinds of change always go to a human, whatever the review concludes: residue
+(a review dossier with `open > 0`), `.github/workflows/*`, and the
+approval/identity machinery. On those the Approver posts `COMMENT` with a
+"Needs a human" list (or `REQUEST_CHANGES` when the review already gives it),
+never `APPROVE`. Nothing is recorded in the repository.
+Unset the variable and the repo is human-only again.
+
+The skill brings its own policy: the core policy rendered for
+`claude-plugin`, followed by the plugin overlay shipped beside the skill. No
+`.claude/approver-policy.md` is needed.
+
+### Forbidding AI approvals
+
+Don't register the Approver App for the owner, or don't install it on the
+repository. Every flow then takes the human path, without an error or a
+warning, even with `CLAUDE_PLUGIN_APPROVER=1` set.
 
 ## Customisation
 
