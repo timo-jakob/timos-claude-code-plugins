@@ -76,7 +76,7 @@ resolve_issue_files() {
   local -a shards
   shards=(core.md scope-block.md step-1-panel.md step-2-invocation.md
     exit-2-stale-findings.md exit-20-awaiting-fix.md delta-rounds.md
-    topic-panels.md decided-pass.md risk-pass.md carry.md subagents.md
+    topic-panels.md decided-pass.md risk-pass.md carry.md subagents.md estimates.md
     briefs/panel.md briefs/fix.md briefs/decide.md briefs/risk.md)
   # #2056 split residue.md the same way, into reference/residue/. Its roster, in
   # that index's read order, under the same discipline.

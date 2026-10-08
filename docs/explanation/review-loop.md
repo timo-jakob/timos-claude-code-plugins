@@ -93,6 +93,13 @@ bounded blocking call reserved for signals the harness does not deliver — is
 `/development:resolve-issue` §3.5's **How to wait**, and nothing here restates
 it.
 
+**Each wait comes with a sourced estimate, or an honest none.** Before the gate,
+the panel, or any other round subagent, the driver prints one line that
+`narrate-estimate.zsh` builds: a live time-left read from the running gate's own
+log, a median and 80th percentile from this repo's past runs, or
+`no estimate (no data)`. The driver never improvises a figure, so a human
+deciding whether to step away is reading a measurement, not a guess.
+
 **A fix pass subtracts.** Step 3 is allowed to delete, narrow or collapse; it is
 not allowed to grow the change. A finding whose smallest fix would have to add
 new behaviour is parked as a follow-up issue instead — unless a human, or the

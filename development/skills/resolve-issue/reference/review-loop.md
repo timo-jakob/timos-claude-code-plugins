@@ -27,7 +27,9 @@ each at most 20,000 bytes (#2055). Read order:
     dispatch.
 12. `reference/review-loop/subagents.md` — round subagents and their verdict
     recovery arms.
-13. `reference/review-loop/briefs/` — `panel.md`, `fix.md`, `decide.md` and
+13. `reference/review-loop/estimates.md` — narrating long waits with a sourced
+    estimate or none.
+14. `reference/review-loop/briefs/` — `panel.md`, `fix.md`, `decide.md` and
     `risk.md`, one brief per round subagent.
 
 Every `<!-- moved: … -->` block in those shards is byte-identical to the text it
