@@ -6,7 +6,7 @@
 #     `selected:<id>` --gate-attest skips the loop's own gate on a --resume into
 #     a DELTA round, and NEVER on a --resume into the closing full sweep, where
 #     --test-cmd runs; a bare <id> is #981's attestation, unchanged;
-#   * each history[] entry carries `gate` — {scope, attested, wall_s, slowest}
+#   * each history[] entry carries `gate` — {scope, attested, wall_s, slowest, jobs}
 #     from the loop's own run-gate.zsh run (attested:false) or from
 #     --gate-summary (attested:true), else null — while `rounds` stays an
 #     integer; --gate-summary never decides a skip on its own, but a green
@@ -72,6 +72,9 @@ EOF
   jq -cn '{mode:"parallel", jobs:10, scope:"selected", ok:3, not_ok:0, total:3, exit:0,
            wall_s:40.25, tap:"/tmp/t", tree:"selected:abc",
            files:[{file:"tests/a.bats", wall_s:1}, {file:"tests/b.bats", wall_s:30}]}' > "$SUMMARY"
+
+  # per-step timings the conductor passes for one round (#2197)
+  TIMINGS="$BATS_TEST_TMPDIR/timings.json"
 }
 
 # one step-mode invocation: stdout (the status JSON) kept apart from stderr
@@ -236,7 +239,8 @@ selected_then_promoted() {
          and (.history[1].gate.slowest | length) == 10
          and .history[1].gate.slowest[0] == {file:"tests/f12.bats", wall_s:18}
          and .history[1].gate.slowest[9] == {file:"tests/f3.bats", wall_s:4.5}
-         and (.history[1].gate | keys) == ["attested","scope","slowest","wall_s"]' "$ST"
+         and .history[1].gate.jobs == 10
+         and (.history[1].gate | keys) == ["attested","jobs","scope","slowest","wall_s"]' "$ST"
   # rounds stays the integer count; stdout is the status JSON alone
   jq -e '(.rounds | type) == "number" and .rounds == 2' "$ST"
   echo "$output" | jq -e '.status == "AWAITING_FIX"'
@@ -252,7 +256,13 @@ selected_then_promoted() {
     --gate-attest "selected:$(tid)" --gate-summary "$SUMMARY"
   [ "$status" -eq 20 ]
   jq -e '.history[1].gate == {scope:"selected", attested:true, wall_s:40.25,
-         slowest:[{file:"tests/b.bats", wall_s:30}, {file:"tests/a.bats", wall_s:1}]}' "$ST"
+         slowest:[{file:"tests/b.bats", wall_s:30}, {file:"tests/a.bats", wall_s:1}], jobs:10}' "$ST"
+}
+
+@test "#2197 a summary with no jobs records jobs:null, never a guess" {
+  jq -c 'del(.jobs)' "$SUMMARY" > "$BATS_TEST_TMPDIR/nojobs.json"
+  round1_then_fix --gate-summary "$BATS_TEST_TMPDIR/nojobs.json"
+  jq -e '.history[0].gate.jobs == null and .history[0].gate.wall_s == 40.25' "$ST"
 }
 
 @test "an attested round with no --gate-summary records null" {
@@ -348,6 +358,109 @@ jq '[.[] | {file, dimension, title, confirmed:[\"r\"], re_raised:[], unconfirmed
          and .history[1].gate.scope == "full"' "$ST"
   # run exactly as given: no argument (no selection flag) was added
   [ "$(cat "$BATS_TEST_TMPDIR/gate-argc")" = "0" ]
+}
+
+# ---- per-step wall times (#2197) ------------------------------------------------
+# Each history line carries step_wall_s {panel, decide, risk, fix}: from the
+# conductor's --step-timings in step mode, from the loop's own clock in hook
+# mode. Telemetry only — nothing unusable costs the round.
+
+@test "#2197 step mode: --step-timings lands on the history line of the round as step_wall_s" {
+  round1_then_fix
+  jq -e '.history[0].step_wall_s == {panel:null, decide:null, risk:null, fix:null}' "$ST"
+  confirm_carry 2
+  printf '[]' > "$F"
+  printf '{"panel":600,"decide":null,"risk":45,"fix":900}' > "$TIMINGS"
+  step --resume --carry-accounting "$ACCT" --test-cmd 'true' --step-timings "$TIMINGS"
+  [ "$status" -eq 20 ]
+  jq -e '.history[1].step_wall_s == {panel:600, decide:null, risk:45, fix:900}' "$ST"
+  # no gate key: gate time lives in gate.wall_s only
+  jq -e '(.history[1].step_wall_s | keys) == ["decide","fix","panel","risk"]' "$ST"
+}
+
+@test "#2197 step mode: the fix of round 1 is always null — no fix pass preceded it" {
+  printf '{"panel":120,"decide":5,"risk":30,"fix":300}' > "$TIMINGS"
+  round1_then_fix --step-timings "$TIMINGS"
+  jq -e '.history[0].step_wall_s == {panel:120, decide:5, risk:30, fix:null}' "$ST"
+}
+
+@test "#2197 a non-object --step-timings records four nulls with a note, and the round is still recorded" {
+  printf '[1,2]' > "$TIMINGS"
+  printf '%s' "$CRIT" > "$F"
+  step --step-timings "$TIMINGS"
+  [ "$status" -eq 20 ]
+  jq -e '.history[0].step_wall_s == {panel:null, decide:null, risk:null, fix:null}
+         and (.history | length) == 1' "$ST"
+  contains "$stderr" "--step-timings is not one JSON object"
+}
+
+@test "#2197 a missing --step-timings file records four nulls with a note" {
+  printf '%s' "$CRIT" > "$F"
+  step --step-timings "$BATS_TEST_TMPDIR/no-such.json"
+  [ "$status" -eq 20 ]
+  jq -e '.history[0].step_wall_s == {panel:null, decide:null, risk:null, fix:null}' "$ST"
+  contains "$stderr" "--step-timings is not a readable file"
+}
+
+@test "#2197 a value that is not a non-negative number reads as null, named in a note; the rest stand" {
+  printf '{"panel":-5,"decide":"soon","risk":45}' > "$TIMINGS"
+  printf '%s' "$CRIT" > "$F"
+  step --step-timings "$TIMINGS"
+  [ "$status" -eq 20 ]
+  jq -e '.history[0].step_wall_s == {panel:null, decide:null, risk:45, fix:null}' "$ST"
+  contains "$stderr" "not a non-negative number for round 1: panel, decide"
+}
+
+@test "#2197 without --step-timings every key is null, silently" {
+  printf '%s' "$CRIT" > "$F"
+  step
+  [ "$status" -eq 20 ]
+  jq -e '.history[0].step_wall_s == {panel:null, decide:null, risk:null, fix:null}' "$ST"
+  lacks "$stderr" "step-timings"
+}
+
+@test "#2197 --step-timings is refused in hook mode and beside --no-review" {
+  printf '{}' > "$TIMINGS"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --status-file "$ST" \
+    --review-cmd 'true' --fix-cmd 'true' --step-timings "$TIMINGS"
+  [ "$status" -eq 2 ]
+  contains "$stderr" "--step-timings is step-mode only"
+  run --separate-stderr zsh "$S" --no-review --step-timings "$TIMINGS"
+  [ "$status" -eq 2 ]
+  contains "$stderr" "--step-timings is step-mode only"
+}
+
+@test "#2197 hook mode times --review-cmd as panel and --fix-cmd as the fix of the NEXT round" {
+  local crit="$BATS_TEST_TMPDIR/crit.json" n="$BATS_TEST_TMPDIR/n"
+  printf '%s' "$CRIT" > "$crit"
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --status-file "$ST" \
+    --review-cmd "if [ -e '$n' ]; then echo '[]' > \"\$REVIEW_FINDINGS\"; else touch '$n'; cp '$crit' \"\$REVIEW_FINDINGS\"; fi; \
+if [ -s \"\${REVIEW_FIX_VERIFICATION:-}\" ] && [ \"\$(jq length \"\$REVIEW_FIX_VERIFICATION\")\" != 0 ]; then \
+jq '[.[] | {file, dimension, title, confirmed:[\"r\"], re_raised:[], unconfirmed:[]}]' \"\$REVIEW_FIX_VERIFICATION\" > \"\$REVIEW_FINDINGS.carry.json\"; fi" \
+    --fix-cmd "sleep 1; echo 'x = 2' > '$R/fixed.py'"
+  [ "$status" -eq 0 ]
+  jq -e '.history[0].step_wall_s.panel >= 0 and .history[0].step_wall_s.fix == null
+         and .history[0].step_wall_s.decide == null and .history[0].step_wall_s.risk == null' "$ST"
+  jq -e '.history[1].step_wall_s.fix >= 1 and .history[1].step_wall_s.panel >= 0
+         and .history[1].step_wall_s.decide == null and .history[1].step_wall_s.risk == null' "$ST"
+}
+
+@test "#2197 step-2-invocation.md tells the conductor to time and pass --step-timings, outside every moved block" {
+  local f="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop/step-2-invocation.md"
+  local outside inside
+  # the text outside every <!-- moved: --> span, and the spans themselves
+  outside="$(awk '/<!-- moved: /{m=1} !m{print} /<!-- \/moved: /{m=0}' "$f" | tr -s ' \n' '  ')"
+  inside="$(awk '/<!-- moved: /{m=1} m{print} /<!-- \/moved: /{m=0}' "$f")"
+  contains "$outside" 'read `date +%s` when you dispatch the panel, decide, risk and fix subagents and again when you observe each one'"'"'s verdict'
+  contains "$outside" 'Write the differences as one JSON object, `{"panel": s, "decide": s, "risk": s, "fix": s}`, in whole seconds, with `null` for a step that did not run or was not timed.'
+  contains "$outside" 'pass it on the invocation that consolidates the round as `--step-timings <file>`'
+  contains "$outside" 'is the sum of its dispatches, each measured from dispatch to verdict'
+  contains "$outside" 'Rewrite it before any re-invoke that followed a re-dispatch; re-pass it unchanged only when nothing was re-dispatched.'
+  contains "$outside" 'The loop records it as that round'"'"'s `history[].step_wall_s`, which `estimate-step.zsh` reads to build priors.'
+  contains "$outside" 'It is telemetry only: a file the loop cannot use costs a stderr note and nulls, never the round.'
+  lacks "$inside" '--step-timings'
 }
 
 @test "the loop's code never invokes the selector or passes --select-base" {

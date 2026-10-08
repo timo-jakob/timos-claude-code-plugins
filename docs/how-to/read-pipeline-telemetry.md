@@ -100,6 +100,37 @@ jq -c --arg id resolve-issue-1752403000-8f3a \
 and docs lifecycles actually reach your stories. The full payload is documented
 in ARCHITECTURE.md, *Resolve-issue telemetry*.
 
+## Estimate how long a review-loop step takes
+
+Every review-loop record also stores how long each round's steps took:
+`payload.step_wall_s_by_round` holds the panel, decide, risk and fix times in
+seconds, and `payload.gate_by_round` holds each gate's `wall_s` and the `jobs`
+share it ran with. A step that did not run, or was not timed, is `null`, never
+`0`. `estimate-step.zsh` turns those into a prior for one step, read from the
+sink in the current directory:
+
+```console
+$ development/skills/resolve-issue/scripts/estimate-step.zsh --step panel
+{"step":"panel","scope":null,"jobs":null,"repo_type":null,"n":6,"median_s":700,"p80_s":900}
+```
+
+For the gate, name the scope and, to compare runs made with different CPU
+shares, the job count to scale them to. Each recorded gate becomes
+`wall_s × recorded jobs ÷ N`:
+
+```console
+$ development/skills/resolve-issue/scripts/estimate-step.zsh \
+    --step gate --scope full --jobs 5 --repo-type claude-plugin
+{"step":"gate","scope":"full","jobs":5,"repo_type":"claude-plugin","n":6,"median_s":2400,"p80_s":2400}
+```
+
+`median_s` and `p80_s` are the median and the 80th percentile, in whole seconds.
+`--repo-type` keeps only records of that repo type, and `--sink FILE` reads
+another file. With fewer than 5 samples, which includes every record written
+before the times were recorded, it prints nothing, says
+`estimate-step: <n> samples, fewer than 5 — withheld` on stderr and exits `1`.
+It exits `2` when it is called wrongly and `3` when the sink cannot be read.
+
 ## Machine-readable output
 
 ```bash

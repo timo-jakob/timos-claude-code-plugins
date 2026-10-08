@@ -5397,14 +5397,30 @@ round (the closing sweep or CI catches it), never a shipped regression.
 **Per-round gate telemetry (#1973).** Every `run-gate.zsh` summary carries
 `scope` (`full`|`selected`), the run's `wall_s`, and `files` — each bats file
 the run ran with its time from bats' JUnit report. Each round's
-`history.jsonl` line carries `gate: {scope, attested, wall_s, slowest}` (the 10
-slowest files) for the gate that **preceded** that round — from the loop's own
+`history.jsonl` line carries `gate: {scope, attested, wall_s, slowest, jobs}`
+(the 10 slowest files, and the summary's job share — `null` when the summary
+carries none, #2197) for the gate that **preceded** that round — from the loop's own
 `--test-cmd` run (`attested: false`) or, when the loop ran none, from the
 session's `--gate-summary FILE` (`attested: true`) — or `null` when it has
 neither. `--gate-summary` never decides a skip on its own; its one effect on
 the gate is lifting the `.selected-attest` backstop above. The
 status JSON's `rounds` stays the integer count; the per-round record lives in
 `history[]`.
+
+**Per-round step telemetry (#2197).** Each `history.jsonl` line also carries
+`step_wall_s: {panel, decide, risk, fix}` — every key present, a non-negative
+number of seconds or `null`, where `null` means not run or not timed and never
+0. In step mode the conductor times its round subagents and passes the times as
+`--step-timings FILE` on the consolidating invocation (refused in hook mode and
+beside `--no-review`); hook mode times `--review-cmd` as `panel` and
+`--fix-cmd` as `fix` itself, and records `decide` and `risk` as `null`. `fix`
+belongs to the round it precedes, as `gate` does, so round 1's is always
+`null`. There is no gate key: the gate's time is `gate.wall_s`, its one source.
+Telemetry only — a missing, unreadable or non-object file, or a value that is
+not a non-negative number, reads as `null` with a stderr note and never costs
+the round or its history line. `estimate-step.zsh` reads these, and the gate
+records' `wall_s` and `jobs`, from the local sink to print a step's median and
+80th-percentile time.
 
 **The gate's job count is shared across concurrent gates (#1798).** Sessions run
 in parallel, and a `run-gate.zsh` that gave every gate every core drove a
@@ -6214,13 +6230,19 @@ later; so a `null` here means "not an escalation", **not** "succeeded", and the
 `escalation` breakdown's null bucket silently contains failed `ERROR` runs —
 read `outcome` when you want success/failure), `rounds`, `max_rounds`,
 `promotion_phase`, `possible_false_trip_auto_continues`, `findings_by_round`,
-`gate_by_round`, `skipped_dimensions_by_round`, `convergence_assessment`, and `fixed`
+`gate_by_round`, `step_wall_s_by_round`, `skipped_dimensions_by_round`,
+`convergence_assessment`, and `fixed`
 (blockers found and cleared) vs `waived` (Low suggestions logged).
 `gate_by_round` (#1973) is `[{round, gate}]`, read from the status JSON's
-`history[]`: each round's gate record (`{scope, attested, wall_s, slowest}`, or
-`null`), described under *Per-round gate telemetry*. It is a separate field
+`history[]`: each round's gate record (`{scope, attested, wall_s, slowest, jobs}`,
+or `null`), described under *Per-round gate telemetry*. It is a separate field
 rather than a key on each `findings_by_round` entry, so the findings lockstep
 below is untouched, and the two join on `round`.
+`step_wall_s_by_round` (#2197) is `[{round, step_wall_s}]`, read from the same
+`history[]` lines: each round's `{panel, decide, risk, fix}` seconds, described
+under *Per-round step telemetry*, and `null` for a history line that predates
+the key. It is separate from `findings_by_round` for the same reason, and joins
+it on `round`.
 `skipped_dimensions_by_round` (#2009) is `[{round, skipped_dimensions}]`, read
 from the same `history[]` lines: the dimensions that round's panel was planned
 to leave out — the plan's `skippable_dimensions` less any dimension the round's

@@ -70,7 +70,30 @@ EOF
   done
   # ...and exactly the payload keys it does own
   [ "$(echo "$output" | jq -c 'keys_unsorted | sort')" = \
-    '["convergence_assessment","escalation","findings_by_round","fixed","gate_by_round","max_rounds","possible_false_trip_auto_continues","promotion_phase","rounds","skipped_dimensions_by_round","status","waived"]' ]
+    '["convergence_assessment","escalation","findings_by_round","fixed","gate_by_round","max_rounds","possible_false_trip_auto_continues","promotion_phase","rounds","skipped_dimensions_by_round","status","step_wall_s_by_round","waived"]' ]
+}
+
+@test "#2197 step_wall_s_by_round is read from history[]: a timed round, and a pre-key line reads null" {
+  printf '%s\n' '{"status":"CONVERGED","rounds":3,"max_rounds":5,"history":[' \
+    '{"round":1,"blocking":2},' \
+    '{"round":2,"blocking":1,"step_wall_s":{"panel":600,"decide":null,"risk":45,"fix":900}},' \
+    '{"round":3,"blocking":0,"step_wall_s":{"panel":null,"decide":null,"risk":null,"fix":null}}],' \
+    '"round_changelists":[],"final_changelist":{"blocking":[]}}' > "$ST"
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.step_wall_s_by_round == [
+    {round:1, step_wall_s:null},
+    {round:2, step_wall_s:{panel:600, decide:null, risk:45, fix:900}},
+    {round:3, step_wall_s:{panel:null, decide:null, risk:null, fix:null}}]'
+  # findings_by_round is untouched by the new field
+  echo "$output" | jq -e '.findings_by_round == []'
+}
+
+@test "#2197 step_wall_s_by_round: no history is []" {
+  printf '%s\n' '{"status":"SKIPPED","rounds":0,"max_rounds":5}' > "$ST"
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.step_wall_s_by_round == []'
 }
 
 @test "skipped_dimensions_by_round is read from history[] — a skipped round, a carry-forced round, a full round (#2009)" {
