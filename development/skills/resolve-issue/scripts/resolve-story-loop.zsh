@@ -408,11 +408,24 @@
 #                 history[].gate with attested:true, unless the loop ran its own
 #                 --test-cmd, whose summary is recorded instead (attested:false).
 #                 Unreadable or not a run-gate summary: a stderr note, no record.
-#   history[].gate {scope, attested, wall_s, slowest} per round, or null when
-#                 the loop neither ran a run-gate.zsh gate nor received a
+#   history[].gate {scope, attested, wall_s, slowest, jobs} per round, or null
+#                 when the loop neither ran a run-gate.zsh gate nor received a
 #                 --gate-summary for that round. A gate belongs to the round it
 #                 precedes: a --resume gate to the round it resumes into, hook
-#                 mode's post-fix gate to the next round.
+#                 mode's post-fix gate to the next round. `jobs` is the
+#                 summary's job share, null when it carries none (#2197).
+#   --step-timings step mode: a JSON object {panel, decide, risk, fix} of whole
+#                 seconds the conductor timed for the round this invocation
+#                 consolidates (#2197). Telemetry only: a missing, unreadable or
+#                 non-object file, or a value that is not a non-negative number,
+#                 reads as null with a stderr note and never costs the round.
+#   history[].step_wall_s {panel, decide, risk, fix} per round, every key a
+#                 non-negative number or null — null is "not run or not timed",
+#                 never 0. Hook mode times --review-cmd as panel and --fix-cmd
+#                 as fix itself, and records decide and risk as null. `fix` is the
+#                 fix pass that PRECEDED the round, as for `gate`, so round 1's is
+#                 always null. There is no gate key: the gate's time is
+#                 history[].gate.wall_s.
 #
 # Usage:
 #   resolve-story-loop.zsh --repo PATH [--base REF] \
@@ -421,14 +434,15 @@
 #       [--issue N] [--telemetry-file PATH] [--telemetry-dir DIR] \
 #       [--parent-run-id ID] [--gate-attest TREE_ID] [--gate-summary FILE] \
 #       [--findings-tree TREE_ID] [--carry-accounting FILE] [--promote FILE] \
-#       [--risk FILE]                                                   # step mode
+#       [--risk FILE] [--step-timings FILE]                             # step mode
 #   resolve-story-loop.zsh --repo PATH [--base REF] \
 #       --review-cmd CMD --fix-cmd CMD [--test-cmd CMD] \
 #       [--promote FILE] ...                                      # hook mode
 #   resolve-story-loop.zsh --no-review   # skip the loop entirely (fast path;
 #                                        # refused together with --promote,
-#                                        # --carry-accounting (#1583) or
-#                                        # --risk (#1921))
+#                                        # --carry-accounting (#1583),
+#                                        # --risk (#1921) or
+#                                        # --step-timings (#2197))
 #
 # Exit codes (also carried as `status` in the JSON on stdout / --status-file):
 #   0   CONVERGED (or SKIPPED with --no-review)
@@ -500,6 +514,7 @@ local repo="" base="origin/main" review_cmd="" fix_cmd="" test_cmd="" findings_f
 local max_rounds=$MAX_REVIEW_ROUNDS status_file="" work_dir="" no_review=0
 local issue="" telemetry_file="" resume=0 gate_attest="" findings_tree="" promote=""
 local carry_accounting="" parent_run_id="" telemetry_dir="" risk="" gate_summary=""
+local step_timings=""
 
 # A value flag with no value, or one whose value is the NEXT FLAG, is a caller
 # mistake — and both are silent disasters here. Under `nounset` a dangling
@@ -578,6 +593,10 @@ while [[ $# -gt 0 ]]; do
   # threshold is on, so a malformed file refuses the round before any state is
   # written; with the threshold off or ignored it is forwarded unread.
   --risk) _need_val "$1" $# "${2:-}"; risk="$2"; shift 2 ;;
+  # --step-timings (#2197): the conductor's per-step wall times for the round
+  # this invocation consolidates. Telemetry only — read by _step_wall_rec, which
+  # turns anything unusable into nulls rather than failing the round.
+  --step-timings) _need_val "$1" $# "${2:-}"; step_timings="$2"; shift 2 ;;
   --max-rounds) _need_val "$1" $# "${2:-}"; max_rounds="$2"; shift 2 ;;
   --status-file) _need_val "$1" $# "${2:-}"; status_file="$2"; shift 2 ;;
   --work-dir) _need_val "$1" $# "${2:-}"; work_dir="$2"; shift 2 ;;
@@ -607,6 +626,7 @@ while [[ $# -gt 0 ]]; do
     print -r -- "  [--promote FILE]"
     print -r -- "  [--risk FILE]              # step mode: this round's risk assessment (#1921), read only"
     print -r -- "                             # while corner_case_risk_threshold is on; demotes low-risk Warnings."
+    print -r -- "  [--step-timings FILE]      # step mode: {panel, decide, risk, fix} seconds for this round (#2197)"
     print -r -- "  [--work-dir DIR] [--status-file PATH] [--telemetry-file PATH] [--telemetry-dir DIR]"
     print -r -- "  [--parent-run-id ID]       # the resolve-issue run this loop runs under (#1226)"
     print -r -- "  [--no-review]   # fast path; mutually exclusive with --promote, --carry-accounting and --risk"
@@ -707,6 +727,9 @@ fi
 # so the file would be silently ignored.
 [[ -n "$risk" && ( -n "$review_cmd" || $no_review -eq 1 ) ]] && {
   print -u2 -- "resolve-story-loop: --risk is step-mode only; hook mode supplies no assessment (every blocker is kept), and --no-review consolidates nothing"; exit 2 }
+# --step-timings (#2197) is one round's timings, refused for the same two reasons.
+[[ -n "$step_timings" && ( -n "$review_cmd" || $no_review -eq 1 ) ]] && {
+  print -u2 -- "resolve-story-loop: --step-timings is step-mode only; hook mode times its own --review-cmd and --fix-cmd, and --no-review consolidates nothing"; exit 2 }
 
 # --issue rides straight into the telemetry envelope, whose contract is a
 # non-negative integer. Before #1004 a junk value (`--issue '#123'` from a
@@ -1049,7 +1072,7 @@ _tree_id() {  # $1 = repo
 }
 
 # --- per-round gate records (#1973) ------------------------------------------
-# `<work-dir>/gate-<R>.json` holds {scope, attested, wall_s, slowest} for the
+# `<work-dir>/gate-<R>.json` holds {scope, attested, wall_s, slowest, jobs} for the
 # gate that PRECEDED round R, and round R's history line carries it as `gate`
 # (null without one). Measurement only: nothing here decides whether a gate
 # runs or skips, and every failure costs the record, never the round.
@@ -1069,7 +1092,8 @@ _gate_record() {  # $1 = round, $2 = attested (true|false), $3 = summary text, $
       | if . == null then empty else
           { scope, attested: $att, wall_s,
             slowest: ( [ .files[] | select(type == "object" and (.wall_s | type) == "number") ]
-                       | sort_by(-.wall_s) | .[:10] | map({file, wall_s}) ) }
+                       | sort_by(-.wall_s) | .[:10] | map({file, wall_s}) ),
+            jobs: (if (.jobs | type) == "number" then .jobs else null end) }
         end' 2>/dev/null) || rec=""
   if [[ -z "$rec" ]]; then
     [[ "${4:-}" == quiet ]] || \
@@ -1079,6 +1103,46 @@ _gate_record() {  # $1 = round, $2 = attested (true|false), $3 = summary text, $
   print -r -- "$rec" 2>/dev/null >| "$work_dir/gate-$1.json" || \
     print -u2 -- "resolve-story-loop: could not write the round $1 gate record to $work_dir/gate-$1.json (#1973)"
   return 0
+}
+
+# --- per-round step wall times (#2197) ---------------------------------------
+# Prints round $1's history `step_wall_s` object, {panel, decide, risk, fix},
+# every key a non-negative number or null. Step mode reads the conductor's
+# --step-timings file; hook mode passes its own measured panel and fix seconds
+# as $2 and $3 (empty = not timed). Telemetry only: anything unusable is a
+# stderr note and a null, never a failed round. `fix` is the fix pass that
+# preceded the round, so round 1's is always null.
+_step_wall_rec() {  # $1 = round, $2 = hook panel seconds, $3 = hook fix seconds
+  local nulls='{"panel":null,"decide":null,"risk":null,"fix":null}' raw="" rec=""
+  if [[ -n "$review_cmd" ]]; then
+    raw=$(jq -nc --arg p "${2:-}" --arg f "${3:-}" \
+      '{panel: ($p | tonumber? // null), decide: null, risk: null, fix: ($f | tonumber? // null)}')
+  elif [[ -z "$step_timings" ]]; then
+    raw="$nulls"
+  elif [[ ! -f "$step_timings" || ! -r "$step_timings" ]]; then
+    print -u2 -- "resolve-story-loop: --step-timings is not a readable file ($step_timings) — round $1's step_wall_s stays null (#2197)"
+    raw="$nulls"
+  else
+    raw=$(jq -ce 'if type == "object" then . else error end' -- "$step_timings" 2>/dev/null) || {
+      print -u2 -- "resolve-story-loop: --step-timings is not one JSON object ($step_timings) — round $1's step_wall_s stays null (#2197)"
+      raw="$nulls" }
+  fi
+  rec=$(jq -c '
+      { panel, decide, risk, fix } as $in
+      | [ $in | to_entries[] | select(.value != null and ((.value | type) != "number" or .value < 0)) | .key ] as $bad
+      | { bad: $bad,
+          rec: ($in | with_entries(.value |= (if type == "number" and . >= 0 then . else null end))) }' <<< "$raw" 2>/dev/null) || rec=""
+  if [[ -z "$rec" ]]; then
+    print -r -- "$nulls"; return 0
+  fi
+  local bad; bad=$(jq -r '.bad | join(", ")' <<< "$rec")
+  [[ -z "$bad" ]] || \
+    print -u2 -- "resolve-story-loop: --step-timings value(s) not a non-negative number for round $1: $bad — recorded as null (#2197)"
+  if (( $1 == 1 )); then
+    jq -c '.rec | .fix = null' <<< "$rec"
+  else
+    jq -c '.rec' <<< "$rec"
+  fi
 }
 
 # Run --test-cmd — always the FULL gate: the loop never selects (#1973). Its
@@ -1915,6 +1979,9 @@ fi
 [[ -n "$work_dir" ]] || work_dir=$(mktemp -d)
 mkdir -p -- "$work_dir"
 local history_file="$work_dir/history.jsonl"
+# Hook mode's own step timings (#2197), whole seconds: the panel of the round in
+# progress, and the fix pass that will precede the next round.
+local hook_panel_s="" hook_fix_s="" step_t0=""
 
 # --- the loop's own in-repo artifacts, resolved ONCE (#1435) -----------------
 # Every path here is CALLER-CHOSEN and may legitimately sit inside the repo. All
@@ -2596,6 +2663,7 @@ local digest="" prev_digest_file=""
 local prev_findings_empty=0
 local blocking=0 conflict=0 nonconv=0 nconf=0 verdict="" ftrips=0
 local adj_dropped=0 gate_rec='null' skippable_json='[]' skipped_rec='[]' carry_dims='[]'
+local step_rec=''
 local cur_tree="" prior_tree="" prior_tree_file="" fix_verification=""
 local scope_mode="" replanned_scope_mode="" delta_json="" carried=0
 local is_final=0 is_closing_sweep=0 is_empty_delta=0 empty_delta_note=""
@@ -3103,6 +3171,7 @@ while (( round <= effective_max )); do
       carry_by_dim=$("$DISPATCH" split-carry --fix-verification "$fix_verification") || {
         print -u2 -- "resolve-story-loop: could not split the fix-verification carry $fix_verification by dimension at round $round"; exit 1 }
     fi
+    step_t0=$(date +%s 2>/dev/null) || step_t0=""
     ( export REVIEW_ROUND="$round" REVIEW_FINDINGS="$findings_path" \
              REVIEW_SKILL="$review_skill" REVIEW_TOPIC_SKILLS="$topic_review_skills" \
              REVIEW_SCOPE_FILE="$scope_file" \
@@ -3112,6 +3181,8 @@ while (( round <= effective_max )); do
              REVIEW_SKIPPABLE_DIMENSIONS="$skippable_json" \
              REVIEW_ADJUDICATED="$adjudicated_file"; eval "$review_cmd" ) || {
       print -u2 -- "resolve-story-loop: --review-cmd failed at round $round"; exit 1 }
+    hook_panel_s=""
+    [[ "$step_t0" == <-> ]] && hook_panel_s=$(( $(date +%s 2>/dev/null || print -r -- "$step_t0") - step_t0 ))
   fi
   # The `[]` default is a DELTA-round convenience, never a full-round one
   # (#1434). On a full round zero blockers IS the CONVERGED condition, so
@@ -3329,10 +3400,16 @@ while (( round <= effective_max )); do
       -- "$work_dir/skippable-$round.json" 2>/dev/null) || skipped_rec='[]'
     [[ -n "$skipped_rec" ]] || skipped_rec='[]'
   fi
+  # step_wall_s (#2197): telemetry like `gate`, so _step_wall_rec never fails —
+  # and a capture that somehow comes back empty is all-null, never a lost line.
+  step_rec=$(_step_wall_rec "$round" "$hook_panel_s" "$hook_fix_s")
+  [[ -n "$step_rec" ]] || step_rec='{"panel":null,"decide":null,"risk":null,"fix":null}'
+  hook_panel_s="" hook_fix_s=""
   jq -c --argjson r "$round" --argjson b "$blocking" --argjson c "$nconf" --argjson nc "$nonconv" \
      --argjson ft "$ftrips" --argjson ad "$adj_dropped" --argjson g "$gate_rec" --argjson sk "$skipped_rec" \
+     --argjson sw "$step_rec" \
      '{round:$r, blocking:$b, conflicts:$c, non_converging:($nc==1), false_trips:$ft,
-       adjudicated_dropped:$ad, gate:$g, skipped_dimensions:$sk}' <<< '{}' >> "$history_file" || {
+       adjudicated_dropped:$ad, gate:$g, skipped_dimensions:$sk, step_wall_s:$sw}' <<< '{}' >> "$history_file" || {
     print -u2 -- "resolve-story-loop: could not append the round $round history line to $history_file"; exit 1 }
 
   # ...and ONLY NOW record this round's suggestions as adjudicated. The append
@@ -3565,9 +3642,13 @@ while (( round <= effective_max )); do
   # A failed identity is not fatal: it only costs the next round's `class`
   # stamps, and _capture_fix_touched says so on stderr.
   fix_base_tree=$(_tree_id "$repo" 2>/dev/null) || fix_base_tree=""
+  step_t0=$(date +%s 2>/dev/null) || step_t0=""
   ( export REVIEW_ROUND="$round" REVIEW_REPO="$repo" \
            REVIEW_CHANGELIST="$changelist" REVIEW_BLOCKERS="$blockers"; eval "$fix_cmd" ) || {
     print -u2 -- "resolve-story-loop: --fix-cmd failed at round $round"; exit 1 }
+  # the fix pass precedes the next round, so its time is that round's (#2197)
+  hook_fix_s=""
+  [[ "$step_t0" == <-> ]] && hook_fix_s=$(( $(date +%s 2>/dev/null || print -r -- "$step_t0") - step_t0 ))
   _capture_fix_touched "$fix_base_tree" "$round" || true
 
   # 6. re-run the gate (optional); red after a fix is an operational abort. It

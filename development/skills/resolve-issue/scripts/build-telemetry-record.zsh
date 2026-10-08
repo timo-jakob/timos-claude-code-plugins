@@ -223,10 +223,16 @@ jq -c '
       # history lines. Deliberately a SEPARATE field from findings_by_round,
       # which is in lockstep with three other renderings; a gate record is not
       # a finding count and joins it only by `round`. gate is {scope, attested,
-      # wall_s, slowest} or null (no run-gate.zsh gate, and no summary, for that
-      # round), and a history line that predates the key reads null too.
+      # wall_s, slowest, jobs} or null (no run-gate.zsh gate, and no summary, for
+      # that round), and a history line that predates the key reads null too.
       gate_by_round: [ ($s.history // [])[] | select(type == "object")
                        | {round, gate: (.gate // null)} ],
+      # #2197: each round s per-step wall times {panel, decide, risk, fix}, read
+      # from the same history lines, for estimate-step.zsh to build priors from.
+      # A history line that predates the key reads null, never four nulls,
+      # because nobody timed that round.
+      step_wall_s_by_round: [ ($s.history // [])[] | select(type == "object")
+                              | {round, step_wall_s: (.step_wall_s // null)} ],
       # #2009: the dimensions each round s panel was planned to leave out (the
       # plan s skippable_dimensions less any the carry forced back in), read
       # from the same per-round history lines. [] is a round that skipped

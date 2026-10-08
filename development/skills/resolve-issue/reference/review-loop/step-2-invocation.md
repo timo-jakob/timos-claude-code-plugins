@@ -177,3 +177,20 @@ given, so every loop record is parented to the run and lands in its sink.
 When `start` failed there is no run file: pass only the sink flags from the
 `args` output, with no `--parent-run-id`. An epic child that E3 drives passes its
 own child run's `loop_args` (`reference/epic-telemetry.md` step 2).
+
+**Time every round subagent, and pass the times (#2197).** For each round, read
+`date +%s` when you dispatch the panel, decide, risk and fix subagents and again
+when you observe each one's verdict. A step the round dispatched more than once
+— the stall retry, a recovery arm's second panel or decide — is the sum of its
+dispatches, each measured from dispatch to verdict. The fix that counts is the
+fix pass that preceded this round, so round 1 has none; an awaiting-fix pass
+and a gate-red pass that both preceded it sum the same way. Write the
+differences as one JSON object, `{"panel": s, "decide": s, "risk": s, "fix": s}`,
+in whole seconds, with `null` for a step that did not run or was not timed. Keep
+the file outside the repo, beside the round's findings file, and pass it on the
+invocation that consolidates the round as `--step-timings <file>`. Rewrite it
+before any re-invoke that followed a re-dispatch; re-pass it unchanged only when
+nothing was re-dispatched. The loop records it as that round's
+`history[].step_wall_s`, which `estimate-step.zsh` reads to build priors. It is
+telemetry only: a file the loop cannot use costs a stderr note and nulls, never
+the round.
