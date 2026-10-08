@@ -78,6 +78,12 @@
 #     read it as the pass/fail signal — `exit` is the gate verdict, `tree` only
 #     says which tree was gated.
 #   stderr — the live TAP stream, a human count line, and (degraded) the warning.
+#     Two lines on it are a contract a reader of the captured stderr relies on
+#     (gate-eta.zsh, #2196): one unconditional start line, printed before the
+#     suite runs,
+#       run-gate: start epoch=<integer epoch seconds> mode=<mode> scope=<scope> jobs=<jobs>
+#     with the same mode, scope and jobs as the stdout summary, and the count
+#     line, which ends in ` wall_s=<seconds>` equal to the summary's wall_s.
 #
 # Exit codes:
 #   run-gate.zsh EXITS WITH THE SUITE'S REAL EXIT CODE (0 green, non-zero red),
@@ -310,6 +316,9 @@ fi
 # reads red, never green.
 rc_file="$(mktemp "${TMPDIR:-/tmp}/run-gate-rc.XXXXXX")" \
   || die_usage "could not create an exit-code temp file"
+# The start line (#2196): the epoch is the gate's own start (t_start), so a
+# reader's now − epoch measures the same clock as the summary's wall_s.
+print -u2 -- "run-gate: start epoch=${t_start%%.*} mode=${mode} scope=${scope} jobs=${jobs}"
 # Per-file timings (#1973) come from bats' JUnit report, one <testsuite> per
 # file. A report that cannot be set up costs the timings, never the run.
 junit_dir="$(mktemp -d "${TMPDIR:-/tmp}/run-gate-junit.XXXXXX" 2>/dev/null)" || junit_dir=""
@@ -336,7 +345,11 @@ if (( total == 0 && rc == 0 )); then
   rc=1
 fi
 
-print -u2 -- "run-gate: mode=${mode} jobs=${jobs} ok=${ok} not_ok=${not_ok} total=${total} exit=${rc}"
+# Measured once, here, so the count line and the stdout summary carry the same
+# wall_s (#2196).
+local wall_s
+wall_s=$(LC_ALL=C printf '%.3f' $(( EPOCHREALTIME - t_start )))
+print -u2 -- "run-gate: mode=${mode} jobs=${jobs} ok=${ok} not_ok=${not_ok} total=${total} exit=${rc} wall_s=${wall_s}"
 
 # --- machine-readable summary on stdout --------------------------------------
 # Escape the tap path (the only free-form field) so a quote/backslash/control
@@ -385,8 +398,6 @@ if [[ -n "$junit_dir" && -r "$junit_dir/report.xml" ]]; then
     files_json+="${files_json:+,}{\"file\":\"${fname}\",\"wall_s\":${ftime}}"
   done
 fi
-local wall_s
-wall_s=$(LC_ALL=C printf '%.3f' $(( EPOCHREALTIME - t_start )))
 printf '{"mode":"%s","jobs":%d,"scope":"%s","ok":%d,"not_ok":%d,"total":%d,"exit":%d,"wall_s":%s,"tap":"%s","tree":"%s","files":[%s]}\n' \
   "$mode" "$jobs" "$scope" "$ok" "$not_ok" "$total" "$rc" "$wall_s" "$tap_json" "$tree" "$files_json"
 
