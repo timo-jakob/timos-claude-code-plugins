@@ -1,0 +1,258 @@
+#!/usr/bin/env bats
+#
+# Acceptance cases for "live gate ETA from the run-gate log" (#2196, epic #2195
+# child (a)) — the `cli`-tooled test_cases[] of its story-spec, one test per
+# `tc-*` id:
+#
+#   tc-happy-run-gate-start-line         #2202
+#   tc-happy-run-gate-summary-wall       #2203
+#   tc-happy-running                     #2204
+#   tc-happy-running-json                #2205
+#   tc-corner-withheld                   #2206
+#   tc-corner-threshold-floor            #2207
+#   tc-corner-counts-not-ok-and-skips    #2208
+#   tc-corner-finished-with-wall         #2209
+#   tc-corner-finished-no-wall           #2210
+#   tc-corner-zero-plan                  #2211
+#   tc-corner-empty-log                  #2212
+#   tc-corner-no-start-line              #2213
+#   tc-corner-tap-only-started           #2214
+#   tc-corner-started-overrides          #2215
+#   tc-corner-contention-line-ignored    #2216
+#   tc-error-missing-log-file            #2217
+#   tc-error-no-log-flag                 #2218
+#   tc-error-bad-started                 #2219
+#   tc-error-unknown-flag                #2220
+#   tc-error-unreadable-log              #2221
+#
+# The use case: timo-platform-builder, mid-round in a resolve-issue run, wants to
+# know how many tests the whole-suite gate has done and how long it has left, to
+# decide whether to step away or free CPU. The gate's captured stderr reads
+# `run-gate: start epoch=1791360000 mode=parallel scope=full jobs=4`, `1..1830`
+# and 412 result lines; at 1791360552 that is 412/1830 tests, 9m12s elapsed,
+# ~31m40s left (jobs=4).
+#
+# run-gate.zsh runs against a stub `bats`, so no real suite runs; gate-eta.zsh
+# reads fixture logs with its clock pinned through GATE_ETA_NOW. Nothing reaches
+# GitHub. The default gate's tests/run-gate.bats and tests/gate-eta.bats cover
+# the same criteria.
+
+bats_require_minimum_version 1.5.0
+load ../../assertions
+
+setup() {
+  REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
+  SCRIPTS="$REPO_ROOT/development/skills/resolve-issue/scripts"
+  RUN_GATE="$SCRIPTS/run-gate.zsh"
+  ETA="$SCRIPTS/gate-eta.zsh"
+  START=1791360000
+  NOW=1791360552
+  LOG="$BATS_TEST_TMPDIR/gate-2.stderr"
+
+  # a stub suite for run-gate: 1830 tests, the platform suite's size
+  BATS_STUB="$BATS_TEST_TMPDIR/bats-stub"
+  printf '#!/usr/bin/env bash\necho 1..1830\nfor i in $(seq 1 1830); do echo "ok $i resolve-issue case $i"; done\n' > "$BATS_STUB"
+  PAR_GNU="$BATS_TEST_TMPDIR/parallel-gnu"
+  printf '#!/usr/bin/env bash\necho "GNU parallel 20260722"\n' > "$PAR_GNU"
+  chmod +x "$BATS_STUB" "$PAR_GNU"
+  mkdir -p "$BATS_TEST_TMPDIR/tests"
+}
+
+# the platform gate's captured stderr: start line, plan, <done> results
+platform_log() {  # <done> [no-start]
+  local i
+  {
+    if [ -z "${2-}" ]; then
+      echo "run-gate: start epoch=$START mode=parallel scope=full jobs=4"
+    fi
+    echo "1..1830"
+    for ((i = 1; i <= $1; i++)); do echo "ok $i resolve-issue case $i"; done
+  } > "$LOG"
+}
+
+run_gate() {
+  run --separate-stderr env GATE_BATS_BIN="$BATS_STUB" GATE_PARALLEL_BIN="$PAR_GNU" \
+    GATE_NPROC=4 GATE_SLOTS_DIR="$BATS_TEST_TMPDIR/slots" \
+    zsh "$RUN_GATE" --tests-dir "$BATS_TEST_TMPDIR/tests"
+}
+
+eta() { run --separate-stderr env GATE_ETA_NOW="$NOW" zsh "$ETA" "$@"; }
+
+@test "tc-happy-run-gate-start-line (#2202)" {
+  run_gate
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^run-gate: start ' <<< "$stderr")" -eq 1 ]
+  matches "$(grep '^run-gate: start ' <<< "$stderr")" \
+    '^run-gate: start epoch=[0-9]+ mode=parallel scope=full jobs=4$'
+  local s p
+  s="$(grep -n '^run-gate: start ' <<< "$stderr" | cut -d: -f1)"
+  p="$(grep -n '^1\.\.1830$' <<< "$stderr" | cut -d: -f1)"
+  [ "$s" -lt "$p" ]
+  jq -e '[keys_unsorted[]] == ["mode","jobs","scope","ok","not_ok","total","exit","wall_s","tap","tree","files"]' <<< "$output"
+}
+
+@test "tc-happy-run-gate-summary-wall (#2203)" {
+  run_gate
+  [ "$status" -eq 0 ]
+  local line w
+  line="$(grep '^run-gate: mode=' <<< "$stderr")"
+  matches "$line" '^run-gate: mode=parallel .* exit=0 wall_s=[0-9]+\.[0-9]{3}$'
+  w="${line##* wall_s=}"
+  jq -e --argjson w "$w" '.wall_s == $w' <<< "$output"
+}
+
+@test "tc-happy-running (#2204)" {
+  platform_log 412
+  eta --log "$LOG"
+  [ "$status" -eq 0 ]
+  [ "$output" = "412/1830 tests, 9m12s elapsed, ~31m40s left (jobs=4)" ]
+}
+
+@test "tc-happy-running-json (#2205)" {
+  platform_log 412
+  eta --log "$LOG" --json
+  [ "$status" -eq 0 ]
+  jq -e '. == {done:412, total:1830, elapsed_s:552, eta_s:1900, jobs:4, state:"running"}' <<< "$output"
+}
+
+@test "tc-corner-withheld (#2206)" {
+  platform_log 12
+  eta --log "$LOG" --json
+  [ "$status" -eq 0 ]
+  jq -e '.state == "withheld" and .eta_s == null' <<< "$output"
+  eta --log "$LOG"
+  [ "$status" -eq 0 ]
+  contains "$output" "ETA withheld"
+}
+
+@test "tc-corner-threshold-floor (#2207)" {
+  local n
+  for n in 4 5; do
+    {
+      echo "run-gate: start epoch=$START mode=parallel scope=selected jobs=2"
+      echo "1..20"
+      for ((i = 1; i <= n; i++)); do echo "ok $i t$i"; done
+    } > "$LOG"
+    eta --log "$LOG" --json
+    [ "$status" -eq 0 ]
+    if [ "$n" -eq 4 ]; then
+      jq -e '.state == "withheld" and .eta_s == null' <<< "$output"
+    else
+      jq -e '.state == "running" and (.eta_s | type == "number")' <<< "$output"
+    fi
+  done
+}
+
+@test "tc-corner-counts-not-ok-and-skips (#2208)" {
+  printf '%s\n' "1..10" "ok 1 a" "not ok 2 b" "ok 3 c # skip" "# ok inside a diagnostic" > "$LOG"
+  eta --log "$LOG" --json
+  [ "$status" -eq 0 ]
+  jq -e '.done == 3' <<< "$output"
+}
+
+@test "tc-corner-finished-with-wall (#2209)" {
+  platform_log 1830
+  echo "run-gate: mode=parallel jobs=4 ok=1830 not_ok=0 total=1830 exit=0 wall_s=2463.512" >> "$LOG"
+  eta --log "$LOG" --json
+  [ "$status" -eq 0 ]
+  jq -e '.state == "finished" and .eta_s == 0 and .elapsed_s == 2464' <<< "$output"
+  eta --log "$LOG"
+  contains "$output" "finished"
+}
+
+@test "tc-corner-finished-no-wall (#2210)" {
+  platform_log 1830
+  eta --log "$LOG" --json
+  [ "$status" -eq 0 ]
+  jq -e '.state == "finished" and .eta_s == 0 and .elapsed_s == null' <<< "$output"
+}
+
+@test "tc-corner-zero-plan (#2211)" {
+  printf '1..0\n' > "$LOG"
+  eta --log "$LOG" --json
+  [ "$status" -eq 0 ]
+  jq -e '.state == "finished" and .done == 0 and .total == 0 and .eta_s == 0' <<< "$output"
+}
+
+@test "tc-corner-empty-log (#2212)" {
+  : > "$LOG"
+  eta --log "$LOG" --json
+  [ "$status" -eq 0 ]
+  jq -e '. == {done:0, total:null, elapsed_s:null, eta_s:null, jobs:null, state:"no-plan"}' <<< "$output"
+  eta --log "$LOG"
+  contains "$output" "no plan line"
+}
+
+@test "tc-corner-no-start-line (#2213)" {
+  platform_log 412 no-start
+  eta --log "$LOG" --json
+  [ "$status" -eq 0 ]
+  jq -e '.state == "running" and .elapsed_s == null and .eta_s == null and .jobs == null' <<< "$output"
+  eta --log "$LOG"
+  contains "$output" "unknown elapsed"
+  contains "$output" "unknown left"
+  contains "$output" "jobs=?"
+}
+
+@test "tc-corner-tap-only-started (#2214)" {
+  platform_log 412 no-start
+  eta --log "$LOG" --started "$START"
+  [ "$status" -eq 0 ]
+  [ "$output" = "412/1830 tests, 9m12s elapsed, ~31m40s left (jobs=?)" ]
+}
+
+@test "tc-corner-started-overrides (#2215)" {
+  platform_log 412
+  eta --log "$LOG" --started 1791360252 --json
+  [ "$status" -eq 0 ]
+  jq -e '.elapsed_s == 300' <<< "$output"
+}
+
+@test "tc-corner-contention-line-ignored (#2216)" {
+  {
+    echo "run-gate: start epoch=$START mode=parallel scope=full jobs=4"
+    echo "run-gate: 2 other live gate(s) — sharing 10 cores, jobs=3 (#1798)"
+    echo "1..1830"
+    for ((i = 1; i <= 412; i++)); do echo "ok $i t"; done
+  } > "$LOG"
+  eta --log "$LOG" --json
+  [ "$status" -eq 0 ]
+  jq -e '.jobs == 4' <<< "$output"
+}
+
+@test "tc-error-missing-log-file (#2217)" {
+  eta --log /nonexistent/gate-2.stderr
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  [ -n "$stderr" ]
+}
+
+@test "tc-error-no-log-flag (#2218)" {
+  eta --json
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+}
+
+@test "tc-error-bad-started (#2219)" {
+  platform_log 412
+  eta --log "$LOG" --started yesterday
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+}
+
+@test "tc-error-unknown-flag (#2220)" {
+  platform_log 412
+  eta --log "$LOG" --frobnicate
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+}
+
+@test "tc-error-unreadable-log (#2221)" {
+  [ "$(id -u)" -ne 0 ] || skip "root can read a mode-000 file"
+  platform_log 412
+  chmod 000 "$LOG"
+  eta --log "$LOG"
+  chmod 600 "$LOG"
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+}

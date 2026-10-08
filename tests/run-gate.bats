@@ -878,3 +878,100 @@ SH
   [ ! -e "$BATS_TEST_TMPDIR/sel-argv" ]
   echo "$output" | jq -e '.scope == "full"'
 }
+
+# ---- the stderr start line and the count line's wall_s (#2196) --------------
+# gate-eta.zsh reads run-gate's captured stderr, so two lines there are a
+# contract: one unconditional `run-gate: start …` line before the suite runs,
+# carrying the summary's mode/scope/jobs, and the count line's trailing wall_s.
+
+START_RE='^run-gate: start epoch=[0-9]+ mode=[a-z-]+ scope=(full|selected) jobs=[0-9]+$'
+
+# assert_start_line <stdout json> <stderr>: exactly one start line, well-formed,
+# printed before the TAP plan line, its mode/scope/jobs equal to the summary's.
+assert_start_line() {
+  local out="$1" err="$2" line n s p mode scope jobs
+  n="$(grep -c '^run-gate: start ' <<< "$err")"
+  [ "$n" -eq 1 ] || { echo "want exactly one start line, got $n" >&2; return 1; }
+  line="$(grep '^run-gate: start ' <<< "$err")"
+  matches "$line" "$START_RE" || return 1
+  s="$(grep -n '^run-gate: start ' <<< "$err" | cut -d: -f1)"
+  p="$(grep -m1 -n '^1\.\.' <<< "$err" | cut -d: -f1)"
+  [ -n "$p" ] || { echo "no plan line on stderr" >&2; return 1; }
+  [ "$s" -lt "$p" ] || { echo "start line ($s) not before the plan line ($p)" >&2; return 1; }
+  mode="$(sed -E 's/.* mode=([^ ]+).*/\1/' <<< "$line")"
+  scope="$(sed -E 's/.* scope=([^ ]+).*/\1/' <<< "$line")"
+  jobs="$(sed -E 's/.* jobs=([0-9]+)$/\1/' <<< "$line")"
+  jq -e --arg m "$mode" --arg s "$scope" --argjson j "$jobs" \
+    '.mode == $m and .scope == $s and .jobs == $j' <<< "$out" >/dev/null \
+    || { echo "start line disagrees with the summary: $line / $out" >&2; return 1; }
+}
+
+@test "#2196 start line: one per run, before the plan line, mode/scope/jobs equal the summary" {
+  local before after epoch
+  before="$(date +%s)"
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4 STUB_EXIT=0
+  after="$(date +%s)"
+  [ "$status" -eq 0 ]
+  assert_start_line "$output" "$stderr"
+  contains "$stderr" " mode=parallel scope=full jobs=4"
+  # the epoch is integer epoch seconds taken during this run
+  epoch="$(grep '^run-gate: start ' <<< "$stderr" | sed -E 's/.*epoch=([0-9]+).*/\1/')"
+  [ "$epoch" -ge "$before" ]
+  [ "$epoch" -le "$after" ]
+}
+
+@test "#2196 start line is unconditional: degraded, 1-core, red, contended and zero-test runs print it" {
+  run_gate GATE_PARALLEL_BIN="$BATS_TEST_TMPDIR/no-such-parallel" GATE_NPROC=4 STUB_EXIT=0
+  assert_start_line "$output" "$stderr"
+  contains "$stderr" "mode=sequential-degraded scope=full jobs=4"
+
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=1 STUB_EXIT=0
+  assert_start_line "$output" "$stderr"
+  contains "$stderr" "mode=sequential scope=full jobs=1"
+
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4 STUB_EXIT=1
+  [ "$status" -eq 1 ]
+  assert_start_line "$output" "$stderr"
+
+  live_slot
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=10 STUB_EXIT=0
+  assert_start_line "$output" "$stderr"
+  contains "$stderr" "mode=parallel scope=full jobs=5"
+
+  printf '1..0\n' > "$TAPFIX"
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4 STUB_EXIT=0
+  [ "$status" -eq 1 ]
+  assert_start_line "$output" "$stderr"
+}
+
+@test "#2196 start line on a selected run says scope=selected, as the summary does" {
+  mk_gitproj; mk_selector
+  printf '1..1\nok 1 x\n' > "$TAPFIX"
+  cd "$proj"
+  run --separate-stderr env -u GATE_NPROC -u GATE_PARALLEL_BIN \
+    GATE_BATS_BIN="$STUB" CALLS="$CALLS" ARGV="$ARGV" TAPFIX="$TAPFIX" \
+    GATE_SELECT_BIN="$SEL_STUB" SEL_OUT='{"selection":"selected","reason":null,"changed":["x"],"files":["tests/a.bats"]}' \
+    zsh "$S" --tests-dir tests --select-base origin/main
+  [ "$status" -eq 0 ]
+  assert_start_line "$output" "$stderr"
+  contains "$stderr" " scope=selected "
+}
+
+@test "#2196 count line ends in wall_s equal to the summary's wall_s, green and red" {
+  local code n w
+  for code in 0 1; do
+    run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4 STUB_EXIT="$code"
+    [ "$status" -eq "$code" ]
+    n="$(grep -cE '^run-gate: mode=.* exit=[0-9]+ wall_s=[0-9]+\.[0-9]{3}$' <<< "$stderr")"
+    [ "$n" -eq 1 ]
+    w="$(grep '^run-gate: mode=' <<< "$stderr" | sed -E 's/.* wall_s=//')"
+    jq -e --argjson w "$w" '.wall_s == $w' <<< "$output"
+  done
+}
+
+@test "#2196 stdout stays one JSON object with its keys unchanged" {
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4 STUB_EXIT=0
+  [ "$(jq -s 'length' <<< "$output")" -eq 1 ]
+  jq -e '[keys_unsorted[]] == ["mode","jobs","scope","ok","not_ok","total","exit","wall_s","tap","tree","files"]' <<< "$output"
+  run ! grep -q '^run-gate:' <<< "$output"
+}
