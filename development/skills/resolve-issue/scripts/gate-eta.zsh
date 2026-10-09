@@ -40,6 +40,9 @@
 #             so eta_s is null rather than stated.
 #   running   elapsed_s = now − start, eta_s = elapsed_s × (total − done) / done
 #             rounded to the nearest second; each null with no start epoch.
+#             In parallel mode results arrive one bats file at a time, in list
+#             order, so done is a floor on the tests finished and the estimate
+#             tends to overstate the time left, by less as the run goes on.
 #   elapsed_s, in every state: the count line's wall_s rounded to whole seconds
 #   whenever the count line is present — never now − start, so an ended gate
 #   reads the same on every re-run. Without it: null for finished, otherwise

@@ -315,6 +315,52 @@ COUNT_LINE="run-gate: mode=parallel jobs=2 ok=2 not_ok=1 total=3 exit=1 wall_s=1
   grep -F '| `running` |' "$doc" | grep -qF "A gate that was killed never prints one"
 }
 
+# ---- parallel mode releases results one file at a time (#2265) ---------------
+
+@test "how-to intro: parallel mode releases results one file at a time, in list order" {
+  local doc="$REPO_ROOT/docs/how-to/see-how-long-a-gate-has-left.md" intro
+  intro="$(awk '/^## /{exit} {print}' "$doc")"
+  contains "$intro" "In the sequential modes they arrive one test at a time."
+  contains "$intro" "In parallel mode"
+  contains "$intro" "one file at a time, in list order"
+  contains "$intro" "every file listed before"
+}
+
+@test "how-to running row: the liveness check is for the sequential modes, a still done is normal in parallel until it outlasts a file" {
+  local doc="$REPO_ROOT/docs/how-to/see-how-long-a-gate-has-left.md" row
+  row="$(grep -F '| `running` |' "$doc")"
+  contains "$row" "A gate that was killed never prints one"
+  contains "$row" "In the sequential modes, if \`done\` has not moved between two readings, check that the gate is still alive"
+  contains "$row" "In parallel mode, \`done\` standing still is normal while a file listed earlier is still running;"
+  contains "$row" "if it stays still for longer than any one file should take, check that the gate is still alive."
+  contains "$row" "is a floor on the tests finished"
+  contains "$row" "tends to overstate the time left, by less as the run goes on"
+}
+
+@test "how-to withheld row: in parallel mode done can stay at 0 until the first file finishes" {
+  local doc="$REPO_ROOT/docs/how-to/see-how-long-a-gate-has-left.md" row
+  row="$(grep -F '| `withheld` |' "$doc")"
+  contains "$row" "In parallel mode \`done\` can stay at 0 until the first listed file finishes"
+  contains "$row" "the start line shows the gate has started"
+}
+
+@test "the estimate is never called a bound, in the how-to or in --help" {
+  local doc="$REPO_ROOT/docs/how-to/see-how-long-a-gate-has-left.md"
+  run grep -ciE 'upper bound|lower bound|a bound' "$doc"
+  [ "$output" = "0" ]
+  run zsh "$G" --help
+  [ "$status" -eq 0 ]
+  lacks "$output" "bound"
+}
+
+@test "--help: the running entry says parallel mode releases results one bats file at a time" {
+  run zsh "$G" --help
+  [ "$status" -eq 0 ]
+  contains "$output" "In parallel mode results arrive one bats file at a time, in list"
+  contains "$output" "order, so done is a floor on the tests finished and the estimate"
+  contains "$output" "tends to overstate the time left, by less as the run goes on."
+}
+
 # ---- TAP-only logs and --started --------------------------------------------
 
 @test "TAP-only log without --started: done/total known, elapsed, ETA and jobs unknown" {
