@@ -224,19 +224,55 @@ needle_held() {
   needle_held "$RULE" '--step panel|decide|risk|fix'
   needle_held "$RULE" '--step gate \ --gate-log <work-dir>/gate-<R>.stderr'
   needle_held "$RULE" "is the round gate"
-  needle_held "$RULE" "captured stderr. When you launch the gate at step 2"
+  needle_held "$RULE" "captured stderr. When you launch the gate out of band — at step 2"
   needle_held "$RULE" 'When `<full gate>` is not `run-gate.zsh`, there is no such log'
   needle_held "$RULE" 'printed without running the script.'
   needle_held "$RULE" 'is §1b'
   needle_held "$RULE" 'Omit it when §1b did not run or exited 3.'
   needle_held "$RULE" 'narrated once, immediately before their dispatch.'
-  needle_held "$RULE" "narrated once in the boundary turn, after step 3"
-  needle_held "$RULE" "s panel dispatch, and once more in each later turn the conductor is woken in anyway"
   needle_held "$RULE" "Never schedule a wake-up or poll in order to re-narrate"
   needle_held "$RULE" "a narration is never a reason to hold a turn open."
   needle_held "$RULE" "It never stops the round, and it never licenses a figure of your own in place of the line."
   needle_held "$REPO_ROOT/development/skills/resolve-issue/reference/review-loop.md" \
     "narrating long waits with a sourced estimate or none."
+}
+
+# ---- the gate: out of band or a foreground call (#2270, #2271) -------------
+
+GATE_NEEDLES=(
+  "or before the serial boundary"
+  "A gate run as one foreground Bash call has no such log either."
+  "every round boundary in strictly sequential mode (\`reference/sequential.md\`)"
+  "a serial boundary (\`reference/review-loop/core.md\`) whose gate is run in the foreground."
+  "Immediately before the call, print the literal \`estimate for gate: no estimate (no data)\` without running the script."
+  "before the call there is no scope or job share to scale a prior to."
+  "A gate launched out of band is narrated once immediately after its launch, before the panel is planned;"
+  "once more before step 4"
+  "s wait when the panel returned in the same turn;"
+  "and once more in each later turn the conductor is woken in anyway while the gate's completion signal is absent."
+  "A gate run as a foreground call is narrated once, immediately before the call, and never again:"
+  "not when it returns, and not when a gate that outlived its call notifies its exit."
+)
+
+@test "estimates.md: the foreground-gate arm and the gate cadence are stated" {
+  local needle
+  for needle in "${GATE_NEEDLES[@]}"; do needle_held "$RULE" "$needle"; done
+}
+
+@test "MUTATION: cutting each foreground-gate or cadence needle from estimates.md reds its check" {
+  local cut="$BATS_TEST_TMPDIR/estimates.md" needle
+  for needle in "${GATE_NEEDLES[@]}"; do
+    flat "$RULE" | NEEDLE="$needle" perl -pe 's/\Q$ENV{NEEDLE}\E//g' > "$cut"
+    run needle_held "$cut" "$needle"
+    [ "$status" -ne 0 ] || { echo "needle still held after removal: $needle"; return 1; }
+  done
+}
+
+@test "estimates.md no longer narrates the gate after the panel dispatch" {
+  run needle_held "$RULE" "after step 3"
+  [ "$status" -ne 0 ]
+  run needle_held "$RULE" "panel dispatch"
+  [ "$status" -ne 0 ]
 }
 
 @test "estimates.md holds no moved block, and its heading appears exactly once under reference/" {

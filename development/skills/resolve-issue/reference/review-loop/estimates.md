@@ -30,23 +30,35 @@ earlier round, not one worked out from the progress block. When the line says
 
 **Its inputs.**
 
-- `--gate-log` is the round gate's captured stderr. When you launch the gate at
-  step 2 (*The round boundary is concurrent*), also write `run-gate.zsh`'s
+- `--gate-log` is the round gate's captured stderr. When you launch the gate
+  out of band — at step 2 (*The round boundary is concurrent*), or before the
+  serial boundary's mint — also write `run-gate.zsh`'s
   stderr to `<work-dir>/gate-<R>.stderr` — separately from its stdout, which
   carries the JSON summary step 5 reads, and outside the repo like everything
   else the launch writes; that file is `--gate-log`. When `<full gate>` is not
   `run-gate.zsh`, there is no such log: the gate's line is the literal
   `estimate for gate: no estimate (no data)`, printed without running the
   script.
+- A gate run as one foreground Bash call has no such log either. That is every
+  round boundary in strictly sequential mode (`reference/sequential.md`), and a
+  serial boundary (`reference/review-loop/core.md`) whose gate is run in the
+  foreground. Immediately before the call, print the literal
+  `estimate for gate: no estimate (no data)` without running the script. The
+  number is withheld on purpose: before the call there is no scope or job share
+  to scale a prior to.
 - `--repo-type` is §1b's `repo_type`. Omit it when §1b did not run or exited 3.
 - `--sink` is the file the run's loop records land in: the run's
   `telemetry_file`, else `<telemetry_dir>/<repo-slug>.jsonl`, else
   `<repo-dir>/.claude/telemetry/telemetry.jsonl`.
 
 **When to print it.** Panel, decide, risk and fix are narrated once,
-immediately before their dispatch. The gate is narrated once in the boundary
-turn, after step 3's panel dispatch, and once more in each later turn the
-conductor is woken in anyway while the gate's completion signal is absent.
+immediately before their dispatch. A gate launched out of band is narrated
+once immediately after its launch, before the panel is planned; once more
+before step 4's wait when the panel returned in the same turn; and once more in
+each later turn the conductor is woken in anyway while the gate's completion
+signal is absent. A gate run as a foreground call is narrated once, immediately
+before the call, and never again: not when it returns, and not when a gate that
+outlived its call notifies its exit.
 Never schedule a wake-up or poll in order to re-narrate: the round protocol's
 end-the-turn wait (#1513) still governs, and a narration is never a reason to
 hold a turn open.
