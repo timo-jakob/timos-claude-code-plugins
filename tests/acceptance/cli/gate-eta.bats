@@ -37,6 +37,18 @@
 #   tc-error-truncated-count-line                  #2280
 #   tc-error-unreadable-log-unchanged              #2281
 #
+# and, for "say that parallel mode releases results one file at a time" (#2265):
+#
+#   tc-happy-help-parallel-running                 #2283
+#   tc-corner-parallel-done-still                  #2284
+#   tc-corner-parallel-first-file                  #2285
+#   tc-error-unknown-flag-before-help              #2286
+#
+# Its use case: the conductor polls a healthy parallel gate (`mode=parallel ...
+# jobs=4`, `1..1830`) and reads 412 results at 9m12s and again at 10m00s. done
+# has not moved because an earlier file is still running; gate-eta keeps reading
+# it as running, and its --help says why.
+#
 # Its use case: the same builder reads a gate whose suite stopped short of its
 # plan (a file whose setup_file failed: `1..10`, two passes, one `not ok`), and
 # whose run-gate count line says `exit=1 wall_s=12.4`. Read at 1791460000, long
@@ -372,4 +384,36 @@ eta_at() { local at="$1"; shift; run --separate-stderr env GATE_ETA_NOW="$at" zs
   [ "$status" -eq 2 ]
   [ -z "$output" ]
   contains "$stderr" "cannot read log"
+}
+
+# ---- #2265: parallel mode releases results one file at a time ----------------
+
+@test "tc-happy-help-parallel-running (#2283)" {
+  run --separate-stderr zsh "$ETA" --help
+  [ "$status" -eq 0 ]
+  contains "$output" "In parallel mode results arrive one bats file at a time, in list"
+}
+
+@test "tc-corner-parallel-done-still (#2284)" {
+  platform_log 412
+  eta_at $((START + 552)) --log "$LOG" --json
+  [ "$status" -eq 0 ]
+  jq -e '.state == "running" and .done == 412 and .eta_s == 1900' <<< "$output"
+  eta_at $((START + 600)) --log "$LOG" --json
+  [ "$status" -eq 0 ]
+  jq -e '.state == "running" and .done == 412 and .eta_s == 2065' <<< "$output"
+}
+
+@test "tc-corner-parallel-first-file (#2285)" {
+  platform_log 0
+  eta_at $((START + 120)) --log "$LOG" --json
+  [ "$status" -eq 0 ]
+  jq -e '. == {done:0, total:1830, elapsed_s:120, eta_s:null, jobs:4, state:"withheld"}' <<< "$output"
+}
+
+@test "tc-error-unknown-flag-before-help (#2286)" {
+  run --separate-stderr zsh "$ETA" --bogus --help
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  contains "$stderr" "gate-eta:"
 }
