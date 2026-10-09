@@ -27,19 +27,23 @@
 #          skipped test counts as done.
 #   jobs, start epoch  from the first `run-gate: start epoch=… jobs=…` line. A
 #          `run-gate: … other live gate(s) … jobs=…` line is not read.
-#   wall_s from run-gate's count line (`run-gate: mode=… wall_s=…`), for a
-#          finished log.
+#   wall_s from run-gate's count line (`run-gate: mode=… wall_s=<digits>…`),
+#          which run-gate prints once the gate has ended (#2264). A line whose
+#          wall_s has no digits is not a count line.
 #
 # State, decided in this order:
 #   no-plan   no plan line yet: total and eta_s are null.
-#   finished  done >= total: eta_s 0; elapsed_s is the count line's wall_s
-#             rounded to whole seconds, or null without it — never now − start.
+#   finished  the count line is present, or done >= total: eta_s 0. With the
+#             count line, done below total means the suite stopped short of
+#             its plan; the gate has still ended.
 #   withheld  done < max(5, ceil(10% of total)): too few tests for a fair rate,
 #             so eta_s is null rather than stated.
 #   running   elapsed_s = now − start, eta_s = elapsed_s × (total − done) / done
 #             rounded to the nearest second; each null with no start epoch.
-#   elapsed_s is also reported, when a start epoch is known, for no-plan and
-#   withheld.
+#   elapsed_s, in every state: the count line's wall_s rounded to whole seconds
+#   whenever the count line is present — never now − start, so an ended gate
+#   reads the same on every re-run. Without it: null for finished, otherwise
+#   now − start when a start epoch is known.
 #
 # Output:
 #   default — one human line, e.g.
@@ -103,17 +107,19 @@ read -r total done_n epoch jobs wall <<< "$parsed"
 [[ -n "$started" ]] && epoch="$started"
 
 local state elapsed="-" eta="-"
-if [[ "$epoch" != "-" ]]; then
+if [[ "$wall" != "-" ]]; then
+  # an ended gate's elapsed is its own measured wall time, never now − start
+  elapsed="$(LC_ALL=C awk -v w="$wall" 'BEGIN { printf "%d", w + 0.5 }')"
+elif [[ "$epoch" != "-" ]]; then
   elapsed=$(( now - epoch ))
   (( elapsed < 0 )) && elapsed=0
 fi
 if [[ "$total" == "-" ]]; then
   state="no-plan"
-elif (( done_n >= total )); then
+elif [[ "$wall" != "-" ]] || (( done_n >= total )); then
+  # the count line means the gate has ended, however many results it left
   state="finished"; eta=0
-  # a finished run's elapsed is its own measured wall time, never now − start
-  elapsed="-"
-  [[ "$wall" != "-" ]] && elapsed="$(LC_ALL=C awk -v w="$wall" 'BEGIN { printf "%d", w + 0.5 }')"
+  [[ "$wall" == "-" ]] && elapsed="-"
 else
   local floor=$(( (total + 9) / 10 ))
   (( floor < 5 )) && floor=5

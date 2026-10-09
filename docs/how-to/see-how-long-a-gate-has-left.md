@@ -53,13 +53,13 @@ $ development/skills/resolve-issue/scripts/gate-eta.zsh --log gate.stderr --json
 | ------- | ------------- |
 | `no-plan` | The suite has not printed its `1..N` plan line yet, so there is no total. The line says `no plan line`. |
 | `withheld` | Fewer than 5 tests, or fewer than 10% of them, are done. That is too few for a fair rate, so no time is given. The line says `ETA withheld`. |
-| `running` | The estimate above. It describes the log, not the process: a gate that was killed leaves a log that reads `running` for good, with `done` standing still while `elapsed` grows. If `done` has not moved between two readings, check that the gate is still alive before trusting the figure. |
-| `finished` | Every test has a result. The elapsed time is the gate's own measured wall time. |
+| `running` | The estimate above. It describes a log with no count line yet. A gate that was killed never prints one, so its log reads `running` for good, with `done` standing still while `elapsed` grows. If `done` has not moved between two readings, check that the gate is still alive before trusting the figure. |
+| `finished` | The gate has ended: its count line is in the log, or every planned test has a result. A `done` below `total` means the suite stopped short of its plan, for example when a file's setup failed. With the count line, the elapsed time is the gate's own measured wall time, so it is the same on every reading; without it, elapsed is `unknown`. |
 
 `unknown` and `jobs=?` mean the log does not say. A log written by an older
 `run-gate.zsh`, or a TAP-only `--tap-out` file, has no start line. Give the
-start yourself with `--started <epoch seconds>`, and the elapsed time and the
-estimate come back. `jobs` stays unknown.
+start yourself with `--started <epoch seconds>`, and, while the gate is still
+running, the elapsed time and the estimate come back. `jobs` stays unknown.
 
 `gate-eta.zsh` exits `0` whenever it could read the log, whatever the state. It
 exits `2`, with nothing on stdout, when it is called wrongly or the log cannot

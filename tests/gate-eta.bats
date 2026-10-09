@@ -8,6 +8,8 @@
 #     `run-gate: start` line only, wall_s from the count line;
 #   * the state order no-plan -> finished -> withheld -> running, and each
 #     state's numbers, with the clock pinned through GATE_ETA_NOW;
+#   * that the count line ends the gate (#2264): finished even short of the
+#     plan, and elapsed fixed at its wall_s in every state;
 #   * --started, which serves a TAP-only log and beats the start line;
 #   * the human line and the --json object;
 #   * exit 0 whenever the log was read, exit 2 (nothing on stdout) otherwise;
@@ -215,6 +217,104 @@ eta() {  # gate-eta with the clock pinned to $NOW (or $AT when set)
   jq -e '.state == "finished" and .eta_s == 0' <<< "$output"
 }
 
+# ---- a gate that ended short of its plan (#2264) ------------------------------
+
+# mk_short <count line|none>: the #2264 log — start line (jobs=2), `1..10`, two
+# passes and one failure (a file whose setup failed), then the given line.
+mk_short() {
+  {
+    echo "run-gate: start epoch=$START mode=parallel scope=full jobs=2"
+    echo "1..10"
+    echo "ok 1 a"
+    echo "ok 2 b"
+    echo "not ok 3 tests/x.bats"
+    if [ "$1" != "none" ]; then echo "$1"; fi
+  } > "$LOG"
+}
+COUNT_LINE="run-gate: mode=parallel jobs=2 ok=2 not_ok=1 total=3 exit=1 wall_s=12.4"
+
+@test "short-ended: the count line settles finished — elapsed is its wall_s, eta 0" {
+  mk_short "$COUNT_LINE"
+  AT=1791460000 eta --log "$LOG" --json
+  [ "$status" -eq 0 ]
+  [ -z "$stderr" ]
+  jq -e '. == {done:3, total:10, elapsed_s:12, eta_s:0, jobs:2, state:"finished"}' <<< "$output"
+}
+
+@test "short-ended: the human line keeps the finished form, exactly" {
+  mk_short "$COUNT_LINE"
+  AT=1791460000 eta --log "$LOG"
+  [ "$status" -eq 0 ]
+  [ "$output" = "3/10 tests, finished in 0m12s (jobs=2)" ]
+  [ -z "$stderr" ]
+}
+
+@test "short-ended: every re-run prints the same, whatever the clock says" {
+  local j1 h1
+  mk_short "$COUNT_LINE"
+  AT=$((START + 100)) eta --log "$LOG" --json; j1="$output"
+  AT=$((START + 100)) eta --log "$LOG"; h1="$output"
+  AT=$((START + 100000100)) eta --log "$LOG" --json
+  [ "$output" = "$j1" ]
+  AT=$((START + 100000100)) eta --log "$LOG"
+  [ "$output" = "$h1" ]
+  jq -e '.elapsed_s == 12' <<< "$j1"
+}
+
+@test "short-ended: with no count line a short log still reads withheld, then running" {
+  mk_short none
+  eta --log "$LOG" --json
+  [ "$status" -eq 0 ]
+  jq -e '. == {done:3, total:10, elapsed_s:552, eta_s:null, jobs:2, state:"withheld"}' <<< "$output"
+  local i
+  for i in 4 5 6; do echo "ok $i more" >> "$LOG"; done
+  eta --log "$LOG" --json
+  jq -e '.state == "running" and .done == 6 and .elapsed_s == 552 and (.eta_s | type == "number")' <<< "$output"
+}
+
+@test "no-plan with a count line: total null, elapsed fixed at the rounded wall_s" {
+  {
+    echo "run-gate: start epoch=$START mode=parallel scope=full jobs=2"
+    echo "run-gate: mode=parallel jobs=2 ok=0 not_ok=0 total=0 exit=1 wall_s=0.8"
+  } > "$LOG"
+  local first
+  AT=$((START + 99999)) eta --log "$LOG" --json
+  [ "$status" -eq 0 ]
+  jq -e '. == {done:0, total:null, elapsed_s:1, eta_s:null, jobs:2, state:"no-plan"}' <<< "$output"
+  first="$output"
+  AT=$((START + 5)) eta --log "$LOG" --json
+  [ "$output" = "$first" ]
+}
+
+@test "TAP-only short log: no count line, so withheld with elapsed from --started" {
+  { echo "1..10"; echo "ok 1 a"; echo "ok 2 b"; echo "not ok 3 c"; } > "$LOG"
+  eta --log "$LOG" --started "$START" --json
+  [ "$status" -eq 0 ]
+  jq -e '. == {done:3, total:10, elapsed_s:552, eta_s:null, jobs:null, state:"withheld"}' <<< "$output"
+}
+
+@test "a count line whose wall_s has no digits is not a count line" {
+  mk_short "run-gate: mode=parallel jobs=2 ok=2 not_ok=1 total=3 exit=1 wall_s="
+  eta --log "$LOG" --json
+  [ "$status" -eq 0 ]
+  jq -e '. == {done:3, total:10, elapsed_s:552, eta_s:null, jobs:2, state:"withheld"}' <<< "$output"
+}
+
+@test "--help states the finished rule: the count line is present, or done >= total" {
+  run zsh "$G" --help
+  [ "$status" -eq 0 ]
+  contains "$output" "finished  the count line is present, or done >= total"
+}
+
+@test "how-to: the finished row says the gate has ended, and the running row names the killed gate" {
+  local doc="$REPO_ROOT/docs/how-to/see-how-long-a-gate-has-left.md"
+  grep -F '| `finished` |' "$doc" | grep -qF "The gate has ended: its count line is in the log, or every planned test has a result"
+  grep -F '| `finished` |' "$doc" | grep -qF "stopped short of its plan"
+  grep -F '| `finished` |' "$doc" | grep -qF 'without it, elapsed is `unknown`'
+  grep -F '| `running` |' "$doc" | grep -qF "a log with no count line"
+  grep -F '| `running` |' "$doc" | grep -qF "A gate that was killed never prints one"
+}
+
 # ---- TAP-only logs and --started --------------------------------------------
 
 @test "TAP-only log without --started: done/total known, elapsed, ETA and jobs unknown" {
@@ -238,6 +338,13 @@ eta() {  # gate-eta with the clock pinned to $NOW (or $AT when set)
   eta --log "$LOG" --started $((START + 252)) --json
   [ "$status" -eq 0 ]
   jq -e '.elapsed_s == 300 and .jobs == 4' <<< "$output"
+}
+
+@test "--started never beats the count line: a finished gate keeps its wall_s" {
+  mk_short "$COUNT_LINE"
+  AT=1791460000 eta --log "$LOG" --started "$START" --json
+  [ "$status" -eq 0 ]
+  jq -e '. == {done:3, total:10, elapsed_s:12, eta_s:0, jobs:2, state:"finished"}' <<< "$output"
 }
 
 # ---- the --json contract ----------------------------------------------------
