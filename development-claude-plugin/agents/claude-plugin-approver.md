@@ -421,6 +421,19 @@ When both match, each arm posts through the reviews API with
 `commit_id="$HEAD_SHA"`, so GitHub attaches the review to the judged head
 even if a push lands between the re-read and the post.
 
+`DRY_RUN` is exactly `true` (print the body, post nothing) or exactly
+`false` (post). Any other value — `TRUE`, `1`, empty — stops before
+anything is read, printed or posted, and so does a `verdict` that is not
+one of the three tokens, dry run included (#2299).
+
+The review body goes through a quoted heredoc whose delimiter is unique
+to this run, so no line of the body can end it early and run the rest as
+shell. `<the review delimiter>` is `REVIEW_` followed by the basename of
+the path Step 2 printed — for `/tmp/tmp.Ab12Cd` it is `REVIEW_tmp.Ab12Cd`.
+Write it literally on all three lines that name it: a shell cannot expand
+a variable inside a heredoc delimiter, and the block refuses a delimiter
+that is not built that way.
+
 Set `GH_TOKEN` (re-exported from its token file), `PR_NUMBER`, `REPO`,
 `DRY_RUN`, `HEAD_SHA`, `BODY_SHA256`, `work`,
 `verdict` (exactly one of the three bare tokens) and the
@@ -433,14 +446,24 @@ export GH_TOKEN=$(cat <the token file path>) && [ -n "$GH_TOKEN" ] || exit 1
 PR_NUMBER=<the PR number>
 REPO=<owner>/<repo>
 DRY_RUN=<true or false>
+case "$DRY_RUN" in
+  true|false) ;;
+  *) echo "::error::unknown DRY_RUN '$DRY_RUN' — posting nothing" >&2; exit 1 ;;
+esac
 HEAD_SHA=<HEAD_SHA from the prompt>; [ -n "$HEAD_SHA" ] || exit 1
 BODY_SHA256=<BODY_SHA256 from the prompt>; [ -n "$BODY_SHA256" ] || exit 1
 work=<the path Step 2 printed>; [ -d "$work" ] || exit 1
 verdict=<APPROVE, REQUEST_CHANGES or COMMENT>
+case "$verdict" in
+  APPROVE|REQUEST_CHANGES|COMMENT) ;;
+  *) echo "::error::unknown verdict '$verdict' — posting nothing" >&2; exit 1 ;;
+esac
+[ "<the review delimiter>" = "REVIEW_${work##*/}" ] ||
+  { echo "::error::the review delimiter is not REVIEW_ plus the work directory's name — posting nothing" >&2; exit 1; }
 review_body_file="$work/review.md"
-cat > "$review_body_file" <<'REVIEW'
+cat > "$review_body_file" <<'<the review delimiter>'
 <the rendered review body>
-REVIEW
+<the review delimiter>
 
 live_head=$(gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid) && [ -n "$live_head" ] &&
   gh pr view "$PR_NUMBER" --json body -q .body > "$work/live-body" &&
@@ -470,9 +493,6 @@ case "$verdict" in
   COMMENT)
     gh api --method POST "repos/$REPO/pulls/$PR_NUMBER/reviews" \
       -f commit_id="$HEAD_SHA" -f event=COMMENT -F body=@"$review_body_file" --jq .html_url
-    ;;
-  *)
-    echo "::error::unknown verdict '$verdict' — posting nothing" >&2; exit 1
     ;;
 esac
 ```

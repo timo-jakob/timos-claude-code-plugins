@@ -52,7 +52,8 @@ PR_NUMBER=<the PR number resolved above>; [ -n "$PR_NUMBER" ] || exit 1
 REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 [ -n "$REPO" ] || { echo "::error::Could not resolve the repository — posting nothing."; exit 1; }
 printf 'PR_NUMBER=%s\nREPO=%s\n' "$PR_NUMBER" "$REPO"
-AUTHOR=$(gh pr view "$PR_NUMBER" --json author -q .author.login)
+AUTHOR=$(gh pr view "$PR_NUMBER" --json author -q .author.login) && [ -n "$AUTHOR" ] ||
+  { echo "::error::Could not read PR #$PR_NUMBER's author — posting nothing." >&2; exit 1; }
 grep -qE '^(app/)?claude-maintenance' <<<"$AUTHOR" || {
   echo "AI approval: off (PR authored by ${AUTHOR}, not the Maintenance App) — a human approves."
   exit 0
@@ -100,7 +101,7 @@ verbatim from that output, never from a fresh `gh` read.
 ```bash
 PR_NUMBER=<the PR_NUMBER Step 1 printed>; REPO=<the REPO Step 1 printed>
 [ -n "$PR_NUMBER" ] && [ -n "$REPO" ] || exit 1
-SCRATCH=$(mktemp -d -t plugin-approver.XXXXXX)
+SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/plugin-approver.XXXXXX")
 { HEAD_SHA=$(gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid) && [ -n "$HEAD_SHA" ] &&
   sed 's/{{APPROVER_LANG}}/claude-plugin/g' \
     development/skills/bootstrap/templates/common/approver-policy-core.md.tmpl > "$SCRATCH/policy.md" &&
