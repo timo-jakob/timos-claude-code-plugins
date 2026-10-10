@@ -376,5 +376,8 @@ pin_each() {
     'never `APPROVE`. Nothing is recorded in the repository.' \
     '`CLAUDE_PLUGIN_APPROVER=1` (exactly `1`; any other value is off). Then run' \
     '`/development-claude-plugin:approve <pr>` by hand on each PR; on `APPROVE`,' \
-    'armed auto-merge merges it. Nothing calls the skill for you yet: wiring it into'
+    'armed auto-merge merges it. On the PRs they open, `/development:resolve-issue`' \
+    '`/development:maintenance` call the skill for you: each asks' \
+    '`development/scripts/approval/plugin-approver-override.zsh`, and on' \
+    '`override=on` drives `/development-claude-plugin:approve` itself.'
 }

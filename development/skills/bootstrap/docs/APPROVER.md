@@ -587,9 +587,10 @@ A claude-plugin repo is human-only by default and records `approval: human`.
 To let the Approver review this session's Maintenance-App PRs, export
 `CLAUDE_PLUGIN_APPROVER=1` (exactly `1`; any other value is off). Then run
 `/development-claude-plugin:approve <pr>` by hand on each PR; on `APPROVE`,
-armed auto-merge merges it. Nothing calls the skill for you yet: wiring it into
-`/development:resolve-issue` and `/development:open-pr` is planned under
-epic #2129.
+armed auto-merge merges it. On the PRs they open, `/development:resolve-issue`
+and `/development:maintenance` call the skill for you: each asks
+`development/scripts/approval/plugin-approver-override.zsh`, and on
+`override=on` drives `/development-claude-plugin:approve` itself.
 
 Three kinds of change always go to a human, whatever the review concludes: residue
 (a review dossier with `open > 0`), `.github/workflows/*`, and the

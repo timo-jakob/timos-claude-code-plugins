@@ -151,7 +151,11 @@ worktrees, so it survives the session). Before Phase 1, check for one:
     whatever phase the run continues at — never restored as data and
     jumped over — because that gate is where every run, a resumed one
     included, stamps its telemetry start (*Telemetry — stamp the run's
-    start*, below). Phase 8's per-stage resume additionally reconciles
+    start*, below). The **approver-mode detection** (*Approver mode*,
+    Phase 2.5) is likewise re-run, never restored: the
+    `CLAUDE_PLUGIN_APPROVER` opt-in belongs to the session, so a resumed
+    run's detection overwrites the `approver_mode` an earlier session
+    saved. Phase 8's per-stage resume additionally reconciles
     against GitHub reality (#536).
   - **`--fresh`** (or the user picks fresh) → `checkpoint.zsh clear`,
     then Phase 1 as normal.
@@ -912,6 +916,17 @@ checkpoint so every stage's gate reads the same value:
   still schema 1 / the Keychain unreadable (exit 1) — the helper's stderr
   names the fix; relay it. The Approver isn't available here; the
   gate falls back to a human review / native auto-merge as it does today.
+  A **claude-plugin-primary** repo is also `none` unless
+  `plugin-approver-override.zsh` prints `override=on` (the session exported
+  `CLAUDE_PLUGIN_APPROVER=1` and the Approver App is installed); then it is
+  `local`, and the gate drives `/development-claude-plugin:approve`; Phase 8
+  still gates a PR the Maintenance App did not author as `none`. An off for
+  a "no Approver App" reason is silent; a helper exit 1 (a broken setup) is
+  relayed and listed in Phase 9. A repo counts as claude-plugin-primary —
+  here and wherever this skill uses the term, Phase 8 included — when it
+  declares `primary: claude-plugin` or carries `.claude-plugin/plugin.json` or
+  `marketplace.json` — the helper's own test, whatever primary Phase 1
+  detected.
 
 ```bash
 mode=none
@@ -938,13 +953,38 @@ if (( probe_rc == 0 )); then
     if grep -q 'check_suite' "$wf"; then mode=ci; break; fi
   done < <(grep -rlsE 'claude-approver|approver-gate' .github/workflows 2>/dev/null)
 fi
+# A claude-plugin-primary repo is human-only (#1684) unless this session opted
+# in with CLAUDE_PLUGIN_APPROVER=1 — decided by the shared helper, never by
+# reading the variable here. Off for a "no Approver App" reason is silent: it is
+# the supported way to forbid AI approvals. The block reads `primary` itself
+# (Phase 1's expression — shell state does not survive between blocks), and a
+# declaration that exists but cannot be read fails closed: the helper decides.
+primary=$(grep -E '^[[:space:]]*primary:' .maintenance.yml 2>/dev/null | head -1 \
+  | sed -E 's/^[[:space:]]*primary:[[:space:]]*//; s/[[:space:]]*(#.*)?$//; s/^["'\'']//; s/["'\'']$//')
+if [[ -e .maintenance.yml && ! -r .maintenance.yml ]]; then primary=claude-plugin; fi
+# A plugin repo that declares no primary is still one: the helper's own
+# test (.claude-plugin/plugin.json or marketplace.json) counts too.
+if [[ -f .claude-plugin/plugin.json || -f .claude-plugin/marketplace.json ]]; then primary=claude-plugin; fi
+if [[ "$primary" == claude-plugin && "$mode" != none ]]; then
+  ovr_rc=0
+  ovr=$("<skill-base-dir>/../../scripts/approval/plugin-approver-override.zsh") || ovr_rc=$?
+  if grep -qx 'override=on' <<<"$ovr"; then
+    mode=local
+  else
+    mode=none
+  fi
+  if (( ovr_rc != 0 )); then
+    # A broken setup someone intended: the helper's stderr already named the fix.
+    print -r -- "AI approval: off — $(sed -n 's/^reason=//p' <<<"$ovr") (see the diagnostic above)"  # list in Phase 9
+  fi
+fi
 print -r -- "{\"approver_mode\": \"$mode\"}" \
   | "<skill-base-dir>/scripts/checkpoint.zsh" save --phase approver_mode --data -
 ```
 
 Read it back in the approval gate with
 `checkpoint.zsh load --phase approver_mode` (defaulting to `none` when
-absent, e.g. a resumed run whose checkpoint predates this detection).
+absent).
 
 ### `--dry-run` — detect only, never dispatch or push
 
@@ -2112,7 +2152,9 @@ the blessed helper (#431), never a hand-rolled loop:
 "<skill-base-dir>/scripts/merge-pr-cycle.zsh" --update --retrigger "<pr_number>"
 
 # local mode (#642): no CI-side workflow to re-trigger — --update only, then
-# drive the approve skill to re-earn the review (no /approve comment)
+# drive the approve skill to re-earn the review (no /approve comment); <lang> is
+# claude-plugin on a claude-plugin-primary repo as § Approver mode defines it,
+# whatever the stage's language
 "<skill-base-dir>/scripts/merge-pr-cycle.zsh" --update "<pr_number>"
 /development-<lang>:approve "<pr_number>"
 ```
@@ -2589,7 +2631,14 @@ After pushing and opening the PR:
      workflow that never runs (~10 min wasted per stage, #642). Instead,
      once checks settle green, **drive the language plugin's `approve`
      skill directly** and then confirm the merge — the local-mode path
-     below.
+     below. On a claude-plugin-primary repo as § Approver mode defines it —
+     the gate re-applies that section's test to the repo, never Phase 1's
+     detected primary — the gate always runs
+     `/development-claude-plugin:approve`, whatever the stage's language;
+     elsewhere it runs `/development-<lang>:approve` for the stage's language.
+     That skill reviews only a PR the Maintenance App authored, so on such a
+     repo every other PR — a vendor PR (Dependabot, Renovate, Snyk)
+     included — is gated as `none` instead: a human review, no wait.
    - **`none`** — no Approver available; fall through to the human /
      native-auto-merge handling (the `NONE` / `REVIEW_REQUIRED` branches
      below).
@@ -2624,15 +2673,22 @@ After pushing and opening the PR:
    drive the language plugin's `approve` skill to earn the verdict, then merge:
 
    ```bash
+   # 0. on a claude-plugin-primary repo as § Approver mode defines it, read the
+   #    PR's author first: unless it is the `claude-maintenance` App (login
+   #    prefix match, as Phase 2.5 tells a bot PR), gate this PR as `none` —
+   #    no approve call, no wait — and skip steps 1-3:
+   gh pr view "<pr_number>" --json author --jq .author.login
    # 1. wait for green — no /approve comment posted (mode is local)
    "<skill-base-dir>/scripts/merge-pr-cycle.zsh" "<pr_number>"
    #    add --update first for a vendor PR that's BEHIND under strict branch
-   #    protection. Exit 4 (AWAITING-APPROVAL) here is expected — green but
+   #    protection (never on a plugin repo: step 0 gated it as `none`). Exit 4 (AWAITING-APPROVAL) here is expected — green but
    #    unapproved — and is the cue to drive the approve skill next; exit 6
    #    (NOT-GREEN) → back to step 3; exit 3 (TIMED-OUT) → record + move on.
    # 2. mint the Approver token just-in-time (a mode-600 file path, #640) and
    #    drive the approve skill — it spawns the local approver agent, which
-   #    posts APPROVE as claude-approver-<owner>[bot], never your identity:
+   #    posts APPROVE as claude-approver-<owner>[bot], never your identity
+   #    (<lang> is claude-plugin on a claude-plugin-primary repo as
+   #    § Approver mode defines it, see above):
    /development-<lang>:approve "<pr_number>"
    # 3. re-read reviewDecision (below).
    ```

@@ -173,8 +173,10 @@ with `CLAUDE_PLUGIN_APPROVER=1` in the environment, the Claude Approver may appr
 a claude-plugin repo's bot PRs, as decided by
 `development/scripts/approval/plugin-approver-override.zsh` — the one place any
 flow is to read that variable, and only a registered and installed Approver App
-turns it on. No flow consults it yet, so a plugin repo stays human-only until the
-open-pr, resolve-issue and maintenance wiring lands (epic #2129). No Approver App
+turns it on. `/development:resolve-issue` and `/development:maintenance` consult
+it through that helper, and on `override=on` drive
+`/development-claude-plugin:approve`; without the opt-in a plugin repo stays
+human-only (epic #2129). No Approver App
 is a supported setup, never an error:
 not installing the Approver App is the supported way to forbid AI approvals,
 and every flow then takes the human path without an error or a warning.
