@@ -83,6 +83,11 @@ SKILL_NEEDLES=(
   "for \`approver-not-registered\` or \`approver-not-installed\` it adds exactly one informational line, never a warning:"
   "AI approval: off (Approver App not installed) — a human approves."
   "**Helper exit 1** (a broken Approver setup), or any other non-zero exit → relay the helper's diagnostic — its \`reason=\` slug and its stderr — as one line, and take the human path."
+  # §6: the report line after Outcomes depends on how the run ended (#2289)
+  "Report the PR URL and how the run ended: on \`MERGED\`, that it merged;"
+  "on a human-only stop, that stop's named reason, never that auto-merge is armed;"
+  "on a user-authored fallback PR, that it is user-authored, that no auto-merge is armed, and that a human admin-merges it;"
+  "otherwise, that it's bot-authored and that auto-merge is armed."
   # the Epic flow
   "E3 asks \`development/scripts/approval/plugin-approver-override.zsh\` once per run. On \`override=on\` each child's PR takes §6's approve-and-advance path,"
   "so the chain advances in the same invocation as on an Approver repo — each next child branches only once §6 reads its predecessor \`MERGED\`."
@@ -136,6 +141,10 @@ OPENPR_NEEDLES=(
   out="$(awk '/^Outcomes:/{f=1} f && /^Report the PR URL/{exit} f' "$SKILL" | tr '\n' ' ' | tr -s ' ')"
   contains "$out" "Ask the helper; never read the variable yourself."
   contains "$out" "AI approval: off (Approver App not installed) — a human approves."
+}
+
+@test "SKILL.md: §6 never reports auto-merge as armed unconditionally (#2289)" {
+  lacks "$(flat "$SKILL")" "Report the PR URL, that it's bot-authored, and that auto-merge is armed."
 }
 
 @test "remediation.md: the override note sits after the interactive-remediation frozen block" {

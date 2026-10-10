@@ -1064,7 +1064,11 @@ Outcomes:
 - **No writer App installed** → open-pr falls back to a *user*-authored PR (the
   human admin-merges, since they can't approve their own); report which path ran.
 
-Report the PR URL, that it's bot-authored, and that auto-merge is armed.
+Report the PR URL and how the run ended: on `MERGED`, that it merged; on a
+human-only stop, that stop's named reason, never that auto-merge is armed; on a
+user-authored fallback PR, that it is user-authored, that no auto-merge is
+armed, and that a human admin-merges it; otherwise, that it's bot-authored and
+that auto-merge is armed.
 
 ### 7. Emit the run's record — at every ending after Step 0a
 
