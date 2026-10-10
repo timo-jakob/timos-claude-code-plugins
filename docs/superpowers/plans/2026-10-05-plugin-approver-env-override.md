@@ -879,8 +879,11 @@ RTK_DISABLED=1 git commit -m "feat(development-claude-plugin): opt-in claude-plu
 
 - Modify: `development/skills/resolve-issue/SKILL.md`: frontmatter `description`; §6 "Outcomes" list; Epic flow
   "**Waiting for each merge.**" paragraph
-- Modify: `development/skills/resolve-issue/reference/interactive.md`: the "Wait for each merge before the next rung"
-  paragraph
+- Modify: `development/skills/resolve-issue/reference/interactive/remediation.md`: a new unfrozen note after
+  `<!-- /moved: interactive-remediation -->` and the #1226 note. The "Wait for each merge before the next rung"
+  paragraph sits inside that frozen span and stays byte-identical (#2133)
+- Modify: `development/skills/resolve-issue/reference/interactive.md`: name the new note in its "Everything outside
+  those blocks is outside that proof" list
 - Modify: `development/skills/resolve-issue/reference/sequential.md`: the sentence containing "a human-only repo still"
 - Modify: `development/skills/open-pr/SKILL.md`: the sentence "so a **human** approves (no AI Approver)"
 - Test: `tests/plugin-approver-resolve-issue.bats` (new)
@@ -929,8 +932,11 @@ setup() {
   lacks "$output" '$CLAUDE_PLUGIN_APPROVER'
 }
 
-@test "interactive.md and sequential.md name the override exception" {
-  grep -q 'plugin-approver-override.zsh' "$RI/reference/interactive.md"
+@test "remediation.md names the override exception after its frozen block, and sequential.md names it" {
+  local f="$RI/reference/interactive/remediation.md" end hit
+  end="$(grep -n -- '<!-- /moved: interactive-remediation -->' "$f" | cut -d: -f1)"
+  hit="$(grep -n 'plugin-approver-override.zsh' "$f" | head -1 | cut -d: -f1)"
+  [ -n "$end" ] && [ -n "$hit" ] && [ "$hit" -gt "$end" ]
   grep -q 'plugin-approver-override.zsh' "$RI/reference/sequential.md"
 }
 
@@ -994,9 +1000,13 @@ invocation` on one source line. Re-wrap the paragraph if needed.
 
 - [ ] **Step 5: interactive.md, sequential.md, open-pr**
 
-- `interactive.md`, in "Wait for each merge before the next rung": after `in a human-only repo the human is present`,
-  add `(a claude-plugin repo whose plugin-approver-override.zsh says override=on is not human-only for this run: it
-  auto-merges like an Approver repo)`.
+- `reference/interactive/remediation.md`: "Wait for each merge before the next rung" sits inside the
+  `<!-- moved: interactive-remediation -->` frozen span, so leave it byte-identical. After
+  `<!-- /moved: interactive-remediation -->` and the #1226 note, add an unfrozen paragraph with a bold lead-in saying
+  that under `override=on` a rung's PR follows the approve-and-advance cadence (`merge-pr-cycle.zsh`, then
+  `/development-claude-plugin:approve`, then `await-pr-checks.zsh` on `APPROVED`), and any other verdict is the
+  human-only wait naming the verdict. Then name the note in `reference/interactive.md`'s "Everything outside those
+  blocks is outside that proof" list (#2133).
 - `sequential.md`: after `a human-only repo still`, insert the same parenthetical.
 - `open-pr/SKILL.md`: change `so a **human** approves (no AI Approver).` to `so a **human** approves (no AI Approver,
   unless the session opts in with \`CLAUDE_PLUGIN_APPROVER=1\` — see \`/development-claude-plugin:approve\`).`

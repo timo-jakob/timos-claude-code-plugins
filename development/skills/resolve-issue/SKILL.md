@@ -5,7 +5,9 @@ description: >
   bot-authored PR(s). Single issue: branch off fresh main, implement, validate
   (tests must be green), commit, and open a Maintenance-App-authored PR with
   squash auto-merge armed — the Approver auto-approves on app repos; a human
-  approves on claude-plugin repos. Epic: decompose the children, order them
+  approves on claude-plugin repos, except under CLAUDE_PLUGIN_APPROVER=1, where
+  the claude-plugin Approver approves each PR and an epic advances in one
+  invocation. Epic: decompose the children, order them
   conflict-aware, resolve provably-disjoint ones in parallel worktrees and the
   rest sequentially off fresh main (each child independently tested), then run a
   holistic end-to-end test over the merged epic and explicitly close the epic
@@ -1018,7 +1020,47 @@ Outcomes:
 
 - **Approver repo (Python / Java)** → the Claude Approver auto-approves → it
   auto-merges on green CI.
-- **Claude-plugin repo (human-only)** → a human approves → it auto-merges.
+- **Claude-plugin repo (human-only)** → a human approves → it auto-merges —
+  **unless** `development/scripts/approval/plugin-approver-override.zsh`
+  reports `override=on`, the `CLAUDE_PLUGIN_APPROVER=1` exception. Ask the
+  helper; never read the variable yourself.
+  - **`override=on`** → approve and advance, on open-pr's bot path only: a
+    user-authored fallback PR has no armed auto-merge, so once approved it
+    ends on the human-only stop, `approved; a human admin-merges`. Wait with
+    `development/skills/maintenance/scripts/merge-pr-cycle.zsh <pr>` and act on
+    its exit: **4** AWAITING-APPROVAL is the cue — run
+    `/development-claude-plugin:approve <pr>`, then re-read `reviewDecision`;
+    **0** READY means the PR is already approved; **6** NOT-GREEN means fix CI
+    first, push the fix and re-trigger CI as open-pr's *Re-pushing to an
+    already-open PR?* paragraph says (#605), then wait again on the new head —
+    a third NOT-GREEN is the human-only stop, naming the failing check;
+    **5** CHANGES-REQUESTED, **3** TIMED-OUT or **1** is the human-only stop,
+    naming that result line; **2** is your own malformed call — fix it and
+    re-run, never a verdict. `reviewDecision` `APPROVED` (exit 0, or after the
+    approve run) → armed auto-merge merges it: wait for its checks with
+    `development/skills/maintenance/scripts/await-pr-checks.zsh <pr>`, then
+    re-read `gh pr view <pr> --json state,autoMergeRequest` until it reads
+    `MERGED` — a green PR is not yet a merged one, and auto-merge can lag
+    behind green. Each re-read is its own foreground Bash call,
+    `gh pr view <pr> --json state,autoMergeRequest; sleep 60`, judged by the
+    JSON it prints, never by its exit status — at most 30 of them, one a
+    minute, and never a hand-rolled `while [ … ]` loop (#412), a `Monitor` or
+    a background poll. A read showing `MERGED` ends the wait merged, even when
+    that same read shows `autoMergeRequest` `null`. Otherwise the wait ends
+    unmerged, on the human-only stop naming why, when `await-pr-checks.zsh`
+    exits non-zero or settles `NOT-GREEN`, `state` reads `CLOSED`,
+    `autoMergeRequest` reads `null` (auto-merge disarmed), or the 30th re-read
+    shows no `MERGED`. Any other `reviewDecision` →
+    the human-only stop, naming the Approver's verdict, or that it posted none.
+    In strictly sequential mode every one of these waits is that mode's
+    foreground call.
+  - **`override=off`** → the human-only flow, unchanged. For `env-unset` or
+    `not-plugin-repo` the report adds nothing; for `approver-not-registered` or
+    `approver-not-installed` it adds exactly one informational line, never a
+    warning: `AI approval: off (Approver App not installed) — a human approves.`
+  - **Helper exit 1** (a broken Approver setup), or any other non-zero exit →
+    relay the helper's diagnostic — its `reason=` slug and its stderr — as one
+    line, and take the human path.
 - **No writer App installed** → open-pr falls back to a *user*-authored PR (the
   human admin-merges, since they can't approve their own); report which path ran.
 
@@ -1432,6 +1474,14 @@ fetch + branch the next. **All children, one invocation, no re-trigger.** In a
 judgement gate, not a needless re-trigger — so a *sequential* chain there still
 advances per merge: open the current child's PR and stop, resuming on re-run once
 it merges. (Disjoint children can still all be opened at once even there.)
+**The `CLAUDE_PLUGIN_APPROVER=1` exception:** E3 asks
+`development/scripts/approval/plugin-approver-override.zsh` once per run. On
+`override=on` each child's PR takes §6's approve-and-advance path, so the chain
+advances in the same invocation as on an Approver repo — each next child
+branches only once §6 reads its predecessor `MERGED`. A child that ends on §6's
+human-only stop (any ending short of `MERGED`) stops there, and
+the children that depend on it are parked. On `override=off` (or a helper
+exit 1) the per-merge stop above is unchanged.
 
 **When a child escalates (typed exit from §#564), don't abort the epic.** Triage
 the rest against the escalated child:

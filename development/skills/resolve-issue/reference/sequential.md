@@ -39,13 +39,19 @@ this mode, this file governs:
   tool's largest timeout; on its exit 3 (not yet settled) issue the same call
   again, up to the script's default 30-minute budget in total, and treat a
   timeout after that as a real one. Never a `run_in_background` poll, a
-  `Monitor`, or a detached process.
+  `Monitor`, or a detached process. Under the `override=on` exception
+  (SKILL.md §6), `merge-pr-cycle.zsh --timeout 540 <pr>` waits the same way:
+  re-issued on its exit 3 within the same 30-minute total, and only a timeout
+  after that is §6's human-only stop. §6's re-read until `MERGED` needs no
+  splitting: it is already at most 30 foreground calls, one `gh pr view` each.
 
 Unchanged in both modes: E1b still gates **every** child and builds nothing
 unless all are `READY`; the review panel, the E1b readiness gates and the other
 agents stay ordinary sub-agents, visible in the session; a human-only repo still
-stops after opening each sequential child's PR; and headless `claude` is never
-used.
+stops after opening each sequential child's PR, unless
+`development/scripts/approval/plugin-approver-override.zsh` reports
+`override=on` (the `CLAUDE_PLUGIN_APPROVER=1` exception, SKILL.md §6's
+approve-and-advance path); and headless `claude` is never used.
 
 ### The round boundary — gate first, in the foreground
 
