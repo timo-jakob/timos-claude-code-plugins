@@ -13,7 +13,10 @@ disable-model-invocation: false
 
 You are opening a PR **as the Claude-Plugin-Writer** — the Claude Maintenance
 GitHub App, reused as the writer for a plugin repo. The point: a plugin repo is
-the origin of every other repo, so a **human** approves (no AI Approver). GitHub
+the origin of every other repo, so a **human** approves (no AI Approver) — the
+one exception is a session opted in with `CLAUDE_PLUGIN_APPROVER=1`, where
+`development/scripts/approval/plugin-approver-override.zsh` decides whether
+`/development-claude-plugin:approve` may approve instead. GitHub
 won't let someone approve a PR they authored, so Claude's PRs must be authored by
 the bot, not by you — then you approve and it auto-merges.
 

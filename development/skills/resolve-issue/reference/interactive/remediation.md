@@ -224,3 +224,16 @@ issue's run was given. Its loops take **its** `loop_args`, never the named
 issue's, and it emits its own record at its own ending. The named issue's run
 file is never touched by a rung, so the named issue's own record is unaffected
 (`reference/telemetry.md`, step 2).
+
+**A rung's PR under the `CLAUDE_PLUGIN_APPROVER=1` exception.** The span's
+"Wait for each merge before the next rung" names two cadences. On a
+claude-plugin repo where `development/scripts/approval/plugin-approver-override.zsh`
+reports `override=on` there is a third: the rung's PR follows the
+approve-and-advance cadence exactly as SKILL.md §6 states it — its
+`merge-pr-cycle.zsh <pr>` wait, `/development-claude-plugin:approve <pr>` on
+that wait's exit 4 only, and `await-pr-checks.zsh <pr>` once `reviewDecision`
+reads `APPROVED`, each exit acted on as §6 lists it — and the remediation
+continues once the PR reads `MERGED`, not merely green. Wherever §6 ends on its
+human-only stop, that is the span's human-only wait, and the report names the
+verdict §6 named. On `override=off`, or a helper failure (its diagnostic
+relayed), the span's human-only wait is unchanged.

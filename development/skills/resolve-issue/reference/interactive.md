@@ -30,5 +30,6 @@ the frozen extension is cut into two such blocks, `interactive-extension` in
 
 **Everything outside those blocks is outside that proof**: the shard headers,
 the opening notes of `remediation.md` and `extension.md`, the #1226 note after
-`remediation.md`'s block, and the whole of `extension-ceiling.md`. Edit them
+`remediation.md`'s block, the `CLAUDE_PLUGIN_APPROVER=1` note that follows it
+(#2133), and the whole of `extension-ceiling.md`. Edit them
 knowing the byte check does not cover them.
