@@ -439,6 +439,8 @@ stub_gh() {
     'case "$*" in' \
     '  *headRefOid*) [ -z "${STUB_FAIL:-}" ] || exit 1; printf "%s\n" "$STUB_HEAD" ;;' \
     '  *"--json body"*) printf "%s\n" "$STUB_BODY" ;;' \
+    '  *nameWithOwner*) printf "o/r\n" ;;' \
+    '  *"--json author"*) exit 1 ;;' \
     '  *"/files"*) printf "%s\n" "${STUB_PATHS:-README.md}" ;;' \
     '  "api --method POST"*) printf "https://github.com/o/r/pull/42#pullrequestreview-1\n" ;;' \
     '  *) exit 99 ;;' \
@@ -451,11 +453,13 @@ stub_gh() {
 sha_of_body() { printf '%s\n' "$1" | shasum -a 256 | cut -d' ' -f1; }
 
 # Agent Step 12's block with its placeholders filled in: judged head abc123,
-# judged body "Summary", the given verdict and DRY_RUN.
+# judged body "Summary", the given verdict and DRY_RUN, and the per-run
+# heredoc delimiter built from the work directory's name.
 step12_script() {
   local verdict="$1" dry="$2" work="$BATS_TEST_TMPDIR/work"
   mkdir -p "$work"; printf 'tok\n' > "$BATS_TEST_TMPDIR/token"
   extract_block "$AGENT" 'The guard and the `case` stay in this one call' | sed \
+    -e "s|<the review delimiter>|REVIEW_work|g" \
     -e "s|<the token file path>|$BATS_TEST_TMPDIR/token|" \
     -e 's|<the PR number>|42|' -e 's|<owner>/<repo>|o/r|' -e "s|<true or false>|$dry|" \
     -e 's|<HEAD_SHA from the prompt>|abc123|' \
@@ -475,8 +479,11 @@ step12_script() {
   hash_line=$(printf '%s\n' "$block" | grep -nxF \
     '  BODY_SHA256=$(shasum -a 256 < "$SCRATCH/body" | cut -d'"' '"' -f1) && [ -n "$BODY_SHA256" ] &&' | cut -d: -f1)
   group_end=$(printf '%s\n' "$block" | grep -nF '} || { echo "::error::Policy render or PR fetch failed' | cut -d: -f1)
-  [ -n "$body_line" ] && [ -n "$hash_line" ] && [ -n "$group_end" ]
-  [ "$body_line" -lt "$hash_line" ] && [ "$hash_line" -lt "$group_end" ]
+  [ -n "$body_line" ]
+  [ -n "$hash_line" ]
+  [ -n "$group_end" ]
+  [ "$body_line" -lt "$hash_line" ]
+  [ "$hash_line" -lt "$group_end" ]
 }
 
 @test "skill Step 3 runs: it prints the judged head and body hash, and an empty head stops before the bar" {
@@ -487,16 +494,27 @@ step12_script() {
       -e 's|<the PR_NUMBER Step 1 printed>|42|' -e 's|<the REPO Step 1 printed>|o/r|')
   printf '%s\n' "$block" > step3.sh
   cd "$REPO_ROOT"
-  STUB_HEAD=abc123 STUB_BODY=Summary run bash "$BATS_TEST_TMPDIR/step3.sh"
+  TMPDIR="$BATS_TEST_TMPDIR" STUB_HEAD=abc123 STUB_BODY=Summary run bash "$BATS_TEST_TMPDIR/step3.sh"
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "${lines[@]:1}")" = "$(printf 'HEAD_SHA=abc123\nBODY_SHA256=%s\nBAR_RC=0' "$(sha_of_body Summary)")" ]
   [ -d "${lines[0]#SCRATCH=}" ]
+  starts_with "${lines[0]#SCRATCH=}" "$BATS_TEST_TMPDIR/plugin-approver."
   : > "$GH_LOG"
-  STUB_HEAD='' STUB_BODY=Summary run bash "$BATS_TEST_TMPDIR/step3.sh"
+  TMPDIR="$BATS_TEST_TMPDIR" STUB_HEAD='' STUB_BODY=Summary run bash "$BATS_TEST_TMPDIR/step3.sh"
   [ "$status" -eq 1 ]
   contains "$output" "Policy render or PR fetch failed — posting nothing."
   lacks "$output" "BAR_RC="
   [ "$(cat "$GH_LOG")" = "pr view 42 --json headRefOid -q .headRefOid" ]
+}
+
+@test "skill Step 1 runs: a failed author lookup is an error with exit 1, never the off state (#2300)" {
+  stub_gh
+  extract_block "$SKILL" '## Step 1 — Resolve the PR and check its author' \
+    | sed 's|<the PR number resolved above>|42|' > step1.sh
+  run bash "$BATS_TEST_TMPDIR/step1.sh"
+  [ "$status" -eq 1 ]
+  contains "$output" "::error::Could not read PR #42's author — posting nothing."
+  lacks "$output" "AI approval: off"
 }
 
 @test "skill Step 5: the prompt passes HEAD_SHA and BODY_SHA256 and names the pinned reviews endpoint" {
@@ -526,9 +544,12 @@ step12_script() {
   local guard dry kase
   guard=$(printf '%s\n' "$block" | grep -nF '[ "$live_head" = "$HEAD_SHA" ] ||' | cut -d: -f1)
   dry=$(printf '%s\n' "$block" | grep -nxF 'if [ "$DRY_RUN" = "true" ]; then' | cut -d: -f1)
-  kase=$(printf '%s\n' "$block" | grep -nxF 'case "$verdict" in' | cut -d: -f1)
-  [ -n "$guard" ] && [ -n "$dry" ] && [ -n "$kase" ]
-  [ "$guard" -lt "$dry" ] && [ "$dry" -lt "$kase" ]
+  kase=$(printf '%s\n' "$block" | grep -nxF '  APPROVE)' | cut -d: -f1)
+  [ -n "$guard" ]
+  [ -n "$dry" ]
+  [ -n "$kase" ]
+  [ "$guard" -lt "$dry" ]
+  [ "$dry" -lt "$kase" ]
   local ev
   for ev in APPROVE REQUEST_CHANGES COMMENT; do
     printf '%s\n' "$block" | grep -A2 -xF "  $ev)" | grep -qxF -- \
@@ -595,5 +616,93 @@ step12_script() {
   [ "$status" -eq 1 ]
   [ -z "$output" ]
   contains "$stderr" "(head abc123 -> def456) — posting nothing"
+  STUB_HEAD=abc123 STUB_BODY='Summary plus residue' run --separate-stderr bash "$BATS_TEST_TMPDIR/step12.sh"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  contains "$stderr" "(body changed) — posting nothing"
+  STUB_FAIL=1 STUB_HEAD=abc123 STUB_BODY=Summary run --separate-stderr bash "$BATS_TEST_TMPDIR/step12.sh"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  contains "$stderr" "could not re-read PR #42's head and body — posting nothing"
   [ "$(grep -c '^api' "$GH_LOG")" -eq 0 ]
+}
+
+@test "agent Step 12 runs: a DRY_RUN other than exactly true or false, or an unknown verdict, stops before any read, print or post (#2299)" {
+  stub_gh
+  local v
+  for v in TRUE 1 ''; do
+    step12_script APPROVE "$v"
+    : > "$GH_LOG"
+    STUB_HEAD=abc123 STUB_BODY=Summary run --separate-stderr bash "$BATS_TEST_TMPDIR/step12.sh"
+    [ "$status" -eq 1 ] || { echo "DRY_RUN='$v' exited $status"; false; }
+    [ -z "$output" ]
+    contains "$stderr" "::error::unknown DRY_RUN '$v' — posting nothing"
+    [ ! -s "$GH_LOG" ] || { echo "DRY_RUN='$v' called gh: $(cat "$GH_LOG")"; false; }
+  done
+  step12_script BOGUS true
+  : > "$GH_LOG"
+  STUB_HEAD=abc123 STUB_BODY=Summary run --separate-stderr bash "$BATS_TEST_TMPDIR/step12.sh"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  contains "$stderr" "::error::unknown verdict 'BOGUS' — posting nothing"
+  [ ! -s "$GH_LOG" ]
+}
+
+@test "agent Step 12 runs: a review body holding a line that is just REVIEW lands verbatim and runs nothing (#2299)" {
+  stub_gh
+  step12_script APPROVE false
+  local canary="$BATS_TEST_TMPDIR/ran"
+  awk -v c="$canary" '$0 == "RENDERED REVIEW" { print "Looks fine."; print "REVIEW"; print "touch " c; next } { print }' \
+    "$BATS_TEST_TMPDIR/step12.sh" > "$BATS_TEST_TMPDIR/step12-canary.sh"
+  : > "$GH_LOG"
+  STUB_HEAD=abc123 STUB_BODY=Summary run bash "$BATS_TEST_TMPDIR/step12-canary.sh"
+  [ "$status" -eq 0 ]
+  [ ! -e "$canary" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/work/review.md")" = "$(printf 'Looks fine.\nREVIEW\ntouch %s' "$canary")" ]
+  [ "$(grep -c '^api --method POST' "$GH_LOG")" -eq 1 ]
+}
+
+@test "agent Step 12: the delimiter is REVIEW_ plus the work directory's name, checked before the heredoc, and a wrong one posts nothing (#2299)" {
+  local block guard heredoc
+  block=$(extract_block "$AGENT" 'The guard and the `case` stay in this one call')
+  [ "$(printf '%s\n' "$block" | grep -cF '<the review delimiter>')" -eq 3 ]
+  heredoc=$(printf '%s\n' "$block" | grep -nxF "cat > \"\$review_body_file\" <<'<the review delimiter>'" | cut -d: -f1)
+  guard=$(printf '%s\n' "$block" | grep -nxF '[ "<the review delimiter>" = "REVIEW_${work##*/}" ] ||' | cut -d: -f1)
+  [ -n "$heredoc" ]
+  [ -n "$guard" ]
+  [ "$guard" -lt "$heredoc" ]
+  run grep -n "<<'REVIEW'" "$AGENT"
+  [ "$status" -eq 1 ]
+  stub_gh
+  step12_script APPROVE false
+  sed -i.bak 's/REVIEW_work/REVIEW_fixed/g' "$BATS_TEST_TMPDIR/step12.sh"
+  : > "$GH_LOG"
+  STUB_HEAD=abc123 STUB_BODY=Summary run --separate-stderr bash "$BATS_TEST_TMPDIR/step12.sh"
+  [ "$status" -eq 1 ]
+  contains "$stderr" "the review delimiter is not REVIEW_ plus the work directory's name — posting nothing"
+  [ ! -s "$GH_LOG" ]
+  pin_each "$AGENT" \
+    '`DRY_RUN` is exactly `true` (print the body, post nothing) or exactly' \
+    '`false` (post). Any other value — `TRUE`, `1`, empty — stops before' \
+    'one of the three tokens, dry run included (#2299).' \
+    'The review body goes through a quoted heredoc whose delimiter is unique' \
+    'shell. `<the review delimiter>` is `REVIEW_` followed by the basename of' \
+    'a variable inside a heredoc delimiter, and the block refuses a delimiter'
+}
+
+@test "the stop and no-review messages are pinned through their re-run instructions, and APPROVER.md states the stale-approval rule (#2299)" {
+  pin_each "$AGENT" \
+    "{ echo \"::error::could not re-read PR #\$PR_NUMBER's head and body — posting nothing; re-run the review\" >&2; exit 1; }" \
+    '($changed) — posting nothing; re-run /development-claude-plugin:approve" >&2'
+  pin_each "$SKILL" \
+    'say "Needs a human" and list every `hit=` line. If the agent posted nothing (a' \
+    'head or body change, a failed re-read, unsettled CI or a conflicting PR), say' \
+    'that no review was posted, give the reason, and say to re-run' \
+    '`/development-claude-plugin:approve` — never report its derived verdict as posted.'
+  pin_each "$APPROVER_DOC" \
+    'The review is posted pinned to the head the never-approve bar judged, with' \
+    '`commit_id`, and nothing is posted when the head or the body changed in the' \
+    'meantime. An `APPROVE` stops counting after a later push only when branch' \
+    "protection's *Dismiss stale pull request approvals when new commits are" \
+    "pushed* is on; bootstrap's \`branch-protection.sh\` turns it on."
 }

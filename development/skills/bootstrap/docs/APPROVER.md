@@ -599,6 +599,12 @@ approval/identity machinery. On those the Approver posts `COMMENT` with a
 never `APPROVE`. Nothing is recorded in the repository.
 Unset the variable and the repo is human-only again.
 
+The review is posted pinned to the head the never-approve bar judged, with
+`commit_id`, and nothing is posted when the head or the body changed in the
+meantime. An `APPROVE` stops counting after a later push only when branch
+protection's *Dismiss stale pull request approvals when new commits are
+pushed* is on; bootstrap's `branch-protection.sh` turns it on.
+
 The skill brings its own policy: the core policy rendered for
 `claude-plugin`, followed by the plugin overlay shipped beside the skill. No
 `.claude/approver-policy.md` is needed.
