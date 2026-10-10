@@ -63,8 +63,10 @@ as a **hard rule**:
   almost everything a review needs.
 - When you need the PR's checked-out tree (Step 4 does), create a
   **fresh scratch worktree** in a directory you make
-  (`git worktree add "$(mktemp -d)/pr" <sha>`), work there, and **remove
-  it before returning** (`git worktree remove --force <dir>`). Never
+  (`wt=$(mktemp -d) && git worktree add "$wt/pr" <sha> && echo "wt=$wt"`),
+  work there, and **remove it before returning**
+  (`git worktree remove --force "$wt/pr" && rm -rf "$wt"`), together
+  with Step 2's per-run work directory (`rm -rf "$work"`). Never
   create or reuse a worktree under `.claude/worktrees/`.
 
 Verify CI is green at the head SHA yourself (baseline criterion 1) — there
@@ -131,11 +133,27 @@ calibration step.
 
 ### Step 2 — Gather PR context
 
+**Make a per-run work directory first.** Two approve runs at once (two
+sessions, two PRs) must never share PR data, so nothing goes to a fixed
+`/tmp` path:
+
 ```bash
-gh pr view "$PR_NUMBER" --json title,body,author,headRefOid,baseRefName,additions,deletions,changedFiles,labels,reviewDecision,mergeable,mergeStateStatus > /tmp/pr.json
-gh pr diff "$PR_NUMBER" > /tmp/pr.diff
-gh pr view "$PR_NUMBER" --json files --jq '.files[].path' > /tmp/pr.files
+export GH_TOKEN=$(cat <the token file path>); PR_NUMBER=<the PR number>
+work=$(mktemp -d) && echo "work=$work"
+gh pr view "$PR_NUMBER" --json title,body,author,headRefOid,baseRefName,additions,deletions,changedFiles,labels,reviewDecision,mergeable,mergeStateStatus > "$work/pr.json"
+gh pr diff "$PR_NUMBER" > "$work/pr.diff"
+gh pr view "$PR_NUMBER" --json files --jq '.files[].path' > "$work/pr.files"
 ```
+
+If `mktemp -d` fails, stop and post nothing. Shell variables do not
+survive between your Bash calls, so set `work` to the printed path,
+`PR_NUMBER`, `GH_TOKEN` (re-exported from its token file), `wt` and
+every other variable a block reads, at the top of that block — each
+later block below starts with `work=<the path Step 2 printed>` and
+`[ -d "$work" ] || exit 1`. **Remove it before you return, on
+every path** — the early stops (a conflicting PR, CI not settled, a
+refusal) and the dry-run print included — with `rm -rf "$work"`,
+alongside the scratch worktree's removal.
 
 **Mergeability gate — before anything else.** If `mergeable` is
 `CONFLICTING`, STOP: do not evaluate, do not post any verdict. An
@@ -158,7 +176,7 @@ Capture:
 ### Step 3 — Detect PR type
 
 Follow the policy's *Type detection* section: primary (title prefix),
-fallback (diff heuristic over `/tmp/pr.files`, using the overlay's
+fallback (diff heuristic over `$work/pr.files`, using the overlay's
 *Fallback diff-heuristic paths*), tiebreaker (author).
 
 If type is genuinely ambiguous (primary and fallback disagree and the
@@ -191,10 +209,11 @@ For `feat:` and `feat!:` types, the policy requires a linked GitHub
 issue. Extract it from the PR body:
 
 ```bash
-body=$(jq -r .body /tmp/pr.json)
+work=<the path Step 2 printed>; [ -d "$work" ] || exit 1
+body=$(jq -r .body "$work/pr.json")
 issue=$(printf '%s' "$body" | grep -oiE '(close[sd]?|fix(e[sd])?|resolve[sd]?):? #[0-9]+' | head -1 | grep -oE '[0-9]+')
 if [ -n "$issue" ]; then
-  gh issue view "$issue" --json title,body,state > /tmp/pr.issue.json
+  gh issue view "$issue" --json title,body,state > "$work/pr.issue.json"
 fi
 ```
 
@@ -244,7 +263,9 @@ criteria that need commands:
   neutral, never failures. If it reports no checks yet, or any check is
   still pending when it returns, post nothing and report that the review
   must be re-run once CI settles.
-- Conflict markers — `grep -E '^<<<<<<<' /tmp/pr.diff`.
+- Conflict markers — `work=<the path Step 2 printed>; [ -s "$work/pr.diff" ] ||
+  exit 2; grep -E '^\+<<<<<<<' "$work/pr.diff"`. Exit status 1 means no markers;
+  any other non-zero status is a failed check, never a pass.
 - New scanner findings / secrets — read the finding diff where the repo
   exposes the relevant API; re-check the diff for secrets.
 
@@ -383,11 +404,21 @@ and a re-fetch never lifts it.
 If `DRY_RUN` is `"true"`, **print the rendered review body to stdout
 and exit 0.** Do not call `gh pr review`.
 
-Otherwise post the review using the App token in `GH_TOKEN`:
+Otherwise post the review using the App token in `GH_TOKEN`. Set
+`GH_TOKEN` (re-exported from its token file), `PR_NUMBER`, `work`,
+`verdict` (exactly one of the three bare tokens) and the
+rendered body in this same Bash call — none survives from an earlier
+one:
 
 ```bash
-review_body_file=$(mktemp)
-printf '%s' "$rendered_body" > "$review_body_file"
+export GH_TOKEN=$(cat <the token file path>) && [ -n "$GH_TOKEN" ] || exit 1
+PR_NUMBER=<the PR number>
+work=<the path Step 2 printed>; [ -d "$work" ] || exit 1
+verdict=<APPROVE, REQUEST_CHANGES or COMMENT>
+review_body_file="$work/review.md"
+cat > "$review_body_file" <<'REVIEW'
+<the rendered review body>
+REVIEW
 
 case "$verdict" in
   APPROVE)
@@ -398,6 +429,9 @@ case "$verdict" in
     ;;
   COMMENT)
     gh pr review "$PR_NUMBER" --comment --body-file "$review_body_file"
+    ;;
+  *)
+    echo "::error::unknown verdict '$verdict' — posting nothing" >&2; exit 1
     ;;
 esac
 ```
