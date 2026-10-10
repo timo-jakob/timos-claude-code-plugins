@@ -267,6 +267,48 @@ dossier() { printf 'x\n<!-- review-dossier: %s -->\n' "$1" > body; }
   grep -qF "version differs from \`origin/main\`'s and equals its" "$AGENT"
 }
 
+@test "agent: PR data lives in a per-run mktemp -d directory, never a fixed /tmp path (#2222)" {
+  run grep -n '/tmp/pr' "$AGENT"
+  [ "$status" -eq 1 ]
+  grep -qxF 'work=$(mktemp -d) && echo "work=$work"' "$AGENT"
+  for f in pr.json pr.diff pr.files; do
+    grep -qF "> \"\$work/$f\"" "$AGENT" || { echo "not written under \$work: $f"; false; }
+  done
+  grep -qF 'body=$(jq -r .body "$work/pr.json")' "$AGENT"
+  grep -qF '> "$work/pr.issue.json"' "$AGENT"
+  grep -qF "exit 2; grep -E '^\\+<<<<<<<' \"\$work/pr.diff\"" "$AGENT"
+  grep -qF 'fallback (diff heuristic over `$work/pr.files`,' "$AGENT"
+  grep -qF 'review_body_file="$work/review.md"' "$AGENT"
+  [ "$(grep -cxF 'work=<the path Step 2 printed>; [ -d "$work" ] || exit 1' "$AGENT")" -eq 2 ]
+  grep -qF -- '- Conflict markers — `work=<the path Step 2 printed>; [ -s "$work/pr.diff" ] ||' "$AGENT"
+  grep -qxF 'verdict=<APPROVE, REQUEST_CHANGES or COMMENT>' "$AGENT"
+  grep -qF "echo \"::error::unknown verdict '\$verdict' — posting nothing\" >&2; exit 1" "$AGENT"
+  for arm in APPROVE:approve REQUEST_CHANGES:request-changes COMMENT:comment; do
+    grep -A1 -xF "  ${arm%%:*})" "$AGENT" | grep -qxF -- \
+      "    gh pr review \"\$PR_NUMBER\" --${arm#*:} --body-file \"\$review_body_file\"" \
+      || { echo "arm not posting --${arm#*:}: ${arm%%:*}"; false; }
+  done
+  grep -qxF 'export GH_TOKEN=$(cat <the token file path>) && [ -n "$GH_TOKEN" ] || exit 1' "$AGENT"
+  pin_each "$AGENT" \
+    '`GH_TOKEN` (re-exported from its token file), `PR_NUMBER`, `work`,' \
+    '`verdict` (exactly one of the three bare tokens) and the' \
+    'rendered body in this same Bash call — none survives from an earlier' \
+    '  any other non-zero status is a failed check, never a pass.'
+  pin_each "$AGENT" \
+    '**Make a per-run work directory first.** Two approve runs at once (two' \
+    'sessions, two PRs) must never share PR data, so nothing goes to a fixed' \
+    'If `mktemp -d` fails, stop and post nothing. Shell variables do not' \
+    'survive between your Bash calls, so set `work` to the printed path,' \
+    '`PR_NUMBER`, `GH_TOKEN` (re-exported from its token file), `wt` and' \
+    'every other variable a block reads, at the top of that block — each' \
+    'later block below starts with `work=<the path Step 2 printed>` and' \
+    '`[ -d "$work" ] || exit 1`. **Remove it before you return, on' \
+    'every path** — the early stops (a conflicting PR, CI not settled, a' \
+    'refusal) and the dry-run print included — with `rm -rf "$work"`,' \
+    "alongside the scratch worktree's removal." \
+    "with Step 2's per-run work directory (\`rm -rf \"\$work\"\`). Never"
+}
+
 @test "agent: nothing Python-specific survives the copy" {
   run grep -n -i 'python\|ruff\|pytest\|pyproject\|griffe' "$AGENT"
   [ "$status" -eq 1 ]
