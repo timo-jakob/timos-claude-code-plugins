@@ -283,14 +283,9 @@ dossier() { printf 'x\n<!-- review-dossier: %s -->\n' "$1" > body; }
   grep -qF -- '- Conflict markers — `work=<the path Step 2 printed>; [ -s "$work/pr.diff" ] ||' "$AGENT"
   grep -qxF 'verdict=<APPROVE, REQUEST_CHANGES or COMMENT>' "$AGENT"
   grep -qF "echo \"::error::unknown verdict '\$verdict' — posting nothing\" >&2; exit 1" "$AGENT"
-  for arm in APPROVE:approve REQUEST_CHANGES:request-changes COMMENT:comment; do
-    grep -A1 -xF "  ${arm%%:*})" "$AGENT" | grep -qxF -- \
-      "    gh pr review \"\$PR_NUMBER\" --${arm#*:} --body-file \"\$review_body_file\"" \
-      || { echo "arm not posting --${arm#*:}: ${arm%%:*}"; false; }
-  done
   grep -qxF 'export GH_TOKEN=$(cat <the token file path>) && [ -n "$GH_TOKEN" ] || exit 1' "$AGENT"
   pin_each "$AGENT" \
-    '`GH_TOKEN` (re-exported from its token file), `PR_NUMBER`, `work`,' \
+    '`GH_TOKEN` (re-exported from its token file), `PR_NUMBER`, `REPO`,' \
     '`verdict` (exactly one of the three bare tokens) and the' \
     'rendered body in this same Bash call — none survives from an earlier' \
     '  any other non-zero status is a failed check, never a pass.'
@@ -401,6 +396,8 @@ pin_each() {
     'A failed `sed`, `gh pr view` or `gh api` above is the same stop, and the block' \
     'never the value (#640). Capture the path; never `cat` or `echo` the token.' \
     'say "Needs a human" and list every `hit=` line.' \
+    'head or body change, a failed re-read, unsettled CI or a conflicting PR), say' \
+    '`/development-claude-plugin:approve` — never report its derived verdict as posted.' \
     'print `usage: /development-claude-plugin:approve [<pr-number>]` and stop.'
 }
 
@@ -422,4 +419,181 @@ pin_each() {
     '`/development:maintenance` call the skill for you: each asks' \
     '`development/scripts/approval/plugin-approver-override.zsh`, and on' \
     '`override=on` drives `/development-claude-plugin:approve` itself.'
+}
+
+# ── the bar is tied to the head and body it judged (#2223) ────────────────────
+
+# The first ```bash block after the line containing $2, verbatim.
+extract_block() {
+  awk -v m="$2" 'index($0, m) { f = 1 } f && /^```bash$/ { b = 1; next } b && /^```$/ { exit } b { print }' "$1"
+}
+
+# A gh stub: logs every call to $GH_LOG, answers `pr view` from $STUB_HEAD /
+# $STUB_BODY (printed newline-terminated, as gh prints a body), fails the head
+# read when $STUB_FAIL is set, and lists $STUB_PATHS for `api …/files`.
+stub_gh() {
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'printf "%s\n" "$*" >> "$GH_LOG"' \
+    'case "$*" in' \
+    '  *headRefOid*) [ -z "${STUB_FAIL:-}" ] || exit 1; printf "%s\n" "$STUB_HEAD" ;;' \
+    '  *"--json body"*) printf "%s\n" "$STUB_BODY" ;;' \
+    '  *"/files"*) printf "%s\n" "${STUB_PATHS:-README.md}" ;;' \
+    '  "api --method POST"*) printf "https://github.com/o/r/pull/42#pullrequestreview-1\n" ;;' \
+    '  *) exit 99 ;;' \
+    'esac' > "$BATS_TEST_TMPDIR/bin/gh"
+  chmod +x "$BATS_TEST_TMPDIR/bin/gh"
+  export PATH="$BATS_TEST_TMPDIR/bin:$PATH" GH_LOG="$BATS_TEST_TMPDIR/gh.log"
+  : > "$GH_LOG"
+}
+
+sha_of_body() { printf '%s\n' "$1" | shasum -a 256 | cut -d' ' -f1; }
+
+# Agent Step 12's block with its placeholders filled in: judged head abc123,
+# judged body "Summary", the given verdict and DRY_RUN.
+step12_script() {
+  local verdict="$1" dry="$2" work="$BATS_TEST_TMPDIR/work"
+  mkdir -p "$work"; printf 'tok\n' > "$BATS_TEST_TMPDIR/token"
+  extract_block "$AGENT" 'The guard and the `case` stay in this one call' | sed \
+    -e "s|<the token file path>|$BATS_TEST_TMPDIR/token|" \
+    -e 's|<the PR number>|42|' -e 's|<owner>/<repo>|o/r|' -e "s|<true or false>|$dry|" \
+    -e 's|<HEAD_SHA from the prompt>|abc123|' \
+    -e "s|<BODY_SHA256 from the prompt>|$(sha_of_body Summary)|" \
+    -e "s|<the path Step 2 printed>|$work|" \
+    -e "s|<APPROVE, REQUEST_CHANGES or COMMENT>|$verdict|" \
+    -e 's|<the rendered review body>|RENDERED REVIEW|' > "$BATS_TEST_TMPDIR/step12.sh"
+}
+
+@test "skill Step 3: HEAD_SHA is read first and BODY_SHA256 hashes the body file, both inside the fail-closed group" {
+  local block
+  block=$(extract_block "$SKILL" '## Step 3 — Policy and never-approve bar')
+  [ "$(printf '%s\n' "$block" | sed -n 4p)" = \
+    '{ HEAD_SHA=$(gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid) && [ -n "$HEAD_SHA" ] &&' ]
+  local body_line hash_line group_end
+  body_line=$(printf '%s\n' "$block" | grep -nF 'gh pr view "$PR_NUMBER" --json body -q .body > "$SCRATCH/body" &&' | cut -d: -f1)
+  hash_line=$(printf '%s\n' "$block" | grep -nxF \
+    '  BODY_SHA256=$(shasum -a 256 < "$SCRATCH/body" | cut -d'"' '"' -f1) && [ -n "$BODY_SHA256" ] &&' | cut -d: -f1)
+  group_end=$(printf '%s\n' "$block" | grep -nF '} || { echo "::error::Policy render or PR fetch failed' | cut -d: -f1)
+  [ -n "$body_line" ] && [ -n "$hash_line" ] && [ -n "$group_end" ]
+  [ "$body_line" -lt "$hash_line" ] && [ "$hash_line" -lt "$group_end" ]
+}
+
+@test "skill Step 3 runs: it prints the judged head and body hash, and an empty head stops before the bar" {
+  stub_gh
+  local block
+  block=$(extract_block "$SKILL" '## Step 3 — Policy and never-approve bar' \
+    | sed -e "s|<skill-base-dir>|$REPO_ROOT/development-claude-plugin/skills/approve|" \
+      -e 's|<the PR_NUMBER Step 1 printed>|42|' -e 's|<the REPO Step 1 printed>|o/r|')
+  printf '%s\n' "$block" > step3.sh
+  cd "$REPO_ROOT"
+  STUB_HEAD=abc123 STUB_BODY=Summary run bash "$BATS_TEST_TMPDIR/step3.sh"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "${lines[@]:1}")" = "$(printf 'HEAD_SHA=abc123\nBODY_SHA256=%s\nBAR_RC=0' "$(sha_of_body Summary)")" ]
+  [ -d "${lines[0]#SCRATCH=}" ]
+  : > "$GH_LOG"
+  STUB_HEAD='' STUB_BODY=Summary run bash "$BATS_TEST_TMPDIR/step3.sh"
+  [ "$status" -eq 1 ]
+  contains "$output" "Policy render or PR fetch failed — posting nothing."
+  lacks "$output" "BAR_RC="
+  [ "$(cat "$GH_LOG")" = "pr view 42 --json headRefOid -q .headRefOid" ]
+}
+
+@test "skill Step 5: the prompt passes HEAD_SHA and BODY_SHA256 and names the pinned reviews endpoint" {
+  pin_each "$SKILL" \
+    '    HEAD_SHA=<$HEAD_SHA>' \
+    '    BODY_SHA256=<$BODY_SHA256>' \
+    'Post the verdict through `gh api repos/<owner>/<repo>/pulls/<n>/reviews` with' \
+    'commit_id=<HEAD_SHA>, and only after your Step 12 has re-checked the live head' \
+    'So is an empty `HEAD_SHA` or `BODY_SHA256`: a review with nothing to pin it to' \
+    'holds only for the head SHA and body it judged: a push or a body edit before' \
+    'verbatim from that output, never from a fresh `gh` read.'
+  run grep -n 'gh pr review' "$SKILL"
+  [ "$status" -eq 1 ]
+}
+
+@test "agent: takes HEAD_SHA and BODY_SHA256 and hard-fails without them" {
+  grep -qF '| `HEAD_SHA` | The PR'"'"'s head commit (`headRefOid`) when the bar was run.' "$AGENT"
+  grep -qF '| `BODY_SHA256` | The SHA-256 of the PR body the bar read.' "$AGENT"
+  pin_each "$AGENT" \
+    '- `HEAD_SHA` or `BODY_SHA256` is not present in the prompt. Without them' \
+    'there is no telling whether the bar'"'"'s result still applies.'
+}
+
+@test "agent Step 12: the head/body guard precedes the dry-run print and the case, and every arm posts pinned to HEAD_SHA" {
+  local block
+  block=$(extract_block "$AGENT" 'The guard and the `case` stay in this one call')
+  local guard dry kase
+  guard=$(printf '%s\n' "$block" | grep -nF '[ "$live_head" = "$HEAD_SHA" ] ||' | cut -d: -f1)
+  dry=$(printf '%s\n' "$block" | grep -nxF 'if [ "$DRY_RUN" = "true" ]; then' | cut -d: -f1)
+  kase=$(printf '%s\n' "$block" | grep -nxF 'case "$verdict" in' | cut -d: -f1)
+  [ -n "$guard" ] && [ -n "$dry" ] && [ -n "$kase" ]
+  [ "$guard" -lt "$dry" ] && [ "$dry" -lt "$kase" ]
+  local ev
+  for ev in APPROVE REQUEST_CHANGES COMMENT; do
+    printf '%s\n' "$block" | grep -A2 -xF "  $ev)" | grep -qxF -- \
+      "      -f commit_id=\"\$HEAD_SHA\" -f event=$ev -F body=@\"\$review_body_file\" --jq .html_url" \
+      || { echo "arm not pinned to HEAD_SHA: $ev"; false; }
+  done
+  [ "$(printf '%s\n' "$block" | grep -cxF '    gh api --method POST "repos/$REPO/pulls/$PR_NUMBER/reviews" \')" -eq 3 ]
+  run grep -n 'gh pr review' "$AGENT"
+  [ "$status" -eq 1 ]
+  pin_each "$AGENT" \
+    'posted or printed. If the head is not `HEAD_SHA`, or the body no longer' \
+    'hashes to `BODY_SHA256`, it posts **no** review of **any** verdict —' \
+    'The check covers `DRY_RUN=true` too: a mismatch prints the report, never'
+}
+
+@test "agent Step 12 runs: on the judged head and body each verdict posts once, pinned with commit_id" {
+  stub_gh
+  local ev
+  for ev in APPROVE REQUEST_CHANGES COMMENT; do
+    step12_script "$ev" false
+    : > "$GH_LOG"
+    STUB_HEAD=abc123 STUB_BODY=Summary run bash "$BATS_TEST_TMPDIR/step12.sh"
+    [ "$status" -eq 0 ] || { echo "$ev: $output"; false; }
+    [ "$output" = "https://github.com/o/r/pull/42#pullrequestreview-1" ]
+    [ "$(grep -c '^api --method POST' "$GH_LOG")" -eq 1 ]
+    grep -qxF "api --method POST repos/o/r/pulls/42/reviews -f commit_id=abc123 -f event=$ev -F body=@$BATS_TEST_TMPDIR/work/review.md --jq .html_url" "$GH_LOG" \
+      || { echo "$ev posted as: $(cat "$GH_LOG")"; false; }
+  done
+}
+
+@test "agent Step 12 runs: a moved head, an edited body or a failed re-read posts no verdict at all" {
+  stub_gh
+  local ev
+  for ev in APPROVE REQUEST_CHANGES COMMENT; do
+    step12_script "$ev" false
+    : > "$GH_LOG"
+    STUB_HEAD=def456 STUB_BODY=Summary run --separate-stderr bash "$BATS_TEST_TMPDIR/step12.sh"
+    [ "$status" -eq 1 ]
+    contains "$stderr" "PR #42 changed since the never-approve bar judged it (head abc123 -> def456) — posting nothing"
+    [ "$(grep -c '^api' "$GH_LOG")" -eq 0 ] || { echo "$ev posted on a moved head"; false; }
+
+    STUB_HEAD=abc123 STUB_BODY=$'Summary\n<!-- review-dossier: {"dimensions":{"bugs":{"open":1}}} -->' \
+      run --separate-stderr bash "$BATS_TEST_TMPDIR/step12.sh"
+    [ "$status" -eq 1 ]
+    contains "$stderr" "(body changed) — posting nothing"
+    [ "$(grep -c '^api' "$GH_LOG")" -eq 0 ] || { echo "$ev posted on an edited body"; false; }
+  done
+  STUB_HEAD=def456 STUB_BODY=Other run --separate-stderr bash "$BATS_TEST_TMPDIR/step12.sh"
+  [ "$status" -eq 1 ]
+  contains "$stderr" "(head abc123 -> def456; body changed)"
+  STUB_FAIL=1 STUB_HEAD=abc123 STUB_BODY=Summary run --separate-stderr bash "$BATS_TEST_TMPDIR/step12.sh"
+  [ "$status" -eq 1 ]
+  contains "$stderr" "could not re-read PR #42's head and body — posting nothing"
+  [ "$(grep -c '^api' "$GH_LOG")" -eq 0 ]
+}
+
+@test "agent Step 12 runs: DRY_RUN prints the body only on the judged head, and posts nothing either way" {
+  stub_gh
+  step12_script APPROVE true
+  STUB_HEAD=abc123 STUB_BODY=Summary run bash "$BATS_TEST_TMPDIR/step12.sh"
+  [ "$status" -eq 0 ]
+  [ "$output" = "RENDERED REVIEW" ]
+  STUB_HEAD=def456 STUB_BODY=Summary run --separate-stderr bash "$BATS_TEST_TMPDIR/step12.sh"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  contains "$stderr" "(head abc123 -> def456) — posting nothing"
+  [ "$(grep -c '^api' "$GH_LOG")" -eq 0 ]
 }
