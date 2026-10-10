@@ -48,8 +48,10 @@ run — is off.
 print `usage: /development-claude-plugin:approve [<pr-number>]` and stop.
 
 ```bash
+PR_NUMBER=<the PR number resolved above>; [ -n "$PR_NUMBER" ] || exit 1
 REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 [ -n "$REPO" ] || { echo "::error::Could not resolve the repository — posting nothing."; exit 1; }
+printf 'PR_NUMBER=%s\nREPO=%s\n' "$PR_NUMBER" "$REPO"
 AUTHOR=$(gh pr view "$PR_NUMBER" --json author -q .author.login)
 grep -qE '^(app/)?claude-maintenance' <<<"$AUTHOR" || {
   echo "AI approval: off (PR authored by ${AUTHOR}, not the Maintenance App) — a human approves."
@@ -66,6 +68,7 @@ A conflicting PR is never reviewed: auto-merge can't fire on it, and resolving
 the conflict pushes a new head that invalidates any verdict.
 
 ```bash
+PR_NUMBER=<the PR_NUMBER Step 1 printed>; [ -n "$PR_NUMBER" ] || exit 1
 MERGEABLE=$(gh pr view "$PR_NUMBER" --json mergeable -q .mergeable)
 ```
 
@@ -87,18 +90,30 @@ set to `claude-plugin`, followed by this skill's overlay — and run the bar ove
 the PR body and every changed path. A renamed file contributes its old path as
 well as its new one, so moving a file out of the approval machinery still hits.
 
+The bar's result holds only for the head and body it judged, so the block
+records both: `HEAD_SHA`, read first, before the body and paths, and
+`BODY_SHA256`, the SHA-256 of the exact body file the bar reads. The agent
+re-checks both against the live PR just before it posts (its Step 12). The
+block prints them with `SCRATCH` and `BAR_RC`; later steps take these values
+verbatim from that output, never from a fresh `gh` read.
+
 ```bash
+PR_NUMBER=<the PR_NUMBER Step 1 printed>; REPO=<the REPO Step 1 printed>
+[ -n "$PR_NUMBER" ] && [ -n "$REPO" ] || exit 1
 SCRATCH=$(mktemp -d -t plugin-approver.XXXXXX)
-{ sed 's/{{APPROVER_LANG}}/claude-plugin/g' \
+{ HEAD_SHA=$(gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid) && [ -n "$HEAD_SHA" ] &&
+  sed 's/{{APPROVER_LANG}}/claude-plugin/g' \
     development/skills/bootstrap/templates/common/approver-policy-core.md.tmpl > "$SCRATCH/policy.md" &&
   cat "<skill-base-dir>/approver-policy-overlay.md.tmpl" >> "$SCRATCH/policy.md" &&
   gh pr view "$PR_NUMBER" --json body -q .body > "$SCRATCH/body" &&
+  BODY_SHA256=$(shasum -a 256 < "$SCRATCH/body" | cut -d' ' -f1) && [ -n "$BODY_SHA256" ] &&
   gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" \
     --jq '.[] | .filename, (.previous_filename // empty)' > "$SCRATCH/paths"
 } || { echo "::error::Policy render or PR fetch failed — posting nothing."; rm -rf "$SCRATCH"; exit 1; }
 BAR_RC=0
 "<skill-base-dir>/scripts/never-approve-bar.zsh" --body "$SCRATCH/body" --paths "$SCRATCH/paths" \
   > "$SCRATCH/bar" || BAR_RC=$?
+printf 'SCRATCH=%s\nHEAD_SHA=%s\nBODY_SHA256=%s\nBAR_RC=%s\n' "$SCRATCH" "$HEAD_SHA" "$BODY_SHA256" "$BAR_RC"
 ```
 
 - `BAR_RC` 0 → clear (`$SCRATCH/bar` is empty); 3 → hit (one `hit=` line per
@@ -110,6 +125,8 @@ BAR_RC=0
 
 A failed `sed`, `gh pr view` or `gh api` above is the same stop, and the block
 exits 1 on it: a bar run over an empty or partial paths file would read as clear.
+So is an empty `HEAD_SHA` or `BODY_SHA256`: a review with nothing to pin it to
+is never posted.
 
 ## Step 4 — Mint the Approver token, just in time
 
@@ -117,8 +134,11 @@ The mint script writes the token to a mode-600 file and prints the **path** —
 never the value (#640). Capture the path; never `cat` or `echo` the token.
 
 ```bash
+SCRATCH=<the SCRATCH path Step 3 printed>
+[ -n "$SCRATCH" ] || exit 1
 TOKEN_FILE=$(development/skills/maintenance/scripts/mint-approver-token.zsh)
 [ -s "$TOKEN_FILE" ] || { echo "::error::Failed to mint Approver token."; rm -rf "$SCRATCH"; exit 1; }
+echo "TOKEN_FILE=$TOKEN_FILE"
 ```
 
 ## Step 5 — Spawn the agent, then clean up
@@ -137,19 +157,25 @@ Agent(
     DRY_RUN=false
     POLICY_FILE=<$SCRATCH/policy.md>
     BAR_FILE=<$SCRATCH/bar>
+    HEAD_SHA=<$HEAD_SHA>
+    BODY_SHA256=<$BODY_SHA256>
     Read your token from the path below and export it before any `gh` mutation — do not print it:
       export GH_TOKEN=$(cat <TOKEN_FILE path>)
     Your cwd is this session's shared worktree — do NOT run git checkout / git switch /
     gh pr checkout in it or any .claude/worktrees/ dir (#643); use a fresh scratch
     worktree you remove before returning.
-    Post the verdict with `gh pr review <n> --approve|--request-changes|--comment`.
+    Post the verdict through `gh api repos/<owner>/<repo>/pulls/<n>/reviews` with
+    commit_id=<HEAD_SHA>, and only after your Step 12 has re-checked the live head
+    and body against HEAD_SHA and BODY_SHA256.
   """
 )
 ```
 
-Substitute the actual paths. Afterwards — whether the agent succeeded or not:
+Substitute the values Steps 1, 3 and 4 printed. Afterwards — whether the agent succeeded or not:
 
 ```bash
+TOKEN_FILE=<the TOKEN_FILE path Step 4 printed>; SCRATCH=<the SCRATCH path Step 3 printed>
+[ -n "$TOKEN_FILE" ] && [ -n "$SCRATCH" ] || exit 1
 rm -rf "$TOKEN_FILE" "$SCRATCH"
 ```
 
@@ -157,7 +183,10 @@ rm -rf "$TOKEN_FILE" "$SCRATCH"
 
 Print the posted verdict, the review URL and the agent's full output
 (human-readable verdict, findings and the hidden JSON block). When the bar hit,
-say "Needs a human" and list every `hit=` line.
+say "Needs a human" and list every `hit=` line. If the agent posted nothing (a
+head or body change, a failed re-read, unsettled CI or a conflicting PR), say
+that no review was posted, give the reason, and say to re-run
+`/development-claude-plugin:approve` — never report its derived verdict as posted.
 
 ## Security & token handling
 
@@ -169,4 +198,7 @@ say "Needs a human" and list every `hit=` line.
 - **Review is posted as `claude-approver-<owner>[bot]`**, a read-only identity
   distinct from the Maintenance App that authored the PR.
 - **The never-approve bar is a script, not a judgment**: residue, workflow
-  changes and approval/identity machinery always reach a human.
+  changes and approval/identity machinery always reach a human. Its result
+  holds only for the head SHA and body it judged: a push or a body edit before
+  the post means no review is posted, and the review that is posted is pinned
+  to that head with `commit_id`.

@@ -1,6 +1,6 @@
 ---
 name: claude-plugin-approver
-description: Synthesis-layer reviewer for claude-plugin PRs, opt-in per session with CLAUDE_PLUGIN_APPROVER=1 (a plugin repo is otherwise human-only). Reads the rendered policy at POLICY_FILE and the never-approve bar result at BAR_FILE, builds a risk register fed by the review dossier's claude-plugin dimensions, calibrates confidence, and posts APPROVE / REQUEST_CHANGES / COMMENT via `gh pr review` using a locally minted Approver App token. Invoked only by `/development-claude-plugin:approve`.
+description: Synthesis-layer reviewer for claude-plugin PRs, opt-in per session with CLAUDE_PLUGIN_APPROVER=1 (a plugin repo is otherwise human-only). Reads the rendered policy at POLICY_FILE and the never-approve bar result at BAR_FILE, builds a risk register fed by the review dossier's claude-plugin dimensions, calibrates confidence, and posts APPROVE / REQUEST_CHANGES / COMMENT through the GitHub reviews API, pinned to the head the bar judged, using a locally minted Approver App token. Invoked only by `/development-claude-plugin:approve`.
 model: fable
 tools: Bash, Read, Grep
 ---
@@ -51,6 +51,8 @@ The approve skill that spawned you puts these values in the prompt:
 | `DRY_RUN` | `"true"` for a non-binding print-only run; `"false"` to post the review |
 | `POLICY_FILE` | The rendered policy: the core policy for `claude-plugin`, followed by the claude-plugin overlay |
 | `BAR_FILE` | The output of `never-approve-bar.zsh` for this PR: one `hit=` line per hit, empty when clear |
+| `HEAD_SHA` | The PR's head commit (`headRefOid`) when the bar was run. `BAR_FILE` speaks for this head only; Step 12 refuses to post on any other and pins the review to it with `commit_id` |
+| `BODY_SHA256` | The SHA-256 of the PR body the bar read. Step 12 refuses to post when the live body hashes differently |
 
 **Your cwd is the orchestrator's shared session worktree — never mutate
 it (#643).** A `git checkout` / `git switch` / `gh pr checkout` there
@@ -83,6 +85,8 @@ review) when:
 - `gh` is not on `PATH`, OR `gh` cannot authenticate (no `GH_TOKEN`
   set AND `gh auth status` exits non-zero).
 - `PR_NUMBER` or `REPO` are not present in the prompt.
+- `HEAD_SHA` or `BODY_SHA256` is not present in the prompt. Without them
+  there is no telling whether the bar's result still applies.
 
 These are operator errors, not PR problems. Surfacing them as a review
 verdict would be wrong.
@@ -401,18 +405,36 @@ failure as a finding, and never `APPROVE` on a failed read. Step 0's bar
 is not metadata-grounded in this sense: it was computed before you ran,
 and a re-fetch never lifts it.
 
-If `DRY_RUN` is `"true"`, **print the rendered review body to stdout
-and exit 0.** Do not call `gh pr review`.
+**The bar's result holds only for the head and body it judged (#2223).**
+Your run is long (Step 8 waits on CI), and a push or a body edit can land
+in that time while `BAR_FILE` still reads clear. So the block below
+re-reads the live `headRefOid` and body **first**, before anything is
+posted or printed. If the head is not `HEAD_SHA`, or the body no longer
+hashes to `BODY_SHA256`, it posts **no** review of **any** verdict —
+`APPROVE`, `REQUEST_CHANGES` and `COMMENT` alike — and stops, naming what
+changed. Report that the review must be re-run with
+`/development-claude-plugin:approve`. A failed re-read is the same stop.
+The check covers `DRY_RUN=true` too: a mismatch prints the report, never
+the rendered body.
 
-Otherwise post the review using the App token in `GH_TOKEN`. Set
-`GH_TOKEN` (re-exported from its token file), `PR_NUMBER`, `work`,
+When both match, each arm posts through the reviews API with
+`commit_id="$HEAD_SHA"`, so GitHub attaches the review to the judged head
+even if a push lands between the re-read and the post.
+
+Set `GH_TOKEN` (re-exported from its token file), `PR_NUMBER`, `REPO`,
+`DRY_RUN`, `HEAD_SHA`, `BODY_SHA256`, `work`,
 `verdict` (exactly one of the three bare tokens) and the
 rendered body in this same Bash call — none survives from an earlier
-one:
+one. The guard and the `case` stay in this one call, so nothing runs
+between the re-read and the post:
 
 ```bash
 export GH_TOKEN=$(cat <the token file path>) && [ -n "$GH_TOKEN" ] || exit 1
 PR_NUMBER=<the PR number>
+REPO=<owner>/<repo>
+DRY_RUN=<true or false>
+HEAD_SHA=<HEAD_SHA from the prompt>; [ -n "$HEAD_SHA" ] || exit 1
+BODY_SHA256=<BODY_SHA256 from the prompt>; [ -n "$BODY_SHA256" ] || exit 1
 work=<the path Step 2 printed>; [ -d "$work" ] || exit 1
 verdict=<APPROVE, REQUEST_CHANGES or COMMENT>
 review_body_file="$work/review.md"
@@ -420,15 +442,34 @@ cat > "$review_body_file" <<'REVIEW'
 <the rendered review body>
 REVIEW
 
+live_head=$(gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid) && [ -n "$live_head" ] &&
+  gh pr view "$PR_NUMBER" --json body -q .body > "$work/live-body" &&
+  live_body_sha=$(shasum -a 256 < "$work/live-body" | cut -d' ' -f1) && [ -n "$live_body_sha" ] ||
+  { echo "::error::could not re-read PR #$PR_NUMBER's head and body — posting nothing; re-run the review" >&2; exit 1; }
+changed=""
+[ "$live_head" = "$HEAD_SHA" ] || changed="head $HEAD_SHA -> $live_head"
+[ "$live_body_sha" = "$BODY_SHA256" ] || changed="${changed:+$changed; }body changed"
+if [ -n "$changed" ]; then
+  echo "::error::PR #$PR_NUMBER changed since the never-approve bar judged it ($changed) — posting nothing; re-run /development-claude-plugin:approve" >&2
+  exit 1
+fi
+
+if [ "$DRY_RUN" = "true" ]; then
+  cat "$review_body_file"; exit 0
+fi
+
 case "$verdict" in
   APPROVE)
-    gh pr review "$PR_NUMBER" --approve --body-file "$review_body_file"
+    gh api --method POST "repos/$REPO/pulls/$PR_NUMBER/reviews" \
+      -f commit_id="$HEAD_SHA" -f event=APPROVE -F body=@"$review_body_file" --jq .html_url
     ;;
   REQUEST_CHANGES)
-    gh pr review "$PR_NUMBER" --request-changes --body-file "$review_body_file"
+    gh api --method POST "repos/$REPO/pulls/$PR_NUMBER/reviews" \
+      -f commit_id="$HEAD_SHA" -f event=REQUEST_CHANGES -F body=@"$review_body_file" --jq .html_url
     ;;
   COMMENT)
-    gh pr review "$PR_NUMBER" --comment --body-file "$review_body_file"
+    gh api --method POST "repos/$REPO/pulls/$PR_NUMBER/reviews" \
+      -f commit_id="$HEAD_SHA" -f event=COMMENT -F body=@"$review_body_file" --jq .html_url
     ;;
   *)
     echo "::error::unknown verdict '$verdict' — posting nothing" >&2; exit 1
