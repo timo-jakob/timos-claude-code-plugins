@@ -173,4 +173,9 @@ override_with_stub_probes() {
   grep -q 'CLAUDE_PLUGIN_APPROVER=1' "$REPO_ROOT/ARCHITECTURE.md"
   grep -q 'development/scripts/approval/plugin-approver-override.zsh' "$REPO_ROOT/ARCHITECTURE.md"
   grep -q 'not installing the Approver App is the supported way to forbid AI approvals' "$REPO_ROOT/ARCHITECTURE.md"
+  grep -qF 'turns it on. `/development:resolve-issue` and `/development:maintenance` consult' "$REPO_ROOT/ARCHITECTURE.md"
+  grep -qF 'it through that helper, and on `override=on` drive' "$REPO_ROOT/ARCHITECTURE.md"
+  grep -qF 'human-only (epic #2129).' "$REPO_ROOT/ARCHITECTURE.md"
+  run grep -qF 'No flow consults it yet' "$REPO_ROOT/ARCHITECTURE.md"
+  [ "$status" -eq 1 ]
 }
