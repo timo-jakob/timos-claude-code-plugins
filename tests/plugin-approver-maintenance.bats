@@ -213,14 +213,23 @@ run_block() {
 @test "SKILL.md: Phase 8 gates a PR the Maintenance App did not author as none on a plugin repo" {
   local text
   text="$(tr '\n' ' ' < "$SKILL" | tr -s ' ')"
-  contains "$text" "That skill reviews only a PR the Maintenance App authored, so on such a repo every other PR — a vendor PR (Dependabot, Renovate, Snyk) included — is gated as \`none\` instead: a human review, no wait."
+  contains "$text" "That skill reviews only a PR the Maintenance App authored, so on such a repo every other PR — a vendor PR (Dependabot, Renovate, Snyk) included — is gated as \`none\` instead: a human review, no wait — read \`reviewDecision\` once and take the \`NONE\` on the first poll or the \`REVIEW_REQUIRED\` branch below at once, never the poll."
 }
 
 @test "SKILL.md: the local-mode recipe checks the PR author before any approve call or wait" {
   local text
   text="$(tr '\n' ' ' < "$SKILL" | tr -s ' ')"
-  contains "$text" "# 0. on a claude-plugin-primary repo as § Approver mode defines it, read the # PR's author first: unless it is the \`claude-maintenance\` App (login # prefix match, as Phase 2.5 tells a bot PR), gate this PR as \`none\` — # no approve call, no wait — and skip steps 1-3: gh pr view \"<pr_number>\" --json author --jq .author.login # 1. wait for green"
-  contains "$text" "add --update first for a vendor PR that's BEHIND under strict branch # protection (never on a plugin repo: step 0 gated it as \`none\`). Exit 4"
+  contains "$text" "# 0. on a claude-plugin-primary repo as § Approver mode defines it, read the # PR's author first: unless it is the \`claude-maintenance\` App (login # prefix match, as Phase 2.5 tells a bot PR), gate this PR as \`none\` — # no approve call, no wait: read reviewDecision once and take the # \`NONE\` on the first poll or the \`REVIEW_REQUIRED\` branch below at # once, never the poll — and skip steps 1-3: gh pr view \"<pr_number>\" --json author --jq .author.login # 1. wait for green"
+  contains "$text" "add --update first for a vendor PR that's BEHIND under strict branch # protection (never on a plugin repo: step 0 gated it as \`none\`, and # bringing it up to date is left to the human reviewer). Exit 4"
+}
+
+@test "SKILL.md: the re-stale recipe checks the PR author before --update on a plugin repo" {
+  local text
+  text="$(tr '\n' ' ' < "$SKILL" | tr -s ' ')"
+  contains "$text" "# whatever the stage's language. On such a repo, read the PR's author first, as # Phase 8 step 0 does: unless it is the \`claude-maintenance\` App (login prefix # match, as Phase 2.5 tells a bot PR), gate this PR as \`none\` the way step 0 # does — no --update (updating the branch is left to the human reviewer), no # approve call, one reviewDecision read and never the poll — and skip both # commands below: gh pr view \"<pr_number>\" --json author --jq .author.login \"<skill-base-dir>/scripts/merge-pr-cycle.zsh\" --update \"<pr_number>\""
+  contains "$text" "workflow to nudge, #642), after the comment's author check, which on a plugin repo leaves a PR the Maintenance App did not author un-updated and gated as \`none\`: bringing it up to date is left to the human reviewer (for example GitHub's \"Update branch\")."
+  contains "$text" "3. Re-update whichever remaining PR the merge just re-staled by the recipe in § *Re-staling is unavoidable under \`strict\`*, its author check included (on a plugin repo a PR the Maintenance App did not author is not updated: that is left to the human reviewer), then repeat."
+  contains "$text" "native auto-merge is armed and will fire once a human approves and, if the PR is BEHIND, brings it up to date (left to the human reviewer, for example GitHub's \"Update branch\"); record"
 }
 
 @test "SKILL.md: a resumed run re-detects the approver mode instead of restoring it" {
