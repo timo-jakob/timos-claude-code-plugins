@@ -2154,7 +2154,13 @@ the blessed helper (#431), never a hand-rolled loop:
 # local mode (#642): no CI-side workflow to re-trigger — --update only, then
 # drive the approve skill to re-earn the review (no /approve comment); <lang> is
 # claude-plugin on a claude-plugin-primary repo as § Approver mode defines it,
-# whatever the stage's language
+# whatever the stage's language. On such a repo, read the PR's author first, as
+# Phase 8 step 0 does: unless it is the `claude-maintenance` App (login prefix
+# match, as Phase 2.5 tells a bot PR), gate this PR as `none` the way step 0
+# does — no --update (updating the branch is left to the human reviewer), no
+# approve call, one reviewDecision read and never the poll — and skip both
+# commands below:
+gh pr view "<pr_number>" --json author --jq .author.login
 "<skill-base-dir>/scripts/merge-pr-cycle.zsh" --update "<pr_number>"
 /development-<lang>:approve "<pr_number>"
 ```
@@ -2164,7 +2170,10 @@ prior approval); the helper waits for the fresh SHA's CI to **register** and
 settle. In **`ci` mode** `--retrigger` then posts one `/approve` to re-earn the
 Approver's counting review; in **`local` mode** you drop `--retrigger` and drive
 the `approve` skill instead (same reason as the approval gate — no server-side
-workflow to nudge, #642). Process such PRs **one at a time** — each merge
+workflow to nudge, #642), after the comment's author check, which on a plugin
+repo leaves a PR the Maintenance App did not author un-updated and gated as
+`none`: bringing it up to date is left to the human reviewer (for example
+GitHub's "Update branch"). Process such PRs **one at a time** — each merge
 re-stales the rest, so a batch must be serial.
 
 > The structural O(N) cost is inherent to `strict` + `dismiss_stale_reviews`.
@@ -2287,9 +2296,11 @@ absent; the top-N groups when it is set), in priority order:
       the just-registered checks; a false "no checks" won't slip through.
    2. Approval gate (§ the Phase 8 approval-gate step) — mode-aware
       (#642); on green + approved, confirm the merge.
-   3. Re-update whichever remaining PR the merge just re-staled, then
-      repeat — the same re-stale ordering as § *Re-staling is unavoidable
-      under `strict`*.
+   3. Re-update whichever remaining PR the merge just re-staled by the
+      recipe in § *Re-staling is unavoidable under `strict`*, its author
+      check included (on a plugin repo a PR the Maintenance App did not
+      author is not updated: that is left to the human reviewer), then
+      repeat.
 
    The agent did the **initial** branch-update for the PRs it reported
    `pr_pending_reverification`; **you** own the **re-stale re-updates**
@@ -2638,7 +2649,9 @@ After pushing and opening the PR:
      elsewhere it runs `/development-<lang>:approve` for the stage's language.
      That skill reviews only a PR the Maintenance App authored, so on such a
      repo every other PR — a vendor PR (Dependabot, Renovate, Snyk)
-     included — is gated as `none` instead: a human review, no wait.
+     included — is gated as `none` instead: a human review, no wait — read
+     `reviewDecision` once and take the `NONE` on the first poll or the
+     `REVIEW_REQUIRED` branch below at once, never the poll.
    - **`none`** — no Approver available; fall through to the human /
      native-auto-merge handling (the `NONE` / `REVIEW_REQUIRED` branches
      below).
@@ -2676,12 +2689,15 @@ After pushing and opening the PR:
    # 0. on a claude-plugin-primary repo as § Approver mode defines it, read the
    #    PR's author first: unless it is the `claude-maintenance` App (login
    #    prefix match, as Phase 2.5 tells a bot PR), gate this PR as `none` —
-   #    no approve call, no wait — and skip steps 1-3:
+   #    no approve call, no wait: read reviewDecision once and take the
+   #    `NONE` on the first poll or the `REVIEW_REQUIRED` branch below at
+   #    once, never the poll — and skip steps 1-3:
    gh pr view "<pr_number>" --json author --jq .author.login
    # 1. wait for green — no /approve comment posted (mode is local)
    "<skill-base-dir>/scripts/merge-pr-cycle.zsh" "<pr_number>"
    #    add --update first for a vendor PR that's BEHIND under strict branch
-   #    protection (never on a plugin repo: step 0 gated it as `none`). Exit 4 (AWAITING-APPROVAL) here is expected — green but
+   #    protection (never on a plugin repo: step 0 gated it as `none`, and
+   #    bringing it up to date is left to the human reviewer). Exit 4 (AWAITING-APPROVAL) here is expected — green but
    #    unapproved — and is the cue to drive the approve skill next; exit 6
    #    (NOT-GREEN) → back to step 3; exit 3 (TIMED-OUT) → record + move on.
    # 2. mint the Approver token just-in-time (a mode-600 file path, #640) and
@@ -2781,8 +2797,9 @@ After pushing and opening the PR:
 
      - **`none`** — no Approver exists; do **not** poll for a verdict
        that can never come (that was the ~10-min dead wait, #642). The
-       native auto-merge is armed and will fire if a human approves;
-       record the outcome as `awaiting_approval` and move on
+       native auto-merge is armed and will fire once a human approves and,
+       if the PR is BEHIND, brings it up to date (left to the human
+       reviewer, for example GitHub's "Update branch"); record the outcome as `awaiting_approval` and move on
        (`result_code=4`).
 
      Then map `result_code` (skip this mapping in `none` mode, which set
