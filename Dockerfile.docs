@@ -7,7 +7,7 @@
 #
 # Built + pushed only from main by .github/workflows/docs-publish.yml; the
 # `site/` build context is produced there by `mkdocs build`, never committed.
-FROM nginx:1.27-alpine
+FROM nginx:1.31-alpine
 
 # Static docs only — nginx's default server block serves /usr/share/nginx/html.
 COPY site/ /usr/share/nginx/html/
