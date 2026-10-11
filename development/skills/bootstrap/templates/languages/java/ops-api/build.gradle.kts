@@ -10,7 +10,7 @@
 // exporter (still an unstable artifact upstream). Renovate/Dependabot keep both
 // versions current in your repo -- bump them together (same base version).
 dependencies {
-    implementation(platform("io.opentelemetry:opentelemetry-bom:1.49.0"))
+    implementation(platform("io.opentelemetry:opentelemetry-bom:1.67.0"))
     implementation(platform("io.opentelemetry:opentelemetry-bom-alpha:1.49.0-alpha"))
 
     implementation("io.opentelemetry:opentelemetry-sdk")
