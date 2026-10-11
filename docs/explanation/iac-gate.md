@@ -66,6 +66,13 @@ tree is empty for exactly the components that most need checking: third-party ch
 pulled in through an overlay. An empty rendered tree passes every check without testing
 anything.
 
+**A helm crash fails render; it is never read as "no dependencies".** `helm dependency
+build` exiting 0 or 1 is tolerated, so dependency-free charts still render. Any other exit
+status, such as a Go runtime abort or a signal, fails the stage with
+`helm dependency build crashed on <chart> (exit <N>)`. That message sits below helm's own
+dump and tells you to re-run once before touching the chart. An existing IaC repository
+picks this up when it re-runs bootstrap.
+
 **Policy is yours; the mechanism is the plugin's.** The plugin ships no Kyverno policies.
 Generic hygiene belongs to `kube-linter`, and two tools enforcing one rule means two places
 to silence a single false positive. You declare your own rules under

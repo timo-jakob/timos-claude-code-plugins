@@ -1059,6 +1059,132 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# A helm crash in `helm dependency build` fails render (#1874)
+# ---------------------------------------------------------------------------
+
+# Put a stub helm first on PATH that fakes ONLY `helm dependency build`: a
+# Go-style dump on stderr, then exit $1. Every other call is handed to the real
+# pinned helm, so `helm template` still renders for real. Each call's first two
+# words are appended to $CALLS, which is how a test sees whether `template` ran.
+stub_helm_dependency_build() {
+  local stub="$BATS_TEST_TMPDIR/stub-bin"
+  mkdir -p "$stub"
+  cat > "$stub/helm" <<'EOF'
+#!/bin/sh
+printf '%s %s\n' "$1" "$2" >> "$CALLS"
+if [ "$1 $2" = "dependency build" ]; then
+  cat >&2 <<'DUMP'
+fatal error: concurrent map writes
+STUB-DUMP-MARKER helm dependency build aborted
+
+goroutine 1 [running]:
+helm.sh/helm/v3/pkg/downloader.(*Manager).Build(0x14000418000)
+	/home/runner/work/helm/helm/pkg/downloader/manager.go:91 +0x2c
+DUMP
+  exit "$DEP_EXIT"
+fi
+exec "$REAL_HELM" "$@"
+EOF
+  chmod +x "$stub/helm"
+  GATE_PATH_PREFIX="$stub"
+  GATE_ENV="$(printf '%s\n' "CALLS=$CALLS" "REAL_HELM=$IAC_BIN/helm" "DEP_EXIT=$1")"
+}
+
+# The crash message the gate prints for a chart and a status, without its
+# `error: ` / `::error::` prefix.
+crash_message() {
+  printf '%s' "helm dependency build crashed on $1 (exit $2) — a helm runtime abort, not a chart defect; its dump is above. Re-run once before touching the chart."
+}
+
+# The 1-based line number of the first output line that is EXACTLY $2, or
+# nothing. A here-string, not a pipe (tests/early-exit-reader-guard.bats).
+line_of() {
+  WANT="$2" awk '$0 == ENVIRON["WANT"] { print NR; exit }' <<< "$1"
+}
+
+@test "render: a helm dependency build exiting 0 or 1 is tolerated whatever its stderr says (#1874)" {
+  local code
+  for code in 0 1; do
+    prepare kubernetes-repo
+    : > "$CALLS"
+    stub_helm_dependency_build "$code"
+    run run_gate
+    [ "$status" -eq 0 ]
+    [ "$(verdict_lines "$output")" = "$(expected_all_ok)" ]
+    # its stderr still reaches the log, and is not read as a crash
+    contains "$output" 'STUB-DUMP-MARKER helm dependency build aborted'
+    lacks "$output" 'crashed on'
+    # …and `helm template` ran for the chart after it
+    [ "$(cat "$CALLS")" = "$(printf '%s\n' 'dependency build' 'template charts-app')" ]
+    run rendered_files
+    [ "$status" -eq 0 ]
+    contains "$output" 'helm_charts_app.yaml'
+  done
+}
+
+@test "render: any other helm dependency build status is a crash, failing render before helm template (#1874)" {
+  local code dump_at msg_at failed_at
+  for code in 2 134 130 143; do
+    prepare kubernetes-repo
+    : > "$CALLS"
+    stub_helm_dependency_build "$code"
+    run run_gate
+    [ "$status" -eq 1 ]
+    [ "$(verdict_lines "$output")" = "gate: render FAILED" ]
+    # the exact message, once, naming the chart and helm's own status
+    [ "$(grep -cxF -- "error: $(crash_message charts/app "$code")" <<< "$output")" -eq 1 ]
+    # `helm template` never ran after the crash
+    [ "$(cat "$CALLS")" = "dependency build" ]
+    # helm's stderr is uncaptured and unchanged, ABOVE the message, which is
+    # above the verdict line
+    dump_at="$(line_of "$output" 'STUB-DUMP-MARKER helm dependency build aborted')"
+    msg_at="$(line_of "$output" "error: $(crash_message charts/app "$code")")"
+    failed_at="$(line_of "$output" 'gate: render FAILED')"
+    [ -n "$dump_at" ]
+    [ -n "$msg_at" ]
+    [ -n "$failed_at" ]
+    [ "$dump_at" -lt "$msg_at" ]
+    [ "$msg_at" -lt "$failed_at" ]
+    [ -n "$(line_of "$output" '	/home/runner/work/helm/helm/pkg/downloader/manager.go:91 +0x2c')" ]
+  done
+}
+
+@test "render: the helm crash message is a workflow command under GitHub Actions, and names a root chart 'root' (#1874)" {
+  prepare kubernetes-repo
+  : > "$CALLS"
+  stub_helm_dependency_build 2
+  GATE_ENV="$GATE_ENV"$'\n''GITHUB_ACTIONS=true'
+  run run_gate
+  [ "$status" -eq 1 ]
+  [ "$(grep -cxF -- "::error::$(crash_message charts/app 2)" <<< "$output")" -eq 1 ]
+  [ "$(verdict_lines "$output")" = "gate: render FAILED" ]
+
+  # a chart at the repository root is named by the same `root` the render
+  # stage's file and release names fall back to
+  W="$BATS_TEST_TMPDIR/root-chart"
+  SLUG="fixture-org/root-chart"
+  RENDERED="$BATS_TEST_TMPDIR/rendered-root-chart"
+  rm -rf "$W" "$RENDERED"
+  mkdir -p "$W"
+  cp -R "$FIXTURES/kubernetes-repo/charts/app/." "$W/"
+  : > "$CALLS"
+  stub_helm_dependency_build 2
+  run run_gate
+  [ "$status" -eq 1 ]
+  [ "$(grep -cxF -- "error: $(crash_message root 2)" <<< "$output")" -eq 1 ]
+}
+
+@test "docs: iac-gate.md states the helm crash rule and the gate's own message (#1874)" {
+  local doc msg
+  doc="$(cat "$REPO_ROOT/docs/explanation/iac-gate.md")"
+  msg="$(crash_message '<chart>' '<N>')"
+  contains "$doc" '**A helm crash fails render; it is never read as "no dependencies".**'
+  contains "$doc" 'build` exiting 0 or 1 is tolerated, so dependency-free charts still render.'
+  contains "$doc" "\`${msg%% — *}\`"
+  contains "$doc" 're-run once before touching the chart.'
+}
+
+# ---------------------------------------------------------------------------
 # The untested-policy variant — green, plus the warning
 # ---------------------------------------------------------------------------
 
@@ -1794,7 +1920,10 @@ EOF
   # the standard library names no module. Goroutine 7's header carries the
   # `gp=` address a recent Go runtime prints, and it differs between the two
   # helm calls (`$$`), so the header is listed once only if the address is
-  # ignored.
+  # ignored. The stub exits 1 on `dependency build`, which the gate tolerates
+  # (#1874), and 2 on `template`, which reds render — so the gate still calls
+  # helm twice and the output carries the dump twice; an exit 2 on both would
+  # stop render at the first call and leave the once-each check vacuous.
   prepare kubernetes-repo
   local stub="$BATS_TEST_TMPDIR/stub-bin"
   mkdir -p "$stub"
@@ -1826,6 +1955,7 @@ helm.sh/helm/v3/pkg/kube.(*Client).Wait(0x1400012a000)
 created by k8s.io/klog/v2.init.0 in goroutine 1
 	/home/runner/go/pkg/mod/k8s.io/klog/v2@v2.130.1/klog.go:420 +0x114
 DUMP
+if [ "$1 $2" = "dependency build" ]; then exit 1; fi
 exit 2
 EOF
   chmod +x "$stub/helm"
@@ -1834,6 +1964,8 @@ EOF
   # the gate still reds: the helper attributes, it never rescues
   [ "$status" -eq 1 ]
   contains "$output" 'gate: render FAILED'
+  # both helm calls happened, so the dump is in the output twice
+  [ "$(grep -cxF 'goroutine 1 [running]:' <<< "$output")" -eq 2 ]
   local gate_status="$status" gate_output="$output"
   local out="$BATS_TEST_TMPDIR/attribution.out" err="$BATS_TEST_TMPDIR/attribution.err"
   local rc=0
@@ -1852,7 +1984,8 @@ EOF
   contains "$output" 'no gate verdict preceded the abort'
   contains "$output" 'helm.sh/helm'
   # the goroutine headers, EXACTLY: both of them, each once, although the gate
-  # calls helm twice and so carries the dump twice
+  # calls helm twice (`dependency build` exits 1, then `template` exits 2) and
+  # so carries the dump twice
   [ "$(sed -n '/^goroutine headers/,/^module roots/p' "$err" | sed '1d;$d')" = "$(printf '%s\n' \
     '  goroutine 1 [running]:' '  goroutine 7 [chan receive]:')" ]
   # the module roots, EXACTLY and in order, klog from a `created by` line;

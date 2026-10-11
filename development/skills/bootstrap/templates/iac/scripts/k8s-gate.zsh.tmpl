@@ -284,7 +284,7 @@ tar -C . --exclude=.git --exclude=.kyverno-deref -cf - . | tar -C "$src_dir" -xf
 cd "$src_dir"
 
 # --- helm: every TOP-LEVEL chart ---
-local c d owner rel slug name
+local c d owner rel slug name dep_rc
 find . -name Chart.yaml -not -path './.git/*' | while IFS= read -r c; do
   d="${c:h}"
   # Skip a VENDORED subchart — one whose charts/ parent is itself a chart. A
@@ -309,10 +309,18 @@ find . -name Chart.yaml -not -path './.git/*' | while IFS= read -r c; do
   # strip ALL leading/trailing dashes — a `--` run survives a single ${name#-},
   # and a leading or trailing dash is an invalid release name
   name="$(print -r -- "$name" | sed 's/^-*//; s/-*$//')"
-  # a chart declaring dependencies: fails to render without them. Tolerate
-  # the status (dependency-free charts), but let stderr reach the log —
-  # otherwise the later `helm template` failure is undiagnosable.
-  helm dependency build "$d" >/dev/null || true
+  # a chart declaring dependencies: fails to render without them. Exit 0 or 1
+  # is tolerated whatever stderr says — a dependency-free chart, or vendored
+  # dependencies helm cannot fetch — and the later `helm template` decides.
+  # Any OTHER status is a helm crash (a Go runtime abort exits 2, a signal
+  # 128+N, 130 and 143 included), never "no dependencies": render fails here,
+  # before `helm template` runs for this chart. stderr is never captured — it
+  # reaches the log, so the dump sits above the gate's own message.
+  dep_rc=0
+  helm dependency build "$d" >/dev/null || dep_rc=$?
+  if (( dep_rc > 1 )); then
+    stage_fail "helm dependency build crashed on ${rel} (exit ${dep_rc}) — a helm runtime abort, not a chart defect; its dump is above. Re-run once before touching the chart."
+  fi
   helm template "${name:-root}" "$d" > "$render_dir/helm_$slug.yaml"
 done
 
