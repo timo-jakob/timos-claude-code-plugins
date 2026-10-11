@@ -474,12 +474,26 @@ done
 if [[ "$python_in_langs" == "true" ]]; then
 	pyproject="$cwd/pyproject.toml"
 
+	# ONE interpreter for both tomllib probes below (#2313): the first of these
+	# on PATH whose `import tomllib` (stdlib 3.11+) succeeds. The bare python3
+	# alone is not enough — on a host whose Homebrew Python links only the
+	# versioned names, python3 is the system /usr/bin/python3 (3.9 on macOS).
+	# Empty when none qualifies: both probes are then skipped, exactly as when
+	# no python3 exists at all.
+	toml_python=""
+	for cand in python3.14 python3.13 python3.12 python3.11 python3; do
+		if command -v "$cand" >/dev/null 2>&1 && "$cand" -c 'import tomllib' >/dev/null 2>&1; then
+			toml_python="$cand"
+			break
+		fi
+	done
+
 	# Parse `requires-python` and strip operators (>=, ~=, ^, <, >). Prefer
-	# python3's tomllib (stdlib 3.11+); fall back to grep so the script
-	# doesn't hard-require a recent Python on the host.
-	if [[ -f "$pyproject" ]] && command -v python3 >/dev/null 2>&1; then
+	# tomllib; fall back to grep so the script doesn't hard-require a recent
+	# Python on the host.
+	if [[ -f "$pyproject" && -n "$toml_python" ]]; then
 		python_version="$(
-			python3 - <<EOF 2>/dev/null || true
+			"$toml_python" - <<EOF 2>/dev/null || true
 import re, sys
 try:
     import tomllib
@@ -495,7 +509,7 @@ EOF
 	fi
 
 	# Fallback: grep for "requires-python" if Python's tomllib path didn't
-	# yield anything (older python3 on host, malformed file, etc.).
+	# yield anything (no tomllib-capable Python on host, malformed file, etc.).
 	if [[ -z "$python_version" && -f "$pyproject" ]]; then
 		# `|| true`: a no-match grep exits 1, which under `set -euo pipefail`
 		# (pipefail) would abort the script before the 3.12 fallback below — the
@@ -515,8 +529,8 @@ EOF
 	fi
 
 	# pytest-cov detection: search pyproject dev extras + requirements files.
-	if [[ -f "$pyproject" ]] && command -v python3 >/dev/null 2>&1; then
-		if python3 - <<EOF >/dev/null 2>&1; then
+	if [[ -f "$pyproject" && -n "$toml_python" ]]; then
+		if "$toml_python" - <<EOF >/dev/null 2>&1; then
 import sys
 try:
     import tomllib

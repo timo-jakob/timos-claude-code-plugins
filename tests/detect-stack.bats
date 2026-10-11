@@ -52,6 +52,77 @@ setup() {
   [ "$(jq -r .language_meta.python.has_cov <<<"$out")" = "true" ]
 }
 
+# Stub interpreters for EVERY candidate name detect-stack tries (#2313), in a
+# directory put first on PATH, so no host Python — macOS's /usr/bin/python3, or
+# a runner's /usr/bin/python3.12 — is ever the one chosen. The names in $@ get
+# tomllib; every other candidate fails `import tomllib`. A tomllib stub answers
+# the two probe programs by their text, no real TOML parsing: the
+# requires-python one prints 3.13, the pytest-cov one exits 0. Each program run
+# is logged as the stub's name in $BATS_TEST_TMPDIR/py-runs.
+python_stubs() {
+  PY_STUBS="$BATS_TEST_TMPDIR/py-stubs"
+  mkdir -p "$PY_STUBS"
+  : > "$BATS_TEST_TMPDIR/py-runs"
+  local cand capable
+  for cand in python3.14 python3.13 python3.12 python3.11 python3; do
+    capable=0
+    case " $* " in *" $cand "*) capable=1 ;; esac
+    cat > "$PY_STUBS/$cand" <<EOF
+#!/bin/sh
+if [ "\$1" = "-c" ]; then exit \$(( 1 - $capable )); fi
+echo "$cand" >> "$BATS_TEST_TMPDIR/py-runs"
+[ $capable -eq 1 ] || exit 1
+prog="\$(cat)"
+case "\$prog" in
+  *requires-python*) echo 3.13 ;;
+  *pytest-cov*) exit 0 ;;
+esac
+EOF
+    chmod +x "$PY_STUBS/$cand"
+  done
+}
+
+@test "detect-stack: #2313 python3 without tomllib, a versioned python3.N with it -> both probes use python3.N" {
+  printf '[project]\nname = "x"\nversion = "0.1.0"\nrequires-python = ">=3.13"\n[project.optional-dependencies]\ndev = ["pytest-cov>=5"]\n' > pyproject.toml
+  # 3.11 has tomllib too: the EARLIER candidate wins
+  python_stubs python3.12 python3.11
+  out=$(PATH="$PY_STUBS:$PATH" bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r .language_meta.python.has_cov <<<"$out")" = "true" ]
+  [ "$(jq -r .language_meta.python.version <<<"$out")" = "3.13" ]
+  [ "$(jq -r .language_meta.python.version_source <<<"$out")" = "parsed" ]
+  # both programs ran under the one chosen interpreter, and nothing else ran one
+  [ "$(cat "$BATS_TEST_TMPDIR/py-runs")" = "$(printf '%s\n' python3.12 python3.12)" ]
+}
+
+@test "detect-stack: #2313 each candidate, the only one with tomllib, runs both probes" {
+  printf '[project]\nname = "x"\nversion = "0.1.0"\n[project.optional-dependencies]\ndev = ["pytest-cov>=5"]\n' > pyproject.toml
+  for cand in python3.14 python3.13 python3.12 python3.11 python3; do
+    python_stubs "$cand"
+    PATH="$PY_STUBS:$PATH" bash "$DETECT" >/dev/null 2>&1
+    [ "$(cat "$BATS_TEST_TMPDIR/py-runs")" = "$(printf '%s\n' "$cand" "$cand")" ]
+  done
+}
+
+@test "detect-stack: #2313 no candidate has tomllib -> grep version, has_cov only from requirements*.txt" {
+  printf '[project]\nname = "x"\nversion = "0.1.0"\nrequires-python = ">=3.11"\n[project.optional-dependencies]\ndev = ["pytest-cov>=5"]\n' > pyproject.toml
+  python_stubs
+  out=$(PATH="$PY_STUBS:$PATH" bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  # the grep fallback: 3.11, not the tomllib stub's 3.13
+  [ "$(jq -r .language_meta.python.version <<<"$out")" = "3.11" ]
+  [ "$(jq -r .language_meta.python.version_source <<<"$out")" = "parsed" ]
+  # the pyproject dev extra is not read without tomllib…
+  [ "$(jq -r .language_meta.python.has_cov <<<"$out")" = "false" ]
+  # …no stub ran a program…
+  [ ! -s "$BATS_TEST_TMPDIR/py-runs" ]
+  # …and requirements*.txt still counts
+  printf 'pytest-cov>=5\n' > requirements-dev.txt
+  out=$(PATH="$PY_STUBS:$PATH" bash "$DETECT" 2>/dev/null); rc=$?
+  [ "$rc" -eq 0 ]
+  [ "$(jq -r .language_meta.python.has_cov <<<"$out")" = "true" ]
+}
+
 @test "detect-stack: no pyproject -> exit 0, python not detected" {
   out=$(bash "$DETECT" 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ]
