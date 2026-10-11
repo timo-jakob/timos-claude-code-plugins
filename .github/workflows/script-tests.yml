@@ -193,7 +193,7 @@ jobs:
     # step is #1353's.
     timeout-minutes: 27
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           # Full history: build-golden-798-target.zsh extracts its fixture from
           # a historical commit (4202beb), which a shallow checkout lacks (#808).
@@ -290,7 +290,7 @@ jobs:
       # and it is keyed on arch as well as OS, because the cache root holds a
       # per-`os-arch` leaf.
       - name: Cache the pinned IaC toolchain
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/timos-claude-code-plugins/iac-tools
           # both inputs that can move a pin: the workflow template holds the

@@ -28,7 +28,7 @@ jobs:
       contents: read
       packages: read
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       # scripts/promote.zsh is `#!/usr/bin/env zsh`, and ubuntu-latest ships no zsh. yq is pinned rather than taken
       # from the runner image, whose version moves on GitHub's schedule.
       - name: install zsh and yq
@@ -71,7 +71,7 @@ jobs:
       contents: read
       packages: read
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: install zsh and yq
         run: |
           set -euo pipefail
