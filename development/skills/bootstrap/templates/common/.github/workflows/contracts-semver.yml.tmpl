@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           # the gate diffs each contracts/vN spec against the base ref, so it
           # needs the base branch available locally
@@ -80,7 +80,7 @@ jobs:
         # if: always() so the Approver can read the report even when the gate
         # failed — the whole point of the two-layer design.
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: contracts-semver-${{ github.event.pull_request.number || github.sha }}
           # both the business-API and the ops-surface (#688) findings, when present

@@ -45,7 +45,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.15"
 
       - name: Regenerate the reference and fail on drift
         run: python3 scripts/generate-docs-reference.py --check
