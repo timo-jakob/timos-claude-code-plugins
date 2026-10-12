@@ -40,6 +40,13 @@ override_helper() {
   chmod +x "$W/override.zsh"
 }
 
+# ci_approver_workflow: a pre-#476 CI Approver workflow (it names the Approver
+# and runs on check_suite) in the test repo, which puts the probe in ci mode.
+ci_approver_workflow() {
+  mkdir -p "$W/repo/.github/workflows"
+  printf 'on:\n  check_suite:\n    types: [completed]\njobs:\n  claude-approver: {}\n' > "$W/repo/.github/workflows/approver.yml"
+}
+
 # wire_block: the extracted block with the stubs wired in, as $W/b.zsh.
 wire_block() {
   sed -e "s#\"<skill-base-dir>/../bootstrap/scripts/claude-apps-owner.zsh\"#$W/owner.zsh#" \
@@ -187,11 +194,30 @@ run_block() {
 }
 
 @test "language-primary with a pre-476 CI Approver workflow stays ci" {
-  mkdir -p "$W/repo/.github/workflows"
-  printf 'on:\n  check_suite:\n    types: [completed]\njobs:\n  claude-approver: {}\n' > "$W/repo/.github/workflows/approver.yml"
+  ci_approver_workflow
   override_helper 0 'override=on'
   run --separate-stderr run_block python
   [ "$output" = "ci" ]
+}
+
+# A claude-plugin repo the owner probe has already put in ci mode: the override
+# must still be consulted, and it decides the mode whatever ci said (#2294).
+@test "plugin-primary in ci mode, override on: local, and the helper was consulted" {
+  ci_approver_workflow
+  override_helper 0 'override=on'
+  run --separate-stderr run_block claude-plugin
+  [ "$status" -eq 0 ]
+  [ "$output" = "local" ]
+  [ -e "$W/override-called" ]
+}
+
+@test "plugin-primary in ci mode, override off: none, and the helper was consulted" {
+  ci_approver_workflow
+  override_helper 0 $'override=off\nreason=env-unset'
+  run --separate-stderr run_block claude-plugin
+  [ "$status" -eq 0 ]
+  [ "$output" = "none" ]
+  [ -e "$W/override-called" ]
 }
 
 @test "SKILL.md: the none bullet states the claude-plugin-primary rule and names the approve skill" {
