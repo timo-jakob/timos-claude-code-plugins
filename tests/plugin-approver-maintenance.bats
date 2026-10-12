@@ -254,7 +254,8 @@ run_block() {
   text="$(tr '\n' ' ' < "$SKILL" | tr -s ' ')"
   contains "$text" "# whatever the stage's language. On such a repo, read the PR's author first, as # Phase 8 step 0 does: unless it is the \`claude-maintenance\` App (login prefix # match, as Phase 2.5 tells a bot PR), gate this PR as \`none\` the way step 0 # does — no --update (updating the branch is left to the human reviewer), no # approve call, one reviewDecision and mergeStateStatus read and never the # poll — and skip both commands below: gh pr view \"<pr_number>\" --json author --jq .author.login \"<skill-base-dir>/scripts/merge-pr-cycle.zsh\" --update \"<pr_number>\""
   contains "$text" "workflow to nudge, #642), after the comment's author check, which on a plugin repo leaves a PR the Maintenance App did not author un-updated and gated as \`none\`: bringing it up to date is left to the human reviewer (for example GitHub's \"Update branch\")."
-  contains "$text" "3. Re-update whichever remaining PR the merge just re-staled by the recipe in § *Re-staling is unavoidable under \`strict\`*, its author check included (on a plugin repo a PR the Maintenance App did not author is not updated: that is left to the human reviewer), then repeat."
+  contains "$text" "3. Re-update whichever remaining PR the merge just re-staled by the recipe in § *Re-staling is unavoidable under \`strict\`*, its author check and its approver-mode-\`none\` rule included (on a plugin repo a PR the Maintenance App did not author is not updated, and in approver mode \`none\` an approved PR is not updated: both are left to the human reviewer), then repeat."
+  contains "$text" "never a hand-rolled loop. In approver mode \`none\` there is no Approver to re-earn the review, so an approved PR is never updated: it takes Phase 8's approved-but-\`BEHIND\` bullet instead."
   contains "$text" "native auto-merge is armed and will fire once a human approves and, if the PR is BEHIND, brings it up to date (left to the human reviewer, for example GitHub's \"Update branch\"); record"
 }
 
@@ -262,11 +263,21 @@ run_block() {
   local text
   text="$(tr '\n' ' ' < "$SKILL" | tr -s ' ')"
   contains "$text" "- **\`APPROVED\`** → proceed to step 6 (merge), unless the approved-but-\`BEHIND\` bullet below applies."
-  contains "$text" "- **Approved but \`BEHIND\`, gated as \`none\`** → a PR step 0 gated as \`none\` that is approved (\`APPROVED\`, or a non-zero explicit-approval count on the \`NONE\` branch) and whose \`mergeStateStatus\` is \`BEHIND\` does not take step 6, because GitHub refuses the merge under \`strict\`. Instead arm native auto-merge with \`gh pr merge \"<pr_number>\" --auto --squash --delete-branch\`, record \`awaiting_approval\` (bringing it up to date is left to the human reviewer) and move on to the next stage. This arms on the \`NONE\` branch too: the rule against arming there protects an unapproved PR, and this one already carries an explicit approval, so arming bypasses nothing — it merges once the human brings the branch up to date. - **\`NONE\` on the first poll**"
+  contains "$text" "- **Approved but \`BEHIND\`, gated as \`none\`** → a PR gated as \`none\`, by step 0 or by approver mode \`none\`, on any repo, that is approved (\`APPROVED\`, or a non-zero explicit-approval count on the \`NONE\` branch) and whose \`mergeStateStatus\` is \`BEHIND\` does not take step 6, because GitHub refuses the merge under \`strict\`. Instead arm native auto-merge with \`gh pr merge \"<pr_number>\" --auto --squash --delete-branch\`, record \`awaiting_approval\` (bringing it up to date is left to the human reviewer) and move on to the next stage. Never run \`--update\` on such a PR in approver mode \`none\`: under \`dismiss_stale_reviews\` an update dismisses the human's approval, and no Approver exists to earn it back. This arms on the \`NONE\` branch too: the rule against arming there protects an unapproved PR, and this one already carries an explicit approval, so arming bypasses nothing — it merges once the human brings the branch up to date. - **\`NONE\` on the first poll**"
   contains "$text" "Non-zero → proceed to step 6, unless the approved-but-\`BEHIND\` bullet above applies. Zero → do **NOT** arm auto-merge"
   contains "$text" "If \`<worktree_path>\` is empty — a standing PR step 0 gated as \`none\` has no worktree, and the legacy path where isolation didn't apply shouldn't happen after #64 — skip the \`worktree remove\` step and just call \`gh pr merge\`; the local-branch delete will then succeed because there's no worktree holding the ref."
   contains "$text" "ended awaiting_approval (armed but not approved within polling window, or approved but left BEHIND) or requires review"
   contains "$text" "- PR #<pr> (\"<title>\") — approved but BEHIND: armed for auto-merge; merges once the branch is brought up to date (left to the human reviewer)."
+}
+
+@test "SKILL.md: approver mode none polls reviewDecision and mergeStateStatus in one read and reaches the approved-but-BEHIND bullet" {
+  local text
+  text="$(tr '\n' ' ' < "$SKILL" | tr -s ' ')"
+  contains "$text" "Poll the review decision (30s interval, 10-minute budget): \`\`\`bash gh pr view \"<pr_number>\" --json reviewDecision,mergeStateStatus \\ --jq '\"\\(.reviewDecision | select(. != \"\") // \"NONE\") \\(.mergeStateStatus)\"' \`\`\`"
+  contains "$text" "Each iteration is that one read: it prints the decision and the \`mergeStateStatus\` together, and the approved-but-\`BEHIND\` bullet tests the status from the same read that returned the approval, so a PR that goes \`BEHIND\` mid-poll is still caught."
+  contains "$text" "- **\`none\`** — no Approver available; fall through to the human / native-auto-merge handling (the approved-but-\`BEHIND\` bullet and the \`NONE\` / \`REVIEW_REQUIRED\` branches below)."
+  run grep -F -- "--json reviewDecision --jq '.reviewDecision // \"NONE\"'" "$SKILL"
+  [ "$status" -eq 1 ]
 }
 
 @test "SKILL.md: a resumed run re-detects the approver mode instead of restoring it" {
