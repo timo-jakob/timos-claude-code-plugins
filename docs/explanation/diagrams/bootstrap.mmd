@@ -1,0 +1,26 @@
+flowchart TD
+    classDef human fill:#fde7c8,stroke:#b8741a,color:#222
+    classDef conductor fill:#dbe8fb,stroke:#3567b5,color:#222
+    classDef agent fill:#e9ddf7,stroke:#7a4cb5,color:#222
+    classDef bot fill:#d9f2df,stroke:#2e8b4e,color:#222
+    classDef artifact fill:#eeeeee,stroke:#777,color:#222
+    classDef stop fill:#f8d7d7,stroke:#b33,color:#222
+
+    START(["/development:bootstrap"]):::human
+    DETECT["Step 1: detect-stack.sh<br/>languages, visibility, existing files,<br/>GitHub-side state"]:::artifact
+    STATE{"All files<br/>present?"}
+    GAP(["Gap-fill: protection, secrets,<br/>Sonar project, drift check"]):::conductor
+    ASK["Ask what detection could not<br/>answer; resolve toolchain<br/>and approval model"]:::human
+    PLAN{"Step 2: you<br/>confirm the plan?"}
+    DECL(["Stop: nothing written"]):::stop
+    REVIEW["Step 2.5: three plan reviewers;<br/>you decide each existing file"]:::agent
+    WRITE["Steps 3-3.6: render files,<br/>validate, stamp markers"]:::conductor
+    POST["Step 4: hooks, branch protection,<br/>build edits, Docker smoke test"]:::conductor
+    PR["PR by the Maintenance App;<br/>Approver approves if wired"]:::bot
+    AUTO(["Steps 4.5-5: setup automation,<br/>manual-setup checklist"]):::artifact
+
+    START --> DETECT --> STATE
+    STATE -- yes --> GAP
+    STATE -- no --> ASK --> PLAN
+    PLAN -- no --> DECL
+    PLAN -- yes --> REVIEW --> WRITE --> POST --> PR --> AUTO

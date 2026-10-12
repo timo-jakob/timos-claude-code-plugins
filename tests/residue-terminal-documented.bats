@@ -183,7 +183,7 @@ SWEEP_NEAR_TERMINAL='CONVERGED_WITH_RESIDUE.{0,250}(full sweep|closing sweep)|(f
   grep -qiE "$SWEEP_NEAR_TERMINAL" <<< "$(flat "$near")"
 }
 
-@test "#1435 roster tripwire: exactly seventeen markdown sites name the terminal" {
+@test "#1435 roster tripwire: exactly eighteen markdown sites name the terminal" {
   # A derived sweep answers "do the sites agree?", never "did a site appear or
   # vanish?" — so the roster is recorded here and a site that appears or vanishes
   # reds until this file is updated in the same PR.
@@ -218,6 +218,8 @@ SWEEP_NEAR_TERMINAL='CONVERGED_WITH_RESIDUE.{0,250}(full sweep|closing sweep)|(f
   # #2058 split interactive.md: its index no longer names the terminal, and its
   # mentions all fell into one shard, extension-grant.md (step 5). Still
   # seventeen.
+  # The workflow walkthrough (docs/explanation/workflow-resolve-issue.md) names
+  # the terminal among the loop's endings. Seventeen became eighteen.
   [ "$found" = "ARCHITECTURE.md
 development/skills/bootstrap/templates/common/approver-policy-core.md.tmpl
 development/skills/open-pr/SKILL.md
@@ -234,8 +236,9 @@ development/skills/resolve-issue/reference/residue/step-1-plan.md
 development/skills/resolve-issue/reference/review-loop/delta-rounds.md
 development/skills/resolve-issue/reference/review-loop/exit-20-awaiting-fix.md
 docs/explanation/review-loop.md
+docs/explanation/workflow-resolve-issue.md
 docs/reference/commands.md" ] || {
-    echo "markdown roster changed; expected the seventeen known sites, got:"
+    echo "markdown roster changed; expected the eighteen known sites, got:"
     echo "$found"; return 1; }
 }
 

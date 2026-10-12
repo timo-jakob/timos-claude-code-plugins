@@ -1,0 +1,18 @@
+{
+  "theme": "neutral",
+  "htmlLabels": false,
+  "fontFamily": "Source Sans Pro, Helvetica, Arial, sans-serif",
+  "flowchart": {
+    "htmlLabels": false,
+    "useMaxWidth": false,
+    "curve": "basis",
+    "wrappingWidth": 420,
+    "nodeSpacing": 40,
+    "rankSpacing": 45
+  },
+  "sequence": {
+    "useMaxWidth": false,
+    "mirrorActors": false,
+    "wrap": true
+  }
+}

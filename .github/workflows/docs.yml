@@ -20,6 +20,7 @@ on:
       - "requirements-docs.txt"
       - "scripts/docs-nav-to-chapters.zsh"
       - "scripts/pandoc/**"
+      - "scripts/build-workflows-booklet.zsh"
       - ".github/workflows/docs.yml"
   push:
     branches: [main]
@@ -29,6 +30,7 @@ on:
       - "requirements-docs.txt"
       - "scripts/docs-nav-to-chapters.zsh"
       - "scripts/pandoc/**"
+      - "scripts/build-workflows-booklet.zsh"
       - ".github/workflows/docs.yml"
 
 permissions:
@@ -86,24 +88,41 @@ jobs:
         # makes that page readable: the header's A4 geometry gives a 160 mm
         # column, which runs to ~100 characters a line at the class's 10 pt
         # default and ~85 at 11 pt. Change one of the two and re-read a page.
+        #
+        # Diagrams: a page embeds its SVG diagrams by a path relative to itself
+        # (`diagrams/x.svg`); `rebase_relative_paths` resolves that against the
+        # page's own directory. pandoc/extra registers no system fonts, so
+        # FONTCONFIG_FILE hands rsvg-convert the font the diagram labels are set
+        # in, and figures.tex keeps a tall diagram on the page that introduces it.
         run: |
           set -euo pipefail
           mapfile -t chapters < chapters.txt
-          docker run --rm -v "$PWD:/data" -w /data pandoc/extra:3.5 \
+          docker run --rm -e FONTCONFIG_FILE=/data/scripts/pandoc/fonts.conf \
+            -v "$PWD:/data" -w /data pandoc/extra:3.5 \
+            -f markdown+rebase_relative_paths \
             --pdf-engine=xelatex --toc \
             -V fontsize=11pt \
             --metadata title="Claude Code Plugins" \
             --metadata author="timos-claude-code-plugins" \
             --lua-filter=scripts/pandoc/break-long-tokens.lua \
             --include-in-header=scripts/pandoc/manual-header.tex \
+            --include-in-header=scripts/pandoc/figures.tex \
             -o manual.pdf "${chapters[@]}" 2>&1 | tee pandoc-pdf.log
           docker run --rm -v "$PWD:/data" -w /data pandoc/extra:3.5 \
+            -f markdown+rebase_relative_paths \
             --toc --metadata title="Claude Code Plugins" \
             --metadata author="timos-claude-code-plugins" \
             -o manual.epub "${chapters[@]}"
 
       - name: Confirm both manuals were produced
         run: test -s manual.pdf && test -s manual.epub
+
+      - name: Build the workflows booklet (workflows.pdf + workflows.epub)
+        # The "How the plugins work" pages on their own, with the manual's
+        # pandoc settings. The script exits non-zero when either file is
+        # missing or empty. Its text is a subset of the manual's, so the glyph
+        # and reference gates below cover it too.
+        run: ./scripts/build-workflows-booklet.zsh
 
       - name: Fail on characters the PDF has no glyph for
         # xelatex drops an unmapped character SILENTLY — "≥90% coverage" would

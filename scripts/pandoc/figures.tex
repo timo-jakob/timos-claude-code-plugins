@@ -1,0 +1,33 @@
+% Figure sizing for the SVG diagrams in manual.pdf and the workflows booklet.
+% Included via --include-in-header next to manual-header.tex, by both docs
+% workflows and scripts/build-workflows-booklet.zsh. Kept out of
+% manual-header.tex on purpose: the bootstrap templates ship that file
+% byte-for-byte, and no bootstrapped repo has diagrams that need this.
+%
+% pandoc's \pandocbounded scales an image to the FULL \textheight. A tall
+% flowchart then fills the page, its caption pushes the float past it ("Float
+% too large for page"), and LaTeX parks the figure on a page of its own, leaving
+% the heading above it alone on an otherwise blank page. Bounding images at 80%
+% of the text height leaves room for the caption and the section heading, so a
+% diagram stays on the page that introduces it. pandoc defines \pandocbounded
+% only when the document has an image, hence the \ifdefined guard.
+\makeatletter
+\ifdefined\pandocbounded
+\renewcommand*\pandocbounded[1]{%
+  \sbox\pandoc@box{#1}%
+  \Gscale@div\@tempa{0.80\textheight}{\dimexpr\ht\pandoc@box+\dp\pandoc@box\relax}%
+  \Gscale@div\@tempb{\linewidth}{\wd\pandoc@box}%
+  \ifdim\@tempb\p@<\@tempa\p@\let\@tempa\@tempb\fi
+  \ifdim\@tempa\p@<\p@\scalebox{\@tempa}{\usebox\pandoc@box}%
+  \else\usebox{\pandoc@box}%
+  \fi}
+\fi
+\makeatother
+
+% LaTeX's float defaults keep a figure that fills more than 70% of a page off
+% the top of a text page (\topfraction) and demand 20% of the page stay text
+% (\textfraction), so even a bounded diagram still fled to a float-only page.
+% These let a page carry the heading, the diagram and its caption together.
+\renewcommand{\topfraction}{0.9}
+\renewcommand{\textfraction}{0.05}
+\renewcommand{\floatpagefraction}{0.85}

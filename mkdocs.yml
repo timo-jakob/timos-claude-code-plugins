@@ -121,6 +121,13 @@ nav:
       - explanation/index.md
       - Motivation & current gaps: explanation/motivation.md
       - Why per-language plugins?: explanation/why-per-language-plugins.md
+      - How the plugins work:
+          - explanation/how-the-plugins-work.md
+          - How refine-issue works: explanation/workflow-refine-issue.md
+          - How resolve-issue works: explanation/workflow-resolve-issue.md
+          - How bootstrap works: explanation/workflow-bootstrap.md
+          - How maintenance works: explanation/workflow-maintenance.md
+          - How the family learns: explanation/how-the-family-learns.md
       - The Claude Approver: explanation/claude-approver.md
       - The C4 architecture docs: explanation/c4-architecture-docs.md
       - The target-repo docs stack: explanation/target-repo-docs-stack.md
