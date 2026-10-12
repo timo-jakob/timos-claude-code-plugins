@@ -436,13 +436,13 @@ run_script_in() {
 
   # ...and the workflow's path asserted EXACTLY, so neither side can be renamed
   # without exactly one of these two failing
-  run yq -r '.jobs.bats.steps[] | select(.uses == "actions/cache@v4") | .with.path' "$wf"
+  run yq -r '.jobs.bats.steps[] | select((.uses // "") | test("^actions/cache@")) | .with.path' "$wf"
   [ "$status" -eq 0 ]
   [ "$output" = "~/.cache/timos-claude-code-plugins/iac-tools" ]
 
   # the key must hash BOTH files a pin can live in — the script (helm/kustomize)
   # and the workflow template (the other four)
-  run yq -r '.jobs.bats.steps[] | select(.uses == "actions/cache@v4") | .with.key' "$wf"
+  run yq -r '.jobs.bats.steps[] | select((.uses // "") | test("^actions/cache@")) | .with.key' "$wf"
   [ "$status" -eq 0 ]
   contains "$output" 'tests/iac-tools.zsh'
   contains "$output" 'development/skills/bootstrap/templates/iac/.github/workflows/kubernetes-ci.yml.tmpl'
@@ -482,7 +482,7 @@ run_script_in() {
   local install_ix gate_ix cache_ix
   install_ix="$(yq -r '.jobs.bats.steps | to_entries[] | select(.value.name == "Install the pinned IaC toolchain") | .key' "$wf")"
   gate_ix="$(yq -r '.jobs.bats.steps | to_entries[] | select(.value.name == "Run shell-script behavioral tests") | .key' "$wf")"
-  cache_ix="$(yq -r '.jobs.bats.steps | to_entries[] | select(.value.uses == "actions/cache@v4") | .key' "$wf")"
+  cache_ix="$(yq -r '.jobs.bats.steps | to_entries[] | select((.value.uses // "") | test("^actions/cache@")) | .key' "$wf")"
   [ -n "$install_ix" ]
   [ -n "$gate_ix" ]
   [ -n "$cache_ix" ]
