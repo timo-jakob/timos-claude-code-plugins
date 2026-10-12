@@ -17,10 +17,12 @@
 #      a module may be sourced from `./vendor/…`, and validating without it
 #      would fail a tree that is fine;
 #   2. enumerates the ROOT modules — every directory holding a non-pruned `*.tf`
-#      or `*.tf.json`, less those another such directory calls as a local module
-#      (`source = "./…"` / `"../…"`). Validating a root validates the modules it
-#      calls, and a called module validated on its own can fail on provider
-#      configuration only its caller supplies, so that would fail good trees;
+#      or `*.tf.json`, less those a DIFFERENT such directory calls as a local
+#      module (`source = "./…"` / `"../…"`); a self-call does not count. Validating
+#      a root validates the modules it calls, and a called module validated on
+#      its own can fail on provider configuration only its caller supplies, so
+#      that would fail good trees. A directory the call edges never reach from a
+#      root (a module cycle) becomes a root too, so it is still validated;
 #   3. in each root: `tofu init -backend=false`, then `tofu validate`;
 #   4. runs `tflint --recursive` when tflint is installed.
 #
@@ -155,7 +157,8 @@ done
 dirs=("${(@u)dirs}")
 
 # The local module sources each directory calls, resolved to repo-relative
-# directories. A directory that some OTHER directory calls is not a root.
+# directories. A directory that some OTHER directory calls is not a root, unless
+# no root reaches it (the walk after the collection).
 local -a called=()
 # A module call is a line that BEGINS with `source =`, or with a one-line
 # `module "…" { source = … }` block — so a `#` or `//` comment, a string, a
@@ -167,25 +170,39 @@ blk { if (index($0, "*/")) blk = 0; next }
 /^[[:space:]]*\/\*/ { if (!index(substr($0, index($0, "/*") + 2), "*/")) blk = 1; next }
 { print }'
 
-local src target
+# The call edges, caller -> newline-joined callees, walked below from the roots.
+local -A callees=()
+
+# Records one resolved module source of directory $d. A directory that calls
+# itself (`source = "./"`) is not thereby called: only a call from a DIFFERENT
+# directory makes a callee.
+record_call() {
+  local rel
+  if [[ "$1" == "$copy" ]]; then
+    rel="."
+  elif [[ "$1" == "$copy"/* ]]; then
+    rel="${1#$copy/}"
+  else
+    return 0
+  fi
+  [[ "$rel" == "$d" ]] && return 0
+  called+=("$rel")
+  callees[$d]+="$rel"$'\n'
+}
+
+local src
 for d in "${dirs[@]}"; do
   for f in "$copy/$d"/*.tf(N); do
     for src in ${(f)"$(awk "$STRIP_BLOCKS" "$f" 2>/dev/null \
                      | grep -hoE '^[[:space:]]*(module[[:space:]]+"[^"]*"[[:space:]]*\{[[:space:]]*)?source[[:space:]]*=[[:space:]]*"\.\.?/[^"]*"' \
                      | sed -E 's/^.*source[[:space:]]*=[[:space:]]*"//; s/"$//')"}; do
-      target="${${:-$copy/$d/$src}:a}"
-      [[ "$target" == "$copy" ]] && { called+=("."); continue }
-      [[ "$target" == "$copy"/* ]] || continue
-      called+=("${target#$copy/}")
+      record_call "${${:-$copy/$d/$src}:a}"
     done
   done
   for f in "$copy/$d"/*.tf.json(N); do
     for src in ${(f)"$(jq -r '.module? // empty | .. | objects | .source? // empty | strings' "$f" 2>/dev/null \
                      | grep -E '^\.\.?/')"}; do
-      target="${${:-$copy/$d/$src}:a}"
-      [[ "$target" == "$copy" ]] && { called+=("."); continue }
-      [[ "$target" == "$copy"/* ]] || continue
-      called+=("${target#$copy/}")
+      record_call "${${:-$copy/$d/$src}:a}"
     done
   done
 done
@@ -195,10 +212,26 @@ for d in "${dirs[@]}"; do
   (( ${called[(Ie)$d]} )) && continue
   roots+=("$d")
 done
-# every directory called by another — a module cycle, or `source = "./"` — would
-# leave no root and read as verdict "empty"; validate them all instead, so
-# `tofu init` reports the cycle as the failure it is
-(( ${#roots} == 0 && ${#dirs} )) && roots=("${dirs[@]}")
+# A directory no root reaches through the call edges — one in a module cycle,
+# whether or not another root exists beside it — would never be validated, and a
+# broken tree would read as a clean review. It becomes a root of its own, so
+# `tofu init` reports the cycle as the failure it is. A tree whose every
+# directory is called reaches nothing, so every directory is validated.
+local -A reached=()
+local -a queue=("${roots[@]}")
+local callee
+while (( ${#queue} )); do
+  d="${queue[1]}"
+  queue=("${(@)queue[2,-1]}")
+  [[ -n "${reached[$d]:-}" ]] && continue
+  reached[$d]=1
+  for callee in "${(@f)${callees[$d]:-}}"; do
+    [[ -n "$callee" && -z "${reached[$callee]:-}" ]] && queue+=("$callee")
+  done
+done
+for d in "${dirs[@]}"; do
+  [[ -n "${reached[$d]:-}" ]] || roots+=("$d")
+done
 roots=("${(@o)roots}")
 
 local -a validated=() source_only=() notes=() failures=()
