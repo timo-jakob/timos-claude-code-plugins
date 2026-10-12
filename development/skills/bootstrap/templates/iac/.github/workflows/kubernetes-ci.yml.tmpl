@@ -44,7 +44,7 @@ jobs:
           curl -sSfL "$url/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" \
             | tar -xz -C "$RUNNER_TEMP/gate-bin" kustomize
         env:
-          KUSTOMIZE_VERSION: 5.8.1
+          KUSTOMIZE_VERSION: 5.8.3
       - name: install kubeconform
         run: |
           set -euo pipefail
@@ -60,7 +60,7 @@ jobs:
           curl -sSfL "$url/v${KUBE_LINTER_VERSION}/kube-linter-linux.tar.gz" \
             | tar -xz -C "$RUNNER_TEMP/gate-bin" kube-linter
         env:
-          KUBE_LINTER_VERSION: 0.7.2
+          KUBE_LINTER_VERSION: 0.8.3
       - name: install kyverno
         run: |
           set -euo pipefail
