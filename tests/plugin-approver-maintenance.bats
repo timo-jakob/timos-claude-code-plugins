@@ -239,23 +239,34 @@ run_block() {
 @test "SKILL.md: Phase 8 gates a PR the Maintenance App did not author as none on a plugin repo" {
   local text
   text="$(tr '\n' ' ' < "$SKILL" | tr -s ' ')"
-  contains "$text" "That skill reviews only a PR the Maintenance App authored, so on such a repo every other PR — a vendor PR (Dependabot, Renovate, Snyk) included — is gated as \`none\` instead: a human review, no wait — read \`reviewDecision\` once and take the \`NONE\` on the first poll or the \`REVIEW_REQUIRED\` branch below at once, never the poll."
+  contains "$text" "That skill reviews only a PR the Maintenance App authored, so on such a repo every other PR — a vendor PR (Dependabot, Renovate, Snyk) included — is gated as \`none\` instead: a human review, no wait — read \`reviewDecision\` and \`mergeStateStatus\` once (one \`gh pr view \"<pr_number>\" --json reviewDecision,mergeStateStatus\` call) and take the matching branch of *Poll the review decision* below at once — \`APPROVED\` (with its approved-but-\`BEHIND\` bullet), \`CHANGES_REQUESTED\`, \`NONE\` on the first poll, or \`REVIEW_REQUIRED\` handled as that branch's \`none\` sub-branch (arm, record \`awaiting_approval\`) — never the poll or a \`merge-pr-cycle.zsh\` wait."
 }
 
 @test "SKILL.md: the local-mode recipe checks the PR author before any approve call or wait" {
   local text
   text="$(tr '\n' ' ' < "$SKILL" | tr -s ' ')"
-  contains "$text" "# 0. on a claude-plugin-primary repo as § Approver mode defines it, read the # PR's author first: unless it is the \`claude-maintenance\` App (login # prefix match, as Phase 2.5 tells a bot PR), gate this PR as \`none\` — # no approve call, no wait: read reviewDecision once and take the # \`NONE\` on the first poll or the \`REVIEW_REQUIRED\` branch below at # once, never the poll — and skip steps 1-3: gh pr view \"<pr_number>\" --json author --jq .author.login # 1. wait for green"
+  contains "$text" "# 0. on a claude-plugin-primary repo as § Approver mode defines it, read the # PR's author first: unless it is the \`claude-maintenance\` App (login # prefix match, as Phase 2.5 tells a bot PR), gate this PR as \`none\` — # no approve call, no wait: read reviewDecision and mergeStateStatus # once and take the matching branch of *Poll the review decision* # below at once (APPROVED or approved-but-BEHIND, CHANGES_REQUESTED, # NONE on the first poll, REVIEW_REQUIRED as its \`none\` sub-branch), # never the poll or a merge-pr-cycle.zsh wait — and skip steps 1-3: gh pr view \"<pr_number>\" --json author --jq .author.login # 1. wait for green"
   contains "$text" "add --update first for a vendor PR that's BEHIND under strict branch # protection (never on a plugin repo: step 0 gated it as \`none\`, and # bringing it up to date is left to the human reviewer). Exit 4"
 }
 
 @test "SKILL.md: the re-stale recipe checks the PR author before --update on a plugin repo" {
   local text
   text="$(tr '\n' ' ' < "$SKILL" | tr -s ' ')"
-  contains "$text" "# whatever the stage's language. On such a repo, read the PR's author first, as # Phase 8 step 0 does: unless it is the \`claude-maintenance\` App (login prefix # match, as Phase 2.5 tells a bot PR), gate this PR as \`none\` the way step 0 # does — no --update (updating the branch is left to the human reviewer), no # approve call, one reviewDecision read and never the poll — and skip both # commands below: gh pr view \"<pr_number>\" --json author --jq .author.login \"<skill-base-dir>/scripts/merge-pr-cycle.zsh\" --update \"<pr_number>\""
+  contains "$text" "# whatever the stage's language. On such a repo, read the PR's author first, as # Phase 8 step 0 does: unless it is the \`claude-maintenance\` App (login prefix # match, as Phase 2.5 tells a bot PR), gate this PR as \`none\` the way step 0 # does — no --update (updating the branch is left to the human reviewer), no # approve call, one reviewDecision and mergeStateStatus read and never the # poll — and skip both commands below: gh pr view \"<pr_number>\" --json author --jq .author.login \"<skill-base-dir>/scripts/merge-pr-cycle.zsh\" --update \"<pr_number>\""
   contains "$text" "workflow to nudge, #642), after the comment's author check, which on a plugin repo leaves a PR the Maintenance App did not author un-updated and gated as \`none\`: bringing it up to date is left to the human reviewer (for example GitHub's \"Update branch\")."
   contains "$text" "3. Re-update whichever remaining PR the merge just re-staled by the recipe in § *Re-staling is unavoidable under \`strict\`*, its author check included (on a plugin repo a PR the Maintenance App did not author is not updated: that is left to the human reviewer), then repeat."
   contains "$text" "native auto-merge is armed and will fire once a human approves and, if the PR is BEHIND, brings it up to date (left to the human reviewer, for example GitHub's \"Update branch\"); record"
+}
+
+@test "SKILL.md: an approved but BEHIND PR gated as none arms auto-merge instead of step 6" {
+  local text
+  text="$(tr '\n' ' ' < "$SKILL" | tr -s ' ')"
+  contains "$text" "- **\`APPROVED\`** → proceed to step 6 (merge), unless the approved-but-\`BEHIND\` bullet below applies."
+  contains "$text" "- **Approved but \`BEHIND\`, gated as \`none\`** → a PR step 0 gated as \`none\` that is approved (\`APPROVED\`, or a non-zero explicit-approval count on the \`NONE\` branch) and whose \`mergeStateStatus\` is \`BEHIND\` does not take step 6, because GitHub refuses the merge under \`strict\`. Instead arm native auto-merge with \`gh pr merge \"<pr_number>\" --auto --squash --delete-branch\`, record \`awaiting_approval\` (bringing it up to date is left to the human reviewer) and move on to the next stage. This arms on the \`NONE\` branch too: the rule against arming there protects an unapproved PR, and this one already carries an explicit approval, so arming bypasses nothing — it merges once the human brings the branch up to date. - **\`NONE\` on the first poll**"
+  contains "$text" "Non-zero → proceed to step 6, unless the approved-but-\`BEHIND\` bullet above applies. Zero → do **NOT** arm auto-merge"
+  contains "$text" "If \`<worktree_path>\` is empty — a standing PR step 0 gated as \`none\` has no worktree, and the legacy path where isolation didn't apply shouldn't happen after #64 — skip the \`worktree remove\` step and just call \`gh pr merge\`; the local-branch delete will then succeed because there's no worktree holding the ref."
+  contains "$text" "ended awaiting_approval (armed but not approved within polling window, or approved but left BEHIND) or requires review"
+  contains "$text" "- PR #<pr> (\"<title>\") — approved but BEHIND: armed for auto-merge; merges once the branch is brought up to date (left to the human reviewer)."
 }
 
 @test "SKILL.md: a resumed run re-detects the approver mode instead of restoring it" {
