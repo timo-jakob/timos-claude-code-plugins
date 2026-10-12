@@ -2145,7 +2145,9 @@ re-stales on every intervening merge.)
 
 **Re-staling is unavoidable under `strict`, but deterministic.** When a PR you
 still need to merge has gone `BEHIND` from an intervening merge, drive it with
-the blessed helper (#431), never a hand-rolled loop:
+the blessed helper (#431), never a hand-rolled loop. In approver mode `none`
+there is no Approver to re-earn the review, so an approved PR is never updated:
+it takes Phase 8's approved-but-`BEHIND` bullet instead.
 
 ```bash
 # ci mode: --retrigger re-earns the Approver's counting review via /approve
@@ -2298,9 +2300,10 @@ absent; the top-N groups when it is set), in priority order:
       (#642); on green + approved, confirm the merge.
    3. Re-update whichever remaining PR the merge just re-staled by the
       recipe in § *Re-staling is unavoidable under `strict`*, its author
-      check included (on a plugin repo a PR the Maintenance App did not
-      author is not updated: that is left to the human reviewer), then
-      repeat.
+      check and its approver-mode-`none` rule included (on a plugin repo a
+      PR the Maintenance App did not author is not updated, and in approver
+      mode `none` an approved PR is not updated: both are left to the human
+      reviewer), then repeat.
 
    The agent did the **initial** branch-update for the PRs it reported
    `pr_pending_reverification`; **you** own the **re-stale re-updates**
@@ -2658,8 +2661,8 @@ After pushing and opening the PR:
      handled as that branch's `none` sub-branch (arm, record
      `awaiting_approval`) — never the poll or a `merge-pr-cycle.zsh` wait.
    - **`none`** — no Approver available; fall through to the human /
-     native-auto-merge handling (the `NONE` / `REVIEW_REQUIRED` branches
-     below).
+     native-auto-merge handling (the approved-but-`BEHIND` bullet and the
+     `NONE` / `REVIEW_REQUIRED` branches below).
 
    When you drive the review yourself (the language plugin's `approve`
    skill spawning the local approver agent), mint the Approver token
@@ -2745,8 +2748,14 @@ After pushing and opening the PR:
    Poll the review decision (30s interval, 10-minute budget):
 
    ```bash
-   gh pr view "<pr_number>" --json reviewDecision --jq '.reviewDecision // "NONE"'
+   gh pr view "<pr_number>" --json reviewDecision,mergeStateStatus \
+     --jq '"\(.reviewDecision | select(. != "") // "NONE") \(.mergeStateStatus)"'
    ```
+
+   Each iteration is that one read: it prints the decision and the
+   `mergeStateStatus` together, and the approved-but-`BEHIND` bullet tests
+   the status from the same read that returned the approval, so a PR that
+   goes `BEHIND` mid-poll is still caught.
 
    - **`APPROVED`** → proceed to step 6 (merge), unless the
      approved-but-`BEHIND` bullet below applies.
@@ -2764,14 +2773,18 @@ After pushing and opening the PR:
      `actions_requiring_review` with the Approver's findings and move
      to the next stage. If the rejection is from a **human**, escalate
      immediately — that's their call, not yours to litigate.
-   - **Approved but `BEHIND`, gated as `none`** → a PR step 0 gated as
-     `none` that is approved (`APPROVED`, or a non-zero explicit-approval
+   - **Approved but `BEHIND`, gated as `none`** → a PR gated as `none`, by
+     step 0 or by approver mode `none`, on any repo, that is approved
+     (`APPROVED`, or a non-zero explicit-approval
      count on the `NONE` branch) and whose `mergeStateStatus` is `BEHIND`
      does not take step 6, because GitHub refuses the merge under
      `strict`. Instead arm native auto-merge with
      `gh pr merge "<pr_number>" --auto --squash --delete-branch`, record
      `awaiting_approval` (bringing it up to date is left to the human
-     reviewer) and move on to the next stage. This arms on the `NONE`
+     reviewer) and move on to the next stage. Never run `--update` on such
+     a PR in approver mode `none`: under `dismiss_stale_reviews` an update
+     dismisses the human's approval, and no Approver exists to earn it
+     back. This arms on the `NONE`
      branch too: the rule against arming there protects an unapproved PR,
      and this one already carries an explicit approval, so arming
      bypasses nothing — it merges once the human brings the branch up to
