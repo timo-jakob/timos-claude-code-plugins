@@ -259,12 +259,19 @@ run_block() {
   contains "$text" "native auto-merge is armed and will fire once a human approves and, if the PR is BEHIND, brings it up to date (left to the human reviewer, for example GitHub's \"Update branch\"); record"
 }
 
-@test "SKILL.md: an approved but BEHIND PR gated as none arms auto-merge instead of step 6" {
+@test "SKILL.md: an approved but BEHIND PR gated as none arms auto-merge only on APPROVED, never on NONE" {
   local text
   text="$(tr '\n' ' ' < "$SKILL" | tr -s ' ')"
   contains "$text" "- **\`APPROVED\`** → proceed to step 6 (merge), unless the approved-but-\`BEHIND\` bullet below applies."
-  contains "$text" "- **Approved but \`BEHIND\`, gated as \`none\`** → a PR gated as \`none\`, by step 0 or by approver mode \`none\`, on any repo, that is approved (\`APPROVED\`, or a non-zero explicit-approval count on the \`NONE\` branch) and whose \`mergeStateStatus\` is \`BEHIND\` does not take step 6, because GitHub refuses the merge under \`strict\`. Instead arm native auto-merge with \`gh pr merge \"<pr_number>\" --auto --squash --delete-branch\`, record \`awaiting_approval\` (bringing it up to date is left to the human reviewer) and move on to the next stage. Never run \`--update\` on such a PR in approver mode \`none\`: under \`dismiss_stale_reviews\` an update dismisses the human's approval, and no Approver exists to earn it back. This arms on the \`NONE\` branch too: the rule against arming there protects an unapproved PR, and this one already carries an explicit approval, so arming bypasses nothing — it merges once the human brings the branch up to date. - **\`NONE\` on the first poll**"
+  contains "$text" "- **Approved but \`BEHIND\`, gated as \`none\`** → a PR gated as \`none\`, by step 0 or by approver mode \`none\`, on any repo, that is approved (\`APPROVED\`, or a non-zero explicit-approval count on the \`NONE\` branch) and whose \`mergeStateStatus\` is \`BEHIND\` does not take step 6, because GitHub refuses the merge under \`strict\`. On \`APPROVED\`, arm native auto-merge with \`gh pr merge \"<pr_number>\" --auto --squash --delete-branch\`, record \`awaiting_approval\` (bringing it up to date is left to the human reviewer) and move on to the next stage. On the \`NONE\` branch, do not arm: leave the PR open, record \`awaiting_approval\` and move on. Never run \`--update\` on such a PR in approver mode \`none\`: under \`dismiss_stale_reviews\` an update dismisses the human's approval, and no Approver exists to earn it back. This never arms on the \`NONE\` branch: with no review-requiring protection GitHub checks no review at merge time, so an armed PR would merge any head pushed after the approval — a bot rebase included. - **\`NONE\` on the first poll**"
+  contains "$text" "\`\`\`bash gh pr view \"<pr_number>\" --json headRefOid,reviews --jq '.headRefOid as \$h | [.reviews[] | select(.commit.oid == \$h)] | group_by(.author.login) | map(last) | map(select(.state == \"APPROVED\")) | length' \`\`\`"
+  contains "$text" "counting each reviewer's latest review on that head, so approvals only on an older head count as zero"
   contains "$text" "Non-zero → proceed to step 6, unless the approved-but-\`BEHIND\` bullet above applies. Zero → do **NOT** arm auto-merge"
+  contains "$text" "- PR #<pr> (\"<title>\") — approved but BEHIND, no review-requiring protection: not armed; bring the branch up to date and merge it (left to the human reviewer)."
+  run grep -F -- "arming bypasses nothing" "$SKILL"
+  [ "$status" -eq 1 ]
+  run grep -F -- "[.latestReviews[] | select(.state == \"APPROVED\")] | length" "$SKILL"
+  [ "$status" -eq 1 ]
   contains "$text" "If \`<worktree_path>\` is empty — a standing PR step 0 gated as \`none\` has no worktree, and the legacy path where isolation didn't apply shouldn't happen after #64 — skip the \`worktree remove\` step and just call \`gh pr merge\`; the local-branch delete will then succeed because there's no worktree holding the ref."
   contains "$text" "ended awaiting_approval (armed but not approved within polling window, or approved but left BEHIND) or requires review"
   contains "$text" "- PR #<pr> (\"<title>\") — approved but BEHIND: armed for auto-merge; merges once the branch is brought up to date (left to the human reviewer)."
