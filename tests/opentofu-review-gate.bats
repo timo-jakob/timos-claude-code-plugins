@@ -219,12 +219,69 @@ EOF
 }
 
 @test "a tree whose every directory is called is validated, never verdict EMPTY (#1161)" {
+  # the root calls modules/network and modules/network calls the root back: no
+  # directory is uncalled, so the walk reaches nothing and every one is a root
   stub_tofu
-  printf 'module "self" {\n  source = "./"\n}\n' >>"$REPO/main.tf"
+  printf 'module "back" {\n  source = "../.."\n}\n' >>"$REPO/modules/network/variables.tf"
   gate --repo "$REPO"
   [ "$status" -eq 0 ]
   [ "$(jq -r .verdict <<<"$output")" = "full" ]
   [ "$(jq -c .roots <<<"$output")" = '[".","modules/network"]' ]
+}
+
+@test "a self-call does not make a directory a callee (#1814)" {
+  # `source = "./"` in the root used to remove the root from roots, so it was
+  # never validated while the uncalled examples/basic was — a clean review of a
+  # tree whose root was never looked at
+  stub_tofu
+  printf 'module "self" {\n  source = "./"\n}\n' >>"$REPO/main.tf"
+  mkdir -p "$REPO/examples/basic"
+  printf 'variable "x" {}\n' >"$REPO/examples/basic/main.tf"
+  gate --repo "$REPO"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c .roots <<<"$output")" = '[".","examples/basic"]' ]
+  [ "$(jq -c .validated <<<"$output")" = '[".","examples/basic"]' ]
+}
+
+@test "a .tf.json self-call does not make a directory a callee either (#1814)" {
+  stub_tofu
+  rm "$REPO/main.tf"
+  printf '{"module":{"self":{"source":"./"},"network":{"source":"./modules/network"}}}\n' >"$REPO/main.tf.json"
+  mkdir -p "$REPO/examples/basic"
+  printf 'variable "x" {}\n' >"$REPO/examples/basic/main.tf"
+  gate --repo "$REPO"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c .roots <<<"$output")" = '[".","examples/basic"]' ]
+}
+
+@test "a module cycle next to a separate root is validated, not skipped (#1814)" {
+  # modules/a and modules/b call each other and envs/prod calls neither: no
+  # root reaches the cycle, so both become roots and tofu init reports it
+  stub_tofu
+  rm -rf "$REPO/main.tf" "$REPO/modules/network"
+  mkdir -p "$REPO/modules/a" "$REPO/modules/b" "$REPO/envs/prod"
+  printf 'module "b" {\n  source = "../b"\n}\n' >"$REPO/modules/a/main.tf"
+  printf 'module "a" {\n  source = "../a"\n}\n' >"$REPO/modules/b/main.tf"
+  printf 'variable "region" {}\n' >"$REPO/envs/prod/main.tf"
+  gate --repo "$REPO"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c .roots <<<"$output")" = '["envs/prod","modules/a","modules/b"]' ]
+  grep -qF "$(jq -r .work_dir <<<"$output")/tree/modules/a" "$STUB_LOG"
+  grep -qF "$(jq -r .work_dir <<<"$output")/tree/modules/b" "$STUB_LOG"
+}
+
+@test "a cycle a root reaches is validated through that root only (#1814)" {
+  # envs/prod calls modules/a, which cycles with modules/b: the walk reaches
+  # both from the root, so neither is validated on its own
+  stub_tofu
+  rm -rf "$REPO/main.tf" "$REPO/modules/network"
+  mkdir -p "$REPO/modules/a" "$REPO/modules/b" "$REPO/envs/prod"
+  printf 'module "b" {\n  source = "../b"\n}\n' >"$REPO/modules/a/main.tf"
+  printf 'module "a" {\n  source = "../a"\n}\n' >"$REPO/modules/b/main.tf"
+  printf 'module "a" {\n  source = "../../modules/a"\n}\n' >"$REPO/envs/prod/main.tf"
+  gate --repo "$REPO"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c .roots <<<"$output")" = '["envs/prod"]' ]
 }
 
 @test "a local source in a .tf.json caller is honoured too (#1161)" {
