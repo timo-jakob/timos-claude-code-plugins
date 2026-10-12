@@ -532,11 +532,20 @@ EOF
 }
 
 @test "a missing required tool is an internal failure (exit 1), never a verdict (#1161)" {
-  rm "$BIN/rsync"
-  gate --repo "$REPO"
-  [ "$status" -eq 1 ]
-  [ -z "$output" ]
-  contains "$stderr" 'rsync not found'
+  # the list is read from the gate's own pre-check, so a tool dropped from it
+  # reds the equality below rather than shrinking what this case exercises
+  local tools t p
+  tools="$(sed -n 's/^for tool in \(.*\); do$/\1/p' "$GATE")"
+  [ "$tools" = "jq rsync find awk grep sed tail" ]
+  for t in $tools; do
+    p="$(readlink "$BIN/$t")"
+    rm "$BIN/$t"
+    gate --repo "$REPO"
+    [ "$status" -eq 1 ]
+    [ -z "$output" ]
+    contains "$stderr" "$t not found"
+    ln -s "$p" "$BIN/$t"
+  done
 }
 
 # no scratch copy survives an exit that printed no document naming it

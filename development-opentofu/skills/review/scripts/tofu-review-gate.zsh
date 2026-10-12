@@ -81,7 +81,7 @@ done
 [[ -d "$repo" ]] || { print -r -u2 -- "tofu-review-gate.zsh: not a directory: $repo"; exit 2 }
 
 local tool
-for tool in jq rsync find awk; do
+for tool in jq rsync find awk grep sed tail; do
   command -v "$tool" >/dev/null 2>&1 || {
     print -r -u2 -- "tofu-review-gate.zsh: $tool not found on PATH"
     exit 1
