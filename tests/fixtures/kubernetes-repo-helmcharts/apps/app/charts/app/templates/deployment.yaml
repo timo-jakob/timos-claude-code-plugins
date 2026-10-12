@@ -1,4 +1,4 @@
-# A copy of the clean variant's chart deployment (../../../../../kubernetes-repo/
+# A copy of the clean variant's chart deployment (../../../../../../kubernetes-repo/
 # charts/app/templates/deployment.yaml), kept clean to the same standard so the
 # only thing this fixture exercises is INFLATION: whether the overlay's
 # `helmCharts:` entry renders at all. Nothing here is deliberately broken.
