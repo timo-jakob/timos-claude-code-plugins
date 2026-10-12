@@ -590,6 +590,51 @@ variants() {
   contains "$output" 'sub-config'
 }
 
+@test "render: the consumed-root rules each keep their consumed base unrendered (#1611)" {
+  # The consumed-root pass decides which kustomize roots are built. Each base
+  # planted here has exactly ONE consumer, reached through one rule, so a rule
+  # deleted from the script leaves that base reading as unconsumed and adds a
+  # file to the rendered set. Every base is a ConfigMap, so a mutation shows up
+  # in that set rather than as a lint red.
+  prepare kubernetes-repo
+  local b
+  for b in base-quoted-double base-quoted-single base-component overlays/web/httpbin; do
+    mkdir -p "$W/kustomize/$b"
+    printf '%s\n' 'apiVersion: kustomize.config.k8s.io/v1beta1' 'kind: Kustomization' \
+      'resources:' '  - configmap.yaml' > "$W/kustomize/$b/kustomization.yaml"
+    printf '%s\n' 'apiVersion: v1' 'kind: ConfigMap' 'metadata:' "  name: ${b##*/}" \
+      'data:' '  planted: "#1611"' > "$W/kustomize/$b/configmap.yaml"
+  done
+  # the QUOTE-STRIPPING rule: the two quoted bases are consumed only through a
+  # double- and a single-quoted ref, so deleting either sed expression is seen
+  mkdir -p "$W/kustomize/overlays/quoted"
+  printf '%s\n' 'apiVersion: kustomize.config.k8s.io/v1beta1' 'kind: Kustomization' \
+    'resources:' '  - "../../base-quoted-double"' "  - '../../base-quoted-single'" \
+    > "$W/kustomize/overlays/quoted/kustomization.yaml"
+  # the SCHEME-ANCHORED skip: `httpbin` begins with `http` but is a local child
+  # ref, so a bare `http*` prefix would skip it and build the child standalone
+  printf '%s\n' 'apiVersion: kustomize.config.k8s.io/v1beta1' 'kind: Kustomization' \
+    'resources:' '  - httpbin' > "$W/kustomize/overlays/web/kustomization.yaml"
+  # the ROOTS-not-buildable rule: base-component is consumed only by a
+  # Component, which is never buildable, and the Component is pulled in by an
+  # overlay through `components:`
+  mkdir -p "$W/kustomize/components/bundle" "$W/kustomize/overlays/composed"
+  printf '%s\n' 'apiVersion: kustomize.config.k8s.io/v1alpha1' 'kind: Component' \
+    'resources:' '  - ../../base-component' > "$W/kustomize/components/bundle/kustomization.yaml"
+  printf '%s\n' 'apiVersion: kustomize.config.k8s.io/v1beta1' 'kind: Kustomization' \
+    'components:' '  - ../../components/bundle' > "$W/kustomize/overlays/composed/kustomization.yaml"
+  run run_gate
+  [ "$status" -eq 0 ]
+  run rendered_files
+  [ "$status" -eq 0 ]
+  [ "$output" = "helm_charts_app.yaml kustomize_kustomize_overlays_composed.yaml kustomize_kustomize_overlays_prod.yaml kustomize_kustomize_overlays_quoted.yaml kustomize_kustomize_overlays_web.yaml plain_argocd_app-of-apps.yaml plain_argocd_foreign-app.yaml plain_policies_kyverno_kyverno-test.yaml plain_policies_kyverno_require-registry.yaml " ]
+  # here, while $output still holds the listing — one needle per rule's base
+  lacks "$output" 'kustomize_kustomize_base-quoted-double'
+  lacks "$output" 'kustomize_kustomize_base-quoted-single'
+  lacks "$output" 'kustomize_kustomize_overlays_web_httpbin'
+  lacks "$output" 'kustomize_kustomize_base-component'
+}
+
 @test "render: a chart at the repository ROOT renders as helm_root.yaml (#1603)" {
   # `${d#./}` leaves a root chart's dirname as ".", which is neither empty nor a
   # usable slug or release name; the normalisation to "root" is asserted here
