@@ -4557,15 +4557,19 @@ shipping a manifest:
 
 ```text
 npm i -D vitest jsdom @testing-library/react @testing-library/dom @testing-library/jest-dom axe-core @playwright/test @lhci/cli
-# only the ones package.json does not already list (create-vite 8 and earlier
-# provide them; 9+ does not):
 npm i -D eslint-plugin-react-hooks eslint-plugin-react-refresh globals
 ```
 
-`@testing-library/dom` is a required peer of `@testing-library/react` 16.x, so it
-is never optional. `eslint-plugin-react-hooks`, `eslint-plugin-react-refresh` and
-`globals` are installed **only if absent** from `package.json`'s dependencies
-and devDependencies, so a create-vite app keeps its own pins. **If either
+Every package in **both** commands is installed **only if absent** from
+`package.json`'s dependencies and devDependencies, so an app keeps its own pins —
+create-vite 8 and earlier already list the second command's three (9+ does not),
+and a re-run on a bootstrapped repo already lists most of the first command's
+eight. Presence under any version range counts as listed: the step never compares
+a listed range against another package's peer requirements.
+`@testing-library/dom` is a required peer of `@testing-library/react` 16.x, so
+install it when absent. A command whose filtered list is empty is **skipped,
+never run bare** (a bare `npm i -D` is a full `npm install`, not a no-op); a
+skipped command is not a failure and never takes the restore branch below. **If either
 `npm i -D` exits non-zero**, render nothing from this step: restore
 `package.json` and the lockfile **from that snapshot** (never from `HEAD`, which
 would also drop §3k's edits), leave the `eslint.config.js` and `vitest.config.ts`
