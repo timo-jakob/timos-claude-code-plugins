@@ -711,6 +711,27 @@ YAML
   [ "$(verdict_lines "$output")" = "$(expected_all_ok | sed '$d'; printf 'gate: argocd FAILED\n')" ]
 }
 
+@test "clean: an owned app whose repoURL is scp-form git@host:owner/name is selected (#1612)" {
+  # The filter's `":$slug_lc"` arm, pinned on its own: this repoURL ends in
+  # `:owner/name`, never `/owner/name`, so only that arm selects it. The slug
+  # comes from REPO_SLUG, so no remote parsing is involved.
+  prepare kubernetes-repo
+  cat > "$W/argocd/injected.yaml" <<YAML
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: injected
+spec:
+  source:
+    repoURL: git@example.com:$SLUG.git
+    path: charts/injected-scp-missing
+YAML
+  run run_gate
+  [ "$status" -eq 1 ]
+  contains "$output" 'gate: argocd FAILED'
+  contains "$output" 'error: app-of-apps references missing path: charts/injected-scp-missing'
+}
+
 @test "clean: the COMMITTED app-of-apps.yaml is what the filter selects (#1199, #1603)" {
   # The injected-Application control above proves the filter is not too narrow,
   # but it does so with a document the TEST writes — so it says nothing about
@@ -1584,6 +1605,22 @@ EOF
   [ "$status" -eq 1 ]
   contains "$output" 'gate: argocd FAILED'
   contains "$output" 'error: app-of-apps references missing path: charts/app'
+
+  # the two SSH remote shapes resolve to the same slug (#1612). The scp form
+  # `git@host:owner/name` only splits on `/` once `origin="${origin//://}"`
+  # has turned its colon into a slash; without it the slug keeps the host, no
+  # Application is owned and the stage passes having checked no path
+  local remote
+  for remote in "git@github.com:$SLUG.git" "ssh://git@github.com/$SLUG.git"; do
+    (cd "$W" && git remote set-url origin "$remote")
+    run env -u GITHUB_ACTIONS -u GITHUB_REPOSITORY -u REPO_SLUG \
+      PATH="$IAC_SHIM:$IAC_BIN:$PATH" \
+      IAC_KUBECONFORM_BIN="$IAC_KUBECONFORM_BIN" IAC_KUBECONFORM_CACHE="$IAC_KUBECONFORM_CACHE" \
+      bash -c "cd '$W' && zsh '$GATE'"
+    [ "$status" -eq 1 ]
+    contains "$output" 'gate: argocd FAILED'
+    contains "$output" 'error: app-of-apps references missing path: charts/app'
+  done
 
   # GITHUB_REPOSITORY — what every Actions runner exports — is consulted
   # before the remote: no REPO_SLUG, no remote, and the slug still resolves
