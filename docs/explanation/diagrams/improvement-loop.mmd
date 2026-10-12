@@ -1,0 +1,34 @@
+flowchart TD
+    classDef human fill:#fde7c8,stroke:#b8741a,color:#222
+    classDef conductor fill:#dbe8fb,stroke:#3567b5,color:#222
+    classDef bot fill:#d9f2df,stroke:#2e8b4e,color:#222
+    classDef artifact fill:#eeeeee,stroke:#777,color:#222
+    classDef planned fill:#ffffff,stroke:#777,color:#444,stroke-dasharray:6 4
+
+    RUNS["Runs: refine, resolve, bootstrap,<br/>maintenance, on target repos<br/>and on this repo itself"]:::conductor
+
+    subgraph EVIDENCE["Evidence"]
+        TEL[("Telemetry: one record<br/>per run ending")]:::artifact
+        LOG[("Session logs,<br/>captured on request")]:::artifact
+        ISS[("Residue, debt and<br/>escalation issues")]:::artifact
+    end
+
+    ANALYSE["Analysis: today by a human<br/>reading the evidence"]:::human
+    RETRO["Retrospective skill and<br/>self-assessment (planned)"]:::planned
+    POS["Positions and pillars:<br/>what the family should do"]:::artifact
+    ISSUE["Improvement issues on<br/>this repo"]:::human
+    FIX["refine-issue, resolve-issue<br/>on this repo"]:::conductor
+    REL["Release: plugin versions bumped,<br/>marketplace updated"]:::bot
+    DOWN["Pickup: local refresh; target<br/>repos flag template drift"]:::artifact
+
+    RUNS --> TEL
+    RUNS --> LOG
+    RUNS --> ISS
+    TEL --> ANALYSE
+    LOG --> ANALYSE
+    ISS --> ANALYSE
+    TEL -.-> RETRO
+    LOG -.-> RETRO
+    RETRO -.-> ISSUE
+    POS -- "gaps between stated<br/>and delivered" --> ISSUE
+    ANALYSE --> ISSUE --> FIX --> REL --> DOWN --> RUNS

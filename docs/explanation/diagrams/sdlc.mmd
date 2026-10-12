@@ -1,0 +1,45 @@
+flowchart TD
+    classDef human fill:#fde7c8,stroke:#b8741a,color:#222
+    classDef conductor fill:#dbe8fb,stroke:#3567b5,color:#222
+    classDef agent fill:#e9ddf7,stroke:#7a4cb5,color:#222
+    classDef bot fill:#d9f2df,stroke:#2e8b4e,color:#222
+    classDef artifact fill:#eeeeee,stroke:#777,color:#222
+
+    subgraph SETUP["1 · Set up"]
+        BOOT["/development:bootstrap<br/>once: toolchain, CI, hooks, docs"]:::conductor
+        PERS["/development:define-personas<br/>docs/personas.md"]:::conductor
+    end
+
+    subgraph SPEC["2 · Specify"]
+        ISSUE["Issue or epic filed"]:::human
+        GATE{"story-readiness:<br/>ready to build?"}
+        REF["/development:refine-issue<br/>questions, rewrite, story spec"]:::conductor
+    end
+
+    subgraph BUILD["3 · Build"]
+        IMPL["/development:resolve-issue<br/>branch, implement, test gate"]:::conductor
+        LOOP["Review loop<br/>panel, fix, re-test"]:::agent
+    end
+
+    subgraph SHIP["4 · Ship"]
+        PR["PR by the Maintenance App,<br/>auto-merge armed"]:::bot
+        APPR["Approval: Approver bot<br/>or a human"]:::bot
+        MERGE[("Merged on green CI")]:::artifact
+    end
+
+    subgraph OPS["5 · Maintain"]
+        FIND[("Scanner findings, dependency<br/>PRs, coverage")]:::artifact
+        MAINT["/development:maintenance<br/>one PR per finding group"]:::conductor
+    end
+
+    BOOT -- "toolchain in place" --> ISSUE
+    ISSUE --> GATE
+    GATE -- "not ready" --> REF
+    REF -- "ready" --> GATE
+    PERS -. "personas, test data" .-> REF
+    GATE -- ready --> IMPL --> LOOP
+    LOOP -- converged --> PR
+    PR --> APPR --> MERGE
+    MERGE --> FIND
+    FIND --> MAINT --> PR
+    MAINT -. "work for a human:<br/>new issues" .-> ISSUE

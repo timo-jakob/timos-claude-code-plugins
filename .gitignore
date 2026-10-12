@@ -24,6 +24,8 @@ site/
 # pandoc docs manuals (built in CI, #754)
 /manual.pdf
 /manual.epub
+/workflows.pdf
+/workflows.epub
 /chapters.txt
 # pandoc's own stderr, kept so the gate can fail on a dropped character
 /pandoc-pdf.log

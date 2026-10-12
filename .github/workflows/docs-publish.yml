@@ -21,6 +21,7 @@ on:
       - "requirements-docs.txt"
       - "scripts/docs-nav-to-chapters.zsh"
       - "scripts/pandoc/**"
+      - "scripts/build-workflows-booklet.zsh"
       - "Dockerfile.docs"
       - ".github/workflows/docs-publish.yml"
 
@@ -56,30 +57,38 @@ jobs:
         # Same invocation as the docs.yml PR gate — pandoc/extra for fvextra, the
         # PDF-only Lua filter + header that set the page (A4, 25 mm margins) and
         # keep long paths, code lines and unmapped characters from breaking it,
-        # and the 11 pt body size the header's column width is chosen for.
+        # and the 11 pt body size the header's column width is chosen for, plus the
+        # diagram settings (rebased image paths, fonts.conf, figures.tex).
         # Both must stay in step with the gate, or what publishes is not what the
         # gate judged.
         run: |
           set -euo pipefail
           ./scripts/docs-nav-to-chapters.zsh > chapters.txt
           mapfile -t chapters < chapters.txt
-          docker run --rm -v "$PWD:/data" -w /data pandoc/extra:3.5 \
+          docker run --rm -e FONTCONFIG_FILE=/data/scripts/pandoc/fonts.conf \
+            -v "$PWD:/data" -w /data pandoc/extra:3.5 \
+            -f markdown+rebase_relative_paths \
             --pdf-engine=xelatex --toc \
             -V fontsize=11pt \
             --metadata title="Claude Code Plugins" \
             --metadata author="timos-claude-code-plugins" \
             --lua-filter=scripts/pandoc/break-long-tokens.lua \
             --include-in-header=scripts/pandoc/manual-header.tex \
+            --include-in-header=scripts/pandoc/figures.tex \
             -o manual.pdf "${chapters[@]}"
           docker run --rm -v "$PWD:/data" -w /data pandoc/extra:3.5 \
+            -f markdown+rebase_relative_paths \
             --toc --metadata title="Claude Code Plugins" \
             --metadata author="timos-claude-code-plugins" \
             -o manual.epub "${chapters[@]}"
 
+      - name: Build the workflows booklet (workflows.pdf + workflows.epub)
+        run: ./scripts/build-workflows-booklet.zsh
+
       - name: Stage the manuals into the site (/downloads/)
         run: |
           mkdir -p site/downloads
-          cp manual.pdf manual.epub site/downloads/
+          cp manual.pdf manual.epub workflows.pdf workflows.epub site/downloads/
 
       - name: Refresh the rolling docs-latest pre-release
         env:
@@ -88,10 +97,10 @@ jobs:
           set -euo pipefail
           notes="Rolling documentation build from ${GITHUB_SHA}. Downloadable PDF/ePub of the latest docs on main."
           if gh release view docs-latest >/dev/null 2>&1; then
-            gh release upload docs-latest manual.pdf manual.epub --clobber
+            gh release upload docs-latest manual.pdf manual.epub workflows.pdf workflows.epub --clobber
             gh release edit docs-latest --notes "$notes"
           else
-            gh release create docs-latest manual.pdf manual.epub \
+            gh release create docs-latest manual.pdf manual.epub workflows.pdf workflows.epub \
               --prerelease --title "Docs (latest)" --notes "$notes"
           fi
 

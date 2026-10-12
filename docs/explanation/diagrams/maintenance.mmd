@@ -1,0 +1,33 @@
+flowchart TD
+    classDef human fill:#fde7c8,stroke:#b8741a,color:#222
+    classDef conductor fill:#dbe8fb,stroke:#3567b5,color:#222
+    classDef agent fill:#e9ddf7,stroke:#7a4cb5,color:#222
+    classDef bot fill:#d9f2df,stroke:#2e8b4e,color:#222
+    classDef artifact fill:#eeeeee,stroke:#777,color:#222
+    classDef stop fill:#f8d7d7,stroke:#b33,color:#222
+
+    START(["/development:maintenance"]):::human
+    GATHER["Phases 1-4: detect, gather findings<br/>and coverage, one payload per target"]:::artifact
+    DISP{"Phase 6: dispatcher<br/>coverage high enough?"}
+    IMPROVE["Coverage improver PR first<br/>(Stage 0)"]:::agent
+    PLAN["Planner: one group<br/>per tool and agent"]:::agent
+
+    subgraph CYCLE["Phase 8: PR cycle"]
+        WORK["Work agent fixes<br/>in its own worktree"]:::agent
+        PR["PR by the Maintenance App"]:::bot
+        CI{"CI green?"}
+        CIFIX["CI fixer,<br/>at most 3 runs"]:::agent
+        APPR["Approver bot or a human,<br/>then merge and sync"]:::bot
+    end
+
+    ESC(["Escalated for<br/>human review"]):::stop
+    DONE(["Phases 9-10: summary,<br/>debt and follow-up issues"]):::artifact
+
+    START --> GATHER --> DISP
+    DISP -- no --> IMPROVE --> DISP
+    DISP -- yes --> PLAN --> WORK --> PR --> CI
+    CI -- no --> CIFIX --> CI
+    CIFIX -- "still red" --> ESC
+    CI -- yes --> APPR
+    APPR -- "next group" --> WORK
+    APPR -- "queue empty" --> DONE

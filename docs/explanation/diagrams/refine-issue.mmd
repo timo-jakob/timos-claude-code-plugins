@@ -1,0 +1,27 @@
+flowchart TD
+    classDef human fill:#fde7c8,stroke:#b8741a,color:#222
+    classDef conductor fill:#dbe8fb,stroke:#3567b5,color:#222
+    classDef agent fill:#e9ddf7,stroke:#7a4cb5,color:#222
+    classDef stop fill:#f8d7d7,stroke:#b33,color:#222
+    classDef ok fill:#d9f2df,stroke:#2e8b4e,color:#222
+
+    START(["/development:refine-issue N"]):::human
+    DIAG["Steps 0-1: fetch, resume a park,<br/>diagnose with story-readiness"]:::agent
+    TURN["Step 2: refiner turn<br/>explanations, scored questions,<br/>draft prose + story spec"]:::agent
+    ASK["Confident answers taken,<br/>the rest asked; you answer"]:::human
+    CONV{"Objections resolved,<br/>no questions left?"}
+    PARK(["Typed parked exit"]):::stop
+    APPR{"You approve the<br/>exact rewrite?"}
+    WB["Steps 2.5-3: spin out test cases,<br/>write prose + story-spec/v1"]:::conductor
+    REGATE{"Step 4: re-gate<br/>READY?"}
+    DONE(["Label removed,<br/>before/after comment"]):::ok
+    KEEP(["Label kept: loop again<br/>or stop as deferred"]):::stop
+
+    START --> DIAG --> TURN --> CONV
+    CONV -- no --> ASK --> TURN
+    ASK -- "can't converge yet" --> PARK
+    CONV -- yes --> APPR
+    APPR -- "no: revise" --> TURN
+    APPR -- yes --> WB --> REGATE
+    REGATE -- yes --> DONE
+    REGATE -- no --> KEEP

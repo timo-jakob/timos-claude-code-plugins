@@ -117,6 +117,17 @@ for the why and [Amend a C4 diagram](amend-a-c4-diagram.md) for the how.
   does not exist on `main` yet has no anchor to preserve, so any id is safe
   there. The pandoc job fails on an unresolved reference, so a missing id shows
   up as a red `docs` check.
+- **Diagrams are committed SVGs rendered from Mermaid.** Write the source as
+  `docs/<bucket>/diagrams/<name>.mmd`, run `./scripts/render-diagrams.zsh` to
+  render the `<name>.svg` beside it, commit both, and embed the SVG with a path
+  relative to the page: `![What it shows](diagrams/<name>.svg)`. The alt text
+  becomes the figure caption in the PDF. Never hand-edit an SVG. A fenced
+  `mermaid` block draws only on the site — the PDF and ePub print it as source —
+  so use one only where the source itself is the point, as the C4 pages do for
+  their currency check. Keep labels short and split a flowchart that grows past a
+  dozen steps; a tall diagram is scaled down to fit the page, and its text with
+  it. Inside a sequence diagram a `;` ends the statement, so do not use one in
+  message or note text.
 - **Line length is 120** (markdownlint MD013); tables and code blocks are
   exempt. A long URL only passes if it sits at the **end of the line** with no
   trailing text.

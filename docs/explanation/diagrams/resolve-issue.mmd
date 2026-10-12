@@ -1,0 +1,33 @@
+flowchart TD
+    classDef human fill:#fde7c8,stroke:#b8741a,color:#222
+    classDef conductor fill:#dbe8fb,stroke:#3567b5,color:#222
+    classDef agent fill:#e9ddf7,stroke:#7a4cb5,color:#222
+    classDef bot fill:#d9f2df,stroke:#2e8b4e,color:#222
+    classDef artifact fill:#eeeeee,stroke:#777,color:#222
+    classDef stop fill:#f8d7d7,stroke:#b33,color:#222
+
+    START(["/development:resolve-issue N"]):::human
+    EPIC(["Epic: each child through<br/>this flow, then a holistic test"]):::conductor
+    GATES{"Steps 0-0b: unblocked<br/>and READY?"}
+    STOP(["Stop: blocked or<br/>needs-refinement"]):::stop
+    BUILD["Steps 1-3: branch, load profile,<br/>implement, test gate"]:::conductor
+
+    subgraph LOOP["Step 3.5: review loop"]
+        PANEL["Panel + full gate<br/>on one tree"]:::agent
+        BLOCK{"Blockers?"}
+        FIX["Fix pass"]:::agent
+    end
+
+    ESC(["Escalate: branch pushed,<br/>no PR"]):::stop
+    SHIP["Steps 4-6: version bump, commit,<br/>PR by the Maintenance App"]:::bot
+    APPR["Approver bot or<br/>a human approves"]:::bot
+    MERGE(["Merged on green CI"]):::artifact
+
+    START -- epic --> EPIC
+    START -- issue --> GATES
+    GATES -- no --> STOP
+    GATES -- yes --> BUILD --> PANEL --> BLOCK
+    BLOCK -- yes --> FIX -- "next round" --> PANEL
+    BLOCK -- "none, on a full sweep" --> SHIP
+    FIX -- "budget spent" --> ESC
+    SHIP --> APPR --> MERGE
