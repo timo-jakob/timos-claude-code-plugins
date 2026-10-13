@@ -4358,11 +4358,22 @@ scaffold. After approval, in Step 3:
 
 ```text
 npm i -D orval msw                       # the generator + the mock library
-npm i @tanstack/react-query              # React overlay applies only — §3k.6's binding
+npm i @tanstack/react-query              # react-query targets only (rule below) — §3k.6's binding
 # add "generate": "orval" to package.json "scripts" (a §4c-class confirmed edit)
 npm ci && npm run generate               # produce src/api/generated/
 # commit src/api/generated/ ALONGSIDE the scaffold
 ```
+
+**The effective client mode** is `react-query` when the React overlay applies
+**and** either the Step 3 seeder JSON's `"client"` is `"react-query"` (a fresh
+seed), or it is `null` (an existing `orval.config.ts` left untouched) and
+**every** target in that existing config sets `client: "react-query"`. In every
+other case, a mixed-target existing config included, it is not, and §3k.6
+renders no binding. **§3k installs `@tanstack/react-query`** when the React
+overlay applies, `package.json` lacks the package, and either the effective
+client mode is `react-query` or **any** target in an existing config sets
+`client: "react-query"` — that target's generated code imports it. Otherwise
+§3k skips the install.
 
 The committed tree then compiles, the MSW suite is green, and the drift gate
 passes — a clean bootstrap PR.
@@ -4389,8 +4400,8 @@ disposition is explicit** — do not leave it to inference:
   (§3k only overwrites them on completion), so the repo keeps working configs —
   it is never left config-less by an abort.
 - **Keep and commit** whichever of §3k's `package.json`/lockfile edits landed —
-  the `orval` and `msw` devDependencies, the `generate` script and, when the
-  React overlay applies, the `@tanstack/react-query` dependency — so a re-run
+  the `orval` and `msw` devDependencies, the `generate` script and, when §3k
+  installed it, the `@tanstack/react-query` dependency — so a re-run
   after the cause is fixed completes §3k without re-installing.
 
 Record a **prominent Step 5 follow-up** quoting the command that failed and
@@ -4602,7 +4613,10 @@ for **both** files — an install failed, or either prompt resolved to skip — 
 §3k's scaffold with the commit disposition of §3k's activation-failure abort, from
 **Discard from the commit** on — it discards the generated client under
 `src/api/generated/` that the deferred §3k already produced, and §3k's
-`package.json` edits stay — and name the abort in the Step 5 item. §3k's machinery is then
+`package.json` edits stay — and record §3k's Step 5 follow-up naming the abort
+and the kept `package.json` edits: on an install failure it quotes the failed
+command, and on a prompt skip it offers rule 3's "merge manually" on the
+consumer+React diff to unblock. §3k's machinery is then
 absent, so if the install succeeded, render the **plain React** pair under the
 same rules instead. Because §3k wrote neither config, no committed config names
 the discarded `src/test/msw-setup.ts`. The prompt answers given against the
@@ -4837,8 +4851,9 @@ an existing `orval.config.ts` (stronger than idempotency rule 3), so
 `"client"` is then `null`. Read the existing config's `client:` values: if any target is not `"react-query"`,
 render **nothing** from this step — `hooks.ts` would re-export hooks generation
 never produced — and record a Step 5 item saying exactly this: *flip `client:`
-to `"react-query"` by hand in each target of `orval.config.ts`, re-run
-`npm run generate`, then re-run `/development:bootstrap` to add the binding.*
+to `"react-query"` by hand in each target of `orval.config.ts`, run
+`npm i @tanstack/react-query`, re-run `npm run generate`, then re-run
+`/development:bootstrap` to add the binding.*
 That re-run finds the State-D adoption gap above.
 
 **Prerequisites — installed before anything is rendered.** Mirroring §3k's
@@ -4851,8 +4866,11 @@ npm i -D @testing-library/react    # the component/hook test harness
 
 Outside State D's adoption gap (above), this step installs neither. `@tanstack/react-query` is installed in
 **§3k's activation**, beside `npm i -D orval msw` and before
-`npm run generate`, because a `react-query` client imports it and cannot
-compile without it. A failed install is therefore §3k's own activation failure:
+`npm run generate`, and only when a `react-query` target needs it (§3k states
+the rule), because a `react-query` client imports it and cannot compile without
+it. On the idempotency caveat's path (above) with no `react-query` target nothing
+imports it, so the install is skipped there and a failed install cannot abort
+§3k's scaffold. Where it runs, a failed install is §3k's own activation failure:
 §3k aborts its scaffold, and §3k.5 then finds the machinery absent and renders
 the plain React pair — so no committed config names a discarded file.
 `@testing-library/react` is §3k.5's install. Bootstrap still **writes no

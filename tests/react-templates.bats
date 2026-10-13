@@ -341,7 +341,7 @@ STEP_END='### 3k.6. React Query binding (a React repo consuming a spec — #958)
   section="$(react_step)"
   ends_with "$section" "$STEP_END"
   contains "$section" 'Resolve both files'"'"' rule-3 prompts (below) **before** rendering either.'
-  contains "$section" 'If §3k deferred and this step will not end with the consumer+React pair on disk for **both** files — an install failed, or either prompt resolved to skip — abort §3k'"'"'s scaffold with the commit disposition of §3k'"'"'s activation-failure abort, from **Discard from the commit** on — it discards the generated client under `src/api/generated/` that the deferred §3k already produced, and §3k'"'"'s `package.json` edits stay — and name the abort in the Step 5 item.'
+  contains "$section" 'If §3k deferred and this step will not end with the consumer+React pair on disk for **both** files — an install failed, or either prompt resolved to skip — abort §3k'"'"'s scaffold with the commit disposition of §3k'"'"'s activation-failure abort, from **Discard from the commit** on — it discards the generated client under `src/api/generated/` that the deferred §3k already produced, and §3k'"'"'s `package.json` edits stay — and record §3k'"'"'s Step 5 follow-up naming the abort and the kept `package.json` edits: on an install failure it quotes the failed command, and on a prompt skip it offers rule 3'"'"'s "merge manually" on the consumer+React diff to unblock.'
   lacks "$section" 'discard the ACL/MSW files and workflows'
   contains "$section" 'so if the install succeeded, render the **plain React** pair under the same rules instead.'
   contains "$section" 'Because §3k wrote neither config, no committed config names the discarded `src/test/msw-setup.ts`.'
@@ -544,7 +544,10 @@ BINDING_END='### 3l. Infrastructure-as-code repos (no application language) — 
   k="$(section_between '^### 3k\. ' '^### 3k\.5\. ')"
   ends_with "$k" '### 3k.5. React overlay (a JS/TS repo carrying the React marker — #957) '
   # before `npm run generate`, so a failed install takes §3k's own abort
-  contains "$k" 'npm i @tanstack/react-query # React overlay applies only — §3k.6'"'"'s binding'
+  contains "$k" 'npm i @tanstack/react-query # react-query targets only (rule below) — §3k.6'"'"'s binding'
+  lacks "$k" 'React overlay applies only — §3k.6'"'"'s binding'
+  contains "$k" '**The effective client mode** is `react-query` when the React overlay applies **and** either the Step 3 seeder JSON'"'"'s `"client"` is `"react-query"` (a fresh seed), or it is `null` (an existing `orval.config.ts` left untouched) and **every** target in that existing config sets `client: "react-query"`. In every other case, a mixed-target existing config included, it is not, and §3k.6 renders no binding.'
+  contains "$k" '**§3k installs `@tanstack/react-query`** when the React overlay applies, `package.json` lacks the package, and either the effective client mode is `react-query` or **any** target in an existing config sets `client: "react-query"` — that target'"'"'s generated code imports it. Otherwise §3k skips the install.'
   contains "$k" '**If an `npm i`, `npm ci` or `npm run generate` fails**'
   contains "$k" 'Record a **prominent Step 5 follow-up** quoting the command that failed and naming the kept `package.json` edits; when it is the spec package that cannot be resolved'
   contains "$k" '§3k.6 applies the same rewrite to its binding files'
@@ -565,7 +568,9 @@ BINDING_END='### 3l. Infrastructure-as-code repos (no application language) — 
   contains "$section" 'restore the pre-edit snapshot and record a Step 5 TODO'
   contains "$section" '**Idempotency caveat — the flag only shapes a fresh seed.**'
   contains "$section" 'if any target is not `"react-query"`, render **nothing** from this step'
-  contains "$section" '*flip `client:` to `"react-query"` by hand in each target of `orval.config.ts`, re-run `npm run generate`'
+  contains "$section" '*flip `client:` to `"react-query"` by hand in each target of `orval.config.ts`, run `npm i @tanstack/react-query`, re-run `npm run generate`, then re-run `/development:bootstrap` to add the binding.*'
+  contains "$section" 'and only when a `react-query` target needs it (§3k states the rule), because a `react-query` client imports it and cannot compile without it. On the idempotency caveat'"'"'s path (above) with no `react-query` target nothing imports it, so the install is skipped there and a failed install cannot abort §3k'"'"'s scaffold.'
+  contains "$section" 'Where it runs, a failed install is §3k'"'"'s own activation failure: §3k aborts its scaffold, and §3k.5 then finds the machinery absent and renders the plain React pair — so no committed config names a discarded file.'
   contains "$section" '`null` when an existing config is left untouched'
   contains "$section" 'and the JSON `"client"` is then `null`'
   contains "$section" 'Outside State D'"'"'s adoption gap (above), this step installs neither.'
