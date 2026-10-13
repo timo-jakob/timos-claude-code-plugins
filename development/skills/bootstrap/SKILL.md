@@ -4464,7 +4464,8 @@ The installed set (all committed together, once generation succeeds):
   pair over both itself. When a deferred §3k does not end with that pair on disk
   (§3k.5's install fails, or its rule-3 prompt on either file resolves to skip),
   §3k.5 aborts this scaffold as the skip below does (see §3k.5). No prompt here,
-  and no abort of its own. **If rule 3's prompt resolves to skip** (or the
+  and no skip-abort of its own — the activation-failure abort above still
+  applies to a deferred §3k, before §3k.5 reads what is on disk. **If rule 3's prompt resolves to skip** (or the
   no-answer default), do **not** proceed with §3k at all: committing the ACL/MSW
   scaffold beside the un-superseded base config would ship a red tree (no boundary
   gate, no MSW `setupFiles`). Treat it like the activation-failure abort above:
@@ -4592,6 +4593,12 @@ create-vite 8 and earlier already list the second command's three (9+ does not),
 and a re-run on a bootstrapped repo already lists most of the first command's
 eight. Presence under any version range counts as listed: the step never compares
 a listed range against another package's peer requirements.
+**A kept `vitest` must be Vitest 5.** After the install, read the version
+`package-lock.json` resolves for `vitest`; when its major is not 5, or the
+lockfile resolves none, treat it as `vitest.config.ts`'s rule-3 prompt resolving
+to skip (below) and name the upgrade to Vitest 5 in that Step 5 item —
+`src/test/setup.ts` declares Vitest 5's two-parameter `Matchers<R, T>`, which an
+older Vitest rejects under `tsc -b`.
 `@testing-library/dom` is a required peer of `@testing-library/react` 16.x, so
 install it when absent. A command whose filtered list is empty is **skipped,
 never run bare** (a bare `npm i -D` is a full `npm install`, not a no-op); a
