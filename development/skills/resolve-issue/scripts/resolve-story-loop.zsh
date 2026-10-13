@@ -601,13 +601,18 @@ while [[ $# -gt 0 ]]; do
   --status-file) _need_val "$1" $# "${2:-}"; status_file="$2"; shift 2 ;;
   --work-dir) _need_val "$1" $# "${2:-}"; work_dir="$2"; shift 2 ;;
   --issue) _need_val "$1" $# "${2:-}"; issue="$2"; shift 2 ;;
-  --telemetry-file) _need_val "$1" $# "${2:-}"; telemetry_file="$2"; shift 2 ;;
+  # A literal `null` sink value (#1761) is the absent flag, as for --repo-type and
+  # story-telemetry.zsh start: it is what `jq -r` prints for an unset sink in the
+  # `args` JSON, and forwarding it would write a file or dir named `null` in-repo.
+  --telemetry-file) _need_val "$1" $# "${2:-}"
+    [[ "$2" == "null" ]] || telemetry_file="$2"; shift 2 ;;
   # --telemetry-dir / --parent-run-id (#1226): forwarded to the emitter on every
   # terminal record, so a resolve-issue run's nested loop records land in the
   # sink the run was given and point back at the run that spawned them. Both go
   # through _need_val, so an empty value is a usage error rather than a record
   # silently written to the default sink or silently unparented.
-  --telemetry-dir) _need_val "$1" $# "${2:-}"; telemetry_dir="$2"; shift 2 ;;
+  --telemetry-dir) _need_val "$1" $# "${2:-}"
+    [[ "$2" == "null" ]] || telemetry_dir="$2"; shift 2 ;;
   --parent-run-id) _need_val "$1" $# "${2:-}"; parent_run_id="$2"; shift 2 ;;
   --no-review) no_review=1; shift ;;
   --resume) resume=1; shift ;;

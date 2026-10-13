@@ -88,13 +88,17 @@ rather than edited into it.
   `reference/promotion/step-4-sub-loop.md` shows neither. Without them the promotion record is unparented, and under a
   sink flag it lands in a different sink from the run's other records. When
   `start` failed there is no run file: pass only the sink flags from the `args`
-  output, with no `--parent-run-id`.
+  output, with no `--parent-run-id`. Omit any sink flag `args` reported as
+  `null`; never pass the string `null`.
 - **The loop does have a `--telemetry-dir` now.** Step 3's
   (`reference/promotion/step-3-select.md`) "the loop has no
   `--telemetry-dir` of its own, so the enrichment must not pass one either" is
   therefore reversed, by the same mirroring rule it states: pass the
   enrichment the same `--telemetry-file` **and** the same `--telemetry-dir`
-  the loop was given, and the two records share a sink. The enrichment itself
+  the loop was given, less any `null`, and the two records share a sink. Never
+  pass the enrichment the string `null`: the loop drops one (#1761), but the
+  emitter has no such guard and would take it as a path, writing a file named
+  `null` in the repo. The enrichment itself
   takes **no** `--parent-run-id`: it stays joined to the loop record it enriches
   by that record's `run_id`, and through it to the resolve-issue run.
 

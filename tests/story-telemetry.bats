@@ -814,6 +814,34 @@ advised() {
   grep -qF "the run's \`loop_args\` (Step 0) on every invocation" "$base/SKILL.md"
 }
 
+@test "#1761 every failed-start sink fallback in resolve-issue reference omits a null sink flag" {
+  # `args` reports an unset sink as JSON null, which `jq -r` prints as `null`.
+  # Positive pairing over every tracked reference shard: each fallback trigger
+  # needs the omit sentence beside it, and the trigger set is pinned so a new
+  # fallback site cannot pass vacuously.
+  local omit='Omit any sink flag `args` reported as `null`; never pass the string `null`.'
+  local -a found=()
+  local f flat triggers pinned
+  while IFS= read -r f; do
+    flat=$(tr -s '[:space:]' ' ' < "$REPO_ROOT/$f")
+    triggers=$(grep -oE 'from (the )?`args`' <<<"$flat" | grep -c '' || true)
+    (( triggers > 0 )) || continue
+    found+=("$f")
+    pinned=$(grep -oF -- "$omit" <<<"$flat" | grep -c '' || true)
+    (( pinned >= triggers )) || { echo "$f: $triggers fallback(s), $pinned omit sentence(s)"; return 1; }
+  done < <(git -C "$REPO_ROOT" ls-files 'development/skills/resolve-issue/reference/*.md')
+  local -a expected=(
+    development/skills/resolve-issue/reference/epic-telemetry.md
+    development/skills/resolve-issue/reference/promotion/step-8-status-files.md
+    development/skills/resolve-issue/reference/review-loop/step-2-invocation.md
+    development/skills/resolve-issue/reference/telemetry.md
+  )
+  [ "$(printf '%s\n' "${found[@]}" | LC_ALL=C sort)" = "$(printf '%s\n' "${expected[@]}" | LC_ALL=C sort)" ]
+  # the promotion enrichment calls the emitter directly, which has no null guard
+  flat=$(tr -s '[:space:]' ' ' < "$REPO_ROOT/development/skills/resolve-issue/reference/promotion/step-8-status-files.md")
+  contains "$flat" "the loop was given, less any \`null\`, and the two records share a sink. Never pass the enrichment the string \`null\`"
+}
+
 # --- round-1 fix pass: the internal exits, ~user --------------------------------
 
 # a PATH holding the shell and its basics but no jq — the CHILD's only, since

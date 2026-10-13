@@ -34,7 +34,8 @@ Call it once per invocation and re-read the file on re-entry, exactly as
 `reference/telemetry.md` step 2 says. Exit 2 is your own malformed call: fix it and re-run once. **Exit
 1** costs the epic record and nothing else: say so in one line, skip step 4's
 `emit`, and keep going — the children still get their own runs and the sink
-flags (from `args`), but no `--parent-run-id`.
+flags (from `args`), but no `--parent-run-id`. Omit any sink flag `args`
+reported as `null`; never pass the string `null`.
 
 ### 2. In E3 — start each child's run, parented to the epic run
 
@@ -54,7 +55,8 @@ the **child record's own** `parent_run_id` is the epic run. From there the child
 follows `reference/telemetry.md` steps 2–4 with its own run file: its loops take
 **its** `loop_args` (parented to the child run, never to the epic), and it emits
 its own record at its own ending. When the epic `start` failed, pass only the
-sink flags from `args`, with no `--parent-run-id`.
+sink flags from `args`, with no `--parent-run-id`. Omit any sink flag `args`
+reported as `null`; never pass the string `null`.
 
 - **A parallel sub-agent** gets, in its prompt, the epic `run_id` and the sink
   flags — the `child_start_args` list, verbatim — and runs that `start` itself
