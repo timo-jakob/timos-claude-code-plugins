@@ -258,23 +258,60 @@ checked_tools() {
   lacks "$stderr" 'still not GNU parallel'
 }
 
+# The language-app tool sets, written out (#1639): an exact set catches a tool
+# dropped from preflight.sh's lists AND one silently added to them, which a
+# contains/lacks spot check cannot. Sorted the way checked_tools sorts.
+LANG_APP_BATCH='gh git gitleaks jq pre-commit semgrep snyk-cli sonar-scanner'
+POLYGLOT_BATCH='gh git gitleaks golangci-lint jq parallel pre-commit ruff semgrep sonar-scanner swiftformat swiftlint trivy'
+
+# A docker stub that records each call and succeeds, so a toolchain that needs
+# the Docker daemon (sonarqube, trivy) passes check_docker and
+# check_docker_compose on any host instead of reaching the no-TTY install prompt.
+docker_stub() {
+  DOCKER_CALLS="$BATS_TEST_TMPDIR/docker-calls"
+  : > "$DOCKER_CALLS"
+  export DOCKER_CALLS
+  printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "$DOCKER_CALLS"\nexit 0\n' > "$STUB_BIN/docker"
+  chmod +x "$STUB_BIN/docker"
+}
+
+# The tools one run of the preflight script $1 checked, space-joined, for the
+# args after it. The run must exit 0; its stdout is kept in
+# $BATS_TEST_TMPDIR/last-run.out (a path, since this runs inside `$(…)`).
+checked_set() {
+  local p="$1"
+  shift
+  env PATH="$TEST_PATH" bash "$p" "$@" --assume-yes </dev/null > "$BATS_TEST_TMPDIR/last-run.out" 2>/dev/null || return 1
+  checked_tools "$(cat "$BATS_TEST_TMPDIR/last-run.out")" | tr '\n' ' ' | sed 's/ $//'
+}
+
+# The three exact-set checks, each on the preflight script given, so the
+# MUTATION test below runs the very checks the tests run. A sonarqube or trivy
+# run refuses to start without the docker stub on PATH.
+language_batch_exact() {
+  local p="$1"
+  shift
+  [ "$(checked_set "$p" --static-analysis sonarcloud --vulnerabilities snyk --languages "" --has-dockerfile false "$@")" = "$LANG_APP_BATCH" ]
+}
+sonarqube_batch_exact() {
+  [ -x "$STUB_BIN/docker" ] || return 1
+  [ "$(checked_set "$1" --static-analysis sonarqube --vulnerabilities snyk --languages "" --has-dockerfile false)" = "$LANG_APP_BATCH" ]
+}
+polyglot_exact() {
+  [ -x "$STUB_BIN/docker" ] || return 1
+  # a repo of its own holds the .claude-plugin marker, so no other run sees it
+  local repo="$BATS_TEST_TMPDIR/polyglot-repo"
+  mkdir -p "$repo/.claude-plugin"
+  printf '{}\n' > "$repo/.claude-plugin/marketplace.json"
+  [ "$(cd "$repo" && checked_set "$1" --static-analysis sonarcloud --vulnerabilities trivy --languages "swift python go javascript" --has-dockerfile false)" = "$POLYGLOT_BATCH" ]
+}
+
 @test "preflight without --iac-only still checks the language-app batch, and a bad --iac-only value is refused (#1605)" {
   preflight_stubs
-  run --separate-stderr env PATH="$TEST_PATH" bash "$PREFLIGHT" \
-    --static-analysis sonarcloud --vulnerabilities snyk --languages "" --has-dockerfile false --assume-yes
-  [ "$status" -eq 0 ]
-  local checked
-  checked="$(checked_tools "$output")"
-  contains $'\n'"$checked"$'\n' $'\npre-commit\n'
-  contains $'\n'"$checked"$'\n' $'\nsnyk-cli\n'
-  lacks $'\n'"$checked"$'\n' $'\nhelm\n'
+  # exactly the eight tools, for both spellings of the language-app path (#1639)
+  language_batch_exact "$PREFLIGHT"
   # an EXPLICIT false — what Step 4.5 passes on every language repo — is the same path
-  run --separate-stderr env PATH="$TEST_PATH" bash "$PREFLIGHT" \
-    --static-analysis sonarcloud --vulnerabilities snyk --languages "" --has-dockerfile false --iac-only false --assume-yes
-  [ "$status" -eq 0 ]
-  checked="$(checked_tools "$output")"
-  contains $'\n'"$checked"$'\n' $'\npre-commit\n'
-  lacks $'\n'"$checked"$'\n' $'\nhelm\n'
+  language_batch_exact "$PREFLIGHT" --iac-only false
   # a value merely CONTAINING a valid token is refused too — `kubernetesx` pins
   # the end anchor, `xkubernetes` the start anchor, `Kubernetes` the case — like
   # the exact `== "kubernetes"` the validation guards. The refusal's wording is
@@ -284,5 +321,57 @@ checked_tools() {
     run --separate-stderr env PATH="$TEST_PATH" bash "$PREFLIGHT" --iac-only "$v"
     [ "$status" -eq 1 ]
     contains "$stderr" '--iac-only must be'
+  done
+}
+
+@test "preflight with sonarqube checks the same eight tools and checks Docker instead of adding a formula (#1639)" {
+  preflight_stubs
+  docker_stub
+  sonarqube_batch_exact "$PREFLIGHT"
+  contains "$(cat "$BATS_TEST_TMPDIR/last-run.out")" 'Checking Docker'
+  contains $'\n'"$(cat "$DOCKER_CALLS")"$'\n' $'\ninfo\n'
+  contains $'\n'"$(cat "$DOCKER_CALLS")"$'\n' $'\ncompose version\n'
+}
+
+@test "preflight with trivy, four languages and the claude-plugin marker checks exactly thirteen tools (#1639)" {
+  preflight_stubs
+  docker_stub
+  polyglot_exact "$PREFLIGHT"
+}
+
+@test "MUTATION: each tool dropped from or added to the language-app lists is caught by its exact-set check (#1639)" {
+  preflight_stubs
+  docker_stub
+  # a mutated COPY of preflight.sh, with the lib.sh it sources beside it
+  mutant() {
+    local dir="$BATS_TEST_TMPDIR/mutant-$1"
+    mkdir -p "$dir"
+    cp "$REPO_ROOT/development/skills/bootstrap/scripts/lib.sh" "$dir/lib.sh"
+    case "$1" in
+    sonarqube-formula)
+      awk '/^[[:space:]]*# Language-specific$/ { print "\t[[ \"$STATIC_ANALYSIS\" == sonarqube ]] && required_brews+=(\"sonarqube-extra\")" } { print }' \
+        "$PREFLIGHT" > "$dir/preflight.sh" ;;
+    javascript-eslint)
+      sed 's/javascript) : ;;/javascript) required_brews+=("eslint") ;;/' "$PREFLIGHT" > "$dir/preflight.sh" ;;
+    *)
+      # (a)-(f): one tool deleted from the always-required list
+      sed "/^[[:space:]]*\"$1\"[[:space:]]*#/d" "$PREFLIGHT" > "$dir/preflight.sh" ;;
+    esac
+    printf '%s\n' "$dir/preflight.sh"
+  }
+  local m check copy
+  # control: an UNMUTATED copy passes, so a red below is the mutation, not the copy
+  copy="$(mutant unmutated-control)"
+  language_batch_exact "$copy"
+  for m in gh:language_batch_exact jq:language_batch_exact git:language_batch_exact \
+    gitleaks:language_batch_exact semgrep:language_batch_exact sonar-scanner:language_batch_exact \
+    sonarqube-formula:sonarqube_batch_exact javascript-eslint:polyglot_exact; do
+    check="${m#*:}"
+    copy="$(mutant "${m%%:*}")"
+    # the mutation took effect: exactly 1 means the files differ
+    run cmp -s "$PREFLIGHT" "$copy"
+    [ "$status" -eq 1 ]
+    run "$check" "$copy"
+    [ "$status" -ne 0 ]
   done
 }
