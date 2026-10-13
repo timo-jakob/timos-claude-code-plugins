@@ -438,7 +438,13 @@ section_between() {
   # an import-style change in client.ts must not turn the loop vacuous
   [ "$n" -ge 2 ]
   # the one domain-mapped seam §3k.6 documents, a `select` mapper rather than a hook
-  grep -qE '^export function selectOrderSummaries\(' "$f"
+  grep -qxF 'export function selectOrderSummaries(orders: Order[]): OrderSummary[] {' "$f"
+  grep -qxF 'import type { OrderSummary } from "./client";' "$f"
+  # the mapper stays the twin of client.ts's fetchOrderSummaries mapping
+  local map
+  map=$(grep -oE '\(\{ id: [^}]*\}\)' "$JS/contract-consumer/src/api/client.ts")
+  [ -n "$map" ]
+  grep -qF -- "$map" "$f"
   # a wrapper, exported inline or by name, would swallow the @deprecated warning
   run grep -qE '^(export )?(default )?(async )?(function|const|let|var) use' "$f"
   [ "$status" -eq 1 ]
@@ -587,8 +593,10 @@ WQN="webui-quality-noop.yml.tmpl"
   section="$(react_step)"
   ends_with "$section" "$STEP_END"
   for block in '# §3k machinery present → the consumer+React pair' '# §3k machinery absent → the plain React pair'; do
-    # the block runs from its comment to the closing fence
+    # the block runs from its comment to the next block's comment or the closing fence
+    contains "$section" "$block"
     body="${section#*"$block"}"
+    body="${body%%"# §3k machinery"*}"
     body="${body%%\`\`\`*}"
     for f in "${WEBUI_FILES[@]}"; do
       [ -f "$RX/$f" ] || { echo "missing: react/$f"; false; }
