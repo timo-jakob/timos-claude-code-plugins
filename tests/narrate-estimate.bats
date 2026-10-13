@@ -17,6 +17,7 @@ bats_require_minimum_version 1.5.0
 load assertions
 
 setup() {
+  export HOME="$BATS_TEST_TMPDIR/home"  # the user-level telemetry default stays out of the real ~/.claude (#1972)
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   SCRIPTS="$REPO_ROOT/development/skills/resolve-issue/scripts"
   N="$SCRIPTS/narrate-estimate.zsh"
@@ -229,6 +230,14 @@ needle_held() {
   needle_held "$RULE" 'printed without running the script.'
   needle_held "$RULE" 'is §1b'
   needle_held "$RULE" 'Omit it when §1b did not run or exited 3.'
+  # #1972: the sink rule — an explicit sink when the run has one; under a
+  # telemetry_dir the slug comes from the shared library, never composed by
+  # hand (its fold rule lives there alone); else the script's own user-level
+  # default
+  needle_held "$RULE" '`--sink` is the file the run'"'"'s loop records land in: the run'"'"'s `telemetry_file` when it has one.'
+  needle_held "$RULE" 'With a `telemetry_dir` instead, it is `<telemetry_dir>/<slug>.jsonl`, and the slug is the emitter'"'"'s own — never composed by hand'
+  needle_held "$RULE" 'tlm_repo_slug "$(tlm_derive_repo .)"'"'"' _ "<skill-base-dir>/../../scripts/telemetry/telemetry-sink-lib.zsh"`.'
+  needle_held "$RULE" 'With neither, omit `--sink`: the script'"'"'s default is the user-level `~/.claude/telemetry/<repo-slug>.jsonl` the records land in (#1972).'
   needle_held "$RULE" 'narrated once, immediately before their dispatch.'
   needle_held "$RULE" "Never schedule a wake-up or poll in order to re-narrate"
   needle_held "$RULE" "a narration is never a reason to hold a turn open."

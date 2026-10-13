@@ -1050,15 +1050,17 @@ _mutant_for() {
 }
 
 @test "the page does not present the shared sink as already wired into pipelines" {
-  # Only resolve-issue (with its review loop, #1226) and maintenance (#1228)
-  # forward --telemetry-dir; an unqualified page would send a reader of any
-  # other pipeline debugging the emitter or the reporting repo instead of
-  # reading the open caller-wiring gap.
+  # Not every pipeline forwards --telemetry-dir; an unqualified page would send
+  # a reader of a non-forwarding pipeline debugging the emitter or the
+  # reporting repo instead of reading the open caller-wiring gap. The set
+  # itself is stated once, in ARCHITECTURE.md (#1972 collapsed the three
+  # restatements that had drifted apart), so the page is pinned to the
+  # qualification and the pointer, never to a copy of the list.
   run cat "$REF_PAGE"
   [ "$status" -eq 0 ]
-  contains "$output" "Only resolve-issue (with its review loop) and maintenance forward"
-  contains "$output" "\`--telemetry-dir\` so far"
-  contains "$output" "refine-issue included"
+  contains "$output" "Not every pipeline forwards \`--telemetry-dir\` yet"
+  contains "$output" "Which pipelines forward \`--telemetry-dir\`"
+  contains "$output" "read an empty"
 }
 
 # ------------------------------------------------------------- registration

@@ -47,6 +47,7 @@ bats_require_minimum_version 1.5.0
 load resolve-issue-corpus
 
 setup() {
+  export HOME="$BATS_TEST_TMPDIR/home"  # the user-level telemetry default stays out of the real ~/.claude (#1972)
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   LOOP="$REPO_ROOT/development/skills/resolve-issue/scripts/resolve-story-loop.zsh"
   ESCALATE="$REPO_ROOT/development/skills/resolve-issue/scripts/build-escalation.zsh"

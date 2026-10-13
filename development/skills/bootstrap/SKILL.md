@@ -87,7 +87,8 @@ Supported flags:
 - `--telemetry-file PATH` / `--telemetry-dir DIR` — where this run's one
   telemetry record goes (#1229), in any position. Each takes a value — halt on a
   missing, empty or `--`-shaped one. Without either, the record lands in the
-  **target** repo's own `.claude/telemetry/telemetry.jsonl`. Precedence is the
+  **target** repo's own file in the user-level directory,
+  `~/.claude/telemetry/<repo-slug>.jsonl` (#1972). Precedence is the
   emitter's: `--telemetry-file` > `--telemetry-dir` > that default.
 
 ## Telemetry — stamp the run's start (#1229)

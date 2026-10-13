@@ -13,11 +13,19 @@
 # Usage:
 #   rollup-telemetry.zsh [FILE|DIR|-] [--repo OWNER/NAME] [--pipeline NAME] [--json] [-h|--help]
 #
-#   With no operand, reads the local default sink
-#   (.claude/telemetry/telemetry.jsonl, relative to the current directory) —
-#   silently treated as an empty stream if it does not exist yet (nothing has
-#   ever emitted). An explicit FILE/DIR operand that is missing or unreadable is
-#   a usage error instead: naming a path is a claim it exists.
+#   With no operand, reads the user-level default directory (#1972) — every
+#   *.jsonl directly in $HOME/.claude/telemetry/, where emit-telemetry.zsh
+#   writes by default — filtered to the CURRENT repo: an implicit --repo equal
+#   to the identity emit derives from the current directory (tlm_derive_repo,
+#   telemetry-sink-lib.zsh), so every worktree and clone of this repo is seen
+#   and no other repo's is. An explicit --repo overrides the implicit one. The
+#   records of other repos are excluded and counted on stderr. Outside a git
+#   work tree there is no current repo: no filter is applied, and stderr says
+#   so. A missing directory is an empty stream (nothing has ever emitted). The
+#   cwd-relative .claude/telemetry/ is never read this way — a legacy in-repo
+#   sink (v0 or v1) is read by naming it as a FILE or DIR operand. An explicit
+#   FILE/DIR operand that is missing or unreadable is a usage error instead:
+#   naming a path is a claim it exists.
 #
 #   FILE   a single JSONL stream.
 #   DIR    every *.jsonl directly inside it (non-recursive, plain files only —
@@ -123,9 +131,10 @@ trap '' PIPE
 local operand="" operand_seen="" repo_filter="" pipeline_filter="" json_mode=""
 local usage="usage: rollup-telemetry.zsh [FILE|DIR|-] [--repo OWNER/NAME] [--pipeline NAME] [--json] [-h|--help]
 
-With no operand, reads the local default sink .claude/telemetry/telemetry.jsonl
-(silently empty if it does not exist yet). DIR reads every *.jsonl directly
-inside it. - reads stdin. -- ends option parsing."
+With no operand, reads every *.jsonl in \$HOME/.claude/telemetry/ (silently empty
+if it does not exist yet), filtered to the current directory's repo unless --repo
+names one. DIR reads every *.jsonl directly inside it. - reads stdin. -- ends
+option parsing."
 
 _need_val() {  # $1 = flag, $2 = remaining arg count, $3 = candidate value
   [[ $2 -ge 2 ]] || {
@@ -167,14 +176,21 @@ done
 command -v jq >/dev/null 2>&1 || {
   print -ru2 -- "rollup-telemetry: jq not found on PATH"; exit 3 }
 
+source "${0:A:h}/telemetry-sink-lib.zsh" || {
+  print -ru2 -- "rollup-telemetry: cannot load telemetry-sink-lib.zsh"; exit 3 }
+
 # --- resolve the source list: an array of (label, readable-path) pairs -------
-# label drives v0 filename-first attribution; "-" (stdin) and the default
-# sink's own basename ("telemetry.jsonl") never match the two canonical legacy
-# filenames, so they fall straight through to shape-sniff, which is the correct
-# behaviour for a stream mixing several pipelines (the default sink, and any
-# (d) shared file).
+# label drives v0 filename-first attribution; "-" (stdin) and a per-repo slug
+# file never match the two canonical legacy filenames, so they fall straight
+# through to shape-sniff, which is the correct behaviour for a stream mixing
+# several pipelines (a default per-repo file, and any (d) shared file).
 
 typeset -a src_labels=() src_paths=()
+# user_level is "1" in no-operand mode, where the records of repos other than
+# the filtered one are counted on stderr (an explicit operand keeps its shipped
+# output); implicit_repo is the current directory's identity when it became
+# the filter.
+local user_level="" implicit_repo=""
 
 # Branch on whether an operand was GIVEN (operand_seen), never on whether its
 # VALUE is empty: an explicit `rollup-telemetry.zsh ""` (e.g. a wrapper script
@@ -183,12 +199,29 @@ typeset -a src_labels=() src_paths=()
 # fall through to the same existence check every other explicit operand does,
 # never silently read the default sink instead.
 if [[ -z "$operand_seen" ]]; then
-  local default_sink=".claude/telemetry/telemetry.jsonl"
-  if [[ -e "$default_sink" ]]; then
-    src_labels=("${default_sink:t}"); src_paths=("$default_sink")
+  user_level=1
+  local user_dir=""
+  user_dir=$(tlm_user_dir) || {
+    print -ru2 -- "rollup-telemetry: HOME is not set, so there is no user-level directory; name a FILE or DIR"
+    exit 3 }
+  # A missing directory leaves both arrays empty — an empty stream, not a usage
+  # error; naming no path at all is not a claim that one exists. The same
+  # (N-.) qualifiers as the DIR branch below, for the same reasons.
+  typeset -a userfiles=()
+  userfiles=("$user_dir"/*.jsonl(N-.))
+  local uf=""
+  for uf in "${userfiles[@]}"; do
+    src_labels+=("${uf:t}"); src_paths+=("$uf")
+  done
+  # The implicit filter: the identity emit would give a record written from
+  # here. Grouping is by the `repo` FIELD, never by filename — the slug mapping
+  # is many-to-one, so a file can hold another repo's records.
+  if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
+    implicit_repo="$(tlm_derive_repo .)"
+    [[ -n "$repo_filter" ]] || repo_filter="$implicit_repo"
+  elif [[ -z "$repo_filter" ]]; then
+    print -ru2 -- "note: not inside a git work tree, so no current repo — showing every repo in ${user_dir} (pass --repo to filter)"
   fi
-  # else: leave both arrays empty — an empty stream, not a usage error; naming
-  # no path at all is not a claim that one exists.
 elif [[ "$operand" == "-" ]]; then
   src_labels=("-"); src_paths=("-")
 elif [[ -d "$operand" ]]; then
@@ -395,6 +428,12 @@ local agg_prog='
       # reporting it as both counted and excluded would be self-contradictory.
       excluded_unknown: (if ($repo_filter | length) > 0 and $repo_filter_ci != "unknown"
                           then $unknown_repo_count else 0 end),
+      # Runs attributed to a NAMED repo other than the filtered one (the
+      # unknown bucket is counted above, never twice).
+      excluded_other: (if ($repo_filter | length) > 0
+                        then ([ $runs[] | select(.repo != "unknown"
+                                  and (.repo | ascii_downcase) != $repo_filter_ci) ] | length)
+                        else 0 end),
       groups: (
         if ($after_repo | length) == 0 then []
         elif ($pipeline_filter | length) > 0 then [ group($pipeline_filter; $selected) ]
@@ -408,16 +447,25 @@ agg=$(jq -c -s --arg repo_filter "$repo_filter" --arg pipeline_filter "$pipeline
 
 # --- render -------------------------------------------------------------------
 
-local is_empty="" excluded_unknown=""
+local is_empty="" excluded_unknown="" excluded_other="" filter_why=""
 is_empty=$(print -r -- "$agg" | jq -r '.empty')
 excluded_unknown=$(print -r -- "$agg" | jq -r '.excluded_unknown')
+excluded_other=$(print -r -- "$agg" | jq -r '.excluded_other')
+if [[ -n "$implicit_repo" && "$repo_filter" == "$implicit_repo" ]]; then
+  filter_why="filtered to ${repo_filter}, the current directory's repo"
+else
+  filter_why="--repo ${repo_filter} was given"
+fi
 
-# The exclusion note always goes to STDERR — in both text and --json mode —
+# The exclusion notes always go to STDERR — in both text and --json mode —
 # so a --json consumer's stdout stays a pure array while "never a silent
 # drop" still holds; a combined (non-`--separate-stderr`) capture still sees
-# it inline, same as before.
+# them inline, same as before.
 if [[ "$excluded_unknown" != "0" ]]; then
-  print -ru2 -- "note: excluded ${excluded_unknown} record(s) attributed to an unknown repo (--repo ${repo_filter} was given)"
+  print -ru2 -- "note: excluded ${excluded_unknown} record(s) attributed to an unknown repo (${filter_why})"
+fi
+if [[ -n "$user_level" && "$excluded_other" != "0" ]]; then
+  print -ru2 -- "note: excluded ${excluded_other} record(s) of other repos (${filter_why})"
 fi
 
 if [[ -n "$json_mode" ]]; then

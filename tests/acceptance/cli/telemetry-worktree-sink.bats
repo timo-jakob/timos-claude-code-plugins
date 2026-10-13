@@ -1,8 +1,7 @@
 #!/usr/bin/env bats
 #
-# Acceptance cases for "worktree telemetry lands in the main checkout's sink"
-# (#2138) — the `cli`-tooled test_cases[] of its story-spec, one test per
-# `tc-*` id:
+# Acceptance cases for "worktree telemetry survives the worktree" (#2138) — the
+# `cli`-tooled test_cases[] of its story-spec, one test per `tc-*` id:
 #
 #   tc-happy-worktree-default-sink-lands-in-main   #2155
 #   tc-happy-epic-join-across-worktrees            #2156
@@ -17,12 +16,18 @@
 #   tc-error-main-sink-unwritable                  #2165
 #   tc-error-repo-dir-not-a-directory              #2166
 #
+# #2138 landed worktree records in the main checkout's in-repo sink. #1972
+# superseded that with the user-level default, ~/.claude/telemetry/<slug>.jsonl,
+# which is outside every checkout, so each case keeps its intent against that
+# file: a worktree's records outlive the worktree, and every worktree of one
+# repo shares one sink.
+#
 # The use case: timo-platform-builder runs `/development:resolve-issue 741` (an
 # epic) from a Claude Code worktree session with no sink flag, and expects the
-# epic record, every child record and every review-loop record joined in the
-# main checkout's sink after the worktrees are removed. The model-driven run is
-# reduced to the deterministic steps it calls: `story-telemetry.zsh start` /
-# `emit`, and `emit-telemetry.zsh` for the loop's record. The default gate's
+# epic record, every child record and every review-loop record joined in one
+# sink after the worktrees are removed. The model-driven run is reduced to the
+# deterministic steps it calls: `story-telemetry.zsh start` / `emit`, and
+# `emit-telemetry.zsh` for the loop's record. The default gate's
 # tests/telemetry-emit.bats and tests/story-telemetry.bats cover the same
 # criteria.
 
@@ -35,12 +40,14 @@ setup() {
   DRIVER="$REPO_ROOT/development/skills/resolve-issue/scripts/story-telemetry.zsh"
   VALIDATE="$REPO_ROOT/development/scripts/telemetry/validate-telemetry.zsh"
   export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1
+  export HOME="$BATS_TEST_TMPDIR/home"  # the user-level telemetry default stays out of the real ~/.claude (#1972)
+  UDIR="$HOME/.claude/telemetry"
 
   MAIN="$BATS_TEST_TMPDIR/timos-claude-code-plugins"
   git init -q "$MAIN"
   git -C "$MAIN" remote add origin git@github.com:timo-jakob/timos-claude-code-plugins.git
   git -C "$MAIN" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m init
-  SINK="$MAIN/.claude/telemetry/telemetry.jsonl"
+  SINK="$UDIR/timo-jakob-timos-claude-code-plugins.jsonl"
   WT="$MAIN/.claude/worktrees/fancy-brewing-magpie"
   git -C "$MAIN" worktree add -q "$WT" -b worktree-fancy-brewing-magpie
 }
@@ -51,14 +58,15 @@ loop_emit() {  # $1 = --repo-dir, then extra flags
     --wall-s 412 --repo-dir "$rd" "$@"
 }
 
-@test "tc-happy-worktree-default-sink-lands-in-main: a worktree emit with no sink flag lands in the main checkout" {
+@test "tc-happy-worktree-default-sink-lands-in-main: a worktree emit with no sink flag lands in the user-level sink" {
   loop_emit "$WT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '' "$SINK")" -eq 1 ]
   [ ! -e "$WT/.claude/telemetry" ]
+  [ ! -e "$MAIN/.claude/telemetry" ]
 }
 
-@test "tc-happy-epic-join-across-worktrees: epic, child and loop records join in the main sink" {
+@test "tc-happy-epic-join-across-worktrees: epic, child and loop records join in the user-level sink" {
   local WB="$MAIN/.claude/worktrees/child-2138" ERUN="$BATS_TEST_TMPDIR/epic-run.json"
   local CRUN="$BATS_TEST_TMPDIR/story-run-2138.json" a
   git -C "$MAIN" worktree add -q "$WB" -b fix/2138-worktree-sink
@@ -83,10 +91,13 @@ loop_emit() {  # $1 = --repo-dir, then extra flags
   zsh "$VALIDATE" "$SINK" --require-records
 }
 
-@test "tc-corner-main-checkout-unchanged: an emit from the main checkout appends to the same path as before" {
+@test "tc-corner-main-checkout-unchanged: an emit from the main checkout lands in the same sink as one from a worktree" {
   loop_emit "$MAIN"
   [ "$status" -eq 0 ]
-  [ "$(grep -c '' "$SINK")" -eq 1 ]
+  loop_emit "$WT"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '' "$SINK")" -eq 2 ]
+  [ ! -e "$MAIN/.claude/telemetry" ]
 }
 
 @test "tc-corner-explicit-file-passes-through: --telemetry-file from a worktree writes only there" {
@@ -103,24 +114,26 @@ loop_emit() {  # $1 = --repo-dir, then extra flags
   [ ! -e "$SINK" ]
 }
 
-@test "tc-corner-not-a-git-repo-falls-back: a plain directory keeps its own default sink" {
+@test "tc-corner-not-a-git-repo-falls-back: a plain directory's record lands in the user-level file of its own name" {
   local D="$BATS_TEST_TMPDIR/scratch-notes"
   mkdir -p "$D"
   loop_emit "$D"
   [ "$status" -eq 0 ]
-  [ "$(grep -c '' "$D/.claude/telemetry/telemetry.jsonl")" -eq 1 ]
+  [ "$(grep -c '' "$UDIR/scratch-notes.jsonl")" -eq 1 ]
+  [ ! -e "$D/.claude/telemetry" ]
 }
 
-@test "tc-corner-bare-main-falls-back: a worktree of a bare repository keeps its own sink" {
+@test "tc-corner-bare-main-falls-back: a worktree of a bare repository lands in the user-level file of its own name" {
   local BARE="$BATS_TEST_TMPDIR/plugins.git" BW="$BATS_TEST_TMPDIR/plugins-wt"
   git clone -q --bare "$MAIN" "$BARE"
   git -C "$BARE" worktree add -q "$BW" -b bare-wt
   loop_emit "$BW"
   [ "$status" -eq 0 ]
-  [ "$(grep -c '' "$BW/.claude/telemetry/telemetry.jsonl")" -eq 1 ]
+  [ "$(grep -c '' "$UDIR/plugins-wt.jsonl")" -eq 1 ]
+  [ ! -e "$BW/.claude/telemetry" ]
 }
 
-@test "tc-corner-many-worktrees-resolves: 30 linked worktrees still resolve to the main checkout" {
+@test "tc-corner-many-worktrees-resolves: 30 linked worktrees still resolve to the one user-level sink" {
   local i
   for i in {1..29}; do git -C "$MAIN" worktree add -q "$BATS_TEST_TMPDIR/wt-$i" -b "wt-$i"; done
   loop_emit "$BATS_TEST_TMPDIR/wt-29"
@@ -128,7 +141,7 @@ loop_emit() {  # $1 = --repo-dir, then extra flags
   [ "$(grep -c '' "$SINK")" -eq 1 ]
 }
 
-@test "tc-corner-git-absent-falls-back: with git unavailable the worktree keeps its own sink" {
+@test "tc-corner-git-absent-falls-back: with git unavailable the record still lands, under the folder's own name" {
   local stub="$BATS_TEST_TMPDIR/nogit"
   mkdir -p "$stub"
   printf '#!/bin/sh\nexit 127\n' > "$stub/git"
@@ -136,8 +149,8 @@ loop_emit() {  # $1 = --repo-dir, then extra flags
   run --separate-stderr env PATH="$stub:$PATH" zsh "$EMIT" --pipeline resolve-issue --kind run \
     --outcome success --wall-s 412 --repo-dir "$WT"
   [ "$status" -eq 0 ]
-  [ "$(grep -c '' "$WT/.claude/telemetry/telemetry.jsonl")" -eq 1 ]
-  [ ! -e "$SINK" ]
+  [ "$(grep -c '' "$UDIR/fancy-brewing-magpie.jsonl")" -eq 1 ]
+  [ ! -e "$WT/.claude/telemetry" ]
 }
 
 @test "tc-corner-run-file-shape-unchanged: start with no sink flag writes only the parent pair" {
@@ -147,14 +160,14 @@ loop_emit() {  # $1 = --repo-dir, then extra flags
   [ "$(jq -c '.child_start_args' "$BATS_TEST_TMPDIR/r.json")" = "$(jq -c '["--parent-run-id", .run_id]' "$BATS_TEST_TMPDIR/r.json")" ]
 }
 
-@test "tc-error-main-sink-unwritable: a read-only main sink is exit 3 and nothing lands in the worktree" {
+@test "tc-error-main-sink-unwritable: a read-only user-level sink is exit 3 and nothing lands in the worktree" {
   [ "$(id -u)" -ne 0 ] || skip "chmod proves nothing as root"
-  mkdir -p "$MAIN/.claude/telemetry"
-  chmod 555 "$MAIN/.claude/telemetry"
+  mkdir -p "$UDIR"
+  chmod 555 "$UDIR"
   loop_emit "$WT"
-  chmod 755 "$MAIN/.claude/telemetry"
+  chmod 755 "$UDIR"
   [ "$status" -eq 3 ]
-  contains "$stderr" "cannot append to sink: $(cd "$MAIN" && pwd -P)/.claude/telemetry/telemetry.jsonl"
+  contains "$stderr" "$SINK"
   [ ! -e "$WT/.claude/telemetry" ]
 }
 

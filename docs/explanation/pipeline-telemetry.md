@@ -68,11 +68,21 @@ a missing record never means a run did not happen.
 
 ## Why it stays local
 
-The sink is `.claude/telemetry/telemetry.jsonl`. In a repo this family
-bootstrapped, that path is git-ignored — so it is never committed, never pushed,
-and never reaches a PR. That is an ignore *entry*, not a property of the file:
-if you adopted the plugins into an existing repo without bootstrap, add
-`.claude/telemetry/` to your `.gitignore` yourself — that entry specifically,
+The sink is `~/.claude/telemetry/<repo-slug>.jsonl`: one file per repo, in a
+directory beside Claude Code's own transcripts and **outside every checkout**.
+No git operation can commit it, push it or delete it, so it never reaches a PR,
+and removing a worktree or deleting a clone takes no record with it. Until #1972
+the sink sat inside the checkout a run started in, which in practice meant a
+worktree — and every record went when the worktree did, so the figures that
+survived were a lower bound, skewed against exactly the runs most worth
+measuring. All of one repo's checkouts now share one file, keyed by the repo's
+identity rather than by where it is checked out.
+
+An older in-repo sink, `.claude/telemetry/telemetry.jsonl`, may still exist, and
+so may one you point `--telemetry-dir` at inside a repo. In a repo this family
+bootstrapped that path is git-ignored. That is an ignore *entry*, not a property
+of the file: if you adopted the plugins into an existing repo without bootstrap,
+add `.claude/telemetry/` to your `.gitignore` yourself — that entry specifically,
 since ignoring all of `.claude/` would also untrack files meant to be committed,
 such as `.claude/approver-policy.md` — and check `git status` once before
 trusting the guarantee. The default is local

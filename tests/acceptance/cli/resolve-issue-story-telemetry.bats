@@ -38,6 +38,7 @@ bats_require_minimum_version 1.5.0
 load ../../assertions
 
 setup() {
+  export HOME="$BATS_TEST_TMPDIR/home"  # the user-level telemetry default stays out of the real ~/.claude (#1972)
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   SCRIPTS="$REPO_ROOT/development/skills/resolve-issue/scripts"
   DRIVER="$SCRIPTS/story-telemetry.zsh"
@@ -64,7 +65,7 @@ setup() {
 
   TEL="$BATS_TEST_TMPDIR/home/telemetry"          # ~/telemetry
   DIR_SINK="$TEL/timos-platform-tenant-service.jsonl"
-  DEFAULT_SINK="$R/.claude/telemetry/telemetry.jsonl"
+  DEFAULT_SINK="$HOME/.claude/telemetry/timos-platform-tenant-service.jsonl"  # #1972: user-level
   SCRATCH="$BATS_TEST_TMPDIR/scratch"             # the session scratchpad
   mkdir -p "$SCRATCH"
   RUN="$SCRATCH/story-run-412.json"               # keyed by the issue, as documented
@@ -137,7 +138,7 @@ run_id() { jq -r '.run_id' "$RUN"; }
   zsh "$VALIDATE" "$DIR_SINK" --require-records
 }
 
-@test "tc-happy-default-sink-parked-gate: no sink flags, NEEDS_REFINEMENT -> one parked record in the local default" {
+@test "tc-happy-default-sink-parked-gate: no sink flags, NEEDS_REFINEMENT -> one parked record in the user-level default" {
   step0 412
   ending '{"outcome":"gate-parked","dependency_precheck":"PROCEED","gate_verdict":"NEEDS_REFINEMENT","risk":"normal"}'
   [ "$status" -eq 0 ]

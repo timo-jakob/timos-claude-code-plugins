@@ -57,6 +57,7 @@ load prose-lockstep
 load resolve-issue-corpus
 
 setup() {
+  export HOME="$BATS_TEST_TMPDIR/home"  # the user-level telemetry default stays out of the real ~/.claude (#1972)
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   # #1503 split this skill into a conductor plus reference/*.md. Sweeps that
   # COUNT sites across the skill read the corpus; sweeps that pin WHERE a

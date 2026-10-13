@@ -21,6 +21,7 @@ bats_require_minimum_version 1.5.0
 load assertions
 
 setup() {
+  export HOME="$BATS_TEST_TMPDIR/home"  # the user-level telemetry default stays out of the real ~/.claude (#1972)
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   REF="$REPO_ROOT/development/skills/resolve-issue/reference"
   PROTO="$REF/review-loop.md"

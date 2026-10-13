@@ -793,8 +793,8 @@ carries over unchanged from the pre-contract shape is the rule that a
 unaffected.
 
 Build the payload from the run's summary and hand it to the emitter, which
-derives `repo`, mints the `run_id`, and appends to the shared git-ignored sink
-`.claude/telemetry/telemetry.jsonl`:
+derives `repo`, mints the `run_id`, and appends to the shared user-level sink
+`~/.claude/telemetry/<repo-slug>.jsonl`, outside every checkout (#1972):
 
 **Build the state with `jq`, never a hand-quoted heredoc**, and pass every field
 as a **plain string** (`--arg`) so `jq` owns the encoding. A hand-quoted state is
@@ -937,7 +937,8 @@ fi
   fail the run, and never retry it.
 - Records written **before** this retrofit stay in
   `.claude/telemetry/refine-issue.jsonl` in the pre-contract (v0) shape — they
-  are **not** migrated; child (e)'s rollup reads both.
+  are **not** migrated; child (e)'s rollup reads both, the old file through an
+  explicit operand.
 
 ## Guardrails
 

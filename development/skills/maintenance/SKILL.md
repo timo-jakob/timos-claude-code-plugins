@@ -89,8 +89,8 @@ Supported flags in `$ARGUMENTS`:
   `telemetry/v1` record goes (#1228; see *Telemetry — stamp the run's start*
   below). Each takes a value — halt on a missing, empty or `--`-shaped one, or
   on a repeated flag. Precedence is the emitter's: `--telemetry-file` >
-  `--telemetry-dir` (`DIR/<repo-slug>.jsonl`) > the repo's local
-  `.claude/telemetry/telemetry.jsonl`. Combinable with every other flag.
+  `--telemetry-dir` (`DIR/<repo-slug>.jsonl`) > the user-level
+  `~/.claude/telemetry/<repo-slug>.jsonl` (#1972). Combinable with every other flag.
 
 Anything else: surface the input to the user as "unrecognized
 arguments" and stop.

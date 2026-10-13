@@ -105,3 +105,10 @@
      A failed emit is likewise never fatal — telemetry never changes what the
      run does.
 <!-- /moved: suggestion-promotion-step-3 -->
+
+**Since #1972 the third sink determinant is the user-level default.** Where the
+span above names the local default `<repo-dir>/.claude/telemetry/telemetry.jsonl`,
+read `~/.claude/telemetry/<repo-slug>.jsonl`: `--repo-dir` no longer locates a
+file, it only derives `repo` — whose slug names the file. The rule is unchanged:
+a differing `--repo-dir` still mis-derives `repo` and so still lands the record
+in a different file, so mirror exactly what the loop was given.

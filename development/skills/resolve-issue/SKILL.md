@@ -759,8 +759,8 @@ loop emits one per escalation, plus a final one only if it later reaches a
 different terminal status — a run whose human declines the grant ends ON its
 last escalation, so that record is its final one, not an extra) to **the run's
 sink**: the `--telemetry-file` / `--telemetry-dir` it was given (the `loop_args`
-below, #1226), else the repo's shared local default
-`.claude/telemetry/telemetry.jsonl` (git-ignored, #566/#1004) — via the family's
+below, #1226), else the repo's shared user-level default
+`~/.claude/telemetry/<repo-slug>.jsonl` (outside every checkout, #1972) — via the family's
 shared emitter, with the loop's own detail under `payload` and its status
 narrowed onto the cross-pipeline `outcome` enum. Evidence for
 convergence rate, rounds-to-converge, and escalation breakdown. **A promotion

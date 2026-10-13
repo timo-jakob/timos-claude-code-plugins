@@ -36,6 +36,21 @@ setup() {
   S="$REPO_ROOT/development/scripts/telemetry/rollup-telemetry.zsh"
   ZSH_BIN="$(command -v zsh)"
   FIX="$REPO_ROOT/tests/fixtures/telemetry"
+
+  # The no-operand default reads $HOME/.claude/telemetry/ (#1972), so HOME is
+  # the test's own — never the maintainer's real records. Not created here.
+  export HOME="$BATS_TEST_TMPDIR/home"
+  UDIR="$HOME/.claude/telemetry"
+  export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1
+}
+
+# A git checkout whose remote makes its identity owner-a/proj — the repo
+# v1-multi-repo.jsonl's two named repos are measured against.
+_proj_checkout() {
+  local d="$BATS_TEST_TMPDIR/proj"
+  git init -q "$d"
+  git -C "$d" remote add origin "git@github.com:owner-a/proj.git"
+  printf '%s' "$d"
 }
 
 # jq-extract one field from a --json array's first (or Nth, 0-based) entry.
@@ -312,10 +327,102 @@ _jqfc() { echo "$1" | jq -c "$2"; }
   contains "$output" "only one input may be given"
 }
 
+# --------------------------------------- the user-level no-operand default (#1972)
+
+@test "no operand: reads every *.jsonl in ~/.claude/telemetry, filtered to the current repo" {
+  local d; d="$(_proj_checkout)"
+  mkdir -p "$UDIR"
+  # The records are split across two files on purpose: grouping is by the
+  # `repo` FIELD, never by filename.
+  head -n 3 "$FIX/v1-multi-repo.jsonl" > "$UDIR/owner-a-proj.jsonl"
+  tail -n +4 "$FIX/v1-multi-repo.jsonl" > "$UDIR/other.jsonl"
+  run --separate-stderr bash -c "cd '$d' && zsh '$S' --json"
+  [ "$status" -eq 0 ]
+  # exactly the owner-a/proj view an explicit --repo gives over the same records
+  local expected
+  expected="$(zsh "$S" --json --repo owner-a/proj "$FIX/v1-multi-repo.jsonl" 2>/dev/null)"
+  [ "$output" = "$expected" ]
+  contains "$stderr" "record(s) of other repos (filtered to owner-a/proj, the current directory's repo)"
+  contains "$stderr" "record(s) attributed to an unknown repo (filtered to owner-a/proj"
+}
+
+@test "no operand: the other-repo exclusion count is exact" {
+  local d; d="$(_proj_checkout)"
+  mkdir -p "$UDIR"
+  cp "$FIX/v1-multi-repo.jsonl" "$UDIR/mixed.jsonl"
+  local other
+  other="$(jq -s '[.[] | select((.kind // "run") == "run" and (.repo | type) == "string"
+            and (.repo | ascii_downcase) != "owner-a/proj")] | length' "$FIX/v1-multi-repo.jsonl")"
+  [ "$other" -gt 0 ]
+  run --separate-stderr bash -c "cd '$d' && zsh '$S' --json"
+  [ "$status" -eq 0 ]
+  contains "$stderr" "note: excluded $other record(s) of other repos"
+}
+
+@test "no operand: an explicit --repo overrides the implicit current-repo filter" {
+  local d; d="$(_proj_checkout)"
+  mkdir -p "$UDIR"
+  cp "$FIX/v1-multi-repo.jsonl" "$UDIR/mixed.jsonl"
+  run --separate-stderr bash -c "cd '$d' && zsh '$S' --json --repo owner-a/projected"
+  [ "$status" -eq 0 ]
+  local expected
+  expected="$(zsh "$S" --json --repo owner-a/projected "$FIX/v1-multi-repo.jsonl" 2>/dev/null)"
+  [ "$output" = "$expected" ]
+  contains "$stderr" "(--repo owner-a/projected was given)"
+  lacks "$stderr" "current directory's repo"
+}
+
+@test "no operand outside a git work tree: no filter, and stderr says so" {
+  local d="$BATS_TEST_TMPDIR/not-a-repo"
+  mkdir -p "$d" "$UDIR"
+  cp "$FIX/v1-multi-repo.jsonl" "$UDIR/mixed.jsonl"
+  run --separate-stderr bash -c "cd '$d' && GIT_CEILING_DIRECTORIES='$BATS_TEST_TMPDIR' zsh '$S' --json"
+  [ "$status" -eq 0 ]
+  local expected
+  expected="$(zsh "$S" --json "$FIX/v1-multi-repo.jsonl" 2>/dev/null)"
+  [ "$output" = "$expected" ]
+  contains "$stderr" "not inside a git work tree"
+  lacks "$stderr" "excluded"
+}
+
+@test "no operand with no ~/.claude/telemetry at all is an empty stream, exit 0" {
+  local d; d="$(_proj_checkout)"
+  run --separate-stderr bash -c "cd '$d' && zsh '$S'"
+  [ "$status" -eq 0 ]
+  [ "$output" = "no records" ]
+  [ ! -e "$UDIR" ]                             # reading never creates it
+}
+
+@test "no operand never reads the cwd-relative .claude/telemetry/" {
+  local d; d="$(_proj_checkout)"
+  mkdir -p "$d/.claude/telemetry"
+  cp "$FIX/v1-multi-repo.jsonl" "$d/.claude/telemetry/telemetry.jsonl"
+  run --separate-stderr bash -c "cd '$d' && zsh '$S'"
+  [ "$status" -eq 0 ]
+  [ "$output" = "no records" ]
+}
+
+@test "a legacy in-repo sink dir stays readable as an explicit DIR operand, v0 included" {
+  local legacy="$BATS_TEST_TMPDIR/checkout/.claude/telemetry"
+  mkdir -p "$legacy"
+  cp "$FIX/v0-review-loop.jsonl" "$legacy/review-loop.jsonl"
+  run --separate-stderr zsh "$S" --json "$legacy"
+  [ "$status" -eq 0 ]
+  [ "$(_jqf "$output" '.[0].pipeline')" = "review-loop" ]
+  [ "$(_jqf "$output" '.[0].run_count')" = "2" ]
+  [ "$(_jqfc "$output" '.[0].outcome_mix')" = '{"success":1,"parked":0,"escalated":1,"failed":0}' ]
+}
+
+@test "an empty HOME with no operand is an internal error, not a read of /.claude" {
+  run --separate-stderr env HOME= zsh "$S"
+  [ "$status" -eq 3 ]
+  contains "$stderr" "HOME is not set"
+}
+
 @test "a bare trailing -- with no operand falls through to the default sink, not a usage error" {
   local d="$BATS_TEST_TMPDIR/bare-dashdash"
   mkdir -p "$d"
-  run bash -c "cd '$d' && zsh '$S' --"
+  run --separate-stderr bash -c "cd '$d' && zsh '$S' --"
   [ "$status" -eq 0 ]
   [ "$output" = "no records" ]
 }
@@ -594,6 +701,22 @@ _jqfc() { echo "$1" | jq -c "$2"; }
   [ "$(_jqf "$output" '[.[] | select(.pipeline == "review-loop")] | length')" = "1" ]
   [ "$(_jqf "$output" '[.[] | select(.pipeline == "review-loop")][0].run_count')" = "4" ]
   [ "$(_jqf "$output" '[.[] | select(.pipeline == "review-loop")][0] | has("repo")')" = "false" ]
+}
+
+@test "ARCHITECTURE.md states the no-operand default this suite proves (#1972)" {
+  # The paragraph the no-operand tests implement, pinned on a
+  # whitespace-flattened haystack so a line wrap cannot defeat a needle: the
+  # user-level directory, the implicit current-repo filter, grouping by the
+  # field, the excluded-count note, the no-filter case, and that the in-repo
+  # directory is never read implicitly.
+  local arch
+  arch="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/ARCHITECTURE.md")"
+  contains "$arch" 'With no operand it reads the user-level default directory (#1972)'
+  contains "$arch" '**filtered to the current repo**'
+  contains "$arch" 'It groups by the `repo` **field**, never by filename'
+  contains "$arch" '`note: excluded N record(s) of other repos`'
+  contains "$arch" 'outside a git work tree there is no current repo, so no filter applies'
+  contains "$arch" 'The cwd-relative `.claude/telemetry/` is never read this way'
 }
 
 # ----------------------------------------------------------- --pipeline
@@ -935,19 +1058,19 @@ EOF
   [ "$output" = "no records" ]
 }
 
-@test "with no operand, a missing local default sink is an empty stream, not a usage error" {
+@test "with no operand, a missing user-level directory is an empty stream, not a usage error" {
   local d="$BATS_TEST_TMPDIR/no-sink-here"
   mkdir -p "$d"
-  run bash -c "cd '$d' && zsh '$S'"
+  run --separate-stderr bash -c "cd '$d' && GIT_CEILING_DIRECTORIES='$BATS_TEST_TMPDIR' zsh '$S'"
   [ "$status" -eq 0 ]
   [ "$output" = "no records" ]
 }
 
-@test "with no operand, an existing local default sink IS read" {
+@test "with no operand, an existing user-level file IS read" {
   local d="$BATS_TEST_TMPDIR/has-sink"
-  mkdir -p "$d/.claude/telemetry"
-  cp "$FIX/v0-review-loop.jsonl" "$d/.claude/telemetry/telemetry.jsonl"
-  run bash -c "cd '$d' && zsh '$S' --json"
+  mkdir -p "$d" "$UDIR"
+  cp "$FIX/v0-review-loop.jsonl" "$UDIR/review-loop.jsonl"
+  run --separate-stderr bash -c "cd '$d' && GIT_CEILING_DIRECTORIES='$BATS_TEST_TMPDIR' zsh '$S' --json"
   [ "$status" -eq 0 ]
   [ "$(_jqf "$output" '.[0].pipeline')" = "review-loop" ]
   [ "$(_jqf "$output" '.[0].run_count')" = "2" ]
@@ -1105,14 +1228,14 @@ EOF
   contains "$output" "failed to aggregate records"
 }
 
-@test "an unreadable default sink (no operand) is a read failure (exit 3), never a false 'no records'" {
+@test "an unreadable user-level file (no operand) is a read failure (exit 3), never a false 'no records'" {
   [ "$(id -u)" -ne 0 ] || skip "chmod proves nothing as root"
   local d="$BATS_TEST_TMPDIR/unreadable-sink"
-  mkdir -p "$d/.claude/telemetry"
-  cp "$FIX/v0-review-loop.jsonl" "$d/.claude/telemetry/telemetry.jsonl"
-  chmod 000 "$d/.claude/telemetry/telemetry.jsonl"
-  run bash -c "cd '$d' && zsh '$S'"
-  chmod 644 "$d/.claude/telemetry/telemetry.jsonl"
+  mkdir -p "$d" "$UDIR"
+  cp "$FIX/v0-review-loop.jsonl" "$UDIR/some-repo.jsonl"
+  chmod 000 "$UDIR/some-repo.jsonl"
+  run bash -c "cd '$d' && GIT_CEILING_DIRECTORIES='$BATS_TEST_TMPDIR' zsh '$S'"
+  chmod 644 "$UDIR/some-repo.jsonl"
   [ "$status" -eq 3 ]
   contains "$output" "failed to read a stream"
 }

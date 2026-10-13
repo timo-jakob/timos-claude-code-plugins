@@ -11,6 +11,7 @@ bats_require_minimum_version 1.5.0
 load assertions
 
 setup() {
+  export HOME="$BATS_TEST_TMPDIR/home"  # the user-level telemetry default stays out of the real ~/.claude (#1972)
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   D="$REPO_ROOT/development/skills/bootstrap/scripts/bootstrap-telemetry.zsh"
   SKILL="$REPO_ROOT/development/skills/bootstrap/SKILL.md"
@@ -26,8 +27,9 @@ setup() {
   git -C "$A" remote add origin git@github.com:acme/alpha.git
   git -C "$B" init -q
   git -C "$B" remote add origin git@github.com:nils/legacy-billing.git
-  SINK_A="$A/.claude/telemetry/telemetry.jsonl"
-  SINK_B="$B/.claude/telemetry/telemetry.jsonl"
+  # #1972: the user-level default sink, one file per resolved identity
+  SINK_A="$HOME/.claude/telemetry/acme-alpha.jsonl"
+  SINK_B="$HOME/.claude/telemetry/nils-legacy-billing.jsonl"
 
   S="$BATS_TEST_TMPDIR/scratch"
   mkdir -p "$S"
@@ -134,7 +136,7 @@ lines() { [ -f "$1" ] && wc -l < "$1" | tr -d ' ' || echo 0; }
   [ "$(jq -r .outcome "$SINK_B")" = "parked" ]
 }
 
-@test "siting: called from repo A with --repo-dir B, the record lands in B's sink with B's repo" {
+@test "siting: called from repo A with --repo-dir B, the record carries B's repo and lands in B's file" {
   mkdir -p "${SINK_A%/*}"
   printf '%s\n' '{"existing":"line"}' > "$SINK_A"
   cp "$SINK_A" "$S/a-before"
@@ -148,7 +150,7 @@ lines() { [ -f "$1" ] && wc -l < "$1" | tr -d ' ' || echo 0; }
   cmp -s "$SINK_A" "$S/a-before"
 }
 
-@test "siting: from a linked worktree of B, the record lands in B's main checkout" {
+@test "siting: from a linked worktree of B, the record carries B's identity and lands in B's file" {
   git -C "$B" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m init
   git -C "$B" worktree add -q "$BATS_TEST_TMPDIR/legacy-billing-wt" -b chore/bootstrap-gap-fill
   start
@@ -166,14 +168,15 @@ lines() { [ -f "$1" ] && wc -l < "$1" | tr -d ' ' || echo 0; }
   start
   run --separate-stderr "$ZSH" "$D" emit --run-file "$RUN" --state "$STATE" --repo-dir "$F"
   [ "$status" -eq 0 ]
-  [ "$(lines "$F/.claude/telemetry/telemetry.jsonl")" = "1" ]
-  [ "$(jq -r .repo "$F/.claude/telemetry/telemetry.jsonl")" = "empty-folder" ]
+  [ "$(lines "$HOME/.claude/telemetry/empty-folder.jsonl")" = "1" ]
+  [ "$(jq -r .repo "$HOME/.claude/telemetry/empty-folder.jsonl")" = "empty-folder" ]
   mkdir -p "$A/nested-folder"
   start
   run --separate-stderr "$ZSH" "$D" emit --run-file "$RUN" --state "$STATE" --repo-dir "$A/nested-folder"
-  [ "$(lines "$A/nested-folder/.claude/telemetry/telemetry.jsonl")" = "1" ]
-  [ "$(jq -r .repo "$A/nested-folder/.claude/telemetry/telemetry.jsonl")" = "nested-folder" ]
-  [ ! -e "$SINK_A" ]
+  [ "$(lines "$HOME/.claude/telemetry/nested-folder.jsonl")" = "1" ]
+  [ "$(jq -r .repo "$HOME/.claude/telemetry/nested-folder.jsonl")" = "nested-folder" ]
+  [ ! -e "$SINK_A" ]                  # never borrowed the enclosing repo's identity
+  [ ! -e "$F/.claude" ] && [ ! -e "$A/nested-folder/.claude" ]
 }
 
 @test "sink precedence: --telemetry-file beats --telemetry-dir beats the target's default" {

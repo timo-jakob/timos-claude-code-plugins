@@ -27,6 +27,7 @@ load assertions
 load resolve-issue-corpus
 
 setup() {
+  export HOME="$BATS_TEST_TMPDIR/home"  # the user-level telemetry default stays out of the real ~/.claude (#1972)
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   # #1503 split this skill into a conductor plus reference/*.md. A sweep that
   # counts or reads ACROSS the skill takes the corpus; one that pins WHERE a

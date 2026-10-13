@@ -18,6 +18,7 @@ bats_require_minimum_version 1.5.0
 load assertions
 
 setup() {
+  export HOME="$BATS_TEST_TMPDIR/home"  # the user-level telemetry default stays out of the real ~/.claude (#1972)
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   E="$REPO_ROOT/development/skills/resolve-issue/scripts/estimate-step.zsh"
   K="$BATS_TEST_TMPDIR/telemetry.jsonl"
@@ -198,14 +199,36 @@ est() { run --separate-stderr zsh "$E" --sink "$K" "$@"; }
   [ "$stderr" = "estimate-step: 0 samples, fewer than 5 — withheld" ]
 }
 
-@test "the default sink is .claude/telemetry/telemetry.jsonl under the current directory" {
-  mkdir -p "$BATS_TEST_TMPDIR/proj/.claude/telemetry"
+@test "the default sink is the current repo's file in ~/.claude/telemetry (#1972)" {
+  # The same identity and slug emit-telemetry.zsh writes under: a linked
+  # worktree of a repo whose origin is acme/widget reads acme-widget.jsonl.
+  export HOME="$BATS_TEST_TMPDIR/home"
+  export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1
+  local proj="$BATS_TEST_TMPDIR/proj" wt="$BATS_TEST_TMPDIR/proj-wt"
+  git init -q "$proj"
+  git -C "$proj" remote add origin git@github.com:acme/widget.git
+  git -C "$proj" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m init
+  git -C "$proj" worktree add -q "$wt"
+  mkdir -p "$HOME/.claude/telemetry"
   panel_recs 600 660 700 720 900 1200
-  cp "$K" "$BATS_TEST_TMPDIR/proj/.claude/telemetry/telemetry.jsonl"
-  cd "$BATS_TEST_TMPDIR/proj"
+  cp "$K" "$HOME/.claude/telemetry/acme-widget.jsonl"
+  # a legacy in-repo sink is no longer read by default
+  mkdir -p "$wt/.claude/telemetry"
+  printf '%s\n' '{"not":"read"}' > "$wt/.claude/telemetry/telemetry.jsonl"
+  cd "$wt"
   run --separate-stderr zsh "$E" --step panel
   [ "$status" -eq 0 ]
   jq -e '.n == 6' <<< "$output"
+}
+
+@test "with no user-level file for the current repo, the default is withheld, exit 1" {
+  export HOME="$BATS_TEST_TMPDIR/home"
+  mkdir -p "$BATS_TEST_TMPDIR/empty-proj"
+  cd "$BATS_TEST_TMPDIR/empty-proj"
+  run --separate-stderr zsh "$E" --step panel
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  [ "$stderr" = "estimate-step: 0 samples, fewer than 5 — withheld" ]
 }
 
 @test "an unreadable sink is exit 3, nothing on stdout" {
