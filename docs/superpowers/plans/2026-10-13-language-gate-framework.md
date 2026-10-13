@@ -1,8 +1,9 @@
 # Language gate framework (#2508) Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or
-> superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for
-> tracking.
+> **How this plan is implemented:** through `/development:resolve-issue 2508`, with this repo's claude-plugin
+> resolve profile, and never through a superpowers execution skill. resolve-issue's implementation step follows the
+> tasks below in order. Its readiness gate, self-check, whole-suite gate, review loop and `/development:open-pr`
+> apply unchanged.
 
 **Goal:** Ship `scripts/gate.zsh`, the language-path gate framework. It provides the verdict, skip, exit and
 module contract, plus the five shared stages: hygiene, yaml, secrets, sast and vuln-scan.
