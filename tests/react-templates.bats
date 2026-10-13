@@ -341,7 +341,8 @@ STEP_END='### 3k.6. React Query binding (a React repo consuming a spec — #958)
   section="$(react_step)"
   ends_with "$section" "$STEP_END"
   contains "$section" 'Resolve both files'"'"' rule-3 prompts (below) **before** rendering either.'
-  contains "$section" 'If §3k deferred and this step will not end with the consumer+React pair on disk for **both** files — an install failed, or either prompt resolved to skip — abort §3k'"'"'s scaffold exactly as §3k'"'"'s own overwrite-skip abort does: discard the ACL/MSW files and workflows, commit the seeded `orval.config.ts` and its transformer, and name the abort in the Step 5 item.'
+  contains "$section" 'If §3k deferred and this step will not end with the consumer+React pair on disk for **both** files — an install failed, or either prompt resolved to skip — abort §3k'"'"'s scaffold with the commit disposition of §3k'"'"'s activation-failure abort, from **Discard from the commit** on — it discards the generated client under `src/api/generated/` that the deferred §3k already produced, and §3k'"'"'s `package.json` edits stay — and name the abort in the Step 5 item.'
+  lacks "$section" 'discard the ACL/MSW files and workflows'
   contains "$section" 'so if the install succeeded, render the **plain React** pair under the same rules instead.'
   contains "$section" 'Because §3k wrote neither config, no committed config names the discarded `src/test/msw-setup.ts`.'
   contains "$section" 'The prompt answers given against the consumer+React diff do **not** carry over to the plain pair: a file whose prompt resolved to skip **stays skipped**, with its skip consequences below (for `vitest.config.ts`, `src/test/setup.ts`, the example test and the WebUI gate set withheld); a file whose prompt resolved to overwrite gets a **fresh** rule-3 prompt showing the plain React diff, since that consent was for different content; a known predecessor of the plain variant is overwritten without a prompt.'
@@ -545,7 +546,7 @@ BINDING_END='### 3l. Infrastructure-as-code repos (no application language) — 
   # before `npm run generate`, so a failed install takes §3k's own abort
   contains "$k" 'npm i @tanstack/react-query # React overlay applies only — §3k.6'"'"'s binding'
   contains "$k" '**If an `npm i`, `npm ci` or `npm run generate` fails**'
-  contains "$k" 'Record a **prominent Step 5 follow-up** quoting the command that failed; when it is the spec package that cannot be resolved'
+  contains "$k" 'Record a **prominent Step 5 follow-up** quoting the command that failed and naming the kept `package.json` edits; when it is the spec package that cannot be resolved'
   contains "$k" '§3k.6 applies the same rewrite to its binding files'
   contains "$section" 'In State D the binding is an **adoption gap** when the trigger holds, every `orval.config.ts` target is `client: "react-query"`, and `src/api/hooks.ts` is missing'
   contains "$section" 'snapshot `package.json`, the lockfile and `src/api/generated/` as §3k.5 snapshots its install, install `@tanstack/react-query` when `package.json` lacks it, then `npm ci && npm run generate` and commit its output with the binding; if either fails, restore all three from that snapshot (never from `HEAD`), render nothing, and record a Step 5 item quoting the failed command.'
