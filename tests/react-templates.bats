@@ -228,6 +228,7 @@ has() {
 @test "react: the example test renders a component it defines and queries it by role" {
   local t="$RX/src/Greeting.test.tsx"
   has "$t" 'import { render, screen } from "@testing-library/react";'
+  has "$t" 'import { describe, expect, it } from "vitest";'
   # self-contained: the component is defined in the test file, never Vite's App
   grep -qE '^function Greeting\(' "$t"
   has "$t" 'render(<Greeting name="Ada" />);'
