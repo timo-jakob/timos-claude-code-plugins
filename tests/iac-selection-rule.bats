@@ -285,7 +285,7 @@ selection_gaps() {
 @test "the IaC-selection sweep skips a site that only MENTIONS the flag (#1432)" {
   # Roster members that reference `--iac-only` without stating the selection
   # condition — among them the checker's header (quoting §3l on what its JSON
-  # does not carry), the how-to (naming the flag that requires the six contexts)
+  # does not carry), the how-to (naming the flag that requires the single `gate` context)
   # and, since #1605, preflight.sh (choosing its tool list by the flag) — are
   # correctly outside the gate. The first two are pinned as their own case so a gate
   # that widened to every roster member reds here rather than forcing a

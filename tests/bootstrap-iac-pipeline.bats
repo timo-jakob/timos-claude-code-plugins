@@ -583,6 +583,19 @@ EOF
   lacks "$output" 'sonarcloud'
 }
 
+@test "branch-protection --iac-only on any other HTTP failure exits 1 before the merge settings (#1642)" {
+  # Step 5 reads "exited 1 ... or a failed API call" as "neither the rule nor the
+  # merge settings were applied" — so the *) arm must exit 1 before the PATCH
+  protection_stubs
+  CURL_HTTP_STATUS=422 run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
+    --has-dockerfile false --has-codeql false \
+    --iac-only kubernetes --default-branch main
+  [ "$status" -eq 1 ]
+  contains "$output" 'Branch protection failed (HTTP 422)'
+  [ "$(wc -l < "$CURL_DATA")" -eq 1 ]
+  lacks "$(cat "$CURL_DATA")" 'allow_auto_merge'
+}
+
 @test "branch-protection --iac-only ignores every language-app context PRODUCER (#1154)" {
   # the flag guards three of them — the visibility case, the `image` context and
   # the CodeQL matrix — but a test passing --has-dockerfile false --has-codeql
@@ -1305,6 +1318,8 @@ EOF
   protect="$(sed -E 's/^[[:space:]]*#[[:space:]]?//' "$PROTECT" | tr -s '[:space:]' ' ')"
   contains "$protect" 'no other `primary:` recorded'
   contains "$protect" 'settles it false whatever the marker says'
+  # #1605's second entry arm, in SETUP.md.tmpl's wording (#1642)
+  contains "$protect" "or bootstrap's explicit empty-GitOps-repo confirmation"
   setup="$(tr -s '[:space:]' ' ' \
     < "$REPO_ROOT/development/skills/bootstrap/templates/common/SETUP.md.tmpl")"
   contains "$setup" 'no application language and no other `primary:` recorded'
@@ -1345,8 +1360,13 @@ EOF
   # "approver-policy") would then be satisfied by unrelated prose with the block
   # deleted outright
   ends_with "$block" '## Important Rules '
-  # the LIST as written, not the bare names
-  contains "$block" 'The required `gate` check shows as "expected" in Settings'
+  # the LIST as written, not the bare names. Its first bullet claims the rule is
+  # valid, so it is qualified like its siblings: after any exit 1 or a 403 the
+  # rule is an outstanding item, and the bare bullet would contradict it (#1642);
+  # a closed "#1606 refusal" list would read a #1641 refusal as applied (#1641)
+  contains "$block" '(only when Step 4b applied the rule — not after it exited 1, whatever its message, or hit its 403 fallback) The required `gate` check shows as "expected" in Settings'
+  lacks "$block" 'not after its #1606 refusal or its 403'
+  lacks "$block" '```text - The required `gate` check'
   contains "$block" 'no CodeQL'
   # the local gate is the hook's command, and a failed wiring is an outstanding item
   contains "$block" 'The local gate is `make lint`, the same command CI'"'"'s `gate` runs'
@@ -1359,6 +1379,9 @@ EOF
   # exits 0, so an unconditional "not outstanding" claim leaves a no-admin repo
   # unprotected with no TODO
   contains "$block" 'unless Step 4b hit its 403 fallback'
+  # …and on a 403 the script exits before the merge-settings PATCH, so those are
+  # outstanding too, as the #1606 refusal arm already says (#1642)
+  contains "$block" 'and so are the two repo merge settings (Allow auto-merge, Automatically delete head branches)'
   # the Dockerfile case the Step 2 IaC plan variant delegates here
   contains "$block" 'That image is NOT scanned in CI'
   # the re-run promise, which §3l case 1 makes FALSE: every §3l bootstrap records
@@ -1625,6 +1648,7 @@ EOF
   contains "$section" '**the skill renders the IaC set itself**'
   contains "$section" '**leaves out every row of the not-emitted table below** — on a marker-less repo `detect-stack.sh` holds none of them out, so `quality-*.yml`, `codeql.yml`, `.pre-commit-config.yaml`, `scripts/check-no-cluster-deploy.zsh` and `.github/workflows/no-cluster-deploy.yml` can all reach `missing_artifacts`'
   contains "$section" 'the confirmation is never granted over it'
+  contains "$section" 'The confirmation grants nothing beyond this run — a recorded `primary: kubernetes` still never grants the path (#1193)'
   contains "$section" '**until a marker exists, every re-run asks Q4 and the confirmation again**'
 }
 
@@ -1856,14 +1880,14 @@ step4a_iac() {
   # Step 5's user-facing consequence, not just its heading: replacing it with
   # "branch protection is still not an outstanding item" would print a checklist
   # claiming protection is done on a repo that has no rule at all
-  contains "$skill" 'Or unless Step 4b hit its #1606 refusal'
-  # …for EVERY exit-1 arm (#1641): a closed #1606 list here reads a flow-style,
+  # …for EVERY exit 1 (#1641): a closed #1606 list here reads a flow-style,
   # trigger or read-failure refusal as "not a refusal", and Step 5 then reports
-  # a rule that was never written as already valid
-  contains "$skill" 'Or unless Step 4b hit its #1606 refusal** (exit 1, **any** arm — #1606'"'"'s or #1641'"'"'s'
-  contains "$skill" 'a `gate` job written in flow style or through an anchor, alias, tag or `<<:` merge key; a workflow that does not run on every pull request; or a file awk could not read): then'
-  contains "$skill" 'refused (#1606 or #1641 — any exit-1 arm) or fell back on a'
-  contains "$skill" 'hit its #1606 refusal (any exit-1 arm, #1641'"'"'s three included) or its'
+  # a rule that was never written as already valid; keyed on the exit, not the
+  # arm, it also covers the failed-API-call exit without a workflow remedy
+  contains "$skill" 'Or unless Step 4b exited 1** (whatever its message — a #1606 or #1641 refusal, or a failed API call): then'
+  contains "$skill" 'message — fix what it names, then re-run `branch-protection.sh`:'
+  contains "$skill" 'exited 1 (whatever its message) or fell back on a'
+  contains "$skill" 'Step 4b exited 1 (whatever its message) or hit its'
   contains "$skill" 'neither the rule nor the merge settings were applied'
   contains "$skill" 'outstanding item quoting the script'"'"'s message'
 }
