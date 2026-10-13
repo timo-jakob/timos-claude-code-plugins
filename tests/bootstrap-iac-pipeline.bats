@@ -333,6 +333,10 @@ EOF
   # gate's status (a `-` prefix, `.IGNORE:`) prints the very same dry run
   mkdir -p "$repo/scripts"
   printf 'touch ran; exit 3\n' > "$repo/scripts/k8s-gate.zsh"
+  # a `lint` path in the consumer makes `.PHONY` load-bearing for `lint`, as
+  # hooks/ does for `hooks`: without it make calls lint up to date and the gate
+  # never runs, in pre-push and CI alike (#1634)
+  mkdir -p "$repo/lint"
   run make -C "$repo" -f "$MAKEFILE" lint
   [ "$status" -ne 0 ]
   [ -f "$repo/ran" ]
