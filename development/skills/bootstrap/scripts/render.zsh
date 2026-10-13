@@ -53,9 +53,9 @@
 #   --org-key <s>                 {{ORG_KEY}}
 #   --default-branch <s>          {{DEFAULT_BRANCH}}   (default: main)
 #   --languages "<a b c>"         {{LANGUAGES}} + block keep set; may be ""
-#   --primary <s>                 {{PRIMARY}} (+ the KUBERNETES block keep set:
-#                                 kept iff the value is `kubernetes`, the
-#                                 §3l IaC path)
+#   --primary <s>                 {{PRIMARY}} (+ the IAC block keep set: kept
+#                                 iff the value is in iac_primaries —
+#                                 `kubernetes` or `opentofu`, the IaC path)
 #   --gate-command <s>            {{GATE_COMMAND}} (default: make lint) — the
 #                                 IaC gate command (#1604); a blank or
 #                                 multi-line value is a usage error (exit 2),
@@ -65,7 +65,7 @@
 #   --code-scanning <s>           {{CODE_SCANNING}}    } recorded in .maintenance.yml's
 #                                 `tools:` block. No defaults — the block sits in
 #                                 the TOOLCHAIN block (kept unless --primary is
-#                                 `kubernetes`), so a language-path render that
+#                                 an IaC topic), so a language-path render that
 #                                 forgot them trips the leftover check; a blank
 #                                 value, or one outside its category's set, is a
 #                                 usage error (exit 2). They ALSO compose the
@@ -95,7 +95,7 @@
 #                                 render that forgot it trips the leftover
 #                                 check; any other value, or `approver` with
 #                                 --claude-plugin true, --primary claude-plugin
-#                                 or --primary kubernetes (human-only), is a
+#                                 or an IaC --primary (human-only), is a
 #                                 usage error (exit 2).
 #   --coverage-threshold <n>      {{COVERAGE_THRESHOLD}} (default: 90)
 #   --python-version <x.y>        {{PYTHON_VERSION}} (default: 3.12; the
@@ -260,10 +260,17 @@ fi
 if [[ "$visibility" == private && "${vals[CODE_SCANNING]:-}" == codeql ]]; then
 	print -u2 -- "render.zsh: private + codeql is never rendered (it needs GitHub Advanced Security)" && usage
 fi
+# The IaC topics (#2425): a --primary in this set takes the IaC path — human-only
+# approval, the IAC block's `gate:` line kept, the TOOLCHAIN block dropped. Written
+# out rather than derived from the template tree, and matched exactly, so
+# `kubernetes-operator` or `opentofu-x` stays on the language path.
+typeset -a iac_primaries=(kubernetes opentofu)
+is_iac_primary() { [[ -n "${vals[PRIMARY]:-}" ]] && ((${iac_primaries[(Ie)${vals[PRIMARY]}]})); }
+
 # resolve-approval.zsh refuses a recorded approver on the human-only kinds (#1684);
 # rendering one would stop every later bootstrap run.
-if [[ "${vals[APPROVAL]:-}" == approver && ("$claude_plugin" == true || "${vals[PRIMARY]:-}" == claude-plugin ||
-	"${vals[PRIMARY]:-}" == kubernetes) ]]; then
+if [[ "${vals[APPROVAL]:-}" == approver ]] &&
+	{ [[ "$claude_plugin" == true || "${vals[PRIMARY]:-}" == claude-plugin ]] || is_iac_primary; }; then
 	print -u2 -- "render.zsh: approval approver is never rendered for a plugin repo or the IaC path (both are human-only)" && usage
 fi
 
@@ -423,9 +430,9 @@ keep_block() {
 	SURFACE_REST) has_surface rest ;;
 	SURFACE_WEB_UI) has_surface web_ui ;;
 	SURFACE_GRPC) has_surface grpc ;;
-	KUBERNETES) [[ "${vals[PRIMARY]:-}" == "kubernetes" ]] ;;
-	# §3l renders no quality workflow, so it declares no toolchain (#1651)
-	TOOLCHAIN) [[ "${vals[PRIMARY]:-}" != "kubernetes" ]] ;;
+	IAC) is_iac_primary ;;
+	# the IaC path renders no quality workflow, so it declares no toolchain (#1651)
+	TOOLCHAIN) ! is_iac_primary ;;
 	*) return 2 ;; # unknown tag — the caller fails loudly
 	esac
 }

@@ -184,6 +184,51 @@ checked_tools() {
   done
 }
 
+@test "preflight --iac-only opentofu checks exactly gh jq git opentofu tflint trivy conftest, and no Docker (#2425)" {
+  preflight_stubs
+  run --separate-stderr env PATH="$TEST_PATH" bash "$PREFLIGHT" \
+    --languages "" --has-dockerfile true --iac-only opentofu --assume-yes </dev/null
+  [ "$status" -eq 0 ]
+  local checked t
+  checked="$(checked_tools "$output")"
+  # the exact set, written out: a tool added to or dropped from tofu_brews reds this
+  [ "$checked" = "$(printf '%s\n' conftest gh git jq opentofu tflint trivy | LC_ALL=C sort)" ]
+  # and none of the kubernetes gate's tools: the two topics' toolchains stay apart
+  for t in helm kustomize kubeconform kube-linter kyverno yq; do
+    lacks $'\n'"$checked"$'\n' $'\n'"$t"$'\n'
+  done
+  contains $'\n'"$(cat "$BREW_INSTALLS")"$'\n' $'\nconftest\n'
+  # a tooling Dockerfile does not pull in the Docker check on the IaC path
+  lacks "$output" 'Checking Docker'
+}
+
+@test "preflight --iac-only opentofu adds no language or claude-plugin tools, whatever --languages and the cwd say (#2425)" {
+  preflight_stubs
+  mkdir -p .claude-plugin
+  printf '{}\n' > .claude-plugin/marketplace.json
+  run --separate-stderr env PATH="$TEST_PATH" bash "$PREFLIGHT" \
+    --languages "swift python go" --has-dockerfile false --iac-only opentofu --assume-yes
+  [ "$status" -eq 0 ]
+  local t
+  [ "$(checked_tools "$output")" = "$(printf '%s\n' conftest gh git jq opentofu tflint trivy | LC_ALL=C sort)" ]
+  for t in pre-commit gitleaks semgrep sonar-scanner snyk-cli swiftlint swiftformat ruff golangci-lint parallel; do
+    lacks $'\n'"$(cat "$BREW_INSTALLS")"$'\n' $'\n'"$t"$'\n'
+  done
+  contains $'\n'"$(cat "$BREW_INSTALLS")"$'\n' $'\nopentofu\n'
+}
+
+@test "preflight --iac-only opentofu counts a non-Homebrew tofu on PATH as the opentofu formula (#2425)" {
+  # the formula is `opentofu` but its binary is `tofu`: without the map entry a
+  # tofu from tenv, mise or a tarball reads as missing and is brew-installed again
+  preflight_stubs
+  printf '#!/bin/sh\nexit 0\n' > "$STUB_BIN/tofu"
+  chmod +x "$STUB_BIN/tofu"
+  run --separate-stderr env PATH="$TEST_PATH" bash "$PREFLIGHT" \
+    --languages "" --has-dockerfile false --iac-only opentofu --assume-yes </dev/null
+  [ "$status" -eq 0 ]
+  lacks $'\n'"$(cat "$BREW_INSTALLS")"$'\n' $'\nopentofu\n'
+}
+
 @test "preflight --iac-only kubernetes reports a yq that is not mikefarah's v4 as missing, and accepts mikefarah's (#1637)" {
   preflight_stubs
   local v

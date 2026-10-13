@@ -636,7 +636,9 @@ SWEEP_AWK='
   contains "$block" '--codeql-languages'
   contains "$block" '--has-ko'
   contains "$block" '--iac-only false'
-  contains "$block" 'pass --iac-only kubernetes'
+  # the IaC caller comment names the topic generically (#2425)
+  contains "$block" 'pass --iac-only <topic>'
+  contains "$block" '`kubernetes`, or `opentofu`'
   lacks "$block" '--visibility'
 }
 

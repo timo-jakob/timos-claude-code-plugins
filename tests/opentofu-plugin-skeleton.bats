@@ -486,11 +486,11 @@ setup() {
   contains "$ARCH_FLAT" 'The check is dialect-aware, because the mechanism is not'
   contains "$ARCH_FLAT" 'is the **requirement** — state must be encrypted at rest'
   contains "$ARCH_FLAT" 'neither may narrow the rule to the OpenTofu block alone'
-  # BOTH consumers bound, not just #1160: the rendered CI job cannot call this
+  # BOTH consumers bound, not just #1160: the rendered gate script cannot call this
   # plugin's gather script, so #1162 embeds its own copy of the rule and is just
   # as able to narrow it to the OpenTofu-only block
   contains "$ARCH_FLAT" '**Both consumers of the rule are bound by it**'
-  contains "$ARCH_FLAT" "#1162's \`state-encryption\` job must implement the same dialect-aware rule"
+  contains "$ARCH_FLAT" "#1162's \`state-encryption\` stage must implement the same dialect-aware rule"
   # and the permissive reading made explicit, so "in whichever form the repo's
   # dialect provides" cannot be read as one-form-per-dialect — an OpenTofu repo
   # encrypting at the backend must clear the check too
@@ -502,12 +502,9 @@ setup() {
   # marker detects.
   contains "$ARCH_FLAT" 'The requirement binds only where the repo owns state'
   # the CI half of the exemption — also zero-of-one-site. "Reports nothing" is
-  # gather vocabulary; the obvious CI realisation is a job-level skip, and a
-  # SKIPPED job reports no status context, so a REQUIRED `state-encryption`
-  # context would sit at `expected` forever and block every PR on exactly the
-  # repo shape this charter claims. Rule and consequence, as elsewhere.
-  contains "$ARCH_FLAT" 'job **passes**, still reporting'
-  contains "$ARCH_FLAT" 'a required context that never reports would sit at `expected`'
+  # gather vocabulary; in CI the stage must PASS, or the one required `gate`
+  # context fails every PR on exactly the repo shape this charter claims.
+  contains "$ARCH_FLAT" "#1162's \`state-encryption\` stage **passes**, so the one required \`gate\` context still reports"
   contains "$ARCH_FLAT" '**reusable-module library**'
   # and the DISCRIMINATOR, which is the whole of the branch: keyed on backend
   # absence it would clear a root on the implicit local backend — the plaintext
@@ -557,13 +554,15 @@ setup() {
   contains "$ARCH_FLAT" 'trains people to stop checking'
 }
 
-@test "ARCHITECTURE.md ENUMERATES the six requirable checks by name (#1159)" {
-  # a count word alone is unusable: these six job ids ARE the branch-protection
-  # contexts #1162 must require, and a guessed set makes branch-protection.sh
-  # demand a context no workflow reports, blocking every merge on the repo it
-  # was meant to protect. The sibling enumerates its six for the same reason.
-  contains "$ARCH_FLAT" 'the **seven jobs**'
-  contains "$ARCH_FLAT" '**credential-free six will be the requirable set**'
+@test "ARCHITECTURE.md ENUMERATES the six credential-free gate stages by name (#1159, #2425)" {
+  # a count word alone is unusable: these six ids are the stages #1162's gate
+  # script must run under the one `gate` job (#2425), and a guessed set leaves
+  # that script running stages nobody specified. The sibling enumerates its six
+  # for the same reason. The superseded per-stage-context wording must not return.
+  contains "$ARCH_FLAT" 'the **seven stages** of the gate script that the one `gate` job'
+  contains "$ARCH_FLAT" 'the **credential-free six** run on every pull request'
+  lacks "$ARCH_FLAT" 'the **seven jobs**'
+  lacks "$ARCH_FLAT" 'will be the requirable set'
   # ONE contiguous needle rather than six independent ones. A per-token loop
   # pins membership only, and two of those tokens occur elsewhere in this
   # section (`policy` in the missing_tooling exemption), so dropping one from
@@ -571,15 +570,15 @@ setup() {
   # to prevent. The contiguous form pins membership, ORDER and adjacency at
   # once, and it is bounded at BOTH ends — the leading `in pipeline order:` and
   # the trailing `. Those` — because a tail bound alone is satisfied by a
-  # PREPENDED id, which presents seven ids as the requirable six while every
+  # PREPENDED id, which presents seven ids as the credential-free six while every
   # count word in the paragraph still reads correctly. That is the sibling's
   # two-ended discipline (`lacks '→ render'` beside `lacks 'config-scan →
   # argocd →'`), which the first draft of this needle transplanted by half.
   contains "$ARCH_FLAT" 'in pipeline order: `fmt`, `validate`, `lint`, `config-scan`, `state-encryption`, `policy`. Those'
-  # the seventh, and why it is deliberately NOT requirable — required-and-
-  # disabled sits at `expected` forever and blocks every PR
+  # the seventh, and that the gate does NOT run it until the repository
+  # variable turns it on — the credentialed stage stays off by default
   contains "$ARCH_FLAT" 'The seventh, `plan-policy`'
-  contains "$ARCH_FLAT" 'deliberately **not** requirable'
+  contains "$ARCH_FLAT" 'the gate does **not** run unless the repository variable above turns it on'
   # and the ownership boundary for the workflow itself: a bootstrap template in
   # `development`, not something this plugin's skills run
   contains "$ARCH_FLAT" 'a *bootstrap* template owned by the generic `development` plugin'
@@ -588,14 +587,14 @@ setup() {
   # needle: without it `tofu fmt -check` inspects the working directory alone,
   # so a module tree's submodules go unchecked while the job reports green.
   # bounded at the head by the em-dash that introduces it, for the same reason
-  # as the job-id list above: an unbounded head lets a seventh tool be prepended
+  # as the stage list above: an unbounded head lets a seventh tool be prepended
   # while the prose still says six
   contains "$ARCH_FLAT" 'Static analysis — `tofu fmt -check -recursive`, `tofu validate`, `tflint`, `trivy config`, the state-encryption check, and Conftest over HCL —'
   # `-backend=false` is the qualifier the whole credential-free claim rests on,
   # and it was pinned nowhere: dropped, #1162 renders `validate` behind a bare
-  # `tofu init`, which initialises the consumer's remote backend — turning one
-  # of the six REQUIRABLE contexts credentialed and failing it permanently on
-  # every remote-backend repo. Rule and consequence, as with `-recursive`.
+  # `tofu init`, which initialises the consumer's remote backend — turning the
+  # `validate` stage credentialed and failing the one required `gate` context
+  # permanently on every remote-backend repo. Rule and consequence, as with `-recursive`.
   contains "$ARCH_FLAT" 'the credential-free claim holds **only** under that flag'
   contains "$ARCH_FLAT" 'fail permanently on every remote-backend repo'
   # TENSE, pinned in both directions like the sibling's `will emit`/`emits` pair:
@@ -613,22 +612,22 @@ setup() {
   contains "$ARCH_FLAT" 'the generated pipeline **will contain** the plan stage'
 }
 
-@test "ARCHITECTURE.md records that NEITHER half of the branch-protection contract is wired yet (#1159)" {
-  # the enumeration above names branch-protection.sh as the consumer of those six
-  # contexts, but that script's IaC path is an --iac-only enum whose one IaC value
-  # is `kubernetes` (#1892), resolving to a literal kubernetes context set, and detect-stack.sh's derivation takes a repo
-  # declaring `primary: opentofu` OFF that path rather than onto it. Unsaid,
-  # #1162 is pointed at a flag that cannot select its set.
-  contains "$ARCH_FLAT" 'Neither half of that contract is wired yet, and #1162 owns both'
-  contains "$ARCH_FLAT" 'is today an enum `--iac-only` with a `kubernetes` value'
+@test "ARCHITECTURE.md records that the flag half of the branch-protection contract is wired and the derivation half is not (#1159, #2425)" {
+  # #2425 widened branch-protection.sh's --iac-only enum with an `opentofu` value
+  # requiring the one `gate` context, but detect-stack.sh's derivation still takes
+  # a repo declaring `primary: opentofu` OFF that path rather than onto it. Unsaid,
+  # #1162 is pointed at a flag no bootstrap path can yet select.
+  contains "$ARCH_FLAT" 'The flag half of that contract is wired; the derivation half is #1162'"'"'s.'
+  contains "$ARCH_FLAT" 'whose values are `kubernetes` (#1892) and, since #2425, `opentofu`'
+  contains "$ARCH_FLAT" 'requires the single `gate` context of `.github/workflows/opentofu-ci.yml`'
   contains "$ARCH_FLAT" 'taking a repo **off** that path rather than onto it'
-  contains "$ARCH_FLAT" 'a specification for #1162, not a description of a flag that'
-  # the PRESCRIPTION half, not just the diagnosis: everything after the colon is
-  # the only instruction #1162 has, and the third site is the whole reason the
-  # paragraph names three artifacts rather than two. Unpinned, #1162 widens the
-  # flag and the derivation and leaves bootstrap's own procedure documenting a
-  # boolean kubernetes-only flag that no longer exists.
-  contains "$ARCH_FLAT" 'widening `--iac-only` (and the `iac_only` derivation, including the `primary: opentofu` arm) is that story'
+  contains "$ARCH_FLAT" 'no bootstrap path passes `--iac-only opentofu` yet'
+  lacks "$ARCH_FLAT" 'Neither half of that contract is wired yet'
+  # the PRESCRIPTION half, not just the diagnosis: the derivation and the third
+  # site are the only instruction #1162 has left. Unpinned, #1162 widens the
+  # derivation and leaves bootstrap's own procedure documenting a kubernetes-only
+  # flag that no longer exists.
+  contains "$ARCH_FLAT" 'the `iac_only` derivation, including the `primary: opentofu` arm, is that story'
   contains "$ARCH_FLAT" 'the §3l / Step 4b prose in `development/skills/bootstrap/SKILL.md`'
   # and BOTH facts it describes must actually hold — the widening has not
   # happened on either side. Read through plain assignments so a failed read
@@ -640,9 +639,8 @@ setup() {
   [ -f "$bp" ]
   bp_body="$(cat "$bp")"
   contains "$bp_body" '--iac-only'
-  # the enum's value set is exactly what the prose says it is today: `kubernetes`
-  # and no opentofu value — #1162 widens it and must retire this needle
-  contains "$bp_body" '[[ "$IAC_ONLY" =~ ^(false|kubernetes)$ ]]'
+  # the enum's value set is exactly what the prose says it is: both IaC topics
+  contains "$bp_body" '[[ "$IAC_ONLY" =~ ^(false|kubernetes|opentofu)$ ]]'
   lacks "$bp_body" 'state-encryption'
   # the second half: detect-stack.sh's recorded-primary veto has no opentofu arm
   # yet, which is the ONLY reason the prose's "takes a repo off that path" claim
@@ -662,22 +660,18 @@ setup() {
   lacks "$ds_body" '"opentofu")'
 }
 
-@test "ARCHITECTURE.md records the job-id collision with the sibling, and who owns it (#1159)" {
-  # three of the six ids are byte-identical to the kubernetes pipeline's, and a
-  # required status context is matched by NAME — so left unrecorded this reads
-  # as contradicting the disjoint-file-sets claim in the same section. It is a
-  # known, accepted collision: exactly one IaC workflow renders per repo because
-  # a dual-marker repo halts, and #1394 owns the slice that must render both.
-  contains "$ARCH_FLAT" 'Three of those six ids will collide with the sibling'
-  # the three ids NAMED, not just counted — the count word alone can go stale
-  # against either enumeration without anything forcing this paragraph to be
-  # re-checked, and these three are the intersection a reader must be able to act on
-  contains "$ARCH_FLAT" '`lint`, `config-scan` and `policy` are enumerated byte-identically to the shipped kubernetes template'
+@test "ARCHITECTURE.md records the gate-context collision with the sibling, and who owns it (#1159, #2425)" {
+  # both IaC workflows require a context named `gate`, and a required status
+  # context is matched by NAME — so left unrecorded this reads as contradicting
+  # the disjoint-file-sets claim in the same section. It is a known, accepted
+  # collision: at most one IaC workflow renders per repo because a dual-marker
+  # repo halts, and #1394 owns the slice that must render both. The shared stage
+  # names report no contexts, so naming THEM as the collision would point #1394
+  # at a rename that disambiguates nothing.
+  contains "$ARCH_FLAT" '**Both IaC workflows will require a context named `gate`**'
   contains "$ARCH_FLAT" 'matched by **name**'
-  # …and WHAT they collide with, since #1604/#1606 left the kubernetes side with
-  # one requirable context: these three are gate STAGES there, so a reader cannot
-  # take the paragraph as naming three kubernetes contexts that still exist
-  contains "$ARCH_FLAT" 'stages of the kubernetes gate **script**, not job ids'
+  contains "$ARCH_FLAT" 'report no contexts, so their clash is cosmetic'
+  contains "$ARCH_FLAT" 'owns disambiguating their `gate` contexts'
   contains "$ARCH_FLAT" 'the collision is **latent**'
   contains "$ARCH_FLAT" 'known, accepted collision'
   # the bound is AT MOST one workflow, not exactly one: a repo with an
@@ -698,8 +692,8 @@ setup() {
   # exist: bootstrap keys its IaC path on the kubernetes marker alone, so a
   # zero-language dual-marker repo today renders the SIBLING's workflow. Stated
   # in the present indicative it reads as an invariant #1160/#1162 may rely on —
-  # so neither builds it, #1162 ships the colliding ids, and a required
-  # lint/config-scan/policy context is satisfied by the wrong pipeline's job.
+  # so neither builds it, #1162 ships the colliding context, and a required
+  # `gate` context is satisfied by the wrong pipeline's job.
   contains "$ARCH_FLAT" 'The dual-marker case is a specification, not current behaviour'
   contains "$ARCH_FLAT" 'nothing does that today'
   contains "$ARCH_FLAT" '**#1162 owns adding the halt**'
@@ -999,7 +993,7 @@ setup() {
   # #1394 OWNER is pinned at the ARCHITECTURE site only — this page states the
   # fact without the issue number, so this needle gates the claim, not the
   # pointer.
-  contains "$section" 'the slice that renders both (disambiguating those ids) is still open'
+  contains "$section" 'the slice that renders both (disambiguating that context) is still open'
   # the state-encryption exception and the naming decision, restated where a
   # user decides what the plugin does
   contains "$section" 'first-class check rather than a policy: **state encryption**'
