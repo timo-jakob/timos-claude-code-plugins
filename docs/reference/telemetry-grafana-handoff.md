@@ -51,7 +51,9 @@ which owns the sink. Sink precedence, highest first:
 1. `--telemetry-file PATH` — an explicit file.
 2. `--telemetry-dir DIR` — the **shared** cross-repo mode: appends to
    `DIR/<repo-slug>.jsonl`. This is the mode the reporting repo consumes.
-3. The local default — `<repo-dir>/.claude/telemetry/telemetry.jsonl`, which is
+3. The local default — `.claude/telemetry/telemetry.jsonl` in the repository's
+   **main checkout**, so every git worktree of a repo shares it, falling back
+   to `<repo-dir>` when that is not the top level of a git work tree. It is
    git-ignored (via the entry bootstrap installs) and never leaves the
    machine.
 
@@ -82,7 +84,7 @@ broken aggregation service.
 | --- | --- | --- |
 | `--telemetry-dir` | `emit-telemetry.zsh` | Writes into the shared directory the reporting repo globs. |
 | `--telemetry-file` | `emit-telemetry.zsh` | Overrides the directory; a record lands here instead. |
-| `--repo-dir` | `emit-telemetry.zsh` | Identity source (which repo a record claims); it locates the local default sink, never the shared directory. |
+| `--repo-dir` | `emit-telemetry.zsh` | Identity source (which repo a record claims); it locates the local default sink — in that repository's main checkout — never the shared directory. |
 | `--require-records` | `validate-telemetry.zsh` | Turns an empty stream into a failure — "did the pipeline emit?" |
 | `--print-envelope-keys` | `validate-telemetry.zsh` | Prints the authoritative envelope key list as a JSON array. |
 

@@ -1427,3 +1427,123 @@ os.execvp(sys.argv[1], sys.argv[1:])' \
   [ "$status" -eq 0 ]
   echo "$output" | jq -r '.run_id' | grep -Eq '^p-1720000000-[0-9a-f]{4}$'
 }
+
+# ------------------------------- the main checkout's default sink (#2138)
+# With no sink flag, a record emitted from a linked worktree lands in the main
+# checkout's default sink: a worktree's own git-ignored sink is deleted with it.
+
+_wt_repo() {  # a main checkout with one commit, so worktrees can be added
+  git -C "$RD" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m init
+}
+_wt_add() {  # $1 = worktree path
+  git -C "$RD" worktree add -q "$1" -b "wt-${1##*/}"
+}
+emit_default() { run --separate-stderr zsh "$S" --pipeline review-loop --outcome success --wall-s 7 "$@"; }
+
+@test "#2138 a linked worktree's default-sink record lands in the main checkout, not the worktree" {
+  _wt_repo
+  local WT="$BATS_TEST_TMPDIR/fancy-brewing-magpie"
+  _wt_add "$WT"
+  emit_default --repo-dir "$WT"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '' "$RD/.claude/telemetry/telemetry.jsonl")" -eq 1 ]
+  [ "$(cat "$RD/.claude/telemetry/telemetry.jsonl")" = "$output" ]
+  [ ! -e "$WT/.claude/telemetry" ]
+  # --repo-dir stays the identity source: no remote, so the worktree's basename
+  [ "$(jq -r '.repo' <<<"$output")" = "fancy-brewing-magpie" ]
+}
+
+@test "#2138 the main-checkout default sink is stated where the contract and its readers look" {
+  local arch handoff epic est
+  arch="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/ARCHITECTURE.md")"
+  handoff="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/docs/reference/telemetry-grafana-handoff.md")"
+  epic="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/development/skills/resolve-issue/reference/epic-telemetry.md")"
+  est="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/development/skills/resolve-issue/reference/review-loop/estimates.md")"
+  contains "$arch" '`<main checkout>/.claude/telemetry/telemetry.jsonl` (git-ignored), where the main checkout is the first entry of `git worktree list --porcelain` for `--repo-dir` (#2138)'
+  contains "$arch" 'With no sink flag, worktree epic, child and loop records share the main checkout'"'"'s default sink (#2138)'
+  contains "$handoff" '`.claude/telemetry/telemetry.jsonl` in the repository'"'"'s **main checkout**, so every git worktree of a repo shares it'
+  contains "$epic" 'A worktree child'"'"'s records land in the epic'"'"'s sink'
+  contains "$est" '`.claude/telemetry/telemetry.jsonl` in the main checkout of `<repo-dir>` — the first entry of `git -C <repo-dir> worktree list --porcelain`'
+  contains "$est" 'is always passed (the script'"'"'s own default is relative to the current directory)'
+  contains "$est" '[--repo-type <repo_type>] --sink <the run'"'"'s sink>'
+}
+
+@test "#2138 the main checkout's own default sink is unchanged" {
+  _wt_repo
+  emit_default --repo-dir "$RD"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '' "$RD/.claude/telemetry/telemetry.jsonl")" -eq 1 ]
+}
+
+@test "#2138 explicit sink flags from a linked worktree select exactly the given sink" {
+  _wt_repo
+  local WT="$BATS_TEST_TMPDIR/wt-flags"
+  _wt_add "$WT"
+  emit_default --repo-dir "$WT" --telemetry-file "$SINK"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '' "$SINK")" -eq 1 ]
+  emit_default --repo-dir "$WT" --repo timo-jakob/tenant --telemetry-dir "$DIR"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '' "$DIR/timo-jakob-tenant.jsonl")" -eq 1 ]
+  [ ! -e "$RD/.claude/telemetry" ]
+  [ ! -e "$WT/.claude/telemetry" ]
+}
+
+@test "#2138 a plain folder, nested in a repo or not, keeps its own default sink" {
+  local plain="$BATS_TEST_TMPDIR/not-a-git-repo"
+  mkdir -p "$plain" "$RD/nested"
+  emit_default --repo-dir "$plain"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '' "$plain/.claude/telemetry/telemetry.jsonl")" -eq 1 ]
+  emit_default --repo-dir "$RD/nested"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '' "$RD/nested/.claude/telemetry/telemetry.jsonl")" -eq 1 ]
+  [ ! -e "$RD/.claude/telemetry" ]
+}
+
+@test "#2138 a worktree of a bare repository falls back to the worktree's own sink" {
+  local BARE="$BATS_TEST_TMPDIR/bare.git" WT="$BATS_TEST_TMPDIR/bare-wt"
+  _wt_repo
+  git clone -q --bare "$RD" "$BARE"
+  git -C "$BARE" worktree add -q "$WT" -b bare-branch
+  emit_default --repo-dir "$WT"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '' "$WT/.claude/telemetry/telemetry.jsonl")" -eq 1 ]
+}
+
+@test "#2138 thirty linked worktrees still resolve to the main checkout" {
+  _wt_repo
+  local i
+  for i in {1..30}; do _wt_add "$BATS_TEST_TMPDIR/wt-$i"; done
+  emit_default --repo-dir "$BATS_TEST_TMPDIR/wt-30"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '' "$RD/.claude/telemetry/telemetry.jsonl")" -eq 1 ]
+  [ ! -e "$BATS_TEST_TMPDIR/wt-30/.claude/telemetry" ]
+}
+
+@test "#2138 a failing git falls back to --repo-dir as given, with the same exit" {
+  _wt_repo
+  local WT="$BATS_TEST_TMPDIR/wt-nogit" stub="$BATS_TEST_TMPDIR/nogit"
+  _wt_add "$WT"
+  mkdir -p "$stub"
+  printf '#!/bin/sh\nexit 127\n' > "$stub/git"
+  chmod +x "$stub/git"
+  run --separate-stderr env PATH="$stub:$PATH" "$ZSH_BIN" "$S" --pipeline p --outcome success --wall-s 1 --repo-dir "$WT"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '' "$WT/.claude/telemetry/telemetry.jsonl")" -eq 1 ]
+  [ ! -e "$RD/.claude/telemetry" ]
+}
+
+@test "#2138 an unwritable main-checkout sink is exit 3, and nothing lands in the worktree" {
+  [ "$(id -u)" -ne 0 ] || skip "chmod proves nothing as root"
+  _wt_repo
+  local WT="$BATS_TEST_TMPDIR/wt-ro"
+  _wt_add "$WT"
+  mkdir -p "$RD/.claude/telemetry"
+  chmod 555 "$RD/.claude/telemetry"
+  emit_default --repo-dir "$WT"
+  chmod 755 "$RD/.claude/telemetry"
+  [ "$status" -eq 3 ]
+  contains "$stderr" "cannot append to sink: $(cd "$RD" && pwd -P)/.claude/telemetry/telemetry.jsonl"
+  [ ! -e "$WT/.claude/telemetry" ]
+}

@@ -21,7 +21,9 @@ zsh development/scripts/telemetry/rollup-telemetry.zsh
 With no argument it reads the local default sink
 (`.claude/telemetry/telemetry.jsonl`, resolved relative to your **current
 directory** — run it from the repo root) — if nothing has ever emitted, that's
-silently an empty stream (`no records`), never an error.
+silently an empty stream (`no records`), never an error. A run inside a git
+worktree writes to the **main checkout's** sink, not the worktree's, so its
+records outlive the worktree: run the rollup from the main checkout's root.
 
 ```text
 Pipeline: review-loop

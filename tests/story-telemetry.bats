@@ -988,6 +988,49 @@ EPIC_RUN_STATE='{"outcome":"parked","e1_classification":"native_children","child
   zsh "$VALIDATE" "$SLUG_SINK" --require-records
 }
 
+# #2138: with no sink flag, an epic run in one linked worktree, a child run and
+# its loop in another all land in the MAIN checkout's default sink, so the
+# parent/child join resolves there after both worktrees are gone.
+@test "#2138 epic, child and loop records from two worktrees share the main checkout's default sink" {
+  git -C "$R" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m init
+  local WA="$BATS_TEST_TMPDIR/wt-epic" WB="$BATS_TEST_TMPDIR/wt-child"
+  git -C "$R" worktree add -q "$WA" -b epic-741
+  git -C "$R" worktree add -q "$WB" -b fix/2138-child
+  local ERUN="$BATS_TEST_TMPDIR/epic-run.json" ESTATE="$BATS_TEST_TMPDIR/epic-state.json"
+  (cd "$WA" && zsh "$D" start --run-file "$ERUN" --ts 1791280000 >/dev/null)
+  local -a cargs=()
+  local a
+  while IFS= read -r a; do cargs+=("$a"); done < <(jq -r '.child_start_args[]' "$ERUN")
+  (cd "$WB" && zsh "$D" start --run-file "$RUN" --ts 1791280410 "${cargs[@]}" >/dev/null)
+  local -a largs=()
+  while IFS= read -r a; do largs+=("$a"); done < <(jq -r '.loop_args[]' "$RUN")
+  zsh "$REPO_ROOT/development/scripts/telemetry/emit-telemetry.zsh" --pipeline review-loop \
+    --outcome success --wall-s 60 --repo-dir "$WB" "${largs[@]}" >/dev/null
+  state "$SUCCESS"
+  run --separate-stderr zsh "$D" emit --run-file "$RUN" --state "$ST" --repo-dir "$WB" --issue 2138
+  [ "$status" -eq 0 ]
+  local epic_id child_id
+  epic_id="$(jq -r '.run_id' "$ERUN")"
+  child_id="$(jq -r '.run_id' "$RUN")"
+  jq -c --arg c "$child_id" '.child_run_ids = [$c]' <<<"$EPIC_RUN_STATE" > "$ESTATE"
+  run --separate-stderr zsh "$D" emit --epic --run-file "$ERUN" --state "$ESTATE" --repo-dir "$WA" --issue 741
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '' "$DEFAULT_SINK")" -eq 3 ]
+  [ ! -e "$WA/.claude/telemetry" ]
+  [ ! -e "$WB/.claude/telemetry" ]
+  [ "$(jq -r --arg e "$epic_id" 'select(.run_id == $e) | .payload.child_run_ids[0]' "$DEFAULT_SINK")" = "$child_id" ]
+  [ "$(jq -r --arg c "$child_id" 'select(.run_id == $c) | .parent_run_id' "$DEFAULT_SINK")" = "$epic_id" ]
+  [ "$(jq -r 'select(.pipeline == "review-loop") | .parent_run_id' "$DEFAULT_SINK")" = "$child_id" ]
+  zsh "$VALIDATE" "$DEFAULT_SINK" --require-records
+}
+
+@test "#2138 start with no sink flag writes loop_args and child_start_args as exactly the parent pair" {
+  run --separate-stderr zsh "$D" start --run-file "$RUN" --ts 1791280000
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '.loop_args' "$RUN")" = "$(jq -c '["--parent-run-id", .run_id]' "$RUN")" ]
+  [ "$(jq -c '.child_start_args' "$RUN")" = "$(jq -c '["--parent-run-id", .run_id]' "$RUN")" ]
+}
+
 @test "emit: a story run started without --parent-run-id emits a null parent_run_id" {
   zsh "$D" start --run-file "$RUN" >/dev/null
   state "$SUCCESS"

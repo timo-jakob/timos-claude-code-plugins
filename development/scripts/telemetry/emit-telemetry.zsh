@@ -41,8 +41,10 @@
 #                 it is optional and minted when omitted.
 #     --repo      the `owner/name` identity. Derived from the git remote when
 #                 omitted, falling back to the repo directory basename.
-#     --repo-dir  where to derive `repo` from and where the local default sink
-#                 lives (default: the current directory). NOTE: this is a
+#     --repo-dir  where to derive `repo` from and which repository's local
+#                 default sink to use (default: the current directory). The
+#                 sink lives in that repository's MAIN checkout, so a linked
+#                 worktree shares it (#2138); see Sink precedence. NOTE: this is a
 #                 filesystem path — `--repo` is the owner/name identity. The two
 #                 are deliberately separate flags because callers such as
 #                 resolve-story-loop.zsh already use "repo" to mean a path.
@@ -82,8 +84,11 @@
 #                 directly.
 #
 # Sink precedence: --telemetry-file > --telemetry-dir >
-# <repo-dir>/.claude/telemetry/telemetry.jsonl (the repo's own common sink, the
-# one file every pipeline in a repo shares). The record is printed to
+# <main checkout>/.claude/telemetry/telemetry.jsonl (the repo's own common sink,
+# the one file every pipeline and every worktree of a repo shares; #2138). The
+# main checkout is the first entry of `git worktree list --porcelain` for
+# --repo-dir; when --repo-dir is not the top level of a git work tree, git is
+# unavailable or fails, or the main worktree is bare, it is --repo-dir as given. The record is printed to
 # stdout BEFORE it is appended to the sink, so a downstream pipe that closes
 # early (EPIPE) can never leave a record in the sink behind a non-zero exit.
 #
@@ -146,7 +151,7 @@ OPTIONS: [--repo OWNER/NAME] [--repo-dir DIR] [--repo-type T] [--issue N] [--pr 
   [--telemetry-file PATH] [--telemetry-dir DIR]
 
 Sink precedence: --telemetry-file > --telemetry-dir (DIR/<repo-slug>.jsonl)
-  > <repo-dir>/.claude/telemetry/telemetry.jsonl"
+  > <main checkout of --repo-dir>/.claude/telemetry/telemetry.jsonl"
 
 # A value flag with no value must be a usage error, not a silent "omitted".
 # Coercing it to empty is worse than it looks: a dangling --telemetry-file would
@@ -477,10 +482,37 @@ _repo_slug() {  # $1 = the resolved repo identity
   print -r -- "${s:l}"
 }
 
+# The repository's MAIN checkout for --repo-dir (#2138): the first entry of
+# `git worktree list --porcelain`. A linked worktree's git-ignored sink is
+# deleted with the worktree, so a default-sink record emitted from one would be
+# lost and an epic's parent/child join would span files. The whole listing is
+# read before it is parsed — a reader that stops at the first line can SIGPIPE
+# git on a long listing and fall back for no reason. Prints nothing (so the
+# caller keeps --repo-dir as given) when --repo-dir is not the top level of a
+# git work tree — a plain folder, one nested inside a repo included, keeps its
+# own sink as bootstrap's siting (#1229) requires — or git is absent or fails,
+# or the main worktree is bare or gone.
+_main_checkout() {  # $1 = --repo-dir
+  local top
+  top="$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" || return 0
+  [[ -n "$top" && "${top:A}" == "${1:A}" ]] || return 0
+  local listing
+  listing="$(git -C "$1" worktree list --porcelain 2>/dev/null)" || return 0
+  local -a lines=("${(@f)listing}")
+  [[ "${lines[1]}" == "worktree "* ]] || return 0
+  [[ "${lines[2]}" == bare ]] && return 0
+  local main="${lines[1]#worktree }"
+  [[ -d "$main" ]] && print -r -- "$main"
+}
+
 local sink="$telemetry_file"
 [[ -n "$sink" ]] || [[ -z "$telemetry_dir" ]] || \
   sink="${telemetry_dir%/}/$(_repo_slug "$repo").jsonl"
-[[ -n "$sink" ]] || sink="${repo_dir%/}/.claude/telemetry/telemetry.jsonl"
+if [[ -z "$sink" ]]; then
+  local sink_root
+  sink_root="$(_main_checkout "$repo_dir")"
+  sink="${${sink_root:-$repo_dir}%/}/.claude/telemetry/telemetry.jsonl"
+fi
 
 local sink_dir="${sink:h}"
 # `--` is load-bearing: every one of these paths is caller-controlled and may
