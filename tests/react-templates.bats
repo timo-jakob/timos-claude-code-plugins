@@ -231,6 +231,7 @@ has() {
   has "$t" 'import { describe, expect, it } from "vitest";'
   # self-contained: the component is defined in the test file, never Vite's App
   grep -qE '^function Greeting\(' "$t"
+  has "$t" 'return <h1>Hello, {name}!</h1>;'
   has "$t" 'render(<Greeting name="Ada" />);'
   run grep -qE 'from "\./App"|<App' "$t"
   [ "$status" -eq 1 ]
