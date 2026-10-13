@@ -223,10 +223,17 @@ since a repo with an unreadable subtree and no `.tf` aborts on the opentofu
 half. **Halt
 and show that stderr**; do not proceed with an empty document, which would read
 as a repo with no git, no languages and no artifacts and would drive Step 4 to
-render the wrong set entirely. Re-run once — if the same statuses recur the
-cause is **most likely** permissions on the paths the search covers. Say "most
-likely", not "the tree is unreadable": the searches suppress their own
-diagnostics, and a tree being *written* throughout both runs reproduces the
+render the wrong set entirely. Re-run once — if the same statuses recur with a
+non-zero `find` exit, or with a non-zero `grep` exit from the kubernetes marker
+(whose `grep` reads repository files), the cause is **most likely** permissions
+on the paths the search covers. When the stderr reads `(find exit 0, filter exit N)` with N of 2
+or more — only the opentofu marker prints a filter status — the walk read the
+tree completely, and the prune filter, which reads only the captured path list
+and never the filesystem, is what failed: `127` means `grep` is not on `PATH`,
+`2` means `grep` failed on its own input. Have the user check `command -v grep`
+and their `PATH`, not permissions. Say "most likely", not "the tree is
+unreadable": every marker's `find`, and the kubernetes marker's `grep`, run with
+`2>/dev/null`, and a tree being *written* throughout both runs reproduces the
 same statuses (for the opentofu marker an installer populating `node_modules`,
 which its walk still enters; for either marker a build rewriting a tree the
 walk does enter, such as `dist/` or a chart directory). Do not cite
