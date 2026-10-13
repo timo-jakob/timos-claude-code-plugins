@@ -388,3 +388,12 @@ halt_state() {
   run --separate-stderr zsh "$B" --state "$BATS_TEST_TMPDIR"
   [ "$status" -eq 2 ]
 }
+
+@test "#2139 both children rows state the ordered first-match rule and the qualified queued clause" {
+  local f doc
+  for f in development/skills/resolve-issue/reference/epic-telemetry.md ARCHITECTURE.md; do
+    doc="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/$f")"
+    contains "$doc" 'Every child **open** at that read goes in the **first** of these buckets whose test it meets: `resolved_this_run` (closed as completed during this run), `escalated` (ended on a typed escalation), `parked` (parked by E3'"'"'s triage: a §0a dependency rejection, a precheck tooling failure — exit 1, or an exit 2 that recurs after the fixed re-run or whose malformation cannot be seen — a §2 size pre-flight stop or error, and every child that depends on an escalated or parked child, or, under `override=on`, on a child stopped short of `MERGED` at §6'"'"'s human-only stop), then `queued` (every other open child: a PR awaiting a human merge, a child whose own story run ended `failed` for a cause E3'"'"'s triage does not park — an abandoned red gate, a gate or loop error, or a round protocol that stopped before any loop invocation — and every child when E1b halts)'
+    lacks "$doc" 'a child whose own story run ended `failed`,'
+  done
+}
