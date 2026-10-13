@@ -9,15 +9,16 @@
 #                        [--has-ko true|false] \
 #                        --has-codeql true|false \
 #                        [--codeql-languages "python javascript-typescript ..."] \
-#                        [--iac-only false|kubernetes] \
+#                        [--iac-only false|kubernetes|opentofu] \
 #                        --default-branch main \
 #                        [--require-signed-commits true|false]
 #
 # --iac-only is an enum naming the IaC topic, not a boolean: `false` (the
-# default) is the language-app path, and `kubernetes` is the
-# infrastructure-as-code path (the bootstrap skill's §3l): the kubernetes topic
-# marker — or bootstrap's explicit empty-GitOps-repo confirmation —
-# with no application language AND no other `primary:` recorded. A detected
+# default) is the language-app path, and `kubernetes` or `opentofu` is the
+# infrastructure-as-code path for that topic (#2425; `kubernetes` is the
+# bootstrap skill's §3l): the topic's marker — the kubernetes marker or the
+# opentofu marker — or bootstrap's explicit empty-GitOps-repo confirmation
+# (kubernetes only), with no application language AND no other `primary:` recorded. A detected
 # language, or a recorded language /
 # claude-plugin primary, settles it false whatever the marker says; the mixed
 # repo (marker plus a stray tooling language) is #1193. There, the language-app
@@ -25,11 +26,12 @@
 # semgrep, pre-commit, license-fs, the static-analysis job and trivy-fs — would
 # be required contexts that no
 # workflow ever reports, pinning every PR on the permanent `expected` state. The
-# repo's one check is kubernetes-ci.yml's single `gate` job instead. Everything
+# repo's one check is the topic workflow's single `gate` job instead —
+# kubernetes-ci.yml's single `gate` job, or opentofu-ci.yml's. Everything
 # else the rule applies (PR required, linear history, no force-push/deletion, and
 # the repo-level merge settings auto-merge arming depends on) is unchanged: the
 # contexts differ, the protection does not. It refuses (exit 1, before any rule
-# is written) when .github/workflows/kubernetes-ci.yml is absent, has no `gate`
+# is written) when the topic's workflow under .github/workflows/ is absent, has no `gate`
 # job, or has a `gate` job carrying `name:`, `strategy:` or a reusable-workflow
 # `uses:` (GitHub then reports the check under that name, `gate (<leg>)` per
 # matrix entry, or `gate / <called job>`), since the `gate` context would never
@@ -52,7 +54,7 @@
 # language-app context set follows #1670 D1 — toolchain plus stack, with no
 # visibility term — so this script neither accepts nor derives visibility: a
 # `--visibility` exits 1 naming the two flags that replaced it. Neither flag is
-# required or read under --iac-only kubernetes, whose context set is `gate` alone.
+# required or read under an IaC --iac-only, whose context set is `gate` alone.
 #
 # --has-codeql is true exactly when the resolved `code_scanning` is `codeql`;
 # CodeQL's public-only rule is enforced at the plan (resolve-tools.zsh step 4,
@@ -78,7 +80,7 @@ HAS_CODEQL="false"
 CODEQL_LANGUAGES=""
 IAC_ONLY="false"
 # the one statement of --iac-only's value set, shared by both refusals below
-IAC_ONLY_ENUM_MSG="--iac-only must be one of: false kubernetes"
+IAC_ONLY_ENUM_MSG="--iac-only must be one of: false kubernetes opentofu"
 DEFAULT_BRANCH="main"
 REQUIRE_SIGNED_COMMITS="false"
 
@@ -132,13 +134,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 # validated, not merely compared: an unvalidated flag silently falls through to
-# the language-app context set on any value but the literal "kubernetes" —
+# the language-app context set on any value but a literal topic name —
 # `Kubernetes`, the retired `true`, or a following flag swallowed as the value —
 # and that is exactly the permanent-`expected` state --iac-only exists to prevent
-[[ "$IAC_ONLY" =~ ^(false|kubernetes)$ ]] || die "$IAC_ONLY_ENUM_MSG"
+[[ "$IAC_ONLY" =~ ^(false|kubernetes|opentofu)$ ]] || die "$IAC_ONLY_ENUM_MSG"
 # The toolchain names the language-app contexts, so it is required exactly on
 # that path — and never read on the IaC path, which requires `gate` alone.
-if [[ "$IAC_ONLY" != "kubernetes" ]]; then
+if [[ "$IAC_ONLY" == "false" ]]; then
 	[[ "$STATIC_ANALYSIS" =~ ^(sonarcloud|sonarqube)$ ]] ||
 		die "--static-analysis must be sonarcloud or sonarqube (the resolved static_analysis)"
 	[[ "$VULNERABILITIES" =~ ^(snyk|trivy)$ ]] ||
@@ -168,7 +170,7 @@ checks=("test-and-coverage" "semgrep" "pre-commit")
 # wedges every PR at `expected` forever — the failure this file warns about four
 # separate times. branch-protection.sh always runs from the target repo root, so
 # the path is repo-relative.
-if [[ "$IAC_ONLY" != "kubernetes" ]]; then
+if [[ "$IAC_ONLY" == "false" ]]; then
 	# BOTH halves, because the workflow runs the script: a present workflow with
 	# a missing checker makes every PR fail with `no such file or directory`
 	# instead of a verdict — the same wedge one level down.
@@ -188,7 +190,7 @@ fi
 # quality-*.yml is not rendered, so every context above would sit at `expected`
 # forever and block each PR. The toolchain contexts below are skipped for the same
 # reason — its contexts come from that same unrendered workflow.
-if [[ "$IAC_ONLY" == "kubernetes" ]]; then
+if [[ "$IAC_ONLY" != "false" ]]; then
 	# Gated on the job actually being ON DISK, like `no-cluster-deploy` above and
 	# `image` below — but REFUSED rather than dropped. A repo bootstrapped before
 	# #1604 still carries the per-stage kubernetes-ci.yml, which never reports
@@ -223,8 +225,14 @@ if [[ "$IAC_ONLY" == "kubernetes" ]]; then
 	# to resolve against, so it falls back to the CWD rather than refusing: that
 	# keeps the probe no stricter than the two beside it.
 	iac_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
-	iac_ci="$iac_root/.github/workflows/kubernetes-ci.yml"
-	iac_tmpl="templates/iac/.github/workflows/kubernetes-ci.yml.tmpl"
+	# Each IaC topic has its own workflow and its own template subtree (#2425);
+	# the subtree is also what the file's provenance marker names. The opentofu
+	# template is #1162's, so its name carries that until the plugin ships it.
+	case "$IAC_ONLY" in
+	kubernetes) iac_wf="kubernetes-ci.yml" iac_tmpl_dir="iac" iac_tmpl="templates/iac/.github/workflows/kubernetes-ci.yml.tmpl" ;;
+	opentofu) iac_wf="opentofu-ci.yml" iac_tmpl_dir="opentofu" iac_tmpl="templates/opentofu/.github/workflows/opentofu-ci.yml.tmpl (not shipped until #1162; until then, write the workflow by hand with a \`gate\` job)" ;;
+	esac
+	iac_ci="$iac_root/.github/workflows/$iac_wf"
 	if [[ ! -f "$iac_ci" ]]; then
 		die "\`$iac_ci\` is absent — NOT applying branch protection: its \`gate\` check would never report. Render it from the plugin's $iac_tmpl into the working tree first, then re-run this script."
 	fi
@@ -290,7 +298,8 @@ if [[ "$IAC_ONLY" == "kubernetes" ]]; then
 	if [[ "$gate_job_state" != 0 ]]; then
 		# 0 is marked, 1 is unmarked; any other status read nothing
 		marker_status=0
-		awk 'NR <= 10 && /^# claude-bootstrap: rendered from iac\//{ found = 1 } NR > 10 { exit } END { exit !found }' "$iac_ci" ||
+		awk -v marker="# claude-bootstrap: rendered from $iac_tmpl_dir/" \
+			'NR <= 10 && index($0, marker) == 1 { found = 1 } NR > 10 { exit } END { exit !found }' "$iac_ci" ||
 			marker_status=$?
 		case "$marker_status" in
 		0) die "\`$iac_ci\` carries the plugin's provenance marker but has no \`gate\` job (a pre-#1604 per-stage one?) — NOT applying branch protection: \`gate\` would never report. Refresh it from the plugin's $iac_tmpl into the working tree (after reviewing the diff), then re-run this script." ;;
@@ -354,15 +363,15 @@ if [[ "$IAC_ONLY" == "kubernetes" ]]; then
 	if [[ "$trigger_state" != 0 ]]; then
 		die "\`$iac_ci\` does not run on every pull request — NOT applying branch protection: a PR its \`on:\` skips never reports \`gate\` and waits at \`expected\` forever. Trigger it on a bare \`pull_request\` with no \`types:\`, \`branches:\`, \`branches-ignore:\`, \`paths:\` or \`paths-ignore:\` filter (other triggers may stay beside it), then re-run this script."
 	fi
-	# the one job of templates/iac/.github/workflows/kubernetes-ci.yml.tmpl: it
-	# carries no `name:` and no matrix, so GitHub reports it under its id
+	# the one job of the topic's workflow template ($iac_tmpl): it carries no
+	# `name:` and no matrix, so GitHub reports it under its id
 	checks=("gate")
 fi
 
 # Everything below builds the LANGUAGE-APP context set, so the IaC path skips it
 # whole: its `image`/CodeQL/Sonar contexts all come from workflows that path does
 # not render.
-if [[ "$IAC_ONLY" != "kubernetes" ]]; then
+if [[ "$IAC_ONLY" == "false" ]]; then
 	# --- does any workflow actually PROVIDE the shared `image` check? -------------
 	# Both the Docker lane (quality-*.yml's `image` job) and the ko lane
 	# (ko-image.yml's `image` job) report a status check literally named `image`.

@@ -1613,8 +1613,8 @@ in the same PR:
 | `SURFACE_REST` | `rest` in `--acceptance-interfaces` |
 | `SURFACE_WEB_UI` | `web-ui` in `--acceptance-interfaces` |
 | `SURFACE_GRPC` | `grpc` in `--acceptance-interfaces` |
-| `KUBERNETES` | `--primary kubernetes` (the §3l IaC path — gates `.maintenance.yml`'s `gate:` line, #1604) |
-| `TOOLCHAIN` | `--primary` is anything but `kubernetes` (gates `.maintenance.yml`'s `tools:` block, #1651, and `SETUP.md` §4's `{{REQUIRED_CONTEXTS}}` list, #1670 — §3l renders no quality workflow, so it declares no toolchain) |
+| `IAC` | `--primary` is an IaC topic — `kubernetes` (the §3l IaC path) or `opentofu`, render.zsh's `iac_primaries` set, matched exactly (gates `.maintenance.yml`'s `gate:` line, #1604, #2425) |
+| `TOOLCHAIN` | `--primary` is anything but an IaC topic (gates `.maintenance.yml`'s `tools:` block, #1651, and `SETUP.md` §4's `{{REQUIRED_CONTEXTS}}` list, #1670 — §3l renders no quality workflow, so it declares no toolchain) |
 
 The `SURFACE_*` tags (#766) gate the docs templates' per-interface nav/MOC
 entries (§3h); when `--acceptance-interfaces` isn't passed at all, every

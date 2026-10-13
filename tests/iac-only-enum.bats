@@ -2,13 +2,14 @@
 #
 # --iac-only is an ENUM, not a boolean (#1892).
 #
-# branch-protection.sh and preflight.sh take `--iac-only false|kubernetes`. The
+# branch-protection.sh and preflight.sh take `--iac-only false|kubernetes|opentofu`
+# (#2425 added `opentofu`). The
 # old `true` value is retired repo-wide with no alias, because every caller lives
-# in this repo and moved in the same PR. #1162 adds a third value, `opentofu`.
+# in this repo and moved in the same PR.
 #
 # Two claims, tested apart:
 #
-#   * THE VALUE SET. Both scripts accept exactly `false` and `kubernetes`, and
+#   * THE VALUE SET. Both scripts accept exactly `false`, `kubernetes` and `opentofu`, and
 #     every other value (the retired `true` included) dies with one typed
 #     message. That message is pinned HERE and nowhere else, so widening the
 #     enum means editing one needle in one file. The other suites that exercise
@@ -35,8 +36,8 @@ bats_require_minimum_version 1.5.0
 
 load assertions
 
-# The one statement of the refusal. #1162 widens it to add `opentofu`.
-ENUM_MESSAGE='--iac-only must be one of: false kubernetes'
+# The one statement of the refusal (#2425 widened it to add `opentofu`).
+ENUM_MESSAGE='--iac-only must be one of: false kubernetes opentofu'
 
 # The retired value, kept out of this file's own source text (see the header).
 RETIRED=true
@@ -86,30 +87,41 @@ setup() {
   lacks "$stderr" "$ENUM_MESSAGE"
   lacks "$stderr" '--static-analysis must be'
   contains "$stderr" 'kubernetes-ci.yml` is absent'
+  # `opentofu` is the same IaC path keyed on its own workflow (#2425)
+  run --separate-stderr env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
+    --has-dockerfile false --has-codeql false --iac-only opentofu --default-branch main
+  [ "$status" -eq 1 ]
+  lacks "$stderr" "$ENUM_MESSAGE"
+  lacks "$stderr" '--static-analysis must be'
+  contains "$stderr" 'opentofu-ci.yml` is absent'
 }
 
-@test "preflight accepts --iac-only false and kubernetes: each gets past validation to its own path (#1892)" {
+@test "preflight accepts --iac-only false, kubernetes and opentofu: each gets past validation to its own path (#1892, #2425)" {
   run --separate-stderr env PATH="$STUB_BIN:$PATH" bash "$PREFLIGHT" \
     --languages "" --has-dockerfile false --iac-only false --assume-yes
   [ "$status" -eq 1 ]
   lacks "$stderr" "$ENUM_MESSAGE"
   contains "$stderr" '--static-analysis must be sonarcloud or sonarqube'
-  # the IaC path skips the toolchain check and reaches the macOS precondition
-  run --separate-stderr env PATH="$STUB_BIN:$PATH" bash "$PREFLIGHT" \
-    --languages "" --has-dockerfile false --iac-only kubernetes --assume-yes
-  [ "$status" -eq 1 ]
-  lacks "$stderr" "$ENUM_MESSAGE"
-  lacks "$stderr" '--static-analysis must be'
-  contains "$stderr" 'This script supports macOS only. Detected: Linux'
+  # each IaC path skips the toolchain check and reaches the macOS precondition
+  local topic
+  for topic in kubernetes opentofu; do
+    run --separate-stderr env PATH="$STUB_BIN:$PATH" bash "$PREFLIGHT" \
+      --languages "" --has-dockerfile false --iac-only "$topic" --assume-yes
+    [ "$status" -eq 1 ]
+    lacks "$stderr" "$ENUM_MESSAGE"
+    lacks "$stderr" '--static-analysis must be'
+    contains "$stderr" 'This script supports macOS only. Detected: Linux'
+  done
 }
 
 @test "both scripts refuse the retired true and every other value with the one typed message (#1892)" {
   # the retired value first; then case, affix and near-miss variants that pin the
-  # anchors and the exact spelling of `kubernetes`; then an empty value and a
-  # following flag swallowed as the value
+  # anchors and the exact spelling of `kubernetes` and `opentofu`; then an empty
+  # value and a following flag swallowed as the value
   local script v
   for script in "$PROTECT" "$PREFLIGHT"; do
-    for v in "$RETIRED" True yes 1 Kubernetes kubernetesx xkubernetes k8s opentofu "" --default-branch; do
+    for v in "$RETIRED" True yes 1 Kubernetes kubernetesx xkubernetes k8s OpenTofu opentofu-x xopentofu \
+      tofu terraform "" --default-branch; do
       run --separate-stderr env PATH="$STUB_BIN:$PATH" bash "$script" \
         --static-analysis sonarcloud --vulnerabilities snyk --iac-only "$v"
       [ "$status" -eq 1 ]

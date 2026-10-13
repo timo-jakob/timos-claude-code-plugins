@@ -8,7 +8,7 @@
 #                --languages "swift javascript python go" \
 #                --has-dockerfile true|false \
 #                [--has-ko true|false] \
-#                [--iac-only false|kubernetes] \
+#                [--iac-only false|kubernetes|opentofu] \
 #                [--assume-yes]
 #
 #   --static-analysis / --vulnerabilities   the RESOLVED toolchain
@@ -18,15 +18,17 @@
 #                     flags. `snyk` needs snyk-cli, `trivy` needs trivy, and
 #                     `sonarqube` (like `trivy` or a Dockerfile) needs the
 #                     Docker daemon + compose plugin. Required unless
-#                     --iac-only kubernetes, where neither is required or read.
+#                     --iac-only names an IaC topic, where neither is required
+#                     or read.
 #
-#   --iac-only kubernetes
-#                     the §3l IaC path (#1605): require `gh jq git` plus the
-#                     gate's toolchain (iac_brews below) and no other brew
-#                     formula — no pre-commit, gitleaks, semgrep, sonar-scanner
-#                     or snyk-cli — and skip the Docker-daemon check, none of
-#                     which that path uses. Default false; any other value is
-#                     rejected.
+#   --iac-only kubernetes|opentofu
+#                     the IaC path for that topic (#1605, #2425): require
+#                     `gh jq git` plus the topic gate's toolchain (iac_brews
+#                     for kubernetes, tofu_brews for opentofu, below) and no
+#                     other brew formula — no pre-commit, gitleaks, semgrep,
+#                     sonar-scanner or snyk-cli — and skip the Docker-daemon
+#                     check, none of which that path uses. Default false; any
+#                     other value is rejected.
 #
 # Exits 0 if all required tools are present (or installed during this run).
 # Exits non-zero if a required tool is missing and could not be installed.
@@ -46,7 +48,7 @@ ASSUME_YES="false"
 CLAUDE_APPROVER="false"
 IAC_ONLY="false"
 # the one statement of --iac-only's value set, shared by both refusals below
-IAC_ONLY_ENUM_MSG="--iac-only must be one of: false kubernetes"
+IAC_ONLY_ENUM_MSG="--iac-only must be one of: false kubernetes opentofu"
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -96,9 +98,9 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 
-[[ "$IAC_ONLY" =~ ^(false|kubernetes)$ ]] || die "$IAC_ONLY_ENUM_MSG"
+[[ "$IAC_ONLY" =~ ^(false|kubernetes|opentofu)$ ]] || die "$IAC_ONLY_ENUM_MSG"
 # the toolchain names the language-app prerequisites; the IaC path never reads it
-if [[ "$IAC_ONLY" != "kubernetes" ]]; then
+if [[ "$IAC_ONLY" == "false" ]]; then
 	[[ "$STATIC_ANALYSIS" =~ ^(sonarcloud|sonarqube)$ ]] ||
 		die "--static-analysis must be sonarcloud or sonarqube (the resolved static_analysis)"
 	[[ "$VULNERABILITIES" =~ ^(snyk|trivy)$ ]] ||
@@ -115,9 +117,14 @@ require_brew
 # `kustomize` renderer it prefers over `kubectl kustomize`. Exactly the seven tools
 # kubernetes-ci.yml pins; Homebrew cannot pin, so locally they are brew-current.
 iac_brews=(helm kustomize kubeconform kube-linter kyverno trivy yq)
+# The OpenTofu gate's toolchain (#2425): what the bootstrapped scripts/tofu-gate.zsh
+# runs — tofu itself, tflint, trivy's config scan and conftest's policy stages.
+tofu_brews=(opentofu tflint trivy conftest)
 
 if [[ "$IAC_ONLY" == "kubernetes" ]]; then
 	required_brews=("gh" "jq" "git" "${iac_brews[@]}")
+elif [[ "$IAC_ONLY" == "opentofu" ]]; then
+	required_brews=("gh" "jq" "git" "${tofu_brews[@]}")
 else
 	# Always required
 	required_brews=(
@@ -217,6 +224,7 @@ for pkg in "${required_brews[@]}"; do
 	snyk-cli) bin="snyk" ;;
 	sonar-scanner) bin="sonar-scanner" ;;
 	golangci-lint) bin="golangci-lint" ;;
+	opentofu) bin="tofu" ;;
 	esac
 	if command -v "$bin" >/dev/null 2>&1 || brew list --formula "$pkg" >/dev/null 2>&1; then
 		ok "$pkg"
@@ -300,7 +308,7 @@ fi
 # --- docker (SonarQube, Trivy, or any project with a Dockerfile) -------------
 needs_docker="false"
 # never on the IaC path: its Docker consumers (image, Trivy image, SonarQube) are never emitted there
-if [[ "$IAC_ONLY" != "kubernetes" ]] &&
+if [[ "$IAC_ONLY" == "false" ]] &&
 	[[ "$STATIC_ANALYSIS" == "sonarqube" || "$VULNERABILITIES" == "trivy" || "$HAS_DOCKERFILE" == "true" ]]; then
 	needs_docker="true"
 fi

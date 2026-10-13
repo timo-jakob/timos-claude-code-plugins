@@ -373,15 +373,17 @@ EOF
   done
 }
 
-@test "render: #1604 KUBERNETES block follows --primary kubernetes" {
-  printf 'a: 1\n# --- KUBERNETES-START ---\ngate: yes\n# --- KUBERNETES-END ---\n' > "$T/k.tmpl"
-  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --primary kubernetes k.tmpl
-  [ "$status" -eq 0 ]
-  grep -qx 'gate: yes' "$OUT/k"
-  # an EXACT match only: another primary, a prefix of `kubernetes`, and no
-  # --primary at all each strip it
+@test "render: #1604 #2425 IAC block follows an IaC-topic --primary (kubernetes, opentofu)" {
+  printf 'a: 1\n# --- IAC-START ---\ngate: yes\n# --- IAC-END ---\n' > "$T/k.tmpl"
   local primary
-  for primary in --primary=python --primary=kubernetes-operator none; do
+  for primary in kubernetes opentofu; do
+    run zsh "$SCRIPT" --templates "$T" --out "$OUT" --primary "$primary" k.tmpl
+    [ "$status" -eq 0 ]
+    grep -qx 'gate: yes' "$OUT/k"
+  done
+  # an EXACT match only: another primary, an extension of either topic, and no
+  # --primary at all each strip it
+  for primary in --primary=python --primary=kubernetes-operator --primary=opentofu-x none; do
     if [ "$primary" = none ]; then
       run zsh "$SCRIPT" --templates "$T" --out "$OUT" k.tmpl
     else
@@ -394,18 +396,46 @@ EOF
   done
 }
 
-@test "render: #1604 the real .maintenance.yml.tmpl records gate: only on the kubernetes primary" {
-  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --approval human --primary kubernetes \
-    common/.maintenance.yml.tmpl
-  [ "$status" -eq 0 ]
-  [ "$(yq -r '.gate' "$OUT/common/.maintenance.yml")" = "make lint" ]
+@test "render: #1604 #2425 the real .maintenance.yml.tmpl records gate: only on an IaC-topic primary" {
+  local primary
+  for primary in kubernetes opentofu; do
+    run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --approval human --primary "$primary" \
+      common/.maintenance.yml.tmpl
+    [ "$status" -eq 0 ]
+    [ "$(yq -r '.gate' "$OUT/common/.maintenance.yml")" = "make lint" ]
+    [ "$(yq -r '.tools' "$OUT/common/.maintenance.yml")" = null ]
+  done
   run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --approval human --primary python --languages python \
     --static-analysis sonarcloud --vulnerabilities snyk --code-scanning codeql \
     common/.maintenance.yml.tmpl
   [ "$status" -eq 0 ]
   [ "$(yq -r '.primary' "$OUT/common/.maintenance.yml")" = "python" ]
   run ! grep -q '^gate:' "$OUT/common/.maintenance.yml"
-  run ! grep -q 'KUBERNETES' "$OUT/common/.maintenance.yml"
+  run ! grep -q 'IAC' "$OUT/common/.maintenance.yml"
+}
+
+@test "render: #2425 --primary kubernetes and --primary opentofu render the same IaC .maintenance.yml" {
+  local primary
+  for primary in kubernetes opentofu; do
+    run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --approval human --primary "$primary" \
+      --languages "" common/.maintenance.yml.tmpl
+    [ "$status" -eq 0 ]
+    # the pre-#2425 kubernetes render, byte for byte, but for the reworded gate: comment
+    [ "$(cat "$OUT/common/.maintenance.yml")" = "# Declares this repo's PRIMARY type for /development:maintenance.
+# The primary stack gets the full pipeline (its app-grade gates: coverage floor,
+# dependency upgrades, ...); everything else detected is AUXILIARY and gets a
+# mechanical/lint-level treatment only. See ARCHITECTURE.md \"Primary / auxiliary
+# model\" in the development plugin family.
+primary: $primary
+# The approval model /development:bootstrap resolved (#1684). A recorded value wins on every
+# re-run: human (a human approves; armed auto-merge then merges) | approver (the Claude Approver).
+approval: human
+# --- IAC-START ---
+# The repository's gate COMMAND: what the IaC workflow's gate job and hooks/pre-push run. A re-run of
+# bootstrap keeps a recorded value and renders it into both.
+gate: make lint
+# --- IAC-END ---" ]
+  done
 }
 
 # --- #1651: the declared toolchain in .maintenance.yml's tools: block -------------
@@ -457,10 +487,10 @@ EOF
   run ! grep -q 'TOOLCHAIN' "$OUT/common/.maintenance.yml"
 }
 
-@test "render: #1651 TOOLCHAIN block is kept for every primary but kubernetes, and with no --primary" {
+@test "render: #1651 #2425 TOOLCHAIN block is kept for every primary but an IaC topic, and with no --primary" {
   printf 'a: 1\n# --- TOOLCHAIN-START ---\ntools: yes\n# --- TOOLCHAIN-END ---\n' > "$T/t.tmpl"
   local primary
-  for primary in python java claude-plugin kubernetes-operator; do
+  for primary in python java claude-plugin kubernetes-operator opentofu-x; do
     run zsh "$SCRIPT" --templates "$T" --out "$OUT" --primary "$primary" t.tmpl
     [ "$status" -eq 0 ]
     grep -qx 'tools: yes' "$OUT/t"
@@ -468,10 +498,12 @@ EOF
   run zsh "$SCRIPT" --templates "$T" --out "$OUT" t.tmpl
   [ "$status" -eq 0 ]
   grep -qx 'tools: yes' "$OUT/t"
-  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --primary kubernetes t.tmpl
-  [ "$status" -eq 0 ]
-  run ! grep -q 'tools: yes' "$OUT/t"
-  grep -qx 'a: 1' "$OUT/t"
+  for primary in kubernetes opentofu; do
+    run zsh "$SCRIPT" --templates "$T" --out "$OUT" --primary "$primary" t.tmpl
+    [ "$status" -eq 0 ]
+    run ! grep -q 'tools: yes' "$OUT/t"
+    grep -qx 'a: 1' "$OUT/t"
+  done
 }
 
 @test "render: #1651 a declare-nothing .maintenance.yml is today's file plus the appended tools: block" {
@@ -554,11 +586,22 @@ tools:
   run zsh "$SCRIPT" --templates "$T" --out "$OUT" --approval approver --claude-plugin true a.tmpl
   [ "$status" -eq 2 ]
   contains "$output" "approval approver is never rendered for a plugin repo or the IaC path"
-  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --approval approver --primary kubernetes a.tmpl
-  [ "$status" -eq 2 ]
-  [ ! -e "$OUT/a" ]
-  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --approval human --primary kubernetes a.tmpl
-  [ "$status" -eq 0 ]
+  local primary
+  for primary in kubernetes opentofu; do
+    rm -f "$OUT/a"
+    run zsh "$SCRIPT" --templates "$T" --out "$OUT" --approval approver --primary "$primary" a.tmpl
+    [ "$status" -eq 2 ]
+    contains "$output" "approval approver is never rendered for a plugin repo or the IaC path"
+    [ ! -e "$OUT/a" ]
+    run zsh "$SCRIPT" --templates "$T" --out "$OUT" --approval human --primary "$primary" a.tmpl
+    [ "$status" -eq 0 ]
+  done
+  # exact matching: an extension of either topic is a language primary, so approver renders
+  for primary in kubernetes-operator opentofu-x; do
+    run zsh "$SCRIPT" --templates "$T" --out "$OUT" --approval approver --primary "$primary" a.tmpl
+    [ "$status" -eq 0 ]
+    grep -qx 'approval: approver' "$OUT/a"
+  done
 }
 
 @test "render: #1684 approval approver is refused for --primary claude-plugin without --claude-plugin" {
@@ -606,12 +649,32 @@ tools:
   [ -x "$OUT/common/scripts/check-ops-conformance.zsh" ]
 }
 
-@test "render: #1604 an IaC-shaped tag keep_block was never taught still fails loudly" {
-  # KUBERNETES was ADDED to the keep-rules; the loud failure for every other tag stays
-  printf '# --- IAC-START ---\nx\n# --- IAC-END ---\n' > "$T/i.tmpl"
+@test "render: #1604 #2425 the retired KUBERNETES tag is no longer taught and fails loudly" {
+  # IAC replaced KUBERNETES in the keep-rules; a stale template still carrying
+  # the old tag must fail, not silently strip its gate: line
+  # the tag is assembled, so this file's own source never spells the retired
+  # marker the sweep below forbids
+  local tag=KUBER"NETES"
+  printf '# --- %s-START ---\nx\n# --- %s-END ---\n' "$tag" "$tag" > "$T/i.tmpl"
   run zsh "$SCRIPT" --templates "$T" --out "$OUT" --primary kubernetes i.tmpl
   [ "$status" -eq 1 ]
-  contains "$output" "unknown block tag 'IAC'"
+  contains "$output" "unknown block tag '$tag'"
+}
+
+@test "render: #2425 no tracked file outside docs/superpowers carries the retired KUBERNETES block marker or tag row" {
+  local tag=KUBER"NETES" files hits
+  files="$(cd "$REPO_ROOT" && git ls-files -- ':!docs/superpowers/**')"
+  # anchored positively: an enumeration that came back empty would pass vacuously
+  [ "$(printf '%s\n' "$files" | grep -c .)" -gt 500 ]
+  grep -qx 'development/skills/bootstrap/templates/common/.maintenance.yml.tmpl' <<< "$files"
+  hits="$(cd "$REPO_ROOT" && printf '%s\n' "$files" | tr '\n' '\0' |
+    xargs -0 grep -lE -- "$tag-(START|END)|^\\| \`$tag\` \\|" 2>/dev/null || true)"
+  [ -z "$hits" ] || { echo "$hits"; return 1; }
+  # non-vacuity: the same pattern fires on a planted copy
+  printf '# --- %s-START ---\n' "$tag" > "$BATS_TEST_TMPDIR/planted"
+  grep -qE -- "$tag-(START|END)" "$BATS_TEST_TMPDIR/planted"
+  printf '| `%s` | x |\n' "$tag" > "$BATS_TEST_TMPDIR/planted-row"
+  grep -qE -- "^\\| \`$tag\` \\|" "$BATS_TEST_TMPDIR/planted-row"
 }
 
 @test "render: unknown block tag fails loudly with file:line" {

@@ -428,8 +428,11 @@ EOF
   [ -n "$row" ]
   contains "$row" 'the **recorded** `gate:` value'
   contains "$row" 'else `make lint`'
-  row="$(grep -F '| `KUBERNETES` |' "$SKILL")"
-  contains "$row" '`--primary kubernetes`'
+  row="$(grep -F '| `IAC` |' "$SKILL")"
+  contains "$row" '`kubernetes` (the §3l IaC path) or `opentofu`'
+  contains "$row" "render.zsh's \`iac_primaries\` set, matched exactly"
+  row="$(grep -F '| `TOOLCHAIN` |' "$SKILL")"
+  contains "$row" '`--primary` is anything but an IaC topic'
   # END-ANCHORED by length: a range whose end address stopped matching would run
   # to EOF and let unrelated prose satisfy the needles
   [ "$(sed -n '/^- `\.maintenance\.yml` (render/,/^- `LICENSE`/p' "$SKILL" | wc -l | tr -d ' ')" -le 8 ]
@@ -998,6 +1001,91 @@ write_marker_at_line() {
   done
 }
 
+# --- --iac-only opentofu (#2425): the same precondition, keyed on its own workflow --
+#
+# No OpenTofu workflow template ships yet (#1162 adds it), so these run against
+# fixture workflows: each shape writer above fills kubernetes-ci.yml, and
+# as_opentofu_workflow moves that file to opentofu-ci.yml, leaving no
+# kubernetes-ci.yml behind — so a pass can only come from reading the opentofu file.
+as_opentofu_workflow() {
+  mv "$PROTECT_REPO/.github/workflows/kubernetes-ci.yml" "$PROTECT_REPO/.github/workflows/opentofu-ci.yml"
+}
+
+@test "branch-protection --iac-only opentofu requires exactly the gate context from opentofu-ci.yml (#2425)" {
+  local shape
+  for shape in 4-space quoted crlf step-name sibling-after; do
+    protection_stubs
+    write_gate_workflow "$shape"
+    as_opentofu_workflow
+    run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
+      --has-dockerfile false --has-codeql false \
+      --iac-only opentofu --default-branch main
+    [ "$status" -eq 0 ]
+    [ "$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | sort | join(",")')" = "gate" ]
+  done
+}
+
+@test "branch-protection --iac-only opentofu REFUSES an absent opentofu-ci.yml, even beside a good kubernetes-ci.yml (#2425)" {
+  # protection_stubs leaves a real, passing kubernetes-ci.yml in the repo: the
+  # opentofu path must not be satisfied by the other topic's workflow
+  protection_stubs
+  [ -f "$PROTECT_REPO/.github/workflows/kubernetes-ci.yml" ]
+  run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
+    --has-dockerfile false --has-codeql false \
+    --iac-only opentofu --default-branch main
+  [ "$status" -eq 1 ]
+  contains "$output" '.github/workflows/opentofu-ci.yml` is absent'
+  contains "$output" 'Render it from the plugin'"'"'s templates/opentofu/.github/workflows/opentofu-ci.yml.tmpl (not shipped until #1162;'
+  lacks "$output" 'kubernetes-ci.yml'
+  [ ! -s "$CURL_DATA" ]
+}
+
+@test "branch-protection --iac-only opentofu REFUSES a workflow with no gate job, reading the opentofu/ marker (#2425)" {
+  local out body
+  # marked from the opentofu/ subtree → the plugin's file: refresh it from the template
+  protection_stubs
+  out="$PROTECT_REPO/.github/workflows/opentofu-ci.yml"
+  write_per_stage_workflow unmarked
+  as_opentofu_workflow
+  body="$(cat "$out")"
+  printf '# claude-bootstrap: rendered from opentofu/.github/workflows/opentofu-ci.yml.tmpl @ v1 sha256:0\n%s\n' \
+    "$body" > "$out"
+  run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
+    --has-dockerfile false --has-codeql false \
+    --iac-only opentofu --default-branch main
+  [ "$status" -eq 1 ]
+  contains "$output" 'carries the plugin'"'"'s provenance marker but has no `gate` job'
+  contains "$output" 'Refresh it from the plugin'"'"'s templates/opentofu/.github/workflows/opentofu-ci.yml.tmpl'
+  [ ! -s "$CURL_DATA" ]
+  # the kubernetes subtree's marker is not this topic's: the file reads as user-owned
+  protection_stubs
+  write_per_stage_workflow marked
+  as_opentofu_workflow
+  run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
+    --has-dockerfile false --has-codeql false \
+    --iac-only opentofu --default-branch main
+  [ "$status" -eq 1 ]
+  contains "$output" 'is user-owned and has no `gate` job'
+  contains "$output" 'or remove it so the plugin'"'"'s templates/opentofu/.github/workflows/opentofu-ci.yml.tmpl'
+  lacks "$output" 'provenance marker'
+  [ ! -s "$CURL_DATA" ]
+}
+
+@test "branch-protection --iac-only opentofu REFUSES a gate job carrying name:, strategy: or uses: (#2425)" {
+  local shape
+  for shape in named matrix reusable; do
+    protection_stubs
+    write_gate_workflow "$shape"
+    as_opentofu_workflow
+    run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
+      --has-dockerfile false --has-codeql false \
+      --iac-only opentofu --default-branch main
+    [ "$status" -eq 1 ]
+    contains "$output" 'opentofu-ci.yml`'"'"'s `gate` job carries `name:`, a `strategy:` block or a reusable-workflow `uses:`'
+    [ ! -s "$CURL_DATA" ]
+  done
+}
+
 @test "branch-protection --iac-only REFUSES a gate job written in flow style or through an anchor (#1641)" {
   # a line reader cannot see the keys such a job carries — a `name:` inside the
   # braces, or behind the alias or merge key, would rename the check unseen — so
@@ -1326,10 +1414,12 @@ EOF
   # …and the context NAME. A rename of the workflow's job would otherwise leave
   # SETUP.md handing a no-admin user (the 403 path) a recipe for a context no
   # workflow reports — and the retired six-name list is asserted gone (#1605)
-  contains "$setup" '`branch-protection.sh --iac-only kubernetes`): `gate`. This single context **replaces**'
-  # …and where it comes from, worded topic-neutrally (#1892) so the next IaC
-  # path (#1162) adds its workflow beside kubernetes-ci.yml without reopening it
-  contains "$setup" "It comes from the IaC workflow's one \`gate\` job, \`.github/workflows/kubernetes-ci.yml\` on the kubernetes path"
+  contains "$setup" '`branch-protection.sh --iac-only <topic>`): `gate`. This single context **replaces**'
+  # the qualifier names the topic generically (#2425): an OpenTofu adopter is
+  # never told to pass --iac-only kubernetes
+  contains "$setup" '(the kubernetes topic marker — or bootstrap'"'"'s explicit empty-GitOps-repo confirmation — or the opentofu topic marker (once #1162 ships that path), with no application language'
+  # …and where it comes from, per topic (#1892, #2425)
+  contains "$setup" "It comes from the IaC workflow's one \`gate\` job, \`.github/workflows/kubernetes-ci.yml\` on the kubernetes path and \`.github/workflows/opentofu-ci.yml\` on the opentofu path"
   lacks "$setup" '`render`, `schema`, `lint`, `policy`, `config-scan`, `argocd`'
   step5="$(sed -n '/^For the \*\*IaC path\*\*/,/^## /p' "$SKILL" | tr -s '[:space:]' ' ')"
   contains "$step5" 'no other `primary:` recorded'
@@ -1776,7 +1866,7 @@ step4a_iac() {
   contains "$skill" 'the `--iac-only` checks array (the single `gate` context)'
   contains "$setup" 'your required check is `kubernetes-ci.yml`'"'"'s single `gate`'
   contains "$setup" 'its own required check is `kubernetes-ci.yml`'"'"'s `gate` job instead'
-  contains "$setup" '`branch-protection.sh --iac-only kubernetes`): `gate`.'
+  contains "$setup" '`branch-protection.sh --iac-only <topic>`): `gate`.'
 }
 
 @test "EXPECTED_JOBS equals the rendered workflow's job ids (#1606)" {

@@ -1966,11 +1966,8 @@ plugin stops at the boundary of — nor container images, nor application code o
 any kind. The two IaC plugins own **disjoint file sets**, so a repo holding both
 **does** detect both topics and runs both **maintenance** pipelines with no
 coordination between them, now that #1160 has registered the marker that makes
-the second topic detectable. The **CI** half is narrower — the two
-bootstrap-rendered workflows will share three **names** — since #1604 the
-kubernetes side reports one context, `gate`, so those three are its gate
-**stages** rather than job ids — **and** at most one of them is rendered per
-repo, which is what makes that safe; see the job-id collision below.
+the second topic detectable. The **CI** half is narrower; see the `gate`-context
+collision below.
 
 **The boundary is the FILE SET, not the resource kind**, and the two statements
 above only agree because of it. Cluster resources *expressed in HCL* — a
@@ -2125,8 +2122,8 @@ the only way to clear the finding would be to break the tool the repo actually
 runs. So what is *identical for every consumer* is the **requirement** — state
 must be encrypted at rest — not the artifact that satisfies it. **Both
 consumers of the rule are bound by it**: #1160 owns the detection rule for the
-maintenance gather, and #1162's `state-encryption` job must implement the same
-dialect-aware rule inline in the rendered workflow — a consumer repo's workflow
+maintenance gather, and #1162's `state-encryption` stage must implement the same
+dialect-aware rule inline in the rendered gate script — a consumer repo's workflow
 cannot call this plugin's gather script, so #1162 embeds its own copy and is
 just as capable of narrowing it. Both must satisfy the requirement in both
 dialects — **any at-rest form the repo's own tool provides clears it, when the
@@ -2142,10 +2139,8 @@ block does not belong in a consumed module. Such a repo can satisfy *neither*
 enumerated form, so an unconditional check would fire on it permanently and
 unclearably — the same defect the dialect paragraph above exists to prevent, one
 repo-shape over. The check therefore **reports nothing** there: no finding in the
-gather #1160 ships, and #1162's `state-encryption` job **passes**, still reporting
-its context (a required context that never reports would sit at `expected`
-forever, which is the failure the seventh job is kept out of the requirable set
-to avoid).
+gather #1160 ships, and #1162's `state-encryption` stage **passes**, so the one
+required `gate` context still reports.
 
 **The exemption keys on module-library shape, never on backend absence alone.**
 A **root** module that declares no `backend` block does not thereby escape — it
@@ -2445,41 +2440,38 @@ Settling the boundary first is deliberate: a topic plugin that
 creeps into Dockerfiles, cluster manifests or application code contradicts
 language-first and has to be unpicked across several plugins later.
 
-That pipeline is the **seven jobs** #1162's bootstrap template **will emit** —
-future tense deliberately, because no such template exists yet — of which the
-**credential-free six will be the requirable set**, in pipeline order: `fmt`,
-`validate`, `lint`, `config-scan`, `state-encryption`, `policy`. Those six job
-ids *are* the branch-protection contexts, so they are enumerated rather than
-counted — a guessed set makes `branch-protection.sh` require a context no
-workflow ever reports, which blocks every merge on the repo it was meant to
-protect. The seventh, `plan-policy`, is the credentialed plan stage and is
-deliberately **not** requirable: required-and-disabled would sit at `expected`
-forever. Note where the workflow will live — a *bootstrap* template owned by the
+That pipeline is the **seven stages** of the gate script that the one `gate` job
+of #1162's bootstrap template **will emit** runs — future tense deliberately,
+because no such template exists yet — of which the **credential-free six** run on
+every pull request, in pipeline order: `fmt`, `validate`, `lint`, `config-scan`,
+`state-encryption`, `policy`. Those six are enumerated rather than counted, so the
+gate script #1162 renders runs exactly these stages. The seventh, `plan-policy`, is the
+credentialed plan stage, which the gate does **not** run unless the repository
+variable above turns it on. Note where the workflow will live — a *bootstrap* template owned by the
 generic `development` plugin, not something this plugin's skills run, the same
 boundary that keeps detection in `development`.
 
-**Neither half of that contract is wired yet, and #1162 owns both.**
-`branch-protection.sh`'s IaC path is today an enum `--iac-only` with a
-`kubernetes` value (#1892) resolving to a literal kubernetes context set, and `detect-stack.sh` derives it as *the
+**The flag half of that contract is wired; the derivation half is #1162's.**
+`branch-protection.sh`'s IaC path is an enum `--iac-only` whose values are
+`kubernetes` (#1892) and, since #2425, `opentofu`, which requires the single
+`gate` context of `.github/workflows/opentofu-ci.yml` — the one-job gate model
+that #1162's template follows, running the six stages above in its gate script.
+But `detect-stack.sh` still derives the flag as *the
 kubernetes marker with no application language* — with a recorded
-`primary: opentofu` taking a repo **off** that path rather than onto it. So the
-enumeration above is a specification for #1162, not a description of a flag that
-can select it: widening `--iac-only` (and the `iac_only` derivation, including
-the `primary: opentofu` arm) is that story's work — as is the **third** site,
+`primary: opentofu` taking a repo **off** that path rather than onto it — so no
+bootstrap path passes `--iac-only opentofu` yet: the `iac_only` derivation,
+including the `primary: opentofu` arm, is that story's work — as is the **third** site,
 the §3l / Step 4b prose in `development/skills/bootstrap/SKILL.md`, which states
 the same flag's contract in its kubernetes-only form and would otherwise be left
 describing a flag that had grown a second context set.
 
-**Three of those six ids will collide with the sibling's** — `lint`,
-`config-scan` and `policy` are enumerated byte-identically to the shipped
-kubernetes template's **stage** names (future tense for the same reason as above:
-only one IaC template exists on disk today), and a required status context is
-matched by **name**. Since #1604 those three are stages of the kubernetes gate
-**script**, not job ids: that template emits one job, `gate`, and
-`--iac-only kubernetes` requires that one context (#1606) — so the collision is **latent**, a
-clash of names the kubernetes side no longer reports as contexts. It stays
-recorded because the enumeration above is #1162's specification and the names are
-the ones it will render. That is a known, accepted collision
+**Both IaC workflows will require a context named `gate`** — `--iac-only
+kubernetes` that of the sibling's one job (#1606), `--iac-only opentofu` that of
+`opentofu-ci.yml` — and a required status context is matched by **name**, so
+one workflow's `gate` could satisfy the other's requirement. While at most one
+workflow renders, the collision is **latent**. The shared stage names (`lint`,
+`config-scan`, `policy`) report no contexts, so their clash is cosmetic. That is
+a known, accepted collision
 rather than an oversight, because **at most one IaC workflow is rendered per
 repo**: a repo with an application language takes neither IaC path, and a
 zero-language repo takes at most one — the path whose marker it carries. A
@@ -2500,10 +2492,10 @@ on the kubernetes marker alone, so such a repo currently renders the sibling's
 workflow. **#1162 owns adding the halt**, alongside the `--iac-only` widening
 and against the marker #1160 landed; it is an acceptance criterion of that
 story, and that criterion cites **#1394** — the later slice that must render
-both workflows and therefore owns disambiguating the three ids. Until the halt lands,
+both workflows and therefore owns disambiguating their `gate` contexts. Until the halt lands,
 the collision is bounded by the absence of an `opentofu` marker rather than by a
 check. Do not "fix" any of this by renaming the ids here — #1162 renders them
-exactly as enumerated.
+exactly as enumerated, as gate-script stages.
 
 ### `development-composition` owns
 

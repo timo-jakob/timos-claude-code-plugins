@@ -569,9 +569,9 @@ this one owns the modules that *create* it. The two own disjoint file sets, so a
 repo holding both **does** detect both topics and runs both **maintenance**
 pipelines, now that #1160 has registered the marker that makes the second topic
 detectable. The CI half is narrower: the two bootstrap-rendered workflows will
-share three job ids, **and** at most one of them is rendered per repo, which is
-what makes that safe — the slice that renders both (disambiguating those ids) is
-still open. Like
+both require a status context named `gate`, **and** at most one of them is
+rendered per repo, which is what makes that safe — the slice that renders both
+(disambiguating that context) is still open. Like
 `development-kubernetes`, it can also be **primary**: a provisioning repo has no
 application language, and the primary/auxiliary model already permits a topic to
 hold that slot.
