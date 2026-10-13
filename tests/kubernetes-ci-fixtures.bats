@@ -590,6 +590,51 @@ variants() {
   contains "$output" 'sub-config'
 }
 
+@test "render: the consumed-root rules each keep their consumed base unrendered (#1611)" {
+  # The consumed-root pass decides which kustomize roots are built. Each base
+  # planted here has exactly ONE consumer, reached through one rule, so a rule
+  # deleted from the script leaves that base reading as unconsumed and adds a
+  # file to the rendered set. Every base is a ConfigMap, so a mutation shows up
+  # in that set rather than as a lint red.
+  prepare kubernetes-repo
+  local b
+  for b in base-quoted-double base-quoted-single base-component overlays/web/httpbin; do
+    mkdir -p "$W/kustomize/$b"
+    printf '%s\n' 'apiVersion: kustomize.config.k8s.io/v1beta1' 'kind: Kustomization' \
+      'resources:' '  - configmap.yaml' > "$W/kustomize/$b/kustomization.yaml"
+    printf '%s\n' 'apiVersion: v1' 'kind: ConfigMap' 'metadata:' "  name: ${b##*/}" \
+      'data:' '  planted: "#1611"' > "$W/kustomize/$b/configmap.yaml"
+  done
+  # the QUOTE-STRIPPING rule: the two quoted bases are consumed only through a
+  # double- and a single-quoted ref, so deleting either sed expression is seen
+  mkdir -p "$W/kustomize/overlays/quoted"
+  printf '%s\n' 'apiVersion: kustomize.config.k8s.io/v1beta1' 'kind: Kustomization' \
+    'resources:' '  - "../../base-quoted-double"' "  - '../../base-quoted-single'" \
+    > "$W/kustomize/overlays/quoted/kustomization.yaml"
+  # the SCHEME-ANCHORED skip: `httpbin` begins with `http` but is a local child
+  # ref, so a bare `http*` prefix would skip it and build the child standalone
+  printf '%s\n' 'apiVersion: kustomize.config.k8s.io/v1beta1' 'kind: Kustomization' \
+    'resources:' '  - httpbin' > "$W/kustomize/overlays/web/kustomization.yaml"
+  # the ROOTS-not-buildable rule: base-component is consumed only by a
+  # Component, which is never buildable, and the Component is pulled in by an
+  # overlay through `components:`
+  mkdir -p "$W/kustomize/components/bundle" "$W/kustomize/overlays/composed"
+  printf '%s\n' 'apiVersion: kustomize.config.k8s.io/v1alpha1' 'kind: Component' \
+    'resources:' '  - ../../base-component' > "$W/kustomize/components/bundle/kustomization.yaml"
+  printf '%s\n' 'apiVersion: kustomize.config.k8s.io/v1beta1' 'kind: Kustomization' \
+    'components:' '  - ../../components/bundle' > "$W/kustomize/overlays/composed/kustomization.yaml"
+  run run_gate
+  [ "$status" -eq 0 ]
+  run rendered_files
+  [ "$status" -eq 0 ]
+  [ "$output" = "helm_charts_app.yaml kustomize_kustomize_overlays_composed.yaml kustomize_kustomize_overlays_prod.yaml kustomize_kustomize_overlays_quoted.yaml kustomize_kustomize_overlays_web.yaml plain_argocd_app-of-apps.yaml plain_argocd_foreign-app.yaml plain_policies_kyverno_kyverno-test.yaml plain_policies_kyverno_require-registry.yaml " ]
+  # here, while $output still holds the listing — one needle per rule's base
+  lacks "$output" 'kustomize_kustomize_base-quoted-double'
+  lacks "$output" 'kustomize_kustomize_base-quoted-single'
+  lacks "$output" 'kustomize_kustomize_overlays_web_httpbin'
+  lacks "$output" 'kustomize_kustomize_base-component'
+}
+
 @test "render: a chart at the repository ROOT renders as helm_root.yaml (#1603)" {
   # `${d#./}` leaves a root chart's dirname as ".", which is neither empty nor a
   # usable slug or release name; the normalisation to "root" is asserted here
@@ -664,6 +709,27 @@ YAML
   # the FAILED verdict is the last line of the run, and every stage before it
   # still reported ok — a red argocd must not hide a green schema
   [ "$(verdict_lines "$output")" = "$(expected_all_ok | sed '$d'; printf 'gate: argocd FAILED\n')" ]
+}
+
+@test "clean: an owned app whose repoURL is scp-form git@host:owner/name is selected (#1612)" {
+  # The filter's `":$slug_lc"` arm, pinned on its own: this repoURL ends in
+  # `:owner/name`, never `/owner/name`, so only that arm selects it. The slug
+  # comes from REPO_SLUG, so no remote parsing is involved.
+  prepare kubernetes-repo
+  cat > "$W/argocd/injected.yaml" <<YAML
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: injected
+spec:
+  source:
+    repoURL: git@example.com:$SLUG.git
+    path: charts/injected-scp-missing
+YAML
+  run run_gate
+  [ "$status" -eq 1 ]
+  contains "$output" 'gate: argocd FAILED'
+  contains "$output" 'error: app-of-apps references missing path: charts/injected-scp-missing'
 }
 
 @test "clean: the COMMITTED app-of-apps.yaml is what the filter selects (#1199, #1603)" {
@@ -1540,6 +1606,22 @@ EOF
   contains "$output" 'gate: argocd FAILED'
   contains "$output" 'error: app-of-apps references missing path: charts/app'
 
+  # the two SSH remote shapes resolve to the same slug (#1612). The scp form
+  # `git@host:owner/name` only splits on `/` once `origin="${origin//://}"`
+  # has turned its colon into a slash; without it the slug keeps the host, no
+  # Application is owned and the stage passes having checked no path
+  local remote
+  for remote in "git@github.com:$SLUG.git" "ssh://git@github.com/$SLUG.git"; do
+    (cd "$W" && git remote set-url origin "$remote")
+    run env -u GITHUB_ACTIONS -u GITHUB_REPOSITORY -u REPO_SLUG \
+      PATH="$IAC_SHIM:$IAC_BIN:$PATH" \
+      IAC_KUBECONFORM_BIN="$IAC_KUBECONFORM_BIN" IAC_KUBECONFORM_CACHE="$IAC_KUBECONFORM_CACHE" \
+      bash -c "cd '$W' && zsh '$GATE'"
+    [ "$status" -eq 1 ]
+    contains "$output" 'gate: argocd FAILED'
+    contains "$output" 'error: app-of-apps references missing path: charts/app'
+  done
+
   # GITHUB_REPOSITORY — what every Actions runner exports — is consulted
   # before the remote: no REPO_SLUG, no remote, and the slug still resolves
   (cd "$W" && git remote remove origin)
@@ -1564,6 +1646,58 @@ EOF
   contains "$output" 'slug could not be resolved'
   contains "$output" 'set REPO_SLUG=owner/name'
   lacks "$output" 'missing path'
+}
+
+# GitHub slugs are case-insensitive, so the argocd stage folds case in three
+# places. Each test below reaches exactly one fold: it plants a case mismatch
+# that only that fold reconciles, with the dangling path as the proof that the
+# Application was owned (#2111).
+
+@test "the slug fold: an upper-case REPO_SLUG still owns the lower-case repoURL (#2111)" {
+  # guards `"${(L)${REPO_SLUG:-${GITHUB_REPOSITORY:-}}}"`; the fixture's
+  # repoURLs are lower-case, so without that fold nothing is owned
+  prepare kubernetes-repo
+  rm -rf "$W/charts/app" "$W/policies"
+  SLUG="FIXTURE-ORG/Kubernetes-Repo"
+  run run_gate
+  [ "$status" -eq 1 ]
+  contains "$output" 'gate: argocd FAILED'
+  contains "$output" 'error: app-of-apps references missing path: charts/app'
+}
+
+@test "the repoURL fold: a mixed-case repoURL is owned by the lower-case slug (#2111)" {
+  # guards `url="${(L)url}"`; $SLUG stays the fixture's lower-case slug
+  prepare kubernetes-repo
+  cat > "$W/argocd/injected.yaml" <<YAML
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: injected
+spec:
+  source:
+    repoURL: https://example.com/FIXTURE-ORG/Kubernetes-Repo.git
+    path: charts/injected-mixed-case-missing
+YAML
+  run run_gate
+  [ "$status" -eq 1 ]
+  contains "$output" 'gate: argocd FAILED'
+  contains "$output" 'error: app-of-apps references missing path: charts/injected-mixed-case-missing'
+  [ "$(verdict_lines "$output")" = "$(expected_all_ok | sed '$d'; printf 'gate: argocd FAILED\n')" ]
+}
+
+@test "the origin fold: a mixed-case origin remote still owns the lower-case repoURL (#2111)" {
+  # guards `"${(L)${origin:h:t}}/${(L)${origin:t}}"`; REPO_SLUG and
+  # GITHUB_REPOSITORY are unset, so the remote is the only slug source
+  prepare kubernetes-repo
+  rm -rf "$W/charts/app" "$W/policies"
+  (cd "$W" && git init -q && git remote add origin "https://github.com/FIXTURE-ORG/Kubernetes-Repo.git")
+  run env -u GITHUB_ACTIONS -u GITHUB_REPOSITORY -u REPO_SLUG \
+    PATH="$IAC_SHIM:$IAC_BIN:$PATH" \
+    IAC_KUBECONFORM_BIN="$IAC_KUBECONFORM_BIN" IAC_KUBECONFORM_CACHE="$IAC_KUBECONFORM_CACHE" \
+    bash -c "cd '$W' && zsh '$GATE'"
+  [ "$status" -eq 1 ]
+  contains "$output" 'gate: argocd FAILED'
+  contains "$output" 'error: app-of-apps references missing path: charts/app'
 }
 
 @test "K8S_GATE_RENDER_DIR inside the tree, or non-empty, is refused (#1603)" {

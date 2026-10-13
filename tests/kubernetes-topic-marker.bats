@@ -1001,6 +1001,28 @@ chart() {
   # other not, which is the divergence this pair exists to forbid
   contains "$skill" 'the cause is **most likely** permissions'
   contains "$bootstrap" 'the cause is **most likely** permissions'
+  # the hedge holds only for a find that failed (#1596): a find exit 0 with a
+  # failed opentofu prune filter read the whole tree, so the cause is the grep
+  # binary, never permissions — and only find and the kubernetes grep suppress
+  # their diagnostics, the prune filter's grep does not
+  contains "$skill" 'marker'"'"'s `find`, and the kubernetes marker'"'"'s `grep`, run with `2>/dev/null`'
+  contains "$bootstrap" 'marker'"'"'s `find`, and the kubernetes marker'"'"'s `grep`, run with `2>/dev/null`'
+  contains "$skill" 'with a non-zero `find` exit'
+  contains "$bootstrap" 'with a non-zero `find` exit'
+  # …while the kubernetes marker's (find exit 0, grep exit M) stays under it:
+  # its grep reads repository files, so permissions remain the likely cause
+  contains "$skill" 'or with a non-zero `grep` exit from the kubernetes marker'
+  contains "$bootstrap" 'or with a non-zero `grep` exit from the kubernetes marker'
+  contains "$skill" '`(find exit 0, filter exit N)`'
+  contains "$bootstrap" '`(find exit 0, filter exit N)`'
+  contains "$skill" '`127` means `grep` is not on `PATH`'
+  contains "$bootstrap" '`127` means `grep` is not on `PATH`'
+  contains "$skill" 'check `command -v grep` and their `PATH`, not permissions'
+  contains "$bootstrap" 'check `command -v grep` and their `PATH`, not permissions'
+  lacks "$skill" 'if the same statuses recur the cause is **most likely** permissions'
+  lacks "$bootstrap" 'if the same statuses recur the cause is **most likely** permissions'
+  lacks "$skill" 'Every copy of the marker runs `find … 2>/dev/null` and `grep … 2>/dev/null`'
+  lacks "$bootstrap" 'the searches suppress their own diagnostics'
   contains "$skill" 'not "the tree is unreadable"'
   contains "$bootstrap" 'not "the tree is unreadable"'
   # and the hedge's EXAMPLE must be marker-accurate (#1393): the kubernetes walk

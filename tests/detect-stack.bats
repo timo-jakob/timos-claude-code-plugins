@@ -2474,8 +2474,8 @@ TOOL_SCOPED=(.github/workflows/quality-public.yml .github/workflows/quality-publ
 @test "detect-stack #1154: a primary that merely STARTS with kubernetes still vetoes" {
   # detect-stack.sh states the property — "the comparison is exact, so a future
   # `primary: kubernetes-operator` does not take the IaC path on a prefix match"
-  # — and nothing tested it. Loosening the arm to `kubernetes*)` would hand a
-  # kubernetes-operator repo the six required contexts.
+  # — and nothing tested it. Loosening the arm to `kubernetes*)` would put a
+  # kubernetes-operator repo on the IaC path, requiring only the `gate` context.
   k8s_chart
   printf 'primary: kubernetes-operator\n' > .maintenance.yml
   out=$(bash "$DETECT" 2>/dev/null)
