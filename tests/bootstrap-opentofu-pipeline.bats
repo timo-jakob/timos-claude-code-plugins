@@ -91,7 +91,7 @@ run_gate() {
   render_tofu opentofu/scripts/tofu-gate.zsh.tmpl
   tool_stubs
   cd "$FIX"
-  run env PATH="$STUB_BIN:$PATH" "$@" zsh "$GATE"
+  run env -u GITHUB_ACTIONS PATH="$STUB_BIN:$PATH" "$@" zsh "$GATE"
 }
 
 clean_fixture() {
@@ -272,7 +272,7 @@ stages_seen() {
   render_tofu opentofu/scripts/tofu-gate.zsh.tmpl
   cd "$FIX"
   tool_stubs
-  run env PATH="$STUB_BIN:$PATH" zsh "$GATE"
+  run env -u GITHUB_ACTIONS PATH="$STUB_BIN:$PATH" zsh "$GATE"
   [ "$status" -eq 1 ]
   contains "$output" 'gate: state-encryption FAILED'
   lacks "$output" 'gate: policy'
@@ -301,7 +301,7 @@ stages_seen() {
     if [[ ! -x "$d/conftest" ]]; then path_no_conftest="$path_no_conftest:$d"; fi
   done
   cd "$FIX"
-  run env PATH="$path_no_conftest" zsh "$GATE"
+  run env -u GITHUB_ACTIONS PATH="$path_no_conftest" zsh "$GATE"
   [ "$status" -eq 2 ]
   contains "$output" 'tofu-gate: required tool not on PATH: conftest — install it with: brew install conftest'
   lacks "$output" 'gate: fmt'
