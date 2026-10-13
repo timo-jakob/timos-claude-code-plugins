@@ -2660,9 +2660,8 @@ After pushing and opening the PR:
      That skill reviews only a PR the Maintenance App authored, so on such a
      repo every other PR — a vendor PR (Dependabot, Renovate, Snyk)
      included — is gated as `none` instead: a human review, no wait — read
-     `reviewDecision` and `mergeStateStatus` once (one
-     `gh pr view "<pr_number>" --json reviewDecision,mergeStateStatus`
-     call) and take the matching branch of *Poll the review decision*
+     `reviewDecision` and `mergeStateStatus` once (one call of the poll's
+     read below, `--jq` included) and take the matching branch of *Poll the review decision*
      below at once — `APPROVED` (with its approved-but-`BEHIND` bullet),
      `CHANGES_REQUESTED`, `NONE` on the first poll, or `REVIEW_REQUIRED`
      handled as that branch's `none` sub-branch (arm, record
@@ -2729,7 +2728,16 @@ After pushing and opening the PR:
    Then, on the re-read `reviewDecision`:
    - **`APPROVED`** → step 6 (merge).
    - **`CHANGES_REQUESTED`** → the `CHANGES_REQUESTED` handling below.
-   - **anything else** (still `REVIEW_REQUIRED`/`NONE`, or a
+   - **`NONE`** → the repo has no review-requiring branch protection, so
+     take the `NONE` on the first poll branch below at once: count each
+     reviewer's latest review on the current head. Non-zero → step 6,
+     unless the approved-but-`BEHIND` bullet applies, whose `NONE` arm
+     does not arm. Zero → leave the PR open and unarmed, record
+     `awaiting_approval` and move to the next stage. **Never** arm native
+     auto-merge on `NONE`: GitHub checks no review at merge time, so an
+     armed PR would merge as soon as its checks are green, bypassing
+     approval gating (#224).
+   - **anything else** (still `REVIEW_REQUIRED`, or a
      COMMENT-with-reservations that isn't a binding `APPROVE`) → the
      approve skill did not clear the gate; **do not `--retrigger`** (there
      is no workflow to nudge). Arm native auto-merge, record the outcome
@@ -2746,8 +2754,14 @@ After pushing and opening the PR:
    head**: a stale request-changes pinned to a superseded commit comes back
    as `AWAITING-APPROVAL` (4) with a stale note instead, since that is
    re-review territory, not a terminal verdict (#523); `AWAITING-APPROVAL`
-   (4) or `TIMED-OUT`
-   (3) → arm native auto-merge and move on (the `REVIEW_REQUIRED` branch below);
+   (4) or `TIMED-OUT` (3) → read the decision once with the poll's one-call
+   read below, `--jq` included, which prints an empty decision as `NONE`,
+   because the helper exits 4 for `REVIEW_REQUIRED` and `NONE` alike. On
+   `NONE`, exit 4 takes the `NONE` on the first poll branch below, and exit 3
+   leaves the PR open and unarmed, recorded in `actions_requiring_review` as
+   "timed out waiting for CI" — never arm on `NONE`. On any other decision,
+   arm native auto-merge as the `REVIEW_REQUIRED` branch below arms, never
+   its `ci` re-poll (the helper has spent its one re-trigger), and move on;
    `NOT-GREEN` (6) → back to step 3. The manual poll below is exactly what it
    automates — drop to it only when you need the finer-grained in-run
    rejection-fix rounds.
