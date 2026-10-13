@@ -239,7 +239,7 @@ run_block() {
 @test "SKILL.md: Phase 8 gates a PR the Maintenance App did not author as none on a plugin repo" {
   local text
   text="$(tr '\n' ' ' < "$SKILL" | tr -s ' ')"
-  contains "$text" "That skill reviews only a PR the Maintenance App authored, so on such a repo every other PR — a vendor PR (Dependabot, Renovate, Snyk) included — is gated as \`none\` instead: a human review, no wait — read \`reviewDecision\` and \`mergeStateStatus\` once (one \`gh pr view \"<pr_number>\" --json reviewDecision,mergeStateStatus\` call) and take the matching branch of *Poll the review decision* below at once — \`APPROVED\` (with its approved-but-\`BEHIND\` bullet), \`CHANGES_REQUESTED\`, \`NONE\` on the first poll, or \`REVIEW_REQUIRED\` handled as that branch's \`none\` sub-branch (arm, record \`awaiting_approval\`) — never the poll or a \`merge-pr-cycle.zsh\` wait."
+  contains "$text" "That skill reviews only a PR the Maintenance App authored, so on such a repo every other PR — a vendor PR (Dependabot, Renovate, Snyk) included — is gated as \`none\` instead: a human review, no wait — read \`reviewDecision\` and \`mergeStateStatus\` once (one call of the poll's read below, \`--jq\` included) and take the matching branch of *Poll the review decision* below at once — \`APPROVED\` (with its approved-but-\`BEHIND\` bullet), \`CHANGES_REQUESTED\`, \`NONE\` on the first poll, or \`REVIEW_REQUIRED\` handled as that branch's \`none\` sub-branch (arm, record \`awaiting_approval\`) — never the poll or a \`merge-pr-cycle.zsh\` wait."
 }
 
 @test "SKILL.md: the local-mode recipe checks the PR author before any approve call or wait" {
@@ -275,6 +275,15 @@ run_block() {
   contains "$text" "If \`<worktree_path>\` is empty — a standing PR step 0 gated as \`none\` has no worktree, and the legacy path where isolation didn't apply shouldn't happen after #64 — skip the \`worktree remove\` step and just call \`gh pr merge\`; the local-branch delete will then succeed because there's no worktree holding the ref."
   contains "$text" "ended awaiting_approval (armed but not approved within polling window, or approved but left BEHIND) or requires review"
   contains "$text" "- PR #<pr> (\"<title>\") — approved but BEHIND: armed for auto-merge; merges once the branch is brought up to date (left to the human reviewer)."
+}
+
+@test "SKILL.md: the local re-read and the ci helper result never arm auto-merge on NONE" {
+  local text
+  text="$(tr '\n' ' ' < "$SKILL" | tr -s ' ')"
+  contains "$text" "- **\`NONE\`** → the repo has no review-requiring branch protection, so take the \`NONE\` on the first poll branch below at once: count each reviewer's latest review on the current head. Non-zero → step 6, unless the approved-but-\`BEHIND\` bullet applies, whose \`NONE\` arm does not arm. Zero → leave the PR open and unarmed, record \`awaiting_approval\` and move to the next stage. **Never** arm native auto-merge on \`NONE\`: GitHub checks no review at merge time, so an armed PR would merge as soon as its checks are green, bypassing approval gating (#224). - **anything else** (still \`REVIEW_REQUIRED\`, or a COMMENT-with-reservations that isn't a binding \`APPROVE\`) → the approve skill did not clear the gate; **do not \`--retrigger\`** (there is no workflow to nudge). Arm native auto-merge, record the outcome as \`awaiting_approval\`"
+  contains "$text" "\`AWAITING-APPROVAL\` (4) or \`TIMED-OUT\` (3) → read the decision once with the poll's one-call read below, \`--jq\` included, which prints an empty decision as \`NONE\`, because the helper exits 4 for \`REVIEW_REQUIRED\` and \`NONE\` alike. On \`NONE\`, exit 4 takes the \`NONE\` on the first poll branch below, and exit 3 leaves the PR open and unarmed, recorded in \`actions_requiring_review\` as \"timed out waiting for CI\" — never arm on \`NONE\`. On any other decision, arm native auto-merge as the \`REVIEW_REQUIRED\` branch below arms, never its \`ci\` re-poll (the helper has spent its one re-trigger), and move on; \`NOT-GREEN\` (6) → back to step 3."
+  lacks "$text" "(still \`REVIEW_REQUIRED\`/\`NONE\`"
+  lacks "$text" "\`AWAITING-APPROVAL\` (4) or \`TIMED-OUT\` (3) → arm native auto-merge and move on"
 }
 
 @test "SKILL.md: approver mode none polls reviewDecision and mergeStateStatus in one read and reaches the approved-but-BEHIND bullet" {
