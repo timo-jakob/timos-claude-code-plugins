@@ -220,6 +220,7 @@ has() {
 @test "react: the setup module registers the jest-dom matchers and unmounts after each test" {
   local f="$RX/src/test/setup.ts"
   has "$f" 'import "@testing-library/jest-dom/vitest";'
+  has "$f" 'import { cleanup } from "@testing-library/react";'
   has "$f" 'import { afterEach, expect } from "vitest";'
   grep -qxF 'afterEach(() => cleanup());' "$f"
 }
@@ -322,7 +323,7 @@ STEP_END='### 3k.6. React Query binding (a React repo consuming a spec — #958)
   contains "$section" 'npm i -D eslint-plugin-react-hooks eslint-plugin-react-refresh globals'
   contains "$section" '**only if absent**'
   contains "$section" 'Every package in **both** commands is installed **only if absent** from `package.json`'"'"'s dependencies and devDependencies'
-  contains "$section" 'Presence under any version range counts as listed'
+  contains "$section" 'Presence under any version range counts as listed: the step never compares a listed range against another package'"'"'s peer requirements.'
   contains "$section" 'so install it when absent'
   contains "$section" 'A command whose filtered list is empty is **skipped, never run bare**'
   contains "$section" 'a skipped command is not a failure and never takes the restore branch below'
