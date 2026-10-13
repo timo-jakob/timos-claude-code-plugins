@@ -265,3 +265,17 @@ JS
     grep -q 'branches: \["main"\]' "$W"
   done
 }
+
+@test "contract-consumer #1909: an aborted §3k scaffold has one commit disposition, naming the generated client and package.json" {
+  local k
+  # §3k's text, whitespace-collapsed and bounded by §3k.5's heading (asserted,
+  # so a needle cannot pass on prose after §3k)
+  k="$(sed -n '/^### 3k\. /,/^### 3k\.5\. /p' "$REPO_ROOT/development/skills/bootstrap/SKILL.md" | tr -s '[:space:]' ' ')"
+  ends_with "$k" '### 3k.5. React overlay (a JS/TS repo carrying the React marker — #957) '
+  contains "$k" '- **Discard from the commit** — the ACL (`src/api/**`), including the generated client under `src/api/generated/` if generation already produced it, `src/test/msw-setup.ts`, the sample test, and both `contracts-*.yml` workflows: `git checkout`/remove them from the staging + working tree (none of them is green without the rest of §3k'"'"'s machinery), and rewrite each discarded path'"'"'s per-file entry (*Keep the run'"'"'s facts as you go*) to `failed`.'
+  contains "$k" '- **Commit only** the seeded `orval.config.ts` **and** its `orval-deprecation-transformer.mjs` (both already rendered; the `.mjs` is dependency-free and inert until `npm run generate`, and committing it keeps the config'"'"'s `input.override.transformer` reference from dangling on the next run).'
+  contains "$k" '- **Keep and commit** whichever of §3k'"'"'s `package.json`/lockfile edits landed — the `orval` and `msw` devDependencies, the `generate` script and, when the React overlay applies, the `@tanstack/react-query` dependency — so a re-run after the cause is fixed completes §3k without re-installing.'
+  contains "$k" '**If rule 3'"'"'s prompt resolves to skip** (or the no-answer default), do **not** proceed with §3k at all: committing the ACL/MSW scaffold beside the un-superseded base config would ship a red tree (no boundary gate, no MSW `setupFiles`).'
+  contains "$k" 'Treat it like the activation-failure abort above: apply that abort'"'"'s commit disposition, from **Discard from the commit** on, and record a Step 5 follow-up offering rule 3'"'"'s "merge manually" to unblock.'
+  lacks "$k" 'discard the ACL/MSW scaffold + workflows from the commit'
+}

@@ -4375,9 +4375,12 @@ the finish-flow would arm auto-merge on that red PR. The scaffold set was alread
 rendered into the working tree before this activation step ran, so **commit
 disposition is explicit** — do not leave it to inference:
 
-- **Discard from the commit** — the ACL (`src/api/**`), `src/test/msw-setup.ts`,
-  the sample test, and both `contracts-*.yml` workflows: `git checkout`/remove
-  them from the staging + working tree (they import a client that doesn't exist).
+- **Discard from the commit** — the ACL (`src/api/**`), including the generated
+  client under `src/api/generated/` if generation already produced it,
+  `src/test/msw-setup.ts`, the sample test, and both `contracts-*.yml` workflows:
+  `git checkout`/remove them from the staging + working tree (none of them is
+  green without the rest of §3k's machinery), and rewrite each discarded path's
+  per-file entry (*Keep the run's facts as you go*) to `failed`.
 - **Commit only** the seeded `orval.config.ts` **and** its
   `orval-deprecation-transformer.mjs` (both already rendered; the `.mjs` is
   dependency-free and inert until `npm run generate`, and committing it keeps the
@@ -4385,8 +4388,13 @@ disposition is explicit** — do not leave it to inference:
 - The **base** `eslint.config.js`/`vitest.config.ts` §3d rendered stay in place
   (§3k only overwrites them on completion), so the repo keeps working configs —
   it is never left config-less by an abort.
+- **Keep and commit** whichever of §3k's `package.json`/lockfile edits landed —
+  the `orval` and `msw` devDependencies, the `generate` script and, when the
+  React overlay applies, the `@tanstack/react-query` dependency — so a re-run
+  after the cause is fixed completes §3k without re-installing.
 
-Record a **prominent Step 5 follow-up** quoting the command that failed; when it
+Record a **prominent Step 5 follow-up** quoting the command that failed and
+naming the kept `package.json` edits; when it
 is the spec package that cannot be resolved, it reads: "this repo pins `<spec-pkg>` but it
 isn't installable yet; once it resolves, re-run `/development:bootstrap` to
 scaffold + generate the contract-consumer machinery." Nothing else §3k lands
@@ -4448,11 +4456,9 @@ The installed set (all committed together, once generation succeeds):
   and no abort of its own. **If rule 3's prompt resolves to skip** (or the
   no-answer default), do **not** proceed with §3k at all: committing the ACL/MSW
   scaffold beside the un-superseded base config would ship a red tree (no boundary
-  gate, no MSW `setupFiles`). Treat it like the activation-failure abort above —
-  discard the ACL/MSW scaffold + workflows from the commit, keep **and commit** the
-  seeded `orval.config.ts` and its `orval-deprecation-transformer.mjs` (so the
-  config's transformer reference isn't dangling) plus the base configs, and record
-  a Step 5 follow-up offering rule 3's "merge manually" to unblock.
+  gate, no MSW `setupFiles`). Treat it like the activation-failure abort above:
+  apply that abort's commit disposition, from **Discard from the commit** on, and
+  record a Step 5 follow-up offering rule 3's "merge manually" to unblock.
 - `vitest.config.ts` — **supersedes** the base one (base **plus** `setupFiles`
   starting MSW, and generated code excluded from coverage). Same overwrite rule
   as `eslint.config.js` above — it upgrades the base §3d rendered.
@@ -4593,9 +4599,10 @@ overlay applies (it *defers the pair*), so this step is what wires §3k's ACL/MS
 scaffold. Resolve both files' rule-3 prompts (below) **before** rendering either.
 If §3k deferred and this step will not end with the consumer+React pair on disk
 for **both** files — an install failed, or either prompt resolved to skip — abort
-§3k's scaffold exactly as §3k's own overwrite-skip abort does: discard the
-ACL/MSW files and workflows, commit the seeded `orval.config.ts` and its
-transformer, and name the abort in the Step 5 item. §3k's machinery is then
+§3k's scaffold with the commit disposition of §3k's activation-failure abort, from
+**Discard from the commit** on — it discards the generated client under
+`src/api/generated/` that the deferred §3k already produced, and §3k's
+`package.json` edits stay — and name the abort in the Step 5 item. §3k's machinery is then
 absent, so if the install succeeded, render the **plain React** pair under the
 same rules instead. Because §3k wrote neither config, no committed config names
 the discarded `src/test/msw-setup.ts`. The prompt answers given against the
