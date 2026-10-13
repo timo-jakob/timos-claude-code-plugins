@@ -98,7 +98,8 @@ out from under loops already parented to the first.
   run file left over from an earlier run of the same issue would otherwise be
   emitted with that run's id and start time. The loops still get the sink flags: take them
   from the `args` output, since the run file that would have carried them was
-  never written. They get no `--parent-run-id`.
+  never written. They get no `--parent-run-id`. Omit any sink flag `args`
+  reported as `null`; never pass the string `null`.
 
 **A remediation rung is its own run.** When §0a's interactive remediation runs
 the Single-issue flow on a blocker, that rung calls `start` with its **own**
@@ -126,7 +127,10 @@ and the emitter exits 0 either way, so nothing surfaces the loss.
 
 The promotion enrichment (`reference/promotion/step-3-select.md` step 3) emits through the
 emitter directly, not through the loop. Pass it the same `--telemetry-file` and
-`--telemetry-dir` the run was given, so it lands beside the record it enriches.
+`--telemetry-dir` the run was given — the sink flags in `loop_args`, or, when
+`start` failed, the ones from `args` — so it lands beside the record it
+enriches. Omit any sink flag `args` reported as `null`; never pass the string
+`null`. The emitter has no `null` guard of its own and would take it as a path.
 It stays joined to its loop record by that record's `run_id`, as before, and it
 carries no `--parent-run-id` of its own.
 

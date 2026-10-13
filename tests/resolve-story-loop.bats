@@ -4155,6 +4155,27 @@ JSON
   [ ! -e "$R/.claude/telemetry/telemetry.jsonl" ]
 }
 
+# #1761: `jq -r` prints an unset sink in the `args` JSON as the string `null`.
+# Run from inside the repo, so a forwarded `null` would land as a relative
+# path there; the loop must treat it as the absent flag, as it does --repo-type.
+@test "#1761 a literal null --telemetry-file is the absent flag: default sink, no null path" {
+  cd "$R"
+  clean_loop --telemetry-file null --issue 1761
+  [ "$status" -eq 0 ]
+  [ ! -e "$R/null" ]
+  [ ! -e "$BATS_TEST_TMPDIR/null" ]
+  assert_envelope "$R/.claude/telemetry/telemetry.jsonl" success CONVERGED
+}
+
+@test "#1761 a literal null --telemetry-dir is the absent flag: default sink, no null path" {
+  cd "$R"
+  clean_loop --telemetry-dir null --issue 1761
+  [ "$status" -eq 0 ]
+  [ ! -e "$R/null" ]
+  [ ! -e "$BATS_TEST_TMPDIR/null" ]
+  assert_envelope "$R/.claude/telemetry/telemetry.jsonl" success CONVERGED
+}
+
 @test "#1226 --telemetry-dir DIR appends to DIR/<slug>.jsonl and not to the local default" {
   local TD="$BATS_TEST_TMPDIR/telemetry"
   git -C "$R" remote add origin https://github.com/timos-platform/tenant-service.git
