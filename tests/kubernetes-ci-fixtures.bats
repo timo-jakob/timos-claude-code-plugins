@@ -1648,6 +1648,58 @@ EOF
   lacks "$output" 'missing path'
 }
 
+# GitHub slugs are case-insensitive, so the argocd stage folds case in three
+# places. Each test below reaches exactly one fold: it plants a case mismatch
+# that only that fold reconciles, with the dangling path as the proof that the
+# Application was owned (#2111).
+
+@test "the slug fold: an upper-case REPO_SLUG still owns the lower-case repoURL (#2111)" {
+  # guards `"${(L)${REPO_SLUG:-${GITHUB_REPOSITORY:-}}}"`; the fixture's
+  # repoURLs are lower-case, so without that fold nothing is owned
+  prepare kubernetes-repo
+  rm -rf "$W/charts/app" "$W/policies"
+  SLUG="FIXTURE-ORG/Kubernetes-Repo"
+  run run_gate
+  [ "$status" -eq 1 ]
+  contains "$output" 'gate: argocd FAILED'
+  contains "$output" 'error: app-of-apps references missing path: charts/app'
+}
+
+@test "the repoURL fold: a mixed-case repoURL is owned by the lower-case slug (#2111)" {
+  # guards `url="${(L)url}"`; $SLUG stays the fixture's lower-case slug
+  prepare kubernetes-repo
+  cat > "$W/argocd/injected.yaml" <<YAML
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: injected
+spec:
+  source:
+    repoURL: https://example.com/FIXTURE-ORG/Kubernetes-Repo.git
+    path: charts/injected-mixed-case-missing
+YAML
+  run run_gate
+  [ "$status" -eq 1 ]
+  contains "$output" 'gate: argocd FAILED'
+  contains "$output" 'error: app-of-apps references missing path: charts/injected-mixed-case-missing'
+  [ "$(verdict_lines "$output")" = "$(expected_all_ok | sed '$d'; printf 'gate: argocd FAILED\n')" ]
+}
+
+@test "the origin fold: a mixed-case origin remote still owns the lower-case repoURL (#2111)" {
+  # guards `"${(L)${origin:h:t}}/${(L)${origin:t}}"`; REPO_SLUG and
+  # GITHUB_REPOSITORY are unset, so the remote is the only slug source
+  prepare kubernetes-repo
+  rm -rf "$W/charts/app" "$W/policies"
+  (cd "$W" && git init -q && git remote add origin "https://github.com/FIXTURE-ORG/Kubernetes-Repo.git")
+  run env -u GITHUB_ACTIONS -u GITHUB_REPOSITORY -u REPO_SLUG \
+    PATH="$IAC_SHIM:$IAC_BIN:$PATH" \
+    IAC_KUBECONFORM_BIN="$IAC_KUBECONFORM_BIN" IAC_KUBECONFORM_CACHE="$IAC_KUBECONFORM_CACHE" \
+    bash -c "cd '$W' && zsh '$GATE'"
+  [ "$status" -eq 1 ]
+  contains "$output" 'gate: argocd FAILED'
+  contains "$output" 'error: app-of-apps references missing path: charts/app'
+}
+
 @test "K8S_GATE_RENDER_DIR inside the tree, or non-empty, is refused (#1603)" {
   prepare kubernetes-repo
   RENDERED="$W/rendered"
