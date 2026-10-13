@@ -23,9 +23,9 @@ earlier round, not one worked out from the progress block. When the line says
 
 ```bash
 "<skill-base-dir>/scripts/narrate-estimate.zsh" --step panel|decide|risk|fix \
-  [--repo-type <repo_type>] [--sink <the run's sink>]
+  [--repo-type <repo_type>] --sink <the run's sink>
 "<skill-base-dir>/scripts/narrate-estimate.zsh" --step gate \
-  --gate-log <work-dir>/gate-<R>.stderr [--repo-type <repo_type>] [--sink <the run's sink>]
+  --gate-log <work-dir>/gate-<R>.stderr [--repo-type <repo_type>] --sink <the run's sink>
 ```
 
 **Its inputs.**
@@ -47,9 +47,12 @@ earlier round, not one worked out from the progress block. When the line says
   number is withheld on purpose: before the call there is no scope or job share
   to scale a prior to.
 - `--repo-type` is §1b's `repo_type`. Omit it when §1b did not run or exited 3.
-- `--sink` is the file the run's loop records land in: the run's
+- `--sink` is the file the run's loop records land in, and is always passed
+  (the script's own default is relative to the current directory): the run's
   `telemetry_file`, else `<telemetry_dir>/<repo-slug>.jsonl`, else
-  `<repo-dir>/.claude/telemetry/telemetry.jsonl`.
+  `.claude/telemetry/telemetry.jsonl` in the main checkout of `<repo-dir>` —
+  the first entry of `git -C <repo-dir> worktree list --porcelain`, as
+  ARCHITECTURE.md's *Sink precedence* bullet states (#2138).
 
 **When to print it.** Panel, decide, risk and fix are narrated once,
 immediately before their dispatch. A gate launched out of band is narrated

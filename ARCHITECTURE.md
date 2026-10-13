@@ -5837,7 +5837,13 @@ Rules that carry the contract's weight:
   happened passes `--require-records`, which turns it into a failure. Blank and
   whitespace-only lines are not records, so a file of blanks fails it too.
 - **Sink precedence:** `--telemetry-file` > `--telemetry-dir` > the local default
-  `<repo-dir>/.claude/telemetry/telemetry.jsonl` (git-ignored). One stream per
+  `<main checkout>/.claude/telemetry/telemetry.jsonl` (git-ignored), where the
+  main checkout is the first entry of `git worktree list --porcelain` for
+  `--repo-dir` (#2138) — so every linked worktree of a repo shares one default
+  sink, which outlives the worktree. When `--repo-dir` is not the top level of a
+  git work tree, git is unavailable or fails, or the main worktree is bare, it
+  is `<repo-dir>/.claude/telemetry/telemetry.jsonl` as given. `--repo-dir` stays
+  the identity source for `repo`. One stream per
   repo **in the local default**; the `pipeline` and `kind` fields discriminate.
   (Cross-repo mode below keeps one file per repo but not one repo per file —
   see its many-to-one note.)
@@ -6688,7 +6694,9 @@ a sequential child or a parallel worktree sub-agent, which receives the epic
 `run_id` and sink flags in its prompt — calls `start` with the epic run file's
 `child_start_args`, so the **child's own** record carries `parent_run_id` = the
 epic run, and the epic record lists the child in `payload.child_run_ids`. The
-join resolves from both ends. The child's loops stay parented to the child run.
+join resolves from both ends. With no sink flag, worktree epic, child and loop
+records share the main checkout's default sink (#2138), so the join survives the
+worktrees. The child's loops stay parented to the child run.
 On a failed epic `start` the children still get their own runs and the sink
 flags, with no parent. A child's size pre-flight record is parented to the
 child run, as in story mode.

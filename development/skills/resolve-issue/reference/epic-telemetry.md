@@ -61,7 +61,9 @@ reported as `null`; never pass the string `null`.
 - **A parallel sub-agent** gets, in its prompt, the epic `run_id` and the sink
   flags — the `child_start_args` list, verbatim — and runs that `start` itself
   in its worktree's session, with a scratch run file of its own. It reports the
-  child run's `run_id` back with its result.
+  child run's `run_id` back with its result. A worktree child's records land in
+  the epic's sink: the same sink flags, or with none the main checkout's default
+  sink, which the emitter resolves from any worktree (#2138).
 - **Note every child run's `run_id`** in `child_run_ids`, in start order (a
   parallel batch in dispatch order) — escalated and parked children included.
   A child that never reached its `start` has no run and is not listed.
