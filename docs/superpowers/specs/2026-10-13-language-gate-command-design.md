@@ -40,11 +40,13 @@ It closes the gaps on the way.
 - A composed `scripts/gate.zsh` for each bootstrapped language repo.
 - `make lint` runs that script, `make fmt` applies fixes, and `make hooks`
   points git at the hooks directory.
-- A version-controlled `hooks/pre-push`.
+- Version-controlled hooks: `hooks/pre-commit` runs the gate's fast stages,
+  and `hooks/pre-push` runs the whole gate.
 - `gate: make lint` in `.maintenance.yml`.
-- One CI job, `gate`, with branch protection reduced to `gate` plus the
-  hosted scanners.
-- Pre-commit is retired on the language paths.
+- One CI job, `gate`, always on `ubuntu-latest`, with branch protection
+  reduced to `gate` plus the hosted scanners.
+- The `pre-commit` framework is retired on the language paths. Commit-time
+  checks stay, through `hooks/pre-commit`.
 - New checks: typecheck, a JS coverage floor, and zero-warning eslint.
 - A three-step migration for existing repos.
 
@@ -65,16 +67,29 @@ It closes the gaps on the way.
 
 The plugin owns the mechanism, `scripts/gate.zsh`. The repo owns the command,
 `make lint`, which `.maintenance.yml` records as `gate: make lint`.
-`hooks/pre-push` runs the gate command, `make hooks` sets
-`core.hooksPath hooks`, and CI's single `gate` job runs `{{GATE_COMMAND}}`.
+`hooks/pre-push` runs the gate command and `hooks/pre-commit` runs the
+gate's fast stages (§3.7). `make hooks` sets `core.hooksPath hooks`, which
+installs both hooks at once. CI's single `gate` job runs `{{GATE_COMMAND}}`.
 
-### 3.2 Hosted scanners are named exceptions
+### 3.2 Named exceptions: CI-only checks and local-only stages
 
-CodeQL, Scorecard, Sonar and Snyk (the App, and `snyk container test`,
-which needs `SNYK_TOKEN`) stay CI-only. So does `acceptance (<iface>)`,
-until #704. Each one is listed by name in a "CI-only checks" section of the
-generated README, and each stays a required context in branch protection.
-Any other check is in the gate.
+**CI-only checks.** CodeQL, Scorecard, Sonar and Snyk stay CI-only. For
+Snyk that means the App and `snyk container test`, which needs
+`SNYK_TOKEN`. `acceptance (<iface>)` also stays CI-only, until #704. Each
+of these is listed by name in the generated README and stays a required
+context in branch protection.
+
+**Local-only stages.** CI never uses a macOS runner. A full local run before
+pushing is the Swift verification, so GitHub Actions spends no macOS
+minutes. The Swift stages that need the Apple toolchain are therefore
+local-only. Those are format, lint, test and coverage for Swift. In CI they
+report `skipped — local-only (macOS), enforced by pre-push` (§3.6), and the
+pre-push hook is what enforces them.
+
+**Where they are listed.** Both lists appear in one "Exceptions" section of
+the generated README, under "CI-only checks" and "Local-only stages".
+
+Every other check runs in the gate, both locally and in CI.
 
 ### 3.3 One composed script per repo (approach A)
 
@@ -144,9 +159,11 @@ means a missing tool or a usage error, and it comes before any stage runs.
 
 **Missing tools.** Before stage 1, the gate checks with `command -v` that
 every tool its rendered stages need is installed. When one is missing, it
-names the tool and its pinned version and exits 2.
+names the tool and its pinned version and exits 2. When `CI=true`, the
+check leaves out the tools that only local-only stages use, since CI never
+runs those stages.
 
-**Two kinds of skip.**
+**Three kinds of skip.**
 
 - **Not applicable: a skip everywhere.** The thing the stage would check is
   absent. Examples: `no Dockerfile`, `no changed lines`, `no tsconfig.json`,
@@ -163,6 +180,11 @@ names the tool and its pinned version and exits 2.
   `gate: image FAILED — docker unavailable in CI`. Without this split, a
   misconfigured runner would skip the image scan and still report a green
   `gate`.
+- **Local-only: runs locally, a skip when `CI=true`.** These are the §3.2
+  Swift stages, and they are fixed when the gate script is rendered. In CI
+  the line reads `skipped — local-only (macOS), enforced by pre-push`.
+  Locally, a missing Apple toolchain is a missing tool and exits 2, never a
+  skip.
 
 **No tests is FAILED.** Each runner's exit for "no tests found" maps to red,
 for example pytest's exit 5 and `go test`'s "no test files".
@@ -171,14 +193,27 @@ for example pytest's exit 5 and `go test`'s "no test files".
 `SKIP=` variable. A repo that cannot run a stage changes `gate:` in
 `.maintenance.yml` to its own command, where the change is visible.
 
-### 3.7 Pre-commit is replaced
+### 3.7 Version-controlled hooks replace the pre-commit framework
 
 On the language paths, bootstrap no longer emits `.pre-commit-config.yaml`
 and no longer runs `install-precommit-hooks.zsh` or
-`reconcile-precommit-hooks.zsh`.
+`reconcile-precommit-hooks.zsh`. Commit-time checks stay; they now come
+from the repo itself.
 
 - **Checks move to the gate.** Hygiene, yamllint, gitleaks and the
   linters and formatters become the gate's check-mode stages.
+- **`hooks/pre-commit` runs the fast stages.** It runs
+  `zsh scripts/gate.zsh --commit`, which is stages 1–5 (hygiene, yaml,
+  secrets, format, lint), with the same verdict lines, tools and pins as the
+  full gate. `--commit` is a fixed subset, not a way to disable stages. It
+  checks the working tree, as CI does.
+- **`hooks/pre-push` runs the whole gate.**
+- **No hook needs the plugin.** Both hooks live in the repo and need only
+  the toolchain. A contributor without the plugin runs `make hooks` once per
+  clone, as they used to run `pre-commit install`. Git never activates hooks
+  from a clone by itself, so one setup step is unavoidable. For anyone who
+  skips it, the CI `gate` job is the backstop. It covers every stage except
+  the §3.2 local-only ones.
 - **Fixes move to `make fmt`.** Auto-fix is now an explicit target that
   runs `ruff format`, `ruff check --fix`, `golangci-lint fmt`,
   `spotlessApply`, `swift-format format -i`, `prettier --write` and
@@ -189,8 +224,10 @@ and no longer runs `install-precommit-hooks.zsh` or
 
 `gate.yml` replaces `quality-<vis>.yml` and its noop twin.
 
-- **Runner.** The single `gate` job runs on `macos-latest` when Swift is
-  among the resolved languages, and on `ubuntu-latest` otherwise.
+- **Runner.** The single `gate` job runs on `{{RUNNER}}`. That is
+  `ubuntu-latest`, or the self-hosted Linux runner on SonarQube repos. It is
+  never a macOS runner. The Swift stages are local-only (§3.2), and the
+  `{{SWIFT_RUNNER}}` placeholder retires on the language paths.
 - **Steps.** The job checks out with `fetch-depth: 0`, installs the pinned
   toolchain, and runs `{{GATE_COMMAND}}`.
 - **Pins.** Each install step is named `install <tool>` and carries a
@@ -214,10 +251,11 @@ What lands in a target repo:
 ```text
 <repo>/
 ├── Makefile               # lint, fmt, hooks (emitted only if absent)
+├── hooks/pre-commit       # gate.zsh --commit: stages 1–5 (plugin-owned, overwritten)
 ├── hooks/pre-push         # runs the gate command (plugin-owned, overwritten)
 ├── scripts/gate.zsh       # composed stages (plugin-owned, overwritten)
 ├── .maintenance.yml       # gate: make lint (added only if absent)
-├── README.md              # gains a "CI-only checks" section
+├── README.md              # gains an "Exceptions" section (CI-only, local-only)
 └── .github/workflows/
     ├── gate.yml           # jobs: gate, sonar (needs: gate)
     ├── codeql.yml, scorecard.yml        # hosted, unchanged
@@ -237,7 +275,7 @@ an admin override. Migration therefore takes three steps, and each step can
 merge on its own:
 
 1. **Add the gate.** A PR adds `gate.yml`, `scripts/gate.zsh`, the Makefile
-   targets, `hooks/pre-push` and `gate:`. The old workflows stay, so the old
+   targets, `hooks/pre-commit`, `hooks/pre-push` and `gate:`. The old workflows stay, so the old
    required contexts gate this PR.
 2. **Switch protection.** Once step 1 has merged, `branch-protection.sh`
    sets the required contexts to `gate` plus the hosted scanners.
@@ -274,15 +312,20 @@ as #1602 did.
     auxiliary, and Swift with JS.
   - For each set, the rendered `gate.zsh` has exactly the expected stages,
     in order.
-  - The workflow has one `gate` job, on macOS exactly when Swift is in the
-    set.
+  - The workflow has one `gate` job on `{{RUNNER}}` and never a macOS
+    runner, Swift sets included.
   - Every `install <tool>` step carries a parseable `<TOOL>_VERSION` pin.
   - `Makefile` and `gate:` are emitted only when absent.
 - **Behaviour** (`gate-script.bats`). Every tool is stubbed, with host
   `/usr/bin` hidden (#1605).
   - For each stage: ok, a not-applicable skip, an unavailable skip with
     `CI` unset, and an unavailable FAILED with `CI=true`.
-  - A missing tool exits 2 before stage 1.
+  - A missing tool exits 2 before stage 1. With `CI=true`, the tools used
+    only by local-only stages are not required.
+  - Local-only stages run when `CI` is unset and report the local-only skip
+    when `CI=true`.
+  - `--commit` runs exactly stages 1–5. `hooks/pre-commit` calls it, and
+    `hooks/pre-push` runs the gate command.
   - The first red stops the run.
   - Finding no tests is FAILED.
   - The diff-cover base comes from the merge-base.
@@ -301,7 +344,8 @@ as #1602 did.
   the repository, using real toolchains on macOS.
   - `make lint` is green on the clean fixture.
   - A seeded defect reds its stage.
-  - `hooks/pre-push` refuses that push.
+  - `hooks/pre-commit` refuses a commit with a seeded format or secret
+    defect, and `hooks/pre-push` refuses a push with a seeded test defect.
   - Migration runs against a fixture that is still on `quality-*.yml`.
   - The gate's wall-clock time is recorded for each fixture.
 
@@ -311,20 +355,23 @@ as #1602 did.
   one page for both families. The old path redirects to it.
 - New `how-to/migrate-to-the-gate.md`.
 - New `reference/gate-stages.md`. Its stage table lists, for each stage, the
-  tools, the not-applicable condition and the unavailable condition.
+  tools, the not-applicable condition, the unavailable condition, whether it
+  runs in `--commit`, and whether it is local-only.
 - ARCHITECTURE.md extends the gate position from IaC to every path and
   retires the pre-commit statement.
-- The bootstrap README template gains the "CI-only checks" section.
+- The bootstrap README template gains the "Exceptions" section, listing
+  the CI-only checks and the local-only stages, and states the one-time
+  `make hooks` step for contributors.
 
 ## 7. Risks
 
 | Risk | Mitigation |
 |---|---|
 | **Slow pushes.** Fifteen stages, image and web UI among them, make pre-push slow. | Stages with nothing to check skip at once. E4 records the wall-clock time per fixture, and an over-budget figure becomes a follow-up issue rather than an escape hatch. |
-| **Commit-time auto-fix is lost.** | `make fmt` takes over, and the format stage's FAILED line names it. |
+| **Commit-time auto-fix is lost.** `hooks/pre-commit` checks but does not fix. | `make fmt` fixes, and the format stage's FAILED line names it. |
 | **One script on two platforms.** The gate runs on macOS locally and on ubuntu in CI, and the BSD and GNU tools differ. | The ubuntu bats CI job runs the behaviour suite. The IaC gate has already proved the pattern. |
-| **Swift CI cost.** A Swift repo's whole gate runs on macOS minutes. | Accepted. Splitting the job would bring back a second required context. |
-| **Breaking change to the bootstrap contract.** No pre-commit config, and new required contexts. | A major version bump of `development`, plus the migration how-to. |
+| **Swift stages are unenforced for contributors without hooks.** CI skips the local-only stages, so a contributor who never ran `make hooks` can push Swift code that failed nothing. | Accepted, in place of macOS CI minutes. The README's contributor note asks for `make hooks`, and the skip line in CI names pre-push as the enforcement. |
+| **Breaking change to the bootstrap contract.** No pre-commit config, new required contexts, and no macOS runner. | A major version bump of `development`, plus the migration how-to. |
 
 Retiring the pre-commit CI job also fixes the toolchain-less ubuntu
 backstop bug from §1.
@@ -340,10 +387,10 @@ backstop bug from §1.
 
 | # | Child | Depends on |
 |---|---|---|
-| 1 | `gate.zsh` framework: verdict lines, both skip classes, the missing-tool refusal, exit codes, shared stages 1–3 and 9–10, behaviour tests | — |
+| 1 | `gate.zsh` framework: verdict lines, the three skip classes, the missing-tool refusal, exit codes, `--commit`, shared stages 1–3 and 9–10, behaviour tests | — |
 | 2a–2e | One language block each (Python, Go, Java, Swift, JS): format, lint, typecheck, test, coverage. Each is a separate tagged-block file, so the five can run in parallel. | 1 |
 | 3 | Conditional stages: contracts, policy, image, ops, web UI | 1 |
-| 4 | Emission: `gate.yml`, Makefile `fmt`, hooks and `gate:` on the language paths, the README "CI-only checks" section, no more pre-commit emission | 2a–2e, 3 |
+| 4 | Emission: `gate.yml`, Makefile `fmt`, `hooks/pre-commit`, `hooks/pre-push` and `gate:` on the language paths, the README "Exceptions" section, no macOS runner, no more pre-commit emission | 2a–2e, 3 |
 | 5 | Branch protection: `gate` plus the hosted contexts on the language paths | 4 |
 | 6 | Preflight: install the pinned toolchain (one pin, several readers) | 4 |
 | 7 | Migration: the three-step re-bootstrap, the deletion rules, maintenance detection | 5, 6 |
