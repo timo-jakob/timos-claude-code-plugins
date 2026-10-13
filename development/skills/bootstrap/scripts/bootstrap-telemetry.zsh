@@ -29,8 +29,9 @@
 #       sink flags. The run file's host replaces the state's.
 #       SITING: DIR is resolved to the target's MAIN checkout — `dirname` of the
 #       absolute `git rev-parse --git-common-dir` — so a run from a linked
-#       worktree (which Step 4g deletes) still lands in the target's own sink,
-#       and the envelope `repo` is derived from the target, never from the
+#       worktree (which Step 4g deletes) still carries the target's identity —
+#       and so lands in the target's own user-level file (#1972) — and the
+#       envelope `repo` is derived from the target, never from the
 #       directory this script was called from. A DIR that is not its own
 #       checkout's root (a State A folder, even one nested in another repo) is
 #       used as it is, and its basename is passed as the emitter's `--repo`.

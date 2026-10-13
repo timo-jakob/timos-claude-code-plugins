@@ -11,6 +11,7 @@ bats_require_minimum_version 1.5.0
 load assertions
 
 setup() {
+  export HOME="$BATS_TEST_TMPDIR/home"  # the user-level telemetry default stays out of the real ~/.claude (#1972)
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   D="$REPO_ROOT/development/skills/maintenance/scripts/maintenance-telemetry.zsh"
   SKILL="$REPO_ROOT/development/skills/maintenance/SKILL.md"
@@ -22,7 +23,7 @@ setup() {
   mkdir -p "$R"
   git -C "$R" init -q
   git -C "$R" remote add origin git@github.com:timo-jakob/timos-claude-code-plugins.git
-  DEFAULT_SINK="$R/.claude/telemetry/telemetry.jsonl"
+  DEFAULT_SINK="$HOME/.claude/telemetry/timo-jakob-timos-claude-code-plugins.jsonl"  # #1972
 
   S="$BATS_TEST_TMPDIR/scratch"
   CK="$BATS_TEST_TMPDIR/ckpt"

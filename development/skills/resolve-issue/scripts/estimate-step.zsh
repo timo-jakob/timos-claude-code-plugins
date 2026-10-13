@@ -23,8 +23,10 @@
 #                  skipped. Without it, samples are raw.
 #     --repo-type  keep only records whose envelope repo_type equals T (a null
 #                  repo_type never matches). Omitted, every record counts.
-#     --sink       the telemetry file. Default: .claude/telemetry/telemetry.jsonl
-#                  relative to the current directory.
+#     --sink       the telemetry file. Default: the current directory's repo's
+#                  file in the user-level directory (#1972),
+#                  $HOME/.claude/telemetry/<repo-slug>.jsonl — the identity and
+#                  slug emit-telemetry.zsh writes it under.
 #
 # Records and samples:
 #   Only records with kind "run" and pipeline "review-loop" count; a line that is
@@ -55,7 +57,7 @@ need_val() {  # $1 = flag, $2 = remaining arg count, $3 = candidate value
   (( $2 >= 2 )) && [[ -n "$3" && "$3" != --* ]] || die_usage "$1 needs a value"
 }
 
-local step="" scope="" jobs="" repo_type="" sink=".claude/telemetry/telemetry.jsonl"
+local step="" scope="" jobs="" repo_type="" sink=""
 while (( $# )); do
   case "$1" in
   --step)      need_val "$1" $# "${2:-}"; step="$2"; shift 2 ;;
@@ -90,6 +92,16 @@ fi
 command -v jq >/dev/null 2>&1 || { print -u2 -- "estimate-step: jq not found on PATH"; exit 3 }
 
 withheld() { print -u2 -- "estimate-step: $1 samples, fewer than 5 — withheld"; exit 1 }
+
+if [[ -z "$sink" ]]; then
+  # The file emit-telemetry.zsh writes this repo's records to, derived by the
+  # same shared code, so the two can never name different files.
+  source "${0:A:h}/../../../scripts/telemetry/telemetry-sink-lib.zsh" || {
+    print -u2 -- "estimate-step: cannot load telemetry-sink-lib.zsh"; exit 3 }
+  local user_dir=""
+  user_dir=$(tlm_user_dir) || withheld 0       # no HOME: no records to read
+  sink="$user_dir/$(tlm_repo_slug "$(tlm_derive_repo .)").jsonl"
+fi
 
 [[ -e "$sink" ]] || withheld 0
 [[ -f "$sink" && -r "$sink" ]] || { print -u2 -- "estimate-step: cannot read the sink: $sink"; exit 3 }

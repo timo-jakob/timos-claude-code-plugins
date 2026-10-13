@@ -11,7 +11,8 @@
 # pipeline so no skill hand-rolls one. This script contributes only the
 # refine-issue's own detail, which the emitter embeds unmodified as `payload`;
 # the skill's Step 7 pipes the two together, and the emitter owns the sink (the
-# shared `.claude/telemetry/telemetry.jsonl`, not the old per-pipeline file).
+# shared user-level `~/.claude/telemetry/<repo-slug>.jsonl` since #1972, not the
+# old per-pipeline file).
 # No file migration is performed: records written before this retrofit stay in
 # `.claude/telemetry/refine-issue.jsonl` as they are, and child (e)'s rollup is
 # what reads both.

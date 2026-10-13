@@ -884,7 +884,8 @@ emit_and_exit() {
   # telemetry failure can't change the loop's exit.
   #
   # `repo` must be an existing directory: the emitter derives the repo identity
-  # and the default sink from it. It always is by the time a loop runs, but the
+  # from it, and from that identity (#1972) the default sink file. It always is
+  # by the time a loop runs, but the
   # --no-review fast path short-circuits BEFORE the --repo checks, so guard here
   # rather than hand the emitter a path it would reject.
   if [[ "$st" != "AWAITING_FIX" && "$st" != "STALE_FINDINGS" && -d "$repo" ]]; then
@@ -2038,7 +2039,8 @@ fi
 # `--status-file "$repo/loop.json"` from also swallowing `loop.json.bak`.
 #
 # `--telemetry-file` belongs here for a reason the static `.claude/telemetry/`
-# exclusion hides: that prefix matches the emitter's DEFAULT sink only, never an
+# exclusion hides: that prefix matches the pre-#1972 in-repo default sink (and an
+# in-repo --telemetry-dir) only, never an arbitrary
 # explicit in-repo path — and the promotion flow tells the caller to re-pass "the
 # same file the loop was given", so an explicit value is the documented shape.
 # `emit_and_exit` appends to it AFTER the fix-base stamp, so on a granted

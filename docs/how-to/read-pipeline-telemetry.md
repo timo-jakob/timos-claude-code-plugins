@@ -3,8 +3,8 @@
 The review loop, `/development:refine-issue`, `/development:resolve-issue` and
 `/development:maintenance` — the pipelines instrumented so far, with more
 joining incrementally — each
-append one `telemetry/v1` JSONL record per run **ending** to a local sink
-(git-ignored in a bootstrapped repo — see below) —
+append one `telemetry/v1` JSONL record per run **ending** to a local file
+outside every checkout (`~/.claude/telemetry/<repo-slug>.jsonl` — see below) —
 an extended review-loop run (escalate → grant more rounds → resume) appends
 more than one such terminal record, so a "run" here means one ending, not one
 whole loop. `rollup-telemetry.zsh` gives you a one-command
@@ -18,12 +18,14 @@ glance at how those pipelines are doing — no Grafana, no infrastructure.
 zsh development/scripts/telemetry/rollup-telemetry.zsh
 ```
 
-With no argument it reads the local default sink
-(`.claude/telemetry/telemetry.jsonl`, resolved relative to your **current
-directory** — run it from the repo root) — if nothing has ever emitted, that's
-silently an empty stream (`no records`), never an error. A run inside a git
-worktree writes to the **main checkout's** sink, not the worktree's, so its
-records outlive the worktree: run the rollup from the main checkout's root.
+With no argument it reads every `*.jsonl` in `~/.claude/telemetry/` — the
+user-level directory the pipelines write to by default — and shows **the repo
+you are standing in**: run it from any checkout or worktree of the repo and it
+reports every run of that repo, wherever it ran. Records of other repos are
+left out, and stderr says how many (`note: excluded 3 record(s) of other
+repos`). Pass `--repo OWNER/NAME` to look at another repo; run it outside any
+git checkout and it shows every repo, saying so on stderr. If nothing has ever
+emitted, that's silently an empty stream (`no records`), never an error.
 
 ```text
 Pipeline: review-loop
@@ -87,7 +89,7 @@ suggestion-promotion enrichment, which is reached through its loop record's
 `run_id` instead:
 
 ```bash
-S=.claude/telemetry/telemetry.jsonl
+S=~/.claude/telemetry/timo-jakob-timos-claude-code-plugins.jsonl   # your repo's slug
 # the story runs: outcome, PR and how long each took
 jq -c 'select(.kind == "run" and .pipeline == "resolve-issue")
        | {issue, outcome, pr, wall_s, gate: .payload.gate_verdict}' "$S"
@@ -109,7 +111,7 @@ Every review-loop record also stores how long each round's steps took:
 seconds, and `payload.gate_by_round` holds each gate's `wall_s` and the `jobs`
 share it ran with. A step that did not run, or was not timed, is `null`, never
 `0`. `estimate-step.zsh` turns those into a prior for one step, read from the
-sink in the current directory:
+current repo's file in `~/.claude/telemetry/`:
 
 ```console
 $ development/skills/resolve-issue/scripts/estimate-step.zsh --step panel
@@ -234,7 +236,7 @@ Three things to know before you rely on it:
   `/development:maintenance --telemetry-dir DIR` (or `--telemetry-file PATH`)
   sends its run's record there the same way.
   `/development:refine-issue` does **not** forward it yet, so its
-  records always go to the local default. An empty shared directory after a
+  records always go to the user-level default. An empty shared directory after a
   refine-issue run means *that* gap, not a broken emitter.
 - **The shared directory is `telemetry/v1`-only.** Every line in it carries a
   `schema` key, which is what lets a consumer skip version sniffing entirely.
@@ -244,13 +246,36 @@ Three things to know before you rely on it:
 What a cross-repo consumer may rely on is specified in the
 [Grafana hand-off contract](../reference/telemetry-grafana-handoff.md).
 
+## Bring older records into the user-level directory
+
+Before #1972 every record landed in the checkout it was emitted from
+(`<checkout>/.claude/telemetry/`), so a worktree's records were deleted with the
+worktree. To keep what the remaining checkouts still hold, run the salvage once,
+naming every checkout root of the repo — its worktrees are found for you, a
+second clone is not:
+
+```bash
+zsh development/scripts/telemetry/collect-telemetry.zsh ~/repositories/widget ~/scratch/widget-clone
+# copied 47, duplicate 0, skipped 25
+```
+
+It **copies** every `telemetry/v1` record into
+`~/.claude/telemetry/<repo-slug>.jsonl` and never changes a source, so running it
+again only reports duplicates. Pre-contract (v0) lines are skipped and stay
+where they are; read them by naming the old directory, for example
+`rollup-telemetry.zsh ~/repositories/widget/.claude/telemetry`.
+
 ## What's collected, and what isn't
 
-- Telemetry is written to a **local** file
-  (`.claude/telemetry/telemetry.jsonl`) and is **never sent anywhere** by
-  default — there is no network transport in the emitter at all. In a repo this
-  family bootstrapped that path is **git-ignored**; if you adopted the plugins
-  into an existing repo without bootstrap, add `.claude/telemetry/` to your
+- Telemetry is written to a **local** file,
+  `~/.claude/telemetry/<repo-slug>.jsonl` — one file per repo, outside every
+  checkout, so no git operation can commit it or delete it — and is **never
+  sent anywhere** by default: there is no network transport in the emitter at
+  all. Older records may still sit in a checkout's own
+  `.claude/telemetry/telemetry.jsonl`, the default before #1972, and so may a
+  sink you point `--telemetry-dir` at inside a repo. In a repo this family
+  bootstrapped that path is **git-ignored**; if you adopted the plugins into an
+  existing repo without bootstrap, add `.claude/telemetry/` to your
   `.gitignore` yourself — that exact entry, not all of `.claude/`, which would
   also untrack files meant to be committed (`.claude/approver-policy.md`). See
   [Pipeline telemetry](../explanation/pipeline-telemetry.md). Even the

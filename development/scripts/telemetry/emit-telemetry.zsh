@@ -40,14 +40,15 @@
 #                 would validate cleanly and still be orphaned). For --kind run
 #                 it is optional and minted when omitted.
 #     --repo      the `owner/name` identity. Derived from the git remote when
-#                 omitted, falling back to the repo directory basename.
-#     --repo-dir  where to derive `repo` from and which repository's local
-#                 default sink to use (default: the current directory). The
-#                 sink lives in that repository's MAIN checkout, so a linked
-#                 worktree shares it (#2138); see Sink precedence. NOTE: this is a
-#                 filesystem path — `--repo` is the owner/name identity. The two
-#                 are deliberately separate flags because callers such as
-#                 resolve-story-loop.zsh already use "repo" to mean a path.
+#                 omitted, falling back to the MAIN checkout's basename (so
+#                 every linked worktree of a remote-less repo shares one
+#                 identity — see telemetry-sink-lib.zsh).
+#     --repo-dir  where to derive `repo` from (default: the current
+#                 directory). It decides the IDENTITY only — never where the
+#                 record is written (#1972). NOTE: this is a filesystem path —
+#                 `--repo` is the owner/name identity. The two are deliberately
+#                 separate flags because callers such as resolve-story-loop.zsh
+#                 already use "repo" to mean a path.
 #     --ts        unix seconds to stamp (default: now). Pinning it keeps tests
 #                 deterministic; a caller passes its own start time.
 #     --tokens    best-effort token count. Omitted → null. NEVER estimated:
@@ -66,31 +67,33 @@
 #                 design, and closing it for one key would make every pipeline's
 #                 payload the contract's business); it is a rule each emitting
 #                 pass keeps. See ARCHITECTURE.md, "The telemetry/v1 contract".
-#     --telemetry-dir  CROSS-REPO SINK mode (#1006): append to
-#                 DIR/<repo-slug>.jsonl instead of the local default, so many
-#                 repos can emit into one directory that a cross-repo reporting
-#                 stack globs as `*.jsonl` without any of them clobbering the
-#                 others. The slug is derived from the RESOLVED `repo`, so the
-#                 same repo always lands in the same file (see _repo_slug for
-#                 why the reverse does NOT hold, and why a consumer must group
-#                 by the `repo` field rather than by filename). A RELATIVE DIR
+#     --telemetry-dir  append to DIR/<repo-slug>.jsonl instead of the
+#                 user-level default directory (#1006): the same per-repo
+#                 layout the default uses, rooted somewhere else, so many repos
+#                 can emit into one directory that a cross-repo reporting stack
+#                 globs as `*.jsonl` without any of them clobbering the others.
+#                 The slug is derived from the RESOLVED `repo`, so the same repo
+#                 always lands in the same file (see tlm_repo_slug in
+#                 telemetry-sink-lib.zsh for why the reverse does NOT hold, and
+#                 why a consumer must group by the `repo` field rather than by
+#                 filename). A RELATIVE DIR
 #                 resolves against the caller's CWD, never --repo-dir. Ignored
 #                 for SINK SELECTION when --telemetry-file is also given — but
 #                 the operand is still validated either way, so a value that
 #                 exists and is not a directory is a usage error even when it
-#                 would have been shadowed. NOTE: only resolve-issue and its
-#                 review loop (#1226) and maintenance (#1228) forward it so
-#                 far; every other caller opts in by invoking this script
-#                 directly.
+#                 would have been shadowed. NOTE: which pipelines forward it
+#                 is stated once, in ARCHITECTURE.md ("Which pipelines forward
+#                 --telemetry-dir"); every other caller opts in by invoking
+#                 this script directly.
 #
 # Sink precedence: --telemetry-file > --telemetry-dir >
-# <main checkout>/.claude/telemetry/telemetry.jsonl (the repo's own common sink,
-# the one file every pipeline and every worktree of a repo shares; #2138). The
-# main checkout is the first entry of `git worktree list --porcelain` for
-# --repo-dir; when --repo-dir is not the top level of a git work tree, git is
-# unavailable or fails, or the main worktree is bare, it is --repo-dir as given. The record is printed to
-# stdout BEFORE it is appended to the sink, so a downstream pipe that closes
-# early (EPIPE) can never leave a record in the sink behind a non-zero exit.
+# $HOME/.claude/telemetry/<repo-slug>.jsonl (#1972 — the user-level default:
+# outside every checkout, so removing a worktree or deleting a clone never takes
+# a record with it, and every worktree and clone of one repo shares one file).
+# Every append holds an exclusive `zsystem flock` on the sink, waiting at most
+# 10 s. The record is printed to stdout BEFORE it is appended to the sink, so a
+# downstream pipe that closes early (EPIPE) can never leave a record in the sink
+# behind a non-zero exit.
 #
 # Exit codes (shared taxonomy with validate-telemetry.zsh, so the same class of
 # failure means the same number in both):
@@ -104,6 +107,8 @@
 #   3  internal — environment/tool failure: jq missing, a failed --payload read
 #      (stdin or file) after the operand checks passed, record build failure,
 #      a failed stdout write (closed pipe), an uncreatable or unappendable sink,
+#      a sink lock not acquired within 10 s, an unset or empty HOME when the
+#      user-level default is the sink, the zsh/system module missing,
 #      a clock that cannot be read (when --ts is omitted), and — defensively,
 #      since the basename fallback all but guarantees an identity — an
 #      underivable repo
@@ -151,7 +156,7 @@ OPTIONS: [--repo OWNER/NAME] [--repo-dir DIR] [--repo-type T] [--issue N] [--pr 
   [--telemetry-file PATH] [--telemetry-dir DIR]
 
 Sink precedence: --telemetry-file > --telemetry-dir (DIR/<repo-slug>.jsonl)
-  > <main checkout of --repo-dir>/.claude/telemetry/telemetry.jsonl"
+  > \$HOME/.claude/telemetry/<repo-slug>.jsonl (--repo-dir picks the identity, never the sink)"
 
 # A value flag with no value must be a usage error, not a silent "omitted".
 # Coercing it to empty is worse than it looks: a dangling --telemetry-file would
@@ -206,6 +211,9 @@ done
 
 command -v jq >/dev/null 2>&1 || {
   print -ru2 -- "emit-telemetry: jq not found on PATH"; exit 3 }
+
+source "${0:A:h}/telemetry-sink-lib.zsh" || {
+  print -ru2 -- "emit-telemetry: cannot load telemetry-sink-lib.zsh"; exit 3 }
 
 # --- envelope validation, BEFORE anything is written ------------------------
 
@@ -302,58 +310,10 @@ ts=$(( 10#$ts ))
 
 # --- repo identity ----------------------------------------------------------
 
-# Derive `owner/name` from the git remote; fall back to the repo directory
-# basename (the #593 rule) so a record is never anonymous.
-_derive_repo() {
-  # NB: never name a local `path` in zsh — it is tied to PATH, so declaring it
-  # local blanks PATH for the whole function and every external command
-  # (git included) silently vanishes.
-  local dir="$1" url slug owner name root
-  url=$(git -C "$dir" remote get-url origin 2>/dev/null) || url=""
-
-  # Only a HOST-based remote can yield an owner/name. A local-path or file://
-  # origin has no owner, and splitting one on `/` fabricates an identity —
-  # `/Users/timo/mirrors/widget.git` would become "mirrors/widget", poisoning
-  # the very cross-repo grouping key this field exists to be.
-  # git's own rule: a colon means scp syntax only when it PRECEDES any slash,
-  # so `/Users/x/backup-10:30/widget.git` stays a local path (and falls back to
-  # the basename) instead of being split into a fabricated `30/widget`.
-  if [[ -n "$url" && ( "$url" == *"://"* || "${url%%/*}" == *:* ) && "$url" != file://* ]]; then
-    slug="${url%/}"              # trailing slash first: ".../name.git/" would
-    slug="${slug%.git}"          # otherwise keep its .git and become name.git
-    local host_ok=1
-    if [[ "$slug" == *"://"* ]]; then
-      slug="${slug#*://}"          # strip scheme
-      slug="${slug#*@}"            # strip any userinfo
-      # A leading slash HERE means the authority was empty (https:///owner/name)
-      # — check before stripping the host, because the host-strip below would
-      # otherwise consume that slash and leave a fabricated owner/name behind.
-      [[ "$slug" == /* ]] && host_ok=0
-      slug="${slug#*/}"            # strip host
-    elif [[ "$slug" == *\]:* ]]; then
-      slug="${slug#*\]:}"          # scp-like, bracketed IPv6 host: git@[::1]:owner/name
-    else
-      slug="${slug#*:}"            # scp-like: git@host:owner/name
-    fi
-    if [[ $host_ok -eq 1 && "$slug" == */* && "$slug" != /* ]]; then
-      # Deliberately the LAST TWO segments: the contract's `repo` is
-      # `owner/name`, so a nested namespace (GitLab `group/subgroup/widget`)
-      # is truncated to `subgroup/widget` rather than widening the field's
-      # shape. GitHub — this family's norm — has no nested namespaces.
-      name="${slug##*/}"
-      owner="${slug%/*}"; owner="${owner##*/}"
-      if [[ -n "$owner" && -n "$name" ]]; then
-        print -r -- "$owner/$name"; return 0
-      fi
-    fi
-  fi
-
-  root=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || root=""
-  [[ -n "$root" ]] || root="${dir:A}"
-  print -r -- "${root:t}"
-}
-
-[[ -n "$repo" ]] || repo="$(_derive_repo "$repo_dir")"
+# Derive `owner/name` from the git remote, falling back to the main
+# checkout's basename — tlm_derive_repo in telemetry-sink-lib.zsh, the ONE
+# derivation the rollup and the collect script share.
+[[ -n "$repo" ]] || repo="$(tlm_derive_repo "$repo_dir")"
 [[ -n "$repo" ]] || {
   print -ru2 -- "emit-telemetry: could not determine repo identity; pass --repo OWNER/NAME"; exit 3 }
 
@@ -442,96 +402,40 @@ record=$(jq -c -n \
 print -r -- "$record" || {
   print -ru2 -- "emit-telemetry: failed to write the record to stdout"; exit 3 }
 
-# Cross-repo mode turns the resolved `repo` into a filename. The normal case is
-# `owner/name` → `owner-name`, but `repo` is not guaranteed to be a GitHub slug:
-# the basename fallback yields whatever a directory is called, and --repo is
-# caller-supplied. So sanitize rather than trust — an unusable or invisible
-# filename would silently strand a repo's whole stream:
-#   * `/` → `-`  — the contract's rule, and what keeps a slug from ever being a
-#     path (so no record can escape DIR into a parent or a subdirectory);
-#   * anything outside [A-Za-z0-9._-] → `-` — spaces, colons, newlines and the
-#     like are legal in a filename but hostile to every consumer of one. The
-#     surviving set is a SUPERSET of what GitHub allows in an owner or a repo
-#     name, so a real slug passes through untouched;
-#   * a leading `.` or `-` → `_` — a dotfile is invisible to the `*.jsonl` glob
-#     the reporting repo reads the directory with (the entire point of this
-#     mode), and a leading dash reads as an option to every CLI that later
-#     touches the file. Both hazards are positional — a `.` or `-` anywhere
-#     else is ordinary — so only the leading character is rewritten.
-#   * finally the whole slug is LOWERCASED. GitHub identities are
-#     case-insensitive but case-preserving, so the same repo can reach us as
-#     `Foo/Bar` from one remote URL and `foo/bar` from a caller's `--repo`;
-#     without folding, a case-sensitive filesystem would split one repo's
-#     stream across two files — exactly the failure the stable-slug promise
-#     exists to prevent. Consumers grouping by the `repo` FIELD should compare
-#     case-insensitively for the same reason.
-# The mapping is PURE but deliberately MANY-TO-ONE: `a/b-c` and `a-b/c` both
-# slug to `a-b-c`, and case-folding adds one more collision class. (For
-# NON-ASCII input the character substitution is LC_CTYPE-dependent — one `-` per
-# character under a multibyte locale, one per byte otherwise — so it is pure
-# *within* a locale, which is one more reason to group by the `repo` field.) So the same
-# repo always resolves to the same file, but two repos can share one —
-# harmlessly, since the sink is append-only and every record carries its `repo`
-# verbatim. A consumer therefore groups by the `repo` FIELD, never by filename;
-# the filename only partitions the directory enough that no repo's stream is
-# lost.
-_repo_slug() {  # $1 = the resolved repo identity
-  local s="${1//\//-}"
-  s="${s//[^A-Za-z0-9._-]/-}"
-  [[ "$s" == [.-]* ]] && s="_${s#?}"
-  print -r -- "${s:l}"
-}
-
-# The repository's MAIN checkout for --repo-dir (#2138): the first entry of
-# `git worktree list --porcelain`. A linked worktree's git-ignored sink is
-# deleted with the worktree, so a default-sink record emitted from one would be
-# lost and an epic's parent/child join would span files. The whole listing is
-# read before it is parsed — a reader that stops at the first line can SIGPIPE
-# git on a long listing and fall back for no reason. Prints nothing (so the
-# caller keeps --repo-dir as given) when --repo-dir is not the top level of a
-# git work tree — a plain folder, one nested inside a repo included, keeps its
-# own sink as bootstrap's siting (#1229) requires — or git is absent or fails,
-# or the main worktree is bare or gone.
-_main_checkout() {  # $1 = --repo-dir
-  local top
-  top="$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" || return 0
-  [[ -n "$top" && "${top:A}" == "${1:A}" ]] || return 0
-  local listing
-  listing="$(git -C "$1" worktree list --porcelain 2>/dev/null)" || return 0
-  local -a lines=("${(@f)listing}")
-  [[ "${lines[1]}" == "worktree "* ]] || return 0
-  [[ "${lines[2]}" == bare ]] && return 0
-  local main="${lines[1]#worktree }"
-  [[ -d "$main" ]] && print -r -- "$main"
-}
-
+# The default sink is the user-level one (#1972): outside every checkout, keyed
+# by the slug of the RESOLVED `repo` (tlm_repo_slug, telemetry-sink-lib.zsh), so
+# every worktree and clone of one repo lands in the same file. --repo-dir only
+# ever reached this far as the identity's source.
 local sink="$telemetry_file"
 [[ -n "$sink" ]] || [[ -z "$telemetry_dir" ]] || \
-  sink="${telemetry_dir%/}/$(_repo_slug "$repo").jsonl"
+  sink="${telemetry_dir%/}/$(tlm_repo_slug "$repo").jsonl"
 if [[ -z "$sink" ]]; then
-  local sink_root
-  sink_root="$(_main_checkout "$repo_dir")"
-  sink="${${sink_root:-$repo_dir}%/}/.claude/telemetry/telemetry.jsonl"
+  local user_dir=""
+  user_dir=$(tlm_user_dir) || {
+    print -ru2 -- "emit-telemetry: HOME is not set, so there is no user-level sink; pass --telemetry-file or --telemetry-dir"
+    exit 3 }
+  sink="$user_dir/$(tlm_repo_slug "$repo").jsonl"
 fi
 
 local sink_dir="${sink:h}"
 # `--` is load-bearing: every one of these paths is caller-controlled and may
-# begin with `-` (`--telemetry-dir -drop`, `--repo-dir -work`), which mkdir would
-# otherwise parse as options and reject — reporting a perfectly creatable sink as
-# uncreatable.
+# begin with `-` (`--telemetry-dir -drop`), which mkdir would otherwise parse as
+# options and reject — reporting a perfectly creatable sink as uncreatable.
 # CAPTURE the OS error rather than discarding it: by the time we get here the
 # operand checks have passed, so whatever failed is environmental (permissions,
 # read-only or full filesystem, a path component that is a file) — and those are
 # indistinguishable from each other in a bare "cannot create sink directory",
 # which is precisely when an operator needs the cause. Same reasoning at the
-# append below and at the --payload check above; all three used to swallow it.
+# append below and at the --payload check above.
 local sink_err
 sink_err=$(mkdir -p -- "$sink_dir" 2>&1) || {
   print -ru2 -- "emit-telemetry: cannot create sink directory: $sink_dir (${sink_err:-unknown error})"
   exit 3 }
 
-# Append, never truncate.
-sink_err=$({ print -r -- "$record" >> "$sink" } 2>&1) || {
+# Append, never truncate — under the sink's exclusive lock, so a concurrent
+# emitter's record can never interleave with this one. A lock not acquired in
+# time appends nothing, and its reason names the timeout.
+sink_err=$(print -r -- "$record" | tlm_locked_append "$sink") || {
   print -ru2 -- "emit-telemetry: cannot append to sink: $sink (${sink_err:-unknown error})"
   exit 3 }
 

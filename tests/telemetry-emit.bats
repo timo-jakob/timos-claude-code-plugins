@@ -12,10 +12,10 @@
 # meant to tell those apart. A `-ne 0` assertion would let a regression that
 # collapses the taxonomy ship green.
 #
-# NOTE: every test points --repo-dir / --telemetry-file / --telemetry-dir at
-# BATS_TEST_TMPDIR, so the suite never writes into this repo's own
-# .claude/telemetry sink. All three flags decide a sink — keep any new one
-# tmpdir-scoped too.
+# NOTE: every test points --telemetry-file / --telemetry-dir, and HOME (which
+# roots the user-level default sink, #1972), at BATS_TEST_TMPDIR, so the suite
+# never writes into the maintainer's own ~/.claude/telemetry. All three decide a
+# sink — keep any new one tmpdir-scoped too.
 
 bats_require_minimum_version 1.5.0
 
@@ -36,6 +36,14 @@ setup() {
   RD="$BATS_TEST_TMPDIR/repo"
   mkdir -p "$RD"
   git init -q "$RD"
+
+  # The user-level default (#1972) lives under HOME, so HOME is the test's own.
+  # DEFAULT_DIR is deliberately NOT created: its absence after a run is how the
+  # precedence tests prove a record went elsewhere. RD has no remote, so its
+  # identity is its basename, "repo".
+  export HOME="$BATS_TEST_TMPDIR/home"
+  DEFAULT_DIR="$HOME/.claude/telemetry"
+  DEFAULT_SINK="$DEFAULT_DIR/repo.jsonl"
 
   # The cross-repo directory (#1006). Deliberately NOT created: several tests
   # assert the emitter creates it, and one asserts a --telemetry-dir SHADOWED by
@@ -116,7 +124,8 @@ emit_dir_split() { run --separate-stderr zsh "$S" --repo-dir "$RD" --telemetry-d
   [ "$status" -eq 0 ]
   starts_with "$output" "usage"
   contains "$output" "emit-telemetry.zsh"
-  # Only resolve-issue (#1226) and maintenance (#1228) forward --telemetry-dir, so --help is most callers' only discovery
+  # Few pipelines forward --telemetry-dir (ARCHITECTURE.md's "Which pipelines
+  # forward" bullet is the list), so --help is most callers' only discovery
   # path for it: a usage block that drifts from the implemented precedence must
   # go red rather than quietly hiding the flag.
   contains "$output" "--telemetry-dir"
@@ -434,19 +443,21 @@ EOF
   echo "$output" | jq -e '.schema == "telemetry/v1"' >/dev/null
 }
 
-@test "the local default sink is <repo-dir>/.claude/telemetry/telemetry.jsonl" {
+@test "the default sink is \$HOME/.claude/telemetry/<repo-slug>.jsonl, never inside --repo-dir" {
   run zsh "$S" --repo-dir "$RD" --pipeline p --outcome success --wall-s 1
   [ "$status" -eq 0 ]
-  [ -f "$RD/.claude/telemetry/telemetry.jsonl" ]
-  [ "$(wc -l < "$RD/.claude/telemetry/telemetry.jsonl")" -eq 1 ]
+  [ -f "$DEFAULT_SINK" ]
+  [ "$(wc -l < "$DEFAULT_SINK")" -eq 1 ]
+  [ "$(cat "$DEFAULT_SINK")" = "$output" ]
+  [ ! -e "$RD/.claude" ]                    # the pre-#1972 in-repo sink is gone
 }
 
-@test "--telemetry-file wins over the local default" {
+@test "--telemetry-file wins over the user-level default" {
   run zsh "$S" --repo-dir "$RD" --telemetry-file "$SINK" \
     --pipeline p --outcome success --wall-s 1
   [ "$status" -eq 0 ]
   [ -f "$SINK" ]
-  [ ! -f "$RD/.claude/telemetry/telemetry.jsonl" ]
+  [ ! -e "$DEFAULT_DIR" ]
 }
 
 @test "paths containing spaces are handled everywhere" {
@@ -465,10 +476,188 @@ EOF
   [ "$(echo "$output" | jq '.payload.k')" -eq 1 ]
 }
 
-@test "a --repo-dir with a trailing slash still resolves the default sink" {
+@test "a --repo-dir with a trailing slash still resolves the same default sink" {
   run zsh "$S" --repo-dir "$RD/" --pipeline p --outcome success --wall-s 1
   [ "$status" -eq 0 ]
-  [ -f "$RD/.claude/telemetry/telemetry.jsonl" ]
+  [ -f "$DEFAULT_SINK" ]
+  [ "$(ls "$DEFAULT_DIR")" = "repo.jsonl" ]
+}
+
+# ------------------------------------------ user-level default sink (#1972)
+#
+# The default lives OUTSIDE every checkout so that removing a worktree or
+# deleting a clone cannot take a record with it, and so every checkout of one
+# repo converges on one file. Each case below is one way a repo is checked out.
+
+# A repo with a HOST-based remote, as its main clone. Prints the clone's path.
+_clone_with_remote() {  # $1 = directory name
+  local d="$BATS_TEST_TMPDIR/$1"
+  git init -q "$d"
+  git -C "$d" remote add origin "git@github.com:Acme/Widget.git"
+  git -C "$d" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m init
+  printf '%s' "$d"
+}
+
+@test "runs from the main clone, a linked worktree and a second clone land in one file" {
+  local main wt second
+  main="$(_clone_with_remote main)"
+  wt="$BATS_TEST_TMPDIR/linked"
+  git -C "$main" worktree add -q "$wt"
+  second="$(_clone_with_remote second)"
+  run zsh "$S" --repo-dir "$main" --pipeline p --outcome success --wall-s 1 --issue 1
+  [ "$status" -eq 0 ]
+  run zsh "$S" --repo-dir "$wt" --pipeline p --outcome success --wall-s 1 --issue 2
+  [ "$status" -eq 0 ]
+  run zsh "$S" --repo-dir "$second" --pipeline p --outcome success --wall-s 1 --issue 3
+  [ "$status" -eq 0 ]
+  [ "$(ls "$DEFAULT_DIR")" = "acme-widget.jsonl" ]
+  [ "$(jq -c -s '[.[].issue]' "$DEFAULT_DIR/acme-widget.jsonl")" = "[1,2,3]" ]
+  [ "$(jq -r -s '[.[].repo] | unique | join(",")' "$DEFAULT_DIR/acme-widget.jsonl")" = "Acme/Widget" ]
+  [ ! -e "$main/.claude" ]
+  [ ! -e "$wt/.claude" ]
+  [ ! -e "$second/.claude" ]
+}
+
+@test "a remote-less repo's linked worktree shares its main checkout's identity and file" {
+  # The fallback identity is the MAIN checkout's basename, never the worktree's
+  # own top level — otherwise every worktree would get a file of its own.
+  git -C "$RD" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m init
+  local wt="$BATS_TEST_TMPDIR/feature-wt"
+  git -C "$RD" worktree add -q "$wt"
+  run zsh "$S" --repo-dir "$wt" --pipeline p --outcome success --wall-s 1 --issue 2
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.repo')" = "repo" ]
+  run zsh "$S" --repo-dir "$RD" --pipeline p --outcome success --wall-s 1 --issue 1
+  [ "$status" -eq 0 ]
+  [ "$(ls "$DEFAULT_DIR")" = "repo.jsonl" ]
+  [ "$(jq -c -s '[.[].issue]' "$DEFAULT_SINK")" = "[2,1]" ]
+}
+
+@test "a local-path remote also falls back to the main checkout's basename in a worktree" {
+  git -C "$RD" remote add origin "$BATS_TEST_TMPDIR/mirrors/widget.git"
+  git -C "$RD" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m init
+  local wt="$BATS_TEST_TMPDIR/other-name"
+  git -C "$RD" worktree add -q "$wt"
+  run zsh "$S" --repo-dir "$wt" --pipeline p --outcome success --wall-s 1
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.repo')" = "repo" ]
+  [ -f "$DEFAULT_SINK" ]
+}
+
+@test "a bare repository's worktree takes its own top level as the identity, not the bare store's parent" {
+  # The common git dir of a bare repo is the store itself, not a `.git`, so
+  # there is no main checkout to name; the worktree's top level stands in.
+  git -C "$RD" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m init
+  git clone -q --bare "$RD" "$BATS_TEST_TMPDIR/store.git"
+  git -C "$BATS_TEST_TMPDIR/store.git" worktree add -q "$BATS_TEST_TMPDIR/bare-wt"
+  run zsh "$S" --repo-dir "$BATS_TEST_TMPDIR/bare-wt" --pipeline p --outcome success --wall-s 1
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.repo')" = "bare-wt" ]
+  [ "$(ls "$DEFAULT_DIR")" = "bare-wt.jsonl" ]
+}
+
+@test "--repo-dir picks the identity only: two dirs of one --repo share one file" {
+  local other="$BATS_TEST_TMPDIR/elsewhere"
+  mkdir -p "$other"
+  run zsh "$S" --repo "acme/widget" --repo-dir "$RD" --pipeline p --outcome success --wall-s 1
+  [ "$status" -eq 0 ]
+  run zsh "$S" --repo "acme/widget" --repo-dir "$other" --pipeline p --outcome success --wall-s 1
+  [ "$status" -eq 0 ]
+  [ "$(ls "$DEFAULT_DIR")" = "acme-widget.jsonl" ]
+  [ "$(wc -l < "$DEFAULT_DIR/acme-widget.jsonl")" -eq 2 ]
+  [ ! -e "$RD/.claude" ]
+  [ ! -e "$other/.claude" ]
+}
+
+@test "an uncreatable user-level directory exits 3 with the OS error and writes nothing" {
+  # A FILE where ~/.claude must be a directory: mkdir -p fails whatever the
+  # uid (a chmod seam proves nothing under root).
+  mkdir -p "$HOME"
+  : > "$HOME/.claude"
+  run --separate-stderr zsh "$S" --repo-dir "$RD" --pipeline p --outcome success --wall-s 1
+  [ "$status" -eq 3 ]
+  contains "$stderr" "cannot create sink directory: $DEFAULT_DIR"
+  matches "$stderr" ".*\(.+\).*"
+  lacks "$stderr" "unknown error"
+  [ ! -s "$HOME/.claude" ]
+}
+
+@test "an unappendable user-level sink exits 3 with the OS error and appends nothing" {
+  # The sink path is a DIRECTORY: the directory exists, the append cannot.
+  mkdir -p "$DEFAULT_SINK"
+  run --separate-stderr zsh "$S" --repo-dir "$RD" --pipeline p --outcome success --wall-s 1
+  [ "$status" -eq 3 ]
+  contains "$stderr" "cannot append to sink: $DEFAULT_SINK"
+  matches "$stderr" ".*\(.+\).*"
+  lacks "$stderr" "unknown error"
+  [ -d "$DEFAULT_SINK" ]
+  [ -z "$(ls -A "$DEFAULT_SINK")" ]
+}
+
+@test "an empty HOME is an internal error naming the cause, never a write to /.claude" {
+  run --separate-stderr env HOME= zsh "$S" --repo-dir "$RD" --pipeline p --outcome success --wall-s 1
+  [ "$status" -eq 3 ]
+  contains "$stderr" "HOME is not set"
+  # an explicit sink still works with no HOME at all
+  run env HOME= zsh "$S" --repo-dir "$RD" --telemetry-file "$SINK" --pipeline p --outcome success --wall-s 1
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$SINK")" -eq 1 ]
+}
+
+@test "a sink lock held beyond 10 s exits 3 naming the timeout, and appends nothing" {
+  # A second process holds the exclusive lock on the sink for longer than emit
+  # waits. The holder writes its ready marker only once the lock is held.
+  mkdir -p "$DEFAULT_DIR"
+  printf '%s\n' '{"existing":1}' > "$DEFAULT_SINK"
+  local ready="$BATS_TEST_TMPDIR/locked"
+  zsh -c 'zmodload zsh/system; zsystem flock -f fd "$1" || exit 1; : > "$2"; sleep 14' \
+    _ "$DEFAULT_SINK" "$ready" &
+  local holder=$!
+  local i=0
+  while [ ! -e "$ready" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+  [ -e "$ready" ]
+  run --separate-stderr zsh "$S" --repo-dir "$RD" --pipeline p --outcome success --wall-s 1
+  kill "$holder" 2>/dev/null || true
+  wait "$holder" 2>/dev/null || true
+  [ "$status" -eq 3 ]
+  contains "$stderr" "timed out after 10s waiting for the lock"
+  [ "$(cat "$DEFAULT_SINK")" = '{"existing":1}' ]
+}
+
+@test "a lock that fails for any reason but the timeout exits 3 naming it, and appends nothing" {
+  # The lib's non-timeout branch: a `zsystem` that fails outright (rc 1, not
+  # the timeout's 2). Shadowed through the ZDOTDIR seam — zsh sources
+  # $ZDOTDIR/.zshenv for a script too, and a function wins over the builtin
+  # the module loads — so the emitter runs unmodified. Letting this branch fall
+  # through would append WITHOUT the lock, which the 16-writer test only
+  # catches when interleaving actually happens.
+  local zd="$BATS_TEST_TMPDIR/zd"
+  mkdir -p "$zd" "$DEFAULT_DIR"
+  printf 'zsystem() { return 1 }\n' > "$zd/.zshenv"
+  printf '%s\n' '{"existing":1}' > "$DEFAULT_SINK"
+  run --separate-stderr env ZDOTDIR="$zd" zsh "$S" --repo-dir "$RD" --pipeline p --outcome success --wall-s 1
+  [ "$status" -eq 3 ]
+  contains "$stderr" "cannot lock $DEFAULT_SINK"
+  lacks "$stderr" "timed out"
+  [ "$(cat "$DEFAULT_SINK")" = '{"existing":1}' ]
+}
+
+@test "16 concurrent emitters of 8 KB+ payloads leave exactly 16 whole JSON lines" {
+  # Review-loop records reach 3–5 KB, past the size an O_APPEND write is
+  # guaranteed to stay whole, so emit appends under an exclusive lock (#1972).
+  # 64 KB payloads make an unlocked interleave all but certain — the lock is
+  # what this case exercises (mutation-checked: red with it removed).
+  local pf="$BATS_TEST_TMPDIR/big.json" i
+  jq -n --arg b "$(head -c 65536 /dev/zero | tr '\0' 'x')" '{blob: $b}' > "$pf"
+  for i in $(seq 1 16); do
+    zsh "$S" --repo-dir "$RD" --pipeline p --outcome success --wall-s 1 --issue "$i" \
+      --payload "$pf" >/dev/null &
+  done
+  wait
+  [ "$(wc -l < "$DEFAULT_SINK")" -eq 16 ]
+  run zsh "$V" "$DEFAULT_SINK" --require-records
+  [ "$status" -eq 0 ]
+  [ "$(jq -c -s '[.[].issue] | sort' "$DEFAULT_SINK")" = "$(jq -c -n '[range(1; 17)]')" ]
 }
 
 # -------------------------------------------- cross-repo sink (--telemetry-dir)
@@ -493,7 +682,7 @@ EOF
   [ -f "$DIR/timo-jakob-foo.jsonl" ]
   [ "$(wc -l < "$DIR/timo-jakob-foo.jsonl")" -eq 1 ]
   [ "$(cat "$DIR/timo-jakob-foo.jsonl")" = "$output" ]
-  [ ! -f "$RD/.claude/telemetry/telemetry.jsonl" ]
+  [ ! -e "$DEFAULT_DIR" ]
 }
 
 @test "the cross-repo filename is stable across runs, and records append to it" {
@@ -548,7 +737,7 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(wc -l < "$SINK")" -eq 1 ]
   [ ! -e "$DIR" ]                                  # the ignored flag creates nothing
-  [ ! -f "$RD/.claude/telemetry/telemetry.jsonl" ]
+  [ ! -e "$DEFAULT_DIR" ]
 }
 
 @test "--telemetry-dir is still VALIDATED when --telemetry-file shadows it" {
@@ -572,7 +761,7 @@ EOF
   emit_dir --repo "timo-jakob/foo" --pipeline p --outcome success --wall-s 1
   [ "$status" -eq 0 ]
   [ -f "$DIR/timo-jakob-foo.jsonl" ]
-  [ ! -f "$RD/.claude/telemetry/telemetry.jsonl" ]
+  [ ! -e "$DEFAULT_DIR" ]
 }
 
 @test "the cross-repo directory is created when absent, including missing parents" {
@@ -595,16 +784,18 @@ EOF
   [ -f "$BATS_TEST_TMPDIR/-drop/timo-jakob-foo.jsonl" ]
 }
 
-@test "a dash-leading --repo-dir still resolves its default sink" {
-  # The same hazard on the other flag that feeds `mkdir`: the default sink path
-  # is built from --repo-dir, so `-work/.claude/telemetry` is the operand.
+@test "a dash-leading --repo-dir still resolves an identity and a glob-visible file" {
+  # --repo-dir no longer builds a path (#1972), but `git -C -work` must still
+  # read it as a directory, and the `-work` identity it yields must not become
+  # a dash-leading filename.
   local rd="$BATS_TEST_TMPDIR/-work"
   mkdir -p "$rd"
   git init -q "$rd"
   run bash -c "cd '$BATS_TEST_TMPDIR' && zsh '$S' --repo-dir -work \
     --pipeline p --outcome success --wall-s 1"
   [ "$status" -eq 0 ]
-  [ -f "$rd/.claude/telemetry/telemetry.jsonl" ]
+  [ "$(echo "$output" | jq -r '.repo')" = "-work" ]
+  [ -f "$DEFAULT_DIR/_work.jsonl" ]
 }
 
 @test "a relative --telemetry-dir resolves against the CWD, not --repo-dir" {
@@ -736,7 +927,7 @@ EOF
   lacks "$stderr" "unknown error"
   echo "$output" | jq -e '.schema == "telemetry/v1"' >/dev/null  # stdout: record only
   [ ! -e "$BATS_TEST_TMPDIR/nowhere" ]              # the link's target stays absent
-  [ ! -f "$RD/.claude/telemetry/telemetry.jsonl" ]
+  [ ! -e "$DEFAULT_DIR" ]
 }
 
 @test "a symlink to a real directory is accepted, and the record lands in the target" {
@@ -833,7 +1024,7 @@ EOF
   contains "$stderr" "--telemetry-dir is not a directory"
   [ -z "$output" ]                                 # rejected BEFORE the record is emitted
   [ ! -s "$blocker" ]                              # nothing landed in it
-  [ ! -f "$RD/.claude/telemetry/telemetry.jsonl" ] # and no silent fallback
+  [ ! -e "$DEFAULT_DIR" ] # and no silent fallback
 }
 
 @test "a diagnostic reproduces a backslash-bearing operand verbatim" {
@@ -870,7 +1061,7 @@ EOF
   lacks "$stderr" "unknown error"                  # …not the fallback string
   echo "$output" | jq -e '.schema == "telemetry/v1"' >/dev/null  # stdout: record only
   [ ! -s "$blocker" ]
-  [ ! -f "$RD/.claude/telemetry/telemetry.jsonl" ]
+  [ ! -e "$DEFAULT_DIR" ]
 }
 
 @test "an unappendable cross-repo sink is an internal error, and nothing is written" {
@@ -885,7 +1076,7 @@ EOF
   lacks "$stderr" "unknown error"
   echo "$output" | jq -e '.schema == "telemetry/v1"' >/dev/null
   [ -z "$(ls -A "$DIR/timo-jakob-foo.jsonl")" ]
-  [ ! -f "$RD/.claude/telemetry/telemetry.jsonl" ]
+  [ ! -e "$DEFAULT_DIR" ]
 }
 
 @test "an existing but unwritable cross-repo directory fails without falling back" {
@@ -906,7 +1097,7 @@ EOF
   lacks "$stderr" "unknown error"
   echo "$output" | jq -e '.schema == "telemetry/v1"' >/dev/null
   [ -z "$(ls -A "$DIR")" ]
-  [ ! -f "$RD/.claude/telemetry/telemetry.jsonl" ]
+  [ ! -e "$DEFAULT_DIR" ]
 }
 
 @test "a rejected record leaves an EXISTING cross-repo sink byte-identical" {
@@ -949,14 +1140,14 @@ EOF
     --pipeline p --outcome success --wall-s 1
   [ "$status" -eq 2 ]
   contains "$output" "--telemetry-dir requires a non-empty value"
-  [ ! -f "$RD/.claude/telemetry/telemetry.jsonl" ]
+  [ ! -e "$DEFAULT_DIR" ]
 }
 
 @test "a dangling --telemetry-dir does NOT fall through to the default sink" {
   run zsh "$S" --repo-dir "$RD" --pipeline p --outcome success --wall-s 1 --telemetry-dir
   [ "$status" -eq 2 ]
   contains "$output" "--telemetry-dir requires a value"
-  [ ! -f "$RD/.claude/telemetry/telemetry.jsonl" ]
+  [ ! -e "$DEFAULT_DIR" ]
 }
 
 # ------------------------------------------------------------ usage rejection
@@ -1069,7 +1260,7 @@ EOF
   run zsh "$S" --repo-dir "$RD" --pipeline p --outcome success --wall-s 1 --telemetry-file
   [ "$status" -eq 2 ]
   contains "$output" "--telemetry-file requires a value"
-  [ ! -f "$RD/.claude/telemetry/telemetry.jsonl" ]
+  [ ! -e "$DEFAULT_DIR" ]
 }
 
 @test "a flag-shaped value is rejected rather than swallowed" {
@@ -1236,17 +1427,13 @@ os.execvp(sys.argv[1], sys.argv[1:])' \
 @test "--repo-dir defaults to the current directory" {
   # The bare form a skill uses when it runs the emitter from the repo it is
   # working in. Every other test passes --repo-dir explicitly.
-  local repo_sink_before
-  repo_sink_before="$( [ -f "$REPO_ROOT/.claude/telemetry/telemetry.jsonl" ] \
-      && cksum < "$REPO_ROOT/.claude/telemetry/telemetry.jsonl" || echo none )"
   run bash -c "cd '$RD' && zsh '$S' --pipeline p --outcome success --wall-s 1"
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.repo')" = "repo" ]
-  [ -f "$RD/.claude/telemetry/telemetry.jsonl" ]
-  [ "$(wc -l < "$RD/.claude/telemetry/telemetry.jsonl")" -eq 1 ]
-  # the real leak guard: this repo's own sink must be untouched by the suite
-  [ "$repo_sink_before" = "$( [ -f "$REPO_ROOT/.claude/telemetry/telemetry.jsonl" ] \
-      && cksum < "$REPO_ROOT/.claude/telemetry/telemetry.jsonl" || echo none )" ]
+  [ -f "$DEFAULT_SINK" ]
+  [ "$(wc -l < "$DEFAULT_SINK")" -eq 1 ]
+  # the real leak guard: the record went to the test's HOME, not into the repo
+  [ ! -e "$RD/.claude" ]
 }
 
 @test "the full [A-Za-z0-9._-]+ charset is ACCEPTED for --pipeline" {
@@ -1360,7 +1547,7 @@ os.execvp(sys.argv[1], sys.argv[1:])' \
   emit_no_sink --telemetry-file "" --pipeline p --outcome success --wall-s 1
   [ "$status" -eq 2 ]
   contains "$output" "--telemetry-file requires a non-empty value"
-  [ ! -f "$RD/.claude/telemetry/telemetry.jsonl" ]
+  [ ! -e "$DEFAULT_DIR" ]
 }
 
 @test "an explicitly empty --payload is rejected, never a silent {} payload" {
@@ -1428,122 +1615,46 @@ os.execvp(sys.argv[1], sys.argv[1:])' \
   echo "$output" | jq -r '.run_id' | grep -Eq '^p-1720000000-[0-9a-f]{4}$'
 }
 
-# ------------------------------- the main checkout's default sink (#2138)
-# With no sink flag, a record emitted from a linked worktree lands in the main
-# checkout's default sink: a worktree's own git-ignored sink is deleted with it.
-
-_wt_repo() {  # a main checkout with one commit, so worktrees can be added
-  git -C "$RD" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m init
-}
-_wt_add() {  # $1 = worktree path
-  git -C "$RD" worktree add -q "$1" -b "wt-${1##*/}"
-}
-emit_default() { run --separate-stderr zsh "$S" --pipeline review-loop --outcome success --wall-s 7 "$@"; }
-
-@test "#2138 a linked worktree's default-sink record lands in the main checkout, not the worktree" {
-  _wt_repo
-  local WT="$BATS_TEST_TMPDIR/fancy-brewing-magpie"
-  _wt_add "$WT"
-  emit_default --repo-dir "$WT"
-  [ "$status" -eq 0 ]
-  [ "$(grep -c '' "$RD/.claude/telemetry/telemetry.jsonl")" -eq 1 ]
-  [ "$(cat "$RD/.claude/telemetry/telemetry.jsonl")" = "$output" ]
-  [ ! -e "$WT/.claude/telemetry" ]
-  # --repo-dir stays the identity source: no remote, so the worktree's basename
-  [ "$(jq -r '.repo' <<<"$output")" = "fancy-brewing-magpie" ]
+@test "every suite that names a telemetry-writing script runs with HOME isolated (#1972)" {
+  # The default sink is $HOME/.claude/telemetry (#1972), so a suite that reaches
+  # an emitter without its own HOME writes into the maintainer's real records —
+  # the first full gate after the move left 13 review-loop records there. Keyed
+  # on the script NAME, not on whether the suite executes it: a closed list of
+  # executing suites rots, a name sweep does not.
+  local pat='resolve-story-loop\.zsh|emit-telemetry\.zsh|story-telemetry\.zsh|maintenance-telemetry\.zsh|bootstrap-telemetry\.zsh|estimate-step\.zsh|rollup-telemetry\.zsh|collect-telemetry\.zsh|narrate-estimate\.zsh'
+  local f missing=""
+  while IFS= read -r f; do
+    grep -qE "$pat" "$REPO_ROOT/$f" || continue
+    grep -qF 'export HOME="$BATS_TEST_TMPDIR/home"' "$REPO_ROOT/$f" || missing+="$f "
+  done < <(git -C "$REPO_ROOT" ls-files 'tests/*.bats' 'tests/**/*.bats')
+  [ -z "$missing" ] || { echo "suites without an isolated HOME: $missing"; return 1; }
 }
 
-@test "#2138 the main-checkout default sink is stated where the contract and its readers look" {
-  local arch handoff epic est
+@test "ARCHITECTURE.md states the #1972 sink precedence, identity and lock contract this suite proves" {
+  # The contract bullets the behaviour above implements, pinned on a
+  # whitespace-flattened haystack so a line wrap cannot defeat a needle: the
+  # precedence and what --repo-dir does NOT decide, the one place identity and
+  # lock live, the main-checkout fallback, and the lock's timeout and exit.
+  local arch
   arch="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/ARCHITECTURE.md")"
-  handoff="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/docs/reference/telemetry-grafana-handoff.md")"
-  epic="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/development/skills/resolve-issue/reference/epic-telemetry.md")"
-  est="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/development/skills/resolve-issue/reference/review-loop/estimates.md")"
-  contains "$arch" '`<main checkout>/.claude/telemetry/telemetry.jsonl` (git-ignored), where the main checkout is the first entry of `git worktree list --porcelain` for `--repo-dir` (#2138)'
-  contains "$arch" 'With no sink flag, worktree epic, child and loop records share the main checkout'"'"'s default sink (#2138)'
-  contains "$handoff" '`.claude/telemetry/telemetry.jsonl` in the repository'"'"'s **main checkout**, so every git worktree of a repo shares it'
-  contains "$epic" 'A worktree child'"'"'s records land in the epic'"'"'s sink'
-  contains "$est" '`.claude/telemetry/telemetry.jsonl` in the main checkout of `<repo-dir>` — the first entry of `git -C <repo-dir> worktree list --porcelain`'
-  contains "$est" 'is always passed (the script'"'"'s own default is relative to the current directory)'
-  contains "$est" '[--repo-type <repo_type>] --sink <the run'"'"'s sink>'
+  contains "$arch" '`--telemetry-file` > `--telemetry-dir` > the user-level default `$HOME/.claude/telemetry/<repo-slug>.jsonl` (#1972)'
+  contains "$arch" '`--repo-dir` decides the **identity only** — never which file is written.'
+  contains "$arch" '**Identity, slug and lock live in one place:** `telemetry-sink-lib.zsh`'
+  contains "$arch" 'the identity falls back to the basename of the **main checkout** — the parent of `git rev-parse --git-common-dir`'
+  contains "$arch" '**Every append holds an exclusive `zsystem flock`** on the sink file'
+  contains "$arch" 'waiting at most 10 s.'
+  contains "$arch" 'A lock not acquired in time is exit 3, and nothing is appended.'
 }
 
-@test "#2138 the main checkout's own default sink is unchanged" {
-  _wt_repo
-  emit_default --repo-dir "$RD"
-  [ "$status" -eq 0 ]
-  [ "$(grep -c '' "$RD/.claude/telemetry/telemetry.jsonl")" -eq 1 ]
-}
-
-@test "#2138 explicit sink flags from a linked worktree select exactly the given sink" {
-  _wt_repo
-  local WT="$BATS_TEST_TMPDIR/wt-flags"
-  _wt_add "$WT"
-  emit_default --repo-dir "$WT" --telemetry-file "$SINK"
-  [ "$status" -eq 0 ]
-  [ "$(grep -c '' "$SINK")" -eq 1 ]
-  emit_default --repo-dir "$WT" --repo timo-jakob/tenant --telemetry-dir "$DIR"
-  [ "$status" -eq 0 ]
-  [ "$(grep -c '' "$DIR/timo-jakob-tenant.jsonl")" -eq 1 ]
-  [ ! -e "$RD/.claude/telemetry" ]
-  [ ! -e "$WT/.claude/telemetry" ]
-}
-
-@test "#2138 a plain folder, nested in a repo or not, keeps its own default sink" {
-  local plain="$BATS_TEST_TMPDIR/not-a-git-repo"
-  mkdir -p "$plain" "$RD/nested"
-  emit_default --repo-dir "$plain"
-  [ "$status" -eq 0 ]
-  [ "$(grep -c '' "$plain/.claude/telemetry/telemetry.jsonl")" -eq 1 ]
-  emit_default --repo-dir "$RD/nested"
-  [ "$status" -eq 0 ]
-  [ "$(grep -c '' "$RD/nested/.claude/telemetry/telemetry.jsonl")" -eq 1 ]
-  [ ! -e "$RD/.claude/telemetry" ]
-}
-
-@test "#2138 a worktree of a bare repository falls back to the worktree's own sink" {
-  local BARE="$BATS_TEST_TMPDIR/bare.git" WT="$BATS_TEST_TMPDIR/bare-wt"
-  _wt_repo
-  git clone -q --bare "$RD" "$BARE"
-  git -C "$BARE" worktree add -q "$WT" -b bare-branch
-  emit_default --repo-dir "$WT"
-  [ "$status" -eq 0 ]
-  [ "$(grep -c '' "$WT/.claude/telemetry/telemetry.jsonl")" -eq 1 ]
-}
-
-@test "#2138 thirty linked worktrees still resolve to the main checkout" {
-  _wt_repo
-  local i
-  for i in {1..30}; do _wt_add "$BATS_TEST_TMPDIR/wt-$i"; done
-  emit_default --repo-dir "$BATS_TEST_TMPDIR/wt-30"
-  [ "$status" -eq 0 ]
-  [ "$(grep -c '' "$RD/.claude/telemetry/telemetry.jsonl")" -eq 1 ]
-  [ ! -e "$BATS_TEST_TMPDIR/wt-30/.claude/telemetry" ]
-}
-
-@test "#2138 a failing git falls back to --repo-dir as given, with the same exit" {
-  _wt_repo
-  local WT="$BATS_TEST_TMPDIR/wt-nogit" stub="$BATS_TEST_TMPDIR/nogit"
-  _wt_add "$WT"
-  mkdir -p "$stub"
-  printf '#!/bin/sh\nexit 127\n' > "$stub/git"
-  chmod +x "$stub/git"
-  run --separate-stderr env PATH="$stub:$PATH" "$ZSH_BIN" "$S" --pipeline p --outcome success --wall-s 1 --repo-dir "$WT"
-  [ "$status" -eq 0 ]
-  [ "$(grep -c '' "$WT/.claude/telemetry/telemetry.jsonl")" -eq 1 ]
-  [ ! -e "$RD/.claude/telemetry" ]
-}
-
-@test "#2138 an unwritable main-checkout sink is exit 3, and nothing lands in the worktree" {
-  [ "$(id -u)" -ne 0 ] || skip "chmod proves nothing as root"
-  _wt_repo
-  local WT="$BATS_TEST_TMPDIR/wt-ro"
-  _wt_add "$WT"
-  mkdir -p "$RD/.claude/telemetry"
-  chmod 555 "$RD/.claude/telemetry"
-  emit_default --repo-dir "$WT"
-  chmod 755 "$RD/.claude/telemetry"
-  [ "$status" -eq 3 ]
-  contains "$stderr" "cannot append to sink: $(cd "$RD" && pwd -P)/.claude/telemetry/telemetry.jsonl"
-  [ ! -e "$WT/.claude/telemetry" ]
+@test "ARCHITECTURE.md states once which pipelines forward --telemetry-dir" {
+  # The forwarder list lives only in this ARCHITECTURE.md bullet; the hand-off
+  # page and the emitter header point at its heading, so pinning the heading
+  # also proves those pointers still resolve. Flattened so a wrap cannot defeat it.
+  local arch
+  arch="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/ARCHITECTURE.md")"
+  contains "$arch" '**Which pipelines forward `--telemetry-dir` — stated here, once.**'
+  contains "$arch" 'which forwards it for each loop record'
+  contains "$arch" 'to every child run it starts (#1227).'
+  contains "$arch" '`/development:maintenance` (#1228) and `/development:bootstrap` (#1229) forward both flags for their one record each'
+  contains "$arch" '**refine-issue does not**: its Step 7 passes no sink flag at all'
 }

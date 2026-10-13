@@ -24,6 +24,7 @@ load assertions
 load resolve-issue-corpus
 
 setup() {
+  export HOME="$BATS_TEST_TMPDIR/home"  # the user-level telemetry default stays out of the real ~/.claude (#1972)
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   # #1503 split this skill into a conductor plus reference/*.md. A sweep that
   # counts or reads ACROSS the skill takes the corpus; one that pins WHERE a
@@ -746,4 +747,14 @@ substitute_fence() {   # $1 = work-dir holding .telemetry-run-id · $2 = promote
   echo "$output" | jq -e '.promotion_phase == false' >/dev/null
   # the Warning counts are untouched — promoted is a subset, not an addend
   [ "$(jq -c '[.findings_by_round[].by_severity.Warning]' <<<"$output")" = "[3,3]" ]
+}
+
+@test "#1972 the gap note after the frozen step-3 span supersedes its sink path, keeping the mirror rule" {
+  # The span itself is byte-frozen (verify-reference-move.bats), so the
+  # user-level default is stated in the gap right after it — pin that it is
+  # there, AFTER the span's closing marker, and that it keeps the rule.
+  local sk="$REPO_ROOT/development/skills/resolve-issue/reference/promotion/step-3-select.md" after
+  after="$(awk 'f{print} /<!-- \/moved: suggestion-promotion-step-3 -->/{f=1}' "$sk" | tr '\n' ' ' | tr -s ' ')"
+  contains "$after" 'read `~/.claude/telemetry/<repo-slug>.jsonl`: `--repo-dir` no longer locates a file, it only derives `repo`'
+  contains "$after" 'The rule is unchanged: a differing `--repo-dir` still mis-derives `repo` and so still lands the record in a different file, so mirror exactly what the loop was given.'
 }

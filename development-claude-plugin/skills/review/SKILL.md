@@ -300,4 +300,4 @@ harness:
 `>= WARNING` naming the absent failure branch. **FAIL** on silence or on
 `SUGGESTION`-only. (Recall on one known defect; precision is tuned against the
 review-loop telemetry — the `pipeline: "review-loop"` records in
-`.claude/telemetry/telemetry.jsonl` (#1004) — see the epic #810 design spec.)
+`~/.claude/telemetry/<repo-slug>.jsonl` (#1004, #1972) — see the epic #810 design spec.)

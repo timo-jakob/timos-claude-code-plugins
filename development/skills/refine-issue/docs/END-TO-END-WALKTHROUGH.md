@@ -110,8 +110,8 @@ issue with a comment.
 (concrete `use_case`, happy+corner+error test cases in `curl`, the spun-out
 issues exist and are linked), so the verdict is `READY` and the `needs-refinement` label
 is cleared. One `telemetry/v1` record is appended to the shared sink
-`.claude/telemetry/telemetry.jsonl`, which bootstrap git-ignores (#579,
-retrofitted onto the contract by #1005). The envelope comes from the shared
+`~/.claude/telemetry/<repo-slug>.jsonl`, outside every checkout (#579,
+retrofitted onto the contract by #1005, moved out of the repo by #1972). The envelope comes from the shared
 `emit-telemetry.zsh`, the five bespoke fields from
 `build-refine-telemetry-record.zsh` as the `payload`, and the run's
 `refined-ready` ending narrows onto the envelope's `success`. (The stream

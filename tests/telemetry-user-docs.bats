@@ -36,6 +36,7 @@ flattened_page() {
 }
 
 setup() {
+  export HOME="$BATS_TEST_TMPDIR/home"  # the user-level telemetry default stays out of the real ~/.claude (#1972)
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   EXPLAIN="$REPO_ROOT/docs/explanation/pipeline-telemetry.md"
   HOWTO="$REPO_ROOT/docs/how-to/read-pipeline-telemetry.md"
@@ -60,17 +61,29 @@ setup() {
 
 # ----------------------------------------------------- what is / isn't collected (AC2)
 
-@test "the docs state the sink is local and git-ignored" {
+@test "the docs state the sink is local, user-level and outside every checkout" {
   # BOTH pages, because both make the claim and the how-to is the one a reader
   # lands on first. Pinning only the explanation would let the how-to's whole
-  # "What's collected" list be deleted with the suite green.
+  # "What's collected" list be deleted with the suite green. Since #1972 the
+  # default is user-level; the git-ignored claim survives for the older in-repo
+  # sink, which both pages still name.
   local page
   for page in "$EXPLAIN" "$HOWTO"; do
+    run grep -qF '~/.claude/telemetry/<repo-slug>.jsonl' "$page"
+    [ "$status" -eq 0 ]
+    contains "$(flattened_page "$page")" 'outside every checkout'
     run grep -qF '.claude/telemetry/telemetry.jsonl' "$page"
     [ "$status" -eq 0 ]
     run grep -qF 'git-ignored' "$page"
     [ "$status" -eq 0 ]
   done
+}
+
+@test "the how-to documents the one-off salvage into the user-level directory" {
+  run grep -qF 'collect-telemetry.zsh' "$HOWTO"
+  [ "$status" -eq 0 ]
+  run grep -qF 'never changes a source' "$HOWTO"
+  [ "$status" -eq 0 ]
 }
 
 @test "the git-ignored claim is qualified by the mechanism that provides it" {

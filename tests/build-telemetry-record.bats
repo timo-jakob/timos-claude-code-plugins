@@ -16,6 +16,7 @@ bats_require_minimum_version 1.5.0
 load assertions
 
 setup() {
+  export HOME="$BATS_TEST_TMPDIR/home"  # the user-level telemetry default stays out of the real ~/.claude (#1972)
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development/skills/resolve-issue/scripts/build-telemetry-record.zsh"
   EMIT="$REPO_ROOT/development/scripts/telemetry/emit-telemetry.zsh"
@@ -192,7 +193,7 @@ EOF
   [ "$(echo "$output" | jq -r '.payload.status')" = "CONVERGED" ]
   [ "$(echo "$output" | jq -c '.payload.convergence_assessment.blocking_by_round')" = "[1,0]" ]
 
-  run zsh "$VALIDATE" "$R/.claude/telemetry/telemetry.jsonl" --require-records
+  run zsh "$VALIDATE" "$HOME/.claude/telemetry/timo-jakob-widget.jsonl" --require-records
   [ "$status" -eq 0 ]
 }
 
@@ -356,7 +357,7 @@ EOF
   mkdir -p "$R"
   git -C "$R" init -q
   git -C "$R" remote add origin https://github.com/timo-jakob/widget.git
-  local F="$R/.claude/telemetry/telemetry.jsonl"
+  local F="$HOME/.claude/telemetry/timo-jakob-widget.jsonl"
   local P="$BATS_TEST_TMPDIR/payload.json"
 
   zsh "$S" --status "$ST" > "$P"                                   # CONVERGED, 2 rounds
@@ -556,7 +557,7 @@ EOF
   mkdir -p "$R"
   git -C "$R" init -q
   git -C "$R" remote add origin https://github.com/timo-jakob/widget.git
-  local F="$R/.claude/telemetry/telemetry.jsonl"
+  local F="$HOME/.claude/telemetry/timo-jakob-widget.jsonl"
   local P="$BATS_TEST_TMPDIR/fp-payload.json"
 
   emit() {  # $1 status · $2 outcome · $3 issue · $4 ts · $5 wall

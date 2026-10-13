@@ -59,8 +59,9 @@ escalates, is granted more rounds and finishes writes two: one for each ending.
 `failed`, the wall-clock time, and an open `payload` each pipeline fills with its own measures — rounds, findings per
 round, how many were fixed or waived, gate times per step.
 
-**Where it goes, and what it leaves out.** Records are appended to `.claude/telemetry/telemetry.jsonl` in the
-repository, which is git-ignored. Nothing is sent anywhere: the emitter speaks no network protocol. No code, no diffs
+**Where it goes, and what it leaves out.** Records are appended to `~/.claude/telemetry/<repo-slug>.jsonl`, one file
+per repository, outside every checkout — so no commit can carry one and removing a worktree takes none with it.
+Nothing is sent anywhere: the emitter speaks no network protocol. No code, no diffs
 and no prose are recorded — not even a finding's title. Token counts stay empty rather than estimated, and the stream
 is lossy on purpose: a telemetry failure never fails a run, so the sink undercounts. It is evidence, not an audit log.
 [Pipeline telemetry](pipeline-telemetry.md) explains each of these choices.

@@ -9,6 +9,8 @@ bats_require_minimum_version 1.5.0
 load assertions
 
 setup() {
+  export HOME="$BATS_TEST_TMPDIR/home"  # the user-level telemetry default stays out of the real ~/.claude (#1972)
+  DEFAULT_SINK="$HOME/.claude/telemetry/repo.jsonl"  # R (below) has no remote: its identity is "repo"
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development/skills/resolve-issue/scripts/resolve-story-loop.zsh"
 
@@ -429,7 +431,7 @@ assert_envelope() {
   [ "$(jq '.payload.rounds' "$T")" -eq 1 ]
   # AC8 (override half): --telemetry-file must be the ONLY sink written —
   # emitting to both would double-count every run in the shared stream
-  [ ! -e "$R/.claude/telemetry/telemetry.jsonl" ]
+  [ ! -e "$DEFAULT_SINK" ]
 }
 
 @test "the emitter's basename fallback still yields a non-null repo with no git remote (#1004)" {
@@ -452,14 +454,14 @@ assert_envelope() {
   [ "$(jq -cS '.payload' "$T")" = "$(jq -cS '.' "$BATS_TEST_TMPDIR/expected-payload.json")" ]
 }
 
-@test "the default sink is the shared .claude/telemetry/telemetry.jsonl (#1004)" {
+@test "the default sink is the user-level ~/.claude/telemetry/<repo-slug>.jsonl (#1004, #1972)" {
   clean_loop --issue 7
   [ "$status" -eq 0 ]
-  D="$R/.claude/telemetry/telemetry.jsonl"
-  assert_envelope "$D" success CONVERGED
-  [ "$(jq '.issue' "$D")" -eq 7 ]
-  # the pre-contract per-pipeline file is NOT written any more
-  [ ! -e "$R/.claude/telemetry/review-loop.jsonl" ]
+  assert_envelope "$DEFAULT_SINK" success CONVERGED
+  [ "$(jq '.issue' "$DEFAULT_SINK")" -eq 7 ]
+  # nothing lands inside the checkout any more — neither the pre-#1972 shared
+  # file nor the pre-contract per-pipeline one
+  [ ! -e "$R/.claude/telemetry" ]
 }
 
 # AC4 — the outcome mapping, asserted PER STATUS so a broken mapping names its
@@ -537,7 +539,7 @@ assert_envelope() {
   # the emitter really did fail: nothing at the named sink...
   [ ! -e "$BAD/sub/telemetry.jsonl" ]
   # ...and no silent fallback to the default sink either
-  [ ! -e "$R/.claude/telemetry/telemetry.jsonl" ]
+  [ ! -e "$DEFAULT_SINK" ]
   # and it said so, naming THIS failure — "emit-telemetry" alone would also
   # match an unknown-flag regression, keeping the test green on the wrong cause
   contains "$stderr" "cannot create sink directory"
@@ -557,7 +559,7 @@ assert_envelope() {
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "CONVERGED" ]
   [ ! -e "$T" ]
-  [ ! -e "$R/.claude/telemetry/telemetry.jsonl" ]
+  [ ! -e "$DEFAULT_SINK" ]
 }
 
 @test "--no-review with no --repo emits nothing, and writes into no cwd (#1004)" {
@@ -586,7 +588,7 @@ assert_envelope() {
   [ "$(echo "$output" | jq -r '.status')" = "SKIPPED" ]
   # nothing anywhere: not the cwd, not the repo
   [ ! -e "$CWD/.claude" ]
-  [ ! -e "$R/.claude/telemetry/telemetry.jsonl" ]
+  [ ! -e "$DEFAULT_SINK" ]
 }
 
 @test "--no-review WITH a valid --repo does emit, so the guard is about the repo dir alone (#1004)" {
@@ -1686,7 +1688,7 @@ seed_exhausted_wd() {
   run zsh "$S" --repo "$R" --base main --no-review --telemetry-file ""
   [ "$status" -eq 2 ]
   contains "$output" "requires a non-empty value"
-  [ ! -e "$R/.claude/telemetry/telemetry.jsonl" ]
+  [ ! -e "$DEFAULT_SINK" ]
 }
 
 @test "_need_val: a dangling value flag is a usage error (2), not a raw nounset abort (#1004)" {
@@ -4146,13 +4148,13 @@ JSON
   clean_loop --parent-run-id --telemetry-file "$T"
   [ "$status" -eq 2 ]
   [ ! -e "$T" ]
-  [ ! -e "$R/.claude/telemetry/telemetry.jsonl" ]
+  [ ! -e "$DEFAULT_SINK" ]
 }
 
 @test "#1226 an empty --telemetry-dir is a usage error, not a default-sink write" {
   clean_loop --telemetry-dir ''
   [ "$status" -eq 2 ]
-  [ ! -e "$R/.claude/telemetry/telemetry.jsonl" ]
+  [ ! -e "$DEFAULT_SINK" ]
 }
 
 # #1761: `jq -r` prints an unset sink in the `args` JSON as the string `null`.
@@ -4164,7 +4166,7 @@ JSON
   [ "$status" -eq 0 ]
   [ ! -e "$R/null" ]
   [ ! -e "$BATS_TEST_TMPDIR/null" ]
-  assert_envelope "$R/.claude/telemetry/telemetry.jsonl" success CONVERGED
+  assert_envelope "$DEFAULT_SINK" success CONVERGED
 }
 
 @test "#1761 a literal null --telemetry-dir is the absent flag: default sink, no null path" {
@@ -4173,7 +4175,7 @@ JSON
   [ "$status" -eq 0 ]
   [ ! -e "$R/null" ]
   [ ! -e "$BATS_TEST_TMPDIR/null" ]
-  assert_envelope "$R/.claude/telemetry/telemetry.jsonl" success CONVERGED
+  assert_envelope "$DEFAULT_SINK" success CONVERGED
 }
 
 @test "#1226 --telemetry-dir DIR appends to DIR/<slug>.jsonl and not to the local default" {
@@ -4183,7 +4185,7 @@ JSON
   [ "$status" -eq 0 ]
   assert_envelope "$TD/timos-platform-tenant-service.jsonl" success CONVERGED
   [ "$(jq -r '.parent_run_id' "$TD/timos-platform-tenant-service.jsonl")" = "$PARENT" ]
-  [ ! -e "$R/.claude/telemetry/telemetry.jsonl" ]
+  [ ! -e "$DEFAULT_SINK" ]
 }
 
 @test "#1226 --telemetry-file beats --telemetry-dir for the loop's record" {
@@ -4193,7 +4195,7 @@ JSON
   [ "$status" -eq 0 ]
   assert_envelope "$T" success CONVERGED
   [ ! -e "$TD" ]
-  [ ! -e "$R/.claude/telemetry/telemetry.jsonl" ]
+  [ ! -e "$DEFAULT_SINK" ]
 }
 
 @test "#1226 a --telemetry-dir the emitter refuses never changes the loop's status or exit" {
@@ -4206,7 +4208,7 @@ JSON
   [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
   contains "$stderr" "--telemetry-dir is not a directory"
   [ ! -s "$BAD" ]
-  [ ! -e "$R/.claude/telemetry/telemetry.jsonl" ]
+  [ ! -e "$DEFAULT_SINK" ]
   # a stub-escalating run keeps its typed exit too
   stuck_loop --telemetry-dir "$BAD"
   [ "$status" -eq 12 ]

@@ -36,6 +36,7 @@
 bats_require_minimum_version 1.5.0
 
 setup() {
+  export HOME="$BATS_TEST_TMPDIR/home"  # the user-level telemetry default stays out of the real ~/.claude (#1972)
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development/skills/refine-issue/scripts/build-refine-telemetry-record.zsh"
   E="$REPO_ROOT/development/scripts/telemetry/emit-telemetry.zsh"
@@ -609,19 +610,19 @@ emit_run() {  # $1 = state JSON, $2 = wall seconds, $3.. = extra emitter flags
   assert_eq "$(echo "$output" | jq -r '.outcome')" "success" ".outcome"
 }
 
-@test "the default sink is the SHARED .claude/telemetry/telemetry.jsonl (AC7)" {
+@test "the default sink is the user-level ~/.claude/telemetry/<repo-slug>.jsonl (AC7, #1972)" {
   run emit_run "$READY" 90
   [ "$status" -eq 0 ]
-  [ -f "$RD/.claude/telemetry/telemetry.jsonl" ]
-  [ ! -e "$RD/.claude/telemetry/refine-issue.jsonl" ]   # the retired per-pipeline sink
-  assert_eq "$(wc -l < "$RD/.claude/telemetry/telemetry.jsonl" | tr -d ' ')" 1 "sink lines"
-  assert_eq "$(jq -r '.pipeline' "$RD/.claude/telemetry/telemetry.jsonl")" "refine-issue" "sink .pipeline"
+  [ -f "$HOME/.claude/telemetry/repo.jsonl" ]           # RD has no remote: identity "repo"
+  [ ! -e "$RD/.claude" ]          # neither the retired per-pipeline nor the in-repo shared sink
+  assert_eq "$(wc -l < "$HOME/.claude/telemetry/repo.jsonl" | tr -d ' ')" 1 "sink lines"
+  assert_eq "$(jq -r '.pipeline' "$HOME/.claude/telemetry/repo.jsonl")" "refine-issue" "sink .pipeline"
 }
 
 @test "appending N runs yields N well-formed lines in the shared sink" {
   emit_run "$READY" 10 >/dev/null
   emit_run "$PARKED" 20 >/dev/null
-  local sink="$RD/.claude/telemetry/telemetry.jsonl"
+  local sink="$HOME/.claude/telemetry/repo.jsonl"
   assert_eq "$(wc -l < "$sink" | tr -d ' ')" 2 "sink lines"
   assert_eq "$(jq -s 'length' "$sink")" 2 "parsed records"
   assert_eq "$(jq -s -r '[.[].outcome] | join(",")' "$sink")" "success,parked" "outcomes"
@@ -633,7 +634,7 @@ emit_run() {  # $1 = state JSON, $2 = wall seconds, $3.. = extra emitter flags
   # --ts must be PINNED: without it the emitter stamps date +%s per call, so the
   # ids would differ by their timestamp component alone and this would pass even
   # if the random suffix were a constant — the very regression it targets.
-  local sink="$RD/.claude/telemetry/telemetry.jsonl" i
+  local sink="$HOME/.claude/telemetry/repo.jsonl" i
   for i in 1 2 3 4 5 6 7 8; do emit_run "$READY" 1 >/dev/null; done
   assert_eq "$(jq -s '[.[].ts] | unique | length' "$sink")" 1 "shared ts"
   # >= 7 of 8, not 8 of 8: the suffix is 16 bits, so demanding zero collisions
@@ -878,7 +879,7 @@ skill_step0() {
   # legitimate refine-issue.jsonl mention is the "records written before this
   # retrofit" note, which names it as legacy rather than as a target.
   # positive: the section must NAME the shared sink, not merely omit an override
-  assert_contains "$step7" ".claude/telemetry/telemetry.jsonl"
+  assert_contains "$step7" "~/.claude/telemetry/<repo-slug>.jsonl"
   case "$step7" in
     *--telemetry-file*|*--telemetry-dir*) echo "Step 7 must not override the shared sink"; return 1 ;;
   esac
@@ -897,7 +898,7 @@ skill_step0() {
 
 @test "the builder writes NO files — the emitter owns the sink (the split's core claim)" {
   # build_split runs with the cwd bats was invoked from, which is this repo's
-  # root and holds a real .claude/telemetry/telemetry.jsonl. So a regression
+  # root and may hold a legacy .claude/telemetry/telemetry.jsonl. So a regression
   # re-adding a relative sink write to the BUILDER would append to the
   # maintainer's own telemetry file with every other test still green. Run it
   # from an isolated cwd and assert it creates nothing at all.

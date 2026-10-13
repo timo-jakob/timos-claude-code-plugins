@@ -42,6 +42,7 @@ bats_require_minimum_version 1.5.0
 load ../../assertions
 
 setup() {
+  export HOME="$BATS_TEST_TMPDIR/home"  # the user-level telemetry default stays out of the real ~/.claude (#1972)
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   SCRIPTS="$REPO_ROOT/development/skills/bootstrap/scripts"
   DRIVER="$SCRIPTS/bootstrap-telemetry.zsh"
@@ -55,7 +56,7 @@ setup() {
   mkdir -p "$T"
   git -C "$T" init -q
   git -C "$T" remote add origin git@github.com:nils/legacy-billing.git
-  SINK="$T/.claude/telemetry/telemetry.jsonl"
+  SINK="$HOME/.claude/telemetry/nils-legacy-billing.jsonl"   # #1972: the user-level default
 
   SCRATCH="$BATS_TEST_TMPDIR/scratch"
   mkdir -p "$SCRATCH"
@@ -113,7 +114,7 @@ detect() { cd "$L"; run --separate-stderr bash "$DETECT"; [ "$status" -eq 0 ]; }
   [ "$(jq -r .outcome <<<"$rec")" = "success" ]
 }
 
-@test "tc-corner-ab-siting (#2062): from fixture A, emit --repo-dir B lands in B's sink only" {
+@test "tc-corner-ab-siting (#2062): from fixture A, emit --repo-dir B lands in B's file only" {
   local A="$BATS_TEST_TMPDIR/billing-tools"
   mkdir -p "$A/.claude/telemetry"
   git -C "$A" init -q
@@ -128,9 +129,10 @@ detect() { cd "$L"; run --separate-stderr bash "$DETECT"; [ "$status" -eq 0 ]; }
   [ "$(jq -r .repo <<<"$rec")" = "nils/legacy-billing" ]
   [ "$(jq -r .payload.target_repo <<<"$rec")" = "nils/legacy-billing" ]
   cmp -s "$A/.claude/telemetry/telemetry.jsonl" "$SCRATCH/a-before"
+  [ ! -e "$HOME/.claude/telemetry/nils-billing-tools.jsonl" ]
 }
 
-@test "tc-corner-worktree-siting (#2063): from a linked worktree of B, the record lands in B's main checkout" {
+@test "tc-corner-worktree-siting (#2063): from a linked worktree of B, the record carries B's identity and file" {
   git -C "$T" -c user.name=nils -c user.email=nils@example.invalid commit -q --allow-empty -m "initial"
   local W="$BATS_TEST_TMPDIR/legacy-billing-bootstrap"
   git -C "$T" worktree add -q "$W" -b chore/bootstrap-gap-fill

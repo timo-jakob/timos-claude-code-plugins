@@ -84,7 +84,7 @@ local EPIC_BUILDER="${STORY_TELEMETRY_EPIC_BUILDER_BIN:-${self_dir}/build-epic-t
 
 local invocation_help="usage: /development:resolve-issue <issue-number|url> [--telemetry-file PATH] [--telemetry-dir DIR] [--no-review]
   flags may appear in any position; sink precedence is --telemetry-file >
-  --telemetry-dir (DIR/<repo-slug>.jsonl) > .claude/telemetry/telemetry.jsonl"
+  --telemetry-dir (DIR/<repo-slug>.jsonl) > ~/.claude/telemetry/<repo-slug>.jsonl"
 
 local usage="usage: story-telemetry.zsh args [WORD ...]
        story-telemetry.zsh start --run-file FILE [--telemetry-file PATH] [--telemetry-dir DIR]

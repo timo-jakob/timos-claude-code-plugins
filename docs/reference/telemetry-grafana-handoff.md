@@ -51,11 +51,11 @@ which owns the sink. Sink precedence, highest first:
 1. `--telemetry-file PATH` — an explicit file.
 2. `--telemetry-dir DIR` — the **shared** cross-repo mode: appends to
    `DIR/<repo-slug>.jsonl`. This is the mode the reporting repo consumes.
-3. The local default — `.claude/telemetry/telemetry.jsonl` in the repository's
-   **main checkout**, so every git worktree of a repo shares it, falling back
-   to `<repo-dir>` when that is not the top level of a git work tree. It is
-   git-ignored (via the entry bootstrap installs) and never leaves the
-   machine.
+3. The user-level default — `$HOME/.claude/telemetry/<repo-slug>.jsonl` (#1972):
+   the same per-repo layout as the shared mode, rooted in one directory outside
+   every checkout, which never leaves the machine. (Before #1972 the default
+   was `<repo-dir>/.claude/telemetry/telemetry.jsonl`, git-ignored via the entry
+   bootstrap installs.)
 
 The slug is derived from the record's resolved `repo`: `/` becomes `-`, any
 character outside `[A-Za-z0-9._-]` becomes `-`, a leading `.` or `-` becomes `_`,
@@ -67,24 +67,22 @@ case-insensitively too.
 
 The mode is filesystem-only — JSONL on a path, never a network transport.
 
-**Only resolve-issue (with its review loop) and maintenance forward
-`--telemetry-dir` so far.**
-`/development:resolve-issue <N> --telemetry-dir DIR` lands the story's
-`resolve-issue` record and every review-loop record of that run in the shared
-directory (#1226) — and, for an epic target, the epic's own record and every
-child run's records with it (#1227). `/development:maintenance --telemetry-dir
-DIR` lands its run's `maintenance` record there (#1228). Every other pipeline, refine-issue included,
-forwards no sink flag from its invocation, so its records land in each repo's
-local default sink, never in the shared directory. Wiring the flag through the remaining entry points is per-pipeline
-instrumentation and belongs to the trilogy's **epic 2**. For those pipelines,
-read an empty shared directory as *that* gap, not as a broken emitter or a
-broken aggregation service.
+**Not every pipeline forwards `--telemetry-dir` yet.** Which ones do, and
+which one does not, is stated once, in
+[`ARCHITECTURE.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/ARCHITECTURE.md)
+under *Cross-repo sink mode* (*Which pipelines forward `--telemetry-dir`*);
+each pipeline's own skill lists the flag where it takes it. A pipeline that
+does not forward it leaves its records in the user-level default, never in the
+shared directory: wiring the flag through such an entry point is per-pipeline
+instrumentation and belongs to the trilogy's **epic 2**, so read an empty
+shared directory after one of those as *that* gap, not as a broken emitter or
+a broken aggregation service.
 
 | Flag | Script | Meaning for the hand-off |
 | --- | --- | --- |
 | `--telemetry-dir` | `emit-telemetry.zsh` | Writes into the shared directory the reporting repo globs. |
 | `--telemetry-file` | `emit-telemetry.zsh` | Overrides the directory; a record lands here instead. |
-| `--repo-dir` | `emit-telemetry.zsh` | Identity source (which repo a record claims); it locates the local default sink — in that repository's main checkout — never the shared directory. |
+| `--repo-dir` | `emit-telemetry.zsh` | Identity source (which repo a record claims); it never chooses the file written. |
 | `--require-records` | `validate-telemetry.zsh` | Turns an empty stream into a failure — "did the pipeline emit?" |
 | `--print-envelope-keys` | `validate-telemetry.zsh` | Prints the authoritative envelope key list as a JSON array. |
 

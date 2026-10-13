@@ -28,6 +28,7 @@ load assertions
 
 
 setup() {
+  export HOME="$BATS_TEST_TMPDIR/home"  # the user-level telemetry default stays out of the real ~/.claude (#1972)
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   SCRIPTS="$REPO_ROOT/development/skills/resolve-issue/scripts"
   # #1503 split this skill into a conductor plus reference/*.md. Every pin in

@@ -29,6 +29,8 @@ bats_require_minimum_version 1.5.0
 load assertions
 
 setup() {
+  export HOME="$BATS_TEST_TMPDIR/home"  # the user-level telemetry default stays out of the real ~/.claude (#1972)
+  DEFAULT_SINK="$HOME/.claude/telemetry/repo.jsonl"  # R (below) has no remote: its identity is "repo"
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development/skills/resolve-issue/scripts/resolve-story-loop.zsh"
 
@@ -533,7 +535,7 @@ converge_clean() {
   # ...but it is NOT terminal: no telemetry record, no round block, no Final line
   [ ! -e "$T" ]
   # AC3's negative is about the WHOLE stream, not just the named sink
-  [ ! -e "$R/.claude/telemetry/telemetry.jsonl" ]
+  [ ! -e "$DEFAULT_SINK" ]
   run -1 grep -q '^## Round 2' "$WD/progress.md"
   run -1 grep -q '^\*\*Final:' "$WD/progress.md"
   grep -q '^\*\*Refused (round 2):\*\* stale findings' "$WD/progress.md"
@@ -983,7 +985,7 @@ TID() { zsh "$REPO_ROOT/development/skills/resolve-issue/scripts/git-tree-id.zsh
   # regression that merely touches the sink before the terminal guard must fail
   [ ! -e "$T" ]
   # ...and nothing landed in the default sink either (AC3 is about the stream)
-  [ ! -e "$R/.claude/telemetry/telemetry.jsonl" ]
+  [ ! -e "$DEFAULT_SINK" ]
   # two resumes since #1434 (the clean delta round promotes the closing sweep),
   # and the AWAITING_FIX in between must ALSO write nothing — which is exactly
   # the claim, now tested across one more non-terminal exit

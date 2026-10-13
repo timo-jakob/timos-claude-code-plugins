@@ -10,6 +10,7 @@ bats_require_minimum_version 1.5.0
 load assertions
 
 setup() {
+  export HOME="$BATS_TEST_TMPDIR/home"  # the user-level telemetry default stays out of the real ~/.claude (#1972)
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   D="$REPO_ROOT/development/skills/resolve-issue/scripts/story-telemetry.zsh"
   VALIDATE="$REPO_ROOT/development/scripts/telemetry/validate-telemetry.zsh"
@@ -20,7 +21,7 @@ setup() {
   mkdir -p "$R"
   git -C "$R" init -q
   git -C "$R" remote add origin https://github.com/timos-platform/tenant-service.git
-  DEFAULT_SINK="$R/.claude/telemetry/telemetry.jsonl"
+  DEFAULT_SINK="$HOME/.claude/telemetry/timos-platform-tenant-service.jsonl"  # #1972
 
   RUN="$BATS_TEST_TMPDIR/run.json"
   ST="$BATS_TEST_TMPDIR/state.json"
@@ -989,9 +990,9 @@ EPIC_RUN_STATE='{"outcome":"parked","e1_classification":"native_children","child
 }
 
 # #2138: with no sink flag, an epic run in one linked worktree, a child run and
-# its loop in another all land in the MAIN checkout's default sink, so the
-# parent/child join resolves there after both worktrees are gone.
-@test "#2138 epic, child and loop records from two worktrees share the main checkout's default sink" {
+# its loop in another all land in the one user-level default sink (#1972), so
+# the parent/child join resolves there after both worktrees are gone.
+@test "#2138 epic, child and loop records from two worktrees share the user-level default sink" {
   git -C "$R" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m init
   local WA="$BATS_TEST_TMPDIR/wt-epic" WB="$BATS_TEST_TMPDIR/wt-child"
   git -C "$R" worktree add -q "$WA" -b epic-741

@@ -5413,7 +5413,8 @@ belongs to the round it precedes, as `gate` does, so round 1's is always
 Telemetry only — a missing, unreadable or non-object file, or a value that is
 not a non-negative number, reads as `null` with a stderr note and never costs
 the round or its history line. `estimate-step.zsh` reads these, and the gate
-records' `wall_s` and `jobs`, from the local sink to print a step's median and
+records' `wall_s` and `jobs`, from the current repo's user-level sink file
+(#1972) to print a step's median and
 80th-percentile time.
 
 **The gate's job count is shared across concurrent gates (#1798).** Sessions run
@@ -5828,17 +5829,40 @@ Rules that carry the contract's weight:
   one for *did my pipeline emit anything?*, so a caller asserting that emission
   happened passes `--require-records`, which turns it into a failure. Blank and
   whitespace-only lines are not records, so a file of blanks fails it too.
-- **Sink precedence:** `--telemetry-file` > `--telemetry-dir` > the local default
-  `<main checkout>/.claude/telemetry/telemetry.jsonl` (git-ignored), where the
-  main checkout is the first entry of `git worktree list --porcelain` for
-  `--repo-dir` (#2138) — so every linked worktree of a repo shares one default
-  sink, which outlives the worktree. When `--repo-dir` is not the top level of a
-  git work tree, git is unavailable or fails, or the main worktree is bare, it
-  is `<repo-dir>/.claude/telemetry/telemetry.jsonl` as given. `--repo-dir` stays
-  the identity source for `repo`. One stream per
-  repo **in the local default**; the `pipeline` and `kind` fields discriminate.
-  (Cross-repo mode below keeps one file per repo but not one repo per file —
-  see its many-to-one note.)
+- **Sink precedence:** `--telemetry-file` > `--telemetry-dir` > the user-level
+  default `$HOME/.claude/telemetry/<repo-slug>.jsonl` (#1972). The default is
+  the cross-repo layout below, rooted in one directory beside Claude Code's own
+  transcripts and **outside every checkout**: removing a worktree or deleting a
+  clone can never take a record with it, and every worktree and clone of one
+  repo lands in **one** file, keyed by the slug of the resolved `repo`. Within
+  that file the `pipeline` and `kind` fields discriminate. `--repo-dir` decides
+  the **identity only** — never which file is written. (Before #1972 the default
+  was `<repo-dir>/.claude/telemetry/telemetry.jsonl`, and callers passed
+  `git rev-parse --show-toplevel`, which inside a worktree is the worktree — so
+  a worktree's records died with it.)
+- **Identity, slug and lock live in one place:** `telemetry-sink-lib.zsh`,
+  sourced by the emitter, the rollup and `collect-telemetry.zsh`, so the file a
+  record is written to and the repo a rollup means can never disagree.
+  - When `origin` is missing or a local path, the identity falls back to the
+    basename of the **main checkout** — the parent of
+    `git rev-parse --git-common-dir` — never a linked worktree's own top level,
+    so every worktree of a remote-less repo shares one file too.
+  - **Every append holds an exclusive `zsystem flock`** on the sink file
+    (zsh's `zsh/system` module — macOS ships no `flock(1)`), waiting at most
+    10 s. Several sessions append at once and a review-loop record (3–5 KB) is
+    past the size an `O_APPEND` write is guaranteed to stay whole. A lock not
+    acquired in time is exit 3, and nothing is appended. A reader that needs
+    whole files takes a shared lock on the same file.
+  - **`collect-telemetry.zsh ROOT…`** salvages the pre-#1972 in-repo sinks. For
+    each checkout root it sweeps `.claude/telemetry/*.jsonl` there and in every
+    linked worktree `git worktree list --porcelain` names (a second clone is
+    passed as another root), and **copies** — never moves — every
+    `telemetry/v1` line, verbatim, into the user-level file of the record's own
+    `repo`, under the same lock. It skips v0 and malformed lines and any record
+    whose `(run_id, kind, ts, payload.event)` is already in the destination, so
+    a second run appends nothing, and it prints `copied N, duplicate N,
+    skipped N`. Exit 2 is a missing or non-directory root, checked before
+    anything is written; exit 3 an environment failure.
 - **Cross-repo sink mode (child (d), #1006):** `--telemetry-dir DIR` appends to
   `DIR/<repo-slug>.jsonl`, so many repos emit into one directory that a
   cross-repo reporting stack globs as `*.jsonl` without any of them clobbering
@@ -5901,21 +5925,23 @@ Rules that carry the contract's weight:
   - `DIR` is created if absent (missing parents included). An uncreatable or
     unappendable sink is an internal error (exit 3) with **nothing appended to
     any sink** (the record still reaches stdout, per the stdout-first rule
-    above) and **no fallback to the local default** — a caller that asked for
-    `DIR` must never have its records land somewhere it isn't looking.
-  - **Only resolve-issue and its review loop forward `--telemetry-dir` so
-    far.** Since #1226, `/development:resolve-issue <N> --telemetry-dir DIR`
-    (or `--telemetry-file PATH`) passes the flag to the emitter for its own
-    story record **and** to every `resolve-story-loop.zsh` invocation of the
-    run, which forwards it for each loop record — so one run's records all
-    land in `DIR/<repo-slug>.jsonl`. **refine-issue does not**: its Step 7
-    passes no sink flag at all, so its records always land in the local
-    default, and that gap stays open. An **epic** target forwards it too since
-    #1227: to its own epic record and to every child run it starts. The
-    other pipelines of epic 2 (#741) take the flag as their own children
-    land, under the conventions in *Per-pipeline telemetry instrumentation*
-    below. Read an empty shared directory under any other pipeline as that
-    gap, not as a broken emitter.
+    above) and **no fallback to the user-level default** — a caller that asked
+    for `DIR` must never have its records land somewhere it isn't looking.
+  - **Which pipelines forward `--telemetry-dir` — stated here, once.**
+    `/development:resolve-issue <N> --telemetry-dir DIR` (or
+    `--telemetry-file PATH`) passes the flag to the emitter for its own story
+    record **and** to every `resolve-story-loop.zsh` invocation of the run,
+    which forwards it for each loop record — so one run's records all land in
+    `DIR/<repo-slug>.jsonl` (#1226); an **epic** target forwards it too, to its
+    own epic record and to every child run it starts (#1227).
+    `/development:maintenance` (#1228) and `/development:bootstrap` (#1229)
+    forward both flags for their one record each, under the conventions in
+    *Per-pipeline telemetry instrumentation* below. **refine-issue does not**:
+    its Step 7 passes no sink flag at all, so its records always land in the
+    user-level default, and that gap stays open — read an empty shared
+    directory after a refine-issue run as that gap, not as a broken emitter.
+    An empty shared directory after any pipeline that forwards the flag is a
+    failed emit, to be investigated as one.
 - **Legacy records** (the pre-contract per-pipeline files, which carry no
   `schema` key) are handled by a v0→v1 adapter in child (e)'s rollup
   (`rollup-telemetry.zsh`, below) — **no file migration is performed**, so the
@@ -5925,9 +5951,9 @@ Rules that carry the contract's weight:
     every line in that directory carries a `schema` key. A cross-repo consumer
     therefore needs **no** missing-`schema` tolerance and no version sniffing —
     which is why child (f)'s reference dashboard (#1008) references `schema` in
-    no query at all. That is a property of the *shared* sink specifically: the
-    local default sink can still sit alongside pre-contract files on the same
-    machine.
+    no query at all. The user-level default directory has the same property,
+    since `collect-telemetry.zsh` skips v0 lines; a pre-contract file stays in
+    the checkout it was written in, readable through an explicit operand.
 - **Versioning:** a breaking envelope change bumps to `telemetry/v2`; `payload`
   evolution is per-pipeline and non-breaking by definition — with **one named
   exception**: `payload.rounds` is a shared reporting key the rollup below
@@ -5937,7 +5963,7 @@ Rules that carry the contract's weight:
 **Both pre-existing streams are now retrofitted** — review-loop as child (b),
 issue #1004, and refine-issue as child (c), issue #1005. Each emits
 `telemetry/v1` through `emit-telemetry.zsh` into the repo's shared sink
-`.claude/telemetry/telemetry.jsonl`, with its
+(since #1972 the user-level `~/.claude/telemetry/<repo-slug>.jsonl`), with its
 bespoke fields inside `payload` and its own run endings narrowed onto the
 4-value `outcome` enum — see the two sections below. Neither builder carries an
 envelope key any more; both are payload builders. **No file migration is
@@ -6026,11 +6052,20 @@ the legacy files stay exactly where they lie.
 rollup-telemetry.zsh [FILE|DIR|-] [--repo OWNER/NAME] [--pipeline NAME] [--json] [-h|--help]
 ```
 
-With no operand it reads the local default sink
-(`.claude/telemetry/telemetry.jsonl`, resolved relative to the caller's
-**current directory** — the rollup has no `--repo-dir` of its own, unlike the
-emitter's sink precedence above) — silently treated as an empty stream if it
-doesn't exist yet, since naming no path is not a claim that one exists; an
+With no operand it reads the user-level default directory (#1972) — every
+plain-file `*.jsonl` directly in `$HOME/.claude/telemetry/` — **filtered to the
+current repo**: an implicit `--repo` equal to the identity the emitter derives
+from the caller's current directory (the shared `tlm_derive_repo`), so one call
+shows every run of this repo, from every worktree and clone, and no other
+repo's. It groups by the `repo` **field**, never by filename, because the slug
+mapping is many-to-one. An explicit `--repo` overrides the implicit one. The
+records of other repos are excluded and counted on stderr (`note: excluded N
+record(s) of other repos`), beside the unknown-repo note below; outside a git
+work tree there is no current repo, so no filter applies and stderr says so. The
+cwd-relative `.claude/telemetry/` is never read this way: a legacy in-repo sink
+— v0 records included, through the unchanged adapter — is read by naming it as a
+`FILE` or `DIR` operand. A missing directory is silently an empty stream, since
+naming no path is not a claim that one exists; an
 **explicit** `FILE`/`DIR` operand that is missing or unreadable, by contrast, is
 a usage error (exit 2) — naming a path *is* such a claim, including an
 explicit empty string. A `DIR` reads every plain-file `*.jsonl` directly inside
@@ -6172,10 +6207,12 @@ record per terminal exit — never per round; an extended loop (escalate → gra
 → `--resume`) therefore emits one record per escalation, plus a final one only
 if it later reaches a different terminal status (a run whose human declines the
 grant ends ON its last escalation, so that escalation is its final record, not
-an extra one)** to the repo's shared sink `.claude/telemetry/telemetry.jsonl`
-(git-ignored — the bootstrap gitignore fragments for every language carry
-`.claude/telemetry/`), or to an explicit `--telemetry-file` or `--telemetry-dir`
-(#1226), forwarded to the emitter with its precedence. Emission is
+an extra one)** to the emitter's default sink — since #1972 the user-level
+`~/.claude/telemetry/<repo-slug>.jsonl`, outside every checkout — or to an
+explicit `--telemetry-file` or `--telemetry-dir` (#1226), forwarded to the
+emitter with its precedence. (An in-repo `.claude/telemetry/` — a pre-#1972
+sink, or an explicit directory there — stays git-ignored: the bootstrap
+gitignore fragments for every language carry it.) Emission is
 **best-effort**: it is skipped when `--repo` is not an existing directory (only
 reachable via the `--no-review` fast path, which short-circuits before the
 `--repo` checks) and when the payload build fails, and any emitter error is
@@ -6293,7 +6330,7 @@ one level down under `.payload`. Each metric guards its own divisor, so a
 record-less stream yields `null` rather than a division error:
 
 ```bash
-S=.claude/telemetry/telemetry.jsonl
+S=~/.claude/telemetry/timo-jakob-timos-claude-code-plugins.jsonl   # the repo's slug file (#1972)
 RL='[.[] | select(.kind == "run" and .pipeline == "review-loop")]'
 # terminal-record convergence rate — the share of NON-SKIPPED review-loop
 # records that converged (failed ERROR runs stay in the denominator). NOT a first-pass rate: an extended loop (escalate → grant →
@@ -6441,8 +6478,8 @@ budgets (tokens, wall-clock) and risk-based review depth.
 `/development:refine-issue` sits on the **same `telemetry/v1` contract** as the
 review loop above — retrofitted by child (c), #1005, so neither of the two
 pre-existing streams is a copy-adapted one-off any more. Every run appends
-**one record** to the shared git-ignored sink
-`.claude/telemetry/telemetry.jsonl` through `emit-telemetry.zsh`, which owns the
+**one record** to the shared user-level sink
+`~/.claude/telemetry/<repo-slug>.jsonl` (#1972) through `emit-telemetry.zsh`, which owns the
 envelope and the sink; `build-refine-telemetry-record.zsh` is reduced to a
 **payload builder** and carries no envelope key at all (passing
 `--issue`/`--ts`/`--wall-s` to it is now a usage error).
@@ -6687,7 +6724,7 @@ a sequential child or a parallel worktree sub-agent, which receives the epic
 `child_start_args`, so the **child's own** record carries `parent_run_id` = the
 epic run, and the epic record lists the child in `payload.child_run_ids`. The
 join resolves from both ends. With no sink flag, worktree epic, child and loop
-records share the main checkout's default sink (#2138), so the join survives the
+records share the user-level default sink (#1972), so the join survives the
 worktrees. The child's loops stay parented to the child run.
 On a failed epic `start` the children still get their own runs and the sink
 flags, with no parent. A child's size pre-flight record is parented to the
@@ -6788,7 +6825,8 @@ one advisory line.
 other than the family's own, so the record belongs to the **target**: `emit`
 resolves `--repo-dir` to the target's main checkout — `dirname` of the absolute
 `git rev-parse --git-common-dir`, never a linked worktree, which Step 4g deletes
-— and both the derived envelope `repo` and the local default sink follow it. A
+— and the derived envelope `repo`, and with it the user-level file the record
+lands in (#1972), follow it. A
 folder that is not its own checkout's root is used as it is. The emit runs after the
 4d commit, so no commit carries a `.claude/telemetry/` path, and bootstrap never
 edits `.gitignore` for telemetry.

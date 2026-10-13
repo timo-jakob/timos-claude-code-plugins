@@ -20,6 +20,7 @@
 # test below refuses an entry that would widen into any of them.
 
 setup() {
+  export HOME="$BATS_TEST_TMPDIR/home"  # the user-level telemetry default stays out of the real ~/.claude (#1972)
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   export LC_ALL=C
 }
