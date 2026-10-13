@@ -2248,6 +2248,77 @@ missing_has() { jq -r --arg p "$2" '.missing_artifacts | index($p) | type' <<<"$
   [ "$(missing_has "$out" ".github/workflows/gitleaks.yml")" = "number" ]
 }
 
+# The OpenTofu IaC path (#1162): the opentofu marker with no detected language
+# selects templates/opentofu/, exactly as the kubernetes marker selects
+# templates/iac/, and never both.
+tofu_root() {
+  mkdir -p environments/dev
+  printf 'provider "aws" {}\n' > environments/dev/main.tf
+}
+
+OPENTOFU_SET=".github/workflows/opentofu-ci.yml scripts/tofu-gate.zsh hooks/pre-push Makefile"
+
+@test "detect-stack #1162: a .tf-only repo gets the four OpenTofu artifacts and nothing of templates/iac" {
+  tofu_root
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r .is_opentofu <<<"$out")" = "true" ]
+  local p
+  for p in $OPENTOFU_SET; do
+    [ "$(missing_has "$out" "$p")" = "number" ]
+  done
+  [ "$(missing_has "$out" ".github/workflows/kubernetes-ci.yml")" = "null" ]
+  [ "$(missing_has "$out" "scripts/k8s-gate.zsh")" = "null" ]
+  # the IaC path's hold-outs apply to this topic too
+  [ "$(missing_has "$out" ".pre-commit-config.yaml")" = "null" ]
+  [ "$(missing_has "$out" ".github/workflows/no-cluster-deploy.yml")" = "null" ]
+}
+
+@test "detect-stack #1162: a kubernetes repo gets nothing of templates/opentofu" {
+  k8s_chart
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(missing_has "$out" ".github/workflows/kubernetes-ci.yml")" = "number" ]
+  [ "$(missing_has "$out" ".github/workflows/opentofu-ci.yml")" = "null" ]
+  [ "$(missing_has "$out" "scripts/tofu-gate.zsh")" = "null" ]
+}
+
+@test "detect-stack #1162: a dual-marker zero-language repo takes NEITHER tree (#1394)" {
+  k8s_chart
+  tofu_root
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r .is_kubernetes <<<"$out")" = "true" ]
+  [ "$(jq -r .is_opentofu <<<"$out")" = "true" ]
+  [ "$(missing_has "$out" ".github/workflows/kubernetes-ci.yml")" = "null" ]
+  [ "$(missing_has "$out" ".github/workflows/opentofu-ci.yml")" = "null" ]
+  # POSITIVE CONTROL: candidates ARE collected
+  [ "$(missing_has "$out" ".github/workflows/gitleaks.yml")" = "number" ]
+}
+
+@test "detect-stack #1162: a recorded primary keeps its own topic on the path and vetoes the other" {
+  tofu_root
+  printf 'primary: opentofu\n' > .maintenance.yml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(missing_has "$out" ".github/workflows/opentofu-ci.yml")" = "number" ]
+  printf 'primary: kubernetes\n' > .maintenance.yml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(missing_has "$out" ".github/workflows/opentofu-ci.yml")" = "null" ]
+  [ "$(missing_has "$out" ".pre-commit-config.yaml")" = "number" ]
+  rm -rf environments
+  k8s_chart
+  printf 'primary: opentofu\n' > .maintenance.yml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(missing_has "$out" ".github/workflows/kubernetes-ci.yml")" = "null" ]
+  [ "$(missing_has "$out" ".github/workflows/gitleaks.yml")" = "number" ]
+}
+
+@test "detect-stack #1162: a .tf repo WITH a language gets no OpenTofu candidate" {
+  tofu_root
+  printf 'module example.com/x\n\ngo 1.23\n' > go.mod
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r .is_opentofu <<<"$out")" = "true" ]
+  [ "$(missing_has "$out" ".github/workflows/opentofu-ci.yml")" = "null" ]
+  [ "$(missing_has "$out" ".pre-commit-config.yaml")" = "number" ]
+}
+
 @test "detect-stack #1154: the PUBLIC language-app gates are held out on an IaC repo" {
   k8s_chart
   stub_gh PUBLIC

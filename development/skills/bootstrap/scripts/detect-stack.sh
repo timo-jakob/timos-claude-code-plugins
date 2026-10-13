@@ -51,7 +51,7 @@
 #                                  the IaC candidate set: the marker WITH NO
 #                                  DETECTED LANGUAGE. A recorded `primary:` in
 #                                  .maintenance.yml can only VETO that (any value
-#                                  other than `kubernetes` -> no), never grant it.
+#                                  other than the repo's own topic -> no), never grant it.
 #                                  An absent key, a blank value or a comment-only
 #                                  one (`primary:  # TODO`) is NOT a recorded
 #                                  primary and leaves the heuristic standing;
@@ -82,12 +82,13 @@
 #                                  three and requires them to agree.
 #                                  `.tf.json` is deliberately NOT matched;
 #                                  ARCHITECTURE.md records that decision.
-#                                  This slice EMITS the classification only.
-#                                  Consuming it — the IaC candidate set, the
-#                                  widened `--iac-only` context set, and the
-#                                  dual-marker repo — is #1162's, which is why
-#                                  `iac_only` below still keys on is_kubernetes
-#                                  alone.
+#                                  It selects the OpenTofu IaC candidate set
+#                                  (#1162) exactly as is_kubernetes selects the
+#                                  kubernetes one — the marker with no detected
+#                                  language, a recorded `primary:` other than
+#                                  `opentofu` vetoing — and templates/opentofu is
+#                                  collected instead of templates/iac. A repo
+#                                  carrying BOTH markers takes neither (#1394).
 #   is_composition        bool     repo carries the composition TOPIC marker — a
 #                                  `.claude-workspace.yaml` at the repo root
 #                                  (#1747). Kept identical — test operator and
@@ -1740,9 +1741,10 @@ elif [[ "$react_find_rc" -ne 0 && " ${langs[*]-} " == *" javascript "* ]]; then
 	is_react="null"
 fi
 # is-react-marker:end
-# The infrastructure-as-code tree (SKILL.md §3l, #1154): the kubernetes topic
-# marker with no application language. `.github/workflows/kubernetes-ci.yml`
-# becomes a candidate there — and only there. Without it the one workflow that
+# The infrastructure-as-code tree (SKILL.md §3l, #1154): the kubernetes or the
+# opentofu topic marker with no application language (#1162).
+# `.github/workflows/kubernetes-ci.yml` (or `opentofu-ci.yml`) becomes a
+# candidate there — and only there. Without it the one workflow that
 # path renders appears in neither existing_artifacts nor missing_artifacts, so a
 # repo that lost it is reported complete by the signal SKILL.md calls "the only
 # completeness signal"; with it on the wrong repo, State-D gap-fill would
@@ -1761,8 +1763,21 @@ fi
 # other recorded primary (a language, claude-plugin) vetoes the heuristic, so a
 # language repo whose language the detector happens to miss cannot gain a
 # six-check workflow candidate it would then be gap-filled with.
+# Two IaC topics take this path (#1162): kubernetes and opentofu, each keyed on
+# its own marker. EXACTLY ONE marker must fire — a repo carrying both (and no
+# language) is the dual-marker repo SKILL.md halts with a pointer to #1394, so it
+# takes neither tree here: collecting both would render two workflows that each
+# report a `gate` context.
 iac_only="false"
-if [[ "$is_kubernetes" == "true" && ${#langs[@]} -eq 0 ]]; then
+iac_topic=""
+if [[ ${#langs[@]} -eq 0 ]]; then
+	if [[ "$is_kubernetes" == "true" && "$is_opentofu" != "true" ]]; then
+		iac_topic="kubernetes"
+	elif [[ "$is_opentofu" == "true" && "$is_kubernetes" != "true" ]]; then
+		iac_topic="opentofu"
+	fi
+fi
+if [[ -n "$iac_topic" ]]; then
 	iac_only="true"
 fi
 if [[ -f "$cwd/.maintenance.yml" ]]; then
@@ -1793,16 +1808,21 @@ if [[ -f "$cwd/.maintenance.yml" ]]; then
 	recorded_primary="$(sed -n 's/^[[:space:]]*primary:[[:space:]]*//p' "$cwd/.maintenance.yml" 2>/dev/null |
 		head -n1 | sed -E -e 's/[[:space:]]*(#.*)?$//' -e 's/^["'"'"']//' -e 's/["'"'"']$//' || true)"
 	case "$recorded_primary" in
-	# `kubernetes` does NOT force true (#1193): on a zero-language repo the
-	# heuristic already said true, and on a repo WITH a detected language
+	# The repo's OWN topic does NOT force true (#1193): on a zero-language repo
+	# the heuristic already said true, and on a repo WITH a detected language
 	# forcing it is exactly the mixed-repo case this slice excludes. Grouped
-	# with the empty value because both leave the heuristic standing.
-	kubernetes | "") : ;;
-	*) iac_only="false" ;;
+	# with the empty value because both leave the heuristic standing. Any other
+	# value — a language, `claude-plugin`, or the OTHER IaC topic — vetoes.
+	"") : ;;
+	*) if [[ "$recorded_primary" != "$iac_topic" ]]; then iac_only="false"; fi ;;
 	esac
 fi
 if [[ "$iac_only" == "true" ]]; then
-	collect_from "$templates_dir/iac"
+	if [[ "$iac_topic" == "opentofu" ]]; then
+		collect_from "$templates_dir/opentofu"
+	else
+		collect_from "$templates_dir/iac"
+	fi
 	# re-run the normalisation passes this late append missed: the dedupe above
 	# and the deploy-path override both ran before templates/iac was collected,
 	# and the candidate list is documented as deriving dynamically from the

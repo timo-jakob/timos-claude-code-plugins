@@ -81,11 +81,14 @@ GATES=(
 # The ways a site may name the MARKER as the condition. `is_kubernetes` is the
 # detector field, and a statement keyed on it ("Applies when `is_kubernetes` is
 # `true`") names the marker as surely as the prose spelling does — excluding it
-# would report §3l stale for being precise.
+# would report §3l stale for being precise. Since #1162 the OpenTofu path is the
+# second IaC topic, so its marker, in either spelling, names the condition too.
 MARKERS=(
   'kubernetes topic marker'
   'kubernetes marker'
   'is_kubernetes'
+  'opentofu topic marker'
+  'is_opentofu'
 )
 
 # +/- 2 lines: enough to survive the widest wrap the sites actually use, narrow
@@ -247,7 +250,7 @@ selection_gaps() {
   # clause, not a bare "must halt": that phrase occurs again two paragraphs
   # later ("must halt at bootstrap"), so the short needle would survive the
   # rule statement losing this clause entirely.
-  contains "$body" 'the dual-marker case must halt'
+  contains "$body" 'the dual-marker case halts'
 }
 
 @test "the derived IaC-selection site list is not empty or shrunken (#1432)" {
@@ -377,9 +380,9 @@ selection_gaps() {
 @test "NON-VACUITY: the IaC-selection sweep reds on a stale PROSE site (#1432)" {
   # MUTATION (recorded here so this control cannot rot into a tautology): in
   # development/skills/bootstrap/SKILL.md — a prose site — §3l's own opening
-  # sentence loses its marker qualifier: `Applies when is_kubernetes is true,
-  # the resolved language set is empty` -> `Applies when the resolved language
-  # set is empty`. That is the drift itself, not a synthetic edit: it turns
+  # sentence loses its marker qualifier: `Applies when exactly one of is_kubernetes
+  # and is_opentofu is true, the resolved language set is empty` -> `Applies when
+  # the resolved language set is empty`. That is the drift itself, not a synthetic edit: it turns
   # "the marker selects the path" into "the absent language selects the path",
   # in the section that defines the path.
   #
@@ -390,7 +393,7 @@ selection_gaps() {
   local src="$REPO_ROOT/development/skills/bootstrap/SKILL.md"
   local mut="$BATS_TEST_TMPDIR/stale-prose.md"
   [ -f "$src" ]
-  sed 's/^Applies when `is_kubernetes` is `true`, \*\*the resolved language set is empty\*\*,/Applies when **the resolved language set is empty**,/' \
+  sed 's/^Applies when exactly one of `is_kubernetes` and `is_opentofu` is `true`, \*\*the resolved language set is empty\*\*,/Applies when **the resolved language set is empty**,/' \
     "$src" > "$mut"
   # the mutation must have bitten, or the control proves nothing
   run cmp -s "$src" "$mut"
@@ -418,14 +421,14 @@ selection_gaps() {
   # MUTATION (recorded, as above): in
   # development/skills/bootstrap/scripts/detect-stack.sh — a code site — the
   # `iac_only` block's own comment drops the marker from the condition,
-  # `# marker with no application language.` -> `# tree is selected with no
-  # application language.`. Two distinct sites and two distinct file kinds, so
+  # `# opentofu topic marker with no application language (#1162).` -> `# tree is
+  # selected with no application language (#1162).`. Two distinct sites and two distinct file kinds, so
   # a normalisation that silently stopped working on comments (the one this
   # sweep depends on most) cannot leave the control green.
   local src="$REPO_ROOT/development/skills/bootstrap/scripts/detect-stack.sh"
   local mut="$BATS_TEST_TMPDIR/stale-code.sh"
   [ -f "$src" ]
-  sed 's/^# marker with no application language\./# tree is selected with no application language./' \
+  sed 's/^# opentofu topic marker with no application language (#1162)\./# tree is selected with no application language (#1162)./' \
     "$src" > "$mut"
   run cmp -s "$src" "$mut"
   # exactly 1 = "files differ". `cmp` exits 2 when it cannot READ one of them,

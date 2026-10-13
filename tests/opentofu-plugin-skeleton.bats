@@ -386,6 +386,10 @@ setup() {
   # green-over-unenforced state this rule exists to forbid, with
   # opentofu-policy-triage never handed the defect.
   contains "$ARCH_FLAT" '**Both consumers of that rule are bound by it too**'
+  # the gate's two subtrees, stated so a policy outside both is not read as gated
+  contains "$ARCH_FLAT" 'its `policy` stage only `policies/conftest/hcl/`, its `plan-policy` stage only `policies/conftest/plan/`, while #1160'"'"'s gather still matches the whole glob.'
+  contains "$ARCH_FLAT" 'the three states **fail the stage**: it runs Conftest with `--all-namespaces`, so a rule outside `main` is evaluated rather than skipped.'
+  contains "$ARCH_FLAT" 'A `.rego` the glob matches in **neither** subtree is a declared set no stage would evaluate, so the `policy` stage **fails** on it, naming the file — it never skips.'
   contains "$ARCH_FLAT" 'In #1160'"'"'s gather there is no step to fail, so they are **findings**'
   contains "$ARCH_FLAT" '**#1160 pins the Conftest version**'
   # the actionable half, not just the headline: unpinned, the two pins can drift
@@ -543,10 +547,12 @@ setup() {
 }
 
 @test "ARCHITECTURE.md records the static-now / plan-disabled decision (#1159)" {
-  # the seam #1162 must build: the plan job is PRESENT and OFF, so enabling it
-  # is a repository-variable change rather than a pipeline redesign. Pinned
-  # here because #1162 is reviewed against this section.
-  contains "$ARCH_FLAT" 'a repository variable that defaults off'
+  # the seam #1162 built: the plan stage is PRESENT and OFF, so enabling it is a
+  # one-line config change rather than a pipeline redesign — and the switch is a
+  # COMMITTED .maintenance.yml key the hook and CI both read, never a repository
+  # variable that would make CI run a check the local gate does not.
+  contains "$ARCH_FLAT" 'switched on by a committed `.maintenance.yml` key, `opentofu_plan_policy: true`, that defaults off'
+  lacks "$ARCH_FLAT" 'a repository variable that defaults off'
   contains "$ARCH_FLAT" 'enabling it later is configuration, not a redesign'
   # and the rejected alternative, without which a later contributor "helpfully"
   # adds the source-level destroy heuristic the design spec refused
@@ -559,8 +565,8 @@ setup() {
   # script must run under the one `gate` job (#2425), and a guessed set leaves
   # that script running stages nobody specified. The sibling enumerates its six
   # for the same reason. The superseded per-stage-context wording must not return.
-  contains "$ARCH_FLAT" 'the **seven stages** of the gate script that the one `gate` job'
-  contains "$ARCH_FLAT" 'the **credential-free six** run on every pull request'
+  contains "$ARCH_FLAT" 'the **seven stages** of `scripts/tofu-gate.zsh`, which the one `gate` job of `.github/workflows/opentofu-ci.yml` runs'
+  contains "$ARCH_FLAT" 'The **credential-free six** run on every pull request'
   lacks "$ARCH_FLAT" 'the **seven jobs**'
   lacks "$ARCH_FLAT" 'will be the requirable set'
   # ONE contiguous needle rather than six independent ones. A per-token loop
@@ -578,7 +584,7 @@ setup() {
   # the seventh, and that the gate does NOT run it until the repository
   # variable turns it on — the credentialed stage stays off by default
   contains "$ARCH_FLAT" 'The seventh, `plan-policy`'
-  contains "$ARCH_FLAT" 'the gate does **not** run unless the repository variable above turns it on'
+  contains "$ARCH_FLAT" 'the gate does **not** run unless the `.maintenance.yml` key above turns it on'
   # and the ownership boundary for the workflow itself: a bootstrap template in
   # `development`, not something this plugin's skills run
   contains "$ARCH_FLAT" 'a *bootstrap* template owned by the generic `development` plugin'
@@ -597,68 +603,60 @@ setup() {
   # permanently on every remote-backend repo. Rule and consequence, as with `-recursive`.
   contains "$ARCH_FLAT" 'the credential-free claim holds **only** under that flag'
   contains "$ARCH_FLAT" 'fail permanently on every remote-backend repo'
-  # TENSE, pinned in both directions like the sibling's `will emit`/`emits` pair:
-  # no such template exists yet, so a landed-tense claim here would describe a
-  # file that is not there — and #1162 must flip it deliberately when it lands.
-  # The negative needle KEEPS THE EMPHASIS MARKERS: the landed form this section
-  # will take is the sibling's `template **emits**`, which a marker-free needle
-  # never matches — so the guard would have been unable to fire on the one form
-  # it exists to forbid.
-  contains "$ARCH_FLAT" '**will emit**'
-  lacks "$ARCH_FLAT" 'template **emits**'
-  # the whole section is one tense: the static/plan paragraph describes the same
-  # unbuilt template, so a landed-tense claim there contradicts the enumeration
-  contains "$ARCH_FLAT" 'it **will run** on every pull request'
-  contains "$ARCH_FLAT" 'the generated pipeline **will contain** the plan stage'
+  # TENSE, pinned in both directions: #1162 shipped the template, so the section
+  # describes it in the present and no future-tense claim about it survives.
+  # Both directions are anchored on a file that must exist, so the present tense
+  # can never describe a template that is not there.
+  [ -f "$REPO_ROOT/development/skills/bootstrap/templates/opentofu/.github/workflows/opentofu-ci.yml.tmpl" ]
+  [ -f "$REPO_ROOT/development/skills/bootstrap/templates/opentofu/scripts/tofu-gate.zsh.tmpl" ]
+  contains "$ARCH_FLAT" 'Bootstrap renders all four from `development/skills/bootstrap/templates/opentofu/` (#1162)'
+  contains "$ARCH_FLAT" 'it **runs** on every pull request'
+  contains "$ARCH_FLAT" 'the generated gate **contains** the plan stage'
+  lacks "$ARCH_FLAT" '**will emit**'
+  lacks "$ARCH_FLAT" '**will run**'
+  lacks "$ARCH_FLAT" '**will contain**'
+  lacks "$ARCH_FLAT" 'the plan-based stage will ship disabled'
 }
 
-@test "ARCHITECTURE.md records that the flag half of the branch-protection contract is wired and the derivation half is not (#1159, #2425)" {
-  # #2425 widened branch-protection.sh's --iac-only enum with an `opentofu` value
-  # requiring the one `gate` context, but detect-stack.sh's derivation still takes
-  # a repo declaring `primary: opentofu` OFF that path rather than onto it. Unsaid,
-  # #1162 is pointed at a flag no bootstrap path can yet select.
-  contains "$ARCH_FLAT" 'The flag half of that contract is wired; the derivation half is #1162'"'"'s.'
-  contains "$ARCH_FLAT" 'whose values are `kubernetes` (#1892) and, since #2425, `opentofu`'
+@test "ARCHITECTURE.md records that BOTH halves of the --iac-only contract are wired (#1159, #2425, #1162)" {
+  # #2425 wired the flag — branch-protection.sh's enum gained `opentofu`,
+  # requiring the one `gate` context — and #1162 wired the derivation:
+  # detect-stack.sh selects the OpenTofu tree from its own marker, and a
+  # recorded `primary: opentofu` keeps a repo on that path. The prose and both
+  # scripts must say the same, so each fact is pinned at its source too.
+  contains "$ARCH_FLAT" 'Both halves of the `--iac-only` contract are wired.'
+  contains "$ARCH_FLAT" 'whose values are `kubernetes` (#1892) and `opentofu` (#2425)'
   contains "$ARCH_FLAT" 'requires the single `gate` context of `.github/workflows/opentofu-ci.yml`'
-  contains "$ARCH_FLAT" 'taking a repo **off** that path rather than onto it'
-  contains "$ARCH_FLAT" 'no bootstrap path passes `--iac-only opentofu` yet'
+  contains "$ARCH_FLAT" 'a recorded `primary: opentofu` keeps a repo on that path rather than taking it off'
+  contains "$ARCH_FLAT" 'Bootstrap'"'"'s §3l, Step 4b and Step 4.5 pass `--iac-only opentofu` there'
+  # the retired caveats must not return
+  lacks "$ARCH_FLAT" 'no bootstrap path passes `--iac-only opentofu` yet'
+  lacks "$ARCH_FLAT" 'the derivation half is #1162'
   lacks "$ARCH_FLAT" 'Neither half of that contract is wired yet'
-  # the PRESCRIPTION half, not just the diagnosis: the derivation and the third
-  # site are the only instruction #1162 has left. Unpinned, #1162 widens the
-  # derivation and leaves bootstrap's own procedure documenting a kubernetes-only
-  # flag that no longer exists.
-  contains "$ARCH_FLAT" 'the `iac_only` derivation, including the `primary: opentofu` arm, is that story'
-  contains "$ARCH_FLAT" 'the §3l / Step 4b prose in `development/skills/bootstrap/SKILL.md`'
-  # and BOTH facts it describes must actually hold — the widening has not
-  # happened on either side. Read through plain assignments so a failed read
-  # propagates under errexit (a command substitution in ARGUMENT position
-  # discards its status and yields an empty haystack, which trivially `lacks`
-  # everything), and anchor each haystack positively before the negative.
-  local bp bp_body ds ds_body
+  # Read through plain assignments so a failed read propagates under errexit,
+  # and anchor each haystack positively before any negative.
+  local bp bp_body ds ds_body skill skill_flat
   bp="$REPO_ROOT/development/skills/bootstrap/scripts/branch-protection.sh"
   [ -f "$bp" ]
   bp_body="$(cat "$bp")"
-  contains "$bp_body" '--iac-only'
-  # the enum's value set is exactly what the prose says it is: both IaC topics
   contains "$bp_body" '[[ "$IAC_ONLY" =~ ^(false|kubernetes|opentofu)$ ]]'
   lacks "$bp_body" 'state-encryption'
-  # the second half: detect-stack.sh's recorded-primary veto has no opentofu arm
-  # yet, which is the ONLY reason the prose's "takes a repo off that path" claim
-  # holds. Unpinned, #1162 could add that arm and leave ARCHITECTURE stating the
-  # opposite of the code with this suite green.
   ds="$REPO_ROOT/development/skills/bootstrap/scripts/detect-stack.sh"
   [ -f "$ds" ]
   ds_body="$(cat "$ds")"
-  contains "$ds_body" 'iac_only='
-  # #1160 landed `is_opentofu` in this file, so a bare "opentofu appears nowhere"
-  # sweep no longer expresses the claim. What the prose still hangs on is
-  # narrower and is what is pinned now: `iac_only` is derived from the KUBERNETES
-  # marker alone, and the recorded-primary veto has no opentofu arm. #1162 adds
-  # both and must retire these two deliberately.
-  contains "$ds_body" 'if [[ "$is_kubernetes" == "true" && ${#langs[@]} -eq 0 ]]; then'
-  lacks "$ds_body" 'is_opentofu" == "true" && ${#langs[@]}'
-  lacks "$ds_body" '"opentofu")'
+  # the opentofu arm, keyed on its own marker and refusing the dual-marker repo
+  contains "$ds_body" 'elif [[ "$is_opentofu" == "true" && "$is_kubernetes" != "true" ]]; then'
+  contains "$ds_body" 'collect_from "$templates_dir/opentofu"'
+  # the recorded-primary veto compares against the repo's OWN topic
+  contains "$ds_body" 'if [[ "$recorded_primary" != "$iac_topic" ]]; then iac_only="false"; fi'
+  # and the bootstrap procedure states the flag over both topics
+  skill="$REPO_ROOT/development/skills/bootstrap/SKILL.md"
+  [ -f "$skill" ]
+  skill_flat="$(tr -s '[:space:]' ' ' < "$skill")"
+  contains "$skill_flat" '| `--iac-only` | `kubernetes` | `opentofu` |'
+  contains "$skill_flat" 'kubernetes for the kubernetes topic marker, opentofu for the opentofu topic marker'
 }
+
 
 @test "ARCHITECTURE.md records the gate-context collision with the sibling, and who owns it (#1159, #2425)" {
   # both IaC workflows require a context named `gate`, and a required status
@@ -668,7 +666,7 @@ setup() {
   # repo halts, and #1394 owns the slice that must render both. The shared stage
   # names report no contexts, so naming THEM as the collision would point #1394
   # at a rename that disambiguates nothing.
-  contains "$ARCH_FLAT" '**Both IaC workflows will require a context named `gate`**'
+  contains "$ARCH_FLAT" '**Both IaC workflows require a context named `gate`**'
   contains "$ARCH_FLAT" 'matched by **name**'
   contains "$ARCH_FLAT" 'report no contexts, so their clash is cosmetic'
   contains "$ARCH_FLAT" 'owns disambiguating their `gate` contexts'
@@ -679,65 +677,40 @@ setup() {
   contains "$ARCH_FLAT" '**at most one IaC workflow is rendered per repo**'
   contains "$ARCH_FLAT" 'It is the *maintenance* pipelines that compose freely'
   # the clause that makes the at-most-one argument CHECKABLE, and states a fact
-  # about the very derivation #1162 must widen
+  # about the derivation #1162 widened to both markers
   contains "$ARCH_FLAT" 'the condition is the **marker**, not merely the absence of a language'
-  contains "$ARCH_FLAT" "what #1162's widening must preserve"
+  contains "$ARCH_FLAT" '`detect-stack.sh` enforces for both markers'
   # and the instruction that keeps a later reader from "fixing" it into a
-  # contradiction with #1162, which renders the ids exactly as enumerated
-  contains "$ARCH_FLAT" 'Do not "fix" any of this by renaming the ids here'
+  # contradiction with the gate script, which runs the stages as enumerated
+  contains "$ARCH_FLAT" 'Do not "fix" any of this by renaming the stages here'
 }
 
-@test "ARCHITECTURE.md states the dual-marker halt as SPECIFICATION, not current behaviour (#1159)" {
-  # the collision paragraph's safety argument leans on a halt that does not
-  # exist: bootstrap keys its IaC path on the kubernetes marker alone, so a
-  # zero-language dual-marker repo today renders the SIBLING's workflow. Stated
-  # in the present indicative it reads as an invariant #1160/#1162 may rely on —
-  # so neither builds it, #1162 ships the colliding context, and a required
-  # `gate` context is satisfied by the wrong pipeline's job.
-  contains "$ARCH_FLAT" 'The dual-marker case is a specification, not current behaviour'
-  contains "$ARCH_FLAT" 'nothing does that today'
-  contains "$ARCH_FLAT" '**#1162 owns adding the halt**'
-  contains "$ARCH_FLAT" 'it is an acceptance criterion of that story'
-  # the forward pointer too: without it an accepted, known collision is left
-  # with no owner anyone can look up, which is how accepted becomes unowned
-  contains "$ARCH_FLAT" 'that criterion cites **#1394** — the later slice that must render both workflows'
-  contains "$ARCH_FLAT" 'bounded by the absence of an `opentofu` marker rather than by a check'
-  # and the fact the paragraph asserts must actually hold: no opentofu marker
-  # exists for bootstrap to key on yet
-  local skill
+@test "ARCHITECTURE.md states the dual-marker halt as CURRENT behaviour, owned by #1394 beyond it (#1159, #1162)" {
+  # #1162 built the halt the earlier section specified: a zero-language repo
+  # carrying both markers stops at bootstrap's Q4 with a pointer to #1394, and
+  # detect-stack.sh proposes neither tree. Stated as specification it would
+  # read as missing; stated as behaviour it must actually hold, so the three
+  # artifacts that implement it are pinned beside the prose.
+  contains "$ARCH_FLAT" '**The dual-marker repo halts.**'
+  contains "$ARCH_FLAT" 'Q4 stops the run with a pointer to **#1394** — the later slice that must render both workflows'
+  contains "$ARCH_FLAT" 'proposes neither template tree'
+  lacks "$ARCH_FLAT" 'The dual-marker case is a specification, not current behaviour'
+  lacks "$ARCH_FLAT" 'nothing does that today'
+  local skill skill_3l skill_flat ds_body
   skill="$REPO_ROOT/development/skills/bootstrap/SKILL.md"
   [ -f "$skill" ]
-  # scoped to the §3l block ARCHITECTURE's prescription actually names, not a
-  # whole-file needle satisfied by any of ~30 `--iac-only` mentions: a refactor
-  # moving that contract out of §3l would leave ARCHITECTURE directing #1162 at
-  # a site that no longer exists, with the suite green
-  local skill_3l
   skill_3l="$(sed -n '/^### 3l\./,/^### /p' "$skill" | tr -s '[:space:]' ' ')"
   [ -n "$skill_3l" ]
-  # the POSITIVE wiring clause, not the bare token: §3l states `--iac-only kubernetes`
-  # in both polarities (its conflict branch says "never emit the workflow or
-  # pass `--iac-only kubernetes`"), so a bare needle is satisfied by the negated
-  # mention alone — the negated-clause hazard this file's header forbids, and it
-  # would survive the very relocation this scoped haystack exists to catch.
+  contains "$skill_3l" '**The dual-marker repo halts.**'
   contains "$skill_3l" '`branch-protection.sh` with `--iac-only kubernetes`'
-  # #1160 put opentofu into this file at TWO sites — the detect-stack exit-2
-  # contract (either marker can abort the run) and the `is_opentofu` output-key
-  # bullet — so the whole-file sweep is replaced by a SCOPED one: §3l is where
-  # the IaC wiring lives, and it is §3l that must stay free of an opentofu arm
-  # until #1162 generalises it. That keeps the claim ("the branch-protection
-  # contract is not wired yet") checkable without forbidding accurate mentions
-  # elsewhere.
-  run -1 grep -qi 'opentofu' <<<"$skill_3l"
-  # both legitimate mentions pinned positively, so neither can be lost — and the
-  # second states the refusal-only reading (#1929) that #1162 must widen deliberately
-  # whitespace-normalised: the bullet wraps mid-clause, so a raw-file needle
-  # would be pinning the line break rather than the sentence
-  local skill_flat
   skill_flat="$(tr -s '[:space:]' ' ' < "$skill")"
+  contains "$skill_flat" '**When both are `true`** (the dual-marker repo) do not ask it: halt'
   contains "$skill_flat" 'is_opentofu: false'
-  contains "$skill_flat" 'Bootstrap reads it only to refuse a composition repo holding IaC'
-  lacks "$skill_flat" 'reads it nowhere'
+  lacks "$skill_flat" 'Bootstrap reads it only to refuse a composition repo holding IaC'
+  ds_body="$(cat "$REPO_ROOT/development/skills/bootstrap/scripts/detect-stack.sh")"
+  contains "$ds_body" 'if [[ "$is_kubernetes" == "true" && "$is_opentofu" != "true" ]]; then'
 }
+
 
 @test "ARCHITECTURE.md records the no-approver rationale AND the auto-merge distinction (#1159)" {
   # conflating no-approval with no-auto-merge either over- or under-delivers,
@@ -761,10 +734,11 @@ setup() {
   # the one statement the primary/auxiliary model and #1160 hang on
   contains "$ARCH_FLAT" '**selects this plugin for maintenance dispatch**'
   contains "$ARCH_FLAT" 'since #1160 registered the topic marker and the gather script'
-  # the caveat that replaced the stale-declaration one: the maintenance half is
-  # live, the CI half is not, and that asymmetry is deliberate rather than a gap
+  # #1162 closed the asymmetry the earlier caveat recorded: bootstrap now
+  # writes the declaration and requires the gate, so both halves are live
   contains "$ARCH_FLAT" 'no longer treated as stale'
-  contains "$ARCH_FLAT" 'the maintenance half is live while the CI half is not'
+  contains "$ARCH_FLAT" 'the maintenance half and the CI half are both live'
+  lacks "$ARCH_FLAT" 'the maintenance half is live while the CI half is not'
   # the slice-content claim, the ARCHITECTURE counterpart of the entry-set test
   # above — without it the section can keep describing a slice the manifest and
   # the on-disk tree contradict
@@ -962,11 +936,11 @@ setup() {
   contains "$section" "a severity ruling on \`tflint\`'s existing rule, not a second built-in check"
   # and the plan stage present-but-disabled: a security-relevant claim about a
   # credentialed job, which could otherwise flip to "runs on every PR" unnoticed
-  contains "$section" 'behind a repository variable defaulting off'
+  contains "$section" 'behind a committed `.maintenance.yml` key, `opentofu_plan_policy`, defaulting off'
   contains "$section" 'enabling it later is configuration, not a redesign'
   # the pipeline's home and TENSE, pinned in both directions like ARCHITECTURE's:
-  # the template does not exist, so the present tense here would contradict it
-  contains "$section" 'it **will ship** as a bootstrap template'
+  # #1162 shipped the template, so the page describes it in the present
+  contains "$section" 'it **ships** as a bootstrap template'
   # the negative half must match the form the LANDED text will take, and every
   # plausible one carries emphasis (the sibling's landed sentence is pinned as
   # '**bootstrap** template owned by the generic `development` plugin'). So the
@@ -976,12 +950,13 @@ setup() {
   local section_plain
   section_plain="${section//\*/}"
   [ -n "$section_plain" ]
-  contains "$section_plain" 'it will ship as a bootstrap template'
-  lacks "$section_plain" 'it ships as a bootstrap template'
+  contains "$section_plain" 'it ships as a bootstrap template'
+  lacks "$section_plain" 'it will ship as a bootstrap template'
   # the tense of the static/plan paragraph, pinned at this site too — the same
-  # unbuilt template must not be described in two tenses on one page
-  contains "$section" 'Static analysis needs no credentials and **will run** on every pull request'
-  contains "$section" 'the generated pipeline **will contain** that stage'
+  # template must not be described in two tenses on one page
+  contains "$section" 'Static analysis needs no credentials and **runs** on every pull request'
+  contains "$section" 'the generated gate **contains** that stage'
+  lacks "$section" '**will run**'
   # and the CI-vs-maintenance scoping, without which this page tells a user that
   # a both-markers repo gets both check pipelines while ARCHITECTURE says at
   # most one workflow is rendered
@@ -1015,13 +990,12 @@ setup() {
   # dispatch, and #1161 retired the "routes nothing until the agents land" one
   # by landing them — so the routing table must now say every row routes, and
   # the review panel's gate outcomes must be stated where a user reads them.
-  # The pipeline-lands-in-`development` caveat is untouched and still a claim
-  # #1162 must retire deliberately.
+  # #1162 retired the pipeline-lands-in-`development` caveat by landing it.
   lacks "$section" 'the dispatcher routes nothing'
   contains "$section" '**every row routes**'
   contains "$section" 'a tree that does not validate **fails the round**'
   contains "$section" '**degrades** it to a source-only review'
-  contains "$section" 'it **will ship** as a bootstrap template in the generic `development` plugin'
+  contains "$section" 'it **ships** as a bootstrap template in the generic `development` plugin'
 }
 
 @test "the design spec's SUPERSEDED paragraphs stay banner-covered (#1159)" {

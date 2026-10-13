@@ -230,7 +230,7 @@ if [[ "$IAC_ONLY" != "false" ]]; then
 	# template is #1162's, so its name carries that until the plugin ships it.
 	case "$IAC_ONLY" in
 	kubernetes) iac_wf="kubernetes-ci.yml" iac_tmpl_dir="iac" iac_tmpl="templates/iac/.github/workflows/kubernetes-ci.yml.tmpl" ;;
-	opentofu) iac_wf="opentofu-ci.yml" iac_tmpl_dir="opentofu" iac_tmpl="templates/opentofu/.github/workflows/opentofu-ci.yml.tmpl (not shipped until #1162; until then, write the workflow by hand with a \`gate\` job)" ;;
+	opentofu) iac_wf="opentofu-ci.yml" iac_tmpl_dir="opentofu" iac_tmpl="templates/opentofu/.github/workflows/opentofu-ci.yml.tmpl" ;;
 	esac
 	iac_ci="$iac_root/.github/workflows/$iac_wf"
 	if [[ ! -f "$iac_ci" ]]; then

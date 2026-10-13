@@ -446,7 +446,7 @@ EOF
   skill="$(tr -s '[:space:]' ' ' < "$SKILL")"
   contains "$skill" '`scripts/k8s-gate.zsh`, `hooks/pre-push` or `Makefile`, they are there because'
   contains "$skill" 'Ask Q4 (IaC wording) **first** and render them only on the confirmed "none" answer; a language answer drops all of them from the gap-fill. Render the workflow and the hook with `--gate-command` resolved per the Step 3 placeholder table, and leave `Makefile` unstamped (Step 3.6).'
-  contains "$skill" 'a `Makefile` already on disk goes to the idempotency reviewer against the rendered `iac/Makefile.tmpl` (its `lint`/`hooks` merge strategy) before the hook is written, or `make lint` has no target to run'
+  contains "$skill" 'a `Makefile` already on disk goes to the idempotency reviewer against the topic tree'"'"'s rendered `Makefile.tmpl` (its `lint`/`hooks` merge strategy) before the hook is written, or `make lint` has no target to run'
   contains "$skill" 'an existing `.maintenance.yml` gets §3a'"'"'s `gate:` rule — append `gate: <the value you passed to --gate-command>` when the key is absent, and leave a present value alone'
   contains "$skill" '**not on the §3l IaC path**, whose hook is the version-controlled `hooks/pre-push`'
 }
@@ -1003,8 +1003,9 @@ write_marker_at_line() {
 
 # --- --iac-only opentofu (#2425): the same precondition, keyed on its own workflow --
 #
-# No OpenTofu workflow template ships yet (#1162 adds it), so these run against
-# fixture workflows: each shape writer above fills kubernetes-ci.yml, and
+# These run against fixture workflows, so each refusal shape is reachable (the
+# REAL rendered opentofu-ci.yml is probed in tests/bootstrap-opentofu-pipeline.bats,
+# #1162): each shape writer above fills kubernetes-ci.yml, and
 # as_opentofu_workflow moves that file to opentofu-ci.yml, leaving no
 # kubernetes-ci.yml behind — so a pass can only come from reading the opentofu file.
 as_opentofu_workflow() {
@@ -1035,7 +1036,7 @@ as_opentofu_workflow() {
     --iac-only opentofu --default-branch main
   [ "$status" -eq 1 ]
   contains "$output" '.github/workflows/opentofu-ci.yml` is absent'
-  contains "$output" 'Render it from the plugin'"'"'s templates/opentofu/.github/workflows/opentofu-ci.yml.tmpl (not shipped until #1162;'
+  contains "$output" 'Render it from the plugin'"'"'s templates/opentofu/.github/workflows/opentofu-ci.yml.tmpl into the working tree first'
   lacks "$output" 'kubernetes-ci.yml'
   [ ! -s "$CURL_DATA" ]
 }
@@ -1294,7 +1295,7 @@ EOF
   contains "$section" 'the **mixed repo**'
   contains "$section" '#1193'
   contains "$section" 'in the **negative** direction'
-  contains "$section" 'any *other* value (a language, `claude-plugin`) means not this path'
+  contains "$section" 'any *other* value (a language, `claude-plugin`, the other IaC topic) means not this path'
   # the retired capability asserted GONE, so it cannot be silently reinstated
   lacks "$section" 'does not un-resolve it'
   # the conflict handling the {{PRIMARY}} row's parenthetical delegates here —
@@ -1381,7 +1382,7 @@ EOF
   ends_with "$block" '### 4b.5. Workflow labels (`blocked`) '
   # the VALUE and the condition, not just the flag name — the block could
   # otherwise document `--iac-only false` on the IaC path and still pass
-  contains "$block" '--iac-only "<kubernetes on the §3l IaC path'
+  contains "$block" '--iac-only "<the IaC topic on the §3l IaC path — kubernetes for the kubernetes topic marker, opentofu for the opentofu topic marker'
   contains "$block" 'it requires the `kubernetes-ci.yml` `gate` context **instead of**'
   # the no-other-primary qualifier the sibling sites carry. This is the site a
   # model reads when COMPOSING the invocation, so without it here the conflict
@@ -1417,7 +1418,7 @@ EOF
   contains "$setup" '`branch-protection.sh --iac-only <topic>`): `gate`. This single context **replaces**'
   # the qualifier names the topic generically (#2425): an OpenTofu adopter is
   # never told to pass --iac-only kubernetes
-  contains "$setup" '(the kubernetes topic marker — or bootstrap'"'"'s explicit empty-GitOps-repo confirmation — or the opentofu topic marker (once #1162 ships that path), with no application language'
+  contains "$setup" '(the kubernetes topic marker — or bootstrap'"'"'s explicit empty-GitOps-repo confirmation — or the opentofu topic marker, with no application language'
   # …and where it comes from, per topic (#1892, #2425)
   contains "$setup" "It comes from the IaC workflow's one \`gate\` job, \`.github/workflows/kubernetes-ci.yml\` on the kubernetes path and \`.github/workflows/opentofu-ci.yml\` on the opentofu path"
   lacks "$setup" '`render`, `schema`, `lint`, `policy`, `config-scan`, `argocd`'
@@ -1530,7 +1531,7 @@ EOF
   contains "$row" '**"None" is a valid answer for an IaC repo**'
   contains "$row" 'takes §3l, not a halt'
   # no marker: the confirmation and all three of its outcomes (#1605)
-  contains "$row" '**"None" with `is_kubernetes=false`** asks the **empty-repo confirmation** instead of halting'
+  contains "$row" '**"None" with both markers `false`** asks the **empty-repo confirmation** instead of halting'
   contains "$row" '**confirmed** → §3l, and `primary: kubernetes` is written'
   contains "$row" '**declined** → halt'
   contains "$row" '**another `primary:` already recorded** in `.maintenance.yml` → §3l'"'"'s conflict branch — the confirmation is never granted over a recorded primary'
@@ -1567,13 +1568,13 @@ EOF
   contains "$block" 'Rendering it blind would commit the §3l shape'
   contains "$block" 'ask Q4 (IaC wording) **first**'
   # the condition, with the qualifier's binding made explicit
-  contains "$block" '`kubernetes-ci.yml` is present **AND**'
+  contains "$block" 'so its topic'"'"'s workflow is present **AND**'
   # …and the MARKER as the condition, not the rendered workflow alone (#1432).
   # The workflow's presence is evidence the repo already took the §3l path; the
   # rule detect-stack.sh and §3l actually state keys on the marker, and this
   # site is swept for that clause by tests/iac-selection-rule.bats.
-  contains "$block" 'the repo carries the **kubernetes topic marker** (or, marker-less, its Q4'
-  contains "$block" 'empty-repo confirmation was accepted — §3l), so `kubernetes-ci.yml` is present **AND**'
+  contains "$block" 'the repo carries the **kubernetes topic marker** or the **opentofu topic marker**,'
+  contains "$block" 'not both (or, marker-less, its Q4 empty-repo confirmation was accepted — §3l),'
   contains "$block" 'a recorded `primary: kubernetes` grants nothing on its own'
   # RESOLVED, not merely detected — and the ORDERING that makes it achievable.
   # This tree is ordered and step 3 runs before Q4 is asked in step 6, so keying
@@ -1587,7 +1588,7 @@ EOF
   # the third precedence arm, which the condition previously dropped
   contains "$block" 'no other `primary:` is recorded'
   # the block's OWN clause, not the bare flag — that occurs at five other lines
-  contains "$block" 'invoke `branch-protection.sh` with **`--iac-only kubernetes`**'
+  contains "$block" 'invoke `branch-protection.sh` with **`--iac-only <topic>`**'
   # and the genuinely-mixed case, which §3l excludes rather than claims
   # needles kept WITHIN a source line: the block is a markdown blockquote, so
   # whitespace-normalising leaves the `>` markers in place and any needle
@@ -1616,7 +1617,7 @@ EOF
   contains "$row" 'is_kubernetes'
   # branch (2)'s target, now carrying its no-conflicting-primary qualifier
   contains "$row" 'records no other `primary:`'
-  contains "$row" '→ `kubernetes`'
+  contains "$row" '→ that topic, `kubernetes` or `opentofu`'
   contains "$row" 'Resolved, not detected'
   # branch (1) is UNQUALIFIED: a detected language wins over the marker whatever
   # the record says, which is the narrowing detect-stack.sh implements. The
@@ -1771,13 +1772,13 @@ step4a_iac() {
   contains "$block" '"<skill-base-dir>/scripts/install-iac-hooks.zsh" --repo "<repo-path>"'
   # wired only once the gate itself passes, or the hook rejects Step 4e's bot push —
   # the whole precondition, skip clause included
-  contains "$block" '**Run it only once the gate already passes here:** run the resolved gate command (`make lint` unless `.maintenance.yml` records another) in `<repo-path>` first. The hook runs that same command on every push, so wiring it while the gate fails — a gate tool not yet installed (Step 4.5 installs them only after Step 4e'"'"'s push), a `yq` the gate refuses, or findings in manifests the repo already has — would reject Step 4e'"'"'s bot push. When it fails, skip the script and show the gate'"'"'s first failure; the final report then names `make hooks` for once the gate command passes — or, when the `Makefile` merge was declined and it has no `hooks` target, merging `iac/Makefile.tmpl`'"'"'s `lint` and `hooks` targets into it first.'
+  contains "$block" '**Run it only once the gate already passes here:** run the resolved gate command (`make lint` unless `.maintenance.yml` records another) in `<repo-path>` first. The hook runs that same command on every push, so wiring it while the gate fails — a gate tool not yet installed (Step 4.5 installs them only after Step 4e'"'"'s push), a `yq` the gate refuses, or findings in manifests the repo already has — would reject Step 4e'"'"'s bot push. When it fails, skip the script and show the gate'"'"'s first failure; the final report then names `make hooks` for once the gate command passes — or, when the `Makefile` merge was declined and it has no `hooks` target, merging the `lint` and `hooks` targets of the topic tree'"'"'s `Makefile.tmpl` (§3l'"'"'s *IaC topic table*) into it first.'
   lacks "$block" 'install-precommit-hooks'
   lacks "$block" 'brew install pre-commit'
   contains "$block" '**On a non-zero exit, surface its stderr and continue**'
   contains "$block" 'the final report says the pre-push hook is not wired and names `make hooks` as the remedy'
   # exit 5 is a missing hooks target — a declined Makefile merge — which `make hooks` cannot fix
-  contains "$block" 'or, on exit 5 for a missing `hooks` target (a declined `Makefile` merge), merging `iac/Makefile.tmpl`'"'"'s `lint` and `hooks` targets first'
+  contains "$block" 'or, on exit 5 for a missing `hooks` target (a declined `Makefile` merge), merging the topic tree'"'"'s `Makefile.tmpl` `lint` and `hooks` targets first'
   # skipping the script does not unwire a hook an earlier run wired
   contains "$block" 'skipping the script leaves that hook in place: the final report then says the hook **is wired** and rejects every push, Step 4e'"'"'s included, until the gate command passes, instead of naming `make hooks`.'
   contains "$block" '**Step 4a.5 does not run on this path.**'
@@ -1789,7 +1790,7 @@ step4a_iac() {
   local block quote
   block="$(sed -n '/^### Preflight check/,/^### Per-tool automation/p' "$SKILL" | tr -s '[:space:]' ' ')"
   ends_with "$block" '### Per-tool automation '
-  contains "$block" '--iac-only "<kubernetes on the §3l IaC path, else false>"'
+  contains "$block" '--iac-only "<the IaC topic on the §3l IaC path (kubernetes or opentofu), else false>"'
   contains "$block" 'With `--iac-only kubernetes` the list is `gh`, `jq`, `git` and the gate'"'"'s tools'
   quote="$(sed -n '/^> \*\*The §3l IaC path runs none of the per-tool steps/,/^\*\*The invocations\*\*/p' "$SKILL" \
     | tr -s '[:space:]' ' ')"
@@ -1821,7 +1822,7 @@ step4a_iac() {
   starts_with "${sections[2]}" ' **The IaC set (#1154, #1604) is the third not-blind set.**'
   ends_with "${sections[2]}" '**The ops-major migration (#1330) is the fourth not-blind set.** When '
   # the marker-less, language-less repo asks Q4 BEFORE rendering, then reaches step 3
-  contains "${sections[2]}" 'So when `is_kubernetes` is `false` and `languages` is empty, ask Q4 and its empty-repo confirmation **here, before rendering anything** from `missing_artifacts`: on a confirmed "none", drop every §3l not-emitted artifact from the list, render the IaC set, and then take step 3'"'"'s `github_state` gap-fill with `--iac-only kubernetes`, which the drops have made reachable; on a language answer, render the list as usual; on a declined confirmation, render nothing and halt as Q4 directs.'
+  contains "${sections[2]}" 'So when both `is_kubernetes` and `is_opentofu` are `false` and `languages` is empty, ask Q4 and its empty-repo confirmation **here, before rendering anything** from `missing_artifacts`: on a confirmed "none", drop every §3l not-emitted artifact from the list, render the IaC set, and then take step 3'"'"'s `github_state` gap-fill with `--iac-only kubernetes`, which the drops have made reachable; on a language answer, render the list as usual; on a declined confirmation, render nothing and halt as Q4 directs.'
   ends_with "${sections[3]}" 'A GitOps repo may still carry a Dockerfile (a tooling image, say). On this path '
   contains "${sections[3]}" 'Setup automation: preflight only (--iac-only kubernetes) — verifies and batch-installs gh, jq, git and the gate'"'"'s tools'
   ends_with "${sections[4]}" '**Every other path:** if `pre-commit` is installed on the user'"'"'s machine, run: '
@@ -1856,13 +1857,13 @@ step4a_iac() {
   done
   # …and every IaC required-context statement names `gate`
   contains "$skill" '**One requirable check — `gate`.**'
-  contains "$skill" 'single `gate` context `kubernetes-ci.yml` reports, never the language-app set'
+  contains "$skill" 'single `gate` context the topic'"'"'s workflow reports, never the language-app set'
   contains "$skill" 'for the single `gate` context above'
   contains "$skill" 'replaces the live `gate` context with the language-app set'
   contains "$skill" 'it requires the `kubernetes-ci.yml` `gate` context **instead of**'
   contains "$skill" 'the single `kubernetes-ci.yml` context, `gate`, which is also what'
   contains "$skill" 'its one job, `gate`, is a *required context* with no `-noop` companion'
-  contains "$skill" 'Step 4b already required the `kubernetes-ci.yml` `gate` check'
+  contains "$skill" 'Step 4b already required the topic workflow'"'"'s `gate` check (`kubernetes-ci.yml` or `opentofu-ci.yml`)'
   contains "$skill" 'the `--iac-only` checks array (the single `gate` context)'
   contains "$setup" 'your required check is `kubernetes-ci.yml`'"'"'s single `gate`'
   contains "$setup" 'its own required check is `kubernetes-ci.yml`'"'"'s `gate` job instead'

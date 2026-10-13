@@ -638,7 +638,7 @@ SWEEP_AWK='
   contains "$block" '--iac-only false'
   # the IaC caller comment names the topic generically (#2425)
   contains "$block" 'pass --iac-only <topic>'
-  contains "$block" '`kubernetes`, or `opentofu`'
+  contains "$block" '`kubernetes` or `opentofu`:'
   lacks "$block" '--visibility'
 }
 
