@@ -180,7 +180,7 @@ has() {
 
 @test "react: the plain vitest variant keeps EVERY base essential and adds React" {
   local base="$JS/vitest.config.ts" f="$RX/vitest.config.ts" token
-  for token in 'provider: "v8",' 'reporter: ["text", "lcov"],' 'defineConfig'; do
+  for token in 'test: {' 'provider: "v8",' 'reporter: ["text", "lcov"],' 'defineConfig'; do
     has "$base" "$token"
     has "$f" "$token"
   done
@@ -193,7 +193,7 @@ has() {
 
 @test "react: the consumer+React vitest variant keeps MSW first and every consumer essential" {
   local cc="$JS/contract-consumer/vitest.config.ts" f="$RX/contract-consumer/vitest.config.ts" token
-  for token in './src/test/msw-setup.ts' 'exclude: ["src/api/generated/**"],' \
+  for token in './src/test/msw-setup.ts' 'exclude: ["src/api/generated/**"],' 'test: {' \
     'provider: "v8",' 'reporter: ["text", "lcov"],' 'defineConfig'; do
     has "$cc" "$token"
     has "$f" "$token"
