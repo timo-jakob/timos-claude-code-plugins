@@ -471,9 +471,10 @@ flow. Stop and ask for input wherever marked; do not guess.
    > `expected` state §3l exists to prevent.
    >
    > **When that `--iac-only kubernetes` call REFUSES (exit 1, no rule written)**
-   > (#1606), the workflow on disk cannot report `gate` — typically a repo
-   > bootstrapped before #1604, whose present `kubernetes-ci.yml` still has one
-   > job per stage, so `missing_artifacts` never lists it and step 5's drift
+   > (#1606) — its message carries `NOT applying branch protection` — the
+   > workflow on disk cannot report `gate` — typically a repo bootstrapped
+   > before #1604, whose present `kubernetes-ci.yml` still has one job per stage,
+   > so `missing_artifacts` never lists it and step 5's drift
    > check is never reached while this gap stands. **Do not re-invoke
    > `/development:bootstrap` to clear it** — handle it in this run, below: a
    > re-invocation only re-reaches this same branch, and on an unmarked file the
@@ -5075,8 +5076,8 @@ selector, which needs a toolchain this path never resolves). It does **not** emi
 
 **The final report names** the gate command (the resolved `{{GATE_COMMAND}}`,
 `make lint` unless one is recorded), the single required `gate` context — or,
-when `branch-protection.sh --iac-only kubernetes` refused (#1606 or #1641 — any exit-1
-arm) or fell back on a
+when `branch-protection.sh --iac-only kubernetes` exited 1 (whatever its message)
+or fell back on a
 403, that no rule was applied and `gate` is **not yet** required, quoting the
 script's message as the Step 5 item — and
 every artifact above that was skipped and why, on a confirmed empty repo too. An
@@ -6276,7 +6277,7 @@ step's.
 > run no per-tool script — `enable-github-security.sh` included, which this
 > path has never run (its toggles stay a repo-Settings choice) — and report that
 > branch protection was already applied by Step 4b with `--iac-only kubernetes` — **unless
-> Step 4b hit its #1606 refusal (any exit-1 arm, #1641's three included) or its
+> Step 4b exited 1 (whatever its message) or hit its
 > 403 fallback**, in which case report it as
 > **not** applied and carry Step 4b's outstanding Step 5 item (the rule **and**
 > the merge settings) instead. Reaching this section is never itself evidence
@@ -6597,19 +6598,19 @@ Step 4b already required the `kubernetes-ci.yml` `gate` check via
 checklist carries instead is what the user cannot infer — **unless
 Step 4b hit its 403 fallback** (no admin permission), in which case the general
 rule wins and the manual branch-protection setup IS an outstanding item, listed
-with the `gate` context. **Or unless Step 4b hit its #1606 refusal** (exit 1,
-**any** arm — #1606's or #1641's: the workflow on disk cannot report `gate` —
-absent, no `gate` job, or a `gate` job carrying `name:`, a `strategy:` block or a
-reusable-workflow `uses:`; a `gate` job written in flow style or through an
-anchor, alias, tag or `<<:` merge key; a workflow that does not run on every pull
-request; or a file awk could not read): then
+with the `gate` context — and so are the two repo merge settings (Allow
+auto-merge, Automatically delete head branches), since the script exits before
+applying them. **Or unless Step 4b exited 1** (whatever its message — a #1606
+or #1641 refusal, or a failed API call): then
 neither the rule nor the merge
 settings were applied, and that is an outstanding item quoting the script's
-message — fix the workflow it names, then re-run `branch-protection.sh`:
+message — fix what it names, then re-run `branch-protection.sh`:
 
 ```text
-- The required `gate` check shows as "expected" in Settings → Branches until
-  the first PR runs the workflow. That is normal; the rule is already valid.
+- (only when Step 4b applied the rule — not after it exited 1, whatever its
+  message, or hit its 403 fallback) The required `gate` check shows as "expected" in Settings → Branches
+  until the first PR runs the workflow. That is normal; the rule is already
+  valid.
 - (unless Step 4a's install-iac-hooks.zsh ran and exited 0, or found the hook
   already wired) The pre-push hook is NOT wired: run `make hooks` once the gate
   command (`make lint` unless one is recorded) passes in this clone — merging

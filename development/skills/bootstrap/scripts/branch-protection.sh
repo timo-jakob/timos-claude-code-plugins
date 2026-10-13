@@ -15,8 +15,10 @@
 #
 # --iac-only is an enum naming the IaC topic, not a boolean: `false` (the
 # default) is the language-app path, and `kubernetes` is the
-# infrastructure-as-code path (the bootstrap skill's §3l): the kubernetes topic marker with no application language AND no other
-# `primary:` recorded. A detected language, or a recorded language /
+# infrastructure-as-code path (the bootstrap skill's §3l): the kubernetes topic
+# marker — or bootstrap's explicit empty-GitOps-repo confirmation —
+# with no application language AND no other `primary:` recorded. A detected
+# language, or a recorded language /
 # claude-plugin primary, settles it false whatever the marker says; the mixed
 # repo (marker plus a stray tooling language) is #1193. There, the language-app
 # quality workflow is not rendered at all, so its checks — test-and-coverage,
