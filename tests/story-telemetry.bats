@@ -666,6 +666,34 @@ advised() {
   jq -e '.loop_args | type == "array"' <<<"$output" >/dev/null
 }
 
+@test "#2141 every flag reference/epic-telemetry.md passes to story-telemetry.zsh is one the script accepts" {
+  # The epic flow runs these blocks verbatim too: the epic start, each child's
+  # start (which reads child_start_args) and emit --epic.
+  local ref="$REPO_ROOT/development/skills/resolve-issue/reference/epic-telemetry.md"
+  local sub flags f emit
+  for sub in start emit; do
+    flags="$(awk -v s="story-telemetry.zsh\" $sub" 'index($0, s) { on = 1 } on { print } on && !/\\$/ { on = 0 }' "$ref" | grep -oE -- '--[a-z-]+' | sort -u)"
+    [ -n "$flags" ] || { echo "no $sub block found in epic-telemetry.md"; return 1; }
+    while IFS= read -r f; do
+      grep -qE -- "^ +${f}\) " "$D" || { echo "epic-telemetry.md passes $f to $sub; the script has no such flag"; return 1; }
+    done <<<"$flags"
+  done
+  # the emit block is the epic one
+  emit="$(awk '/story-telemetry.zsh" emit/{on=1} on{print} on && !/\\$/{on=0}' "$ref")"
+  grep -qE -- '--epic( |$)' <<<"$emit" || { echo "epic-telemetry.md's emit block no longer passes --epic"; return 1; }
+  # emit --epic's required set, and the flag --epic refuses
+  for f in --run-file --state --repo-dir --issue --repo-type; do
+    grep -qF -- "$f" <<<"$emit" || { echo "epic-telemetry.md's emit block no longer passes $f"; return 1; }
+  done
+  if grep -qF -- '--loop-work-dir' <<<"$emit"; then echo "epic-telemetry.md's emit block passes --loop-work-dir, which --epic refuses"; return 1; fi
+  # every start block (the epic's and each child's) passes its --run-file
+  [ "$(grep -c 'story-telemetry.zsh" start' "$ref")" -eq "$(awk '/story-telemetry.zsh" start/{on=1} on{print} on && !/\\$/{on=0}' "$ref" | grep -c -- '--run-file')" ] || { echo "an epic-telemetry.md start block no longer passes --run-file"; return 1; }
+  # the child_start_args key the reference reads is the one start writes
+  grep -qF "jq -r '.child_start_args[]'" "$ref"
+  run zsh "$D" start --run-file "$RUN" --ts 1
+  jq -e '.child_start_args | type == "array"' <<<"$output" >/dev/null
+}
+
 # --- round-1 gaps: tilde, reuse, flag-shaped values, bounds, messages -------
 
 @test "args and start expand a leading ~ — slash-command arguments arrive unexpanded" {
@@ -813,6 +841,44 @@ advised() {
   grep -qF "A granted resume carries the run's \`loop_args\` too (#1226)" "$base/reference/interactive/extension-ceiling.md"
   grep -qF "Every sub-loop invocation also carries the run's \`loop_args\`" "$base/reference/promotion/step-8-status-files.md"
   grep -qF "the run's \`loop_args\` (Step 0) on every invocation" "$base/SKILL.md"
+}
+
+@test "the #1226 run-behaviour amendments stand beside their frozen spans" {
+  # Each paragraph carries run behaviour the frozen span beside it does not say:
+  # the escalated record, a rung's own run file, the enrichment's sinks.
+  local ref="$REPO_ROOT/development/skills/resolve-issue/reference" doc
+  doc="$(tr -s '[:space:]' ' ' < "$ref/escalation.md")"
+  contains "$doc" "**Before step 4's stop, emit the run's record (#1226).**"
+  contains "$doc" 'Emit its single `resolve-issue` record (`outcome: escalated`, the typed status in `escalation_status`) before stopping.'
+  contains "$doc" 'An operational-error stop with no typed comment is an ending too, and emits `failed`.'
+  doc="$(tr -s '[:space:]' ' ' < "$ref/interactive/remediation.md")"
+  contains "$doc" '**Each single-issue rung is its own telemetry run (#1226).**'
+  contains "$doc" 'it calls `story-telemetry.zsh start` with its **own** run file, `<scratch>/story-run-<blocker>.json`, and the **same** sink flags the named issue'"'"'s run was given'
+  contains "$doc" 'Its loops take **its** `loop_args`, never the named issue'"'"'s'
+  doc="$(tr -s '[:space:]' ' ' < "$ref/promotion/step-8-status-files.md")"
+  contains "$doc" "**The sub-loop and the enrichment now forward the run's sinks (#1226).**"
+  contains "$doc" '**The loop does have a `--telemetry-dir` now.**'
+  contains "$doc" '"the loop has no `--telemetry-dir` of its own, so the enrichment must not pass one either" is therefore reversed'
+  contains "$doc" 'and the two records share a sink'
+  contains "$doc" 'The enrichment itself takes **no** `--parent-run-id`'
+}
+
+@test "every Read-the-amendment pointer in resolve-issue reference pairs with an amendment paragraph" {
+  # A pointer's target is the first backticked reference/….md path in its whole
+  # blockquote (a pointer such as "there too" names none on its own line), else
+  # its own file, below the pointer. The target needs a **…(#N).** lead line.
+  local base="$REPO_ROOT/development/skills/resolve-issue" f n target line seen=0
+  while IFS= read -r f; do
+    while IFS=$'\t' read -r n target line; do
+      seen=$((seen + 1))
+      if [ "$target" = "-" ]; then
+        awk -v from="$line" -v re="^[*][*].*[(]#$n[)][.][*][*]" 'NR > from && $0 ~ re { hit = 1 } END { exit !hit }' "$REPO_ROOT/$f" || { echo "$f:$line points at a #$n amendment below it; none follows"; return 1; }
+      else
+        grep -qE "^\*\*.*\(#$n\)\.\*\*" "$base/$target" || { echo "$f:$line points at a #$n amendment in $target; it has none"; return 1; }
+      fi
+    done < <(awk '{ l[NR] = $0 } END { for (i = 1; i <= NR; i++) { if (l[i] !~ /^> \*\*Read the #[0-9]+ amendment/) continue; n = l[i]; sub(/^> \*\*Read the #/, "", n); sub(/[^0-9].*/, "", n); s = i; while (s > 1 && l[s-1] ~ /^>/) s--; t = "-"; for (j = s; j <= NR && l[j] ~ /^>/; j++) if (match(l[j], /`reference\/[^`]*\.md`/)) { t = substr(l[j], RSTART + 1, RLENGTH - 2); break } print n "\t" t "\t" i } }' "$REPO_ROOT/$f")
+  done < <(git -C "$REPO_ROOT" ls-files 'development/skills/resolve-issue/reference/*.md')
+  [ "$seen" -gt 0 ] || { echo "no Read-the-amendment pointer found under resolve-issue reference/"; return 1; }
 }
 
 @test "#1761 every failed-start sink fallback in resolve-issue reference omits a null sink flag" {

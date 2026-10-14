@@ -168,6 +168,31 @@ halt_state() {
   refused "$(with 'del(.e1_classification)' "$UNDECOMPOSED")" "state.e1_classification is required"
 }
 
+# The rows of the closed e1_classification table that follows the bold anchor
+# paragraph in $1, one first-column value per line, sorted. Two flags, because a
+# blank line separates the anchor paragraph from its table.
+e1_table_values() {
+  awk '/^\*\*`e1_classification`\*\*/ { a = 1 } a && /^[|] `/ { r = 1; print; next } r && /^$/ { exit }' "$1" | sed -E 's/^[|] `([^`]*)`.*/\1/' | LC_ALL=C sort
+}
+
+@test "#2140 both e1_classification tables list exactly the builder's enum, and the builder accepts every row" {
+  # The reference is the enum the builder enforces. Its header comment also
+  # lists the values, but a comment enforces nothing, so it is not compared.
+  local ref ref_doc arch v
+  ref="$(sed -n '/e1_classification | enum(\[/,/\]) | not)/p' "$B" | grep -oE '"[a-z_]+"' | tr -d '"' | LC_ALL=C sort)"
+  ref_doc="$(e1_table_values "$REPO_ROOT/development/skills/resolve-issue/reference/epic-telemetry.md")"
+  arch="$(e1_table_values "$REPO_ROOT/ARCHITECTURE.md")"
+  [ -n "$ref_doc" ] && [ "$(grep -c '' <<<"$ref_doc")" -eq 10 ]
+  [ -n "$arch" ] && [ "$(grep -c '' <<<"$arch")" -eq 10 ]
+  [ "$ref_doc" = "$ref" ]
+  [ "$arch" = "$ref" ]
+  [ "$(tr '\n' ' ' <<<"$ref")" = "backfilled halt_backfill_error halt_backfill_partial halt_backfill_vet halt_near_miss halt_unclassified halt_undecomposed halt_unrealized_slices inline_slices native_children " ]
+  for v in $ref_doc; do
+    build "$(halt_state "$v")"
+    [ "$status" -eq 0 ] || { printf 'the builder refused %s: %s\n' "$v" "$stderr" >&2; return 1; }
+  done
+}
+
 # --- each outcome row ---------------------------------------------------------
 
 @test "row 1 failed: an E4 regression, E5 not closed" {
