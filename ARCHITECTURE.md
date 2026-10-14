@@ -6841,7 +6841,7 @@ edits `.gitignore` for telemetry.
 | `languages` | `{primary: str\|null, auxiliary: [str]}`; `{primary: null, auxiliary: []}` exactly when no stack resolved |
 | `topics` / `interfaces` | `[str]` — the topic name of each `is_<topic>` key the final, user-confirmed detection reports `true`, and the `interface` of each of its `interfaces` entries |
 | `host` | `{os, homebrew}` — `start` reads it: `os` from `uname -s` (`macos`, `linux`, else lower-cased), `homebrew` from `brew` on PATH |
-| `steps` | `{<step key>: written \| merged \| skipped \| failed \| already_present}` — one key per **applicable** step; a step whose trigger is absent is absent |
+| `steps` | `{<step key>: written \| merged \| skipped \| failed \| already_present}` — one key per **applicable** step, one the run reached with its trigger present; a step whose trigger is absent, or that the run stopped before, is absent, never `skipped` (#2226) |
 | `files` | `{written, merged, skipped, failed, already_present}` — counts over the per-file list |
 | `github_state` | `{branch_protection, secrets, sonar_project, apps_installed}`, each `applied` \| `already_present` \| `skipped` \| `refused` (the API answered 401/403) \| `failed` (any other error) |
 | `ending` | `{stack, early_stop, approve_merge}` — the run's ending facts, below |
