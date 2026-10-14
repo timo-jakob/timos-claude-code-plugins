@@ -647,8 +647,8 @@ SKILL_MD() { tr -s '[:space:]' ' ' < "$SCRIPTS/../SKILL.md"; }
 
 @test "resolve-approval: SKILL.md's 4d/4e skip only a run that recorded no approval:" {
   contains "$(SKILL_MD)" 'generated or recorded nothing in the working tree'
-  contains "$(SKILL_MD)" 'run, either one with no `approval:` recorded — there is nothing to commit'
-  contains "$(SKILL_MD)" 'run, either one with no `approval:` recorded, commit nothing'
+  contains "$(SKILL_MD)" 'run, either one with no `approval:` recorded and no toolchain refresh written — there is nothing to commit'
+  contains "$(SKILL_MD)" 'run, either one with no `approval:` recorded and no toolchain refresh written, commit nothing'
 }
 
 @test "resolve-approval: SKILL.md stops on a resolver exit 1 and never overrides a record" {

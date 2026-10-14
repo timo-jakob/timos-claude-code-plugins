@@ -138,9 +138,13 @@
 #                                 the toolchain flags above: SONARCLOUD, SONARQUBE
 #                                 (--static-analysis), SNYK, TRIVY
 #                                 (--vulnerabilities), CODEQL (--code-scanning),
-#                                 SELF_HOSTED (--static-analysis sonarqube) — each
+#                                 SELF_HOSTED (--static-analysis sonarqube), HOSTED
+#                                 (any other --static-analysis, none included) — each
 #                                 kept iff its tool is resolved, all stripped when
-#                                 the flag is absent (the §3l IaC path). PUBLIC
+#                                 the flag is absent (the §3l IaC path); `none`
+#                                 keeps none of a category's tool blocks (#2121),
+#                                 and keeps DEFERRED_<CATEGORY> plus the
+#                                 DEFERRED_TOOLS block around them instead. PUBLIC
 #                                 wraps only SETUP.md's public-only parts.
 #   --docker true|false           DOCKER block (default: false)
 #   --claude-plugin true|false    CLAUDE_PLUGIN block (default: false)
@@ -239,8 +243,8 @@ done
 
 # The toolchain values select blocks, so a typo must not silently strip them all.
 typeset -A tool_set=(
-	STATIC_ANALYSIS "sonarcloud sonarqube"
-	VULNERABILITIES "snyk trivy"
+	STATIC_ANALYSIS "sonarcloud sonarqube none"
+	VULNERABILITIES "snyk trivy none"
 	CODE_SCANNING "codeql none"
 )
 typeset _k
@@ -338,15 +342,17 @@ fi
 # {{REQUIRED_CONTEXTS}} (#1670): SETUP.md §4's required-status-check list, one
 # markdown bullet per context. The context set is fixed by the toolchain and the
 # stack, never read back from a render: always test-and-coverage, semgrep,
-# pre-commit, license-fs; the analyser's job; trivy-fs iff trivy (Snyk has no CI
-# job); one `analyze (<lang>)` per CodeQL language iff codeql; image iff a
+# pre-commit, license-fs; the analyser's job unless static_analysis is none
+# (#2121); trivy-fs iff trivy (Snyk has no CI job, and `none` has nothing); one
+# `analyze (<lang>)` per CodeQL language iff codeql; image iff a
 # Dockerfile — plus no-cluster-deploy, which comes from its own workflow. Derived
 # only when all three toolchain flags were passed, so a SETUP.md rendered without
 # the toolchain trips the leftover check (its §4 list sits in the TOOLCHAIN
 # block, which the §3l IaC path strips).
 contexts_block=""
 if (( ${+vals[STATIC_ANALYSIS]} && ${+vals[VULNERABILITIES]} && ${+vals[CODE_SCANNING]} )); then
-	typeset -a ctx=(test-and-coverage "${vals[STATIC_ANALYSIS]}")
+	typeset -a ctx=(test-and-coverage)
+	[[ "${vals[STATIC_ANALYSIS]}" != none ]] && ctx+=("${vals[STATIC_ANALYSIS]}")
 	[[ "${vals[VULNERABILITIES]}" == trivy ]] && ctx+=(trivy-fs)
 	ctx+=(semgrep license-fs pre-commit no-cluster-deploy)
 	if [[ "${vals[CODE_SCANNING]}" == codeql && -n "${vals[CODEQL_LANGUAGES]:-}" ]]; then
@@ -422,9 +428,19 @@ keep_block() {
 	SONARCLOUD) [[ "${vals[STATIC_ANALYSIS]:-}" == sonarcloud ]] ;;
 	SONARQUBE) [[ "${vals[STATIC_ANALYSIS]:-}" == sonarqube ]] ;;
 	SELF_HOSTED) [[ "${vals[STATIC_ANALYSIS]:-}" == sonarqube ]] ;;
+	# its complement (#2121): GitHub-hosted runners, so any resolved analyser but
+	# sonarqube — `none` included, which SONARCLOUD used to stand in for
+	HOSTED) [[ -n "${vals[STATIC_ANALYSIS]:-}" && "${vals[STATIC_ANALYSIS]}" != sonarqube ]] ;;
 	SNYK) [[ "${vals[VULNERABILITIES]:-}" == snyk ]] ;;
 	TRIVY) [[ "${vals[VULNERABILITIES]:-}" == trivy ]] ;;
 	CODEQL) [[ "${vals[CODE_SCANNING]:-}" == codeql ]] ;;
+	# the deferred tools (#2121): SETUP.md's DEFERRED-TOOLS block is kept iff any
+	# category resolved to `none`, and each DEFERRED_<CATEGORY> entry iff that one did
+	DEFERRED_STATIC_ANALYSIS) [[ "${vals[STATIC_ANALYSIS]:-}" == none ]] ;;
+	DEFERRED_VULNERABILITIES) [[ "${vals[VULNERABILITIES]:-}" == none ]] ;;
+	DEFERRED_CODE_SCANNING) [[ "${vals[CODE_SCANNING]:-}" == none ]] ;;
+	DEFERRED_TOOLS) [[ "${vals[STATIC_ANALYSIS]:-}" == none || "${vals[VULNERABILITIES]:-}" == none ||
+		"${vals[CODE_SCANNING]:-}" == none ]] ;;
 	CLAUDE_PLUGIN) [[ "$claude_plugin" == "true" ]] ;;
 	SURFACE_CLI) has_surface cli ;;
 	SURFACE_REST) has_surface rest ;;

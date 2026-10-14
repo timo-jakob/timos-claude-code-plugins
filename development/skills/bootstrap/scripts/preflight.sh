@@ -3,8 +3,8 @@
 # and offer to brew-install anything missing.
 #
 # Usage:
-#   preflight.sh --static-analysis sonarcloud|sonarqube \
-#                --vulnerabilities snyk|trivy \
+#   preflight.sh --static-analysis sonarcloud|sonarqube|none \
+#                --vulnerabilities snyk|trivy|none \
 #                --languages "swift javascript python go" \
 #                --has-dockerfile true|false \
 #                [--has-ko true|false] \
@@ -15,9 +15,10 @@
 #                     (resolve-tools.zsh, #1671). The prerequisites follow it,
 #                     never visibility — this script neither accepts nor derives
 #                     visibility, and `--visibility` exits 1 naming these two
-#                     flags. `snyk` needs snyk-cli, `trivy` needs trivy, and
-#                     `sonarqube` (like `trivy` or a Dockerfile) needs the
-#                     Docker daemon + compose plugin. Required unless
+#                     flags. `snyk` needs snyk-cli, `trivy` needs trivy, a
+#                     static analyser needs sonar-scanner, and `sonarqube`
+#                     (like `trivy` or a Dockerfile) needs the Docker daemon +
+#                     compose plugin. `none` (#2121) needs nothing. Required unless
 #                     --iac-only names an IaC topic, where neither is required
 #                     or read.
 #
@@ -54,15 +55,15 @@ while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--visibility)
 		# no alias: the prerequisites follow the toolchain, never visibility (#1671)
-		die "--visibility is no longer accepted — pass the resolved toolchain instead: --static-analysis sonarcloud|sonarqube and --vulnerabilities snyk|trivy"
+		die "--visibility is no longer accepted — pass the resolved toolchain instead: --static-analysis sonarcloud|sonarqube|none and --vulnerabilities snyk|trivy|none"
 		;;
 	--static-analysis)
-		[[ $# -ge 2 ]] || die "--static-analysis must be sonarcloud or sonarqube (the resolved static_analysis)"
+		[[ $# -ge 2 ]] || die "--static-analysis must be sonarcloud, sonarqube or none (the resolved static_analysis)"
 		STATIC_ANALYSIS="$2"
 		shift 2
 		;;
 	--vulnerabilities)
-		[[ $# -ge 2 ]] || die "--vulnerabilities must be snyk or trivy (the resolved vulnerabilities)"
+		[[ $# -ge 2 ]] || die "--vulnerabilities must be snyk, trivy or none (the resolved vulnerabilities)"
 		VULNERABILITIES="$2"
 		shift 2
 		;;
@@ -101,10 +102,10 @@ done
 [[ "$IAC_ONLY" =~ ^(false|kubernetes|opentofu)$ ]] || die "$IAC_ONLY_ENUM_MSG"
 # the toolchain names the language-app prerequisites; the IaC path never reads it
 if [[ "$IAC_ONLY" == "false" ]]; then
-	[[ "$STATIC_ANALYSIS" =~ ^(sonarcloud|sonarqube)$ ]] ||
-		die "--static-analysis must be sonarcloud or sonarqube (the resolved static_analysis)"
-	[[ "$VULNERABILITIES" =~ ^(snyk|trivy)$ ]] ||
-		die "--vulnerabilities must be snyk or trivy (the resolved vulnerabilities)"
+	[[ "$STATIC_ANALYSIS" =~ ^(sonarcloud|sonarqube|none)$ ]] ||
+		die "--static-analysis must be sonarcloud, sonarqube or none (the resolved static_analysis)"
+	[[ "$VULNERABILITIES" =~ ^(snyk|trivy|none)$ ]] ||
+		die "--vulnerabilities must be snyk, trivy or none (the resolved vulnerabilities)"
 fi
 
 # --- preconditions ------------------------------------------------------------
@@ -128,17 +129,18 @@ elif [[ "$IAC_ONLY" == "opentofu" ]]; then
 else
 	# Always required
 	required_brews=(
-		"gh"            # GitHub CLI — auth, secrets, branch protection, runner token
-		"jq"            # JSON parsing in scripts
-		"git"           # already there on macOS, but pin it
-		"pre-commit"    # hook framework
-		"gitleaks"      # secret scanning
-		"semgrep"       # cross-language SAST
-		"sonar-scanner" # Sonar CLI
+		"gh"         # GitHub CLI — auth, secrets, branch protection, runner token
+		"jq"         # JSON parsing in scripts
+		"git"        # already there on macOS, but pin it
+		"pre-commit" # hook framework
+		"gitleaks"   # secret scanning
+		"semgrep"    # cross-language SAST
 	)
+	# the Sonar CLI, for either analyser — `static_analysis: none` has none (#2121)
+	[[ "$STATIC_ANALYSIS" != "none" ]] && required_brews+=("sonar-scanner")
 
 	# Tool-specific: the resolved vulnerabilities tool, whatever the visibility
-	# or Dockerfile. sonarqube adds no formula — its prerequisite is the Docker
+	# or Dockerfile; `none` adds nothing. sonarqube adds no formula — its prerequisite is the Docker
 	# daemon + compose plugin checked below.
 	case "$VULNERABILITIES" in
 	snyk)

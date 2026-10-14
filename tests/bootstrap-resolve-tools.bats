@@ -148,11 +148,11 @@ STEP4_CODEQL='resolve-tools: tools.code_scanning: codeql is not supported on a p
   run --separate-stderr zsh "$S" --visibility private --vulnerabilities grype
   [ "$status" -eq 1 ]
   [ -z "$output" ]
-  [ "$stderr" = "resolve-tools: tools.vulnerabilities: grype is not supported — allowed: snyk | trivy" ]
+  [ "$stderr" = "resolve-tools: tools.vulnerabilities: grype is not supported — allowed: snyk | trivy | none" ]
   # an empty flag is still a declared value, not "nothing chosen"
   run --separate-stderr zsh "$S" --visibility private --static-analysis ''
   [ "$status" -eq 1 ]
-  [ "$stderr" = "resolve-tools: tools.static_analysis:  is not supported — allowed: sonarcloud | sonarqube" ]
+  [ "$stderr" = "resolve-tools: tools.static_analysis:  is not supported — allowed: sonarcloud | sonarqube | none" ]
 }
 
 @test "resolve-tools: step 2 — a bad flag is rejected even where a recorded value would win" {
@@ -160,7 +160,7 @@ STEP4_CODEQL='resolve-tools: tools.code_scanning: codeql is not supported on a p
   run --separate-stderr zsh "$S" --visibility private --vulnerabilities grype
   [ "$status" -eq 1 ]
   [ -z "$output" ]
-  [ "$stderr" = "resolve-tools: tools.vulnerabilities: grype is not supported — allowed: snyk | trivy" ]
+  [ "$stderr" = "resolve-tools: tools.vulnerabilities: grype is not supported — allowed: snyk | trivy | none" ]
 }
 
 @test "resolve-tools: step 2 — a list or map as a category value is unsupported, not 'nothing recorded'" {
@@ -180,7 +180,7 @@ STEP4_CODEQL='resolve-tools: tools.code_scanning: codeql is not supported on a p
   run --separate-stderr zsh "$S" --visibility public
   [ "$status" -eq 1 ]
   [ -z "$output" ]
-  [ "$stderr" = "resolve-tools: tools.vulnerabilities: grype is not supported — allowed: snyk | trivy" ]
+  [ "$stderr" = "resolve-tools: tools.vulnerabilities: grype is not supported — allowed: snyk | trivy | none" ]
 }
 
 # --- step 4 -------------------------------------------------------------------------
@@ -506,6 +506,100 @@ STEP4_CODEQL='resolve-tools: tools.code_scanning: codeql is not supported on a p
   [ "$status" -eq 1 ]
   [ -z "$output" ]
   contains "$stderr" "cannot parse"
+}
+
+# --- #2121: every category accepts none ------------------------------------------------------
+
+@test "resolve-tools: #2121 none is accepted for static_analysis and vulnerabilities, recorded or as a flag, public and private" {
+  local vis cs
+  for vis in public private; do
+    cs=codeql
+    [ "$vis" = private ] && cs=none
+    # as flags
+    rm -f "$M"
+    run --separate-stderr zsh "$S" --visibility "$vis" --static-analysis none --vulnerabilities none --code-scanning "$cs"
+    [ "$status" -eq 0 ]
+    [ -z "$stderr" ]
+    [ "$output" = "$(lines none chosen none chosen "$cs" chosen false)" ]
+    # recorded
+    printf 'tools:\n  static_analysis: none\n  vulnerabilities: none\n' > "$M"
+    run --separate-stderr zsh "$S" --visibility "$vis"
+    [ "$status" -eq 0 ]
+    [ "$output" = "$(lines none recorded none recorded "$cs" default false)" ]
+    # a recorded none wins over a contradicting flag, like any recorded value
+    run --separate-stderr zsh "$S" --visibility "$vis" --static-analysis sonarcloud --vulnerabilities snyk
+    [ "$status" -eq 0 ]
+    [ "$output" = "$(lines none recorded none recorded "$cs" default false)" ]
+  done
+}
+
+@test "resolve-tools: #2121 the story's toolchain resolves — private, static_analysis none, vulnerabilities trivy, code_scanning none — with no runner" {
+  printf 'primary: go\ntools:\n  static_analysis: none\n  vulnerabilities: trivy\n  code_scanning: none\n' > "$M"
+  run --separate-stderr zsh "$S" --visibility private
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(lines none recorded trivy recorded none recorded false)" ]
+  # the sonarqube default is what made a private repo self-hosted; none never does
+  rm "$M"
+  run --separate-stderr zsh "$S" --visibility private --static-analysis none
+  [ "$output" = "$(lines none chosen trivy default none default false)" ]
+}
+
+@test "resolve-tools: #2121 none is never a default — except private code_scanning's — and the sets name it" {
+  run --separate-stderr zsh "$S" --visibility public
+  [ "$output" = "$(lines sonarcloud default snyk default codeql default false)" ]
+  run --separate-stderr zsh "$S" --visibility private
+  [ "$output" = "$(lines sonarqube default trivy default none default true)" ]
+  # an unsupported value's message lists none in every category's set
+  run --separate-stderr zsh "$S" --visibility private --static-analysis bogus
+  [ "$stderr" = "resolve-tools: tools.static_analysis: bogus is not supported — allowed: sonarcloud | sonarqube | none" ]
+  run --separate-stderr zsh "$S" --visibility private --vulnerabilities bogus
+  [ "$stderr" = "resolve-tools: tools.vulnerabilities: bogus is not supported — allowed: snyk | trivy | none" ]
+  # usage() and the header comment advertise it too
+  run --separate-stderr zsh "$S" --help
+  contains "$stderr" "--static-analysis sonarcloud|sonarqube|none"
+  contains "$stderr" "--vulnerabilities snyk|trivy|none"
+  grep -qF '#     static_analysis: sonarcloud   # sonarcloud | sonarqube | none' "$S"
+  grep -qF '#     vulnerabilities: snyk         # snyk | trivy | none' "$S"
+  grep -qF '#                     [--static-analysis sonarcloud|sonarqube|none]' "$S"
+  grep -qF '#                     [--vulnerabilities snyk|trivy|none]' "$S"
+}
+
+@test "resolve-tools: #2121 with none in the sets, 21 combinations resolve and the two rejections cover the other 15" {
+  local vis sa v cs ok=0 rejected=0 runner
+  for vis in public private; do
+    for sa in sonarcloud sonarqube none; do
+      for v in snyk trivy none; do
+        for cs in codeql none; do
+          run --separate-stderr zsh "$S" --visibility "$vis" \
+            --static-analysis "$sa" --vulnerabilities "$v" --code-scanning "$cs"
+          if [ "$vis/$sa" = public/sonarqube ] || [ "$vis/$cs" = private/codeql ]; then
+            [ "$status" -eq 1 ]
+            [ -z "$output" ]
+            rejected=$((rejected + 1))
+          else
+            [ "$status" -eq 0 ]
+            if [ "$sa" = sonarqube ]; then runner=true; else runner=false; fi
+            [ "$output" = "$(lines "$sa" chosen "$v" chosen "$cs" chosen "$runner")" ]
+            ok=$((ok + 1))
+          fi
+        done
+      done
+    done
+  done
+  [ "$ok" -eq 21 ]
+  [ "$rejected" -eq 15 ]
+}
+
+@test "resolve-tools: #2121 --record appends a none toolchain, and the appended block is the template's byte for byte" {
+  printf 'primary: go\n' > "$M"
+  run --separate-stderr zsh "$S" --visibility private --static-analysis none --record
+  [ "$status" -eq 0 ]
+  [ "$(yq -o=json -I=0 '.tools' "$M")" = '{"static_analysis":"none","vulnerabilities":"trivy","code_scanning":"none"}' ]
+  expected="$(sed -n '/TOOLCHAIN-START/,/TOOLCHAIN-END/p' "$TEMPLATE" |
+    sed -e 's/{{STATIC_ANALYSIS}}/none/' -e 's/{{VULNERABILITIES}}/trivy/' -e 's/{{CODE_SCANNING}}/none/')"
+  [ "$(tail -n +2 "$M")" = "$expected" ]
+  # the block's comment names none for every category
+  grep -qF 'static_analysis sonarcloud | sonarqube | none, vulnerabilities snyk | trivy | none,' "$M"
 }
 
 # --- SKILL.md wording (#1651) --------------------------------------------------------------

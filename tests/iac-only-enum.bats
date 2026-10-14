@@ -78,7 +78,7 @@ setup() {
     --has-dockerfile false --has-codeql false --iac-only false --default-branch main
   [ "$status" -eq 1 ]
   lacks "$stderr" "$ENUM_MESSAGE"
-  contains "$stderr" '--static-analysis must be sonarcloud or sonarqube'
+  contains "$stderr" '--static-analysis must be sonarcloud, sonarqube or none'
   # `kubernetes` is the IaC path, which never reads the toolchain and refuses
   # here only because this repo has no kubernetes-ci.yml — the IaC path's own check
   run --separate-stderr env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
@@ -101,7 +101,7 @@ setup() {
     --languages "" --has-dockerfile false --iac-only false --assume-yes
   [ "$status" -eq 1 ]
   lacks "$stderr" "$ENUM_MESSAGE"
-  contains "$stderr" '--static-analysis must be sonarcloud or sonarqube'
+  contains "$stderr" '--static-analysis must be sonarcloud, sonarqube or none'
   # each IaC path skips the toolchain check and reaches the macOS precondition
   local topic
   for topic in kubernetes opentofu; do

@@ -148,29 +148,29 @@ protect_in_fixture() {
   for s in "$PROTECT" "$PREFLIGHT"; do
     run --separate-stderr env PATH="$STUB_BIN:$PATH" bash "$s" --vulnerabilities snyk
     [ "$status" -eq 1 ]
-    contains "$stderr" '--static-analysis must be sonarcloud or sonarqube'
+    contains "$stderr" '--static-analysis must be sonarcloud, sonarqube or none'
     run --separate-stderr env PATH="$STUB_BIN:$PATH" bash "$s" --static-analysis sonarcloud
     [ "$status" -eq 1 ]
-    contains "$stderr" '--vulnerabilities must be snyk or trivy'
+    contains "$stderr" '--vulnerabilities must be snyk, trivy or none'
     run --separate-stderr env PATH="$STUB_BIN:$PATH" bash "$s" \
       --static-analysis sonarcloud --vulnerabilities grype
     [ "$status" -eq 1 ]
-    contains "$stderr" '--vulnerabilities must be snyk or trivy'
+    contains "$stderr" '--vulnerabilities must be snyk, trivy or none'
     run --separate-stderr env PATH="$STUB_BIN:$PATH" bash "$s" \
       --static-analysis public --vulnerabilities snyk
     [ "$status" -eq 1 ]
-    contains "$stderr" '--static-analysis must be sonarcloud or sonarqube'
+    contains "$stderr" '--static-analysis must be sonarcloud, sonarqube or none'
     # near misses pin both regex anchors and the case, as --iac-only's kubernetesx/xkubernetes/Kubernetes do (tests/iac-only-enum.bats)
     local v
     for v in sonarcloudx xsonarqube SonarCloud; do
       run --separate-stderr env PATH="$STUB_BIN:$PATH" bash "$s" --static-analysis "$v" --vulnerabilities snyk
       [ "$status" -eq 1 ]
-      contains "$stderr" '--static-analysis must be sonarcloud or sonarqube'
+      contains "$stderr" '--static-analysis must be sonarcloud, sonarqube or none'
     done
     for v in snykx xtrivy Snyk; do
       run --separate-stderr env PATH="$STUB_BIN:$PATH" bash "$s" --static-analysis sonarcloud --vulnerabilities "$v"
       [ "$status" -eq 1 ]
-      contains "$stderr" '--vulnerabilities must be snyk or trivy'
+      contains "$stderr" '--vulnerabilities must be snyk, trivy or none'
     done
     # a flag with no value is named, never `$2: unbound variable`
     for v in --static-analysis --vulnerabilities; do
@@ -631,8 +631,8 @@ SWEEP_AWK='
   block="$(awk '/^### What if the rule is too strict\?/ { on = 1 } on { print } on && /^```/ { if (++n == 2) exit }' \
     "$REPO_ROOT/development/skills/bootstrap/templates/common/SETUP.md.tmpl")"
   contains "$block" 'branch-protection.sh'
-  contains "$block" '--static-analysis <sonarcloud|sonarqube>'
-  contains "$block" '--vulnerabilities <snyk|trivy>'
+  contains "$block" '--static-analysis <sonarcloud|sonarqube|none>'
+  contains "$block" '--vulnerabilities <snyk|trivy|none>'
   contains "$block" '--codeql-languages'
   contains "$block" '--has-ko'
   contains "$block" '--iac-only false'
@@ -652,4 +652,66 @@ SWEEP_AWK='
   printf '%s\n' '"<dir>/scripts/branch-protection.sh" \' '  --static-analysis sonarcloud \' '  --default-branch main' > "$f"
   run awk "$SWEEP_AWK" "$f"
   [ -z "$output" ]
+}
+
+# --- #2121: a `none` category contributes no context, secret or preflight tool ------------
+
+@test "#2121: static_analysis none requires no analyser context; vulnerabilities none requires no trivy-fs" {
+  protection_stubs
+  local b="test-and-coverage semgrep pre-commit license-fs image" sa v want
+  for sa in sonarcloud sonarqube none; do
+    for v in snyk trivy none; do
+      : > "$CURL_DATA"
+      run protect_row "$sa" "$v" none
+      [ "$status" -eq 0 ] || { echo "$sa/$v exited $status: $output"; return 1; }
+      want="$({
+        printf '%s\n' $b
+        [ "$sa" = none ] || echo "$sa"
+        [ "$v" != trivy ] || echo trivy-fs
+      } | LC_ALL=C sort)"
+      [ "$(put_contexts)" = "$want" ] ||
+        { echo "$sa/$v: got [$(put_contexts | paste -sd, -)] want [$(printf '%s\n' "$want" | paste -sd, -)]"; return 1; }
+    done
+  done
+  # the story's own case: private Go, static_analysis none, vulnerabilities trivy — no Sonar context
+  : > "$CURL_DATA"
+  run protect_row none trivy none
+  [ "$status" -eq 0 ]
+  run ! grep -qE '^sonar' <<< "$(put_contexts)"
+  grep -qx trivy-fs <<< "$(put_contexts)"
+  # all three none: only the stack's and the always-contexts
+  : > "$CURL_DATA"
+  run protect_row none none none
+  [ "$status" -eq 0 ]
+  [ "$(put_contexts)" = "$(printf '%s\n' $b | LC_ALL=C sort)" ]
+}
+
+@test "#2121: preflight asks sonar-scanner only for an analyser, and nothing for vulnerabilities none" {
+  preflight_stubs
+  local sa v checked
+  for sa in sonarcloud sonarqube none; do
+    for v in snyk trivy none; do
+      run --separate-stderr run_preflight --static-analysis "$sa" --vulnerabilities "$v" --has-dockerfile false
+      [ "$status" -eq 0 ] || { echo "$sa/$v: $stderr"; return 1; }
+      checked="$(checked_tools "$output")"
+      if [ "$sa" = none ]; then run ! grep -qx sonar-scanner <<< "$checked"; else grep -qx sonar-scanner <<< "$checked"; fi
+      if [ "$v" = snyk ]; then grep -qx snyk-cli <<< "$checked"; else run ! grep -qx snyk-cli <<< "$checked"; fi
+      if [ "$v" = trivy ]; then grep -qx trivy <<< "$checked"; else run ! grep -qx trivy <<< "$checked"; fi
+      # the always-set is still checked
+      grep -qx semgrep <<< "$checked"
+    done
+  done
+  # all three none and no Dockerfile: no Docker-daemon check either
+  : > "$CALLS"
+  run --separate-stderr run_preflight --static-analysis none --vulnerabilities none --has-dockerfile false
+  [ "$status" -eq 0 ]
+  lacks "$output" 'Checking Docker'
+  [ ! -s "$CALLS" ]
+}
+
+@test "#2121: SKILL.md expects SONAR_TOKEN only for an analyser, and no secret for a none category" {
+  local joined
+  joined="$(tr -s '[:space:]' ' ' < "$SKILL")"
+  contains "$joined" '`SONAR_TOKEN` iff `static_analysis` is not `none`'
+  lacks "$joined" '`SONAR_TOKEN` always'
 }

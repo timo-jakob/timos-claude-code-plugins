@@ -347,8 +347,8 @@ job_body() { # <workflow> <job>
     contains "$stderr" "$flag is required"
     case "$flag" in
     --visibility) bad=internal set="public | private" ;;
-    --static-analysis) bad=sonarcube set="sonarcloud | sonarqube" ;;
-    --vulnerabilities) bad=snik set="snyk | trivy" ;;
+    --static-analysis) bad=sonarcube set="sonarcloud | sonarqube | none" ;;
+    --vulnerabilities) bad=snik set="snyk | trivy | none" ;;
     --code-scanning) bad=cdoeql set="codeql | none" ;;
     esac
     run --separate-stderr zsh "$sel" "${ok[@]}" "$flag" "$bad"
@@ -597,4 +597,448 @@ setup_parts() { # <vis> <sa> <v> <cs> -> "needle<TAB>0|1" lines
     run ! grep -nE '(until|once) \[?#1671' "$f"
   done
   run ! grep -qF "skips this step, and Step" "$skill"
+}
+
+# --- #2121: every tools: category accepts none --------------------------------------------
+
+# none rows: number visibility static_analysis vulnerabilities code_scanning, each with
+# its literal context set beyond B and its literal tool-scoped files
+NONE_ROWS=(
+  "n1 private none trivy none"
+  "n2 private sonarcloud none none"
+  "n3 public none snyk codeql"
+  "n4 public none none none"
+  "n5 private none none none"
+)
+none_contexts() { # <row> -> the extra contexts beyond B, one per line
+  case "$1" in
+  n1) echo trivy-fs ;;
+  n2) echo sonarcloud ;;
+  n3) echo "analyze (python)" ;;
+  n4 | n5) : ;;
+  esac
+}
+none_files() { # <row> -> the tool-scoped files, render-out relative
+  case "$1" in
+  n1 | n5) printf '%s\n' "$PRIW/quality-private.yml" "$PRIW/quality-private-noop.yml" ;;
+  n2) printf '%s\n' "$PRIW/quality-private.yml" "$PRIW/quality-private-noop.yml" public/sonar-project.properties ;;
+  n3) printf '%s\n' "$PUBW/quality-public.yml" "$PUBW/quality-public-noop.yml" "$PUBW/scorecard.yml" \
+    "$PUBW/codeql.yml" "$PUBW/codeql-noop.yml" public/.snyk ;;
+  n4) printf '%s\n' "$PUBW/quality-public.yml" "$PUBW/quality-public-noop.yml" "$PUBW/scorecard.yml" ;;
+  esac
+}
+none_row() { # <row> -> sets out vis sa v cs, rendering once per test
+  local r n
+  for r in "${NONE_ROWS[@]}"; do
+    read -r n vis sa v cs <<<"$r"
+    [ "$n" = "$1" ] && break
+  done
+  out="$BATS_TEST_TMPDIR/$1"
+  [ -d "$out" ] || render_row "$out" python true "$vis" "$sa" "$v" "$cs" "${COMMON[@]}"
+}
+none_render_setup() {
+  TEMPLATES="$REPO_ROOT/development/skills/bootstrap/templates"
+  RENDER="$REPO_ROOT/development/skills/bootstrap/scripts/render.zsh"
+  SEL="$REPO_ROOT/development/skills/bootstrap/scripts/toolchain-templates.zsh"
+}
+
+@test "toolchain render: #2121 each none row renders exactly its tool-scoped files; trivy.yaml stays common" {
+  none_render_setup
+  local r n actual
+  for r in "${NONE_ROWS[@]}"; do
+    read -r n _ <<<"$r"
+    none_row "$n"
+    actual="$(cd "$out" && find . -type f ! -path './common/*' | sed 's#^\./##' | LC_ALL=C sort)"
+    [ "$actual" = "$(none_files "$n" | LC_ALL=C sort)" ] || { echo "$n: got [$actual]"; return 1; }
+    # no Sonar config, no SonarQube or runner infra for static_analysis none
+    if [ "$sa" = none ]; then
+      [ -z "$(cd "$out" && find . -name 'sonar-project.properties' -o -path '*infra*')" ]
+    fi
+    # trivy.yaml drives the license/secret/misconfig scanners too: rendered for every row
+    [ -f "$out/common/trivy.yaml" ]
+    [ -f "$out/common/SETUP.md" ]
+  done
+}
+
+@test "toolchain render: #2121 each none row's PR jobs and noop report exactly B plus its tools' contexts" {
+  none_render_setup
+  local r n want actual
+  for r in "${NONE_ROWS[@]}"; do
+    read -r n _ <<<"$r"
+    none_row "$n"
+    want="$({ printf '%s\n' "$B" | tr '|' '\n'; none_contexts "$n"; } | awk 'NF' | LC_ALL=C sort)"
+    actual="$({
+      reported "$(quality "$out" "$vis")"
+      [ ! -f "$out/$PUBW/codeql.yml" ] || reported "$out/$PUBW/codeql.yml"
+    } | LC_ALL=C sort)"
+    [ "$actual" = "$want" ] || { echo "$n: got [$actual] want [$want]"; return 1; }
+    [ "$(reported "$(quality "$out" "$vis" noop)")" = "$(printf '%s\n' "$want" | grep -v '^analyze (')" ] ||
+      { echo "$n noop: $(reported "$(quality "$out" "$vis" noop)")"; return 1; }
+    # SETUP.md §4 lists the same set plus no-cluster-deploy
+    [ "$(awk '/Require status checks to pass before merging/{on=1; next}
+      /\*\*`no-cluster-deploy` \(§3h\)\*\*/{on=0}
+      on && /^  - `[^`]*`$/ { sub(/^  - `/, ""); sub(/`$/, ""); print }' "$out/common/SETUP.md" | LC_ALL=C sort)" = \
+      "$(printf '%s\n' "$want" no-cluster-deploy | LC_ALL=C sort)" ] || { echo "$n §4 differs"; return 1; }
+    # a GitHub-hosted runner for every none row: none never asks for a self-hosted one
+    [ "$(yq -o=json '.jobs' "$(quality "$out" "$vis")" | jq -c '[.[]."runs-on"] | unique')" = '["ubuntu-latest"]' ]
+  done
+}
+
+@test "toolchain render: #2121 static_analysis none still runs semgrep on the hosted runner, and a trivy row still skips the local trivy-fs hook in CI" {
+  none_render_setup
+  local q
+  # n1: private, none/trivy/none — the motivating repo
+  none_row n1
+  q="$(quality "$out" private)"
+  [ "$(yq -r '.jobs.semgrep.container.image' "$q")" = "returntocorp/semgrep:1.163.0" ]
+  [ "$(yq -r '.jobs.semgrep.steps[-1].run' "$q")" = "semgrep ci --config=auto" ]
+  [ "$(yq -r '.jobs["pre-commit"].steps[-1].env.SKIP' "$q")" = trivy-fs ]
+  # it does get trivy-fs, the image job's Trivy scan and the pre-commit trivy-fs hook
+  yq -e '.jobs["trivy-fs"]' "$q" >/dev/null
+  yq -o=json '.jobs.image.steps' "$q" | jq -e 'map(.name // "") | index("Trivy image vulnerability scan")' >/dev/null
+  [ "$(yq -o=json '.repos' "$out/common/.pre-commit-config.yaml" | jq -r '.[].hooks[].id' | grep -cx trivy-fs)" -eq 1 ]
+  # and no Sonar job, secret or token anywhere in its workflows (comments aside: the
+  # header describes every analyser the template can compose)
+  run ! grep -qiE 'sonar' < <(cat "$q" "$(quality "$out" private noop)" | grep -v '^[[:space:]]*#')
+  # the hosted semgrep matches the sonarcloud-hosted private row's, so none changes nothing but the analyser
+  [ "$(yq -o=json -I=0 '.jobs.semgrep' "$q")" = "$(yq -o=json -I=0 '.jobs.semgrep' "$BATS_FILE_TMPDIR/row7/$PRIW/quality-private.yml")" ]
+}
+
+@test "toolchain render: #2121 vulnerabilities none renders nothing TRIVY or SNYK gate; the image job still builds and decides" {
+  none_render_setup
+  local n q
+  for n in n2 n4 n5; do
+    none_row "$n"
+    q="$(quality "$out" "$vis")"
+    run ! yq -e '.jobs["trivy-fs"]' "$q"
+    run ! grep -qE 'Trivy image vulnerability scan|Snyk container scan|snyk container test' < <(grep -v '^[[:space:]]*#' "$q")
+    [ "$(yq -o=json '.repos' "$out/common/.pre-commit-config.yaml" | jq -r '.[].hooks[].id' | grep -cx trivy-fs || true)" -eq 0 ]
+    run ! grep -qF 'brew install trivy' "$out/common/SETUP.md"
+    run ! grep -qE '^## 2b\. Snyk setup' "$out/common/SETUP.md"
+    [ ! -e "$out/public/.snyk" ]
+    # the image job still decides on container files — the regex watches no scanner policy file
+    yq -r '.jobs.image.steps[] | select(.id == "scan_decision") | .run' "$q" | grep -qxF \
+      "container_re='(^|/)Dockerfile|\.dockerfile\$|(^|/)\.dockerignore\$|(^|/)(docker-compose|compose)\.ya?ml\$'"
+    [ -f "$out/common/trivy.yaml" ]
+  done
+  # n2 (sonarcloud + none) still lists SONAR_TOKEN in its secrets table, without SNYK_TOKEN
+  none_row n2
+  grep -qF '| `SONAR_TOKEN` | Yes | from step 2.1 |' "$out/common/SETUP.md"
+  run ! grep -qF 'SNYK_TOKEN' "$out/common/SETUP.md"
+}
+
+@test "toolchain render: #2121 all three none still renders the quality workflow and noop with the non-toolchain jobs" {
+  none_render_setup
+  local n q
+  for n in n4 n5; do
+    none_row "$n"
+    q="$(quality "$out" "$vis")"
+    [ "$(yq -r '.jobs | keys | .[]' "$q" | LC_ALL=C sort | paste -sd' ' -)" = \
+      "image license-fs pre-commit push-and-sign semgrep test-and-coverage" ]
+    [ "$(yq -r '.jobs | keys | .[]' "$(quality "$out" "$vis" noop)" | LC_ALL=C sort | paste -sd' ' -)" = \
+      "image license-fs pre-commit semgrep test-and-coverage" ]
+    run ! grep -qiE 'sonar|snyk|codeql' < <(grep -v '^[[:space:]]*#' "$q")
+    # SETUP.md: no Sonar, Snyk or SonarQube section
+    run ! grep -qE '^## (2|2b|3)\. ' "$out/common/SETUP.md"
+  done
+  [ ! -e "$out/$PUBW/codeql.yml" ]
+}
+
+# the categories a SETUP.md's DEFERRED-TOOLS block lists, one per line
+deferred_listed() { # <SETUP.md>
+  sed -n '/<!-- --- DEFERRED-TOOLS-START --- -->/,/<!-- --- DEFERRED-TOOLS-END --- -->/p' "$1" |
+    sed -n 's/^- \*\*[^*]*\*\* (`tools\.\([a-z_]*\): none`).*/\1/p'
+}
+
+@test "toolchain render: #2121 SETUP.md's DEFERRED-TOOLS block lists exactly the none categories, each with the enable instruction" {
+  none_render_setup
+  local r n want s c
+  for r in "${NONE_ROWS[@]}"; do
+    read -r n vis sa v cs <<<"$r"
+    none_row "$n"
+    s="$out/common/SETUP.md"
+    want="$(for c in static_analysis:$sa vulnerabilities:$v code_scanning:$cs; do
+      if [ "${c#*:}" = none ]; then echo "${c%%:*}"; fi
+    done)"
+    [ "$(deferred_listed "$s")" = "$want" ] || { echo "$n: [$(deferred_listed "$s")] want [$want]"; return 1; }
+    [ "$(grep -c '<!-- --- DEFERRED-TOOLS-START --- -->' "$s")" -eq 1 ]
+    [ "$(grep -c '<!-- --- DEFERRED-TOOLS-END --- -->' "$s")" -eq 1 ]
+    # each entry carries the enable instruction: set the value, re-run bootstrap
+    for c in $want; do
+      sed -n "/(\`tools\.$c: none\`)/,/<!-- --- DEFERRED_/p" "$s" | tr -s '[:space:]' ' ' |
+        grep -qF "set \`tools.$c\` in \`.maintenance.yml\` to" || { echo "$n: $c has no instruction"; return 1; }
+      sed -n "/(\`tools\.$c: none\`)/,/<!-- --- DEFERRED_/p" "$s" | tr -s '[:space:]' ' ' |
+        grep -qF 're-run `/development:bootstrap`' || { echo "$n: $c has no re-run"; return 1; }
+    done
+  done
+  # omitted when nothing is deferred: row 1 (public sonarcloud/snyk/codeql)
+  run ! grep -qE 'DEFERRED|## Deferred tools' "$BATS_FILE_TMPDIR/row1/common/SETUP.md"
+  # and a private default row lists its code_scanning none, nothing else
+  [ "$(deferred_listed "$BATS_FILE_TMPDIR/row5/common/SETUP.md")" = code_scanning ]
+}
+
+# --- #2121: the none -> tool re-run (refresh-toolchain-files.zsh) --------------------------
+
+refresh_setup() {
+  none_render_setup
+  REFRESH="$REPO_ROOT/development/skills/bootstrap/scripts/refresh-toolchain-files.zsh"
+  STAMP="$REPO_ROOT/development/skills/bootstrap/scripts/stamp-marker.zsh"
+  FLAGS=(--project-name demo --project-slug acme/demo --project-key acme_demo --org-key acme
+    --languages go --docker true --security-contact-email "")
+}
+
+# a bootstrapped repo at <dir>, as Step 3 + 3.6 leave it, for one toolchain
+bootstrapped_repo() { # <dir> <vis> <sa> <v> <cs>
+  local d="$1" vis="$2" sa="$3" v="$4" cs="$5" f t
+  local -a sel=()
+  sel_out="$(zsh "$SEL" --visibility "$vis" --static-analysis "$sa" --vulnerabilities "$v" --code-scanning "$cs")"
+  while IFS= read -r t; do sel+=("$t"); done <<<"$sel_out"
+  zsh "$RENDER" --templates "$TEMPLATES" --out "$d.r" "${FLAGS[@]}" --visibility "$vis" --primary go \
+    --approval human --static-analysis "$sa" --vulnerabilities "$v" --code-scanning "$cs" \
+    "${sel[@]}" common/SETUP.md.tmpl common/.maintenance.yml.tmpl common/.pre-commit-config.yaml.tmpl >/dev/null
+  mkdir -p "$d"
+  # deploy at each file's tree-relative path, as Step 3 does
+  (cd "$d.r" && for t in public private common; do [ -d "$t" ] && (cd "$t" && find . -type f) | while IFS= read -r f; do
+    mkdir -p "$d/$(dirname "$f")" && cp "$t/$f" "$d/$f"; done; done)
+  for f in quality-$vis quality-$vis-noop; do
+    zsh "$STAMP" --repo "$d" --target ".github/workflows/$f.yml" --template "$vis/.github/workflows/$f.yml.tmpl"
+  done
+}
+
+@test "toolchain render: #2121 flipping static_analysis none -> sonarqube changes only the (a)-(e) allow-list, plus the human's own edit" {
+  refresh_setup
+  local repo="$BATS_TEST_TMPDIR/repo" fresh="$BATS_TEST_TMPDIR/fresh" q
+  bootstrapped_repo "$repo" private none trivy none
+  # the user's own SETUP.md edit, outside every tool block, must survive
+  printf '\n## Team notes\n\nAsk the platform team before changing the runner.\n' >> "$repo/SETUP.md"
+  cp -R "$repo" "$BATS_TEST_TMPDIR/before"
+  # the human's one-line edit
+  sed -i.bak 's/^  static_analysis: none$/  static_analysis: sonarqube/' "$repo/.maintenance.yml" && rm "$repo/.maintenance.yml.bak"
+  run --separate-stderr zsh "$REFRESH" --repo "$repo" --visibility private \
+    --static-analysis sonarqube --vulnerabilities trivy --code-scanning none -- "${FLAGS[@]}"
+  [ "$status" -eq 0 ] || { echo "$stderr"; return 1; }
+  [ "$(printf '%s\n' "$output" | jq -r '"\(.file) \(.status) \(.base)"')" = "$(printf '%s\n' \
+    '.github/workflows/quality-private.yml refreshed none/trivy/none' \
+    '.github/workflows/quality-private-noop.yml refreshed none/trivy/none' \
+    '.pre-commit-config.yaml current sonarcloud/trivy/none' \
+    'SETUP.md refreshed none/trivy/none')" ]
+  # (c) the new files are exactly the four the selector adds for sonarqube
+  [ "$(comm -13 <(zsh "$SEL" --visibility private --static-analysis none --vulnerabilities trivy --code-scanning none) \
+    <(zsh "$SEL" --visibility private --static-analysis sonarqube --vulnerabilities trivy --code-scanning none) | paste -sd' ' -)" = \
+    "private/infra/github-runner/README.md private/infra/sonarqube/README.md private/infra/sonarqube/docker-compose.yml.tmpl private/sonar-project.properties.tmpl" ]
+  # every changed file is one of the allow-list's — no other file moved
+  [ "$(diff -rq "$BATS_TEST_TMPDIR/before" "$repo" | sed "s#$BATS_TEST_TMPDIR/before/##; s#$repo/##" |
+    awk '{print $2}' | LC_ALL=C sort | paste -sd' ' -)" = \
+    ".github/workflows/quality-private-noop.yml .github/workflows/quality-private.yml .maintenance.yml SETUP.md" ]
+  # (a)+(b): each workflow is now exactly a fresh sonarqube render, marker kept byte for byte —
+  # so its delta is the toolchain's and nothing else
+  bootstrapped_repo "$fresh" private sonarqube trivy none
+  for q in quality-private quality-private-noop; do
+    [ "$(sed -n 1,2p "$repo/.github/workflows/$q.yml")" = "$(sed -n 1,2p "$BATS_TEST_TMPDIR/before/.github/workflows/$q.yml")" ]
+    cmp <(sed 1,2d "$repo/.github/workflows/$q.yml") <(sed 1,2d "$fresh/.github/workflows/$q.yml")
+  done
+  q="$repo/.github/workflows/quality-private.yml"
+  [ "$(comm -13 <(yq -r '.jobs | keys | .[]' "$BATS_TEST_TMPDIR/before/.github/workflows/quality-private.yml" | LC_ALL=C sort) \
+    <(yq -r '.jobs | keys | .[]' "$q" | LC_ALL=C sort))" = sonarqube ]
+  [ "$(yq -o=json '.jobs' "$q" | jq -c '[.[]."runs-on"] | unique')" = '["self-hosted"]' ]
+  yq -e '.jobs.sonarqube' "$repo/.github/workflows/quality-private-noop.yml" >/dev/null
+  # (d) SETUP.md gains the SonarQube and self-hosted-runner sections, and static_analysis
+  # leaves the deferred block; the user's section is still there
+  grep -q '^## 3\. SonarQube setup (self-hosted)' "$repo/SETUP.md"
+  grep -q '^### 3\.3 Register a self-hosted runner' "$repo/SETUP.md"
+  [ "$(deferred_listed "$repo/SETUP.md")" = code_scanning ]
+  grep -qx 'Ask the platform team before changing the runner.' "$repo/SETUP.md"
+  # SETUP.md minus the user's section is a fresh render's
+  cmp <(sed '/^## Team notes$/,$d' "$repo/SETUP.md" | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}') \
+    <(sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$fresh/SETUP.md")
+  # (e) is branch protection's: its sonarqube context is pinned in bootstrap-toolchain-protection.bats
+  # the human's edit is the only .maintenance.yml change
+  [ "$(diff "$BATS_TEST_TMPDIR/before/.maintenance.yml" "$repo/.maintenance.yml" | grep -c '^[<>]')" -eq 2 ]
+}
+
+@test "toolchain render: #2121 refresh is idempotent — a second run reports current and writes nothing" {
+  refresh_setup
+  local repo="$BATS_TEST_TMPDIR/repo"
+  bootstrapped_repo "$repo" private none trivy none
+  run zsh "$REFRESH" --repo "$repo" --visibility private --static-analysis sonarcloud \
+    --vulnerabilities trivy --code-scanning none -- "${FLAGS[@]}"
+  [ "$status" -eq 0 ]
+  cp -R "$repo" "$BATS_TEST_TMPDIR/after-first"
+  run --separate-stderr zsh "$REFRESH" --repo "$repo" --visibility private --static-analysis sonarcloud \
+    --vulnerabilities trivy --code-scanning none -- "${FLAGS[@]}"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | jq -r .status | sort -u)" = current ]
+  diff -r "$BATS_TEST_TMPDIR/after-first" "$repo"
+}
+
+@test "toolchain render: #2121 refresh rewrites a hand-edited DEFERRED-TOOLS block, and --dry-run writes nothing" {
+  refresh_setup
+  local repo="$BATS_TEST_TMPDIR/repo"
+  bootstrapped_repo "$repo" private none trivy none
+  cp "$repo/SETUP.md" "$BATS_TEST_TMPDIR/pristine"
+  # a stale block: someone deleted the static_analysis entry by hand
+  awk '/DEFERRED_STATIC_ANALYSIS-START/{s=1} !s{print} /DEFERRED_STATIC_ANALYSIS-END/{s=0}' \
+    "$BATS_TEST_TMPDIR/pristine" > "$repo/SETUP.md"
+  [ "$(deferred_listed "$repo/SETUP.md")" = code_scanning ]
+  cp "$repo/SETUP.md" "$BATS_TEST_TMPDIR/stale"
+  run zsh "$REFRESH" --repo "$repo" --visibility private --static-analysis none \
+    --vulnerabilities trivy --code-scanning none --dry-run -- "${FLAGS[@]}"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | jq -r 'select(.file == "SETUP.md") | .status')" = refreshed ]
+  cmp "$repo/SETUP.md" "$BATS_TEST_TMPDIR/stale"
+  run zsh "$REFRESH" --repo "$repo" --visibility private --static-analysis none \
+    --vulnerabilities trivy --code-scanning none -- "${FLAGS[@]}"
+  [ "$status" -eq 0 ]
+  cmp "$repo/SETUP.md" "$BATS_TEST_TMPDIR/pristine"
+  # a removed block is re-inserted after the line it follows in the render
+  awk '/DEFERRED-TOOLS-START/{s=1} !s{print} /DEFERRED-TOOLS-END/{s=0}' "$BATS_TEST_TMPDIR/pristine" > "$repo/SETUP.md"
+  run zsh "$REFRESH" --repo "$repo" --visibility private --static-analysis none \
+    --vulnerabilities trivy --code-scanning none -- "${FLAGS[@]}"
+  [ "$status" -eq 0 ]
+  cmp "$repo/SETUP.md" "$BATS_TEST_TMPDIR/pristine"
+}
+
+@test "toolchain render: #2121 refresh leaves a conflicting file untouched and exits 3; an absent file is reported, not created" {
+  refresh_setup
+  local repo="$BATS_TEST_TMPDIR/repo" q
+  bootstrapped_repo "$repo" private none trivy none
+  q="$repo/.github/workflows/quality-private.yml"
+  # a user edit on the very line the flip must change: the runner of the first job
+  awk '!done && /runs-on: ubuntu-latest/ { sub(/ubuntu-latest/, "ubuntu-24.04"); done = 1 } { print }' "$q" > "$q.new"
+  mv "$q.new" "$q"
+  cp "$q" "$BATS_TEST_TMPDIR/edited"
+  rm "$repo/.github/workflows/quality-private-noop.yml"
+  run --separate-stderr zsh "$REFRESH" --repo "$repo" --visibility private --static-analysis sonarqube \
+    --vulnerabilities trivy --code-scanning none -- "${FLAGS[@]}"
+  [ "$status" -eq 3 ]
+  [ "$(printf '%s\n' "$output" | jq -r 'select(.file == ".github/workflows/quality-private.yml") | .status')" = conflict ]
+  [ "$(printf '%s\n' "$output" | jq -r 'select(.file == ".github/workflows/quality-private-noop.yml") | .status')" = absent ]
+  cmp "$q" "$BATS_TEST_TMPDIR/edited"
+  [ ! -e "$repo/.github/workflows/quality-private-noop.yml" ]
+}
+
+@test "toolchain render: #2121 refresh leaves a file equidistant from two different renders untouched as ambiguous" {
+  refresh_setup
+  local repo="$BATS_TEST_TMPDIR/repo" tv="$BATS_TEST_TMPDIR/trivy" n t hunk at from to half
+  bootstrapped_repo "$repo" private sonarcloud none none
+  bootstrapped_repo "$tv" private sonarcloud trivy none
+  n="$repo/.github/workflows/quality-private-noop.yml" t="$tv/.github/workflows/quality-private-noop.yml"
+  # trivy's noop is the none one plus a single inserted block; keep half of it
+  hunk="$(diff "$n" "$t" | head -1)"
+  grep -qxE '[0-9]+a[0-9]+,[0-9]+' <<< "$hunk"
+  at="${hunk%%a*}" to="${hunk#*,}" from="${hunk#*a}"
+  from="${from%%,*}"
+  [ $(( (to - from + 1) % 2 )) -eq 0 ]
+  half=$(( (to - from + 1) / 2 ))
+  { sed -n "1,${at}p" "$n"; sed -n "${from},$((from + half - 1))p" "$t"; sed -n "$((at + 1)),\$p" "$n"; } > "$n.new"
+  mv "$n.new" "$n"
+  cp "$n" "$BATS_TEST_TMPDIR/tied"
+  run --separate-stderr zsh "$REFRESH" --repo "$repo" --visibility private --static-analysis sonarcloud \
+    --vulnerabilities trivy --code-scanning none -- "${FLAGS[@]}"
+  [ "$status" -eq 3 ]
+  [ "$(printf '%s\n' "$output" | jq -c 'select(.file == ".github/workflows/quality-private-noop.yml") | {status, base}')" = \
+    '{"status":"ambiguous","base":null}' ]
+  [ "$(printf '%s\n' "$output" | jq -rs 'map("\(.file) \(.status)") | sort | join(", ")')" = \
+    '.github/workflows/quality-private-noop.yml ambiguous, .github/workflows/quality-private.yml refreshed, .pre-commit-config.yaml refreshed, SETUP.md refreshed' ]
+  cmp "$n" "$BATS_TEST_TMPDIR/tied"
+}
+
+@test "toolchain render: #2121 refresh on a public repo flips static_analysis none -> sonarcloud" {
+  refresh_setup
+  local repo="$BATS_TEST_TMPDIR/repo" fresh="$BATS_TEST_TMPDIR/fresh"
+  bootstrapped_repo "$repo" public none snyk codeql
+  run --separate-stderr zsh "$REFRESH" --repo "$repo" --visibility public --static-analysis sonarcloud \
+    --vulnerabilities snyk --code-scanning codeql -- "${FLAGS[@]}"
+  [ "$status" -eq 0 ] || { echo "$stderr"; return 1; }
+  [ "$(printf '%s\n' "$output" | jq -r '"\(.file) \(.status) \(.base)"')" = "$(printf '%s\n' \
+    '.github/workflows/quality-public.yml refreshed none/snyk/codeql' \
+    '.github/workflows/quality-public-noop.yml refreshed none/snyk/codeql' \
+    '.pre-commit-config.yaml current sonarcloud/snyk/codeql' \
+    'SETUP.md refreshed none/snyk/codeql')" ]
+  bootstrapped_repo "$fresh" public sonarcloud snyk codeql
+  cmp <(sed 1,2d "$repo/.github/workflows/quality-public.yml") <(sed 1,2d "$fresh/.github/workflows/quality-public.yml")
+  run ! grep -qF 'DEFERRED-TOOLS-START' "$repo/SETUP.md"
+  cmp "$repo/SETUP.md" "$fresh/SETUP.md"
+}
+
+@test "toolchain render: #2121 refresh usage errors exit 2 with nothing on stdout" {
+  refresh_setup
+  local repo="$BATS_TEST_TMPDIR/repo"
+  mkdir -p "$repo"
+  local -a ok=(--repo "$repo" --visibility private --static-analysis none --vulnerabilities trivy --code-scanning none)
+  run --separate-stderr zsh "$REFRESH" "${ok[@]:2}"
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  contains "$stderr" "--repo is required"
+  run --separate-stderr zsh "$REFRESH" "${ok[@]}" --static-analysis sonarcube
+  [ "$status" -eq 2 ]
+  contains "$stderr" "--static-analysis must be one of sonarcloud | sonarqube | none"
+  run --separate-stderr zsh "$REFRESH" --repo "$repo" --visibility public --static-analysis sonarqube \
+    --vulnerabilities trivy --code-scanning none
+  [ "$status" -eq 2 ]
+  contains "$stderr" "a combination resolve-tools.zsh rejects"
+  run --separate-stderr zsh "$REFRESH" "${ok[@]}" -- --out /tmp/x
+  [ "$status" -eq 2 ]
+  contains "$stderr" "--out is set by this script"
+  run --separate-stderr zsh "$REFRESH" "${ok[@]}" --frobnicate
+  [ "$status" -eq 2 ]
+  contains "$stderr" "unknown argument: --frobnicate"
+}
+
+@test "toolchain render: #2121 SKILL.md and ARCHITECTURE.md state that every tools: category accepts none" {
+  local skill="$REPO_ROOT/development/skills/bootstrap/SKILL.md" arch="$REPO_ROOT/ARCHITECTURE.md"
+  tr -s '[:space:]' ' ' < "$skill" | grep -qF '**Every `tools:` category accepts `none`** (#2121), and a category added later ships with it too'
+  tr -s '[:space:]' ' ' < "$arch" | grep -qF 'Every `tools:` category accepts `none` (#2121)'
+  # the refresh is wired into State D, and the Q3a picker offers none last
+  grep -qF 'refresh-toolchain-files.zsh' "$skill"
+  grep -qF '*none (add later)* is always the **last** option on its tab' "$skill"
+}
+
+@test "toolchain render: #2121 SKILL.md pins the none prose at each site that acts on it" {
+  local joined
+  joined="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/development/skills/bootstrap/SKILL.md")"
+  local -a needles=(
+    # Q3a picker
+    '**Analysis** (`sonarcloud` \| `sonarqube` \| *none (add later)*), **Vulns** (`snyk` \| `trivy` \| *none (add later)*), **Code scan** (`codeql` \| *none (add later)*)'
+    'A tab offers only the values this visibility allows: on a public repo Analysis offers `sonarcloud` and *none (add later)*.'
+    # Resolve the toolchain
+    'A `none` category renders no job or noop, no config file of its own, no setup section, secret, preflight requirement or required context;'
+    '`none` is never a default except private `code_scanning`'"'"'s.'
+    # Step 2 plan
+    'A deferred category shows `none` like any other value — for example `static analysis none (recorded)` (#2121) — and with `static_analysis: none` the `Sonar gate:` line is omitted'
+    # Block stripping, §3b, §3c
+    'A category resolved to `none` keeps **none** of its tool blocks (#2121): no job or noop, no config file, no setup section.'
+    '| `none` (any category, #2121) | no file of its own — the quality workflow and its noop still render, all three `none` included |'
+    'the analyser'"'"'s job — `sonarcloud` or `sonarqube` — and its noop; none for `static_analysis: none`;'
+    'so `snyk` adds none, and neither does `none`;'
+    'no scan step for `vulnerabilities: none` (the job still builds the image and reports `image`);'
+    # State D: secrets, the refresh, and step 5's hand-off to it
+    '`SONAR_TOKEN` iff `static_analysis` is not `none`, `SONAR_HOST_URL` iff `static_analysis` is `sonarqube`, `SNYK_TOKEN` iff `vulnerabilities` is `snyk` — a `none` category expects no secret (#2121).'
+    'and the drift detector never sees a toolchain change, since it compares template hashes.'
+    'Its `refreshed` rows join the Step 2 plan as *Will update (toolchain changed)*; on confirmation, run it again without `--dry-run`.'
+    'It also rewrites `SETUP.md`'"'"'s bootstrap-owned `DEFERRED-TOOLS` block on every run.'
+    '`conflict` or `ambiguous` (exit 3) → that file was left untouched, so hand it to the `bootstrap-idempotency-reviewer`'
+    '**When the required contexts changed** — a quality workflow refreshed (a tool added or removed), a `conflict` or `ambiguous` one the reviewer'"'"'s approved overwrite changed, or a gap-fill render of `codeql.yml` — re-apply Step 4b'"'"'s branch protection with its full invocation for the new toolchain, which adds the new tool'"'"'s context (`sonarqube`, say) and drops a removed one'"'"'s, and run the Step 4.5 setup script whose trigger the new toolchain meets. A refresh that only rewrote the deferred block needs neither.'
+    'On a Swift repo, a refreshed quality workflow'"'"'s new analyser job still reads `needs: test-and-coverage`, so apply *Swift job wiring* to it.'
+    'A tool changed to `none` leaves only these four files; its own files (`codeql.yml`, `sonar-project.properties`, `.snyk`) stay — removing them is #2126'"'"'s scope.'
+    'So off the §3l path, once the gate above resolved, run the refresh — in whichever of steps 3, 4 and 5 this run reaches first, and once per run:'
+    '--code-scanning <v> --dry-run -- <the value flags this run renders with>'
+    'It never overwrites a file wholesale: it three-way merges the toolchain delta into the file against the closest render, so only the per-tool blocks the change touches move, a user edit outside them stays, and the provenance marker is kept byte-for-byte.'
+    'they do NOT touch files in the working tree — except the toolchain refresh above, whose `refreshed` files are a committable delta,'
+    'and each of these writes rides Step 4d/4e as the bot PR.'
+    'Per row: `refreshed` → done (a committable delta); `current` → nothing to do; `absent` → the gap-fill above renders it;'
+    'Exit 1 → relay stderr and render nothing more; exit 2 → your own invocation, fix it and re-run.'
+    'never re-derived from visibility; then run step 4'"'"'s *toolchain refresh* (#2121) before any `branch-protection.sh` call, unless this run already did.'
+    'On an exit 0, run step 4'"'"'s *toolchain refresh* (#2121) first, unless this run already did — a refresh whose dry run reported a `refreshed`, `conflict` or `ambiguous` row is a committable delta, which the no-drift stop below never swallows.'
+    'So does a pending toolchain refresh: when its dry run reported any `refreshed`, `conflict` or `ambiguous` row, do not stop — continue to the Step 2 plan, and on confirmation its run without `--dry-run` is the delta.)'
+    # Step 4b, 4.5, Step 5
+    'the `static_analysis` job unless it is `none` (#2121)'
+    'per resolved tool: `sonar-scanner` for either analyser, `snyk` for `snyk`, `trivy` for `trivy` — whatever the visibility or Dockerfile; a `none` category requires nothing, #2121'
+    'A `none` category meets no trigger, so it runs no setup script (#2121): a private repo with `static_analysis: none` and `vulnerabilities: trivy` runs `enable-github-security.sh` alone.'
+    'A `none` category contributes **no** item (#2121) — nothing is outstanding for a deferred tool;'
+  )
+  local n
+  for n in "${needles[@]}"; do
+    contains "$joined" "$n" || { echo "missing: $n"; return 1; }
+  done
 }

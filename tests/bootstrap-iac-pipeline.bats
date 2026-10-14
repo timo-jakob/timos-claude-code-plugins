@@ -1949,7 +1949,7 @@ step4a_iac() {
   contains "$statd" 'the workflow **does not run on every pull request**'
   contains "$statd" 'the script **could not read** the file'
   contains "$statd" 'Handle all four alike.'
-  contains "$skill" 'the one exception being the reviewed, marker-carrying `kubernetes-ci.yml` refresh above'
+  contains "$skill" 'and the reviewed, marker-carrying `kubernetes-ci.yml` refresh above'
   contains "$step4b" 'the message'"'"'s refresh advice does **not** apply in a full run'
   contains "$step4b" 'One FATAL refusal, on the §3l IaC path only (#1606).'
   contains "$step4b" 'list the unapplied rule **and** merge settings as an outstanding Step 5 item'

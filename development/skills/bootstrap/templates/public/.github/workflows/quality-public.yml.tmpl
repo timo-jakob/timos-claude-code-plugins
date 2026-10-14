@@ -296,6 +296,7 @@ jobs:
           if-no-files-found: ignore
   # --- SWIFT-END ---------------------------------------------------------------
 
+  # --- SONARCLOUD-START ------------------------------------------------------
   # --- SonarCloud -----------------------------------------------------------
   sonarcloud:
     needs: test-and-coverage
@@ -319,6 +320,7 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: https://sonarcloud.io
+  # --- SONARCLOUD-END --------------------------------------------------------
 
   # --- TRIVY-START -----------------------------------------------------------
   # Trivy filesystem scan — catches vulnerable 3rd-party deps in lockfiles.
@@ -454,6 +456,9 @@ jobs:
           # --- TRIVY-START ---
           container_re='(^|/)Dockerfile|\.dockerfile$|(^|/)\.dockerignore$|(^|/)(docker-compose|compose)\.ya?ml$|(^|/)trivy\.ya?ml$'
           # --- TRIVY-END ---
+          # --- DEFERRED_VULNERABILITIES-START ---
+          container_re='(^|/)Dockerfile|\.dockerfile$|(^|/)\.dockerignore$|(^|/)(docker-compose|compose)\.ya?ml$'
+          # --- DEFERRED_VULNERABILITIES-END ---
           if ! changed=$(git diff --name-only "$BASE_SHA" HEAD 2>/dev/null); then
             echo "do_scan=true" >> "$GITHUB_OUTPUT"
             echo "::warning::Could not compute the PR diff against $BASE_SHA — scanning to be safe."

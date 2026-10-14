@@ -258,13 +258,54 @@ EOF
   grep -qx 'a: 1' "$OUT/SNYK"
 }
 
+@test "render: #2121 HOSTED and the DEFERRED_* tags are kept iff their condition holds, and all strip with no toolchain flag" {
+  local -a tags=(HOSTED DEFERRED_STATIC_ANALYSIS DEFERRED_VULNERABILITIES DEFERRED_CODE_SCANNING DEFERRED_TOOLS)
+  local tag
+  for tag in "${tags[@]}"; do
+    printf 'a: 1\n# --- %s-START ---\nkept: %s\n# --- %s-END ---\n' "$tag" "$tag" "$tag" > "$T/$tag.tmpl"
+  done
+  local -a files=("${tags[@]/%/.tmpl}")
+  kept() {
+    local k="" t
+    for t in "${tags[@]}"; do
+      if grep -q "kept: $t" "$OUT/$t"; then k="$k $t"; fi
+    done
+    printf '%s' "${k# }"
+  }
+  # nothing deferred, GitHub-hosted
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --visibility public \
+    --static-analysis sonarcloud --vulnerabilities snyk --code-scanning codeql "${files[@]}"
+  [ "$status" -eq 0 ]
+  [ "$(kept)" = "HOSTED" ]
+  # sonarqube is the one analyser that is not HOSTED; code_scanning none is deferred
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --visibility private \
+    --static-analysis sonarqube --vulnerabilities trivy --code-scanning none "${files[@]}"
+  [ "$status" -eq 0 ]
+  [ "$(kept)" = "DEFERRED_CODE_SCANNING DEFERRED_TOOLS" ]
+  # each category alone
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --visibility public \
+    --static-analysis none --vulnerabilities snyk --code-scanning codeql "${files[@]}"
+  [ "$(kept)" = "HOSTED DEFERRED_STATIC_ANALYSIS DEFERRED_TOOLS" ]
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --visibility public \
+    --static-analysis sonarcloud --vulnerabilities none --code-scanning codeql "${files[@]}"
+  [ "$(kept)" = "HOSTED DEFERRED_VULNERABILITIES DEFERRED_TOOLS" ]
+  # all three none
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --visibility private \
+    --static-analysis none --vulnerabilities none --code-scanning none "${files[@]}"
+  [ "$(kept)" = "HOSTED DEFERRED_STATIC_ANALYSIS DEFERRED_VULNERABILITIES DEFERRED_CODE_SCANNING DEFERRED_TOOLS" ]
+  # the §3l IaC path passes no toolchain: every one strips
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" "${files[@]}"
+  [ "$status" -eq 0 ]
+  [ "$(kept)" = "" ]
+}
+
 @test "render: #1670 a toolchain value outside its set, or a rejected combination, is a usage error" {
   printf 'x: 1\n' > "$T/x.tmpl"
   local flag bad want
   for flag in --static-analysis --vulnerabilities --code-scanning; do
     case "$flag" in
-    --static-analysis) bad=sonarcube want="sonarcloud | sonarqube" ;;
-    --vulnerabilities) bad=snik want="snyk | trivy" ;;
+    --static-analysis) bad=sonarcube want="sonarcloud | sonarqube | none" ;;
+    --vulnerabilities) bad=snik want="snyk | trivy | none" ;;
     --code-scanning) bad=cdoeql want="codeql | none" ;;
     esac
     run zsh "$SCRIPT" --templates "$T" --out "$OUT" "$flag" "$bad" x.tmpl
@@ -526,7 +567,8 @@ primary: python
 approval: human
 # --- TOOLCHAIN-START ---
 # The quality toolchain /development:bootstrap resolved (#1651). A recorded value wins on every
-# re-run: static_analysis sonarcloud | sonarqube, vulnerabilities snyk | trivy, code_scanning codeql | none.
+# re-run: static_analysis sonarcloud | sonarqube | none, vulnerabilities snyk | trivy | none,
+# code_scanning codeql | none. \`none\` defers a tool: set the value and re-run bootstrap to add it.
 tools:
   static_analysis: $sa
   vulnerabilities: $v

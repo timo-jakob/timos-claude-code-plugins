@@ -3,8 +3,8 @@
 # branch via the GitHub API. Idempotent (PUT replaces the rule each time).
 #
 # Usage:
-#   branch-protection.sh --static-analysis sonarcloud|sonarqube \
-#                        --vulnerabilities snyk|trivy \
+#   branch-protection.sh --static-analysis sonarcloud|sonarqube|none \
+#                        --vulnerabilities snyk|trivy|none \
 #                        --has-dockerfile true|false \
 #                        [--has-ko true|false] \
 #                        --has-codeql true|false \
@@ -88,15 +88,15 @@ while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--visibility)
 		# no alias: the context set follows the toolchain, never visibility (#1671)
-		die "--visibility is no longer accepted — pass the resolved toolchain instead: --static-analysis sonarcloud|sonarqube and --vulnerabilities snyk|trivy"
+		die "--visibility is no longer accepted — pass the resolved toolchain instead: --static-analysis sonarcloud|sonarqube|none and --vulnerabilities snyk|trivy|none"
 		;;
 	--static-analysis)
-		[[ $# -ge 2 ]] || die "--static-analysis must be sonarcloud or sonarqube (the resolved static_analysis)"
+		[[ $# -ge 2 ]] || die "--static-analysis must be sonarcloud, sonarqube or none (the resolved static_analysis)"
 		STATIC_ANALYSIS="$2"
 		shift 2
 		;;
 	--vulnerabilities)
-		[[ $# -ge 2 ]] || die "--vulnerabilities must be snyk or trivy (the resolved vulnerabilities)"
+		[[ $# -ge 2 ]] || die "--vulnerabilities must be snyk, trivy or none (the resolved vulnerabilities)"
 		VULNERABILITIES="$2"
 		shift 2
 		;;
@@ -141,10 +141,10 @@ done
 # The toolchain names the language-app contexts, so it is required exactly on
 # that path — and never read on the IaC path, which requires `gate` alone.
 if [[ "$IAC_ONLY" == "false" ]]; then
-	[[ "$STATIC_ANALYSIS" =~ ^(sonarcloud|sonarqube)$ ]] ||
-		die "--static-analysis must be sonarcloud or sonarqube (the resolved static_analysis)"
-	[[ "$VULNERABILITIES" =~ ^(snyk|trivy)$ ]] ||
-		die "--vulnerabilities must be snyk or trivy (the resolved vulnerabilities)"
+	[[ "$STATIC_ANALYSIS" =~ ^(sonarcloud|sonarqube|none)$ ]] ||
+		die "--static-analysis must be sonarcloud, sonarqube or none (the resolved static_analysis)"
+	[[ "$VULNERABILITIES" =~ ^(snyk|trivy|none)$ ]] ||
+		die "--vulnerabilities must be snyk, trivy or none (the resolved vulnerabilities)"
 fi
 
 REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
@@ -406,13 +406,15 @@ if [[ "$IAC_ONLY" == "false" ]]; then
 
 	# --- the toolchain's contexts (#1670 D1) -----------------------------------
 	# `license-fs` runs on every combination. The analyser's job is named for
-	# the analyser (`sonarcloud` / `sonarqube`). `trivy-fs` exists only when the
+	# the analyser (`sonarcloud` / `sonarqube`); `static_analysis: none` renders
+	# no analyser job, so it adds no context (#2121). `trivy-fs` exists only when the
 	# resolved vulnerabilities tool is Trivy: Snyk has NO CI job — it runs via
 	# the GitHub integration, which reports `security/snyk` rather than a GitHub
 	# Actions status check (see the quality templates' `# --- Snyk source-code +
 	# open-source scans ---` comment block), so requiring a Snyk context would
 	# produce a permanent stuck-on-expected state.
-	checks+=("license-fs" "$STATIC_ANALYSIS")
+	checks+=("license-fs")
+	[[ "$STATIC_ANALYSIS" != "none" ]] && checks+=("$STATIC_ANALYSIS")
 	[[ "$VULNERABILITIES" == "trivy" ]] && checks+=("trivy-fs")
 	[[ "$image_required" == "true" ]] && checks+=("image") # ko-image shares the `image` job name (#875)
 	# --- the React WebUI gates (#1946) ------------------------------------------
