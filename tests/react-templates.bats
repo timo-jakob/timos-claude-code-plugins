@@ -326,6 +326,9 @@ STEP_END='### 3k.6. React Query binding (a React repo consuming a spec — #958)
   contains "$section" '**only if absent**'
   contains "$section" 'Every package in **both** commands is installed **only if absent** from `package.json`'"'"'s dependencies and devDependencies'
   contains "$section" 'Presence under any version range counts as listed: the step never compares a listed range against another package'"'"'s peer requirements.'
+  contains "$section" '**A kept `vitest` must be Vitest 5.**'
+  contains "$section" 'treat it as `vitest.config.ts`'"'"'s rule-3 prompt resolving to skip (below) and name the upgrade to Vitest 5 in that Step 5 item'
+  contains "$section" '**A kept `vitest` must be Vitest 5.** After the install, read the version `package-lock.json` resolves for `vitest`; when its major is not 5, or the lockfile resolves none, treat it as `vitest.config.ts`'"'"'s rule-3 prompt resolving to skip (below) and name the upgrade to Vitest 5 in that Step 5 item — `src/test/setup.ts` declares Vitest 5'"'"'s two-parameter `Matchers<R, T>`, which an older Vitest rejects under `tsc -b`.'
   contains "$section" 'so install it when absent'
   contains "$section" 'A command whose filtered list is empty is **skipped, never run bare**'
   contains "$section" 'a skipped command is not a failure and never takes the restore branch below'
@@ -389,7 +392,7 @@ section_between() {
   contains "$d" 'When the overlay does not apply they are ordinary on-disk files and take rule 3 as usual.'
   k="$(section_between '^### 3k\. ' '^### 3k\.5\. ')"
   ends_with "$k" '### 3k.5. React overlay (a JS/TS repo carrying the React marker — #957) '
-  contains "$k" '**When the React overlay applies** (§3k.5'"'"'s *Does the overlay apply?* check), §3k **defers the pair**: it writes **neither** `eslint.config.js` nor `vitest.config.ts` — whatever each file on disk is — and completes everything else, and §3k.5 renders the consumer+React pair over both itself. When a deferred §3k does not end with that pair on disk (§3k.5'"'"'s install fails, or its rule-3 prompt on either file resolves to skip), §3k.5 aborts this scaffold as the skip below does (see §3k.5). No prompt here, and no abort of its own.'
+  contains "$k" '**When the React overlay applies** (§3k.5'"'"'s *Does the overlay apply?* check), §3k **defers the pair**: it writes **neither** `eslint.config.js` nor `vitest.config.ts` — whatever each file on disk is — and completes everything else, and §3k.5 renders the consumer+React pair over both itself. When a deferred §3k does not end with that pair on disk (§3k.5'"'"'s install fails, or its rule-3 prompt on either file resolves to skip), §3k.5 aborts this scaffold as the skip below does (see §3k.5). No prompt here, and no skip-abort of its own — the activation-failure abort above still applies to a deferred §3k, before §3k.5 reads what is on disk.'
   contains "$k" 'when the React overlay applies, defer the pair to §3k.5 as above'
   contains "$k" 'a seeded `orval.config.ts` with the ACL/MSW scaffold absent is an adoption gap too.'
 }
