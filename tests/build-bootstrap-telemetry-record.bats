@@ -55,6 +55,13 @@ refused() {  # $1 = the refusal text expected on stderr
   lacks "$output" '"path"'
 }
 
+@test "#2226 a gap-fill that stopped before every step, with steps {} and no files, is success" {
+  edit '.mode = "gap_fill" | .steps = {} | .files = [] | .approve_merge = null | .pr = null'
+  outcome success
+  build
+  [ "$(jq -c .steps <<<"$output")" = "{}" ]
+}
+
 @test "a gap-fill re-run records already_present steps, and an absent step stays absent" {
   edit '.mode = "gap_fill" | .steps = {"common_artifacts":"already_present"} | .files = [{"path":"README.md","step":"common_artifacts","disposition":"already_present"},{"path":"SECURITY.md","step":"common_artifacts","disposition":"already_present"}]'
   build
@@ -338,6 +345,7 @@ refused() {  # $1 = the refusal text expected on stderr
   contains "$output" "**Files ↔ steps.**"
   contains "$output" "\`step: <k>\`, by \`failed\` > \`skipped\` > \`merged\` > \`written\` > \`already_present\`;"
   contains "$output" "an applicable step with **zero** entries is \`skipped\`."
+  contains "$output" "one key per **applicable** step, one the run reached with its trigger present; a step whose trigger is absent, or that the run stopped before, is absent, never \`skipped\` (#2226)"
   contains "$output" "| \`escalated\` | \`approve_merge\` is \`request_changes\`, \`red_ci\` or \`retry_exhausted\` |"
   contains "$output" "**Refused states.**"
 }

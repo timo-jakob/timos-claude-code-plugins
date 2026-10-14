@@ -138,8 +138,10 @@ reconstructed at the end:
 
 - **one per-file entry for every file a step touched or considered** — a
   rendered template, a hook 4a installed under `.git/hooks/`, or `.git/config`
-  when §3l's 4a sets `core.hooksPath` (`already_present` whenever it read
-  `hooks` before 4a, whatever the gate said or the script did; otherwise
+  when §3l's 4a sets `core.hooksPath` (`already_present` whenever
+  `git -C "<repo-path>" config --get core.hooksPath` read `hooks` before 4a —
+  take that reading before 4a's gate runs, whatever its result —
+  whatever the gate said or the script did; otherwise
   `written` when the script set it, `skipped` when the gate failed and the
   script was skipped, `failed` when the script exited non-zero) —
   `{path, step, disposition}`, where `step` is the step key of the heading that
@@ -157,7 +159,12 @@ reconstructed at the end:
   (#2225);
 - each step that **applied** to this repo — a step whose trigger is absent is
   left out, and an applicable step that wrote no file (a declined Groovy
-  conversion) is `skipped`;
+  conversion) is `skipped`. A step is applicable only when the run **reached**
+  it with its trigger present: a step the run stopped before (State D's
+  no-drift "toolchain is current" stop, a GitHub-side-only gap-fill, a
+  precondition park) is absent from `steps`, never `skipped`. So State D's
+  no-drift stop and a GitHub-side-only gap-fill, each with no `approval:`
+  recorded, carry `steps` `{}` and no `files` entry (#2226);
 - each `github_state` target's result as you run it;
 - how the run ended: an early stop, the 4f drive's terminal state, the PR.
 
@@ -6806,7 +6813,9 @@ kept since the start (*Telemetry — stamp the run's start*) to
   → `kubernetes`); `interfaces` — the `interface` of each of its `interfaces`
   entries, `library` included.
 - `host` — leave it as you like: `emit` takes it from the run file.
-- `steps` — one key per **applicable** step, from this closed list:
+- `steps` — one key per **applicable** step — one the run reached with its
+  trigger present; a step it stopped before is absent, never `skipped` (#2226)
+  — from this closed list:
 
   | Key | SKILL.md heading |
   |---|---|

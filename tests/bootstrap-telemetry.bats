@@ -368,8 +368,9 @@ never_fatal() {  # asserts exit 0, the advisory, and an untouched sink
 @test "SKILL.md: the run facts, the per-file vocabulary and the never-fatal rule are stated" {
   run cat "$SKILL"
   contains "$output" "rendered template, a hook 4a installed under \`.git/hooks/\`, or \`.git/config\`"
-  contains "$output" "when §3l's 4a sets \`core.hooksPath\` (\`already_present\` whenever it read"
-  contains "$output" "\`hooks\` before 4a, whatever the gate said or the script did; otherwise"
+  contains "$output" "when §3l's 4a sets \`core.hooksPath\` (\`already_present\` whenever"
+  contains "$(tr -s '[:space:]' ' ' <<<"$output")" 'read `hooks` before 4a — take that reading before 4a'"'"'s gate runs, whatever its result —'
+  contains "$output" "whatever the gate said or the script did; otherwise"
   contains "$output" "script was skipped, \`failed\` when the script exited non-zero) —"
   contains "$output" "touched it — \`quality-<visibility>.yml\` and its \`-noop\` companion are §3c's"
   contains "$output" "(\`quality_workflows\`), and their \`DOCKER\` blocks, when kept, are a second"
@@ -410,7 +411,7 @@ never_fatal() {  # asserts exit 0, the advisory, and an untouched sink
   contains "$output" '`languages` — `{primary, auxiliary}`: the declared primary and every other'
   contains "$output" 'detected language; `{primary: null, auxiliary: []}` whenever no stack'
   contains "$output" '`host` — leave it as you like'
-  contains "$output" '`steps` — one key per **applicable** step, from this closed list:'
+  contains "$output" '`steps` — one key per **applicable** step — one the run reached with its'
   contains "$output" "Its value is the **worst** disposition among that step's \`files\` entries, by"
   contains "$output" 'entry is `skipped` — it chose not to write. A step that failed before writing'
   contains "$output" '— is one `failed` entry for the file it would have written: the Maven refusal'
@@ -436,6 +437,14 @@ never_fatal() {  # asserts exit 0, the advisory, and an untouched sink
   contains "$output" 'only when 4e opened no armed bot PR (arming failed, blocked before a PR, no'
   contains "$output" '`pr` — the PR 4e opened, else `null`.'
   contains "$output" 'Then emit, with `--repo-dir` the main checkout noted at the start:'
+}
+
+@test "#2226 a step is applicable only when the run reached it with its trigger present" {
+  local doc
+  doc="$(tr -s '[:space:]' ' ' < "$SKILL")"
+  contains "$doc" 'A step is applicable only when the run **reached** it with its trigger present: a step the run stopped before (State D'"'"'s no-drift "toolchain is current" stop, a GitHub-side-only gap-fill, a precondition park) is absent from `steps`, never `skipped`.'
+  contains "$doc" 'So State D'"'"'s no-drift stop and a GitHub-side-only gap-fill, each with no `approval:` recorded, carry `steps` `{}` and no `files` entry (#2226);'
+  contains "$doc" '`steps` — one key per **applicable** step — one the run reached with its trigger present; a step it stopped before is absent, never `skipped` (#2226) — from this closed list:'
 }
 
 @test "#2225 a deliberately unwritten file is skipped while its purpose is unserved and already_present once served" {
