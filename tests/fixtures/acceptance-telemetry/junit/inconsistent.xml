@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- failures + errors + skipped (2 + 1 + 1) exceed tests (3): passed would be -1 -->
+<testsuites>
+  <testsuite name="pytest" errors="1" failures="2" skipped="1" tests="3">
+    <testcase classname="tests.acceptance.cli.test_organize" name="test_a" />
+    <testcase classname="tests.acceptance.cli.test_organize" name="test_b" />
+    <testcase classname="tests.acceptance.cli.test_organize" name="test_c" />
+  </testsuite>
+</testsuites>

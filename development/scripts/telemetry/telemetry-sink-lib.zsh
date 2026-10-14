@@ -139,6 +139,26 @@ tlm_user_dir() {
   print -r -- "${HOME%/}/.claude/telemetry"
 }
 
+# tlm_sink_path TELEMETRY_FILE TELEMETRY_DIR REPO — print the ONE sink file a
+# record of REPO lands in, by the emitter's precedence: TELEMETRY_FILE when
+# non-empty, else TELEMETRY_DIR/<repo-slug>.jsonl when TELEMETRY_DIR is
+# non-empty, else the user-level default <tlm_user_dir>/<repo-slug>.jsonl.
+# Status 1, with nothing printed, when the default is the sink and HOME is unset.
+# emit-telemetry.zsh writes through it and collect-acceptance-telemetry.zsh
+# (#1230) reads its idempotency keys through it, so the file one checks is
+# always the file the other appends to.
+tlm_sink_path() {
+  local file="$1" dir="$2" repo="$3" user_dir=""
+  if [[ -n "$file" ]]; then
+    print -r -- "$file"
+  elif [[ -n "$dir" ]]; then
+    print -r -- "${dir%/}/$(tlm_repo_slug "$repo").jsonl"
+  else
+    user_dir=$(tlm_user_dir) || return 1
+    print -r -- "$user_dir/$(tlm_repo_slug "$repo").jsonl"
+  fi
+}
+
 # tlm_locked_append SINK — append stdin to SINK while holding an EXCLUSIVE
 # `zsystem flock` on it. The caller has already created SINK's directory. On
 # failure prints the reason (carrying the OS error where there is one) to

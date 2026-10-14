@@ -5933,7 +5933,10 @@ Rules that carry the contract's weight:
     own epic record and to every child run it starts (#1227).
     `/development:maintenance` (#1228) and `/development:bootstrap` (#1229)
     forward both flags for their one record each, under the conventions in
-    *Per-pipeline telemetry instrumentation* below. **refine-issue does not**:
+    *Per-pipeline telemetry instrumentation* below. The acceptance collector,
+    `collect-acceptance-telemetry.zsh` (#1230), takes both flags directly and
+    resolves them to one sink file for every record it emits (*Acceptance
+    telemetry*, below). **refine-issue does not**:
     its Step 7 passes no sink flag at all, so its records always land in the
     user-level default, and that gap stays open — read an empty shared
     directory after a refine-issue run as that gap, not as a broken emitter.
@@ -6903,6 +6906,109 @@ not `resolved`; `stack` `none` or `detection_failed` without `early_stop:
 `pr` or `approve_merge` on any early stop; `approve_merge` without a `pr`; and,
 on a host that is not macOS with Homebrew, a Step 4.5 target (`secrets`,
 `sonar_project`, `apps_installed`) other than `skipped`.
+
+## Acceptance telemetry (#1230)
+
+The acceptance stage is the one gate that proves the shipped artifact works
+through its real interface (#243), and how many repos run a real harness on
+which interface, passing what, is the question that says whether it delivers.
+Since #1230 each settled `acceptance (<interface>)` check run can become one
+`kind: "run"` record, `pipeline: "acceptance"`.
+
+**Collected from the machine that has the emitter, from settled results.**
+Unlike every other pipeline, the stage is not a skill on the operator's machine:
+it is a GitHub Actions workflow bootstrap renders into the target repo, where
+the emitter is absent, the runner's filesystem is ephemeral and the sink
+directory is out of reach. The facts it needs are durable in GitHub instead —
+each job (whose id is its check-run id) carries the conclusion and timing, and
+the `acceptance-report-<interface>` artifact carries the JUnit XML — so a local
+collector reads them with `gh` and emits through the shared emitter: no CI-side
+change, no vendored contract, numbers read from settled results. Vendoring the
+emitter into every bootstrapped repo was rejected: a copy of the contract per
+repo is the copy-adaptation drift the contract exists to end, and it would still
+need a collection step. Deferring acceptance telemetry was rejected: the stage's
+adoption is precisely what the epic's coverage claim measures.
+
+**The collector.**
+`development/scripts/telemetry/collect-acceptance-telemetry.zsh --repo
+OWNER/NAME [--telemetry-file PATH] [--telemetry-dir DIR]` walks the runs of the
+repo's `acceptance.yml` workflow created in the last 30 days — the artifact's
+`retention-days`, so an older leg could only ever carry withheld counts; the
+request carries `created=>=<today-30d>` and there is no range flag — and emits
+one `kind: "run"` record, `pipeline: "acceptance"`, per completed
+`acceptance (<interface>)` check run — every job attempt (`filter=all`), so a
+cancelled superseded attempt and its successful re-run are both recorded under
+distinct `check_run_id`s. A job still in progress is skipped and picked up by a
+later collection; a run with no associated PR is skipped. The sink is the one
+file the emitter's precedence resolves to — `--telemetry-file`, else
+`DIR/<repo-slug>.jsonl`, else the user-level default — computed by
+`tlm_sink_path` in `telemetry-sink-lib.zsh`, the function the emitter writes
+through, and handed to the emitter as `--telemetry-file`. A check run whose id
+is already `payload.check_run_id` on a `pipeline: "acceptance"` record in **that
+one file** is skipped; a record in any other file does not count. So the
+collector is safe to re-run and `/loop`-able. It never echoes anything `gh`
+prints on stderr — where a token or the signed download URL an artifact's zip
+endpoint redirects to could appear — and reads only the HTTP status from it.
+
+**The builder.** The pure `build-acceptance-telemetry-record.zsh`, beside the
+collector, maps one job JSON plus the artifact's JUnit files to the payload and
+owns the outcome table behind `--print-outcome`; the collector only orchestrates
+`gh` and the emitter. JUnit is read at the `<testsuite>` level, innermost suites
+only: total = Σ `tests`, failed = Σ (`failures` + `errors`), skipped = Σ
+`skipped`, passed = total − failed − skipped. It parses the XML with POSIX awk,
+so no XML tool is a dependency. Under the reliability rule an artifact that is
+absent (404), expired (410) or unreadable yields a record whose counts,
+`harness` and `report_artifact` are all `null` — withheld, never guessed — with
+the conclusion intact. Unreadable covers a zip that does not extract, a report
+that is not well-formed or has no `<testsuite>` or no `<testcase>`, and one the
+builder refuses: it refuses inconsistent counts
+(`passed + failed + skipped != total`, or a negative count) with exit 1 and no
+output, and the collector then records the leg with withheld counts. The
+artifact is the run's `acceptance-report-<interface>` created inside the job's
+own window, so each attempt reads its own report.
+
+**Envelope.** `issue: null`; `pr` is the run's PR; `ts` is the job's
+`started_at`; `wall_s` is `completed_at − started_at`, the CI job's real
+duration; `parent_run_id: null`; `tokens: null`.
+
+**Payload.**
+
+| Key | Value |
+|---|---|
+| `interface` | `cli` \| `rest` \| `web-ui` \| … — one record per leg |
+| `conclusion` | the check run's conclusion, verbatim |
+| `tests` | `{passed, failed, skipped, total}` from the JUnit report, or all four `null` when it could not be read |
+| `report_artifact` | `{name, url}` — `url` the API artifact URL (`https://api.github.com/repos/…/actions/artifacts/<id>`), never the signed download URL — or `null` |
+| `harness` | `"skeleton"` when every `<testcase>` is `name="spine-skeleton-smoke"` `classname="acceptance.<interface>"`; `"real"` when any other testcase is present; `null` when the report could not be read |
+| `check_run_id` | the job id, which is its check-run id — the idempotency key |
+| `head_sha` | the commit the check ran on |
+
+**Outcome**, from the conclusion:
+
+| `outcome` | When |
+|---|---|
+| `success` | `success` |
+| `failed` | `failure`, `timed_out`, `startup_failure` — and any conclusion not listed here |
+| `parked` | `skipped`, `cancelled`, `neutral`, `action_required`, `stale` — never counted as a failure |
+| `escalated` | not used by this pipeline |
+
+**Exit contract.** The never-fatal rule of *Per-pipeline telemetry
+instrumentation* does not apply — the collector has no host run to protect:
+
+| Exit | When |
+|---|---|
+| `0` | the collection completed — including nothing to collect, a repo with no `acceptance.yml` workflow (its runs endpoint answers 404 while the repo itself answers), and records with withheld counts |
+| `2` | usage — no `--repo`, a malformed one, an unknown or dangling flag, a positional, a `--telemetry-dir` that exists and is not a directory; judged before any `gh` call |
+| `3` | a `gh` call listing runs or jobs failed (other than the workflow's 404 on a repo that answers; a mistyped or inaccessible `--repo` is a failure, #2560), the artifacts listing or an artifact download failed other than 404/410, or the builder or the emitter failed |
+
+On exit 3 the collector stops at the first failure: records already appended
+stand, the failing record is not appended, the emitter leaves no partial line,
+and after a transient failure (`gh`, the emitter) a re-run resumes through
+idempotency. A job the builder refuses refuses again on every re-run, so it halts
+collection until its run leaves the 30-day window. Every exit 3 prints one stderr line
+naming the repo, the failing endpoint or script, and the run and check-run id it
+was processing; a completed collection prints one stdout line with the counts
+collected, skipped as already recorded, and recorded with withheld counts.
 
 ## Story size pre-flight (#1437)
 

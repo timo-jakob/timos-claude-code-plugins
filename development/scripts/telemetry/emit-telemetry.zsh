@@ -405,17 +405,12 @@ print -r -- "$record" || {
 # The default sink is the user-level one (#1972): outside every checkout, keyed
 # by the slug of the RESOLVED `repo` (tlm_repo_slug, telemetry-sink-lib.zsh), so
 # every worktree and clone of one repo lands in the same file. --repo-dir only
-# ever reached this far as the identity's source.
-local sink="$telemetry_file"
-[[ -n "$sink" ]] || [[ -z "$telemetry_dir" ]] || \
-  sink="${telemetry_dir%/}/$(tlm_repo_slug "$repo").jsonl"
-if [[ -z "$sink" ]]; then
-  local user_dir=""
-  user_dir=$(tlm_user_dir) || {
-    print -ru2 -- "emit-telemetry: HOME is not set, so there is no user-level sink; pass --telemetry-file or --telemetry-dir"
-    exit 3 }
-  sink="$user_dir/$(tlm_repo_slug "$repo").jsonl"
-fi
+# ever reached this far as the identity's source. The precedence is
+# tlm_sink_path's, shared with readers that must look in the same file.
+local sink=""
+sink=$(tlm_sink_path "$telemetry_file" "$telemetry_dir" "$repo") || {
+  print -ru2 -- "emit-telemetry: HOME is not set, so there is no user-level sink; pass --telemetry-file or --telemetry-dir"
+  exit 3 }
 
 local sink_dir="${sink:h}"
 # `--` is load-bearing: every one of these paths is caller-controlled and may
