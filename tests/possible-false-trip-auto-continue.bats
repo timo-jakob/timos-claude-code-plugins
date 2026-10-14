@@ -263,10 +263,13 @@ meaning the blockers may be fresh rather than stuck).'
   # names those files where the text now lives — the same sites, re-homed.
   # #2055 split review-loop.md into shards; only the AWAITING_FIX one names it.
   # #2058 split interactive.md; only its extension.md shard names it.
+  # #1232's per-pipeline payload key table documents the review-loop record's
+  # possible_false_trip_auto_continues key in the telemetry how-to.
   [ "$found" = "ARCHITECTURE.md
 development/skills/resolve-issue/reference/interactive/extension.md
 development/skills/resolve-issue/reference/review-loop/exit-20-awaiting-fix.md
-docs/explanation/review-loop.md" ] || {
+docs/explanation/review-loop.md
+docs/how-to/read-pipeline-telemetry.md" ] || {
     echo "roster drift — the sites naming the #1498 auto-continue are now:"
     printf '%s\n' "$found"
     return 1; }
