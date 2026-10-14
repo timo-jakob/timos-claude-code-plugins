@@ -1725,10 +1725,16 @@ The orchestrator only needs to handle the three response shapes:
 **Orchestrator's response handling for the first dispatch:**
 
 - **Response has `improver_result` and no `plan`** → improver ran.
-  Run Stage 0 of Phase 8 first (push the improver's branch, open a
-  PR, monitor CI, merge, sync local main). Then **re-invoke the
-  plugin with the same payload** to get the plan. The second
-  invocation sees post-merge coverage and naturally lands on Phase B.
+  1. **Under `--no-merge`, Stage 0 does not run** (no push, no PR, no CI
+     cycle, no merge), and the plugin is **not** re-invoked: a re-dispatch
+     would re-run the coverage pre-flight against an unchanged main and
+     spawn a second improver. Keep the improver's worktree branch for
+     Phase 9's manual-review list. This target planned no groups (#2151).
+  2. **Otherwise**, run Stage 0 of Phase 8 first (push the improver's
+     branch, open a PR, monitor CI, merge, sync local main). Then
+     **re-invoke the plugin with the same payload** to get the plan. The
+     second invocation sees post-merge coverage and naturally lands on
+     Phase B.
 - **Response has `plan` and no `improver_result`** → improver wasn't
   needed. Skip Stage 0. Proceed straight to Phase 8's per-group PRs.
 - **Response has `human_action_required`** → halt as before
@@ -3316,7 +3322,14 @@ Notes from the gather step:
 Worktree branches available for manual review (no PRs opened):
   - <branch>: <summary>
   - ...
+  <For each language whose first dispatch returned improver_result (#2151):>
+  <lang>: planner did not run — the coverage pre-flight waits on the merge
+    of <improver branch>. Merge it, then re-run to plan <lang>.
 ```
+
+**An improver-only language under `--no-merge` is never reported clean.** Its
+planner never ran, so nothing was planned for it; the line above, with the
+improver's branch in the manual-review list, is what it reports instead.
 
 Keep the tone factual. If everything was clean, say so: "No issues
 found by the configured tools; project is in good shape."
@@ -3369,8 +3382,9 @@ from facts noted where each was decided, never reconstructed at the end:
   an aborted cycle); `[]` otherwise. An aborted cycle leaves its current stage
   `agent_spawned` or `pr_opened`, which the builder refuses: set that stage to
   `escalated` in the scratch copy below, never in the store.
-- `coverage_preflight` — whether **this invocation** spawned Stage 0's improver,
-  and for which languages.
+- `coverage_preflight` — whether a dispatcher returned `improver_result` in
+  **this invocation**, and for which languages. That holds under `--no-merge`
+  too, where the improver ran but Stage 0 did not, so `pr` is `null` (#2151).
 
 The stages input is the `phase8-stages` record — `checkpoint.zsh load --phase
 phase8-stages` into a scratch file; omit `--stages` when there is none (a
