@@ -424,7 +424,8 @@ flow. Stop and ask for input wherever marked; do not guess.
    no toolchain flags, never Q3a): on an exit 1, offer **none** of the
    GitHub-side gap-fill below and relay its message instead. On an exit 0 its
    `key=value` output is the toolchain the gap-fill below keys on (#1671),
-   never re-derived from visibility. Every gap-fill call of
+   never re-derived from visibility; then run step 4's *toolchain refresh*
+   (#2121) before any `branch-protection.sh` call, unless this run already did. Every gap-fill call of
    `branch-protection.sh` is **Step 4b's full invocation** — every stack flag
    (`--has-dockerfile`, `--has-ko`, `--has-codeql` true exactly when
    `code_scanning` is `codeql`, `--codeql-languages`), `--iac-only`,
@@ -509,8 +510,9 @@ flow. Stop and ask for input wherever marked; do not guess.
    >   §3l's *Pass the topic to the idempotency reviewer*.) On an approved
    >   overwrite, write and stamp the result (Step 3.6) and
    >   repeat the `branch-protection.sh` call **in this same run**. That refreshed
-   >   file is a working-tree write this gap-fill makes (the `approval:` record is the
-   >   other — see below), and it rides Step 4d/4e as the bot PR — the PR's own run reports
+   >   file is a working-tree write this gap-fill makes (as are the toolchain refresh's
+   >   files and the `approval:` record — see below), and it rides Step 4d/4e as the bot PR —
+   >   the PR's own run reports
    >   `gate`. If the overwrite is declined, or the repeated call refuses again,
    >   take the next bullet — never render a second time;
    > - **no marker** (user-owned) or **absent** → do not overwrite a user's file;
@@ -555,8 +557,9 @@ flow. Stop and ask for input wherever marked; do not guess.
      signing-key contributor warning applies as in Step 4b.
    - Expected secrets not in `secrets.names` → offer "Store missing secrets:
      \<list\>." The expected set follows the resolved toolchain, never
-     visibility: `SONAR_TOKEN` always, `SONAR_HOST_URL` iff `static_analysis`
-     is `sonarqube`, `SNYK_TOKEN` iff `vulnerabilities` is `snyk`. **On the §3l
+     visibility: `SONAR_TOKEN` iff `static_analysis` is not `none`,
+     `SONAR_HOST_URL` iff `static_analysis` is `sonarqube`, `SNYK_TOKEN` iff
+     `vulnerabilities` is `snyk` — a `none` category expects no secret (#2121). **On the §3l
      IaC path the expected-secret set is empty** — that path emits no
      `sonar-project.properties`, no `.snyk`, and no workflow reading either
      secret, so their absence is not a gap.
@@ -570,11 +573,12 @@ flow. Stop and ask for input wherever marked; do not guess.
 
    Gap-fill actions invoke only the specific Step 4 sub-scripts they need
    (e.g., `branch-protection.sh`, `gh secret set`); they do NOT touch files
-   in the working tree — the one exception being the reviewed, marker-carrying
+   in the working tree — except the toolchain refresh above, whose `refreshed`
+   files are a committable delta, and the reviewed, marker-carrying
    `kubernetes-ci.yml` refresh above (or `opentofu-ci.yml`'s), when
    `branch-protection.sh --iac-only <topic>` refuses it. The `approval:` record into an existing `.maintenance.yml` that
    has none (step 4's approval paragraph) is not a gap-fill action but is a
-   working-tree write too, and both ride Step 4d/4e as the bot PR. If multiple
+   working-tree write too, and each of these writes rides Step 4d/4e as the bot PR. If multiple
    gaps coexist, present them as a
    checkboxed list so the user can pick a subset.
 
@@ -630,6 +634,46 @@ flow. Stop and ask for input wherever marked; do not guess.
    values a missing `.maintenance.yml` records. `detect-stack.sh` scoped
    `missing_artifacts` to that same toolchain, so its tool-scoped gaps are
    exactly the ones this render set covers.
+
+   **Then refresh the toolchain-composed files that are already present
+   (#2121).** A changed recorded toolchain — typically a `none` changed to a
+   tool, the normal way to add a deferred one — gets that tool's own new files
+   from the gap-fill above. But the files composed per tool are already on
+   disk — `.github/workflows/quality-<visibility>.yml`, its `-noop` companion,
+   `.pre-commit-config.yaml` and `SETUP.md` — and the drift detector never sees
+   a toolchain change, since it compares template hashes. So off the §3l path,
+   once the gate above resolved, run the refresh — in whichever of steps 3, 4
+   and 5 this run reaches first, and once per run:
+
+   ```bash
+   "<skill-base-dir>/scripts/refresh-toolchain-files.zsh" --repo "<repo-path>" \
+     --visibility <public|private> --static-analysis <v> --vulnerabilities <v> \
+     --code-scanning <v> --dry-run -- <the value flags this run renders with>
+   ```
+
+   Its `refreshed` rows join the Step 2 plan as *Will update (toolchain
+   changed)*; on confirmation, run it again without `--dry-run`. It never
+   overwrites a file wholesale: it three-way merges the toolchain delta into the
+   file against the closest render, so only the per-tool blocks the change
+   touches move, a user edit outside them stays, and the provenance marker is
+   kept byte-for-byte. It also rewrites `SETUP.md`'s bootstrap-owned
+   `DEFERRED-TOOLS` block on every run. Per row: `refreshed` → done (a
+   committable delta); `current` → nothing to do; `absent` → the gap-fill above
+   renders it; `conflict` or `ambiguous` (exit 3) → that file was left
+   untouched, so hand it to the `bootstrap-idempotency-reviewer` with the
+   render under this toolchain, as step 5b does. Exit 1 → relay stderr and
+   render nothing more; exit 2 → your own invocation, fix it and re-run.
+   **When the required contexts changed** — a quality workflow refreshed (a
+   tool added or removed), a `conflict` or `ambiguous` one the reviewer's
+   approved overwrite changed, or a gap-fill render of `codeql.yml` — re-apply
+   Step 4b's branch protection with its full invocation for the new toolchain,
+   which adds the new tool's context (`sonarqube`, say) and drops a removed
+   one's, and run the Step 4.5 setup script whose trigger the new toolchain meets. A
+   refresh that only rewrote the deferred block needs neither. On a Swift repo,
+   a refreshed quality workflow's new analyser job still reads
+   `needs: test-and-coverage`, so apply *Swift job wiring* to it. A tool changed to
+   `none` leaves only these four files; its own files (`codeql.yml`,
+   `sonar-project.properties`, `.snyk`) stay — removing them is #2126's scope.
 
    **So does the approval model (#1684)**, on every path but §3m, and in
    whichever of steps 3, 4 and 5 this State D run reaches — once Q4 has settled
@@ -803,7 +847,10 @@ flow. Stop and ask for input wherever marked; do not guess.
    run already took it there: on an exit 1, take *Resolve the toolchain*'s
    branch and stop before the detector. An empty `missing_artifacts` then
    proves nothing — it was scoped to no toolchain — so this run never reports
-   "toolchain is current", and renders or stamps nothing:
+   "toolchain is current", and renders or stamps nothing. On an exit 0, run
+   step 4's *toolchain refresh* (#2121) first, unless this run already did — a
+   refresh whose dry run reported a `refreshed`, `conflict` or `ambiguous` row
+   is a committable delta, which the no-drift stop below never swallows. Then:
 
    a. **Run the drift detector** — the same marker-sha256 mechanism
       `/development:maintenance` uses. Don't re-roll the comparison by hand,
@@ -826,7 +873,10 @@ flow. Stop and ask for input wherever marked; do not guess.
       current. So does a pending `approval:` record: when *Resolve the approval
       model* returned `approval_source` `chosen` or `default` — nothing is
       recorded, whether the key is absent or blank — do not stop — continue to
-      the Step 2 plan, and on confirmation its `--record` is the delta.)
+      the Step 2 plan, and on confirmation its `--record` is the delta. So does
+      a pending toolchain refresh: when its dry run reported any `refreshed`,
+      `conflict` or `ambiguous` row, do not stop — continue to the Step 2 plan,
+      and on confirmation its run without `--dry-run` is the delta.)
 
       > **The sha256 is the drift signal — not the version label.** A marker
       > records both the template hash AND the plugin version at render time.
@@ -883,7 +933,7 @@ wording so behavior stays consistent:
 | **Q1: Create GitHub repo now?** | State A, or State B without a GitHub remote | "Do you want me to create a GitHub repo for this and connect it as `origin` now?" | If yes → Q2 + Q3 + run `gh repo create <name> --<vis> --source=. --remote=origin`. If no → Q3 only. |
 | **Q2: Repo name** | Only if Q1=yes | "What should the GitHub repo be named? (default: `<current-directory-name>`)" | Used in `gh repo create`. |
 | **Q3: Visibility** | Whenever `visibility=unknown` (including Q1=no path) | "Will this be a **public** or **private** repository? This selects the default toolchain — public uses SonarCloud + Snyk, private uses self-hosted SonarQube + Trivy." | Locks the visibility for the rest of the skill, and with it the toolchain **defaults** Q3a offers. |
-| **Q3a: Toolchain** | After Q3 **and** after Q4 has settled that this run is not the §3l IaC path — asked from *Resolve the toolchain* (below the decision tree), which says exactly when: only while a category is still **open** (nothing recorded in `.maintenance.yml`'s `tools:`), so a re-run with all three recorded never asks it. **Never on the §3l IaC path.** | "This is a `<public\|private>` repository, so the default toolchain is `<static_analysis>` / `<vulnerabilities>` / `<code_scanning>`. Use it?" | **Yes** → the open categories stay on the default. **No** → an `AskUserQuestion` picker with one named tab per open category that has a choice: **Analysis** (`sonarcloud` \| `sonarqube`), **Vulns** (`snyk` \| `trivy`), **Code scan** (`codeql` \| `none`). Recorded categories — and the categories this visibility leaves one value: on a public repo Analysis, which has only `sonarcloud` there, and on a private repo Code scan, which has only `none` there (CodeQL on a private repository needs GitHub Advanced Security, #1670) — are shown fixed in the question text, never as tabs. Picker answers reach `resolve-tools.zsh` as flags (source `chosen`). |
+| **Q3a: Toolchain** | After Q3 **and** after Q4 has settled that this run is not the §3l IaC path — asked from *Resolve the toolchain* (below the decision tree), which says exactly when: only while a category is still **open** (nothing recorded in `.maintenance.yml`'s `tools:`), so a re-run with all three recorded never asks it. **Never on the §3l IaC path.** | "This is a `<public\|private>` repository, so the default toolchain is `<static_analysis>` / `<vulnerabilities>` / `<code_scanning>`. Use it?" | **Yes** → the open categories stay on the default. **No** → an `AskUserQuestion` picker with one named tab per open category that has a choice: **Analysis** (`sonarcloud` \| `sonarqube` \| *none (add later)*), **Vulns** (`snyk` \| `trivy` \| *none (add later)*), **Code scan** (`codeql` \| *none (add later)*). *none (add later)* is always the **last** option on its tab and answers `none` (#2121). A tab offers only the values this visibility allows: on a public repo Analysis offers `sonarcloud` and *none (add later)*. Recorded categories — and the category this visibility leaves one value: on a private repo Code scan, which has only `none` there (CodeQL on a private repository needs GitHub Advanced Security, #1670) — are shown fixed in the question text, never as tabs. Picker answers reach `resolve-tools.zsh` as flags (source `chosen`). |
 | **Q4: Languages** | Whenever detected `languages=[]` — with the IaC wording when `is_kubernetes=true` or `is_opentofu=true`. **When both are `true`** (the dual-marker repo) do not ask it: halt, saying a repo with both a Kubernetes and an OpenTofu marker and no language is not yet supported and pointing at [#1394](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1394). A recorded `primary: kubernetes` or `primary: opentofu` does **not** skip it — the record can veto this path but never grant it (§3l; the mixed repo is #1193) | "I couldn't detect any languages from existing files. Which languages will this project use? (swift / javascript / python / go / java — choose one or more)". When `is_kubernetes=true`, offer **"none — this is a GitOps/IaC repo"** as a first-class answer: "This looks like an infrastructure-as-code repo (charts / overlays / Argo CD resources) with no application language. Bootstrap it as one, or will it also hold application code?" When `is_opentofu=true`, offer the same answer with the OpenTofu wording: "This looks like an OpenTofu/Terraform repo (`.tf` modules) with no application language. Bootstrap it as one, or will it also hold application code?" | Selects per-language fragments and CodeQL matrix. **"None" is a valid answer for an IaC repo** — it takes §3l, not a halt: the manifest checks stand on their own, so a language is never a precondition for bootstrapping. **"None" with both markers `false`** asks the **empty-repo confirmation** instead of halting: "There is no chart, kustomization or Argo CD resource here yet. Bootstrap this as an empty GitOps/IaC repository anyway — one required `gate` check, the `make lint` pre-push hook, and `primary: kubernetes`?" Three outcomes: **confirmed** → §3l, and `primary: kubernetes` is written; **declined** → halt: ask the user to add a marker artifact or name a language, and stop; **another `primary:` already recorded** in `.maintenance.yml` → §3l's conflict branch — the confirmation is never granted over a recorded primary. Nothing records the confirmation, so until a marker exists every re-run asks Q4 and the confirmation again (§3l, #1193). The answer resolves the language set the rest of the skill reads — §3l and `{{PRIMARY}}` branch (2) key on the RESOLVED set, so a language named here makes this a language repo however empty detection was. |
 | **Q5: Dockerfile incoming?** | Whenever `has_dockerfile=false` and the user mentioned containers, OR proactively only if Q4 implies an image build | "Will this project ship a Dockerfile / container image? If yes, I'll wire up Snyk container / Trivy image scans now." | Determines whether to keep the `DOCKER` blocks in workflow templates. Default to "no, skip for now" if the user is unsure — they can re-run the skill later when they add a Dockerfile. |
 | **Q6: Security contact email** | Always (no detection signal) | "What email should appear in `SECURITY.md` as a fallback channel for security reports? Leave blank to use GitHub Security Advisories only." | Drives `{{SECURITY_CONTACT_BLOCK}}` substitution in `SECURITY.md`. See substitution rules below. |
@@ -921,10 +971,18 @@ halting there would make §3l unreachable.
 
 The quality toolchain is a **declaration**, not a consequence of visibility:
 `.maintenance.yml` records it in a `tools:` block beside `primary:` and `gate:`,
-three independent categories — `static_analysis` (`sonarcloud` | `sonarqube`),
-`vulnerabilities` (`snyk` | `trivy`) and `code_scanning` (`codeql` | `none`).
+three independent categories — `static_analysis` (`sonarcloud` | `sonarqube` |
+`none`), `vulnerabilities` (`snyk` | `trivy` | `none`) and `code_scanning`
+(`codeql` | `none`). **Every `tools:` category accepts `none`** (#2121), and a
+category added later ships with it too: `none` means the tool is deliberately
+**deferred**, not forgotten, and adding it later is the normal flow — change the
+recorded value and re-run bootstrap (State D's *toolchain refresh*). A `none`
+category renders no job or noop, no config file of its own, no setup section,
+secret, preflight requirement or required context; `SETUP.md`'s deferred-tools
+block lists it with that enable instruction instead.
 Visibility only supplies the **defaults**: public → `sonarcloud` / `snyk` /
-`codeql`, private → `sonarqube` / `trivy` / `none`. Resolution and validation
+`codeql`, private → `sonarqube` / `trivy` / `none`. `none` is never a default
+except private `code_scanning`'s. Resolution and validation
 are the shipped script's, never re-derived here:
 
 ```bash
@@ -940,7 +998,8 @@ resolves on its own — a **recorded** value wins, else a **chosen** one (its
 flag), else the visibility **default** — and the output is `key=value` lines:
 the three values, a `<category>_source` for each (`recorded` | `chosen` |
 `default`), and `self_hosted_runner` (`true` iff `static_analysis` is
-`sonarqube`, and then **every** quality job runs self-hosted). An absent,
+`sonarqube`, and then **every** quality job runs self-hosted; `none` never
+needs a runner). An absent,
 empty or null `tools:` records nothing, like `gate:`. Reading an existing
 `.maintenance.yml` needs `yq` (mikefarah, v4); a repo with none needs no `yq`.
 
@@ -951,8 +1010,7 @@ empty or null `tools:` records nothing, like `gate:`. Reading an existing
    first — only an exit 0 continues here. A category whose source comes back
    `default` is **open**; a `recorded` one is fixed.
 2. **Q3a**, only when an open category has a **choice** on this visibility —
-   every open category does, except `static_analysis` on a public repo, where
-   `sonarcloud` is the only value, and `code_scanning` on a private repo, where
+   every open category does, except `code_scanning` on a private repo, where
    `none` is the only value (CodeQL there needs GitHub Advanced Security,
    #1670). So a re-run with all three recorded never asks it, and neither does
    a repo whose only open category is the one its visibility fixes. Offer the
@@ -1137,7 +1195,10 @@ output** (*Resolve the toolchain*, #1651): name each category's value with its
 source in parentheses — for example `static analysis sonarcloud (default) ·
 vulnerabilities snyk (recorded) · code scanning codeql (chosen)` — and derive
 `CI runner:` from `self_hosted_runner` alone: `self-hosted` exactly when it is
-`true`, else `github-hosted`. The `Will create:` list's tool-scoped files come
+`true`, else `github-hosted`. A deferred category shows `none` like any other
+value — for example `static analysis none (recorded)` (#2121) — and with
+`static_analysis: none` the `Sonar gate:` line is omitted and `Setup
+automation:` names no Sonar setup. The `Will create:` list's tool-scoped files come
 from `toolchain-templates.zsh` for that same toolchain (Step 3).
 
 **The `Approval:` line comes from `resolve-approval.zsh`'s output** (*Resolve
@@ -1640,9 +1701,12 @@ in the same PR:
 | `SONARCLOUD` | `--static-analysis sonarcloud` (the `sonarcloud` job + noop, `SETUP.md` §2) |
 | `SONARQUBE` | `--static-analysis sonarqube` (the `sonarqube` job + noop, `SETUP.md` §3) |
 | `SELF_HOSTED` | `self_hosted_runner` — `--static-analysis sonarqube` (the self-hosted `semgrep` shape, `SETUP.md`'s self-hosted-runner section) |
+| `HOSTED` | its complement — `--static-analysis` is anything but `sonarqube`, `none` included (the private workflow's GitHub-hosted `semgrep` container and the pre-commit job's `SKIP: trivy-fs`, #2121) |
 | `SNYK` | `--vulnerabilities snyk` (the `image` job's Snyk container scan, `SETUP.md` §2b; Snyk has no CI job of its own) |
 | `TRIVY` | `--vulnerabilities trivy` (the `trivy-fs` job + noop, the `image` job's Trivy scan, the pre-commit `trivy-fs` hook, `SETUP.md`'s `brew install trivy`) |
 | `CODEQL` | `--code-scanning codeql` |
+| `DEFERRED_STATIC_ANALYSIS` / `DEFERRED_VULNERABILITIES` / `DEFERRED_CODE_SCANNING` | that category is `none` (#2121) — its entry in `SETUP.md`'s deferred-tools block; `DEFERRED_VULNERABILITIES` also carries the secrets table under `SETUP.md`'s *Add secrets to GitHub* heading and the `image` job's scanner-less `container_re` |
+| `DEFERRED_TOOLS` | any category is `none` — `SETUP.md`'s `DEFERRED-TOOLS-START`/`END` block, omitted when nothing is deferred |
 | `CLAUDE_PLUGIN` | `--claude-plugin true` |
 | `SURFACE_CLI` | `cli` in `--acceptance-interfaces` |
 | `SURFACE_REST` | `rest` in `--acceptance-interfaces` |
@@ -1662,7 +1726,9 @@ invisible on the rendered page.
 The per-tool tags (#1670) — `SONARCLOUD`, `SONARQUBE`, `SELF_HOSTED`, `SNYK`,
 `TRIVY`, `CODEQL` — are kept iff that tool is in the resolved toolchain passed
 as `--static-analysis` / `--vulnerabilities` / `--code-scanning`; with none of
-those flags (the §3l IaC path) every one of them strips. `render.zsh` refuses a
+those flags (the §3l IaC path) every one of them strips, `HOSTED` and the
+`DEFERRED_*` tags included. A category resolved to `none` keeps **none** of its
+tool blocks (#2121): no job or noop, no config file, no setup section. `render.zsh` refuses a
 value outside its category's set, and the two combinations `resolve-tools.zsh`
 rejects (public + sonarqube, private + codeql), so a typo can never silently
 strip a tool's jobs.
@@ -1848,6 +1914,7 @@ and exits 2 on a malformed invocation (fix it and re-run). What it selects:
 | `snyk` | `.snyk` |
 | `trivy` | no file of its own — `trivy.yaml` is common (§3a) |
 | `codeql` (public only) | `.github/workflows/codeql.yml` + `codeql-noop.yml`, on their hard-coded `runs-on: ubuntu-latest` |
+| `none` (any category, #2121) | no file of its own — the quality workflow and its noop still render, all three `none` included |
 
 A template's tree (`public/`, `private/`) is where it was first written, not a
 visibility rule: a private repo on SonarCloud renders
@@ -1859,14 +1926,16 @@ to its tree.
 Inside the files, `render.zsh`'s per-tool block tags compose the jobs from the
 same toolchain flags (*Block stripping in templates*):
 
-- the analyser's job — `sonarcloud` or `sonarqube` — and its noop;
+- the analyser's job — `sonarcloud` or `sonarqube` — and its noop; none for
+  `static_analysis: none`;
 - `trivy-fs` + its noop iff `trivy`; Snyk has **no** CI job (its GitHub App
-  does the scanning), so `snyk` adds none;
+  does the scanning), so `snyk` adds none, and neither does `none`;
 - the `image` job's scanner (only with a Dockerfile): the Snyk container scan iff
-  `snyk`, the Trivy image scan iff `trivy`;
+  `snyk`, the Trivy image scan iff `trivy`, no scan step for
+  `vulnerabilities: none` (the job still builds the image and reports `image`);
 - every job's runner from `{{RUNNER}}` / `{{SWIFT_RUNNER}}`: self-hosted iff
   `sonarqube` (then **every** quality job, noop included, runs self-hosted), else
-  GitHub-hosted. CodeQL never follows it — it renders only on public repos, on
+  GitHub-hosted — `static_analysis: none` included. CodeQL never follows it — it renders only on public repos, on
   `ubuntu-latest`.
 
 `license-fs`, `semgrep`, `pre-commit` and `test-and-coverage` render for every
@@ -5716,8 +5785,8 @@ The script applies a single protection rule that:
   the flags above (the resolved toolchain, has-dockerfile, has-codeql,
   codeql-languages), so they line up with the jobs the generated workflow
   produces: `test-and-coverage`, `semgrep`, `pre-commit` and `license-fs`
-  always, the `static_analysis` job, `trivy-fs` iff `vulnerabilities` is
-  `trivy`, `image` when there is a Dockerfile (or a ko lane whose
+  always, the `static_analysis` job unless it is `none` (#2121), `trivy-fs` iff
+  `vulnerabilities` is `trivy`, `image` when there is a Dockerfile (or a ko lane whose
   `ko-image.yml` is on disk), `analyze (<lang>)` per language when
   `--has-codeql` is true **and** `codeql.yml` is on disk, and
   `no-cluster-deploy` when both of its halves are on disk (#1670 D1). The toolchain always comes from
@@ -5975,7 +6044,7 @@ committed (*Emit the run's record*).
 **Skip 4d when nothing was written.** If this run rendered, repaired,
 generated or recorded nothing in the working tree — a **GitHub-side-only
 gap-fill** (branch protection, secrets) or a no-drift **"toolchain is current"**
-run, either one with no `approval:` recorded — there is nothing to commit: skip
+run, either one with no `approval:` recorded and no toolchain refresh written — there is nothing to commit: skip
 4d (don't launch the commit flow against a clean tree) and, consequently, skip 4e (its precondition, below, fails too).
 
 ### 4e. Finishing flow — open the bot-authored PR
@@ -6001,7 +6070,7 @@ back for the user to push by hand.)
   recorded in the working tree). A **GitHub-side-only gap-fill** (branch
   protection, secrets — which by design *do not touch the working tree*) and a
   no-drift **"toolchain is current"** run, either one with no `approval:`
-  recorded, commit nothing, so there is no PR to open: **skip 4e** and
+  recorded and no toolchain refresh written, commit nothing, so there is no PR to open: **skip 4e** and
   just report the GitHub-side reconciliation. Never manufacture an empty commit
   or a no-delta PR to satisfy this step.
 
@@ -6345,9 +6414,10 @@ The script will:
 
 1. Refuse to run on non-macOS hosts.
 2. Refuse to run without Homebrew.
-3. List missing tools (`gh`, `jq`, `pre-commit`, `gitleaks`, `semgrep`,
-   `sonar-scanner`, plus per resolved tool: `snyk` for `snyk`, `trivy` for
-   `trivy` — whatever the visibility or Dockerfile — plus language-specific
+3. List missing tools (`gh`, `jq`, `pre-commit`, `gitleaks`, `semgrep`, plus
+   per resolved tool: `sonar-scanner` for either analyser, `snyk` for `snyk`,
+   `trivy` for `trivy` — whatever the visibility or Dockerfile; a `none`
+   category requires nothing, #2121 — plus language-specific
    linters, plus `parallel` on claude-plugin repos — the bats review-loop gate
    parallelises via it, #980). With `--iac-only kubernetes` the list is `gh`, `jq`,
    `git` and the gate's tools (`helm`, `kustomize`, `kubeconform`,
@@ -6396,7 +6466,9 @@ hold:
 | `install-claude-apps.zsh` | the Claude Apps install (the *`--claude-approver true` extension* below) | `--claude-approver` resolved `true` and an Approver-capable language resolves (§3e's `{{APPROVER_LANG}}`) |
 | `install-claude-apps.zsh --writer-only` | the writer App install only (the *`approval: human` extension* below) | `approval` resolved `human` — a plugin repo, or a language repo that recorded, chose or defaulted to it — or resolved `approver` with no Approver-capable language resolving (#1684) — never on the §3l IaC path, whose writer App is Step 4e's offer |
 
-So a public SonarCloud + trivy repo runs `setup-sonarcloud.sh` and
+A `none` category meets no trigger, so it runs no setup script (#2121): a private
+repo with `static_analysis: none` and `vulnerabilities: trivy` runs
+`enable-github-security.sh` alone. So a public SonarCloud + trivy repo runs `setup-sonarcloud.sh` and
 `enable-github-security.sh` only (`trivy-fs` needs no account or secret), and a
 private SonarCloud + Snyk repo runs `setup-sonarcloud.sh`, `setup-snyk.sh` and
 `enable-github-security.sh` — no `register-runner.sh` and no
@@ -6657,7 +6729,7 @@ longer wires the Approver.
 >   branch to land the 4d commit as a bot PR." (Never a user-authored-PR item.)
 > - **4e was skipped because there was no committable delta** (GitHub-side-only
 >   gap-fill, or a no-drift "toolchain is current" run, either one with no
->   `approval:` recorded) → nothing was staged
+>   `approval:` recorded and no toolchain refresh written) → nothing was staged
 >   and nothing is outstanding on the PR axis; **omit** the item entirely.
 >
 > **Only list genuinely outstanding work.** A checklist item is a TODO the
@@ -6683,7 +6755,10 @@ longer wires the Approver.
 > GitHub Actions (Settings → Pages) — `docs deploy` fails until you do."
 
 Compose the list from the **resolved toolchain** (#1670), as `SETUP.md` is:
-the SonarCloud items only with `sonarcloud`, the Snyk items only with `snyk`.
+the SonarCloud items only with `sonarcloud`, the Snyk items only with `snyk`. A
+`none` category contributes **no** item (#2121) — nothing is outstanding for a
+deferred tool; instead name each deferred category once, pointing at `SETUP.md`'s
+*Deferred tools* section for how to add it later.
 Example for the public default toolchain (sonarcloud / snyk / codeql):
 
 ```text
@@ -6906,7 +6981,7 @@ own malformed call: fix it and re-run once; a second costs the record.
   never bypassed with a user-authored PR); **never** push before the Step 2
   confirmation; and a run with **no committable delta** (a GitHub-side-only
   gap-fill, or a no-drift "toolchain is current" run, either one with no
-  `approval:` recorded) pushes nothing, because
+  `approval:` recorded and no toolchain refresh written) pushes nothing, because
   there is nothing to land.
 - NEVER commit secrets or tokens to the repo. All credentials go to GitHub
   Actions secrets only.

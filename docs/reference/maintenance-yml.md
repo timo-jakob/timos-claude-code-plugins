@@ -129,10 +129,19 @@ set of values:
 
 | Category | Values | Public default | Private default |
 | --- | --- | --- | --- |
-| `static_analysis` | `sonarcloud`, `sonarqube` | `sonarcloud` | `sonarqube` |
-| `vulnerabilities` | `snyk`, `trivy` | `snyk` | `trivy` |
+| `static_analysis` | `sonarcloud`, `sonarqube`, `none` | `sonarcloud` | `sonarqube` |
+| `vulnerabilities` | `snyk`, `trivy`, `none` | `snyk` | `trivy` |
 | `code_scanning` | `codeql`, `none` | `codeql` | `none` |
 
+- **Every category accepts `none`.** `none` means the tool is deliberately deferred,
+  not forgotten: no job, config file, secret, setup step or required check exists for
+  it, and `SETUP.md`'s *Deferred tools* section lists it. To add the tool later, set
+  the category's value in `.maintenance.yml` and re-run `/development:bootstrap`,
+  which adds that tool's job, config, required check and setup and updates the
+  existing quality workflow and `SETUP.md` in place
+  ([#2121](https://github.com/timo-jakob/timos-claude-code-plugins/issues/2121)).
+  `none` is never a default, except private `code_scanning`'s. A category added
+  later accepts `none` too.
 - **Written on every path except the IaC path.** The IaC path renders none of the quality
   workflows these tools run in, so it records no `tools:` block.
 - **Defaults** come from the repository's visibility. Bootstrap offers them and lets you

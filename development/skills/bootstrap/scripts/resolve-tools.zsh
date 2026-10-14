@@ -6,11 +6,14 @@
 # is now a DECLARATION in .maintenance.yml, next to `primary:` and `gate:`:
 #
 #   tools:
-#     static_analysis: sonarcloud   # sonarcloud | sonarqube
-#     vulnerabilities: snyk         # snyk | trivy
+#     static_analysis: sonarcloud   # sonarcloud | sonarqube | none
+#     vulnerabilities: snyk         # snyk | trivy | none
 #     code_scanning: codeql         # codeql | none
 #
-# The three categories are independent. Each resolves on its own: a RECORDED
+# Every category accepts `none` (#2121): the tool is deliberately deferred, not
+# forgotten, and adding it later is changing the recorded value and re-running
+# bootstrap. `none` is never a default, except private code_scanning's. A
+# category added later accepts `none` too. The three categories are independent. Each resolves on its own: a RECORDED
 # value in `tools:` wins, else a CHOSEN value (its flag — the Q3a picker's
 # answer), else the visibility DEFAULT (public: sonarcloud / snyk / codeql;
 # private: sonarqube / trivy / none). An absent, empty (`tools:`, `tools: {}`)
@@ -20,8 +23,8 @@
 # Usage:
 #   resolve-tools.zsh --visibility public|private
 #                     [--maintenance-file <path>]   (default: ./.maintenance.yml)
-#                     [--static-analysis sonarcloud|sonarqube]
-#                     [--vulnerabilities snyk|trivy]
+#                     [--static-analysis sonarcloud|sonarqube|none]
+#                     [--vulnerabilities snyk|trivy|none]
 #                     [--code-scanning codeql|none]
 #                     [--record]
 #
@@ -47,7 +50,8 @@
 #   vulnerabilities=<v>  vulnerabilities_source=...
 #   code_scanning=<v>    code_scanning_source=...
 #   self_hosted_runner=true|false   (true iff static_analysis is sonarqube:
-#                                    then EVERY quality job runs self-hosted)
+#                                    then EVERY quality job runs self-hosted;
+#                                    `none` never needs a runner)
 #
 # --record (only on a resolution that exits 0) writes the resolved values into
 # an EXISTING --maintenance-file, touching no existing line (§3a's `gate:`
@@ -65,7 +69,7 @@ set -euo pipefail
 
 usage() {
 	print -u2 -- "usage: resolve-tools.zsh --visibility public|private [--maintenance-file <path>]"
-	print -u2 -- "       [--static-analysis sonarcloud|sonarqube] [--vulnerabilities snyk|trivy]"
+	print -u2 -- "       [--static-analysis sonarcloud|sonarqube|none] [--vulnerabilities snyk|trivy|none]"
 	print -u2 -- "       [--code-scanning codeql|none] [--record]"
 	exit 2
 }
@@ -77,8 +81,8 @@ fail() {
 
 typeset -a categories=(static_analysis vulnerabilities code_scanning)
 typeset -A allowed=(
-	static_analysis "sonarcloud sonarqube"
-	vulnerabilities "snyk trivy"
+	static_analysis "sonarcloud sonarqube none"
+	vulnerabilities "snyk trivy none"
 	code_scanning "codeql none"
 )
 typeset -A public_default=(static_analysis sonarcloud vulnerabilities snyk code_scanning codeql)
@@ -253,7 +257,8 @@ record_tools() {
 			if [[ -n "$(tail -c 1 "$file")" ]]; then print; fi
 			print -r -- "# --- TOOLCHAIN-START ---"
 			print -r -- "# The quality toolchain /development:bootstrap resolved (#1651). A recorded value wins on every"
-			print -r -- "# re-run: static_analysis sonarcloud | sonarqube, vulnerabilities snyk | trivy, code_scanning codeql | none."
+			print -r -- "# re-run: static_analysis sonarcloud | sonarqube | none, vulnerabilities snyk | trivy | none,"
+			print -r -- "# code_scanning codeql | none. \`none\` defers a tool: set the value and re-run bootstrap to add it."
 			print -r -- "tools:"
 			for c in "${categories[@]}"; do print -r -- "  $c: ${resolved[$c]}"; done
 			print -r -- "# --- TOOLCHAIN-END ---"

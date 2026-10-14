@@ -398,6 +398,9 @@ polyglot_exact() {
         "$PREFLIGHT" > "$dir/preflight.sh" ;;
     javascript-eslint)
       sed 's/javascript) : ;;/javascript) required_brews+=("eslint") ;;/' "$PREFLIGHT" > "$dir/preflight.sh" ;;
+    sonar-scanner)
+      # added for either analyser, not listed (#2121): drop that line
+      sed '/required_brews+=("sonar-scanner")/d' "$PREFLIGHT" > "$dir/preflight.sh" ;;
     *)
       # (a)-(f): one tool deleted from the always-required list
       sed "/^[[:space:]]*\"$1\"[[:space:]]*#/d" "$PREFLIGHT" > "$dir/preflight.sh" ;;

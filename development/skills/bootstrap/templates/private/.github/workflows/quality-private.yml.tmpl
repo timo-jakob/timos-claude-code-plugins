@@ -418,6 +418,9 @@ jobs:
           # --- SNYK-START ---
           container_re='(^|/)Dockerfile|\.dockerfile$|(^|/)\.dockerignore$|(^|/)(docker-compose|compose)\.ya?ml$|(^|/)\.snyk$'
           # --- SNYK-END ---
+          # --- DEFERRED_VULNERABILITIES-START ---
+          container_re='(^|/)Dockerfile|\.dockerfile$|(^|/)\.dockerignore$|(^|/)(docker-compose|compose)\.ya?ml$'
+          # --- DEFERRED_VULNERABILITIES-END ---
           if ! changed=$(git diff --name-only "$BASE_SHA" HEAD 2>/dev/null); then
             echo "do_scan=true" >> "$GITHUB_OUTPUT"
             echo "::warning::Could not compute the PR diff against $BASE_SHA — scanning to be safe."
@@ -644,17 +647,17 @@ jobs:
   # --- DOCKER-END -----------------------------------------------------------
 
   # Semgrep — two shapes by runner. A self-hosted runner (SonarQube) reuses a
-  # semgrep it already has; GitHub-hosted runners (SonarCloud — the only other
-  # analyser, so hosted iff SONARCLOUD) run the pinned container image, exactly
-  # as the public workflow does.
+  # semgrep it already has; GitHub-hosted runners (SonarCloud, or no static
+  # analyser at all — HOSTED, #2121) run the pinned container image, exactly as
+  # the public workflow does.
   semgrep:
     runs-on: {{RUNNER}}
-    # --- SONARCLOUD-START ----------------------------------------------------
+    # --- HOSTED-START --------------------------------------------------------
     container:
       # Pinned. Matches the pre-commit hook's semgrep version so local + CI
       # behave identically. Bump in lockstep with `.pre-commit-config.yaml`.
       image: returntocorp/semgrep:1.163.0
-    # --- SONARCLOUD-END ------------------------------------------------------
+    # --- HOSTED-END ----------------------------------------------------------
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # --- SELF_HOSTED-START -------------------------------------------------
@@ -665,11 +668,11 @@ jobs:
           fi
           semgrep ci --config=auto
       # --- SELF_HOSTED-END ---------------------------------------------------
-      # --- SONARCLOUD-START --------------------------------------------------
+      # --- HOSTED-START ------------------------------------------------------
       - run: semgrep ci --config=auto
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}   # optional
-      # --- SONARCLOUD-END ----------------------------------------------------
+      # --- HOSTED-END --------------------------------------------------------
 
   # --- Pre-commit (CI backstop) ---------------------------------------------
   # Catches contributors who bypassed local hooks with `git commit
@@ -684,11 +687,11 @@ jobs:
         with:
           python-version: "{{PYTHON_VERSION}}"
       - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
-      # --- SONARCLOUD-START --------------------------------------------------
+      # --- HOSTED-START ------------------------------------------------------
       # --- TRIVY-START -------------------------------------------------------
         # GitHub-hosted runners carry no trivy binary for the local trivy-fs hook;
         # the trivy-fs job above runs the same scan, so skip the hook here.
         env:
           SKIP: trivy-fs
       # --- TRIVY-END ---------------------------------------------------------
-      # --- SONARCLOUD-END ----------------------------------------------------
+      # --- HOSTED-END --------------------------------------------------------

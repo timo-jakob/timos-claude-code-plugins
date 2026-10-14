@@ -37,10 +37,12 @@ jobs:
     steps:
       - run: echo "Doc-only PR — skipping tests (noop companion for required status check)."
 
+  # --- SONARCLOUD-START ------------------------------------------------------
   sonarcloud:
     runs-on: {{RUNNER}}
     steps:
       - run: echo "Doc-only PR — skipping SonarCloud scan."
+  # --- SONARCLOUD-END --------------------------------------------------------
 
   semgrep:
     runs-on: {{RUNNER}}

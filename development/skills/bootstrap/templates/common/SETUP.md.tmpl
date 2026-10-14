@@ -12,6 +12,34 @@ does not use are not part of this file.
 > *Automated alternative* callout below. The manual instructions below remain
 > useful as a reference for what the automation does, and as a fallback for
 > non-macOS hosts or non-Homebrew workflows.
+<!-- --- DEFERRED-TOOLS-START --- -->
+
+## Deferred tools
+
+`.maintenance.yml` records these quality-tool categories as `none`: the tool is
+deliberately deferred, not forgotten, so no job, secret, setup step or required
+check exists for it yet. `/development:bootstrap` rewrites this list on every
+run, and it lists exactly the categories that are `none` today.
+<!-- --- DEFERRED_STATIC_ANALYSIS-START --- -->
+
+- **Static analysis** (`tools.static_analysis: none`) — to enable it, set
+  `tools.static_analysis` in `.maintenance.yml` to `sonarcloud` (or `sonarqube`
+  on a private repository) and re-run `/development:bootstrap`.
+<!-- --- DEFERRED_STATIC_ANALYSIS-END --- -->
+<!-- --- DEFERRED_VULNERABILITIES-START --- -->
+
+- **Vulnerability scanning** (`tools.vulnerabilities: none`) — to enable it, set
+  `tools.vulnerabilities` in `.maintenance.yml` to `snyk` or `trivy` and re-run
+  `/development:bootstrap`.
+<!-- --- DEFERRED_VULNERABILITIES-END --- -->
+<!-- --- DEFERRED_CODE_SCANNING-START --- -->
+
+- **Code scanning** (`tools.code_scanning: none`) — to enable it, set
+  `tools.code_scanning` in `.maintenance.yml` to `codeql` and re-run
+  `/development:bootstrap`. CodeQL runs on a public repository only: on a private
+  one it needs GitHub Advanced Security.
+<!-- --- DEFERRED_CODE_SCANNING-END --- -->
+<!-- --- DEFERRED-TOOLS-END --- -->
 
 ---
 
@@ -100,6 +128,13 @@ In repo Settings → Secrets and variables → Actions → New repository secret
 | `SONAR_TOKEN` | Yes | from step 2.1 |
 | `SEMGREP_APP_TOKEN` | **Optional** | only needed if you connect Semgrep AppSec Platform for managed rules / dashboards. CI runs the free OSS ruleset without it; the env var is read defensively (`${{ secrets.SEMGREP_APP_TOKEN }}`) and won't fail when unset. |
 <!-- --- TRIVY-END --- -->
+<!-- --- DEFERRED_VULNERABILITIES-START --- -->
+
+| Name | Required? | Value |
+|---|---|---|
+| `SONAR_TOKEN` | Yes | from step 2.1 |
+| `SEMGREP_APP_TOKEN` | **Optional** | only needed if you connect Semgrep AppSec Platform for managed rules / dashboards. CI runs the free OSS ruleset without it; the env var is read defensively (`${{ secrets.SEMGREP_APP_TOKEN }}`) and won't fail when unset. |
+<!-- --- DEFERRED_VULNERABILITIES-END --- -->
 
 ### 2.3 Create the Zero Tolerance Quality Gate
 
@@ -568,8 +603,8 @@ Disable it on `{{DEFAULT_BRANCH}}`:
 ```sh
 # Re-run branch-protection.sh without the flag
 "<skill-base-dir>/scripts/branch-protection.sh" \
-  --static-analysis <sonarcloud|sonarqube> \
-  --vulnerabilities <snyk|trivy> \
+  --static-analysis <sonarcloud|sonarqube|none> \
+  --vulnerabilities <snyk|trivy|none> \
   --has-dockerfile <true|false> \
   --has-ko <true|false> \
   --has-codeql <true|false> \

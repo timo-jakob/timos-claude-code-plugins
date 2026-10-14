@@ -26,6 +26,9 @@
 #                          combination; its job and hook are block-tagged)
 #   codeql (public only)   public/.github/workflows/codeql.yml.tmpl
 #                          public/.github/workflows/codeql-noop.yml.tmpl
+#   none (any category)    no file of its own (#2121) — the quality workflows
+#                          and their noops are still rendered, with that
+#                          category's tool blocks stripped
 #
 # Templates under common/ render for every combination and are not listed here.
 # The tree a template lives in (public/, private/) is where it was first written,
@@ -35,7 +38,7 @@
 #
 # Usage:
 #   toolchain-templates.zsh --visibility public|private \
-#     --static-analysis sonarcloud|sonarqube --vulnerabilities snyk|trivy \
+#     --static-analysis sonarcloud|sonarqube|none --vulnerabilities snyk|trivy|none \
 #     --code-scanning codeql|none
 #
 # Pass the values resolve-tools.zsh printed. Output: one template relpath
@@ -48,16 +51,16 @@
 set -euo pipefail
 
 usage() {
-	print -u2 -- "usage: toolchain-templates.zsh --visibility public|private --static-analysis sonarcloud|sonarqube"
-	print -u2 -- "       --vulnerabilities snyk|trivy --code-scanning codeql|none"
+	print -u2 -- "usage: toolchain-templates.zsh --visibility public|private --static-analysis sonarcloud|sonarqube|none"
+	print -u2 -- "       --vulnerabilities snyk|trivy|none --code-scanning codeql|none"
 	exit 2
 }
 
 typeset -A val
 typeset -A allowed=(
 	visibility "public private"
-	static_analysis "sonarcloud sonarqube"
-	vulnerabilities "snyk trivy"
+	static_analysis "sonarcloud sonarqube none"
+	vulnerabilities "snyk trivy none"
 	code_scanning "codeql none"
 )
 
