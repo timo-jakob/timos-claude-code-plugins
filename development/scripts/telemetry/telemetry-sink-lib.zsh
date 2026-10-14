@@ -145,8 +145,9 @@ tlm_user_dir() {
 # non-empty, else the user-level default <tlm_user_dir>/<repo-slug>.jsonl.
 # Status 1, with nothing printed, when the default is the sink and HOME is unset.
 # emit-telemetry.zsh writes through it and collect-acceptance-telemetry.zsh
-# (#1230) reads its idempotency keys through it, so the file one checks is
-# always the file the other appends to.
+# (#1230) and collect-approver-telemetry.zsh (#1231) read their idempotency
+# keys through it, so the file one checks is always the file the other appends
+# to.
 tlm_sink_path() {
   local file="$1" dir="$2" repo="$3" user_dir=""
   if [[ -n "$file" ]]; then

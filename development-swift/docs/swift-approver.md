@@ -38,6 +38,12 @@ This file records only the **Swift deltas**:
   on arrival (#1147). The review skill itself stays a standalone
   deep-dive capability (owner decision on #448); the Approver borrows
   its lenses for breadth at synthesis time, not its depth.
+- **The hidden block's run metadata (#1231)** carries `"language": "swift"`
+  and the seven-lens list
+  `"dimensions": ["bugs", "security", "performance", "code_quality", "tests", "swift6_compliance", "resilience"]`,
+  beside the `started_at` every approver records at its first step. The
+  agent names the `<!-- claude-approver:findings` marker literally, so its
+  block renders like every other approver's.
 - **`suggested_agent` mapping** targets the Swift agents:
   `test_quality`/`coverage` → `swift-coverage-improver`, Sonar
   baseline findings → `swift-sonar-triage`, CodeQL / Code Scanning

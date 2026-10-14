@@ -5946,7 +5946,9 @@ Rules that carry the contract's weight:
     *Per-pipeline telemetry instrumentation* below. The acceptance collector,
     `collect-acceptance-telemetry.zsh` (#1230), takes both flags directly and
     resolves them to one sink file for every record it emits (*Acceptance
-    telemetry*, below). **refine-issue does not**:
+    telemetry*, below); so does the approver collector,
+    `collect-approver-telemetry.zsh` (#1231, *Approver telemetry*, below).
+    **refine-issue does not**:
     its Step 7 passes no sink flag at all, so its records always land in the
     user-level default, and that gap stays open — read an empty shared
     directory after a refine-issue run as that gap, not as a broken emitter.
@@ -7019,6 +7021,135 @@ collection until its run leaves the 30-day window. Every exit 3 prints one stder
 naming the repo, the failing endpoint or script, and the run and check-run id it
 was processing; a completed collection prints one stdout line with the counts
 collected, skipped as already recorded, and recorded with withheld counts.
+
+## Approver telemetry (#1231)
+
+The Approver is the gate every bot-authored PR in the family passes through,
+and whether it is calibrated or rubber-stamping — how often it asks for
+changes, at what confidence, whether the risk-register size predicts a
+rejection, which PR types it approves — is a question its posted reviews can
+answer only in aggregate. Since #1231 each instrumented review a
+`claude-approver` Bot posted can become one `kind: "run"` record,
+`pipeline: "approve"`.
+
+**Collected from the reviews the Approver posted.** The approver agents live in
+the language plugins (`development-go`, `development-java`,
+`development-python`, `development-swift`) and in `development-claude-plugin`,
+while the shared emitter lives in the `development` plugin, and an installed
+plugin cannot reach another plugin's tree by path. Every approver agent already
+posts its verdict, confidence, detected type and dimension-tagged risk findings
+in the hidden `claude-approver:findings` block of the review it posts, so a
+collector in the `development` plugin reads those posted reviews with `gh` and
+emits through the shared emitter: one emitter, no cross-plugin path, and any
+repo the operator's machine can read gets records. Vendoring the emitter into
+every approver plugin was rejected: five copies of the contract is the drift the
+telemetry trilogy exists to end. Emitting from the `/development-*:approve`
+skill's local step was rejected: the skill reaches the development plugin only
+by the repo-relative path its token mint uses, which resolves only inside this
+repo — so no other repo would ever get a record — and it would need a new
+agent-to-skill hand-off. Deferring to epic 3's `approver_verdict` enrichment
+(#742) was rejected: it loses the confidence, the risk-register size and the PR
+type, which only the Approver knows. The approve skills' repo-relative
+`mint-approver-token.zsh` reference is unchanged by #1231, and approver
+telemetry does not depend on it; that path bug is tracked as #2099.
+
+**The block's run metadata.** All five approver agents — go, java, python, swift
+and claude-plugin — add three keys to the hidden block, `approver_version`
+staying `v1`: `language` (`go` | `java` | `python` | `swift` |
+`claude-plugin`, the value the approve skill renders into `{{APPROVER_LANG}}`),
+`dimensions` (the lenses the risk register walks, in walk order, in full on every block (the hotfix
+and refusal blocks too)) and
+`started_at` (unix seconds at the agent's first step; for the claude-plugin
+approver, Step 2's work-directory creation). The keys are mirrored in each
+language's `docs/<lang>-approver.md` and in `approver-policy-core.md.tmpl`'s
+JSON-block section, and the swift agent names the `<!-- claude-approver:findings`
+marker literally. They are output only: no verdict, policy, risk-register or
+calibration logic reads them. As of #1231 the lists are:
+
+| Approver | `dimensions` |
+|---|---|
+| go, java, python | `["bugs","security","performance","code_quality","tests","resilience"]` |
+| swift | `["bugs","security","performance","code_quality","tests","swift6_compliance","resilience"]` |
+| claude-plugin | `["bugs","security","performance","code_quality","tests","prose_logic","contract","script_quality","manifest_bump","manifest"]` |
+
+**The collector.**
+`development/scripts/telemetry/collect-approver-telemetry.zsh --repo OWNER/NAME
+[--telemetry-file PATH] [--telemetry-dir DIR]` walks the repo's pull requests,
+any state, updated in the last 30 days — listed newest-updated first, 100 a page,
+paging stops at the first page that is short or reaches past the window; there
+is no range flag — in ascending PR number, and every review of each in ascending
+review id, and emits one `kind: "run"` record, `pipeline: "approve"`, per
+instrumented review a `claude-approver` Bot posted. A review counts when its
+author login starts with `claude-approver` and its author type is `Bot`; the
+block read is the last `<!-- claude-approver:findings … -->` in its body. A
+review with no block, a block that is not one JSON object, no integer
+`started_at`, or a non-positive `submitted_at − started_at` yields no record —
+`wall_s` is required and never guessed — and is counted as not instrumented; so
+is a block the builder refuses. A review by any other author is ignored,
+uncounted, even when its body carries a block. Dry runs post nothing and so are
+never recorded. The sink is the one file the emitter's precedence resolves to —
+`--telemetry-file`, else `DIR/<repo-slug>.jsonl`, else the user-level default —
+computed by `tlm_sink_path` in `telemetry-sink-lib.zsh` and handed to the
+emitter as `--telemetry-file`. A review whose id is already `payload.review_id`
+on a `pipeline: "approve"` record in **that one file** is skipped; a record in
+any other file does not count. So the collector is safe to re-run and
+`/loop`-able. It never echoes anything `gh` prints on stderr, where a token
+could appear, and reads only the HTTP status from it.
+
+**The builder.** The pure `build-approver-telemetry-record.zsh`, beside the
+collector, maps one review JSON plus its parsed block to the payload and owns
+the outcome behind `--print-outcome`; the collector only orchestrates `gh` and
+the emitter. It refuses a block whose `verdict` disagrees with the review's
+GitHub state — `APPROVE`↔`APPROVED`, `REQUEST_CHANGES`↔`CHANGES_REQUESTED`,
+`COMMENT`↔`COMMENTED` — with exit 1 and no output; a `DISMISSED` review's state
+no longer says what was posted, so the block's verdict stands against it. It
+also refuses a block whose verdict or confidence is outside its enum, whose
+`findings` is not an array of objects, or whose `language`, `type_detected`,
+`approver_version` or a dimension is not a short lowercase identifier — so no
+token-shaped value can ride a block into a sink.
+
+**Envelope.** `issue: null`; `pr` is the reviewed PR; `ts` is `started_at`;
+`wall_s` is `submitted_at − started_at`; `parent_run_id: null`;
+`tokens: null`.
+
+**Payload.**
+
+| Key | Value |
+|---|---|
+| `verdict` | `APPROVE` \| `REQUEST_CHANGES` \| `COMMENT`, from the block |
+| `confidence` | `HIGH` \| `MEDIUM` \| `LOW`, verbatim from the block |
+| `risk_register_size` | the count of block findings with `category: "risk"` |
+| `dimensions` | the block's `dimensions` — the agent's declared lenses in walk order, in full on every block (the hotfix and refusal blocks too) |
+| `pr_type` | the block's `type_detected` |
+| `language` | the block's `language` |
+| `review_id` | the review's id — the idempotency key |
+| `head_sha` | the review's commit |
+| `approver_version` | the block's `approver_version` |
+
+**Outcome** describes the review event, never the PR's fate:
+
+| `outcome` | When |
+|---|---|
+| `success` | a review was posted — any verdict; `REQUEST_CHANGES` is a successful review |
+| `parked`, `escalated`, `failed` | not used by this pipeline: a run that posts no review (a conflict stop, a hard-fail refusal, a mint failure) leaves no settled trace, and no code path hands off to a human as a distinct event — `COMMENT` with reservations is a posted review |
+
+**Exit contract.** The never-fatal rule of *Per-pipeline telemetry
+instrumentation* does not apply — the collector has no host run to protect:
+
+| Exit | When |
+|---|---|
+| `0` | the collection completed — including nothing to collect and reviews counted as not instrumented |
+| `2` | usage — no `--repo`, a malformed one, an unknown or dangling flag, a positional, a `--telemetry-dir` that exists and is not a directory; judged before any `gh` call |
+| `3` | a `gh` call failed — the pulls listing (a `--repo` that does not exist or the token cannot see answers 404 there, and that is a failure too) or a reviews listing — or the emitter failed, or a tool (`jq`, `gh`), the builder (any exit but its refusal) or the sink is unusable |
+
+On exit 3 the collector stops at the first failure: records already appended
+stand, the failing record is not appended, the emitter leaves no partial line,
+and after a transient failure (`gh`, the emitter) a re-run resumes through
+idempotency; an unusable tool, builder or sink fails again on every re-run until
+it is fixed. Every exit 3 prints one stderr line naming the repo, the failing
+endpoint or script, and the PR number and review id it was processing; a
+completed collection prints one stdout line with the counts recorded, skipped as
+already recorded, and skipped as not instrumented.
 
 ## Story size pre-flight (#1437)
 

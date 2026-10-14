@@ -1,0 +1,14 @@
+[
+  {
+    "id": 2930600001,
+    "user": {
+      "login": "claude-approver-timo-jakob[bot]",
+      "type": "Bot"
+    },
+    "body": "## Verdict: APPROVE\n\n### Summary\n\nFixture review.\n\n---\n\n<!-- claude-approver:findings\n{\"approver_version\":\"v1\",\"language\":\"claude-plugin\",\"dimensions\":[\"bugs\",\"security\",\"performance\",\"code_quality\",\"tests\",\"prose_logic\",\"contract\",\"script_quality\",\"manifest_bump\",\"manifest\"],\"started_at\":1791273600,\"verdict\":\"APPROVE\",\"confidence\":\"HIGH\",\"type_detected\":\"fix\",\"findings\":[{\"category\":\"risk\",\"dimension\":\"prose_logic\",\"title\":\"Missing failure branch\",\"detail\":\"See the diff.\",\"suggested_agent\":null,\"file\":\"src/app.py\",\"line\":42}]}\n-->\n",
+    "state": "APPROVED",
+    "submitted_at": "2026-10-06T08:05:00Z",
+    "commit_id": "4f2c9e1a0b",
+    "author_association": "NONE"
+  }
+]

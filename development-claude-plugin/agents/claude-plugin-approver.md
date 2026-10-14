@@ -144,12 +144,14 @@ sessions, two PRs) must never share PR data, so nothing goes to a fixed
 ```bash
 export GH_TOKEN=$(cat <the token file path>); PR_NUMBER=<the PR number>
 work=$(mktemp -d) && echo "work=$work"
+started_at=$(date +%s) && echo "started_at=$started_at"
 gh pr view "$PR_NUMBER" --json title,body,author,headRefOid,baseRefName,additions,deletions,changedFiles,labels,reviewDecision,mergeable,mergeStateStatus > "$work/pr.json"
 gh pr diff "$PR_NUMBER" > "$work/pr.diff"
 gh pr view "$PR_NUMBER" --json files --jq '.files[].path' > "$work/pr.files"
 ```
 
-If `mktemp -d` fails, stop and post nothing. Shell variables do not
+The `started_at` it prints is the hidden block's `started_at` (#1231):
+keep the number for Step 11. If `mktemp -d` fails, stop and post nothing. Shell variables do not
 survive between your Bash calls, so set `work` to the printed path,
 `PR_NUMBER`, `GH_TOKEN` (re-exported from its token file), `wt` and
 every other variable a block reads, at the top of that block — each
@@ -356,6 +358,9 @@ The review body is markdown. Structure:
 <!-- claude-approver:findings
 {
   "approver_version": "v1",
+  "language": "claude-plugin",
+  "dimensions": ["bugs", "security", "performance", "code_quality", "tests", "prose_logic", "contract", "script_quality", "manifest_bump", "manifest"],
+  "started_at": <the started_at number Step 2 printed>,
   "verdict": "...",
   "confidence": "...",
   "type_detected": "...",
@@ -507,6 +512,9 @@ the approver identity, refuse.
 ```json
 {
   "approver_version": "v1",
+  "language": "claude-plugin",
+  "dimensions": ["bugs", "security", "performance", "code_quality", "tests", "prose_logic", "contract", "script_quality", "manifest_bump", "manifest"],
+  "started_at": 1791108000,
   "verdict": "APPROVE | REQUEST_CHANGES | COMMENT",
   "confidence": "HIGH | MEDIUM | LOW",
   "type_detected": "feat | fix | refactor | chore_deps | chore_deps_major | chore_runtime | security | docs | test | ci | chore | revert | hotfix | ambiguous",
@@ -523,6 +531,16 @@ the approver identity, refuse.
   ]
 }
 ```
+
+`language`, `dimensions` and `started_at` are run metadata for approver
+telemetry (#1231), which `collect-approver-telemetry.zsh` in the
+development plugin reads back from the posted review: `language` is
+`claude-plugin`; `dimensions` lists the lenses Step 9 walks, in walk order, in full on every
+block — the hotfix and refusal blocks too, though the run stops before that
+step — when
+the walk gains a lens, so does this list; `started_at` is the integer
+`started_at` Step 2 printed beside the work directory. They are output only: no verdict,
+finding or calibration reads them.
 
 Every finding in the JSON has a counterpart in the human-readable
 markdown above. Don't add findings to the JSON that aren't in the

@@ -241,7 +241,7 @@ The review body is markdown structured as:
 ---
 
 <!-- claude-approver:findings
-{ "approver_version": "v1", "verdict": "...", "confidence": "...", "type_detected": "...", "findings": [ ... ] }
+{ "approver_version": "v1", "language": "go", "dimensions": [ ... ], "started_at": ..., "verdict": "...", "confidence": "...", "type_detected": "...", "findings": [ ... ] }
 -->
 ```
 
@@ -255,6 +255,9 @@ Don't strip it; don't reformat it; don't substitute prose for it.
 ```json
 {
   "approver_version": "v1",
+  "language": "go",
+  "dimensions": ["bugs", "security", "performance", "code_quality", "tests", "resilience"],
+  "started_at": 1791108000,
   "verdict": "APPROVE | REQUEST_CHANGES | COMMENT",
   "confidence": "HIGH | MEDIUM | LOW",
   "type_detected": "feat | fix | refactor | chore_deps | chore_deps_major | chore_runtime | security | docs | test | ci | chore | revert | hotfix | ambiguous",
@@ -271,6 +274,14 @@ Don't strip it; don't reformat it; don't substitute prose for it.
   ]
 }
 ```
+
+`language`, `dimensions` and `started_at` are run metadata for approver
+telemetry (#1231): `language` is `go`, `dimensions` lists the lenses the
+risk register walks, in walk order, in full on every block (the hotfix and
+refusal blocks too), and `started_at` is the unix seconds the
+agent recorded at its first step. `collect-approver-telemetry.zsh` reads
+them back from the posted review; no verdict, finding or calibration
+reads them.
 
 `dimension` is not a closed enum: the values above are the
 `/development-go:review` panel's dimensions as it ships today, and the

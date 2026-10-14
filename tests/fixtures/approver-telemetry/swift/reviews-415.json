@@ -1,0 +1,14 @@
+[
+  {
+    "id": 2930500001,
+    "user": {
+      "login": "claude-approver-timo-jakob[bot]",
+      "type": "Bot"
+    },
+    "body": "## Verdict: APPROVE\n\n### Summary\n\nFixture review.\n\n---\n\n<!-- claude-approver:findings\n{\"approver_version\":\"v1\",\"language\":\"swift\",\"dimensions\":[\"bugs\",\"security\",\"performance\",\"code_quality\",\"tests\",\"swift6_compliance\",\"resilience\"],\"started_at\":1791190800,\"verdict\":\"APPROVE\",\"confidence\":\"HIGH\",\"type_detected\":\"feat\",\"findings\":[]}\n-->\n",
+    "state": "APPROVED",
+    "submitted_at": "2026-10-05T09:02:00Z",
+    "commit_id": "4f2c9e1a0b",
+    "author_association": "NONE"
+  }
+]
