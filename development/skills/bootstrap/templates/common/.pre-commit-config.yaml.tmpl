@@ -166,30 +166,9 @@ repos:
     hooks:
       - id: golangci-lint
 
-  # Coverage floor — local mirror of the CI coverage-floor step. Same
-  # diff-cover invocation on the cobertura report, same 90%-on-new-code
-  # threshold, keyed on the origin/{{DEFAULT_BRANCH}}...HEAD diff (not
-  # pre-commit's `files:`, which over-fires on a brand-new branch push, #713).
-  # Contract: assumes a recent `task test` (or CI) produced coverage.xml — Go's
-  # `go test -coverprofile` emits a Go profile that diff-cover can't read, so
-  # the Taskfile `test` task converts it to cobertura (gocover-cobertura); this
-  # hook consumes that coverage.xml, exactly as the Swift hook consumes the
-  # lcov its `swift test` produces.
-  - repo: local
-    hooks:
-      - id: coverage-floor-go
-        name: Coverage floor (90% on new code) — requires recent `task test` (go test + cobertura export)
-        entry: >-
-          bash -c 'base=origin/{{DEFAULT_BRANCH}};
-          if git rev-parse -q --verify "$base^{commit}" >/dev/null 2>&1 &&
-          [ -z "$(git diff --name-only --diff-filter=d "$base...HEAD" -- "*.go")" ];
-          then exit 0; fi;
-          exec diff-cover coverage.xml --compare-branch=origin/{{DEFAULT_BRANCH}} --fail-under=90'
-        language: python
-        additional_dependencies: ["diff-cover>=9"]
-        pass_filenames: false
-        always_run: true
-        stages: [pre-push]
+  # No Go coverage-floor hook here (#2122): the floor is the test stage of the
+  # repo's gate (scripts/go-gate.zsh), which the version-controlled
+  # hooks/pre-push runs on every push.
   # --- GO-END ----------------------------------------------------------------
 
   # --- SWIFT-START -----------------------------------------------------------

@@ -1,0 +1,38 @@
+# The repository's gate in CI (#2122, platform contract §12): ONE job, `gate`, which runs the
+# recorded gate command — the same command hooks/pre-push runs — and nothing else. `make setup`
+# installs the gate's pinned tools, so CI and a developer machine run the same versions.
+#
+# The job carries no `name:`, matrix or reusable-workflow `uses:`, so GitHub reports it as the
+# status context `gate`, which branch protection requires. The workflow runs on every pull
+# request, unfiltered: a PR it skipped would never report `gate`.
+
+name: Go CI
+
+on:
+  pull_request:
+  push:
+    branches: ["{{DEFAULT_BRANCH}}"]
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # full history: the coverage floor and buf breaking compare against the base branch
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+      # the gate script is `#!/usr/bin/env zsh`, and ubuntu-latest ships no zsh
+      - name: install zsh
+        run: |
+          set -euo pipefail
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends zsh
+      - run: make setup
+      - run: |
+          {{GATE_COMMAND}}

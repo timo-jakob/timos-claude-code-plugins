@@ -414,17 +414,18 @@ EOF
   done
 }
 
-@test "render: #1604 #2425 IAC block follows an IaC-topic --primary (kubernetes, opentofu)" {
-  printf 'a: 1\n# --- IAC-START ---\ngate: yes\n# --- IAC-END ---\n' > "$T/k.tmpl"
+@test "render: #1604 #2425 #2122 GATE block follows a gate --primary (kubernetes, opentofu, go)" {
+  printf 'a: 1\n# --- GATE-START ---\ngate: yes\n# --- GATE-END ---\n' > "$T/k.tmpl"
   local primary
-  for primary in kubernetes opentofu; do
+  for primary in kubernetes opentofu go; do
     run zsh "$SCRIPT" --templates "$T" --out "$OUT" --primary "$primary" k.tmpl
     [ "$status" -eq 0 ]
     grep -qx 'gate: yes' "$OUT/k"
   done
-  # an EXACT match only: another primary, an extension of either topic, and no
+  # an EXACT match only: another primary, an extension of any of them, and no
   # --primary at all each strip it
-  for primary in --primary=python --primary=kubernetes-operator --primary=opentofu-x none; do
+  for primary in --primary=python --primary=java --primary=claude-plugin --primary=kubernetes-operator \
+    --primary=opentofu-x --primary=golang none; do
     if [ "$primary" = none ]; then
       run zsh "$SCRIPT" --templates "$T" --out "$OUT" k.tmpl
     else
@@ -437,7 +438,7 @@ EOF
   done
 }
 
-@test "render: #1604 #2425 the real .maintenance.yml.tmpl records gate: only on an IaC-topic primary" {
+@test "render: #1604 #2425 #2122 the real .maintenance.yml.tmpl records gate: only on a gate primary, with its per-primary default" {
   local primary
   for primary in kubernetes opentofu; do
     run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --approval human --primary "$primary" \
@@ -446,13 +447,44 @@ EOF
     [ "$(yq -r '.gate' "$OUT/common/.maintenance.yml")" = "make lint" ]
     [ "$(yq -r '.tools' "$OUT/common/.maintenance.yml")" = null ]
   done
+  # go: the gate line beside the toolchain, defaulting to make check (#2122)
+  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --approval human --primary go --languages go \
+    --static-analysis none --vulnerabilities trivy --code-scanning none common/.maintenance.yml.tmpl
+  [ "$status" -eq 0 ]
+  [ "$(yq -r '.gate' "$OUT/common/.maintenance.yml")" = "make check" ]
+  [ "$(yq -r '.tools.vulnerabilities' "$OUT/common/.maintenance.yml")" = trivy ]
+  # a recorded value always wins over the per-primary default, on every gate primary
+  for primary in go kubernetes opentofu; do
+    run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --approval human --primary "$primary" \
+      --languages go --static-analysis none --vulnerabilities trivy --code-scanning none \
+      --gate-command 'task gate' common/.maintenance.yml.tmpl
+    [ "$status" -eq 0 ]
+    [ "$(yq -r '.gate' "$OUT/common/.maintenance.yml")" = "task gate" ]
+  done
   run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" --approval human --primary python --languages python \
     --static-analysis sonarcloud --vulnerabilities snyk --code-scanning codeql \
     common/.maintenance.yml.tmpl
   [ "$status" -eq 0 ]
   [ "$(yq -r '.primary' "$OUT/common/.maintenance.yml")" = "python" ]
   run ! grep -q '^gate:' "$OUT/common/.maintenance.yml"
-  run ! grep -q 'IAC' "$OUT/common/.maintenance.yml"
+  run ! grep -qE 'IAC|GATE-' "$OUT/common/.maintenance.yml"
+}
+
+@test "render: #2122 the per-primary gate default reaches every {{GATE_COMMAND}} site" {
+  printf 'run: {{GATE_COMMAND}}\n' > "$T/g.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --primary go g.tmpl
+  [ "$status" -eq 0 ]
+  grep -qx 'run: make check' "$OUT/g"
+  local primary
+  for primary in kubernetes opentofu; do
+    run zsh "$SCRIPT" --templates "$T" --out "$OUT" --primary "$primary" g.tmpl
+    [ "$status" -eq 0 ]
+    grep -qx 'run: make lint' "$OUT/g"
+  done
+  # no --primary at all keeps the historical make lint
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" g.tmpl
+  [ "$status" -eq 0 ]
+  grep -qx 'run: make lint' "$OUT/g"
 }
 
 @test "render: #2425 --primary kubernetes and --primary opentofu render the same IaC .maintenance.yml" {
@@ -471,11 +503,11 @@ primary: $primary
 # The approval model /development:bootstrap resolved (#1684). A recorded value wins on every
 # re-run: human (a human approves; armed auto-merge then merges) | approver (the Claude Approver).
 approval: human
-# --- IAC-START ---
-# The repository's gate COMMAND: what the IaC workflow's gate job and hooks/pre-push run. A re-run of
+# --- GATE-START ---
+# The repository's gate COMMAND: what the gate workflow's \`gate\` job and hooks/pre-push run. A re-run of
 # bootstrap keeps a recorded value and renders it into both.
 gate: make lint
-# --- IAC-END ---" ]
+# --- GATE-END ---" ]
   done
 }
 
@@ -867,14 +899,15 @@ EOF
   run ! grep -qE '\{\{[A-Z_][A-Z0-9_]*\}\}' "$K"
 }
 
-@test "render: real pre-commit template for a go repo keeps the coverage-floor-go hook (#875)" {
+@test "render: real pre-commit template for a go repo keeps golangci-lint and no coverage-floor-go hook (#875, #2122)" {
   run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" \
     --languages "go" common/.pre-commit-config.yaml.tmpl
   [ "$status" -eq 0 ]
   P="$OUT/common/.pre-commit-config.yaml"
   grep -q 'id: golangci-lint' "$P"
-  grep -q 'id: coverage-floor-go' "$P"
-  grep -q -- '-- "\*.go"' "$P"                  # diff guard keyed on Go files
+  # the floor moved into the gate's test stage, which hooks/pre-push runs (#2122)
+  run ! grep -q 'coverage-floor-go' "$P"
+  run ! grep -qiE 'taskfile|task test' "$P"
   run ! grep -q 'coverage-floor-swift' "$P"     # other languages' hooks stripped
   run ! grep -qE '\{\{[A-Z_][A-Z0-9_]*\}\}' "$P"
 }

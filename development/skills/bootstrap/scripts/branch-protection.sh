@@ -56,6 +56,10 @@
 # `--visibility` exits 1 naming the two flags that replaced it. Neither flag is
 # required or read under an IaC --iac-only, whose context set is `gate` alone.
 #
+# On the language-app path a Go repo's `gate` (#2122) is required IN ADDITION to
+# the language-app contexts, gated on .github/workflows/go-ci.yml being on disk —
+# the same on-disk rule the `image` (ko) and CodeQL contexts follow.
+#
 # --has-codeql is true exactly when the resolved `code_scanning` is `codeql`;
 # CodeQL's public-only rule is enforced at the plan (resolve-tools.zsh step 4,
 # #1670 D8), not here. --codeql-languages is required when --has-codeql=true,
@@ -185,6 +189,93 @@ if [[ "$IAC_ONLY" == "false" ]]; then
 	fi
 fi
 
+# The two probes of a workflow's `gate` job, shared by the IaC path and the Go
+# gate (#2122); each path's comments state the verdicts.
+probe_gate_job() {
+	awk '
+		/^["\047]?jobs["\047]?[[:space:]]*:[[:space:]]*(#.*)?$/ { in_jobs = 1; next }
+		in_jobs && /^[^[:space:]#]/ { in_jobs = 0 }
+		in_jobs && /^[[:space:]]+[^[:space:]#]/ {
+			match($0, /^[[:space:]]+/)
+			this_indent = substr($0, 1, RLENGTH)
+			body = substr($0, RLENGTH + 1)
+			if (job_indent == "") { job_indent = this_indent }
+			if (this_indent == job_indent) {
+				in_gate = (body ~ /^["\047]?gate["\047]?[[:space:]]*:([[:space:]]|$)/)
+				if (in_gate) {
+					found = 1
+					# anything but a comment after the key is an inline value
+					if (body !~ /^["\047]?gate["\047]?[[:space:]]*:[[:space:]]*(#.*)?$/) { flow = 1 }
+				}
+				gate_key_indent = ""
+			} else if (in_gate && length(this_indent) > length(job_indent)) {
+				# only keys belonging to the gate job ITSELF: the first child
+				# line fixes their indent, so a step name, a `with:` map or a
+				# block scalar writing YAML sits deeper and never trips this
+				if (gate_key_indent == "") { gate_key_indent = this_indent }
+				if (this_indent == gate_key_indent) {
+					# at this indent only a plain block key or a flush
+					# sequence item (`steps:` written flush) is readable;
+					# anything else — a flow node, alias, anchor or tag
+					# opening the job on the line after `gate:`, a tagged
+					# or `?` key, a `<<:` merge key — can hide a `name:`
+					if (body ~ /^-([[:space:]]|$)/) {
+					} else if (body !~ /^["\047]?[A-Za-z0-9_-]+["\047]?[[:space:]]*:([[:space:]]|$)/) {
+						flow = 1
+					} else if (body ~ /^["\047]?(name|strategy|uses)["\047]?[[:space:]]*:/) {
+						renamed = 1
+					}
+				}
+			}
+		}
+		END { print (found ? (flow ? 3 : (renamed ? 2 : 0)) : 1) }
+	' "$1"
+}
+probe_gate_trigger() {
+	awk '
+		function trim(s) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", s); return s }
+		function uncomment(s) { sub(/(^|[[:space:]])#.*$/, "", s); return trim(s) }
+		function is_pr(s) {
+			s = trim(s)
+			if (s ~ /^".*"$/ || s ~ /^\047.*\047$/) { s = substr(s, 2, length(s) - 2) }
+			return s ~ /^pull_request$/
+		}
+		/^["\047]?on["\047]?[[:space:]]*:([[:space:]]|$)/ {
+			v = $0
+			sub(/^[^:]*:/, "", v)
+			v = uncomment(v)
+			in_on = (v == "")
+			if (v ~ /^\[.*\]$/) {
+				n = split(substr(v, 2, length(v) - 2), toks, ",")
+				for (i = 1; i <= n; i++) { if (is_pr(toks[i])) { ok = 1 } }
+			} else if (v !~ /^\{/ && is_pr(v)) { ok = 1 }
+			next
+		}
+		in_on && /^[^[:space:]#]/ { in_on = 0; if (pr_open) { ok = 1; pr_open = 0 } }
+		in_on && /^[[:space:]]+[^[:space:]#]/ {
+			match($0, /^[[:space:]]+/)
+			this_indent = substr($0, 1, RLENGTH)
+			body = substr($0, RLENGTH + 1)
+			if (on_indent == "") { on_indent = this_indent }
+			if (length(this_indent) > length(on_indent)) {
+				# a child line: under an open `pull_request:` it is a filter
+				if (pr_open) { pr_open = 0 }
+				next
+			}
+			if (pr_open) { ok = 1; pr_open = 0 }
+			if (body ~ /^-([[:space:]]|$)/) {
+				if (is_pr(uncomment(substr(body, 2)))) { ok = 1 }
+			} else if (body ~ /^["\047]?pull_request["\047]?[[:space:]]*:([[:space:]]|$)/) {
+				v = body
+				sub(/^[^:]*:/, "", v)
+				v = uncomment(v)
+				if (v == "" || v == "~" || v == "null" || v ~ /^\{[[:space:]]*\}$/) { pr_open = 1 }
+			}
+		}
+		END { if (pr_open) { ok = 1 }; print (ok ? 0 : 1) }
+	' "$1"
+}
+
 # --- the infrastructure-as-code path takes an entirely different check set ----
 # Not an addition to the language-app set but a REPLACEMENT: on this path
 # quality-*.yml is not rendered, so every context above would sit at `expected`
@@ -249,46 +340,7 @@ if [[ "$IAC_ONLY" != "false" ]]; then
 	# An awk that exits non-zero read nothing, so its verdict is never taken:
 	# under `set -e` a bare failure would abort with no message, and a status
 	# read as a verdict would blame a file that was never read (#1641).
-	gate_job_state=$(
-		awk '
-			/^["\047]?jobs["\047]?[[:space:]]*:[[:space:]]*(#.*)?$/ { in_jobs = 1; next }
-			in_jobs && /^[^[:space:]#]/ { in_jobs = 0 }
-			in_jobs && /^[[:space:]]+[^[:space:]#]/ {
-				match($0, /^[[:space:]]+/)
-				this_indent = substr($0, 1, RLENGTH)
-				body = substr($0, RLENGTH + 1)
-				if (job_indent == "") { job_indent = this_indent }
-				if (this_indent == job_indent) {
-					in_gate = (body ~ /^["\047]?gate["\047]?[[:space:]]*:([[:space:]]|$)/)
-					if (in_gate) {
-						found = 1
-						# anything but a comment after the key is an inline value
-						if (body !~ /^["\047]?gate["\047]?[[:space:]]*:[[:space:]]*(#.*)?$/) { flow = 1 }
-					}
-					gate_key_indent = ""
-				} else if (in_gate && length(this_indent) > length(job_indent)) {
-					# only keys belonging to the gate job ITSELF: the first child
-					# line fixes their indent, so a step name, a `with:` map or a
-					# block scalar writing YAML sits deeper and never trips this
-					if (gate_key_indent == "") { gate_key_indent = this_indent }
-					if (this_indent == gate_key_indent) {
-						# at this indent only a plain block key or a flush
-						# sequence item (`steps:` written flush) is readable;
-						# anything else — a flow node, alias, anchor or tag
-						# opening the job on the line after `gate:`, a tagged
-						# or `?` key, a `<<:` merge key — can hide a `name:`
-						if (body ~ /^-([[:space:]]|$)/) {
-						} else if (body !~ /^["\047]?[A-Za-z0-9_-]+["\047]?[[:space:]]*:([[:space:]]|$)/) {
-							flow = 1
-						} else if (body ~ /^["\047]?(name|strategy|uses)["\047]?[[:space:]]*:/) {
-							renamed = 1
-						}
-					}
-				}
-			}
-			END { print (found ? (flow ? 3 : (renamed ? 2 : 0)) : 1) }
-		' "$iac_ci"
-	) || die "could not read \`$iac_ci\` (awk exited $? while probing its \`gate\` job) — NOT applying branch protection. Make the file readable, then re-run this script."
+	gate_job_state=$(probe_gate_job "$iac_ci") || die "could not read \`$iac_ci\` (awk exited $? while probing its \`gate\` job) — NOT applying branch protection. Make the file readable, then re-run this script."
 	if [[ "$gate_job_state" == 3 ]]; then
 		die "\`$iac_ci\`'s \`gate\` job is written in flow style, or through an anchor, alias, tag or \`<<:\` merge key — NOT applying branch protection: this script reads the job's own keys line by line and cannot tell whether GitHub reports it as \`gate\`. Write it as a block mapping — \`gate:\` alone on its line, its keys indented beneath it, no \`<<:\` — then re-run this script."
 	fi
@@ -316,50 +368,7 @@ if [[ "$IAC_ONLY" != "false" ]]; then
 	# Any child — `types:`, `branches:`, `branches-ignore:`, `paths:`,
 	# `paths-ignore:` — narrows it, and a flow-mapping `on: {…}` is not read.
 	# Other triggers may sit beside it. 0: runs on every PR; 1: does not.
-	trigger_state=$(
-		awk '
-			function trim(s) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", s); return s }
-			function uncomment(s) { sub(/(^|[[:space:]])#.*$/, "", s); return trim(s) }
-			function is_pr(s) {
-				s = trim(s)
-				if (s ~ /^".*"$/ || s ~ /^\047.*\047$/) { s = substr(s, 2, length(s) - 2) }
-				return s ~ /^pull_request$/
-			}
-			/^["\047]?on["\047]?[[:space:]]*:([[:space:]]|$)/ {
-				v = $0
-				sub(/^[^:]*:/, "", v)
-				v = uncomment(v)
-				in_on = (v == "")
-				if (v ~ /^\[.*\]$/) {
-					n = split(substr(v, 2, length(v) - 2), toks, ",")
-					for (i = 1; i <= n; i++) { if (is_pr(toks[i])) { ok = 1 } }
-				} else if (v !~ /^\{/ && is_pr(v)) { ok = 1 }
-				next
-			}
-			in_on && /^[^[:space:]#]/ { in_on = 0; if (pr_open) { ok = 1; pr_open = 0 } }
-			in_on && /^[[:space:]]+[^[:space:]#]/ {
-				match($0, /^[[:space:]]+/)
-				this_indent = substr($0, 1, RLENGTH)
-				body = substr($0, RLENGTH + 1)
-				if (on_indent == "") { on_indent = this_indent }
-				if (length(this_indent) > length(on_indent)) {
-					# a child line: under an open `pull_request:` it is a filter
-					if (pr_open) { pr_open = 0 }
-					next
-				}
-				if (pr_open) { ok = 1; pr_open = 0 }
-				if (body ~ /^-([[:space:]]|$)/) {
-					if (is_pr(uncomment(substr(body, 2)))) { ok = 1 }
-				} else if (body ~ /^["\047]?pull_request["\047]?[[:space:]]*:([[:space:]]|$)/) {
-					v = body
-					sub(/^[^:]*:/, "", v)
-					v = uncomment(v)
-					if (v == "" || v == "~" || v == "null" || v ~ /^\{[[:space:]]*\}$/) { pr_open = 1 }
-				}
-			}
-			END { if (pr_open) { ok = 1 }; print (ok ? 0 : 1) }
-		' "$iac_ci"
-	) || die "could not read \`$iac_ci\` (awk exited $? while probing its \`on:\` triggers) — NOT applying branch protection. Make the file readable, then re-run this script."
+	trigger_state=$(probe_gate_trigger "$iac_ci") || die "could not read \`$iac_ci\` (awk exited $? while probing its \`on:\` triggers) — NOT applying branch protection. Make the file readable, then re-run this script."
 	if [[ "$trigger_state" != 0 ]]; then
 		die "\`$iac_ci\` does not run on every pull request — NOT applying branch protection: a PR its \`on:\` skips never reports \`gate\` and waits at \`expected\` forever. Trigger it on a bare \`pull_request\` with no \`types:\`, \`branches:\`, \`branches-ignore:\`, \`paths:\` or \`paths-ignore:\` filter (other triggers may stay beside it), then re-run this script."
 	fi
@@ -437,6 +446,22 @@ if [[ "$IAC_ONLY" == "false" ]]; then
 		warn "\`$missing_half\` is absent — NOT requiring \`e2e (playwright)\` or"
 		warn "\`lighthouse (budgets)\` (the PRs that half covers would never report them)."
 		warn "Re-run /development:bootstrap to render the React WebUI gates (#1946)."
+	fi
+	# --- the Go gate (#2122) ------------------------------------------------------
+	# go-ci.yml's one `gate` job runs the repository's recorded gate command; it is
+	# required IN ADDITION to the contexts above (narrowing them is #2128). Gated on
+	# the workflow being ON DISK, exactly as `image` is on ko-image.yml: a Go repo
+	# bootstrapped before #2122 has no workflow to report `gate`, and a required
+	# context nothing reports wedges every PR at `expected`. A go-ci.yml whose
+	# `gate` job the IaC path's probes would refuse is dropped with a warning.
+	go_ci=".github/workflows/go-ci.yml"
+	if [[ -f "$go_ci" ]]; then
+		if [[ "$(probe_gate_job "$go_ci")" == 0 && "$(probe_gate_trigger "$go_ci")" == 0 ]]; then
+			checks+=("gate")
+		else
+			warn "\`$go_ci\` has no \`gate\` job GitHub reports as \`gate\` on every pull request —"
+			warn "NOT requiring \`gate\` (it would wait at \`expected\` forever)."
+		fi
 	fi
 	if [[ "$HAS_CODEQL" == "true" ]]; then
 		# Gated on codeql.yml actually being ON DISK, like `image`/ko-image and

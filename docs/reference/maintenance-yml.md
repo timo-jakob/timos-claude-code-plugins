@@ -33,7 +33,7 @@ A single bootstrap run writes `gate:` or `tools:`, never both.
 | --- | --- | --- | --- |
 | `primary:` | every bootstrap | the repository's primary type | `/development:maintenance`, bootstrap re-runs |
 | `approval:` | every path except the composition path | who approves the repository's PRs: `human` or `approver` | bootstrap re-runs |
-| `gate:` | the IaC path only (`primary: kubernetes` or `primary: opentofu`) | the repository's gate command; default `make lint` | bootstrap, which renders it into two files |
+| `gate:` | the IaC path (`primary: kubernetes` or `primary: opentofu`) and `primary: go` | the repository's gate command; default `make lint`, or `make check` for Go | bootstrap, which renders it into two files |
 | `opentofu_plan_policy:` | never by bootstrap; you add it | `true` turns on the OpenTofu gate's credentialed `plan-policy` stage | `scripts/tofu-gate.zsh`, locally and in CI |
 | `tools:` | every path except the IaC path | the quality toolchain, in three categories | bootstrap re-runs |
 
@@ -105,22 +105,25 @@ request, rather than during setup automation.
 The repository's **gate command**: the one command that validates the repository,
 locally and in CI.
 
-- **Written only on the IaC path**, where bootstrap also records `primary: kubernetes`
-  or `primary: opentofu`.
-  Every other repository gets no `gate:` key.
-- **Default:** `make lint`. The Makefile's `lint` target runs `scripts/k8s-gate.zsh` (`scripts/tofu-gate.zsh`
-  on an OpenTofu repository),
+- **Written when `primary:` is `kubernetes`, `opentofu` or `go`.** Every other
+  repository gets no `gate:` key.
+- **Default:** `make lint` on the IaC path. The Makefile's `lint` target runs
+  `scripts/k8s-gate.zsh` (`scripts/tofu-gate.zsh` on an OpenTofu repository),
   which is documented under
   [Scripts bootstrap emits into a target repository](repo-scripts.md#scripts-bootstrap-emits-into-a-target-repository).
+  On a Go repository the default is `make check`, whose target runs
+  `scripts/go-gate.zsh`: format, lint, proto, generation drift, tests with the
+  90% new-code coverage floor, and vulnerabilities (#2122).
 - **Where the value goes.** Bootstrap renders the value into two files: the last step of
-  the `gate` job in `.github/workflows/kubernetes-ci.yml` or `opentofu-ci.yml`, and `hooks/pre-push`. Neither file
+  the `gate` job in `.github/workflows/kubernetes-ci.yml`, `opentofu-ci.yml` or
+  `go-ci.yml`, and `hooks/pre-push`. Neither file
   reads `.maintenance.yml` when it runs, so after changing `gate:` you must re-run
   bootstrap to update them.
 - **On a re-run.** A recorded value is kept byte for byte and rendered into both files,
   so a command you renamed stays renamed. When an existing `.maintenance.yml` has no
   `gate:` key, bootstrap appends one with the default.
 - **What counts as recorded.** An absent key, `null` and a blank value are **not**
-  recorded values. In each of those cases bootstrap uses the default, `make lint`.
+  recorded values. In each of those cases bootstrap uses the default for the primary.
 
 ## `tools:`
 

@@ -1,10 +1,13 @@
 #!/usr/bin/env zsh
-# install-iac-hooks.zsh — wire an IaC repository's version-controlled pre-push
-# hook through the repository's own `make hooks` (#1605).
+# install-iac-hooks.zsh — wire a repository's version-controlled hooks/ directory
+# through the repository's own `make hooks` (#1605, #2122).
 #
-# Bootstrap's §3l IaC path emits no .pre-commit-config.yaml: its local hook is the
-# rendered hooks/pre-push, which runs the same gate command CI's `gate` job runs.
-# Step 4a calls this script on that path instead of install-precommit-hooks.zsh.
+# Two bootstrap paths render a gate and its hooks: §3l's IaC path, whose local hook
+# is the rendered hooks/pre-push (it emits no .pre-commit-config.yaml), and the Go
+# path (#2122), which adds hooks/pre-commit running `pre-commit run --hook-stage
+# pre-commit` beside it. On both, hooks/pre-push runs the same gate command CI's
+# `gate` job runs, and Step 4a calls this script instead of
+# install-precommit-hooks.zsh. It never runs the gate itself.
 #
 # Usage:
 #   install-iac-hooks.zsh [--repo <path>]
@@ -28,7 +31,8 @@
 #   4  a required tool (git or make) is not on PATH
 #   3  --repo is not the root of a git work tree
 #   5  a gate artifact is missing: no Makefile, a Makefile with no `hooks` target,
-#      or hooks/pre-push missing or not executable
+#      hooks/pre-push missing or not executable, or a hooks/pre-commit that is
+#      present but not executable
 #   1  `make hooks` exited non-zero, or core.hooksPath is not `hooks` afterwards
 #   0  hooks wired. Stdout is exactly `install-iac-hooks: core.hooksPath=hooks`.
 #
@@ -90,6 +94,10 @@ done < "$repo/Makefile"
 (( has_hooks )) || fail 5 "the Makefile in $repo has no hooks target"
 [[ -f "$repo/hooks/pre-push" ]] || fail 5 "hooks/pre-push is missing in $repo"
 [[ -x "$repo/hooks/pre-push" ]] || fail 5 "hooks/pre-push is not executable in $repo"
+# the Go path's second hook (#2122) is optional, but a hook that lost its mode is
+# silently skipped, so a present one must be executable
+[[ ! -e "$repo/hooks/pre-commit" || -x "$repo/hooks/pre-commit" ]] \
+  || fail 5 "hooks/pre-commit is not executable in $repo"
 
 local old
 old="$(git -C "$repo" config --get core.hooksPath 2>/dev/null)" || old=""

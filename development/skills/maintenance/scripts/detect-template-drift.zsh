@@ -70,6 +70,11 @@ typeset -a tracked=(
   # in it — and stamp-marker.zsh inserts after a shebang, preserving the mode.
   "scripts/k8s-gate.zsh"
   "hooks/pre-push"
+  # the Go gate (#2122): its workflow, mechanism and second hook, stamped at
+  # Step 3.6 like the IaC trio above
+  ".github/workflows/go-ci.yml"
+  "scripts/go-gate.zsh"
+  "hooks/pre-commit"
   # the application-repo direct-to-cluster gate (#1206) — BOTH halves. The
   # workflow is the runner; the CHECKER holds the matched command set, so it is
   # the half that actually goes stale: widen the IN set upstream and a consumer
@@ -131,8 +136,17 @@ for target_rel in "${tracked[@]}"; do
   # bootstrap-rendered copy cannot exist. Whether a kubernetes-ci.yml exists does
   # not decide it either way.
   case "$target_rel" in
-    hooks/pre-push|scripts/k8s-gate.zsh)
+    hooks/pre-push)
+      # rendered from iac/ or, on a Go primary (#2122), from languages/go/
+      [[ -n "$(head -10 "$target_abs" | grep -E "^# claude-bootstrap: rendered from (iac|languages/go)/" || true)" ]] \
+        || continue ;;
+    scripts/k8s-gate.zsh)
       [[ -n "$(head -10 "$target_abs" | grep "^# claude-bootstrap: rendered from iac/" || true)" ]] \
+        || continue ;;
+    # the Go gate's script and second hook follow the same ownership rule (#2122):
+    # an unmarked copy is the consumer's own
+    hooks/pre-commit|scripts/go-gate.zsh)
+      [[ -n "$(head -10 "$target_abs" | grep "^# claude-bootstrap: rendered from languages/go/" || true)" ]] \
         || continue ;;
   esac
 

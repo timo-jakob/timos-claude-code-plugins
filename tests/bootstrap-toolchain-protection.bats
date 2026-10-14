@@ -381,6 +381,38 @@ protect_in_fixture() {
     || { printf 'without:\n%s\nwith:\n%s\n' "$without" "$with"; false; }
 }
 
+@test "#2122: a Go repo's gate is required in addition to its contexts if and only if go-ci.yml is on disk" {
+  protection_stubs
+  local without with
+  # the Go language-app set as a ko lane bootstraps it: ko-image.yml on disk
+  touch "$W/.github/workflows/ko-image.yml"
+  run protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy \
+    --has-dockerfile false --has-ko true --has-codeql false --default-branch main
+  [ "$status" -eq 0 ]
+  without="$(put_contexts)"
+  # a Go repo bootstrapped before #2122 has no go-ci.yml: nothing would report `gate`
+  run ! grep -qx gate <<< "$without"
+  # a go-ci.yml with no `gate` job would never report it either
+  touch "$W/.github/workflows/go-ci.yml"
+  : > "$CURL_DATA"
+  run protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy \
+    --has-dockerfile false --has-ko true --has-codeql false --default-branch main
+  [ "$status" -eq 0 ]
+  [ "$(put_contexts)" = "$without" ]
+  cp "$REPO_ROOT/development/skills/bootstrap/templates/languages/go/.github/workflows/go-ci.yml.tmpl" \
+    "$W/.github/workflows/go-ci.yml"
+  : > "$CURL_DATA"
+  run protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy \
+    --has-dockerfile false --has-ko true --has-codeql false --default-branch main
+  [ "$status" -eq 0 ]
+  with="$(put_contexts)"
+  # in ADDITION: every existing context stays, and `gate` is added exactly once
+  [ "$with" = "$({ printf '%s\n' "$without"; echo gate; } | LC_ALL=C sort)" ] \
+    || { printf 'without:\n%s\nwith:\n%s\n' "$without" "$with"; false; }
+  grep -qx test-and-coverage <<< "$with"
+  grep -qx image <<< "$with"
+}
+
 # --- AC4: rows 1 and 5 are today's defaults, byte for byte as sets ------------------
 
 @test "#1671 AC4: rows 1 and 5 produce exactly the pre-change golden context lists" {

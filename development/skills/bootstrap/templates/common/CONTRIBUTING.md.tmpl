@@ -22,6 +22,11 @@ in CI. Don't skip them.
 2. Install the hooks: `pre-commit install`.
 3. Install language-specific tooling listed in [SETUP.md](./SETUP.md).
 
+In a Go repository, run `make setup` once per clone instead of step 2. It
+installs the gate's pinned tools and points git at the version-controlled
+`hooks/` directory, which git cannot do on its own. `hooks/pre-push` then runs
+the same gate command as CI's `gate` check.
+
 ## Workflow
 
 ### 1. Branch from `{{DEFAULT_BRANCH}}`

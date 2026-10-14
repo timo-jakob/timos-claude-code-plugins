@@ -31,7 +31,7 @@ These are the §3 rules for this repo type. The conductor's generic bullet says
   module; never narrow it to the changed package, which can pass while a
   dependent package no longer compiles.
 - **Run the race detector too — `go test -race ./...` — unconditionally**, not
-  only where you notice CI doing it: this family's own bootstrapped `test` task
+  only where you notice CI doing it: this family's own bootstrapped `make test`
   runs `-race` on every invocation, so a run that skips it gates more weakly
   than the repo's own tooling.
 - **Judge pass/fail by the exit status, never by a `| tail` pipeline's.** A
@@ -50,27 +50,22 @@ These are the §3 rules for this repo type. The conductor's generic bullet says
   that rule wholesale: it repairs *someone else's* PR through a
   `resolved: false` envelope that does not exist here, where the racy code is
   usually the run's own §2 output.
-- **This gate does not produce the coverage artifact §6's push may need.** A
-  bootstrapped Go repo carries a `coverage-floor-go` pre-push hook that reads
-  `coverage.xml`; the commands above never write one. What does is the repo's
-  own `task test` — or, where `task` is not installed (go-task is a convenience
-  the family depends on nowhere), the two commands it wraps:
-  `go test -race ./... -coverprofile=coverage.out -covermode=atomic`, then
-  `go run github.com/boumenot/gocover-cobertura@v1.3.0 < coverage.out > coverage.xml`.
-  That second one is a **pinned `go run`, not an installed binary**, which is
-  what makes the fallback usable on the bare machine it exists for. Do not
-  install a toolchain to get past this: the run does not mutate the machine it
-  runs on, and if neither form is available, report the missing exporter and
-  stop rather than pushing into a rejection or reaching for `--no-verify`.
+- **The repo's pre-push hook runs more than this gate (#2122).** A
+  bootstrapped Go repo's `hooks/pre-push` runs its recorded gate command
+  (`.maintenance.yml`'s `gate:`, `make check` by default), and that command
+  adds format, lint, proto, generation drift, a 90% new-code coverage floor and
+  vulnerability stages to the suite above. A green §3 can therefore still be a
+  push the hook refuses.
 
-  **Do not produce it here, and not for every story.** §3 asks whether the
-  suite is green, not whether the push will be accepted, and the hook **skips
-  itself when the branch's diff touches no `*.go`** — so a report built for a
-  docs-only story is pure waste, which `/development:open-pr` step 3 forbids on
-  exactly that reasoning. Produce it at §6, and only when that diff does touch
-  `*.go`. **Do not reach for open-pr's coverage guard to make that call:** its
-  `--lang` arms are python, java and swift, and `--lang go` is a usage error,
-  not a verdict. The hook's own trigger, above, is this type's condition.
+  **Run the recorded gate command once before §6's push, only when the repo
+  carries `hooks/pre-push`.** Treat its red as a §3 red: fix it, and never
+  reach for `--no-verify`. When it fails because a gate tool is missing,
+  report the missing tool and its remedy, and stop — `make setup` for the
+  gate's `not installed; run make setup` failure, and for go's `no such tool`
+  error the `go get -tool` command bootstrap §3d names for it: the run
+  does not install a toolchain to get past its own gate. **Do not reach for
+  open-pr's coverage guard instead:** its `--lang` arms are python, java and
+  swift, and `--lang go` is a usage error, not a verdict.
 - **`--gate-attest`: not applicable.** No attestable single-run runner of the
   `run-gate.zsh` shape (#981) ships for this type, so there is no `tree`
   identity to carry into the next round's `--resume`, and the loop re-runs the

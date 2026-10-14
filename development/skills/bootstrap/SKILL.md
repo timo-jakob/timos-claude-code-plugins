@@ -1460,7 +1460,7 @@ The table below documents where each placeholder's **value** comes from:
 | `{{DEFAULT_BRANCH}}` | from `gh repo view --json defaultBranchRef` or `main` |
 | `{{LANGUAGES}}` | space-separated **resolved** languages; **empty on the §3l IaC path** (`--languages ""`) |
 | `{{PRIMARY}}` | the repo's **primary** type (its reason to exist) for `.maintenance.yml` — a language (`python`) or a topic (`claude-plugin`, `kubernetes`, `opentofu`). Determine: **(0)** if `--claude-plugin` resolves to `true` — the explicit flag, or its auto-detected default when `.claude-plugin/plugin.json` or `.claude-plugin/marketplace.json` is present → `claude-plugin`; **(1)** else if exactly one language was detected → that language (a detected language takes precedence over the kubernetes marker whatever `.maintenance.yml` records — the **mixed repo** is [#1193](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1193), not this slice); **(2)** else if the **resolved** language set (after Q4) is **empty**, exactly one IaC topic marker fires — `is_kubernetes` or `is_opentofu` is `true`, not both (or, both `false`, the user confirmed Q4's empty-repo question, which is the kubernetes topic) — **and `.maintenance.yml` records no other `primary:`** (if it does, surface the conflict per §3l — never overwrite it silently) → that topic, `kubernetes` or `opentofu` (the IaC repo of §3l — a topic holds the primary slot, which the primary/auxiliary model already permits). Both markers `true` never reaches here: Q4 halts it (#1394). Resolved, not detected: a language the user names in Q4 takes branch (1), however empty detection was; **(3)** else (multiple languages) → **ask** the user which is primary (`AskUserQuestion`, options = the detected languages). Surface the chosen primary in the Step 2 plan ("Primary type: X") so the user confirms it there — it's a *declaration*, not a silent inference. |
-| `{{GATE_COMMAND}}` | the repo's gate **command** on the §3l IaC path (#1604) — rendered into the topic workflow's last step (`.github/workflows/kubernetes-ci.yml` or `opentofu-ci.yml`), `hooks/pre-push` and `.maintenance.yml`'s `gate:` line. Resolve it as the **recorded** `gate:` value when `.maintenance.yml` already carries one, else `make lint`. Read it with `yq -r .gate`; an absent key, `null` or a blank value is **not** a recorded value. Pass it via `render.zsh --gate-command` (its default is `make lint`; an explicit empty value is refused). |
+| `{{GATE_COMMAND}}` | the repo's gate **command** on the §3l IaC path (#1604) and the Go path (#2122) — rendered into the gate workflow's last step (`.github/workflows/kubernetes-ci.yml`, `opentofu-ci.yml` or `go-ci.yml`), `hooks/pre-push` and `.maintenance.yml`'s `gate:` line. Resolve it as the **recorded** `gate:` value when `.maintenance.yml` already carries one, else the per-primary default: `make check` when the primary is `go`, else `make lint`. Read it with `yq -r .gate`; an absent key, `null` or a blank value is **not** a recorded value. Pass a recorded value via `render.zsh --gate-command`; without the flag render.zsh applies the same per-primary default itself (an explicit empty value is refused). |
 | `{{STATIC_ANALYSIS}}` / `{{VULNERABILITIES}}` / `{{CODE_SCANNING}}` | the **resolved** toolchain from `resolve-tools.zsh` (*Resolve the toolchain*, #1651) — rendered into `.maintenance.yml`'s `tools:` block. Pass via `render.zsh --static-analysis` / `--vulnerabilities` / `--code-scanning`. No defaults: the block sits in the `TOOLCHAIN` block, kept on every path but §3l, so a language-path render that forgot them trips the leftover check. Not passed on the §3l IaC path. |
 | `{{APPROVAL}}` | the **resolved** approval model from `resolve-approval.zsh` (*Resolve the approval model*, #1684) — `human` or `approver`, rendered into `.maintenance.yml`'s `approval:` line wherever *Resolve the approval model* runs. Pass via `render.zsh --approval`. No default, so a render that forgot it trips the leftover check; any other value is refused. |
 | `{{COVERAGE_THRESHOLD}}` | always `90` |
@@ -1712,7 +1712,7 @@ in the same PR:
 | `SURFACE_REST` | `rest` in `--acceptance-interfaces` |
 | `SURFACE_WEB_UI` | `web-ui` in `--acceptance-interfaces` |
 | `SURFACE_GRPC` | `grpc` in `--acceptance-interfaces` |
-| `IAC` | `--primary` is an IaC topic — `kubernetes` (the §3l IaC path) or `opentofu`, render.zsh's `iac_primaries` set, matched exactly (gates `.maintenance.yml`'s `gate:` line, #1604, #2425) |
+| `GATE` | `--primary` is a gate primary — `kubernetes` (the §3l IaC path), `opentofu` or `go`, render.zsh's `gate_primaries` set, matched exactly (gates `.maintenance.yml`'s `gate:` line, #1604, #2425, #2122) |
 | `TOOLCHAIN` | `--primary` is anything but an IaC topic (gates `.maintenance.yml`'s `tools:` block, #1651, and `SETUP.md` §4's `{{REQUIRED_CONTEXTS}}` list, #1670 — §3l renders no quality workflow, so it declares no toolchain) |
 
 The `SURFACE_*` tags (#766) gate the docs templates' per-interface nav/MOC
@@ -1879,11 +1879,11 @@ Copy from `templates/common/`:
   hook and any YAML CI). Static copy, no substitution.
 - `.maintenance.yml` (render `.maintenance.yml.tmpl` — substitute `{{PRIMARY}}`, `{{APPROVAL}}`). Declares the repo's
   primary type so `/development:maintenance` treats it as primary and everything else as auxiliary (ARCHITECTURE.md
-  "Primary / auxiliary model"), and `approval:` (*Resolve the approval model*, #1684). On the §3l IaC
-  path it also records `gate:`, the repo's gate command (#1604): an existing `.maintenance.yml` **without** a `gate:`
+  "Primary / auxiliary model"), and `approval:` (*Resolve the approval model*, #1684). On the §3l IaC path and a Go
+  primary (#2122) it records `gate:`, the gate command (#1604): an existing `.maintenance.yml` **without** a `gate:`
   key gets the line appended — idempotency rule 3 with `merge` as the recommendation, since no existing value changes;
   an existing `gate:` value is **left alone** byte-for-byte and is the `--gate-command` value for this run's workflow
-  and hook renders, so a consumer who renamed the command keeps the name. Off §3l it records `tools:` (#1651).
+  and hook renders, so a consumer who renamed the command keeps the name. Off §3l (Go too) it records `tools:` (#1651).
 - `LICENSE` — only if missing, ask which license (default MIT)
 - `trivy.yaml` (shared Trivy config — license + vuln + secret + misconfig scanners; license policy customizable per project)
 - `.github/SECURITY.md` (vulnerability disclosure policy — substitute `{{SECURITY_CONTACT_BLOCK}}` per Q6 answer)
@@ -2078,14 +2078,58 @@ For each detected language, merge in the appropriate config from
   nebula versioning TODO in the Java-specific recommendation above (the
   workflow assumes the plugin is applied + no hardcoded `version`). Apply the
   standard idempotency rules (skip/diff if either exists).
-- **Go only (#875):** the `.golangci.yml` (with its `formatters:` section —
-  gofumpt + gci) and the pre-commit GO block (golangci-lint + the
-  `coverage-floor-go` hook) merge via the standard fragment + pre-commit
-  merge above. **Additionally copy** four files (no placeholders in the first
-  two; render the last two):
-  - `templates/languages/go/Taskfile.yml` → `Taskfile.yml` (the thin
-    orchestrator — `fmt`/`lint`/`test`/`generate`/`build`/`image` one-liners;
-    verbatim).
+- **Go only (#875, #2122):** the `.golangci.yml` (with its `formatters:`
+  section — gofumpt + gci) and the pre-commit GO block (golangci-lint only;
+  the coverage floor is the gate's test stage, #2122) merge via the standard
+  fragment + pre-commit merge above. **Additionally, when the primary is
+  `go`**, render the Go gate (#2122, platform contract §12), every file
+  through `render.zsh` with `--primary go` and — when `.maintenance.yml` records a `gate:` — that value
+  as `--gate-command`, so the workflow, the hook and `.maintenance.yml` carry
+  one command (`make check` unless one is recorded):
+  - `templates/languages/go/Makefile.tmpl` → `Makefile` — the one place the
+    gate's non-Go tools are pinned (golangci-lint, diff-cover, and trivy when
+    it is the declared vulnerability tool); its targets are `fmt`, `lint`,
+    `test`, `generate`, `build`, `image`, `check` (runs
+    `scripts/go-gate.zsh`), `hooks` (`git config core.hooksPath hooks`) and
+    `setup` (`hooks`, then installs the pinned tools into `.tools/`). A
+    `Makefile` already on disk goes to the idempotency reviewer, as on §3l,
+    and so does any of the four files below already on disk. Its prompt
+    states the Go primary the way §3l's prompt states the IaC topic: the
+    reviewer reads its kubernetes-tree rules
+    with the Go row — `iac/` → `languages/go/`, the plugin-owned set →
+    `go-ci.yml`, `scripts/go-gate.zsh`, `hooks/pre-commit` and
+    `hooks/pre-push`, and a `Makefile` merge that appends the `check`,
+    `hooks` and `setup` targets and the variables they read when absent,
+    with `check` running `zsh scripts/go-gate.zsh`.
+  - `templates/languages/go/scripts/go-gate.zsh.tmpl` →
+    `scripts/go-gate.zsh` (`chmod +x`) — stages 1–6 in order: format, lint,
+    proto (`buf lint`, then `buf breaking` against the base branch; skipped
+    with a notice when there is no `buf.yaml`, and `buf breaking` alone when
+    the base branch has none), generation drift (skipped without
+    `buf.gen.yaml`), tests with the 90% new-code floor (`diff-cover` against
+    the base branch; skipped with a notice when no `*.go` file changed), and
+    vulnerabilities (`govulncheck`, plus `trivy fs` when trivy is declared;
+    skipped when `tools.vulnerabilities` is `none`). The first failing stage
+    stops the run.
+  - `templates/languages/go/hooks/pre-commit.tmpl` → `hooks/pre-commit` and
+    `templates/languages/go/hooks/pre-push.tmpl` → `hooks/pre-push` (both
+    `chmod +x`) — pre-commit runs the pre-commit framework's
+    `pre-commit` stage; pre-push runs the gate command, then the framework's
+    `pre-push` stage, which `core.hooksPath` would otherwise bypass.
+  - `templates/languages/go/.github/workflows/go-ci.yml.tmpl` →
+    `.github/workflows/go-ci.yml` — one job, `gate` (`fetch-depth: 0`,
+    `make setup`, then the gate command). Step 4 requires its `gate` context
+    in addition to the existing Go contexts.
+  - Pin the gate's Go tools through the module's `tool` directives:
+    `go get -tool golang.org/x/vuln/cmd/govulncheck@latest` and
+    `go get -tool github.com/boumenot/gocover-cobertura@latest`, plus
+    `go get -tool github.com/bufbuild/buf/cmd/buf@latest` only when
+    `buf.yaml` or `buf.gen.yaml` is present. The gate runs them as
+    `go tool <name>`, so `go.mod` is their one pin. Skip this when there is
+    no `go.mod` yet, and name the three commands in the final report.
+
+  **Copy** three more files (no placeholders in the first; render the last
+  two):
   - `templates/languages/go/.ko.yaml` → `.ko.yaml` (the digest-pinned static
     `defaultBaseImage`; verbatim — the `ko-base-digest-refresh` job below owns
     the periodic digest bump, Slice G #876).
@@ -2110,7 +2154,8 @@ For each detected language, merge in the appropriate config from
     Go's coverage is measured **per-package** (`go test ./...
     -coverprofile`, matching the #874 gate) and its new-code figure feeds the
     same 90% `diff-cover` gate as the other languages, via a
-    `gocover-cobertura` conversion the CI + Taskfile perform.
+    `gocover-cobertura` conversion the gate's test stage and `make test`
+    perform.
 - **JavaScript contract-consumer note (#727):** render the base
   `eslint.config.js` and `vitest.config.ts` **normally here** — unconditionally,
   with no dependence on the §3k seeder verdict. When the repo is a contract
@@ -5572,6 +5617,10 @@ actually rendered in Step 3 — §3a through §3l):
 | `.github/workflows/opentofu-ci.yml` | `opentofu/.github/workflows/opentofu-ci.yml.tmpl` (§3l OpenTofu path only) |
 | `scripts/tofu-gate.zsh` | `opentofu/scripts/tofu-gate.zsh.tmpl` (§3l OpenTofu path only) |
 | `hooks/pre-push` | `opentofu/hooks/pre-push.tmpl` (§3l OpenTofu path only) |
+| `.github/workflows/go-ci.yml` | `languages/go/.github/workflows/go-ci.yml.tmpl` (Go primary only, #2122) |
+| `scripts/go-gate.zsh` | `languages/go/scripts/go-gate.zsh.tmpl` (Go primary only) |
+| `hooks/pre-push` | `languages/go/hooks/pre-push.tmpl` (Go primary only) |
+| `hooks/pre-commit` | `languages/go/hooks/pre-commit.tmpl` (Go primary only) |
 | `.github/workflows/no-cluster-deploy.yml` | `common/.github/workflows/no-cluster-deploy.yml.tmpl` (not on the §3l IaC path) |
 | `scripts/check-no-cluster-deploy.zsh` | `common/scripts/check-no-cluster-deploy.zsh` (not on the §3l IaC path) |
 | `.github/workflows/api-stability.yml` | `common/.github/workflows/api-stability.yml.tmpl` |
@@ -5711,6 +5760,28 @@ Run this step again whenever `.pre-commit-config.yaml` changes — the
 script is idempotent, and a refresh that adds a new stage won't fire
 on push until the corresponding hook type is installed.
 
+**A Go primary is the exception to *Every other path* (#2122): it wires its
+hooks as the §3l IaC path does.** Its `hooks/` directory holds `pre-commit` (the
+pre-commit framework's `pre-commit` stage) and `pre-push` (the gate command), so
+run `install-iac-hooks.zsh` as the top of this step shows, under the same rule:
+run the resolved gate command (`make check` unless `.maintenance.yml` records
+another) first, and when it fails, skip the script and
+the final report names `make setup`, which wires the hooks and then installs the
+gate's tools — after which the hook rejects every push until the gate command
+passes, so for a red stage other than a missing tool the report says to fix that
+failure first. The same rule's already-wired case applies unchanged. Skip the
+script too while `pre-commit` is not on PATH (its install declined or failed),
+since `hooks/pre-commit` runs it; the report then names installing it before
+`make setup`. On the script's exit 5 for a missing `hooks` target (a declined
+`Makefile` merge), the remedy is merging the `check`, `hooks` and `setup` targets
+and the variables they read from `languages/go/Makefile.tmpl` first; until then CI's `gate` fails on every PR.
+Unless the hook was already wired, a red gate never blocks bootstrap or Step 4e's
+push; CI's required `gate` check still gates every PR. **Never run
+`install-precommit-hooks.zsh` on a Go primary:** with `core.hooksPath` set, git
+ignores `.git/hooks/`, so its install would wire nothing. Of the steps above,
+only the `pre-commit` install offer applies, since `hooks/pre-commit` calls it;
+Step 4a.5 runs as on every other language path.
+
 ### 4a.5. Normalize pre-existing files: `pre-commit run --all-files` until clean
 
 **Not on the §3l IaC path** (see 4a). The CI backstop job runs the hooks with `--all-files`, but local commits
@@ -5789,7 +5860,8 @@ The script applies a single protection rule that:
   `vulnerabilities` is `trivy`, `image` when there is a Dockerfile (or a ko lane whose
   `ko-image.yml` is on disk), `analyze (<lang>)` per language when
   `--has-codeql` is true **and** `codeql.yml` is on disk, and
-  `no-cluster-deploy` when both of its halves are on disk (#1670 D1). The toolchain always comes from
+  `no-cluster-deploy` when both of its halves are on disk (#1670 D1), and a Go
+  repo's `gate` in addition when `go-ci.yml` is on disk (#2122). The toolchain always comes from
   *Resolve the toolchain*'s `key=value` output, never from visibility — the
   script accepts no visibility at all. With
   `--iac-only kubernetes` it requires the `kubernetes-ci.yml` `gate` context **instead of**
@@ -5831,8 +5903,8 @@ never wedged at `expected`. Watch for that warning on a non-IaC path: it means
 the direct-to-cluster gate is **not enforced**. Render the pair (§3a) and re-run
 the script; if you cannot, list it as an outstanding Step 5 item rather than
 reporting the context as required. Never infer from exit 0 alone that every
-context in §3a's list was applied — three of them (`image` on the ko lane,
-`no-cluster-deploy`, and `analyze (<lang>)`) are computed from on-disk probes,
+context in §3a's list was applied — four of them (`image` on the ko lane,
+`no-cluster-deploy`, `analyze (<lang>)` and Go's `gate`) are computed from on-disk probes,
 not from the flags alone.
 
 **A third, for CodeQL (#1671).** With `--has-codeql true` the script also exits
@@ -6804,6 +6876,22 @@ checklist replaces the SonarCloud items with:
 - Start SonarQube: `cd infra/sonarqube && docker compose up -d`
 - Register self-hosted runner (see `infra/github-runner/README.md`).
 - Mint SonarQube project token, store as `SONAR_TOKEN` secret.
+
+For a **Go primary** (#2122) the checklist adds, each only when it is genuinely
+outstanding:
+
+- (unless Step 4a's gate ran a stage, not `skip every stage`, and its
+  install-iac-hooks.zsh exited 0 or found the hook already wired) Run `make setup`
+  — it wires `core.hooksPath`, then installs the gate's pinned tools — then the gate command
+  (`make check` unless one is recorded), which the pre-push hook runs on every
+  push from then on. First install `pre-commit` if Step 4a found it missing, and
+  merge the `check`, `hooks` and `setup` targets and the variables they read from
+  languages/go/Makefile.tmpl if the `Makefile` merge was declined.
+- (only when Step 4a found core.hooksPath already `hooks` and the gate failing)
+  The pre-push hook IS wired and rejects every push until the gate command
+  passes in this clone.
+- (only when §3d skipped the `go get -tool` pins, as on a repo with no `go.mod`
+  yet) Pin the gate's Go tools: the `go get -tool` commands §3d names.
 
 For the **IaC path** (§3l — the kubernetes topic marker or the opentofu topic marker with an empty RESOLVED language set
 and no other `primary:` recorded; a recorded

@@ -235,7 +235,7 @@ _gate_clauses() {
     'java|end-to-end exercise of the affected behaviour' \
     'go|unconditionally' \
     'go|abandon-and-report' \
-    'go|Do not produce it here' \
+    'go|Run the recorded gate command once before §6'"'"'s push' \
     'go|Epic verification (§E4)' \
     'go|end-to-end exercise of the affected behaviour' \
     'javascript|Epic verification (§E4)' \

@@ -427,10 +427,10 @@ EOF
   row="$(grep -F '| `{{GATE_COMMAND}}` |' "$SKILL")"
   [ -n "$row" ]
   contains "$row" 'the **recorded** `gate:` value'
-  contains "$row" 'else `make lint`'
-  row="$(grep -F '| `IAC` |' "$SKILL")"
-  contains "$row" '`kubernetes` (the §3l IaC path) or `opentofu`'
-  contains "$row" "render.zsh's \`iac_primaries\` set, matched exactly"
+  contains "$row" '`make check` when the primary is `go`, else `make lint`'
+  row="$(grep -F '| `GATE` |' "$SKILL")"
+  contains "$row" '`kubernetes` (the §3l IaC path), `opentofu` or `go`'
+  contains "$row" "render.zsh's \`gate_primaries\` set, matched exactly"
   row="$(grep -F '| `TOOLCHAIN` |' "$SKILL")"
   contains "$row" '`--primary` is anything but an IaC topic'
   # END-ANCHORED by length: a range whose end address stopped matching would run
