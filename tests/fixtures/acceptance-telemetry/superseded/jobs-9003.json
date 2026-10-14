@@ -1,0 +1,27 @@
+{
+  "total_count": 2,
+  "jobs": [
+    {
+      "id": 33001,
+      "run_id": 9003,
+      "run_attempt": 1,
+      "name": "acceptance (cli)",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "head_sha": "4f2c9e1aaaa0000bbbb1111cccc2222dddd3333",
+      "started_at": "2026-10-06T09:00:00Z",
+      "completed_at": "2026-10-06T09:00:30Z"
+    },
+    {
+      "id": 33002,
+      "run_id": 9003,
+      "run_attempt": 2,
+      "name": "acceptance (cli)",
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "4f2c9e1aaaa0000bbbb1111cccc2222dddd3333",
+      "started_at": "2026-10-06T09:05:00Z",
+      "completed_at": "2026-10-06T09:06:15Z"
+    }
+  ]
+}

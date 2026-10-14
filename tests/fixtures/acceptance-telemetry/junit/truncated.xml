@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites name="pytest tests">
+  <testsuite name="pytest" errors="0" failures="1" skipped="0" tests="4" time="1.020">
+    <testcase classname="tests.acceptance.cli.test_organize" name="test_help_exits_zero" time="0.210" />
+    <testcase classname="tests.acceptance.cli.test_organize" name="test_sorts_pdf_into_year_folder" time="0.410">
+      <failure message="assert 0 == 1">the upload was cut off h

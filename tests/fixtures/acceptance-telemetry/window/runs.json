@@ -1,0 +1,29 @@
+{
+  "total_count": 2,
+  "workflow_runs": [
+    {
+      "id": 9005,
+      "name": "acceptance",
+      "event": "pull_request",
+      "status": "completed",
+      "created_at": "@ago:10d",
+      "pull_requests": [
+        {
+          "number": 416
+        }
+      ]
+    },
+    {
+      "id": 9006,
+      "name": "acceptance",
+      "event": "pull_request",
+      "status": "completed",
+      "created_at": "@ago:45d",
+      "pull_requests": [
+        {
+          "number": 417
+        }
+      ]
+    }
+  ]
+}

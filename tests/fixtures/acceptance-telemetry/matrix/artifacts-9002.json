@@ -1,0 +1,23 @@
+{
+  "total_count": 2,
+  "artifacts": [
+    {
+      "id": 7101,
+      "name": "acceptance-report-cli",
+      "expired": false,
+      "created_at": "2026-10-05T11:01:58Z",
+      "size_in_bytes": 2048,
+      "url": "https://api.github.com/repos/timo-jakob/ai-doc-organizer/actions/artifacts/7101",
+      "archive_download_url": "https://api.github.com/repos/timo-jakob/ai-doc-organizer/actions/artifacts/7101/zip"
+    },
+    {
+      "id": 7102,
+      "name": "acceptance-report-rest",
+      "expired": false,
+      "created_at": "2026-10-05T11:00:33Z",
+      "size_in_bytes": 2048,
+      "url": "https://api.github.com/repos/timo-jakob/ai-doc-organizer/actions/artifacts/7102",
+      "archive_download_url": "https://api.github.com/repos/timo-jakob/ai-doc-organizer/actions/artifacts/7102/zip"
+    }
+  ]
+}

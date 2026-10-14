@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- a negative count: totals still add up (3 = 4 + (-1) + 0), but -1 failures is no count -->
+<testsuites>
+  <testsuite name="pytest" errors="0" failures="-1" skipped="0" tests="3">
+    <testcase classname="tests.acceptance.cli.test_organize" name="test_a" />
+    <testcase classname="tests.acceptance.cli.test_organize" name="test_b" />
+    <testcase classname="tests.acceptance.cli.test_organize" name="test_c" />
+  </testsuite>
+</testsuites>

@@ -1,0 +1,16 @@
+{
+  "total_count": 1,
+  "jobs": [
+    {
+      "id": 36001,
+      "run_id": 9006,
+      "run_attempt": 1,
+      "name": "acceptance (cli)",
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "4f2c9e1aaaa0000bbbb1111cccc2222dddd3333",
+      "started_at": "2026-08-30T12:00:00Z",
+      "completed_at": "2026-08-30T12:00:40Z"
+    }
+  ]
+}

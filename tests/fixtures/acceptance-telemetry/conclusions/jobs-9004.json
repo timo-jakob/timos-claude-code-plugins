@@ -1,0 +1,71 @@
+{
+  "total_count": 6,
+  "jobs": [
+    {
+      "id": 34001,
+      "run_id": 9004,
+      "run_attempt": 1,
+      "name": "acceptance (cli)",
+      "status": "completed",
+      "conclusion": "timed_out",
+      "head_sha": "4f2c9e1aaaa0000bbbb1111cccc2222dddd3333",
+      "started_at": "2026-10-07T08:00:00Z",
+      "completed_at": "2026-10-07T08:15:00Z"
+    },
+    {
+      "id": 34002,
+      "run_id": 9004,
+      "run_attempt": 2,
+      "name": "acceptance (cli)",
+      "status": "completed",
+      "conclusion": "startup_failure",
+      "head_sha": "4f2c9e1aaaa0000bbbb1111cccc2222dddd3333",
+      "started_at": "2026-10-07T08:20:00Z",
+      "completed_at": "2026-10-07T08:20:01Z"
+    },
+    {
+      "id": 34003,
+      "run_id": 9004,
+      "run_attempt": 3,
+      "name": "acceptance (cli)",
+      "status": "completed",
+      "conclusion": "neutral",
+      "head_sha": "4f2c9e1aaaa0000bbbb1111cccc2222dddd3333",
+      "started_at": "2026-10-07T08:30:00Z",
+      "completed_at": "2026-10-07T08:31:00Z"
+    },
+    {
+      "id": 34004,
+      "run_id": 9004,
+      "run_attempt": 4,
+      "name": "acceptance (cli)",
+      "status": "completed",
+      "conclusion": "action_required",
+      "head_sha": "4f2c9e1aaaa0000bbbb1111cccc2222dddd3333",
+      "started_at": "2026-10-07T08:40:00Z",
+      "completed_at": "2026-10-07T08:40:00Z"
+    },
+    {
+      "id": 34005,
+      "run_id": 9004,
+      "run_attempt": 5,
+      "name": "acceptance (cli)",
+      "status": "completed",
+      "conclusion": "stale",
+      "head_sha": "4f2c9e1aaaa0000bbbb1111cccc2222dddd3333",
+      "started_at": "2026-10-07T08:50:00Z",
+      "completed_at": "2026-10-07T08:50:02Z"
+    },
+    {
+      "id": 34006,
+      "run_id": 9004,
+      "run_attempt": 6,
+      "name": "acceptance (cli)",
+      "status": "completed",
+      "conclusion": "skipped",
+      "head_sha": "4f2c9e1aaaa0000bbbb1111cccc2222dddd3333",
+      "started_at": "2026-10-07T09:00:00Z",
+      "completed_at": "2026-10-07T09:00:00Z"
+    }
+  ]
+}
