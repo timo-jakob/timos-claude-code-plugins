@@ -16,7 +16,7 @@ Among others, these helper scripts live in
 ## Scripts bootstrap emits into a target repository
 
 The scripts above are this repository's own. `/development:bootstrap` also writes scripts
-**into the repositories it bootstraps**. This section documents the two gate scripts.
+**into the repositories it bootstraps**. This section documents the three gate scripts.
 
 ### `scripts/k8s-gate.zsh`
 
@@ -148,3 +148,37 @@ the key on and `tofu init` or `tofu plan` failing, it fails and names the key.
 
 **Versions.** `.github/workflows/opentofu-ci.yml` installs pinned tool versions; its
 Conftest pin equals the one `gather-opentofu-findings.zsh` evaluates with.
+
+### `scripts/go-gate.zsh`
+
+Emitted for a repository whose `primary:` is `go` (#2122), as a plugin-owned artifact. Its
+source is the bootstrap template `templates/languages/go/scripts/go-gate.zsh.tmpl`. The
+repository's gate command is `make check` by default, and the Makefile's `check` target
+runs this script. `.github/workflows/go-ci.yml`'s `gate` job and `hooks/pre-push` both run
+that command.
+
+**Invocation.** Run `make check`, or `zsh scripts/go-gate.zsh` from the repository root.
+It takes no arguments except `-h` / `--help`; any other argument exits `2`.
+
+**Required tools.** `golangci-lint` and `diff-cover`, which `make setup` installs into
+`.tools/` at the versions the Makefile pins, plus `trivy` when `.maintenance.yml` declares
+`tools.vulnerabilities: trivy`. `buf`, `govulncheck` and `gocover-cobertura` are Go tool
+dependencies in `go.mod`, run with `go tool`. A missing tool fails the stage that needs it:
+for a `make setup` tool the failure names `make setup`, and for a `go tool` one go's own
+"no such tool" error shows, which `go get -tool` fixes.
+
+**Stages**, in order. The script stops at the first stage that fails. A stage it skips
+prints one `go-gate: skip <stage> — <reason>` line.
+
+| # | Stage | What runs | Skipped when |
+| --- | --- | --- | --- |
+| 1 | `format` | `golangci-lint fmt --diff`; any diff fails | never |
+| 2 | `lint` | `golangci-lint run` | never |
+| 3 | `proto` | `buf lint`, then `buf breaking` against `origin/<default branch>` | no `buf.yaml`; the breaking check alone when the base branch has no `buf.yaml` |
+| 4 | `generation` | `buf generate`, then fails when a path named by an `out:` in `buf.gen.yaml` changed | no `buf.gen.yaml` |
+| 5 | `tests` | `go test -race` with coverage, then `diff-cover --fail-under=90` against `origin/<default branch>` | the coverage floor alone, when no `*.go` file changed |
+| 6 | `vulnerabilities` | `govulncheck ./...`, plus `trivy fs --scanners vuln` when trivy is declared | `tools.vulnerabilities: none` |
+
+The coverage floor and `buf breaking` need the base branch, so CI checks out the full
+history (`fetch-depth: 0`). Locally, a missing `origin/<default branch>` fails the tests
+stage and names `git fetch origin`.

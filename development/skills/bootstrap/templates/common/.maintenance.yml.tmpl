@@ -7,11 +7,11 @@ primary: {{PRIMARY}}
 # The approval model /development:bootstrap resolved (#1684). A recorded value wins on every
 # re-run: human (a human approves; armed auto-merge then merges) | approver (the Claude Approver).
 approval: {{APPROVAL}}
-# --- IAC-START ---
-# The repository's gate COMMAND: what the IaC workflow's gate job and hooks/pre-push run. A re-run of
+# --- GATE-START ---
+# The repository's gate COMMAND: what the gate workflow's `gate` job and hooks/pre-push run. A re-run of
 # bootstrap keeps a recorded value and renders it into both.
 gate: {{GATE_COMMAND}}
-# --- IAC-END ---
+# --- GATE-END ---
 # --- TOOLCHAIN-START ---
 # The quality toolchain /development:bootstrap resolved (#1651). A recorded value wins on every
 # re-run: static_analysis sonarcloud | sonarqube | none, vulnerabilities snyk | trivy | none,

@@ -8,6 +8,9 @@
 *.out
 coverage.out
 coverage.txt
+coverage.xml
+# the gate's pinned tools, installed by `make setup` (#2122)
+.tools/
 vendor/
 bin/
 dist/

@@ -1,0 +1,135 @@
+#!/usr/bin/env zsh
+# go-gate.zsh — this Go repository's gate MECHANISM (#2122), owned and re-rendered by
+# /development:bootstrap. `make check` runs it; CI's single `gate` job and hooks/pre-push run
+# `make check`, so the gate is one command everywhere (platform contract §12).
+#
+# Stages, cheapest first, and the first failure stops the gate:
+#   1 format       golangci-lint fmt --diff — fails on any diff, never rewrites a file
+#   2 lint         golangci-lint run with the repo's .golangci.yml (go vet runs inside it)
+#   3 proto        only with buf.yaml: buf lint, then buf breaking against the base branch
+#   4 generation   only with buf.gen.yaml: buf generate, then no drift in the generated paths
+#   5 tests        go test -race with coverage, then the 90% floor on changed Go lines
+#   6 vulns        govulncheck, plus trivy fs when .maintenance.yml declares trivy
+#
+# A stage whose input is absent, or whose tool .maintenance.yml declares `none` (#2121), prints
+# one `go-gate: skip <stage> — <reason>` line. The gate never skips a stage silently.
+#
+# The base ref is origin/{{DEFAULT_BRANCH}} as rendered, never a hard-coded branch. golangci-lint,
+# diff-cover and trivy come from `make setup` (.tools/bin), and a missing one fails the gate naming
+# `make setup`. buf, govulncheck and gocover-cobertura run through `go tool`, pinned by go.mod's tool
+# directives: a missing one fails its stage under go's own "no such tool" error, and `go get -tool`
+# adds it.
+#
+# Usage: zsh scripts/go-gate.zsh [-h|--help], from the repository root. It gates the current
+# directory and takes no other argument.
+#
+# Exit codes: 0 every stage passed or was skipped with a notice; 1 a stage failed, or a tool it
+# needs is missing; 2 an unknown argument.
+
+emulate -L zsh
+setopt pipefail no_unset
+
+if (( $# )); then
+	case "$1" in
+	-h | --help)
+		awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"
+		exit 0
+		;;
+	*)
+		print -u2 -r -- "go-gate: unknown argument: $1"
+		exit 2
+		;;
+	esac
+fi
+
+base="origin/{{DEFAULT_BRANCH}}"
+path=("$PWD/.tools/bin" $path)
+
+stage() { print -r -- "go-gate: $1" }
+skip() { print -r -- "go-gate: skip $1 — $2" }
+fail() { print -u2 -r -- "go-gate: FAIL $1"; exit 1 }
+need() { command -v "$1" >/dev/null 2>&1 || fail "$2 — $1 is not installed; run make setup" }
+
+# tools.<category> from .maintenance.yml's block mapping; empty when absent
+declared() {
+	[[ -f .maintenance.yml ]] || return 0
+	awk -v k="$1:" '/^tools:/ { t = 1; next } t && /^[^[:space:]#]/ { t = 0 }
+		t && $1 == k { print $2; exit }' .maintenance.yml
+}
+
+# a go.mod with no package yet (a fresh repository) has nothing to gate
+pkgs="$(go list ./...)" || fail "go list ./..."
+[[ -n "$pkgs" ]] || { skip "every stage" "no Go package yet"; exit 0; }
+
+# --- 1 format -----------------------------------------------------------------------
+stage "format"
+need golangci-lint format
+fmt_out="$(golangci-lint fmt --diff 2>&1)" || { print -u2 -r -- "$fmt_out"; fail "format — run make fmt"; }
+[[ -z "$fmt_out" ]] || { print -u2 -r -- "$fmt_out"; fail "format — run make fmt"; }
+
+# --- 2 lint -------------------------------------------------------------------------
+stage "lint"
+golangci-lint run || fail "lint"
+
+# --- 3 proto ------------------------------------------------------------------------
+if [[ -f buf.yaml ]]; then
+	stage "proto"
+	go tool buf lint || fail "proto — buf lint"
+	if git cat-file -e "$base:buf.yaml" 2>/dev/null; then
+		go tool buf breaking --against ".git#branch=$base" || fail "proto — buf breaking against $base"
+	else
+		skip "proto breaking check" "$base has no buf.yaml yet (the first proto module)"
+	fi
+else
+	skip "proto" "no buf.yaml"
+fi
+
+# --- 4 generation drift -------------------------------------------------------------
+if [[ -f buf.gen.yaml ]]; then
+	stage "generation"
+	# the generated paths: every `out:` in buf.gen.yaml
+	# (the value after the key, without a trailing comment or surrounding quotes)
+	gen_paths=(${(f)"$(awk '$1 == "out:" || $1 == "-" && $2 == "out:" {
+		v = $0; sub(/[[:space:]]+#.*$/, "", v); sub(/^[^:]*:[[:space:]]*/, "", v)
+		gsub(/^["\047]|["\047]?[[:space:]]*$/, "", v); print v }' buf.gen.yaml)"})
+	(( ${#gen_paths} )) || fail "generation — buf.gen.yaml names no out: path"
+	# drift is what buf generate changed, so an unrelated file under an `out: .` path is not drift
+	before="$(git status --porcelain --untracked-files=all -- "${gen_paths[@]}")"
+	go tool buf generate || fail "generation — buf generate"
+	after="$(git status --porcelain --untracked-files=all -- "${gen_paths[@]}")"
+	[[ "$after" == "$before" ]] || {
+		print -u2 -r -- "$after"
+		fail "generation — committed generated code does not match the protos; run make generate and commit"
+	}
+else
+	skip "generation" "no buf.gen.yaml"
+fi
+
+# --- 5 tests and the coverage floor ------------------------------------------------
+stage "tests"
+go test -race -coverprofile=coverage.out -covermode=atomic ./... || fail "tests"
+go tool gocover-cobertura -ignore-gen-files < coverage.out > coverage.xml || fail "tests — cobertura export"
+git rev-parse -q --verify "$base^{commit}" >/dev/null 2>&1 ||
+	fail "coverage floor — $base is not a commit here; run git fetch origin"
+if [[ -z "$(git diff --name-only --diff-filter=d "$base...HEAD" -- '*.go')" ]]; then
+	skip "coverage floor" "no Go file changed against $base"
+else
+	need diff-cover "coverage floor"
+	diff-cover coverage.xml --compare-branch="$base" --fail-under=90 ||
+		fail "coverage floor — changed Go lines are below 90% covered against $base"
+fi
+
+# --- 6 vulnerabilities --------------------------------------------------------------
+vulns="$(declared vulnerabilities)"
+if [[ "$vulns" == none ]]; then
+	skip "vulnerabilities" "tools.vulnerabilities is none"
+else
+	stage "vulnerabilities"
+	go tool govulncheck ./... || fail "vulnerabilities — govulncheck"
+	if [[ "$vulns" == trivy ]]; then
+		need trivy "vulnerabilities"
+		trivy fs --config trivy.yaml --scanners vuln . || fail "vulnerabilities — trivy fs"
+	fi
+fi
+
+stage "passed"

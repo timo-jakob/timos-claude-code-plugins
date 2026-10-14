@@ -1,0 +1,6 @@
+#!/bin/sh
+# The gate command, then the pre-commit framework's pre-push stage (an auxiliary language's
+# pre-push hooks), which git no longer reaches through .git/hooks once core.hooksPath is set.
+# The gate gets no stdin: that carries the pushed refs the framework reads.
+{ {{GATE_COMMAND}}; } </dev/null || exit 1
+exec pre-commit hook-impl --config=.pre-commit-config.yaml --hook-type=pre-push --hook-dir="$(dirname "$0")" -- "$@"

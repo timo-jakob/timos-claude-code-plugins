@@ -53,13 +53,16 @@
 #   --org-key <s>                 {{ORG_KEY}}
 #   --default-branch <s>          {{DEFAULT_BRANCH}}   (default: main)
 #   --languages "<a b c>"         {{LANGUAGES}} + block keep set; may be ""
-#   --primary <s>                 {{PRIMARY}} (+ the IAC block keep set: kept
-#                                 iff the value is in iac_primaries —
-#                                 `kubernetes` or `opentofu`, the IaC path)
-#   --gate-command <s>            {{GATE_COMMAND}} (default: make lint) — the
-#                                 IaC gate command (#1604); a blank or
-#                                 multi-line value is a usage error (exit 2),
-#                                 since it would render a gate that runs nothing
+#   --primary <s>                 {{PRIMARY}} (+ the GATE block keep set: kept
+#                                 iff the value is in gate_primaries —
+#                                 `kubernetes`, `opentofu` or `go`, #2122)
+#   --gate-command <s>            {{GATE_COMMAND}} — the repository's gate
+#                                 command (#1604, #2122). Its default is per
+#                                 primary and lives here alone: `make check` for
+#                                 `go`, else `make lint` (the IaC topics). A
+#                                 blank or multi-line value is a usage error
+#                                 (exit 2), since it would render a gate that
+#                                 runs nothing
 #   --static-analysis <s>         {{STATIC_ANALYSIS}}  } the RESOLVED toolchain
 #   --vulnerabilities <s>         {{VULNERABILITIES}}  } (resolve-tools.zsh, #1651)
 #   --code-scanning <s>           {{CODE_SCANNING}}    } recorded in .maintenance.yml's
@@ -184,7 +187,7 @@ vals[COVERAGE_THRESHOLD]="90"
 vals[PYTHON_VERSION]="3.12"
 vals[JAVA_VERSION]="21"
 vals[CLAUDE_PLUGINS_REPO]="timo-jakob/timos-claude-code-plugins"
-vals[GATE_COMMAND]="make lint"
+gate_command_set=0
 
 typeset -a files
 while (($# > 0)); do
@@ -201,7 +204,7 @@ while (($# > 0)); do
 	--gate-command)
 		[[ "${2-}" == *[![:space:]]* && "${2-}" != *$'\n'* ]] ||
 			{ print -u2 -- "render.zsh: --gate-command needs a non-blank, single-line value" && usage; }
-		vals[GATE_COMMAND]="$2" && shift 2
+		vals[GATE_COMMAND]="$2" && gate_command_set=1 && shift 2
 		;;
 	--static-analysis | --vulnerabilities | --code-scanning)
 		# a blank value would render a null key that records nothing (#1651)
@@ -265,11 +268,26 @@ if [[ "$visibility" == private && "${vals[CODE_SCANNING]:-}" == codeql ]]; then
 	print -u2 -- "render.zsh: private + codeql is never rendered (it needs GitHub Advanced Security)" && usage
 fi
 # The IaC topics (#2425): a --primary in this set takes the IaC path — human-only
-# approval, the IAC block's `gate:` line kept, the TOOLCHAIN block dropped. Written
+# approval, the GATE block's `gate:` line kept, the TOOLCHAIN block dropped. Written
 # out rather than derived from the template tree, and matched exactly, so
 # `kubernetes-operator` or `opentofu-x` stays on the language path.
 typeset -a iac_primaries=(kubernetes opentofu)
 is_iac_primary() { [[ -n "${vals[PRIMARY]:-}" ]] && ((${iac_primaries[(Ie)${vals[PRIMARY]}]})); }
+# The primaries that record a gate COMMAND (#2122): the IaC topics plus `go`. A
+# --primary in this set keeps the GATE block's `gate:` line; any other primary
+# renders no `gate:` line at all, since nothing would run it. Matched exactly, as
+# iac_primaries is, and kept apart from it: `go` is not on the IaC path.
+typeset -a gate_primaries=(kubernetes opentofu go)
+is_gate_primary() { [[ -n "${vals[PRIMARY]:-}" ]] && ((${gate_primaries[(Ie)${vals[PRIMARY]}]})); }
+# The per-primary gate default (#2122), stated once: a recorded value arrives as
+# --gate-command and always wins.
+if ((!gate_command_set)); then
+	if [[ "${vals[PRIMARY]:-}" == go ]]; then
+		vals[GATE_COMMAND]="make check"
+	else
+		vals[GATE_COMMAND]="make lint"
+	fi
+fi
 
 # resolve-approval.zsh refuses a recorded approver on the human-only kinds (#1684);
 # rendering one would stop every later bootstrap run.
@@ -446,7 +464,7 @@ keep_block() {
 	SURFACE_REST) has_surface rest ;;
 	SURFACE_WEB_UI) has_surface web_ui ;;
 	SURFACE_GRPC) has_surface grpc ;;
-	IAC) is_iac_primary ;;
+	GATE) is_gate_primary ;;
 	# the IaC path renders no quality workflow, so it declares no toolchain (#1651)
 	TOOLCHAIN) ! is_iac_primary ;;
 	*) return 2 ;; # unknown tag — the caller fails loudly

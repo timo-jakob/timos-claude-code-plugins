@@ -977,8 +977,9 @@ spec conversion feeding the contracts machinery) — complete the epic's tool
 universe; both are coverage-exempt config-audit advisors that recommend
 adoption when an external surface lacks the wiring.
 
-> **Blessed toolchain (one default each).** Go modules; **Taskfile** as a thin
-> orchestrator; **golangci-lint v2** (pinned) as the *single* binary for both
+> **Blessed toolchain (one default each).** Go modules; a **Makefile** as the thin
+> orchestrator, whose `make check` is the gate command (#2122);
+> **golangci-lint v2** (pinned) as the *single* binary for both
 > format (`fmt` — gofumpt + import ordering via the gci/goimports formatters)
 > and lint (`run --fix`); `go test -coverprofile` for coverage; **govulncheck**
 > as the single source of truth for Go code vulnerabilities (Snyk OSS is

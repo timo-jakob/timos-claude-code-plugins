@@ -1,0 +1,72 @@
+# This repository's gate and developer targets, bootstrapped by /development:bootstrap (#2122).
+#
+#   make check   the gate COMMAND — CI (.github/workflows/go-ci.yml) and hooks/pre-push run exactly this
+#   make setup   once per clone: wire hooks/, then install the pinned gate tools into .tools/
+#   make hooks   point git at the version-controlled hooks/ directory
+#
+#   make fmt | lint | test | generate | build | image   developer conveniences, one tool each
+#
+# `check` runs the gate MECHANISM, scripts/go-gate.zsh, through zsh rather than by its executable bit, so a
+# checkout that lost the mode still gates. golangci-lint, diff-cover and trivy are pinned HERE and nowhere
+# else: `make setup` installs exactly these versions locally and in CI. buf, govulncheck and gocover-cobertura
+# are Go tool dependencies pinned in go.mod and run with `go tool`.
+GOLANGCI_LINT_VERSION := v2.12.2
+DIFF_COVER_VERSION := 10.2.0
+TRIVY_VERSION := v0.72.0
+
+TOOLS := $(CURDIR)/.tools
+export PATH := $(TOOLS)/bin:$(PATH)
+
+# trivy is installed only when .maintenance.yml declares it (tools.vulnerabilities: trivy)
+VULNERABILITIES := $(shell awk '/^tools:/ { t = 1; next } t && /^[^[:space:]\#]/ { t = 0 } \
+	t && $$1 == "vulnerabilities:" { print $$2; exit }' .maintenance.yml 2>/dev/null)
+
+.PHONY: check hooks setup fmt lint test generate build image
+
+check:
+	zsh scripts/go-gate.zsh
+
+hooks:
+	git config core.hooksPath hooks
+
+setup: hooks
+	@mkdir -p "$(TOOLS)/bin"
+	@if ! golangci-lint version 2>/dev/null | grep -q "version $(GOLANGCI_LINT_VERSION:v%=%) "; then \
+		echo "make setup: installing golangci-lint $(GOLANGCI_LINT_VERSION)"; \
+		curl -sSfL -o "$(TOOLS)/install-golangci-lint.sh" \
+			"https://raw.githubusercontent.com/golangci/golangci-lint/$(GOLANGCI_LINT_VERSION)/install.sh" && \
+			sh "$(TOOLS)/install-golangci-lint.sh" -b "$(TOOLS)/bin" "$(GOLANGCI_LINT_VERSION)" || exit 1; \
+	fi
+	@if ! "$(TOOLS)/venv/bin/pip" show diff-cover 2>/dev/null | grep -qx "Version: $(DIFF_COVER_VERSION)"; then \
+		echo "make setup: installing diff-cover $(DIFF_COVER_VERSION)"; \
+		python3 -m venv "$(TOOLS)/venv" && \
+		"$(TOOLS)/venv/bin/pip" install --quiet "diff-cover==$(DIFF_COVER_VERSION)" && \
+		ln -sf "$(TOOLS)/venv/bin/diff-cover" "$(TOOLS)/bin/diff-cover"; \
+	fi
+	@if [ "$(VULNERABILITIES)" = trivy ] && ! trivy --version 2>/dev/null | grep -qx "Version: $(TRIVY_VERSION:v%=%)"; then \
+		echo "make setup: installing trivy $(TRIVY_VERSION)"; \
+		curl -sSfL -o "$(TOOLS)/install-trivy.sh" \
+			"https://raw.githubusercontent.com/aquasecurity/trivy/$(TRIVY_VERSION)/contrib/install.sh" && \
+			sh "$(TOOLS)/install-trivy.sh" -b "$(TOOLS)/bin" "$(TRIVY_VERSION)" || exit 1; \
+	fi
+
+fmt:
+	golangci-lint fmt
+
+lint:
+	golangci-lint run --fix
+
+test:
+	go test -race ./... -coverprofile=coverage.out -covermode=atomic
+	go tool gocover-cobertura -ignore-gen-files < coverage.out > coverage.xml
+
+generate:
+	go tool buf generate
+	go generate ./...
+
+build:
+	go build ./...
+
+# ko reads .ko.yaml and publishes to KO_DOCKER_REPO
+image:
+	ko build --sbom=spdx ./...
