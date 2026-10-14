@@ -580,6 +580,9 @@ for this language — is listed in the overlay):
 ```json
 {
   "approver_version": "v1",
+  "language": "{{APPROVER_LANG}}",
+  "dimensions": ["bugs", "security", "performance", "code_quality", "tests", "…"],
+  "started_at": 1791108000,
   "verdict": "REQUEST_CHANGES",
   "confidence": "LOW",
   "type_detected": "feat",
@@ -606,6 +609,14 @@ authority on which (the overlay carries the `suggested_agent` vocabulary, not
 the dimension set). Tag a risk with whatever dimension its lens actually
 carries; never drop or mislabel a finding because its dimension is absent
 from this list.
+
+`language`, `dimensions` and `started_at` are run metadata for approver
+telemetry (#1231), carried on every verdict's block: `language` is
+`{{APPROVER_LANG}}`, `dimensions` lists the lenses the risk register walks,
+in walk order, in full on every block (the hotfix
+and refusal blocks too), and `started_at` is the unix seconds the Approver recorded at
+its first step. They are output only — no verdict, finding or calibration
+reads them.
 
 The block is wrapped in an HTML comment so it doesn't render in the
 GitHub UI:

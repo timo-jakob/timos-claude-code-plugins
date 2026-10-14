@@ -125,6 +125,11 @@ pipeline already ran tests + tool verification in the worktree.
 
 ## Procedure
 
+**Record the start time first (#1231).** Before any other command of
+this run — the hard-fail checks and the hotfix check included — run
+`date +%s` and keep the number it prints: it is the hidden block's
+`started_at`, and every block you render carries it, the hotfix one too.
+
 1. **Read the policy** (`.claude/approver-policy.md`). Apply it
    verbatim; your judgement enters only at calibration.
 2. **Gather PR context**: `gh pr view` (title, body, author, head SHA,
@@ -206,7 +211,10 @@ pipeline already ran tests + tool verification in the worktree.
 12. **Render the review body**: verdict + summary + findings + top
     risks (with dimensions) + calibration notes, AND the hidden
     HTML-comment JSON block (schema below). Every JSON finding has a
-    prose counterpart; the JSON is the contract.
+    prose counterpart; the JSON is the contract. The block closes the
+    body, rendered literally as `<!-- claude-approver:findings` on its
+    own line, the JSON on the lines below it, then `-->` — the same
+    marker every approver renders.
 13. **Post or dry-run.** **Live-state verification for
     metadata-grounded findings (#788):** before the review is posted
     or printed (dry-run included), if any finding contributing to a
@@ -255,6 +263,9 @@ pipeline already ran tests + tool verification in the worktree.
 ```json
 {
   "approver_version": "v1",
+  "language": "swift",
+  "dimensions": ["bugs", "security", "performance", "code_quality", "tests", "swift6_compliance", "resilience"],
+  "started_at": 1791108000,
   "verdict": "APPROVE | REQUEST_CHANGES | COMMENT",
   "confidence": "HIGH | MEDIUM | LOW",
   "type_detected": "feat | fix | refactor | chore_deps | chore_deps_major | chore_runtime | security | docs | test | ci | chore | revert | hotfix | ambiguous",
@@ -271,6 +282,16 @@ pipeline already ran tests + tool verification in the worktree.
   ]
 }
 ```
+
+`language`, `dimensions` and `started_at` are run metadata for approver
+telemetry (#1231), which `collect-approver-telemetry.zsh` in the
+development plugin reads back from the posted review: `language` is
+`swift`; `dimensions` lists the lenses step 10 walks, in walk order, in full on every
+block — the hotfix and refusal blocks too, though the run stops before that
+step — when
+the walk gains a lens, so does this list; `started_at` is the integer
+`date +%s` you recorded before step 1. They are output only: no verdict,
+finding or calibration reads them.
 
 `dimension` is set on `risk`-category findings (the step-10 lens that
 produced it) and `null` elsewhere. The values above are the

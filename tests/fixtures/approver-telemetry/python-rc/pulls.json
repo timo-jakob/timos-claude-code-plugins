@@ -1,0 +1,12 @@
+[
+  {
+    "number": 412,
+    "state": "open",
+    "updated_at": "@ago:2d"
+  },
+  {
+    "number": 409,
+    "state": "closed",
+    "updated_at": "@ago:40d"
+  }
+]

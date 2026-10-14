@@ -1,0 +1,14 @@
+[
+  {
+    "id": 2930481177,
+    "user": {
+      "login": "claude-approver-timo-jakob[bot]",
+      "type": "Bot"
+    },
+    "body": "## Verdict: REQUEST_CHANGES\n\n### Summary\n\nFixture review.\n\n---\n\n<!-- claude-approver:findings\n{\"approver_version\":\"v1\",\"language\":\"python\",\"dimensions\":[\"bugs\",\"security\",\"performance\",\"code_quality\",\"tests\",\"resilience\"],\"started_at\":1791108000,\"verdict\":\"REQUEST_CHANGES\",\"confidence\":\"LOW\",\"type_detected\":\"feat\",\"findings\":[{\"category\":\"risk\",\"dimension\":\"security\",\"title\":\"Token compared with ==\",\"detail\":\"See the diff.\",\"suggested_agent\":null,\"file\":\"src/app.py\",\"line\":42},{\"category\":\"risk\",\"dimension\":\"resilience\",\"title\":\"No timeout on the upstream call\",\"detail\":\"See the diff.\",\"suggested_agent\":null,\"file\":\"src/app.py\",\"line\":42},{\"category\":\"test_quality\",\"dimension\":null,\"title\":\"Assertion-free test\",\"detail\":\"x\",\"suggested_agent\":\"python-coverage-improver\",\"file\":\"tests/test_app.py\",\"line\":7}]}\n-->\n",
+    "state": "CHANGES_REQUESTED",
+    "submitted_at": "2026-10-04T10:03:34Z",
+    "commit_id": "4f2c9e1a0b",
+    "author_association": "NONE"
+  }
+]

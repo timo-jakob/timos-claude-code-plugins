@@ -146,6 +146,11 @@ review", "detail": "...", "suggested_agent": null}`. Stop.
 
 ## Procedure
 
+**Record the start time first (#1231).** Before any other command of
+this run — the hard-fail checks and the hotfix check included — run
+`date +%s` and keep the number it prints: it is the hidden block's
+`started_at`, and every block you render carries it, the hotfix one too.
+
 ### Step 1 — Read the policy
 
 ```bash
@@ -412,6 +417,9 @@ The review body is markdown. Structure:
 <!-- claude-approver:findings
 {
   "approver_version": "v1",
+  "language": "python",
+  "dimensions": ["bugs", "security", "performance", "code_quality", "tests", "resilience"],
+  "started_at": <the date +%s number recorded before Step 1>,
   "verdict": "...",
   "confidence": "...",
   "type_detected": "...",
@@ -507,6 +515,9 @@ anymore.
 ```json
 {
   "approver_version": "v1",
+  "language": "python",
+  "dimensions": ["bugs", "security", "performance", "code_quality", "tests", "resilience"],
+  "started_at": 1791108000,
   "verdict": "APPROVE | REQUEST_CHANGES | COMMENT",
   "confidence": "HIGH | MEDIUM | LOW",
   "type_detected": "feat | fix | refactor | chore_deps | chore_deps_major | chore_runtime | security | docs | test | ci | chore | revert | hotfix | ambiguous",
@@ -523,6 +534,16 @@ anymore.
   ]
 }
 ```
+
+`language`, `dimensions` and `started_at` are run metadata for approver
+telemetry (#1231), which `collect-approver-telemetry.zsh` in the
+development plugin reads back from the posted review: `language` is
+`python`; `dimensions` lists the lenses Step 10 walks, in walk order, in full on every
+block — the hotfix and refusal blocks too, though the run stops before that
+step — when
+the walk gains a lens, so does this list; `started_at` is the integer
+`date +%s` you recorded before Step 1. They are output only: no verdict,
+finding or calibration reads them.
 
 Every finding in the JSON has a counterpart in the human-readable
 markdown above. Don't add findings to the JSON that aren't in the
