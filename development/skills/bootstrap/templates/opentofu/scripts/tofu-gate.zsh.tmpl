@@ -1,0 +1,421 @@
+#!/usr/bin/env zsh
+# tofu-gate.zsh — this repository's validation gate for OpenTofu/Terraform code.
+#
+# A template of /development:bootstrap's OpenTofu IaC path (#1162), emitted into
+# a repository as scripts/tofu-gate.zsh. It is the MECHANISM behind the
+# repository's gate command. A `Makefile` whose `lint` target runs this script,
+# a version-controlled `hooks/pre-push` that runs the gate command, and a
+# one-job CI workflow (.github/workflows/opentofu-ci.yml) that runs the same
+# command are what developers and CI invoke; `make lint` is the default command.
+# One script, one verdict, everywhere: no check may exist only in CI.
+#
+# ---------------------------------------------------------------------------
+# THE SEVEN STAGES, IN ORDER, STOPPING AT THE FIRST FAILURE
+# ---------------------------------------------------------------------------
+#   fmt               `tofu fmt -check -recursive`
+#   validate          `tofu init -backend=false` + `tofu validate`, once per
+#                     ROOT module (see ROOT MODULES below)
+#   lint              `tflint --recursive` (`tflint --init` first when a
+#                     `.tflint.hcl` sits at the repository root)
+#   config-scan       `trivy config`, HIGH and CRITICAL only (reads
+#                     `.trivyignore` from the repository root when present)
+#   state-encryption  REPORT-ONLY: warns when this repository owns state that
+#                     nothing encrypts at rest, in any form its dialect offers
+#   policy            `conftest test` of every `.tf` against
+#                     `policies/conftest/hcl/`, then `conftest verify`
+#   plan-policy       OPT-IN, off by default: `tofu plan` per root, then
+#                     `conftest test` of `tofu show -json` against
+#                     `policies/conftest/plan/`. Needs cloud and state
+#                     credentials; enabled by `opentofu_plan_policy: true` in
+#                     .maintenance.yml, which CI and the hook both read
+#
+# Every stage runs on a scratch COPY of the repository (without `.git`,
+# `.terraform` and `node_modules`), so `tofu init` never writes `.terraform/`
+# or a lock file into the working tree a developer is pushing.
+#
+# ROOT MODULES. `validate` and `plan-policy` run once per root: every directory
+# holding a non-pruned `*.tf` or `*.tf.json`, less those a DIFFERENT such
+# directory calls as a local module (`source = "./…"` / `"../…"`). A called
+# module is validated through its caller. A directory no root reaches (a module
+# cycle) is a root of its own. Pruned: `.terraform`, `node_modules`, `vendor`,
+# `.git`. This is the rule /development-opentofu:review applies.
+#
+# STATE ENCRYPTION. The repository OWNS state when a `.tf` declares a
+# `provider "…"` or `backend "…"` block, or a `cloud {}` block; a module
+# library owns none. Owned state counts as encrypted when any `.tf` carries an
+# OpenTofu `encryption {` block, a backend flag (`encrypt = true`,
+# `kms_key_id`, `sse_customer_key`, `encryption_key`, `kms_encryption_key`), an
+# `azurerm` backend or a `cloud {}` block. Matching is line-anchored, ignores
+# leading whitespace, and is repo-wide. A tree that also ships `.tf.json`
+# sources, which this scan cannot read, is never warned about.
+#
+# ---------------------------------------------------------------------------
+# WHAT IT PRINTS
+# ---------------------------------------------------------------------------
+# One verdict line per stage, on stdout:
+#
+#   gate: <stage> ok
+#   gate: <stage> skipped — <reason>
+#   gate: <stage> FAILED
+#
+# The failing stage's tool output sits above its FAILED line. Warnings and
+# notices are printed as `warning: …` / `notice: …` — or as GitHub workflow
+# commands (`::warning::…`) when GITHUB_ACTIONS is set.
+#
+# A repository with no `*.tf` / `*.tf.json` outside the pruned trees skips
+# every stage and exits 0. A repository with no `policies/conftest/hcl/**/*.rego`
+# skips `policy` with a notice: the consumer ships policy, not this script.
+# #1160's maintenance glob matches policies/conftest/**/*.rego; this gate reads
+# hcl/ and plan/ and FAILS `policy` on a `.rego` in neither, naming the file.
+#
+# ---------------------------------------------------------------------------
+# EXIT CODES
+# ---------------------------------------------------------------------------
+#   0  every stage ok or skipped
+#   1  a stage FAILED (its verdict line names which)
+#   2  the gate could not run: a required tool is missing (named, with its
+#      `brew install` line) or a bad invocation
+#   130 / 143  interrupted (SIGINT) or terminated (SIGTERM)
+#
+# ---------------------------------------------------------------------------
+# HOW TO RUN IT
+# ---------------------------------------------------------------------------
+#   scripts/tofu-gate.zsh     run it FROM THE REPOSITORY ROOT: it gates the
+#                             current directory, which is where `make lint` and
+#                             the git hook run it from
+#
+# CI installs pinned tool versions; run the same ones locally before concluding
+# that a red here is a regression.
+
+emulate -L zsh
+setopt err_exit nounset pipefail null_glob
+
+# The stage whose verdict line is still owed; the EXIT trap turns a non-zero
+# exit while it is set into that stage's FAILED line. A stage body must never be
+# called as an `if` condition or `&&`/`||` member, where err_exit is suspended.
+current_stage=""
+
+annotate() {
+  # `annotate <level> <message…>` — level is error, warning or notice.
+  local level="$1"; shift
+  if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+    print -r -- "::${level}::$*"
+  else
+    print -r -- "${level}: $*"
+  fi
+}
+
+stage_begin() { current_stage="$1" }
+stage_ok()    { print -r -- "gate: ${current_stage} ok"; current_stage="" }
+stage_skip()  { print -r -- "gate: ${current_stage} skipped — $1"; current_stage="" }
+stage_fail()  { annotate error "$1"; exit 1 }
+
+script_path="$0"
+usage() { awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$script_path" }
+
+while (( $# > 0 )); do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    *) print -u2 -- "tofu-gate: unknown argument: $1 (this script takes none — see --help)"; exit 2 ;;
+  esac
+done
+
+# ---------------------------------------------------------------------------
+# preconditions — every tool, BEFORE any stage runs
+# ---------------------------------------------------------------------------
+# Never degrade to the stages that can run: a green over five stages with the
+# sixth silently absent validated less than it claims.
+local -a missing=()
+require_tool() {
+  # `require_tool <binary> <brew install line>`
+  if ! command -v "$1" >/dev/null 2>&1; then missing+=("$1=$2"); fi
+}
+require_tool tofu     'brew install opentofu'
+require_tool tflint   'brew install tflint'
+require_tool trivy    'brew install trivy'
+require_tool conftest 'brew install conftest'
+require_tool jq       'brew install jq'
+if (( ${#missing} > 0 )); then
+  local m
+  for m in "${missing[@]}"; do
+    print -u2 -- "tofu-gate: required tool not on PATH: ${m%%=*} — install it with: ${m#*=}"
+  done
+  exit 2
+fi
+
+# ---------------------------------------------------------------------------
+# scratch copies
+# ---------------------------------------------------------------------------
+local repo_root="${PWD:A}"
+local work_dir
+work_dir="${$(mktemp -d "${TMPDIR:-/tmp}/tofu-gate.XXXXXX"):A}"
+cleanup() {
+  local rc=$?
+  rm -rf "$work_dir"
+  if (( rc != 0 )) && [[ -n "$current_stage" ]]; then
+    print -r -- "gate: ${current_stage} FAILED"
+    # normalise to the documented 1; a signal keeps its own status
+    if (( rc != 130 && rc != 143 )); then exit 1; fi
+  fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# `copy_tree <dest>` — the repository without .git, .terraform and node_modules.
+# vendor/ IS copied: a module may be sourced from ./vendor/….
+copy_tree() {
+  mkdir -p "$1"
+  (cd -- "$repo_root" && tar -cf - --exclude='./.git' --exclude='.terraform' --exclude='node_modules' .) \
+    | (cd -- "$1" && tar -xf -)
+}
+local src="$work_dir/src"
+copy_tree "$src"
+
+# ---------------------------------------------------------------------------
+# root modules
+# ---------------------------------------------------------------------------
+local -a PRUNE_NAMES=(
+  .terraform node_modules vendor .git
+)
+local -a prune_args=() dirs=()
+local pn
+for pn in "${PRUNE_NAMES[@]}"; do prune_args+=(-e "/${pn}/"); done
+local hits f d
+hits="$(cd -- "$src" && find . \( -name '*.tf' -o -name '*.tf.json' \) ! -type d)"
+# grep exits 1 when every hit was pruned — a real answer, not a failure
+hits="$(print -r -- "$hits" | { grep -vF "${prune_args[@]}" || (( $? == 1 )) })"
+for f in "${(f)hits}"; do
+  [[ -n "$f" ]] || continue
+  d="${${f:h}#./}"
+  if [[ "$d" == "." || -z "$d" ]]; then d="."; fi
+  dirs+=("$d")
+done
+dirs=("${(@u)dirs}")
+
+# A module call is a line that BEGINS with `source =`, or a one-line
+# `module "…" { source = … }`; a `/* … */` block is dropped first.
+local strip_blocks='
+blk { if (index($0, "*/")) blk = 0; next }
+/^[[:space:]]*\/\*/ { if (!index(substr($0, index($0, "/*") + 2), "*/")) blk = 1; next }
+{ print }'
+local -a called=()
+local -A callees=()
+record_call() {
+  local rel
+  if [[ "$1" == "$src" ]]; then rel="."
+  elif [[ "$1" == "$src"/* ]]; then rel="${1#$src/}"
+  else return 0
+  fi
+  [[ "$rel" == "$d" ]] && return 0
+  called+=("$rel")
+  callees[$d]+="$rel"$'\n'
+}
+local mod_src
+for d in "${dirs[@]}"; do
+  for f in "$src/$d"/*.tf; do
+    for mod_src in ${(f)"$(awk "$strip_blocks" "$f" \
+        | { grep -hoE '^[[:space:]]*(module[[:space:]]+"[^"]*"[[:space:]]*\{[[:space:]]*)?source[[:space:]]*=[[:space:]]*"\.\.?/[^"]*"' || true } \
+        | sed -E 's/^.*source[[:space:]]*=[[:space:]]*"//; s/"$//')"}; do
+      record_call "${${:-$src/$d/$mod_src}:a}"
+    done
+  done
+  for f in "$src/$d"/*.tf.json; do
+    for mod_src in ${(f)"$(jq -r '.module? // empty | .. | objects | .source? // empty | strings' "$f" \
+        | { grep -E '^\.\.?/' || true })"}; do
+      record_call "${${:-$src/$d/$mod_src}:a}"
+    done
+  done
+done
+local -a roots=()
+for d in "${dirs[@]}"; do
+  (( ${called[(Ie)$d]} )) && continue
+  roots+=("$d")
+done
+local -A reached=()
+local -a queue=("${roots[@]}")
+local callee
+while (( ${#queue} )); do
+  d="${queue[1]}"
+  queue=("${(@)queue[2,-1]}")
+  [[ -n "${reached[$d]:-}" ]] && continue
+  reached[$d]=1
+  for callee in "${(@f)${callees[$d]:-}}"; do
+    if [[ -n "$callee" && -z "${reached[$callee]:-}" ]]; then queue+=("$callee"); fi
+  done
+done
+for d in "${dirs[@]}"; do
+  [[ -n "${reached[$d]:-}" ]] || roots+=("$d")
+done
+roots=("${(@o)roots}")
+
+if (( ${#dirs} == 0 )); then
+  local s
+  for s in fmt validate lint config-scan state-encryption policy plan-policy; do
+    print -r -- "gate: $s skipped — no OpenTofu sources (*.tf / *.tf.json) to check"
+  done
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# fmt
+# ---------------------------------------------------------------------------
+stage_begin fmt
+(cd -- "$src" && tofu fmt -check -recursive)
+stage_ok
+
+# ---------------------------------------------------------------------------
+# validate — per root, on its own copy (init writes .terraform/ there)
+# ---------------------------------------------------------------------------
+stage_begin validate
+local vcopy="$work_dir/validate" root
+copy_tree "$vcopy"
+for root in "${roots[@]}"; do
+  print -r -- "validate: $root"
+  (cd -- "$vcopy/$root" && tofu init -backend=false -input=false -no-color >/dev/null && tofu validate -no-color)
+done
+stage_ok
+
+# ---------------------------------------------------------------------------
+# lint
+# ---------------------------------------------------------------------------
+stage_begin lint
+if [[ -f "$src/.tflint.hcl" ]]; then
+  (cd -- "$src" && tflint --init)
+fi
+(cd -- "$src" && tflint --recursive)
+stage_ok
+
+# ---------------------------------------------------------------------------
+# config-scan
+# ---------------------------------------------------------------------------
+stage_begin config-scan
+local -a trivy_args=(config --skip-check-update --skip-version-check --exit-code 1 --severity HIGH,CRITICAL)
+if [[ -f "$src/.trivyignore" ]]; then trivy_args+=(--ignorefile "$src/.trivyignore"); fi
+trivy "${trivy_args[@]}" "$src"
+stage_ok
+
+# ---------------------------------------------------------------------------
+# state-encryption — report-only
+# ---------------------------------------------------------------------------
+stage_begin state-encryption
+# `probe <what> <ere> <text>` — 0 on a match, 1 on none; a scan that cannot run
+# is the stage's one red.
+probe() {
+  local rc=0
+  grep -Eq -- "$2" <<<"$3" || rc=$?
+  (( rc == 0 || rc == 1 )) || stage_fail "state-encryption: could not scan the .tf sources for $1 (grep exit $rc)"
+  return $rc
+}
+local -a tf_files=() tf_readable=()
+local -i tf_skipped=0
+for f in "${(f)hits}"; do
+  if [[ "$f" == *.tf ]]; then tf_files+=("${f#./}"); fi
+done
+local tfjson_present=0
+for f in "${(f)hits}"; do
+  if [[ "$f" == *.tf.json ]]; then tfjson_present=1; fi
+done
+for f in "${tf_files[@]}"; do
+  if [[ -f "$repo_root/$f" && -r "$repo_root/$f" ]]; then tf_readable+=("$repo_root/$f"); else (( ++tf_skipped )); fi
+done
+if (( ${#tf_files} > 0 && ${#tf_readable} == 0 )); then
+  stage_fail "state-encryption: every .tf source is unreadable — the scan cannot run"
+fi
+local tf_text="" owns_state=0 encrypted=0
+if (( ${#tf_readable} > 0 )); then
+  # `awk 1`, not `cat`: a file without a trailing newline would glue its last
+  # line onto the next file's first, hiding a line-anchored match
+  tf_text="$(printf '%s\0' "${tf_readable[@]}" | xargs -0 awk 1)"
+  if probe "a root-module provider or backend block" '^[[:space:]]*(provider|backend)[[:space:]]+"' "$tf_text"; then owns_state=1; fi
+  if probe "a cloud block" '^[[:space:]]*cloud[[:space:]]*\{' "$tf_text"; then owns_state=1; fi
+fi
+if (( owns_state )); then
+  if probe "an OpenTofu encryption block" '^[[:space:]]*encryption[[:space:]]*\{' "$tf_text"; then
+    encrypted=1
+  elif probe "a backend-level encryption flag" '^[[:space:]]*(encrypt[[:space:]]*=[[:space:]]*true|kms_key_id[[:space:]]*=|sse_customer_key[[:space:]]*=|encryption_key[[:space:]]*=|kms_encryption_key[[:space:]]*=)' "$tf_text"; then
+    encrypted=1
+  elif probe "a platform-encrypted backend" '^[[:space:]]*(backend[[:space:]]+"azurerm"|cloud[[:space:]]*\{)' "$tf_text"; then
+    encrypted=1
+  fi
+  if (( ! encrypted && tfjson_present )); then
+    annotate notice "state-encryption: this repository owns state and no .tf source configures encryption, but it also ships .tf.json sources this scan cannot read — not warning"
+  elif (( ! encrypted )); then
+    annotate warning "state-encryption: this repository owns OpenTofu/Terraform state and nothing encrypts it at rest. Configure an OpenTofu \`terraform { encryption { … } }\` block, or backend-level encryption (S3 \`encrypt = true\` plus \`kms_key_id\`, GCS \`encryption_key\`, …)."
+    (( tf_skipped == 0 )) || annotate notice "state-encryption: $tf_skipped .tf file(s) could not be read — if one configures encryption, fix its permissions and re-run"
+  fi
+fi
+stage_ok
+
+# ---------------------------------------------------------------------------
+# policy — policies/conftest/hcl/ only
+# ---------------------------------------------------------------------------
+stage_begin policy
+# A `.rego` under policies/conftest/ outside hcl/ and plan/ is a declared
+# policy that no stage evaluates (#1160's gather matches the whole
+# policies/conftest/**/*.rego glob), so it reds the stage, never skips it.
+local -a stray=()
+if [[ -d "$repo_root/policies/conftest" ]]; then
+  stray=(${(f)"$(cd -- "$repo_root" && find -L policies/conftest \( -path policies/conftest/hcl -o -path policies/conftest/plan \) -prune -o -type f -name '*.rego' -print)"})
+fi
+if (( ${#stray} > 0 )); then
+  print -rl -- "${stray[@]}"
+  stage_fail "policy: the .rego file(s) above sit under policies/conftest/ but outside hcl/ and plan/, so no stage evaluates them — move each into policies/conftest/hcl/ (evaluated against the .tf sources) or policies/conftest/plan/ (evaluated against the plan JSON)"
+fi
+local hcl_dir="$repo_root/policies/conftest/hcl"
+local -a rego=()
+if [[ -d "$hcl_dir" ]]; then
+  rego=(${(f)"$(find -L "$hcl_dir" -type f -name '*.rego')"})
+fi
+if (( ${#rego} == 0 )); then
+  annotate notice "policy: no policies at policies/conftest/hcl/**/*.rego — nothing to evaluate"
+  stage_skip "no policies at policies/conftest/hcl/"
+else
+  (cd -- "$repo_root" && conftest test --all-namespaces --parser hcl2 --policy policies/conftest/hcl -- "${tf_files[@]}")
+  # Conftest discovers tests by RULE NAME, so presence is a `*_test.rego` file
+  # or a `test_` rule in any declared policy. Captured, then tested: a scan
+  # that fails must fail the stage, never read as "no tests".
+  local tests_found="" scan_rc=0
+  tests_found="$(find -L "$hcl_dir" -type f -name '*_test.rego')"
+  if [[ -z "$tests_found" ]]; then
+    tests_found="$(grep -lE '^[[:space:]]*test_[A-Za-z0-9_]*([[:space:]]*(\{|:?=)|[[:space:]]+if([[:space:]]|$))' -- "${rego[@]}")" || scan_rc=$?
+    (( scan_rc == 0 || scan_rc == 1 )) || stage_fail "policy: could not scan the declared policies for test_ rules (grep exit $scan_rc)"
+  fi
+  if [[ -z "$tests_found" ]]; then
+    annotate warning "policy: policies/conftest/hcl/ declares policies but no conftest verify tests — an untested policy usually matches nothing"
+  else
+    (cd -- "$repo_root" && conftest verify --policy policies/conftest/hcl)
+  fi
+  stage_ok
+fi
+
+# ---------------------------------------------------------------------------
+# plan-policy — opt-in via .maintenance.yml
+# ---------------------------------------------------------------------------
+stage_begin plan-policy
+local plan_key=""
+if [[ -f "$repo_root/.maintenance.yml" ]]; then
+  plan_key="$(sed -n 's/^opentofu_plan_policy:[[:space:]]*//p' "$repo_root/.maintenance.yml" \
+    | head -n1 | sed -E -e 's/[[:space:]]*(#.*)?$//' -e 's/^["'"'"']//' -e 's/["'"'"']$//')"
+fi
+if [[ "$plan_key" != "true" ]]; then
+  stage_skip "opt-in (opentofu_plan_policy is not true in .maintenance.yml)"
+else
+  local plan_dir="$repo_root/policies/conftest/plan" pcopy="$work_dir/plan"
+  copy_tree "$pcopy"
+  for root in "${roots[@]}"; do
+    print -r -- "plan-policy: $root"
+    if ! (cd -- "$pcopy/$root" && tofu init -input=false -no-color >/dev/null \
+          && tofu plan -input=false -lock=false -no-color -out=tofu-gate.plan >/dev/null \
+          && tofu show -json tofu-gate.plan > tofu-gate.plan.json); then
+      stage_fail "plan-policy is enabled (opentofu_plan_policy: true in .maintenance.yml) but tofu init or plan failed in $root — backend/provider credentials are unavailable or invalid. Provide them, or set opentofu_plan_policy to false to turn the stage off."
+    fi
+    if [[ -d "$plan_dir" ]]; then
+      conftest test --all-namespaces --policy "$plan_dir" -- "$pcopy/$root/tofu-gate.plan.json"
+    fi
+  done
+  if [[ ! -d "$plan_dir" ]]; then
+    annotate notice "plan-policy: no policies at policies/conftest/plan/ — the plan ran, nothing evaluated it"
+  fi
+  stage_ok
+fi

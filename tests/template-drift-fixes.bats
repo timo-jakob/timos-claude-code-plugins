@@ -281,6 +281,20 @@ PAIRS
   [ "$(printf '%s\n' "$table" | grep -c .)" -ge 15 ]
   [ "$(printf '%s\n' "$arr" | grep -c .)" -ge 15 ]
 
+  # STAMPED, NOT YET TRACKED: #1162 stamps the OpenTofu gate files and #2426
+  # teaches the detector to read them. Exempt exactly those, and only while
+  # they are untracked — once #2426 tracks one, this reds until the exemption
+  # goes, so it cannot outlive the gap it covers.
+  local pending
+  for pending in .github/workflows/opentofu-ci.yml scripts/tofu-gate.zsh; do
+    printf '%s\n' "$table" | grep -qxF "$pending"
+    if printf '%s\n' "$arr" | grep -qxF "$pending"; then
+      printf '%s is tracked now (#2426): drop its exemption here\n' "$pending" >&2
+      return 1
+    fi
+    table="$(printf '%s\n' "$table" | grep -vxF "$pending")"
+  done
+
   if [ "$table" != "$arr" ]; then
     printf 'stamped-but-never-read (table, not tracked):\n' >&2
     comm -23 <(printf '%s\n' "$table") <(printf '%s\n' "$arr") >&2

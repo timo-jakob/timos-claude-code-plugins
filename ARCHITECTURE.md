@@ -2034,8 +2034,14 @@ other state in which a declared set went unevaluated belongs here too.
 
 **Both consumers of that rule are bound by it too**, in the terms each has —
 the same dual binding the state-encryption rule carries below, and for the same
-reason. In #1162's rendered `policy` job the three states **fail the step**.
-In #1160's gather there is no step to fail, so they are **findings**, emitted
+reason. In the rendered gate's `policy` stage (#1162) the three states **fail the
+stage**: it runs Conftest with `--all-namespaces`, so a rule outside `main` is
+evaluated rather than skipped. The gate reads two fixed subtrees of that glob:
+its `policy` stage only `policies/conftest/hcl/`, its `plan-policy` stage only
+`policies/conftest/plan/`, while #1160's gather still matches the whole glob.
+A `.rego` the glob matches in **neither** subtree is a declared set no stage
+would evaluate, so the `policy` stage **fails** on it, naming the file — it
+never skips. In #1160's gather there is no step to fail, so they are **findings**, emitted
 under the configured `policy` key. (The untested-policy case is likewise a
 finding rather than a step failure, but it travels under `policy_tests` — see
 the one-carrier rule below.)
@@ -2043,11 +2049,11 @@ Stating only the CI half would leave the gather free to run Conftest, watch it
 exit 0 having matched nothing, and report an empty `policy` set — the
 green-over-unenforced state this paragraph exists to forbid, with
 `opentofu-policy-triage` never handed the defect. **#1160 pins the Conftest
-version** its gather evaluates against, and #1162's template **hard-codes the
-same pin** as a job-level env var — it cannot read the gather's, because a
+version** its gather evaluates against, and `opentofu-ci.yml.tmpl` **hard-codes the
+same pin** as a step-level env var — it cannot read the gather's, because a
 consumer repo's rendered workflow cannot call this plugin's scripts at all — so
 the two are independent constants that **must be bumped
-together**, and asserting that is #1162's to own. Nothing shares them
+together**, and `tests/bootstrap-opentofu-pipeline.bats` asserts that they are equal. Nothing shares them
 automatically; saying so would describe a mechanism this family does not have.
 
 **One deliberate exception to the `missing_tooling` rule**, inherited from the
@@ -2363,10 +2369,10 @@ check, and the exception above stays at exactly one. It is `tflint`'s
 `terraform_required_providers` rule, and the plugin's contribution is to refuse
 to treat its output as a style note.
 
-**Static checks first; the plan-based stage will ship disabled.** Static analysis —
+**Static checks first; the plan-based stage ships disabled.** Static analysis —
 `tofu fmt -check -recursive`, `tofu validate`, `tflint`, `trivy config`, the
 state-encryption check, and Conftest over HCL — needs no credentials and no
-state access, so it **will run** on every pull request. (`-recursive` is
+state access, so it **runs** on every pull request. (`-recursive` is
 load-bearing: without it `tofu fmt` inspects the working directory alone, so a
 module tree's submodules go unchecked while the job reports green. So is
 `-backend=false`: `tofu validate` requires `tofu init`, and the credential-free
@@ -2378,11 +2384,10 @@ not a credential one.) Plan-based
 analysis — Conftest over `tofu show -json` — sees what actually matters (*this
 destroys the database*), but needs provider credentials and state access in a
 **pull-request-triggered** workflow, which is a real security surface. So the
-generated pipeline **will contain** the plan stage, guarded by a repository
-variable that defaults off: enabling it later is configuration, not a redesign.
-(Future tense throughout this paragraph, for the same reason the enumeration
-below uses it: #1162's template does not exist yet, and one section should not
-describe one unbuilt artifact in two tenses.) This is
+generated gate **contains** the plan stage, switched on by a committed
+`.maintenance.yml` key, `opentofu_plan_policy: true`, that defaults off and that
+the pre-push hook and CI both read: enabling it later is configuration, not a
+redesign. This is
 deliberately *not* a source-level destroy-detection heuristic — module
 composition produces exactly the cases such a heuristic misses, and a guardrail
 that is right most of the time trains people to stop checking.
@@ -2399,17 +2404,17 @@ for maintenance dispatch**: since #1160 registered the topic marker and the
 gather script, `opentofu` is in the detected+supported set, and the
 primary/auxiliary model already permitted a topic to be primary, so no new
 mechanism was needed. Such a declaration is therefore no longer treated as stale
-(see the `dispatch_mode` contract). #1162 is what teaches bootstrap to render the
-pipeline and require its checks — so the maintenance half is live while the CI
-half is not, which is the ordinary state of a topic mid-epic, not a defect.
+(see the `dispatch_mode` contract). Since #1162 bootstrap writes that declaration
+for a `.tf` repo with no application language, renders the pipeline and
+requires its `gate` check, so the maintenance half and the CI half are both live.
 
 **#1159 landed the boundary, #1160 the dispatch, #1161 the agents.**
 This plugin now ships its manifest, its charter, a maintenance
 dispatcher fed by `gather-opentofu-findings.zsh` and the `opentofu` topic marker
 — the marker in three parity-pinned copies (the orchestrator recipe, the
 gather, and `detect-stack.sh`'s `is_opentofu` classification) — and four agents
-plus the `/development-opentofu:review` panel. Still to come: the bootstrap check
-pipeline with #1162, and the self-contained test fixtures with #1163. **Every
+plus the `/development-opentofu:review` panel; #1162 landed the bootstrap check
+pipeline. Still to come: the self-contained test fixtures with #1163. **Every
 dispatcher row routes**: the four auto-fix/triage rows to their two fixers
 (`format` and `lint` to `opentofu-format-fixer`, `policy` and `policy_tests` to
 `opentofu-policy-triage`), and the three advisory rows to
@@ -2440,32 +2445,29 @@ Settling the boundary first is deliberate: a topic plugin that
 creeps into Dockerfiles, cluster manifests or application code contradicts
 language-first and has to be unpicked across several plugins later.
 
-That pipeline is the **seven stages** of the gate script that the one `gate` job
-of #1162's bootstrap template **will emit** runs — future tense deliberately,
-because no such template exists yet — of which the **credential-free six** run on
-every pull request, in pipeline order: `fmt`, `validate`, `lint`, `config-scan`,
-`state-encryption`, `policy`. Those six are enumerated rather than counted, so the
-gate script #1162 renders runs exactly these stages. The seventh, `plan-policy`, is the
-credentialed plan stage, which the gate does **not** run unless the repository
-variable above turns it on. Note where the workflow will live — a *bootstrap* template owned by the
-generic `development` plugin, not something this plugin's skills run, the same
-boundary that keeps detection in `development`.
+That pipeline is the **seven stages** of `scripts/tofu-gate.zsh`, which the one
+`gate` job of `.github/workflows/opentofu-ci.yml` runs through the repo's gate
+command (`make lint`), and which `hooks/pre-push` runs locally. Bootstrap renders
+all four from `development/skills/bootstrap/templates/opentofu/` (#1162). The
+**credential-free six** run on every pull request, in pipeline order: `fmt`,
+`validate`, `lint`, `config-scan`, `state-encryption`, `policy`. Those six are
+enumerated rather than counted, so the gate script runs exactly these stages. The
+seventh, `plan-policy`, is the credentialed plan stage, which the gate does
+**not** run unless the `.maintenance.yml` key above turns it on. Note where the
+workflow lives — a *bootstrap* template owned by the generic `development`
+plugin, not something this plugin's skills run, the same boundary that keeps
+detection in `development`.
 
-**The flag half of that contract is wired; the derivation half is #1162's.**
-`branch-protection.sh`'s IaC path is an enum `--iac-only` whose values are
-`kubernetes` (#1892) and, since #2425, `opentofu`, which requires the single
-`gate` context of `.github/workflows/opentofu-ci.yml` — the one-job gate model
-that #1162's template follows, running the six stages above in its gate script.
-But `detect-stack.sh` still derives the flag as *the
-kubernetes marker with no application language* — with a recorded
-`primary: opentofu` taking a repo **off** that path rather than onto it — so no
-bootstrap path passes `--iac-only opentofu` yet: the `iac_only` derivation,
-including the `primary: opentofu` arm, is that story's work — as is the **third** site,
-the §3l / Step 4b prose in `development/skills/bootstrap/SKILL.md`, which states
-the same flag's contract in its kubernetes-only form and would otherwise be left
-describing a flag that had grown a second context set.
+**Both halves of the `--iac-only` contract are wired.** `branch-protection.sh`'s
+IaC path is an enum `--iac-only` whose values are `kubernetes` (#1892) and
+`opentofu` (#2425), which requires the single `gate` context of
+`.github/workflows/opentofu-ci.yml`. `detect-stack.sh` derives the path from the
+marker that fired with no application language (#1162): the opentofu marker
+selects `templates/opentofu/`, and a recorded `primary: opentofu` keeps a repo
+on that path rather than taking it off. Bootstrap's §3l, Step 4b and Step 4.5
+pass `--iac-only opentofu` there.
 
-**Both IaC workflows will require a context named `gate`** — `--iac-only
+**Both IaC workflows require a context named `gate`** — `--iac-only
 kubernetes` that of the sibling's one job (#1606), `--iac-only opentofu` that of
 `opentofu-ci.yml` — and a required status context is matched by **name**, so
 one workflow's `gate` could satisfy the other's requirement. While at most one
@@ -2475,9 +2477,9 @@ a known, accepted collision
 rather than an oversight, because **at most one IaC workflow is rendered per
 repo**: a repo with an application language takes neither IaC path, and a
 zero-language repo takes at most one — the path whose marker it carries. A
-marker-less repo takes neither, and the dual-marker case must halt (below); the
+marker-less repo takes neither, and the dual-marker case halts (below); the
 condition is the **marker**, not merely the absence of a language, which is what
-`detect-stack.sh` already enforces and what #1162's widening must preserve. The
+`detect-stack.sh` enforces for both markers. The
 one exception is the explicit empty-GitOps-repo confirmation at bootstrap Q4: a
 marker-less repo with no language whose owner answers "none" and then confirms
 it is an empty GitOps repository takes the kubernetes path — rendered by the
@@ -2485,17 +2487,12 @@ bootstrap skill itself, since `detect-stack.sh` still reports no marker, and nev
 over another recorded `primary:` (#1605). It is the *maintenance* pipelines that
 compose freely (above); CI is the narrower half.
 
-**The dual-marker case is a specification, not current behaviour.** A
-zero-language repo carrying *both* markers must **halt** at bootstrap rather
-than pick a workflow, and nothing does that today — bootstrap keys its IaC path
-on the kubernetes marker alone, so such a repo currently renders the sibling's
-workflow. **#1162 owns adding the halt**, alongside the `--iac-only` widening
-and against the marker #1160 landed; it is an acceptance criterion of that
-story, and that criterion cites **#1394** — the later slice that must render
-both workflows and therefore owns disambiguating their `gate` contexts. Until the halt lands,
-the collision is bounded by the absence of an `opentofu` marker rather than by a
-check. Do not "fix" any of this by renaming the ids here — #1162 renders them
-exactly as enumerated, as gate-script stages.
+**The dual-marker repo halts.** A zero-language repo carrying *both* markers
+**halts** at bootstrap rather than pick a workflow (#1162): Q4 stops the run with
+a pointer to **#1394** — the later slice that must render both workflows and
+therefore owns disambiguating their `gate` contexts — and `detect-stack.sh`
+proposes neither template tree. Do not "fix" any of this by renaming the stages
+here — the gate script runs them exactly as enumerated.
 
 ### `development-composition` owns
 

@@ -33,14 +33,15 @@ A single bootstrap run writes `gate:` or `tools:`, never both.
 | --- | --- | --- | --- |
 | `primary:` | every bootstrap | the repository's primary type | `/development:maintenance`, bootstrap re-runs |
 | `approval:` | every path except the composition path | who approves the repository's PRs: `human` or `approver` | bootstrap re-runs |
-| `gate:` | the IaC path only (`primary: kubernetes`) | the repository's gate command; default `make lint` | bootstrap, which renders it into two files |
+| `gate:` | the IaC path only (`primary: kubernetes` or `primary: opentofu`) | the repository's gate command; default `make lint` | bootstrap, which renders it into two files |
+| `opentofu_plan_policy:` | never by bootstrap; you add it | `true` turns on the OpenTofu gate's credentialed `plan-policy` stage | `scripts/tofu-gate.zsh`, locally and in CI |
 | `tools:` | every path except the IaC path | the quality toolchain, in three categories | bootstrap re-runs |
 
 ## `primary:`
 
 The repository's **primary type**: its reason to exist. The value is a language
 (`python`, `java`, `go`, `swift`, `javascript`) or a topic (`claude-plugin`,
-`kubernetes`).
+`kubernetes`, `opentofu`).
 
 - **Effect.** `/development:maintenance` gives the primary type the full pipeline,
   including its app-grade gates such as the coverage floor and dependency upgrades.
@@ -48,7 +49,8 @@ The repository's **primary type**: its reason to exist. The value is a language
   treatment only. With no `.maintenance.yml`, every detected stack is treated as primary.
 - **How bootstrap chooses it.** A Claude plugin repository gets `claude-plugin`. A
   repository with exactly one detected language gets that language. A repository with no
-  language that you bootstrap as a GitOps repository gets `kubernetes`. When several
+  language that you bootstrap as a GitOps repository gets `kubernetes`, or `opentofu`
+  when its infrastructure code is OpenTofu or Terraform. When several
   languages are detected, bootstrap asks which one is primary. Bootstrap shows the value
   in its plan before writing it.
 - **On a re-run.** A recorded value stands. Bootstrap does not overwrite a recorded
@@ -103,13 +105,15 @@ request, rather than during setup automation.
 The repository's **gate command**: the one command that validates the repository,
 locally and in CI.
 
-- **Written only on the IaC path**, where bootstrap also records `primary: kubernetes`.
+- **Written only on the IaC path**, where bootstrap also records `primary: kubernetes`
+  or `primary: opentofu`.
   Every other repository gets no `gate:` key.
-- **Default:** `make lint`. The Makefile's `lint` target runs `scripts/k8s-gate.zsh`,
+- **Default:** `make lint`. The Makefile's `lint` target runs `scripts/k8s-gate.zsh` (`scripts/tofu-gate.zsh`
+  on an OpenTofu repository),
   which is documented under
   [Scripts bootstrap emits into a target repository](repo-scripts.md#scripts-bootstrap-emits-into-a-target-repository).
 - **Where the value goes.** Bootstrap renders the value into two files: the last step of
-  `.github/workflows/kubernetes-ci.yml`'s `gate` job, and `hooks/pre-push`. Neither file
+  the `gate` job in `.github/workflows/kubernetes-ci.yml` or `opentofu-ci.yml`, and `hooks/pre-push`. Neither file
   reads `.maintenance.yml` when it runs, so after changing `gate:` you must re-run
   bootstrap to update them.
 - **On a re-run.** A recorded value is kept byte for byte and rendered into both files,

@@ -1,0 +1,72 @@
+name: opentofu-ci
+# ONE job, ONE command. The gate MECHANISM is scripts/tofu-gate.zsh (fmt -> validate -> lint -> config-scan ->
+# state-encryption -> policy -> plan-policy, one `gate: <stage> ...` verdict line each). The gate COMMAND that runs
+# it is recorded in .maintenance.yml as `gate:`, and this workflow runs that same command and nothing else — the
+# same one hooks/pre-push runs. A check that fails here is the check that fails on a developer's machine: nothing
+# may run in CI that the local gate does not.
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # the gate script is `#!/usr/bin/env zsh`, and ubuntu-latest ships no zsh
+      - name: install zsh
+        run: |
+          set -euo pipefail
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends zsh
+      # Every tool the gate runs is installed below at a PINNED version, into one directory put first on PATH: a
+      # verdict must not move on the runner image's schedule. Each pin is a STEP-level env on a uniquely named
+      # `install <tool>` step. CONFTEST_VERSION must equal the development plugin's gather-opentofu-findings.zsh
+      # constant, so the maintenance pipeline and this gate evaluate policy with the same Conftest.
+      - name: put the tool directory on PATH
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/gate-bin"
+          echo "$RUNNER_TEMP/gate-bin" >> "$GITHUB_PATH"
+      - name: install tofu
+        run: |
+          set -euo pipefail
+          url="https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}"
+          curl -sSfL "$url/tofu_${TOFU_VERSION}_linux_amd64.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP/gate-bin" tofu
+        env:
+          TOFU_VERSION: 1.13.1
+      - name: install tflint
+        run: |
+          set -euo pipefail
+          url="https://github.com/terraform-linters/tflint/releases/download/v${TFLINT_VERSION}"
+          curl -sSfLo "$RUNNER_TEMP/tflint.zip" "$url/tflint_linux_amd64.zip"
+          unzip -o -q "$RUNNER_TEMP/tflint.zip" tflint -d "$RUNNER_TEMP/gate-bin"
+        env:
+          TFLINT_VERSION: 0.64.0
+      - name: install trivy
+        run: |
+          set -euo pipefail
+          url="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}"
+          curl -sSfL "$url/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP/gate-bin" trivy
+        env:
+          TRIVY_VERSION: 0.70.0
+      - name: install conftest
+        run: |
+          set -euo pipefail
+          url="https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}"
+          curl -sSfL "$url/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP/gate-bin" conftest
+        env:
+          CONFTEST_VERSION: 0.69.0
+      # The gate command, substituted at bootstrap time from .maintenance.yml's `gate:`. Keep it the LAST step.
+      # The plan-policy stage is off unless .maintenance.yml records `opentofu_plan_policy: true`; when you turn
+      # it on, forward your cloud's backend and provider credentials here, for example:
+      #   env:
+      #     AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      #     AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      - name: run the gate
+        run: |
+          {{GATE_COMMAND}}

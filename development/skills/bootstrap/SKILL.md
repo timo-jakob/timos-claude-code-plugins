@@ -279,12 +279,11 @@ On a zero exit the script reports:
   (§3l)
 - `is_opentofu` — whether the repo carries the **opentofu topic marker** (any
   `*.tf` outside `.terraform/` and vendored trees). Also a *topic*, so it can be
-  `true` alongside any language, and alongside `is_kubernetes`. **Bootstrap
-  reads it only to refuse a composition repo holding IaC** — Step 1's
-  composition guard and §3m stop on it. §3l's IaC path, the `--iac-only`
-  context set and the dual-marker repo are [#1162](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1162)'s,
-  and the maintenance orchestrator re-derives the topic from its own marker
-  recipe
+  `true` alongside any language, and alongside `is_kubernetes`. With `languages`
+  empty it makes an OpenTofu repo bootstrappable (§3l's OpenTofu path, #1162);
+  with `is_kubernetes` also `true` it is the dual-marker repo §3l halts.
+  Step 1's composition guard and §3m stop on it too, and the maintenance
+  orchestrator re-derives the topic from its own marker recipe
 - `is_composition` — whether the repo carries the **composition topic marker**
   (a `.claude-workspace.yaml` at the repo root, #1747). Bootstrap does not
   **route** on it — §3m is entered on the user's request — but Step 1 **guards**
@@ -428,9 +427,16 @@ flow. Stop and ask for input wherever marked; do not guess.
    `--vulnerabilities <vulnerabilities>`, because its PUT replaces the whole
    rule: a flag left out is a context silently dropped, and a signing value
    left out clears the signature requirement. **On the §3l path pass
-   neither toolchain flag**: the script's `--iac-only kubernetes` mode neither
+   neither toolchain flag**: the script's `--iac-only <topic>` mode neither
    requires nor reads them:
 
+   > **Read this block for the repo's IaC topic** (§3l's *IaC topic table*):
+   > it names the kubernetes row — `kubernetes-ci.yml`, `primary: kubernetes`,
+   > `--iac-only kubernetes`, `iac/` — and an OpenTofu repo takes the opentofu
+   > row's values in each place (`opentofu-ci.yml`, `primary: opentofu`,
+   > `--iac-only opentofu`, `opentofu/`). The Q4 empty-repo confirmation exists
+   > on the kubernetes row only.
+   >
    > **The IaC set is NOT blind-renderable.** `detect-stack.sh` lists
    > `.github/workflows/kubernetes-ci.yml` as a candidate on the
    > marker-with-no-detected-language *heuristic*, since Q4 has not run yet. A
@@ -451,9 +457,9 @@ flow. Stop and ask for input wherever marked; do not guess.
    >
    > **Resolve the IaC condition before invoking `branch-protection.sh` in any
    > of the three bullets below** (#1154). The condition is:
-   > the repo carries the **kubernetes topic marker** (or, marker-less, its Q4
-   > empty-repo confirmation was accepted — §3l), so `kubernetes-ci.yml` is present **AND**
-   > the **resolved** language set is empty **AND**
+   > the repo carries the **kubernetes topic marker** or the **opentofu topic marker**,
+   > not both (or, marker-less, its Q4 empty-repo confirmation was accepted — §3l),
+   > so its topic's workflow is present **AND** the **resolved** language set is empty **AND**
    > no other `primary:` is recorded — matching `detect-stack.sh`'s
    > `case` and §3l: any other recorded primary settles it the other way, and
    > a recorded `primary: kubernetes` grants nothing on its own (#1193).
@@ -469,8 +475,8 @@ flow. Stop and ask for input wherever marked; do not guess.
    >
    > **Only when the three-part IaC condition above holds** (workflow present
    > AND resolved language set empty AND no other `primary:` recorded)
-   > invoke `branch-protection.sh` with **`--iac-only kubernetes`**, and its context comparison set is the
-   > single `gate` context `kubernetes-ci.yml` reports, never the language-app set. The PUT *replaces*
+   > invoke `branch-protection.sh` with **`--iac-only <topic>`**, and its context comparison set is the
+   > single `gate` context the topic's workflow reports, never the language-app set. The PUT *replaces*
    > the rule, so getting this wrong swaps the live `gate` context for contexts no
    > workflow on that repo reports — pinning every PR on the permanent
    > `expected` state §3l exists to prevent.
@@ -492,7 +498,9 @@ flow. Stop and ask for input wherever marked; do not guess.
    >   the `bootstrap-idempotency-reviewer`, exactly as step 5b does, so the user
    >   sees the diff and approves it — it is **never** overwritten blind. (For a
    >   marked copy the reviewer recommends `overwrite`: its plugin-owned IaC
-   >   rule.) On an approved overwrite, write and stamp the result (Step 3.6) and
+   >   rule, read for the topic its prompt states —
+   >   §3l's *Pass the topic to the idempotency reviewer*.) On an approved
+   >   overwrite, write and stamp the result (Step 3.6) and
    >   repeat the `branch-protection.sh` call **in this same run**. That refreshed
    >   file is a working-tree write this gap-fill makes (the `approval:` record is the
    >   other — see below), and it rides Step 4d/4e as the bot PR — the PR's own run reports
@@ -556,8 +564,8 @@ flow. Stop and ask for input wherever marked; do not guess.
    Gap-fill actions invoke only the specific Step 4 sub-scripts they need
    (e.g., `branch-protection.sh`, `gh secret set`); they do NOT touch files
    in the working tree — the one exception being the reviewed, marker-carrying
-   `kubernetes-ci.yml` refresh above, when `branch-protection.sh --iac-only kubernetes`
-   refuses it. The `approval:` record into an existing `.maintenance.yml` that
+   `kubernetes-ci.yml` refresh above (or `opentofu-ci.yml`'s), when
+   `branch-protection.sh --iac-only <topic>` refuses it. The `approval:` record into an existing `.maintenance.yml` that
    has none (step 4's approval paragraph) is not a gap-fill action but is a
    working-tree write too, and both ride Step 4d/4e as the bot PR. If multiple
    gaps coexist, present them as a
@@ -655,7 +663,10 @@ flow. Stop and ask for input wherever marked; do not guess.
    JSON), and gate the seed on `mkdocs.yml`'s C4 nav entries the same way §3h
    does. Skip-if-present keeps it idempotent.
 
-   **The IaC set (#1154, #1604) is the third not-blind set.** When
+   **The IaC set (#1154, #1604) is the third not-blind set.** It is named below
+   by its kubernetes row; an OpenTofu repo's set is its own row of §3l's *IaC
+   topic table* (`opentofu-ci.yml`, `scripts/tofu-gate.zsh`, `hooks/pre-push`,
+   `Makefile`, from `opentofu/`). When
    `missing_artifacts` contains any of `.github/workflows/kubernetes-ci.yml`,
    `scripts/k8s-gate.zsh`, `hooks/pre-push` or `Makefile`, they are there
    because `detect-stack.sh` fell back to its marker-with-no-detected-
@@ -666,9 +677,10 @@ flow. Stop and ask for input wherever marked; do not guess.
    the Step 3 placeholder table, and leave `Makefile` unstamped (Step 3.6).
    Two files that are already present still need this set's content, and
    rendering missing paths never reaches them: a `Makefile` already on disk goes
-   to the idempotency reviewer against the rendered `iac/Makefile.tmpl` (its
+   to the idempotency reviewer against the topic tree's rendered `Makefile.tmpl` (its
    `lint`/`hooks` merge strategy) before the hook is written, or `make lint` has
-   no target to run; and an existing `.maintenance.yml` gets §3a's `gate:` rule —
+   no target to run (pass the topic as §3l's *Pass the topic to the idempotency
+   reviewer* says); and an existing `.maintenance.yml` gets §3a's `gate:` rule —
    append `gate: <the value you passed to --gate-command>` when the key is
    absent, and leave a present value alone.
    Rendering them blind commits the whole §3l shape — the workflow,
@@ -677,8 +689,8 @@ flow. Stop and ask for input wherever marked; do not guess.
    a recorded `primary: kubernetes` does not settle it on its own (#1193).
    A marker-less repo with no detected language never lists these files —
    `detect-stack.sh` proposes the IaC set only on the marker — and lists §3l's
-   not-emitted artifacts instead. So when `is_kubernetes` is `false` and
-   `languages` is empty, ask Q4 and its empty-repo confirmation **here, before
+   not-emitted artifacts instead. So when both `is_kubernetes` and
+   `is_opentofu` are `false` and `languages` is empty, ask Q4 and its empty-repo confirmation **here, before
    rendering anything** from `missing_artifacts`: on a confirmed "none", drop every
    §3l not-emitted artifact from the list, render the IaC set, and then take step
    3's `github_state` gap-fill with `--iac-only kubernetes`, which the drops have made
@@ -821,7 +833,8 @@ flow. Stop and ask for input wherever marked; do not guess.
       `bootstrap-idempotency-reviewer` to classify each and recommend apply /
       skip / cherry-pick — passing the on-disk content AND the rendered
       template content (after substitution), rendered with the toolchain
-      flags the gate above resolved. The reviewer is the only contract
+      flags the gate above resolved — on the §3l path, with the topic passed
+      as §3l's *Pass the topic to the idempotency reviewer* says. The reviewer is the only contract
       that distinguishes:
       - **user customization** (skip-default — user edits the template would
         overwrite)
@@ -864,7 +877,7 @@ wording so behavior stays consistent:
 | **Q2: Repo name** | Only if Q1=yes | "What should the GitHub repo be named? (default: `<current-directory-name>`)" | Used in `gh repo create`. |
 | **Q3: Visibility** | Whenever `visibility=unknown` (including Q1=no path) | "Will this be a **public** or **private** repository? This selects the default toolchain — public uses SonarCloud + Snyk, private uses self-hosted SonarQube + Trivy." | Locks the visibility for the rest of the skill, and with it the toolchain **defaults** Q3a offers. |
 | **Q3a: Toolchain** | After Q3 **and** after Q4 has settled that this run is not the §3l IaC path — asked from *Resolve the toolchain* (below the decision tree), which says exactly when: only while a category is still **open** (nothing recorded in `.maintenance.yml`'s `tools:`), so a re-run with all three recorded never asks it. **Never on the §3l IaC path.** | "This is a `<public\|private>` repository, so the default toolchain is `<static_analysis>` / `<vulnerabilities>` / `<code_scanning>`. Use it?" | **Yes** → the open categories stay on the default. **No** → an `AskUserQuestion` picker with one named tab per open category that has a choice: **Analysis** (`sonarcloud` \| `sonarqube`), **Vulns** (`snyk` \| `trivy`), **Code scan** (`codeql` \| `none`). Recorded categories — and the categories this visibility leaves one value: on a public repo Analysis, which has only `sonarcloud` there, and on a private repo Code scan, which has only `none` there (CodeQL on a private repository needs GitHub Advanced Security, #1670) — are shown fixed in the question text, never as tabs. Picker answers reach `resolve-tools.zsh` as flags (source `chosen`). |
-| **Q4: Languages** | Whenever detected `languages=[]` — with the IaC wording when `is_kubernetes=true`. A recorded `primary: kubernetes` does **not** skip it — the record can veto this path but never grant it (§3l; the mixed repo is #1193) | "I couldn't detect any languages from existing files. Which languages will this project use? (swift / javascript / python / go / java — choose one or more)". When `is_kubernetes=true`, offer **"none — this is a GitOps/IaC repo"** as a first-class answer: "This looks like an infrastructure-as-code repo (charts / overlays / Argo CD resources) with no application language. Bootstrap it as one, or will it also hold application code?" | Selects per-language fragments and CodeQL matrix. **"None" is a valid answer for an IaC repo** — it takes §3l, not a halt: the manifest checks stand on their own, so a language is never a precondition for bootstrapping. **"None" with `is_kubernetes=false`** asks the **empty-repo confirmation** instead of halting: "There is no chart, kustomization or Argo CD resource here yet. Bootstrap this as an empty GitOps/IaC repository anyway — one required `gate` check, the `make lint` pre-push hook, and `primary: kubernetes`?" Three outcomes: **confirmed** → §3l, and `primary: kubernetes` is written; **declined** → halt: ask the user to add a marker artifact or name a language, and stop; **another `primary:` already recorded** in `.maintenance.yml` → §3l's conflict branch — the confirmation is never granted over a recorded primary. Nothing records the confirmation, so until a marker exists every re-run asks Q4 and the confirmation again (§3l, #1193). The answer resolves the language set the rest of the skill reads — §3l and `{{PRIMARY}}` branch (2) key on the RESOLVED set, so a language named here makes this a language repo however empty detection was. |
+| **Q4: Languages** | Whenever detected `languages=[]` — with the IaC wording when `is_kubernetes=true` or `is_opentofu=true`. **When both are `true`** (the dual-marker repo) do not ask it: halt, saying a repo with both a Kubernetes and an OpenTofu marker and no language is not yet supported and pointing at [#1394](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1394). A recorded `primary: kubernetes` or `primary: opentofu` does **not** skip it — the record can veto this path but never grant it (§3l; the mixed repo is #1193) | "I couldn't detect any languages from existing files. Which languages will this project use? (swift / javascript / python / go / java — choose one or more)". When `is_kubernetes=true`, offer **"none — this is a GitOps/IaC repo"** as a first-class answer: "This looks like an infrastructure-as-code repo (charts / overlays / Argo CD resources) with no application language. Bootstrap it as one, or will it also hold application code?" When `is_opentofu=true`, offer the same answer with the OpenTofu wording: "This looks like an OpenTofu/Terraform repo (`.tf` modules) with no application language. Bootstrap it as one, or will it also hold application code?" | Selects per-language fragments and CodeQL matrix. **"None" is a valid answer for an IaC repo** — it takes §3l, not a halt: the manifest checks stand on their own, so a language is never a precondition for bootstrapping. **"None" with both markers `false`** asks the **empty-repo confirmation** instead of halting: "There is no chart, kustomization or Argo CD resource here yet. Bootstrap this as an empty GitOps/IaC repository anyway — one required `gate` check, the `make lint` pre-push hook, and `primary: kubernetes`?" Three outcomes: **confirmed** → §3l, and `primary: kubernetes` is written; **declined** → halt: ask the user to add a marker artifact or name a language, and stop; **another `primary:` already recorded** in `.maintenance.yml` → §3l's conflict branch — the confirmation is never granted over a recorded primary. Nothing records the confirmation, so until a marker exists every re-run asks Q4 and the confirmation again (§3l, #1193). The answer resolves the language set the rest of the skill reads — §3l and `{{PRIMARY}}` branch (2) key on the RESOLVED set, so a language named here makes this a language repo however empty detection was. |
 | **Q5: Dockerfile incoming?** | Whenever `has_dockerfile=false` and the user mentioned containers, OR proactively only if Q4 implies an image build | "Will this project ship a Dockerfile / container image? If yes, I'll wire up Snyk container / Trivy image scans now." | Determines whether to keep the `DOCKER` blocks in workflow templates. Default to "no, skip for now" if the user is unsure — they can re-run the skill later when they add a Dockerfile. |
 | **Q6: Security contact email** | Always (no detection signal) | "What email should appear in `SECURITY.md` as a fallback channel for security reports? Leave blank to use GitHub Security Advisories only." | Drives `{{SECURITY_CONTACT_BLOCK}}` substitution in `SECURITY.md`. See substitution rules below. |
 
@@ -876,8 +889,9 @@ You now have, with certainty:
 - A visibility (`public` or `private`).
 - Optionally, a GitHub remote (created or pre-existing).
 - A **resolved** languages list — detected, or declared by the user in Q4. It is
-  non-empty **except** on the IaC path: `is_kubernetes=true` and the user answered
-  Q4 with "none — this is a GitOps/IaC repo" — or `is_kubernetes=false`, the user
+  non-empty **except** on the IaC path: exactly one of `is_kubernetes` and
+  `is_opentofu` is `true` and the user answered
+  Q4 with "none — this is a GitOps/IaC repo" — or both are `false`, the user
   answered "none" and confirmed Q4's empty-repo question — **and
   `.maintenance.yml` records no other `primary:`**. There an empty list is
   the answer, not a missing value, and the run continues into §3l. With a
@@ -1174,6 +1188,13 @@ delivered:
                     this path consumes it.
 ```
 
+On the OpenTofu path the same block names its own row of §3l's *IaC topic
+table*: `Primary type: opentofu`, `Languages: none — OpenTofu/IaC repo`, the CI
+gate `.github/workflows/opentofu-ci.yml` (make lint → scripts/tofu-gate.zsh: fmt,
+validate, lint, config-scan, state-encryption, policy, plan-policy — the last
+opt-in and off), and `Setup automation: preflight only (--iac-only opentofu)`
+over gh, jq, git, opentofu, tflint, trivy and conftest.
+
 A GitOps repo may still carry a Dockerfile (a tooling image, say). On this path
 that does **not** make it a container repo: **skip the Docker pre-flight
 entirely** — both its artifact-build-step planning and its stale-base
@@ -1278,7 +1299,8 @@ Inputs to each agent are provided **in the agent's prompt**, not on disk
 - Consistency reviewer: full text of `sonar-project.properties`, the planned
   workflow file, `SETUP.md`, and the `checks` array `branch-protection.sh`
   would use given the resolved toolchain and the detection results. **On the §3l IaC path there is no
-  `sonar-project.properties`** — pass `kubernetes-ci.yml` and the `--iac-only`
+  `sonar-project.properties`** — pass the topic workflow (`kubernetes-ci.yml` or
+  `opentofu-ci.yml`) and the `--iac-only`
   checks array (the single `gate` context) instead, and tell the reviewer the Sonar
   cross-references are intentionally absent, or it reports a plan that is
   correct by design as an inconsistency and returns `BLOCK`.
@@ -1290,7 +1312,8 @@ Inputs to each agent are provided **in the agent's prompt**, not on disk
   source of "we silently lost a custom step" regret. The reviewer compares
   each candidate semantically against the planned `quality-*.yml` and
   surfaces what would be lost: Python version pins, system deps, custom
-  timeouts, env vars, secret refs, container services.
+  timeouts, env vars, secret refs, container services. On the §3l IaC path,
+  pass the topic as §3l's *Pass the topic to the idempotency reviewer* says.
 
 Block on all three agents finishing. Aggregate their reports:
 
@@ -1368,8 +1391,8 @@ The table below documents where each placeholder's **value** comes from:
 | `{{ORG_KEY}}` | initial value: `<github-org>`. **`setup-sonarcloud.sh` auto-detects the real SonarCloud org slug after token paste** (some accounts have a `-github` suffix) and patches `sonar-project.properties` in place. The placeholder here is the best-effort initial value; the script overrides it during automation. |
 | `{{DEFAULT_BRANCH}}` | from `gh repo view --json defaultBranchRef` or `main` |
 | `{{LANGUAGES}}` | space-separated **resolved** languages; **empty on the §3l IaC path** (`--languages ""`) |
-| `{{PRIMARY}}` | the repo's **primary** type (its reason to exist) for `.maintenance.yml` — a language (`python`) or a topic (`claude-plugin`, `kubernetes`). Determine: **(0)** if `--claude-plugin` resolves to `true` — the explicit flag, or its auto-detected default when `.claude-plugin/plugin.json` or `.claude-plugin/marketplace.json` is present → `claude-plugin`; **(1)** else if exactly one language was detected → that language (a detected language takes precedence over the kubernetes marker whatever `.maintenance.yml` records — the **mixed repo** is [#1193](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1193), not this slice); **(2)** else if the **resolved** language set (after Q4) is **empty**, `is_kubernetes` is `true` (or the user confirmed Q4's empty-repo question) **and `.maintenance.yml` records no other `primary:`** (if it does, surface the conflict per §3l — never overwrite it silently) → `kubernetes` (the IaC/GitOps repo of §3l — a topic holds the primary slot, which the primary/auxiliary model already permits). Resolved, not detected: a language the user names in Q4 takes branch (1), however empty detection was; **(3)** else (multiple languages) → **ask** the user which is primary (`AskUserQuestion`, options = the detected languages). Surface the chosen primary in the Step 2 plan ("Primary type: X") so the user confirms it there — it's a *declaration*, not a silent inference. |
-| `{{GATE_COMMAND}}` | the repo's gate **command** on the §3l IaC path (#1604) — rendered into `.github/workflows/kubernetes-ci.yml`'s last step, `hooks/pre-push` and `.maintenance.yml`'s `gate:` line. Resolve it as the **recorded** `gate:` value when `.maintenance.yml` already carries one, else `make lint`. Read it with `yq -r .gate`; an absent key, `null` or a blank value is **not** a recorded value. Pass it via `render.zsh --gate-command` (its default is `make lint`; an explicit empty value is refused). |
+| `{{PRIMARY}}` | the repo's **primary** type (its reason to exist) for `.maintenance.yml` — a language (`python`) or a topic (`claude-plugin`, `kubernetes`, `opentofu`). Determine: **(0)** if `--claude-plugin` resolves to `true` — the explicit flag, or its auto-detected default when `.claude-plugin/plugin.json` or `.claude-plugin/marketplace.json` is present → `claude-plugin`; **(1)** else if exactly one language was detected → that language (a detected language takes precedence over the kubernetes marker whatever `.maintenance.yml` records — the **mixed repo** is [#1193](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1193), not this slice); **(2)** else if the **resolved** language set (after Q4) is **empty**, exactly one IaC topic marker fires — `is_kubernetes` or `is_opentofu` is `true`, not both (or, both `false`, the user confirmed Q4's empty-repo question, which is the kubernetes topic) — **and `.maintenance.yml` records no other `primary:`** (if it does, surface the conflict per §3l — never overwrite it silently) → that topic, `kubernetes` or `opentofu` (the IaC repo of §3l — a topic holds the primary slot, which the primary/auxiliary model already permits). Both markers `true` never reaches here: Q4 halts it (#1394). Resolved, not detected: a language the user names in Q4 takes branch (1), however empty detection was; **(3)** else (multiple languages) → **ask** the user which is primary (`AskUserQuestion`, options = the detected languages). Surface the chosen primary in the Step 2 plan ("Primary type: X") so the user confirms it there — it's a *declaration*, not a silent inference. |
+| `{{GATE_COMMAND}}` | the repo's gate **command** on the §3l IaC path (#1604) — rendered into the topic workflow's last step (`.github/workflows/kubernetes-ci.yml` or `opentofu-ci.yml`), `hooks/pre-push` and `.maintenance.yml`'s `gate:` line. Resolve it as the **recorded** `gate:` value when `.maintenance.yml` already carries one, else `make lint`. Read it with `yq -r .gate`; an absent key, `null` or a blank value is **not** a recorded value. Pass it via `render.zsh --gate-command` (its default is `make lint`; an explicit empty value is refused). |
 | `{{STATIC_ANALYSIS}}` / `{{VULNERABILITIES}}` / `{{CODE_SCANNING}}` | the **resolved** toolchain from `resolve-tools.zsh` (*Resolve the toolchain*, #1651) — rendered into `.maintenance.yml`'s `tools:` block. Pass via `render.zsh --static-analysis` / `--vulnerabilities` / `--code-scanning`. No defaults: the block sits in the `TOOLCHAIN` block, kept on every path but §3l, so a language-path render that forgot them trips the leftover check. Not passed on the §3l IaC path. |
 | `{{APPROVAL}}` | the **resolved** approval model from `resolve-approval.zsh` (*Resolve the approval model*, #1684) — `human` or `approver`, rendered into `.maintenance.yml`'s `approval:` line wherever *Resolve the approval model* runs. Pass via `render.zsh --approval`. No default, so a render that forgot it trips the leftover check; any other value is refused. |
 | `{{COVERAGE_THRESHOLD}}` | always `90` |
@@ -1933,12 +1956,12 @@ on:
 - `workflow_dispatch` enables manual reruns from the GitHub UI.
 - `paths-ignore` skips doc/license-only changes.
 
-**Exception — the §3l IaC workflow.** `kubernetes-ci.yml` is `on: pull_request`
-only: no branch filter, no `paths-ignore`, no `push`/`schedule`/`release`. It
-feeds no Sonar baseline and scans no dependency database, so those triggers have
-no consumer there — and its one job, `gate`, is a *required context* with no
-`-noop` companion, so a `paths-ignore` would leave every doc-only PR pinned at
-`expected` forever. Do not "normalise" it to the shape above.
+**Exception — the §3l IaC workflow.** `kubernetes-ci.yml` (and, on the OpenTofu
+path, `opentofu-ci.yml`) is `on: pull_request` only: no branch filter, no
+`paths-ignore`, no `push`/`schedule`/`release`. It feeds no Sonar baseline and
+scans no dependency database, so those triggers have no consumer there — and
+its one job, `gate`, is a *required context* with no `-noop` companion, so a
+`paths-ignore` would leave every doc-only PR pinned at `expected` forever. Do not "normalise" it to the shape above.
 
 ### Pre-commit CI backstop
 
@@ -4978,14 +5001,45 @@ render-and-build smoke check's job (#1063).
 
 ### 3l. Infrastructure-as-code repos (no application language) — #1154
 
-Applies when `is_kubernetes` is `true`, **the resolved language set is empty**,
+Applies when exactly one of `is_kubernetes` and `is_opentofu` is `true`, **the resolved language set is empty**,
 and `.maintenance.yml` records no other `primary:` — resolved meaning *after*
 Q4, so a repo whose languages the detector missed and the user named in Q4 is a
 language repo, not this path. The user confirmed "none — this is a GitOps/IaC
 repo".
 
+**The IaC topic table (#1162).** The marker that fired names the repo's **IaC
+topic**, and the topic decides everything this path renders and passes. The
+text below names the kubernetes row wherever it names a file, a flag or a
+primary; on an OpenTofu repo read the opentofu row's value in its place.
+
+| | kubernetes | opentofu |
+| --- | --- | --- |
+| Marker | `is_kubernetes` (or the Q4 empty-repo confirmation) | `is_opentofu` |
+| `primary:` written | `kubernetes` | `opentofu` |
+| `--iac-only` | `kubernetes` | `opentofu` |
+| Template tree | `templates/iac/` | `templates/opentofu/` |
+| Workflow | `.github/workflows/kubernetes-ci.yml` | `.github/workflows/opentofu-ci.yml` |
+| Gate script | `scripts/k8s-gate.zsh` | `scripts/tofu-gate.zsh` |
+| Policies (the consumer's, never created) | `policies/kyverno/` | `policies/conftest/hcl/` and `policies/conftest/plan/` |
+
+**Pass the topic to the idempotency reviewer.** `bootstrap-idempotency-reviewer`'s
+IaC rules name only the kubernetes row (making the agent itself topic-aware is
+[#2426](https://github.com/timo-jakob/timos-claude-code-plugins/issues/2426)), and
+this reading rule does not reach it. So every dispatch of it on this path states
+the topic in its prompt. On the OpenTofu path the prompt says the topic is
+`opentofu` and that the reviewer reads its kubernetes-tree rules with the opentofu
+row: `iac/` → `opentofu/`, `kubernetes-ci.yml` → `opentofu-ci.yml`,
+`scripts/k8s-gate.zsh` → `scripts/tofu-gate.zsh`. Its `Makefile` merge then adds
+`zsh scripts/tofu-gate.zsh` to the `lint` recipe, and a file marked
+`rendered from opentofu/` counts as plugin-owned.
+
+**The dual-marker repo halts.** Both markers `true` with an empty language set
+takes neither row: both workflows report a context named `gate`, and resolving
+that is [#1394](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1394)'s.
+Q4 stops the run with that pointer, and `detect-stack.sh` proposes neither tree.
+
 **The confirmed empty repo — the one exception to the marker (Q4).** This path
-also applies when `is_kubernetes` is `false` but the user answered Q4 "none" and
+also applies when both markers are `false` but the user answered Q4 "none" and
 then confirmed Q4's empty-repo question, provided `.maintenance.yml` records no
 other `primary:` — a recorded one takes the conflict branch below, and the
 confirmation is never granted over it. `detect-stack.sh` is unchanged and knows
@@ -5005,7 +5059,8 @@ signal: the marker, no *detected* language, and the **same** recorded-primary
 veto — only *detected* vs *resolved* differs. It is what puts `.github/workflows/kubernetes-ci.yml` in the candidate set
 and holds the language-app artifacts out of `missing_artifacts`. There is **no
 `iac_only` key in its JSON** (it is a private shell variable), so resolve the
-condition yourself from `is_kubernetes` plus the resolved language set. And it
+condition yourself from `is_kubernetes` and `is_opentofu` (exactly one `true`)
+plus the resolved language set. And it
 is a heuristic, not this condition: Q4 has not run when it is computed, so
 always confirm with Q4 before acting on it (Step 1's State-D branch and Step 4b
 both re-resolve it for exactly this reason).
@@ -5024,25 +5079,28 @@ repo to the manifest panel at all. That is one coherent slice of work, not a
 qualifier, which is why it is filed rather than partially handled here.
 
 A recorded primary still settles the question in the **negative** direction: any
-*other* value (a language, `claude-plugin`) means not this path, whatever the
+*other* value (a language, `claude-plugin`, the other IaC topic) means not this path, whatever the
 marker says. **Surface that conflict rather than resolving it silently** — if
 the repo looks like a GitOps repo but records another primary, say so and ask
 the user whether to change the record; never let Q4's "none" answer overwrite a
 recorded primary on its own. **Both answers have a defined outcome:**
 
-- **They agree to change it** → rewrite `.maintenance.yml`'s `primary:` to
-  `kubernetes` and proceed on this path. The conflict is resolved, so the
+- **They agree to change it** → rewrite `.maintenance.yml`'s `primary:` to the
+  topic whose marker fired (`kubernetes` or `opentofu`, per the IaC topic table)
+  and proceed on this path. The conflict is resolved, so the
   "never on the conflict path" restriction below no longer applies to this run.
 - **They decline, or do not answer** → the recorded value stands, so this is
-  not the IaC path: never emit the workflow or pass `--iac-only kubernetes`. But do
+  not the IaC path: never emit the topic's workflow or pass `--iac-only <topic>`
+  (`kubernetes` or `opentofu`). But do
   not simply "take that primary's path" either — this branch is only reachable
   with an **empty** resolved language set, so for a recorded *language* primary
+  (or the other IaC topic, whose marker did not fire)
   there is no language path to fall back to: §3b/§3c key on the toolchain with
   no language condition, so continuing would render a `quality-*.yml` whose
   analyser job needs a `test-and-coverage` job the stripped `LINUX_TESTS`
   block never produced — a workflow GitHub refuses to run. **Stop and ask** the
   user to either change the record or name the language the repo will hold (the
-  same halt Q4 takes for "none" with `is_kubernetes=false`). The one exception
+  same halt Q4 takes for "none" with both markers `false`). The one exception
   is a recorded `primary: claude-plugin`, which needs no language — continue on
   the plugin-repo path. (A recorded `primary: composition` never reaches this
   branch: Step 1's composition guard stops the run first.) Say which outcome
@@ -5053,7 +5111,13 @@ emit `templates/iac/.github/workflows/kubernetes-ci.yml.tmpl` as
 `.github/workflows/kubernetes-ci.yml`, `templates/iac/scripts/k8s-gate.zsh.tmpl` as
 `scripts/k8s-gate.zsh`, `templates/iac/hooks/pre-push.tmpl` as `hooks/pre-push`
 and `templates/iac/Makefile.tmpl` as `Makefile`, and write `primary: kubernetes` into
-`.maintenance.yml` (branch (2) of the `{{PRIMARY}}` table in Step 3 above). This path
+`.maintenance.yml` (branch (2) of the `{{PRIMARY}}` table in Step 3 above). On
+the OpenTofu path emit `templates/opentofu/.github/workflows/opentofu-ci.yml.tmpl`
+as `.github/workflows/opentofu-ci.yml`, `templates/opentofu/scripts/tofu-gate.zsh.tmpl`
+as `scripts/tofu-gate.zsh`, `templates/opentofu/hooks/pre-push.tmpl` as
+`hooks/pre-push` and `templates/opentofu/Makefile.tmpl` as `Makefile`, write
+`primary: opentofu`, and render with `--primary opentofu` — never one file of
+the other tree. This path
 records `approval:` too (#1684) — it opens PRs like any other: resolve it with
 `resolve-approval.zsh --kind iac` (*Resolve the approval model*), whose default here
 is `human`, and record it through `render.zsh --approval` or `--record` as that
@@ -5076,7 +5140,12 @@ another), which runs `scripts/k8s-gate.zsh`'s six stages — render, schema, lin
 policy, config-scan, argocd. `hooks/pre-push` runs the same command locally.
 Producing a check a repo can *require* is the whole point of this path: branch
 protection on a GitOps repo could previously demand a review but nothing that
-builds.
+builds. On the OpenTofu path `opentofu-ci.yml` is the same single `gate` job,
+and the command runs `scripts/tofu-gate.zsh`'s seven stages — fmt, validate,
+lint, config-scan, state-encryption (report-only), policy and plan-policy. The
+last needs cloud and state credentials, so it is **opt-in and off**: it runs
+only when `.maintenance.yml` records `opentofu_plan_policy: true`, which the
+hook and CI both read. Bootstrap never writes that key.
 
 **Local tools are Homebrew-current; CI and the harness run the pins.** Step 4.5's
 preflight installs the gate's tools with `brew install`, which cannot pin a
@@ -5125,7 +5194,7 @@ every artifact above that was skipped and why, on a confirmed empty repo too. An
 explicit omission beats a silent one. Unless Step 4a's `install-iac-hooks.zsh`
 ran and exited 0, it also says the
 pre-push hook is **not wired** and names `make hooks` as the remedy — or, after a
-declined `Makefile` merge, merging `iac/Makefile.tmpl`'s `lint` and `hooks`
+declined `Makefile` merge, merging the topic tree's `Makefile.tmpl` `lint` and `hooks`
 targets first. When Step 4a found the hook already wired, it says instead that the
 hook is wired and rejects pushes until the gate command passes.
 
@@ -5176,6 +5245,11 @@ glob is the contract, not the directory's existence. Once policies **are**
 declared the step enforces them: violations fail it, and so does a policy set
 the pinned Kyverno CLI cannot evaluate, because a green check over unenforced
 policies is the one outcome the charter forbids.
+
+On the OpenTofu path do not create `policies/conftest/` or either subtree. The
+gate's `policy` stage reads only `policies/conftest/hcl/` and notices-and-passes
+when it holds no `.rego`; `plan-policy` reads only `policies/conftest/plan/`.
+A `.rego` under `policies/conftest/` in neither subtree fails `policy`.
 
 ### Idempotency rules (apply for every file write)
 
@@ -5417,8 +5491,11 @@ actually rendered in Step 3 — §3a through §3l):
 | --- | --- |
 | `.github/dependabot.yml` | `common/.github/dependabot.yml.tmpl` |
 | `.github/workflows/kubernetes-ci.yml` | `iac/.github/workflows/kubernetes-ci.yml.tmpl` |
-| `scripts/k8s-gate.zsh` | `iac/scripts/k8s-gate.zsh.tmpl` (§3l IaC path only) |
-| `hooks/pre-push` | `iac/hooks/pre-push.tmpl` (§3l IaC path only) |
+| `scripts/k8s-gate.zsh` | `iac/scripts/k8s-gate.zsh.tmpl` (§3l kubernetes path only) |
+| `hooks/pre-push` | `iac/hooks/pre-push.tmpl` (§3l kubernetes path only) |
+| `.github/workflows/opentofu-ci.yml` | `opentofu/.github/workflows/opentofu-ci.yml.tmpl` (§3l OpenTofu path only) |
+| `scripts/tofu-gate.zsh` | `opentofu/scripts/tofu-gate.zsh.tmpl` (§3l OpenTofu path only) |
+| `hooks/pre-push` | `opentofu/hooks/pre-push.tmpl` (§3l OpenTofu path only) |
 | `.github/workflows/no-cluster-deploy.yml` | `common/.github/workflows/no-cluster-deploy.yml.tmpl` (not on the §3l IaC path) |
 | `scripts/check-no-cluster-deploy.zsh` | `common/scripts/check-no-cluster-deploy.zsh` (not on the §3l IaC path) |
 | `.github/workflows/api-stability.yml` | `common/.github/workflows/api-stability.yml.tmpl` |
@@ -5512,7 +5589,8 @@ a gate tool not yet installed (Step 4.5 installs them only after Step 4e's push)
 Step 4e's bot push. When it fails, skip the script and show the gate's first
 failure; the final report then names `make hooks` for once the gate command
 passes — or, when the `Makefile` merge was declined and it has no `hooks` target,
-merging `iac/Makefile.tmpl`'s `lint` and `hooks` targets into it first.
+merging the `lint` and `hooks` targets of the topic tree's `Makefile.tmpl`
+(§3l's *IaC topic table*) into it first.
 If `core.hooksPath` already reads `hooks` (`git -C "<repo-path>" config --get core.hooksPath`)
 — an earlier run or a manual `make hooks` wired it — skipping the script leaves
 that hook in place: the final report then says the hook **is wired** and rejects
@@ -5525,7 +5603,7 @@ header states the exit codes. **On a non-zero exit, surface its stderr and
 continue** — CI's required `gate` check still gates every PR — and the final
 report says the pre-push hook is not wired and names `make hooks` as the remedy —
 or, on exit 5 for a missing `hooks` target (a declined `Makefile` merge), merging
-`iac/Makefile.tmpl`'s `lint` and `hooks` targets first.
+the topic tree's `Makefile.tmpl` `lint` and `hooks` targets first.
 **Step 4a.5 does not run on this path.**
 
 **Every other path:** if `pre-commit` is installed on the user's machine, run:
@@ -5607,7 +5685,7 @@ approval):
   --has-ko "<true|false — whether a root .ko.yaml exists (Go ko image path, #875)>" \
   --has-codeql "<true exactly when resolve-tools.zsh's code_scanning is codeql, else false>" \
   --codeql-languages "<CodeQL language list when has-codeql=true — the same mapped IDs as {{CODEQL_LANGUAGES}}, e.g. 'python javascript-typescript'; either form is accepted: space-separated, or comma-separated as {{CODEQL_LANGUAGES}} renders it; the script splits on commas and whitespace>" \
-  --iac-only "<kubernetes on the §3l IaC path — the kubernetes topic marker with an empty RESOLVED language set (after Q4) and no other `primary:` recorded, or a marker-less repo whose Q4 empty-repo confirmation was accepted (§3l); else false. A detected language, or a recorded language / `claude-plugin` primary, settles it `false` whatever the marker says — §3l renders no workflow for the `gate` context to come from>" \
+  --iac-only "<the IaC topic on the §3l IaC path — kubernetes for the kubernetes topic marker, opentofu for the opentofu topic marker, exactly one of them firing, with an empty RESOLVED language set (after Q4) and no other `primary:` recorded; kubernetes for a marker-less repo whose Q4 empty-repo confirmation was accepted (§3l); else false. A detected language, or a recorded language / `claude-plugin` primary, settles it `false` whatever the marker says — §3l renders no workflow for the `gate` context to come from>" \
   --default-branch "<DEFAULT_BRANCH>" \
   --require-signed-commits "<Step 4b's signing value — below>"
 ```
@@ -5639,7 +5717,7 @@ The script applies a single protection rule that:
   *Resolve the toolchain*'s `key=value` output, never from visibility — the
   script accepts no visibility at all. With
   `--iac-only kubernetes` it requires the `kubernetes-ci.yml` `gate` context **instead of**
-  the language-app set, because §3l renders no `quality-*.yml` for those
+  the language-app set (with `--iac-only opentofu`, `opentofu-ci.yml`'s), because §3l renders no `quality-*.yml` for those
   contexts to come from — so that path passes neither toolchain flag, and the
   script neither requires nor reads them there. Everything else in this list still applies on that
   path — the merge settings below above all, which Step 4e's arming needs.
@@ -5689,8 +5767,10 @@ re-run the script, or list it as an outstanding Step 5 item; never report the
 `analyze` contexts as required after that warning.
 
 **One FATAL refusal, on the §3l IaC path only (#1606).** With `--iac-only kubernetes`
+(or, on the OpenTofu path, `--iac-only opentofu` and `opentofu-ci.yml`)
 the script exits **1** before writing anything — neither the rule nor the merge
-settings — when `.github/workflows/kubernetes-ci.yml` cannot report `gate`: it is
+settings — when the topic workflow (`.github/workflows/kubernetes-ci.yml` or
+`opentofu-ci.yml`) cannot report `gate`: it is
 absent, has no `gate` job, or its `gate` job carries `name:`, a `strategy:` block
 or a reusable-workflow `uses:` (GitHub would then report the check under that
 name, `gate (<leg>)` per matrix entry, or `gate / <called job>`). Three further
@@ -5719,7 +5799,7 @@ status — Step 5 keys its branch-protection checklist item on it. Do not retry.
 **On the §3l IaC path, cite `SETUP.md`'s IaC context bullet, not its composed
 §4 context list** — the single `kubernetes-ci.yml` context, `gate`, which is also what
 `branch-protection.sh` itself prints on a 403 and what the Step 5 IaC checklist
-carries. Relaying the language-app list instead would hand the user two
+carries (on the OpenTofu path, `opentofu-ci.yml`'s `gate`). Relaying the language-app list instead would hand the user two
 conflicting recipes in one run.
 
 ### 4b.5. Workflow labels (`blocked`)
@@ -6240,7 +6320,7 @@ anything missing:
   --languages "<space-separated detected languages>" \
   --has-dockerfile "<true|false>" \
   --has-ko "<true|false — root .ko.yaml, #875>" \
-  --iac-only "<kubernetes on the §3l IaC path, else false>" \
+  --iac-only "<the IaC topic on the §3l IaC path (kubernetes or opentofu), else false>" \
   --claude-approver "<true|false>"
 ```
 
@@ -6264,11 +6344,12 @@ The script will:
    linters, plus `parallel` on claude-plugin repos — the bats review-loop gate
    parallelises via it, #980). With `--iac-only kubernetes` the list is `gh`, `jq`,
    `git` and the gate's tools (`helm`, `kustomize`, `kubeconform`,
-   `kube-linter`, `kyverno`, `trivy`, `yq`) instead.
+   `kube-linter`, `kyverno`, `trivy`, `yq`) instead. With `--iac-only opentofu` it is `gh`,
+   `jq`, `git`, `opentofu`, `tflint`, `trivy` and `conftest`.
 4. Offer to `brew install` all missing pieces in one batch.
 5. Verify `gh auth status`; offer to run `gh auth login` if not authenticated.
 6. When `static_analysis` is `sonarqube`, `vulnerabilities` is `trivy`, or the
-   repo has a Dockerfile (never with `--iac-only kubernetes`): verify the Docker
+   repo has a Dockerfile (never with `--iac-only kubernetes` or `opentofu`): verify the Docker
    daemon is running and the docker compose plugin is present; offer to launch
    Docker.app if not.
 7. When `--claude-approver true`: verify `python3` is present, verify both
@@ -6328,7 +6409,7 @@ step's.
 > secret. So on the IaC path:
 > run no per-tool script — `enable-github-security.sh` included, which this
 > path has never run (its toggles stay a repo-Settings choice) — and report that
-> branch protection was already applied by Step 4b with `--iac-only kubernetes` — **unless
+> branch protection was already applied by Step 4b with `--iac-only kubernetes` (or `opentofu`) — **unless
 > Step 4b exited 1 (whatever its message) or hit its
 > 403 fallback**, in which case report it as
 > **not** applied and carry Step 4b's outstanding Step 5 item (the rule **and**
@@ -6337,14 +6418,15 @@ step's.
 > `--claude-approver` extension below is likewise moot — a manifests repo has no
 > Approver-capable language.) **Scope: this section only.** The *preflight
 > check* above still runs, **with `--iac-only kubernetes` and neither toolchain flag**
-> (`--static-analysis`, `--vulnerabilities`): it then requires `gh`, `jq`
+> (`--iac-only opentofu` on the OpenTofu path) (`--static-analysis`, `--vulnerabilities`): it then requires `gh`, `jq`
 > and `git` plus the gate's tools (`helm`, `kustomize`, `kubeconform`,
-> `kube-linter`, `kyverno`, `trivy`, `yq`) — what `make lint` and the pre-push
+> `kube-linter`, `kyverno`, `trivy`, `yq`; with `--iac-only opentofu`,
+> `opentofu`, `tflint`, `trivy` and `conftest`) — what `make lint` and the pre-push
 > hook run locally — and none of the language-app scanners, so its one
 > all-or-nothing install prompt carries nothing this path leaves unused.
 > Declining it is a preflight *failure*, which by the rule above skips Step 4.5:
 > CI's `gate` still gates, but `make lint` and the hook refuse on the first
-> missing tool, so say so in the report. `--iac-only kubernetes` also skips preflight's
+> missing tool, so say so in the report. `--iac-only <topic>` also skips preflight's
 > Docker-daemon check, which exists for image/Trivy/SonarQube consumers this path
 > never emits.
 
@@ -6641,12 +6723,12 @@ checklist replaces the SonarCloud items with:
 - Register self-hosted runner (see `infra/github-runner/README.md`).
 - Mint SonarQube project token, store as `SONAR_TOKEN` secret.
 
-For the **IaC path** (§3l — the `kubernetes` topic marker with an empty RESOLVED language set
+For the **IaC path** (§3l — the kubernetes topic marker or the opentofu topic marker with an empty RESOLVED language set
 and no other `primary:` recorded; a recorded
-`primary: kubernetes` never grants this path on its own — #1193; a marker-less
+`primary: kubernetes` or `primary: opentofu` never grants this path on its own — #1193; a marker-less
 repo reaches it only through Q4's empty-repo confirmation)
-Step 4b already required the `kubernetes-ci.yml` `gate` check via
-`--iac-only kubernetes`, so branch protection is **not** an outstanding item. What the
+Step 4b already required the topic workflow's `gate` check (`kubernetes-ci.yml` or `opentofu-ci.yml`) via
+`--iac-only <topic>`, so branch protection is **not** an outstanding item. What the
 checklist carries instead is what the user cannot infer — **unless
 Step 4b hit its 403 fallback** (no admin permission), in which case the general
 rule wins and the manual branch-protection setup IS an outstanding item, listed
@@ -6666,7 +6748,8 @@ message — fix what it names, then re-run `branch-protection.sh`:
 - (unless Step 4a's install-iac-hooks.zsh ran and exited 0, or found the hook
   already wired) The pre-push hook is NOT wired: run `make hooks` once the gate
   command (`make lint` unless one is recorded) passes in this clone — merging
-  iac/Makefile.tmpl's `lint` and `hooks` targets first if the Makefile merge was
+  the lint and hooks targets of iac/Makefile.tmpl (kubernetes) or
+  opentofu/Makefile.tmpl (OpenTofu) first if the Makefile merge was
   declined.
 - (only when Step 4a found core.hooksPath already `hooks` and the gate failing)
   The pre-push hook IS wired and rejects every push until the gate command
@@ -6679,7 +6762,8 @@ message — fix what it names, then re-run `branch-protection.sh`:
   no .snyk, no .pre-commit-config.yaml. The local gate is `make lint`, the same
   command CI's `gate` runs. Add a language later and re-run bootstrap to pick
   the language gates up — a detected language takes the repo off this path even
-  though `.maintenance.yml` records `primary: kubernetes`. Expect that re-run to
+  though `.maintenance.yml` records `primary: kubernetes` (or `primary: opentofu`
+  — print the one this run recorded). Expect that re-run to
   REPLACE the `gate` context with the language-app set, which show as
   "expected" until that language's workflow first reports.
 - (only when the repo carries a Dockerfile) That image is NOT scanned in CI:

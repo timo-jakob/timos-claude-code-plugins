@@ -16,7 +16,7 @@ Among others, these helper scripts live in
 ## Scripts bootstrap emits into a target repository
 
 The scripts above are this repository's own. `/development:bootstrap` also writes scripts
-**into the repositories it bootstraps**. This section documents the gate script.
+**into the repositories it bootstraps**. This section documents the two gate scripts.
 
 ### `scripts/k8s-gate.zsh`
 
@@ -106,3 +106,45 @@ This is a warning, not a failure. An untested policy usually matches nothing.
 Bootstrap's preflight installs the current Homebrew versions, which cannot be pinned.
 Tool verdicts change between releases, so before you conclude that a local red is a
 regression, run the pinned versions.
+
+### `scripts/tofu-gate.zsh`
+
+Emitted on the OpenTofu infrastructure-as-code path only, as a plugin-owned artifact. Its
+source is the bootstrap template `templates/opentofu/scripts/tofu-gate.zsh.tmpl`. The
+Makefile's `lint` target runs it, and `.github/workflows/opentofu-ci.yml`'s `gate` job and
+`hooks/pre-push` both run that command. [Bootstrap an OpenTofu repository](../how-to/bootstrap-an-opentofu-repo.md)
+walks through using it.
+
+**Invocation.** Run `make lint`, or `zsh scripts/tofu-gate.zsh` from the repository root.
+It takes no arguments except `-h` / `--help`; any other argument exits `2`.
+
+**Required tools.** `tofu`, `tflint`, `trivy`, `conftest` and `jq`, each checked before any
+stage runs. A missing tool is named with its `brew install` line, and the script exits `2`.
+
+**Stages**, in order. The script stops at the first stage that fails, and runs every stage
+on a scratch copy of the repository, so `tofu init` never writes into the working tree.
+
+| # | Stage | What runs |
+| --- | --- | --- |
+| 1 | `fmt` | `tofu fmt -check -recursive` |
+| 2 | `validate` | `tofu init -backend=false` and `tofu validate`, once per root module |
+| 3 | `lint` | `tflint --recursive`, after `tflint --init` when `.tflint.hcl` exists |
+| 4 | `config-scan` | `trivy config` with `--severity HIGH,CRITICAL`, which reads `.trivyignore` when present |
+| 5 | `state-encryption` | report-only: warns when the repository owns state that nothing encrypts at rest |
+| 6 | `policy` | `conftest test --all-namespaces` of the `.tf` files against `policies/conftest/hcl/`, then `conftest verify` |
+| 7 | `plan-policy` | opt-in: `tofu plan` per root module, then `conftest test` of `tofu show -json` against `policies/conftest/plan/` |
+
+**Verdict lines and exit codes** are the same as `scripts/k8s-gate.zsh`'s above, without
+`K8S_GATE_RENDER_DIR`. A repository with no `.tf` or `.tf.json` outside `.terraform/`,
+`node_modules/`, `vendor/` and `.git/` skips every stage and exits `0`.
+
+**Skip rules.** `policy` prints a notice and skips when `policies/conftest/hcl/` holds no
+`.rego`; with policies but no `conftest verify` tests it runs `conftest test` and warns.
+`policy` fails, naming the file, on a `.rego` under `policies/conftest/` in neither `hcl/`
+nor `plan/`: the maintenance gather's glob is `policies/conftest/**/*.rego`, so that file
+is declared, yet no stage would evaluate it.
+`plan-policy` skips unless `.maintenance.yml` records `opentofu_plan_policy: true`; with
+the key on and `tofu init` or `tofu plan` failing, it fails and names the key.
+
+**Versions.** `.github/workflows/opentofu-ci.yml` installs pinned tool versions; its
+Conftest pin equals the one `gather-opentofu-findings.zsh` evaluates with.

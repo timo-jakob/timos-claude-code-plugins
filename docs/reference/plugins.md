@@ -568,8 +568,8 @@ other side of the cluster boundary: that plugin owns what runs *in* a cluster,
 this one owns the modules that *create* it. The two own disjoint file sets, so a
 repo holding both **does** detect both topics and runs both **maintenance**
 pipelines, now that #1160 has registered the marker that makes the second topic
-detectable. The CI half is narrower: the two bootstrap-rendered workflows will
-both require a status context named `gate`, **and** at most one of them is
+detectable. The CI half is narrower: the two bootstrap-rendered workflows both
+require a status context named `gate`, **and** at most one of them is
 rendered per repo, which is what makes that safe — the slice that renders both
 (disambiguating that context) is still open. Like
 `development-kubernetes`, it can also be **primary**: a provisioning repo has no
@@ -606,6 +606,10 @@ one defect, one carrier. A declared set Conftest **cannot
 evaluate** — a `.rego` that will not parse, one in a package the step never
 invokes, or a failing `conftest verify` run — fails as well: no-matching-file is
 the only thing that skips, or the check would be green over unenforced policies.
+The rendered gate reads two subtrees of that glob — `policy` reads
+`policies/conftest/hcl/` (against the `.tf` sources), `plan-policy` reads
+`policies/conftest/plan/` (against the plan JSON) — and fails `policy` on a `.rego` in
+neither, naming the file.
 
 The plugin ships **no policies of its own** with exactly one exception, and the
 exception is a first-class check rather than a policy: **state encryption**.
@@ -627,13 +631,14 @@ infrastructure on different days is the IaC equivalent of an irreproducible
 build; that is a severity ruling on `tflint`'s existing rule, not a second
 built-in check. Everything else generic belongs to `tflint` and `trivy`.
 
-**Static checks first; the plan-based stage will ship disabled.** Static analysis
-needs no credentials and **will run** on every pull request (credential-free
+**Static checks first; the plan-based stage ships disabled.** Static analysis
+needs no credentials and **runs** on every pull request (credential-free
 because `tofu init` runs with `-backend=false`; see ARCHITECTURE). Plan analysis sees
 what actually matters — *this destroys the database* — but needs cloud
 credentials and state access in a pull-request-triggered workflow, so the
-generated pipeline **will contain** that stage behind a repository variable
-defaulting off: enabling it later is configuration, not a redesign. There is deliberately **no approver
+generated gate **contains** that stage behind a committed `.maintenance.yml`
+key, `opentofu_plan_policy`, defaulting off: enabling it later is configuration,
+not a redesign. There is deliberately **no approver
 agent** — a provisioning change can destroy state that no rollback recovers, so
 a human approves.
 
@@ -646,7 +651,7 @@ detected language or with none — a provisioning repo declaring
 charter but deliberately **not** matched; ARCHITECTURE records why.
 
 `gather-opentofu-findings.zsh` emits the v2 payload over **seven** tool keys.
-Four are presence-detected — the tools themselves **will run** in the check
+Four are presence-detected — the tools themselves **run** in the check
 pipeline (#1162), never in the gather — and **three genuinely evaluate**:
 
 | Key | What it is | Evaluated? |
@@ -717,15 +722,16 @@ the gather script, `opentofu` topic marker and maintenance dispatcher
 and the four agents and the review panel
 ([#1161](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1161)).
 Getting the boundary wrong is the expensive mistake, so it was settled before
-anything filled it. The rest of epic
+anything filled it. Epic
 [#1158](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1158)
-follows: the bootstrap check pipeline
-([#1162](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1162)),
-and the self-contained test fixtures
+has since landed the bootstrap check pipeline
+([#1162](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1162));
+still to come are the self-contained test fixtures
 ([#1163](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1163)).
 And as with the sibling, the check
-**pipeline** will not be here — it **will ship** as a bootstrap template in the
-generic `development` plugin, the same boundary that keeps detection there.
+**pipeline** is not here — it **ships** as a bootstrap template in the
+generic `development` plugin, the same boundary that keeps detection there:
+see [Bootstrap an OpenTofu repository](../how-to/bootstrap-an-opentofu-repo.md).
 
 ## development-composition
 
