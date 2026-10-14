@@ -666,6 +666,34 @@ advised() {
   jq -e '.loop_args | type == "array"' <<<"$output" >/dev/null
 }
 
+@test "#2141 every flag reference/epic-telemetry.md passes to story-telemetry.zsh is one the script accepts" {
+  # The epic flow runs these blocks verbatim too: the epic start, each child's
+  # start (which reads child_start_args) and emit --epic.
+  local ref="$REPO_ROOT/development/skills/resolve-issue/reference/epic-telemetry.md"
+  local sub flags f emit
+  for sub in start emit; do
+    flags="$(awk -v s="story-telemetry.zsh\" $sub" 'index($0, s) { on = 1 } on { print } on && !/\\$/ { on = 0 }' "$ref" | grep -oE -- '--[a-z-]+' | sort -u)"
+    [ -n "$flags" ] || { echo "no $sub block found in epic-telemetry.md"; return 1; }
+    while IFS= read -r f; do
+      grep -qE -- "^ +${f}\) " "$D" || { echo "epic-telemetry.md passes $f to $sub; the script has no such flag"; return 1; }
+    done <<<"$flags"
+  done
+  # the emit block is the epic one
+  emit="$(awk '/story-telemetry.zsh" emit/{on=1} on{print} on && !/\\$/{on=0}' "$ref")"
+  grep -qE -- '--epic( |$)' <<<"$emit" || { echo "epic-telemetry.md's emit block no longer passes --epic"; return 1; }
+  # emit --epic's required set, and the flag --epic refuses
+  for f in --run-file --state --repo-dir --issue --repo-type; do
+    grep -qF -- "$f" <<<"$emit" || { echo "epic-telemetry.md's emit block no longer passes $f"; return 1; }
+  done
+  if grep -qF -- '--loop-work-dir' <<<"$emit"; then echo "epic-telemetry.md's emit block passes --loop-work-dir, which --epic refuses"; return 1; fi
+  # every start block (the epic's and each child's) passes its --run-file
+  [ "$(grep -c 'story-telemetry.zsh" start' "$ref")" -eq "$(awk '/story-telemetry.zsh" start/{on=1} on{print} on && !/\\$/{on=0}' "$ref" | grep -c -- '--run-file')" ] || { echo "an epic-telemetry.md start block no longer passes --run-file"; return 1; }
+  # the child_start_args key the reference reads is the one start writes
+  grep -qF "jq -r '.child_start_args[]'" "$ref"
+  run zsh "$D" start --run-file "$RUN" --ts 1
+  jq -e '.child_start_args | type == "array"' <<<"$output" >/dev/null
+}
+
 # --- round-1 gaps: tilde, reuse, flag-shaped values, bounds, messages -------
 
 @test "args and start expand a leading ~ — slash-command arguments arrive unexpanded" {
