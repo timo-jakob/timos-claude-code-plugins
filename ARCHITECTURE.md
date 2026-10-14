@@ -6886,7 +6886,12 @@ top:
 | `success` | none of the above |
 
 So a re-run where the user keeps one differing file — skip is the default — is
-`parked`, not `success`: something applicable was left undone.
+`parked`, not `success`: something applicable was left undone. A file a step
+deliberately did not write because another file serves its purpose is
+`skipped` while that purpose is unserved and `already_present` once it is
+served, so a composition re-run after the user added the image custom manager
+to their Renovate config is not parked by `renovate.json` (#2225). The one such
+file is §3m's `renovate.json`; bootstrap's §3m states its served test.
 
 **Refused states.** The builder refuses (exit 1) rather than file a record
 whose facts contradict each other, reporting every breach at once: an unknown

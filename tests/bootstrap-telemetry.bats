@@ -437,3 +437,11 @@ never_fatal() {  # asserts exit 0, the advisory, and an untouched sink
   contains "$output" '`pr` — the PR 4e opened, else `null`.'
   contains "$output" 'Then emit, with `--repo-dir` the main checkout noted at the start:'
 }
+
+@test "#2225 a deliberately unwritten file is skipped while its purpose is unserved and already_present once served" {
+  local doc
+  doc="$(tr -s '[:space:]' ' ' < "$SKILL")"
+  contains "$doc" 'a file a step deliberately did not write because another file serves its purpose is never left out — `skipped` while that purpose is unserved, `already_present` once it is served. The one such file is §3m'"'"'s `renovate.json`, whose served test §3m states (#2225);'
+  doc="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/ARCHITECTURE.md")"
+  contains "$doc" 'A file a step deliberately did not write because another file serves its purpose is `skipped` while that purpose is unserved and `already_present` once it is served, so a composition re-run after the user added the image custom manager to their Renovate config is not parked by `renovate.json` (#2225). The one such file is §3m'"'"'s `renovate.json`; bootstrap'"'"'s §3m states its served test.'
+}
