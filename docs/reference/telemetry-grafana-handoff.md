@@ -73,10 +73,9 @@ which one does not, is stated once, in
 under *Cross-repo sink mode* (*Which pipelines forward `--telemetry-dir`*);
 each pipeline's own skill lists the flag where it takes it. A pipeline that
 does not forward it leaves its records in the user-level default, never in the
-shared directory: wiring the flag through such an entry point is per-pipeline
-instrumentation and belongs to the trilogy's **epic 2**, so read an empty
-shared directory after one of those as *that* gap, not as a broken emitter or
-a broken aggregation service.
+shared directory. refine-issue's Step 7 passes no sink flag, so that gap stays
+open: read an empty shared directory after a refine-issue run as *that* gap,
+not as a broken emitter or a broken aggregation service.
 
 | Flag | Script | Meaning for the hand-off |
 | --- | --- | --- |
@@ -194,6 +193,9 @@ directory.
 - **`payload` evolves freely** per pipeline and is non-breaking by definition.
   One named exception: `payload.rounds` is a shared reporting key, so renaming or
   nesting it withholds that pipeline's mean-rounds measure.
+  Per-pipeline payload keys are not dashboard fields — no payload key ever
+  enters the field manifest — and each pipeline's keys are listed in the
+  [per-pipeline payload key tables](../how-to/read-pipeline-telemetry.md#payload-keys-by-pipeline).
 - Until a v2 exists, **the shared directory holds exactly one schema version**,
   so the reference panels deliberately carry no `schema` filter — a filter for a
   condition that cannot occur is noise that reads as caution. The day a v2 stream
