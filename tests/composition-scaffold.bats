@@ -1116,7 +1116,7 @@ section_3m() {
   # over Dependabot — so a repo carrying both gets the Renovate reason
   contains "$s" 'the Renovate configs first — `renovate.json5`, `.github/renovate.json(5)`, `.gitlab/renovate.json(5)`, `.renovaterc`, `.renovaterc.json(5)`, then a `renovate` key in `package.json`'
   contains "$s" 'and `.github/dependabot.y(a)ml` only when none of those exists'
-  contains "$s" '**A Renovate config wins over Dependabot**: when one exists, the plan names that file and says to add the image custom manager from `templates/renovate.json` to it, even when a Dependabot config is also present'
+  contains "$s" '**A Renovate config wins over Dependabot**: when one exists, the plan names that file — the same file the scaffold'"'"'s `skipped renovate.json` line names — even when a Dependabot config is also present.'
   # #1904: the whole sentence, so its consequence cannot be deleted unseen
   contains "$s" 'Only when no Renovate config is found does the plan name the Dependabot file and say the member pins will not be bumped until the repository moves to Renovate.'
   contains "$s" '**when the scaffold printed `wrote renovate.json` or `kept renovate.json`**'
@@ -1225,4 +1225,13 @@ in_list() {
   }
   contains "$s" "the ${words[n + 1]} files the scaffold writes"
   contains "$s" "the plan lists the other ${words[n]} files plus \`renovate.json: skipped — <the file> already configures Renovate / Dependabot\`"
+}
+
+@test "#2225 bootstrap §3m records a skipped renovate.json as skipped or already_present, never omitted" {
+  local s
+  s="$(section_3m)"
+  contains "$s" 'Read it now: when it already carries a `customManagers` entry whose `managerFilePatterns` matches `.claude-workspace.yaml`, the plan says that entry already bumps the member pins and names no edit; otherwise it says to add the image custom manager from `templates/renovate.json` to it (#2225).'
+  contains "$s" 'When you recorded the skipped `renovate.json` as `already_present`, say that the named Renovate config'"'"'s image custom manager already bumps the member pins, and name no edit (#2225).'
+  contains "$s" 'and you recorded it `skipped`, say that the member pins will not be bumped until:'
+  contains "$s" 'Record that skipped `renovate.json` in `files`, never omit it: `skipped` while the member `image:` pins have no bumper (Dependabot, or a Renovate config without the image custom manager), and `already_present` once that Renovate config carries a `customManagers` entry whose `managerFilePatterns` matches `.claude-workspace.yaml` (#2225).'
 }

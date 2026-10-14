@@ -150,7 +150,11 @@ reconstructed at the end:
   *Idempotency rules* outcome: absent or overwritten → `written`; content matches
   → `already_present`; differs and skipped (the default answer) → `skipped`;
   merged by hand or by the `.gitignore` merge → `merged`; a write error, **or the
-  step rejected by a bootstrap gate** → `failed`;
+  step rejected by a bootstrap gate** → `failed`; a file a step deliberately did
+  not write because another file serves its purpose is never left out —
+  `skipped` while that purpose is unserved, `already_present` once it is served.
+  The one such file is §3m's `renovate.json`, whose served test §3m states
+  (#2225);
 - each step that **applied** to this repo — a step whose trigger is absent is
   left out, and an applicable step that wrote no file (a declined Groovy
   conversion) is `skipped`;
@@ -5239,10 +5243,13 @@ conflict.
    none of those exists. When any exists (and `renovate.json` itself does not),
    the plan lists the other six files plus `renovate.json: skipped — <the file>
    already configures Renovate / Dependabot`. **A Renovate config wins over
-   Dependabot**: when one exists, the plan names that file and says to add the
-   image custom manager from `templates/renovate.json` to it, even when a
-   Dependabot config is also present — the same file the scaffold's `skipped
-   renovate.json` line names. Only when no Renovate config is found does the plan
+   Dependabot**: when one exists, the plan names that file — the same file the
+   scaffold's `skipped renovate.json` line names — even when a Dependabot config
+   is also present. Read it now: when it already carries a `customManagers`
+   entry whose `managerFilePatterns` matches `.claude-workspace.yaml`, the plan
+   says that entry already bumps the member pins and names no edit; otherwise
+   it says to add the image custom manager from `templates/renovate.json` to
+   it (#2225). Only when no Renovate config is found does the plan
    name the Dependabot file and say the member pins will not be bumped until the
    repository moves to Renovate.
 
@@ -5295,7 +5302,12 @@ refused manifest leaves the repo untouched. A kept manifest must also declare
 `github_environment` of the same name — the two GitHub Environments the workflow
 binds. It skips `renovate.json` — and says so, exit `0` — when the repository
 already configures Renovate under another file name or runs Dependabot, so it
-never overrides a Renovate config or starts a second dependency bot. It keeps
+never overrides a Renovate config or starts a second dependency bot. Record
+that skipped `renovate.json` in `files`, never omit it: `skipped` while the
+member `image:` pins have no bumper (Dependabot, or a Renovate config without
+the image custom manager), and `already_present` once that Renovate config
+carries a `customManagers` entry whose `managerFilePatterns` matches
+`.claude-workspace.yaml` (#2225). It keeps
 any file that already exists and says so; the
 idempotency rules above decide what to do about a kept file that differs from
 its template, under `<development-composition-root>/templates/`. A kept manifest
@@ -5338,8 +5350,11 @@ of the workflow promotes `production` only, so it cannot repair the failed
 grant access before merging, since that merge would otherwise fail to resolve a
 digest — **and** give Renovate its own credentials for that registry,
 since the scaffold writes no `hostRules` and Renovate's lookups do not use the
-workflow's token. When the scaffold **skipped** `renovate.json` (its line says
-why), say that the member pins will not be bumped until: for another **Renovate**
+workflow's token. When you recorded the skipped `renovate.json` as
+`already_present`, say that the named Renovate config's image custom manager
+already bumps the member pins, and name no edit (#2225). When the scaffold
+**skipped** `renovate.json` (its line says why) and you recorded it `skipped`,
+say that the member pins will not be bumped until: for another **Renovate**
 config, the image custom manager from
 `<development-composition-root>/templates/renovate.json` is added to it (Renovate
 is already set up — do not tell the user to enable it); for **Dependabot**, the
