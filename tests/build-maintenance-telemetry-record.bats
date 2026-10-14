@@ -104,6 +104,17 @@ outcome() { build --print-outcome; }
   [ "$(jq -c '.prs.opened' <<<"$output")" = "[]" ]
 }
 
+@test "#2151 a --no-merge run whose only target returned improver_result is parked, with no PR and no Stage 0" {
+  # Phase 6 runs no Stage 0 under --no-merge, so the run records no stages.
+  state '.run_modifiers.no_merge = true | .groups_planned = 0 | .coverage_preflight = {spawned: true, languages: ["python"]}'
+  run --separate-stderr zsh "$B" --state "$ST"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '.coverage_preflight' <<<"$output")" = '{"spawned":true,"languages":["python"],"pr":null}' ]
+  [ "$(jq -c '.prs.opened' <<<"$output")" = "[]" ]
+  run --separate-stderr zsh "$B" --state "$ST" --print-outcome
+  [ "$output" = "parked" ]
+}
+
 @test "table B: a human_action_required halt parks the run even when every stage merged" {
   state '.human_action_required = 1'
   stages '{"stage1":{"pr":214,"status":"merged"},"stage2":{"pr":215,"status":"merged"}}'

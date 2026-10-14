@@ -339,7 +339,7 @@ never_fatal() {  # asserts exit 0, the advisory, and an untouched sink
   contains "$output" "instead: \`<payload-dir>/payload-<target>.json\`, one per target Phase 4 wrote"
   contains "$output" "\`phase4-payload\` — the checkpoint copies in \`checkpoint.zsh dir\` that its"
   contains "$output" "used. Pass none only when no payload was built."
-  contains "$output" "- \`coverage_preflight\` — whether **this invocation** spawned Stage 0's improver,"
+  contains "$output" "- \`coverage_preflight\` — whether a dispatcher returned \`improver_result\` in"
   contains "$output" "never hand-roll an envelope, a run_id or a payload."
   contains "$output" "re-entry re-reads the run file, never calls \`start\` again — a second call would"
   contains "$output" "- Pass a sink flag only when Phase 0 was given it. A resumed run takes **this**"
@@ -358,6 +358,20 @@ never_fatal() {  # asserts exit 0, the advisory, and an untouched sink
   contains "$output" "a vendor-PR stage acts on"
   contains "$output" 'with `"inherited": true`'
   contains "$output" "as a \`deferred\`"
+}
+
+@test "#2151 SKILL.md: under --no-merge an improver-only target runs no Stage 0, and Phase 9 says why it was not planned" {
+  local doc
+  doc="$(tr -s '[:space:]' ' ' < "$SKILL")"
+  contains "$doc" '**Under `--no-merge`, Stage 0 does not run** (no push, no PR, no CI cycle, no merge), and the plugin is **not** re-invoked: a re-dispatch would re-run the coverage pre-flight against an unchanged main and spawn a second improver.'
+  contains "$doc" "Keep the improver's worktree branch for Phase 9's manual-review list. This target planned no groups (#2151)."
+  contains "$doc" '2. **Otherwise**, run Stage 0 of Phase 8 first (push the improver'"'"'s branch, open a PR, monitor CI, merge, sync local main). Then **re-invoke the plugin with the same payload** to get the plan. The second invocation sees post-merge coverage and naturally lands on Phase B.'
+  contains "$doc" '`coverage_preflight` — whether a dispatcher returned `improver_result` in **this invocation**, and for which languages. That holds under `--no-merge` too, where the improver ran but Stage 0 did not, so `pr` is `null` (#2151).'
+  contains "$doc" '<lang>: planner did not run — the coverage pre-flight waits on the merge of <improver branch>.'
+  contains "$doc" '**An improver-only language under `--no-merge` is never reported clean.**'
+  contains "$doc" "Its planner never ran, so nothing was planned for it; the line above, with the improver's branch in the manual-review list, is what it reports instead."
+  doc="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/docs/explanation/workflow-maintenance.md")"
+  contains "$doc" 'Under `--no-merge` there is no Stage 0: the improver'"'"'s branch stays local, the target is not planned, and the summary names the branch whose merge it waits on'
 }
 
 @test "ARCHITECTURE.md: the fold is a cross-pipeline convention and the maintenance keys are documented" {

@@ -37,7 +37,8 @@ The colour key for the diagrams is on [How the plugins work](how-the-plugins-wor
    in one of three ways:
    - a **plan** — go to the PR cycle;
    - an **improver result** — coverage had to be raised first; that PR runs as *Stage 0*, and the target is
-     dispatched again;
+     dispatched again. Under `--no-merge` there is no Stage 0: the improver's branch stays local, the target is
+     not planned, and the summary names the branch whose merge it waits on;
    - **human action required** — that target stops; the others continue.
 
 ### Inside a dispatcher {#maintenance-inside-a-dispatcher}
