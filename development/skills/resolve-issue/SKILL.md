@@ -156,6 +156,17 @@ issue must belong to it. If `$ARGUMENTS` is empty, print the invocation help
 
 ### 0a. Dependency precheck — reject unless the graph is clean (do NOT skip)
 
+**First, resolve the session mode (#2575)** — this flow's human-present
+determination. Run
+`"<skill-base-dir>/scripts/resolve-session.zsh" --inferred <attended|unattended>`
+once, passing today's inference: `attended` when a human invoked the skill,
+`unattended` for an E3 child or the maintenance pipeline. On a run a human
+invoked, its one line `<mode> <source>` decides:
+`attended` takes the interactive arm, `unattended` the autonomous one. An E3
+child or the maintenance pipeline stays autonomous whatever the line says (E3
+cannot prompt). Say the mode and its source once, quoting any stderr warning,
+and note both for the run's record. An exit 2 is your own malformed call: fix it.
+
 Dependencies are enforced from **GitHub-native `blockedBy` relationships** —
 the single source of truth (#583); prose declares nothing. Before anything
 else — before the readiness gate, before any branch exists — run the precheck:
@@ -246,10 +257,11 @@ Every rejection that ends the run — shape (i), shape (ii) or a cycle — emits
 run's record (§7) before it stops; so does an exit 1, or a repeated exit 2.
 
 On either rejection **of shape (i)** — a shape (ii) rejection already stopped
-above, and has no remediation — what happens next depends on who is driving:
+above, and has no remediation — what happens next depends on who is driving,
+which is the session mode resolved above:
 
-- **Autonomous / non-interactive** (maintenance pipeline, epic-driven resolve —
-  no human to prompt): post `comment_md` as an issue comment, apply the
+- **Autonomous / non-interactive** (mode `unattended`: maintenance pipeline,
+  epic-driven resolve — no human to prompt): post `comment_md` as an issue comment, apply the
   `blocked` label idempotently, and **stop**. **Never auto-chain** into
   resolving the blocker unattended — an unattended run must not widen its own
   scope (#583's decision).
@@ -262,9 +274,9 @@ above, and has no remediation — what happens next depends on who is driving:
   gh issue edit <N> --add-label blocked
   ```
 
-- **Interactive** (a human invoked `/development:resolve-issue` and is
-  present): report the argumentation in the conversation instead — the human
-  is right there, a comment would be noise. Then offer **guided remediation**
+- **Interactive** (mode `attended`: a human invoked
+  `/development:resolve-issue` and is present): report the argumentation in
+  the conversation instead — the human is right there, a comment would be noise. Then offer **guided remediation**
   (below) rather than dead-ending — with a human present, a rejection is a
   fork in the road, not a stop sign.
 

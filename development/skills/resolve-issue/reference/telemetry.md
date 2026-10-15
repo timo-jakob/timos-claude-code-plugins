@@ -141,6 +141,7 @@ decided. None may be guessed at the end.
 
 | Fact | Where it is decided | Value |
 |---|---|---|
+| `session_mode`, `session_mode_source` | Step 0a | the two words of `resolve-session.zsh`'s one line (#2575): `attended` / `unattended`, and `env` / `inferred`. Both `null` when the helper exited 2 twice and so resolved nothing; never one without the other |
 | `dependency_precheck` | Step 0a | the decision string (`PROCEED` / `REJECT_BLOCKED` / `REJECT_CYCLE`) of the **last** precheck this run ran; `null` when that last precheck exited 1, or 2 twice, and so decided nothing |
 | `gate_verdict`, `risk` | Step 0b | the verdict, and the verdict's `risk` when `READY` |
 | `story_spec_present` | Step 2 | `true` when `read-story-spec.zsh` exited 0 |
@@ -179,7 +180,8 @@ emits nothing, so pick the row before writing the state, not after.
 { "outcome": "pr-opened",
   "dependency_precheck": "PROCEED", "gate_verdict": "READY", "risk": "elevated",
   "pr": 413, "story_spec_present": true,
-  "escalation_status": null, "fallbacks_fired": ["c4_currency"] }
+  "escalation_status": null, "fallbacks_fired": ["c4_currency"],
+  "session_mode": "unattended", "session_mode_source": "env" }
 ```
 
 ```bash

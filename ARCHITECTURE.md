@@ -6618,6 +6618,8 @@ record's `run_id`, as it always was.
 | `review_loop_run_ids` | the nested review-loop records' `run_id`s, de-duplicated in emission order |
 | `escalation_status` | the `ESCALATE_*` / `BUDGET_EXHAUSTED` exit that terminated the run — set only on an `escalated` run; `null` on every other ending, a converged, skipped or errored loop and an escalation a later grant superseded included |
 | `fallbacks_fired` | which planned same-PR steps no-oped — a set drawn from `acceptance_tests`, `user_docs`, `c4_currency`: whether the same-PR lifecycles actually reach stories |
+| `session_mode` | `attended` \| `unattended` \| `null` — the session mode §0a resolved with `resolve-session.zsh` (#2575); `null` when the run recorded none |
+| `session_mode_source` | `env` (the `resolve_session` setting decided) \| `inferred` (the run's own inference did) \| `null`. The two are a pair: both `null` or both set, and the builder refuses one without the other |
 
 The builder's state carries a fine-grained ending — `pr-opened`, `gate-parked`,
 `precheck-parked`, `escalated`, `failed` — plus the facts above and `pr`, and
