@@ -46,9 +46,12 @@ ask you something.
 
 ## What changes when it is unattended
 
-Today the setting decides the dependency precheck at the start of a run on a
-single issue. When the story is blocked by an open dependency, `attended` offers
-to resolve the blocker first, and `unattended` comments on the story and adds the
-`blocked` label instead. The other branches that ask you follow the setting
-once #2583 points them at it. The run's telemetry
+Every branch of a single-issue run that would ask you follows the setting:
+`attended` asks, and `unattended` takes the arm the skill already takes when
+nobody is present. For example, when the story is blocked by an open
+dependency, `attended` offers to resolve the blocker first, and `unattended`
+comments on the story and adds the `blocked` label instead. The same holds for
+the size pre-flight's override, the extra review rounds after an escalation,
+the options for a review that did not apply, and suggestion promotion. The
+run's telemetry
 record carries the mode and its source (`session_mode`, `session_mode_source`).

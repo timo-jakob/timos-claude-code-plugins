@@ -13,6 +13,10 @@
 > carries the run's `loop_args`, which the frozen template in
 > `reference/interactive/extension-grant.md` does not show.
 
+Whether a human is present is §0a's determination, read from
+`scripts/resolve-session.zsh`: `attended` takes the interactive arm, `unattended`
+takes the autonomous arm and never prompts.
+
 <!-- moved: interactive-extension -->
 **Interactive extension (human present, `BUDGET_EXHAUSTED` /
 `ESCALATE_NO_CONVERGENCE` only, #562-resume).** When the run is

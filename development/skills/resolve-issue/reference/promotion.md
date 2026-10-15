@@ -3,6 +3,10 @@
 On-demand reference for `development/skills/resolve-issue/SKILL.md` — read it when the
 step that points here is reached, never up front.
 
+Whether a human is present is §0a's determination, read from
+`scripts/resolve-session.zsh`: `attended` takes the interactive arm, `unattended`
+takes the autonomous arm and never prompts.
+
 It carries the phase offered on a convergence of an interactive run that
 waived at least one suggestion, unless the `enable_suggestions` setting is off.
 It is split into shards under `reference/promotion/`, each at most 20,000 bytes

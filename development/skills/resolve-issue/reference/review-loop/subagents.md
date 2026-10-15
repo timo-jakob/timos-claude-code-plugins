@@ -210,6 +210,10 @@ outcome/cause pair is off this table is report-and-stop.
 | `not-applicable` | `not_applicable` | the **NOT APPLICABLE on a full round** arm: autonomous, stop with no commit and no PR; interactive, its three options, none taken without an explicit choice. Never coerced to `[]`, and the panel is not re-run |
 | `story-diff-empty` | `not_applicable` | the **empty story diff** shape: go back to **§2 (Implement)** and take the boundary again, or, if the story needs no code change, say so and stop. The three NOT APPLICABLE options are never offered, and, per the #1485 note, neither the re-invoke arm nor the panel re-run arm is taken |
 
+Whether a human is present is §0a's determination, read from
+`scripts/resolve-session.zsh`: `attended` takes the interactive arm, `unattended`
+takes the autonomous arm and never prompts.
+
 **The never-ran arm is not a verdict.** It applies only when the conductor can
 show that no panel subagent was dispatched this round — on a missing/empty
 STALE_FINDINGS refusal, say. Dispatch one round-mode panel, then a decide

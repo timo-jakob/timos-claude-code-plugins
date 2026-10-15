@@ -76,7 +76,7 @@ setup() {
 }
 
 # The pinned size of the sweep: every tracked tests/*.bats + tests/*.bash.
-SWEPT_FILES=254
+SWEPT_FILES=255
 
 exceptions() {
   cat <<'EOF'

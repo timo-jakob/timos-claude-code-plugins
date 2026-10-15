@@ -37,6 +37,10 @@ yourself.
   land in the dossier's *Waived suggestions* list, as on any run that promotes
   nothing.
 
+Whether a human is present is §0a's determination, read from
+`scripts/resolve-session.zsh`: `attended` takes the interactive arm, `unattended`
+takes the autonomous arm and never prompts.
+
 <!-- moved: suggestion-promotion -->
 Low suggestions never block, so every one the panel raises is **waived** the
 moment it is surfaced — logged and never actioned. That is the right default,

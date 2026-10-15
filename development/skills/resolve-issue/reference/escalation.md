@@ -14,6 +14,10 @@ pinned pre-move commit, and is what keeps this file honest.
 
 ## Escalation (any `ESCALATE_*` / `BUDGET_EXHAUSTED` status) — typed, no PR (#564)
 
+Whether a human is present is §0a's determination, read from
+`scripts/resolve-session.zsh`: `attended` takes the interactive arm, `unattended`
+takes the autonomous arm and never prompts.
+
 <!-- moved: escalation-head -->
 A bad escalation costs a human an afternoon; a good one costs two minutes. On
 any `ESCALATE_*` / `BUDGET_EXHAUSTED` status, produce **one** decision-ready
