@@ -280,6 +280,7 @@ gh issue view <N> --json number,title,body,state,labels,url,comments
   # three counts from the Step 2 loop, or explicitly on a run that made no
   # refiner call.
   STATE_OUTCOME=""; PARK_TYPE=""; RISK=""; ROUNDS=""; RAISED=""; RESOLVED=""
+  SIZE_PREFLIGHT=""   # optional, never guarded — Step 7's size_preflight (#2589)
   # Print the two stamps: Step 7 needs their LITERAL values many tool calls
   # later, and a shell variable does not survive that gap.
   echo "carry into Step 7: T0=$T0 REPO_ROOT=$REPO_ROOT"
@@ -343,6 +344,17 @@ becomes `RISK=""`. This
 **diagnosis** verdict is its only source: it is the risk of the story *as the
 gate sent it back*, which is what the metric measures, so Step 4's re-gate
 `risk` is never substituted for it.
+
+**Record the verdict's `size` object too** (#2589), into Step 7's
+`SIZE_PREFLIGHT` as `{"verdict", "triggers", "children_filed": 0}` — for example
+`SIZE_PREFLIGHT='{"verdict":"stop","triggers":["files"],"children_filed":0}'`.
+Unlike `RISK`, the **last** readiness verdict's `size` wins: Step 4's re-gate
+replaces it. A verdict with no `size` object leaves it empty. Step 2's own size
+check never writes its `verdict` or `triggers`, so a draft split after a
+readiness `pass` records `pass` beside its `children_filed`. A `size` stop
+reaches you as a `scope_bounded` objection naming its trigger; the first refiner
+turn that returns a non-null `proposed_split` goes straight to the plan file and
+split choice of Step 2's size-check exit 1, converged or not.
 
 If it already returns `READY`, tell the human the story now passes and offer to
 just clear the label (Step 5) — no loop needed. **If they accept**, that
@@ -415,9 +427,10 @@ Append this round (your relayed summary + the human's reply, auto-accepted lines
 included) to `conversation` and call the agent again with that reply as
 `human_reply`. **Converge when the agent reports every objection
 `resolved: true` AND `questions == []`** — its `resolved_objections` drives this
-decision (that is its whole purpose). Then present the **final
-`proposed_prose` + `proposed_story_spec`** and get the human's **explicit
-approval of the exact rewrite**. Nothing is written until they approve. If they
+decision (that is its whole purpose). Then **size the draft** (*Step 2 — size
+the draft before approval*, below), and only a draft that does not stop is
+presented: the **final `proposed_prose` + `proposed_story_spec`**, for the
+human's **explicit approval of the exact rewrite**. Nothing is written until they approve. If they
 want changes, feed their reply back for another round.
 
 **Auto-accept never approves the rewrite.** The threshold only answers the
@@ -433,16 +446,17 @@ a park.** They have no other source, and Step 7 refuses to guess, so leaving the
 unset makes it skip the record entirely rather than report a fabricated zero:
 
 A shell variable does **not** survive between Bash tool calls, and this loop
-spans many of them across human turns. Step 7's fence reads **eight** variables
-— Step 0's `T0` and `REPO_ROOT` plus the six run variables — and its guard reads
-them *before* the `jq` does, so substituting literals into the `--arg` lines
+spans many of them across human turns. Step 7's fence reads Step 0's `T0` and
+`REPO_ROOT` plus the run variables `STATE_OUTCOME`, `PARK_TYPE`, `RISK`,
+`ROUNDS`, `RAISED`, `RESOLVED` and `SIZE_PREFLIGHT`, and its guard reads them
+*before* the `jq` does, so substituting literals into the `--arg` lines
 alone still leaves the guard seeing unset values and skipping the record. So:
-carry all eight in your own notes as you go (Step 0 prints its two), and
+carry every one of them in your own notes as you go (Step 0 prints its two), and
 **re-assign every one of them on the lines immediately above the guard, in the
-same invocation as the fence**. The guard reads **seven** of the eight — all but
-`RISK`, which only the `jq` reads — so an omitted `RISK` is not skipped, it is
-silently recorded as `null`. Never assume an assignment from an earlier turn is
-still live:
+same invocation as the fence**. The guard reads all but `RISK` and
+`SIZE_PREFLIGHT`, which only the `jq` reads — so an omitted one is not skipped:
+`RISK` is silently recorded as `null`, and `size_preflight` silently left out.
+Never assume an assignment from an earlier turn is still live:
 
 - `ROUNDS` — after each round, re-assign it to the cumulative count of
   `issue-refiner` calls made in this flow, as a bare integer (e.g. `ROUNDS=4`).
@@ -470,6 +484,82 @@ were seen and none resolved — that is the stall signal the stream exists to
 capture, and zeroing it would hide it). Those are measured zeros. Never
 *default* an unrecorded count to 0: an unset count must reach Step 7 unset so it
 skips the record rather than fabricating a no-op.
+
+### Step 2 — size the draft before approval (#2589)
+
+A story too big to build as one change is found here, while you and the human
+are both present, rather than at resolve-issue §2 after the human has left.
+**Never write back a draft whose declared inventory stops the size check.**
+
+On convergence, build the draft's **declared inventory** — a judgement, the same
+rule `story-readiness` follows: every repo-relative path the drafted story will
+touch, from `proposed_prose` and `proposed_story_spec.scope_boundaries.in`, with
+concrete paths for named areas. Write it as `{"files": [ … ]}` to a temporary
+file outside the repository (an empty `files` array when no concrete path can be
+named), and run, from the repository root:
+
+```bash
+"<skill-base-dir>/scripts/size-check.zsh" --file <inventory.json>
+```
+
+It applies the size pre-flight's own thresholds; this skill restates none.
+
+- **Exit 0** — `pass` or `skipped`: present the draft for approval as above.
+- **Exit 2** — your own malformed call: fix it and re-run once.
+- **Exit 3, or a second 2** — the inventory could not be judged. Tell the human
+  in one line and present the draft: resolve-issue §2's pre-flight remains the
+  backstop.
+- **Exit 1** — `stop`. Do **not** present the draft for approval. Relay the
+  triggers and counts, and run another refiner turn with the stop as an
+  objection: *the draft's declared inventory stops the size check
+  (`<triggers>`, `<counts>`); propose a split into child stories, each a bounded
+  story with a title, a body and its own declared inventory*. Write the
+  refiner's `proposed_split` into a plan file as `children`, adding nothing of
+  your own:
+
+  ```json
+  { "children": [ { "title": "…", "body": "…", "files": ["…"] }, … ] }
+  ```
+
+  A `null` `proposed_split`, or a child with an empty `files`, is never filled
+  in by you: show no children and ask once — **Revise the draft** or **Park as
+  `deferred`** (the typed parked exit below), never the `split-recommended`
+  park, which is offered only when the split names its children.
+
+  Otherwise show the human every child, then ask once (`AskUserQuestion`):
+  **File these N child stories (Recommended)**, **Revise the draft** (their
+  reply is another round, and the revised draft is sized again) or **Park as
+  `split-recommended`** (the typed parked exit below, with the children's titles
+  as `candidate_children`).
+
+**When the human chooses to file the split**, run from the repository root:
+
+```bash
+"<skill-base-dir>/scripts/file-split-children.zsh" --repo "$REPO" --parent <N> --plan <plan.json>
+```
+
+It size-checks every child before any write, files each one as a native
+sub-issue of `<N>` labelled `needs-refinement`, replaces `<N>`'s
+`needs-refinement` with `epic`, and posts a trail comment listing the children.
+Branch on its exit:
+
+- **0** — filed. The original is now an epic, so **skip Steps 2.5–6**: nothing is
+  written back to it. Set `STATE_OUTCOME="parked"`, `PARK_TYPE="split-recommended"`
+  and `SIZE_PREFLIGHT`'s `children_filed` to the length of its `filed` list (an
+  empty `SIZE_PREFLIGHT` stays empty: the children go uncounted), run
+  Step 7, and stop. Tell the human the children are refined next —
+  `/development:refine-issue <N>` walks them as an epic. (In an epic walk that
+  ends **this child**, not the walk: note it in the epic summary as split into
+  its filed children and continue to the next child.)
+- **1** — a child's inventory still stops; **nothing was written**. Relay which
+  child and its triggers, and run another round to revise the split.
+- **2** — your own malformed call: fix it and re-run once.
+- **3** — nothing was written. Relay its stderr and offer the parked exit.
+- **5** — partial. Relay its report verbatim: the children it filed, and what
+  failed. The original's labels were left untouched. Never re-run it — a re-run
+  files the children a second time. Record the run as for exit 0, with
+  `children_filed` the length of the report's `filed` list, and tell the human
+  what is left to finish by hand.
 
 ### Step 2 — the typed parked exit (#578)
 
@@ -684,7 +774,8 @@ Confirm the block is valid JSON (`jq -e` the fenced object) before writing.
 
 ## Step 4 — re-gate
 
-Spawn **`story-readiness`** again on the freshly-edited issue. Its verdict is now
+Spawn **`story-readiness`** again on the freshly-edited issue, and re-record
+`SIZE_PREFLIGHT` from its `size` object (Step 1). Its verdict is now
 authoritative — and, because a `story-spec` block now exists, its validation also
 checks the block against the prose (it will pass: you just stamped the hash over
 this exact prose).
@@ -821,8 +912,9 @@ three-value enum**, which the guard *does* reject: an empty one is the
 from a well-formed park whose type was lost, and an out-of-enum one is a
 fabricated value the payload builder deliberately does not police.
 
-**Re-assign all eight before running this block.** `T0`, `REPO_ROOT`,
-`STATE_OUTCOME`, `PARK_TYPE`, `RISK`, `ROUNDS`, `RAISED`, `RESOLVED` must all be
+**Re-assign them all before running this block.** `T0`, `REPO_ROOT`,
+`STATE_OUTCOME`, `PARK_TYPE`, `RISK`, `ROUNDS`, `RAISED`, `RESOLVED` and
+`SIZE_PREFLIGHT` must all be
 re-stated as literals **in the same Bash invocation as the fence**, on the lines
 above the guard (Step 2's rule). Values assigned in an earlier tool call are
 gone, and the guard would then skip the record for a run that was measured
@@ -836,7 +928,7 @@ already-`READY` shortcut, which never enters Step 2 and so never reads that rule
 # counts must be MEASURED, so a missing one means skip the record. (An unset T0
 # would read as 0 in arithmetic and turn into a ~56-year run; a count DEFAULTED
 # to 0 because it was never measured would validate and read as Step 1's no-op
-# shortcut.) RISK is nullable by contract and is NEVER
+# shortcut.) RISK and SIZE_PREFLIGHT are nullable by contract and are NEVER
 # guarded; PARK_TYPE is guarded ONLY in the `parked` pairing below — see the
 # paragraph above.
 # Hoist both patterns: an UNQUOTED `(a|b)` / `{n,m}` on a `=~` right-hand side is
@@ -872,12 +964,14 @@ else
       jq -n --arg rounds "$ROUNDS" --arg raised "$RAISED" --arg resolved "$RESOLVED" \
             --arg outcome "$STATE_OUTCOME" \
             --arg park_type "${PARK_TYPE:-}" --arg risk "${RISK:-}" \
+            --arg size "${SIZE_PREFLIGHT:-}" \
         '{rounds: ($rounds|tonumber),
           objections_raised: ($raised|tonumber),
           objections_resolved: ($resolved|tonumber),
           outcome: $outcome,
           park_type: (if $park_type == "" then null else $park_type end),
-          risk_classification: (if $risk == "" then null else $risk end)}' > "$STATE" \
+          risk_classification: (if $risk == "" then null else $risk end)}
+         + (if $size == "" then {} else {size_preflight: ($size | fromjson)} end)' > "$STATE" \
         && OUTCOME="$("$BUILDER" --state "$STATE" --print-outcome)" \
         && "$BUILDER" --state "$STATE" > "$PAYLOAD" \
         && "<skill-base-dir>/../../scripts/telemetry/emit-telemetry.zsh" \
@@ -926,6 +1020,16 @@ fi
   when Step 1 produced no verdict. Step 4's re-gate `risk` is never substituted:
   the metric asks how risky the story was *when the gate sent it back*. All five
   bespoke fields live in the `payload`.
+- `size_preflight` (#2589) is the one **optional** payload key, from
+  `SIZE_PREFLIGHT`: a JSON object, `{"verdict", "triggers", "children_filed"}`.
+  Set it from the **last** `story-readiness` verdict's `size` object — Step 1's,
+  then Step 4's re-gate when one ran — with `children_filed: 0`, and set
+  `children_filed` to the number of children a split filed (Step 2's split, from
+  `file-split-children.zsh`'s `filed` list). Re-state it as a single-quoted
+  literal above the guard like the other run variables. It is never guarded: an
+  empty `SIZE_PREFLIGHT` leaves the key out (a verdict with no `size` object,
+  such as one from before #2589), and a malformed one makes the builder refuse
+  the state, which the `||` advisory reports.
 - `repo_type` is deliberately **`null`** on this stream: refine-issue never
   detects a stack, and a guessed one would be worse than an absent one.
 - Emit **exactly one record per run**, where a "run" is **one single-issue
@@ -960,6 +1064,11 @@ fi
   staleness check will disagree with what you wrote.
 - **No `dependencies` in the block** — dependencies are GitHub-native `blockedBy`
   (#583), never in `story-spec`.
+- **Size every draft; never write back one that stops (#2589).** Step 2 runs
+  `scripts/size-check.zsh` on the draft's declared inventory before approval. A
+  stop becomes a proposed split, filed only on the human's choice and only by
+  `scripts/file-split-children.zsh` — never with raw `gh issue create` calls,
+  and never re-run after a partial result.
 - **Spin out test cases with the script, not by hand (#671).** Step 2.5 runs
   `scripts/test-case-spinout.zsh` to create/reconcile/close the linked
   `test-case` issues; splice its reconciled `test_cases[]` (with issue links)

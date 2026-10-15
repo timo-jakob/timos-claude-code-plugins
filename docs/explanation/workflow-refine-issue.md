@@ -39,7 +39,14 @@ re-gate](diagrams/refine-issue.svg)
    yet — a decision belongs to someone else, the story should be split, or it should wait — you take a **typed parked
    exit**: `needs-decision`, `split-recommended` or `deferred`. The skill posts a resume comment with the conversation
    saved inside it, keeps the label, and writes nothing else. Running the skill again resumes from that comment.
-7. **Approve the exact rewrite.** The skill shows you the final prose, the story spec and every answer that was taken
+7. **Size the draft.** Before you see the final rewrite, the skill lists every file the drafted story would touch and
+   runs it through the same size check resolve-issue applies just before it builds. A story too big to build as one
+   change is never written back. The refiner proposes a split into child stories instead, each with its own file
+   list, and you choose: file the children, revise the draft, or park the story as `split-recommended`. Filing checks
+   every child first and writes nothing if one is still too big. It then files them as sub-issues of the original,
+   each labelled `needs-refinement`, turns the original into an epic and posts a comment listing them. The readiness
+   gate runs the same check, so a story too big to build is sent back for refinement before anyone starts on it.
+8. **Approve the exact rewrite.** The skill shows you the final prose, the story spec and every answer that was taken
    automatically, any of which you can overturn. Only your explicit approval of that exact text moves the run on.
    Auto-accept never approves a rewrite.
 
@@ -65,7 +72,8 @@ and you curate them rather than write them from scratch.
    NEEDS_REFINEMENT it keeps the label and offers another loop, or stopping here as `deferred`.
 5. **Step 6 — the before/after comment.** One durable comment records the starting objections, a before/after of the
    prose, the re-gate verdict and the label state, and every answer that was taken automatically with its confidence.
-6. **Step 7 — telemetry.** Exactly one record per run, with the outcome `refined-ready` or `parked`.
+6. **Step 7 — telemetry.** Exactly one record per run, with the outcome `refined-ready` or `parked`. It also records
+   the readiness gate's size verdict and how many children a split filed.
 
 ## What the story spec carries {#refine-what-the-story-spec-carries}
 

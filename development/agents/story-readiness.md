@@ -115,6 +115,45 @@ gh issue view <N> --repo <owner/name> --json number,title,body,state,labels,url
   **check 5** below applies. When the story-spec block already declares
   `interface_surfaces`, reconcile it: a block claiming `rest` for prose that
   describes a CLI-only change is a check-4 contradiction, exactly as today.
+- **Size the story's declared inventory** (#2589). A story too big to build as
+  one change should be split here, while a human is still present, not found at
+  implementation. Build the **declared inventory** — a judgement, as at
+  resolve-issue §2: every repo-relative path the story will touch, derived from
+  the prose and, when present, the story-spec block's `scope_boundaries.in`,
+  naming concrete paths for named areas (a story's own *declared inventory*
+  list, when it has one, is the starting point). Write it as
+  `{"files": [ … ]}` to a temporary file outside the repository, and an empty
+  `files` array when you cannot name a single concrete path. Then run
+  `size-check.zsh` from the repository root, which applies the size pre-flight's
+  own thresholds — you never judge size yourself, and you never restate a
+  threshold:
+
+  ```bash
+  zsh <resolved path> --file <inventory.json>
+  ```
+
+  It ships in this plugin, not in the target repo, so resolve its path with one
+  `Bash` call that takes the highest installed version:
+
+  ```bash
+  zsh -c 'print -r -- ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/cache/*/development/*/skills/refine-issue/scripts/size-check.zsh(N.nOn[1])'
+  ```
+
+  An empty result means no installed copy; when the target repo is this plugin's
+  own repo, its working-tree copy at
+  `development/skills/refine-issue/scripts/size-check.zsh` serves instead. Branch
+  on its exit:
+
+  - **`0`** — `pass`, or `skipped` (an empty inventory). Size does not fail the
+    story.
+  - **`1`** — `stop`. Check 2 fails (below). Its verdict names the triggers
+    (`files`, `plugin`, `bootstrap-straddle`) and the counts.
+  - **`2`** — your own malformed call: fix it and re-run once.
+  - **`3`**, a second `2`, or no copy anywhere — the inventory could not be
+    judged. Record `size.verdict` as `skipped`: an unjudged inventory never
+    stops a story, and resolve-issue §2's pre-flight remains the backstop.
+
+  Report the outcome as the verdict's top-level `size` object (Output, below).
 
 ## Division of labour — you judge specification, 0a enforces sequencing
 
@@ -161,7 +200,16 @@ that would unblock it.
    with no measurable outcome fails.
 2. **Scope is bounded.** The change is a single coherent unit of work with
    identifiable files/areas — not an open-ended programme ("rewrite the
-   pipeline") that should have been an epic.
+   pipeline") that should have been an epic. **A declared inventory that
+   `size-check.zsh` stops also fails this check** (#2589): set `scope_bounded:
+   false` and ask one refinement question that names the trigger and its count
+   (for example, the files trigger with the declared file count, or the two
+   plugins the story straddles) and the seams along which a split could follow
+   — by plugin, by script and its tests, or by template and its skill. A
+   `skipped` size never fails this check. This stop has no override: a story
+   too big as declared is narrowed or split at refinement, and resolve-issue
+   §2(a)'s *build it as one change* answers only a plan that outgrows a
+   declared inventory this gate passed.
 3. **Dependencies are declared natively, and the graph is acyclic.** This check
    is about **declaration, never about closure** (#800). Set
    `dependencies_resolved: false` in exactly two cases, and no others:
@@ -284,6 +332,7 @@ Emit exactly one fenced `json` block and no other trailing prose. Shape:
     "Give a concrete use_case: which actor, what goal, and representative request data (not foo/bar)?"
   ],
   "summary": "Scope and acceptance are fine, but a REST story with no outside-in test cases fails check 5.",
+  "size": { "verdict": "pass", "triggers": [], "files": 6, "plugins": 1 },
   "story_spec": null,
   "advisories": []
 }
@@ -308,6 +357,13 @@ Rules for the payload:
 - `risk` is always present (`low` | `normal` | `elevated`), independent of the
   verdict.
 - `summary` is one sentence a human can read at a glance.
+- `size` (#2589) is always present, and **additive**: `checks` keeps exactly
+  its five keys, and a size stop shows there only as `scope_bounded: false`.
+  It holds `verdict` (`pass` | `stop` | `skipped`), `triggers` (the
+  size check's trigger names, `[]` unless `stop`), and the `files` and `plugins`
+  counts the size check reported (`0` and `0` when `skipped`). Copy them from
+  the size check's output; never compute them yourself.
+  `/development:refine-issue` reads this object into its telemetry.
 - `story_spec` is the **proposed** `story-spec/v1` block (#574) — the machine
   summary of the story as you understand it, per the ARCHITECTURE.md *Story-spec
   contract* (`schema`, `acceptance_criteria`, `scope_boundaries`,

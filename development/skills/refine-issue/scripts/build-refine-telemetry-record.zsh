@@ -31,7 +31,18 @@
 #     "objections_raised": N, "objections_resolved": N,
 #     "outcome": "refined-ready" | "parked",
 #     "park_type": "needs-decision"|"split-recommended"|"deferred"|null,
-#     "risk_classification": "low"|"normal"|"elevated"|null }
+#     "risk_classification": "low"|"normal"|"elevated"|null,
+#     "size_preflight": { "verdict": "pass"|"stop"|"skipped",
+#                         "triggers": ["files"|"plugin"|"bootstrap-straddle", …],
+#                         "children_filed": N } }      # OPTIONAL (#2589)
+#
+# `size_preflight` is the one optional key: refine-issue copies it from the last
+# readiness verdict's `size` object, with `children_filed` the number of child
+# stories an accepted split filed (0 when none). It is carried into the payload
+# only when the state has it — absent or `null` leaves the payload at its five
+# keys — and a present one that is not that shape is refused (exit 1) rather
+# than passed through, since the payload is OPEN and the validator would not
+# catch it.
 #
 # Usage:
 #   build-refine-telemetry-record.zsh --state FILE [--print-outcome]
@@ -150,6 +161,28 @@ case "$outcome" in
   *)  print -u2 -- "build-refine-telemetry-record: unknown outcome: $outcome"; exit 1 ;;
 esac
 
+# The optional size_preflight object (#2589): absent or null is fine; anything
+# present must be exactly the documented shape. Checked before --print-outcome,
+# like the outcome itself, so both modes refuse the same states.
+local size_ok
+size_ok="$(print -r -- "$state" | jq -r '
+  (.size_preflight // null) as $p
+  | if $p == null then "ok"
+    elif ($p | type) != "object" then "size_preflight must be an object"
+    elif ($p | keys) != ["children_filed", "triggers", "verdict"]
+      then "size_preflight must carry exactly verdict, triggers and children_filed"
+    elif ($p.verdict | IN("pass", "stop", "skipped") | not)
+      then "size_preflight.verdict must be pass, stop or skipped"
+    elif ($p.triggers | type) != "array"
+         or any($p.triggers[]; IN("files", "plugin", "bootstrap-straddle") | not)
+      then "size_preflight.triggers must list files, plugin or bootstrap-straddle"
+    elif ($p.children_filed | type) != "number" or $p.children_filed < 0
+         or ($p.children_filed | floor) != $p.children_filed
+      then "size_preflight.children_filed must be a non-negative integer"
+    else "ok" end')" || {
+  print -u2 -- "build-refine-telemetry-record: failed to read state.size_preflight"; exit 1 }
+[[ "$size_ok" == ok ]] || { print -u2 -- "build-refine-telemetry-record: $size_ok"; exit 1 }
+
 if [[ $print_outcome -eq 1 ]]; then
   print -r -- "$envelope_outcome"
   exit 0
@@ -165,4 +198,7 @@ print -r -- "$state" | jq -c '
       objections_resolved: (($s.objections_resolved // 0) | num),
       park_type: ($s.park_type // null),
       risk_classification: ($s.risk_classification // null)
-    }' || { print -u2 -- "build-refine-telemetry-record: failed to build payload"; exit 1 }
+    }
+  + (if ($s.size_preflight // null) == null then {}
+     else {size_preflight: ($s.size_preflight | {verdict, triggers, children_filed})} end)' \
+  || { print -u2 -- "build-refine-telemetry-record: failed to build payload"; exit 1 }

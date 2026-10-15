@@ -45,6 +45,46 @@ setup() {
   }
   WORD="${words[$MAX]}"
   SITES=("$SKILL" "$ARCH" "$SCRIPT")
+  # The sites that run the size check while a human is present (#2589). They
+  # name the pre-flight but must restate NO threshold: each defers to the
+  # script, so a retune never has to find them.
+  NO_RESTATE=(
+    "$REPO_ROOT/development/agents/story-readiness.md"
+    "$REPO_ROOT/development/skills/refine-issue/SKILL.md"
+    "$REPO_ROOT/development/skills/refine-issue/scripts/size-check.zsh"
+    "$REPO_ROOT/development/skills/refine-issue/scripts/file-split-children.zsh"
+  )
+}
+
+# Succeeds when site $1 names the size check and restates no threshold.
+restates_no_threshold() {
+  [ -r "$1" ] || { printf "site %s is missing or unreadable\n" "$1" >&2; return 1; }
+  # non-vacuity: the site really is a size-check site
+  grep -q 'size-check' "$1" || { printf '%s does not name size-check\n' "$1" >&2; return 1; }
+  if grep -nE "more than ([0-9]+|[a-z-]+) files|MAX_FILES|(^|[^0-9])${MAX} files|${WORD} files" "$1" >&2; then
+    printf '%s restates the threshold\n' "$1" >&2
+    return 1
+  fi
+}
+
+@test "#2589 the human-present sites name the size check and restate no threshold" {
+  local f
+  for f in "${NO_RESTATE[@]}"; do
+    restates_no_threshold "$f"
+  done
+}
+
+@test "#2589 non-vacuity: a threshold planted in a human-present site reds the check" {
+  local copy="$BATS_TEST_TMPDIR/story-readiness.md" f
+  for f in "more than ${MAX} files" "more than ${WORD} files" "MAX_FILES=${MAX}"; do
+    cp "${NO_RESTATE[0]}" "$copy"
+    printf 'A story with %s stops.\n' "$f" >> "$copy"
+    run restates_no_threshold "$copy"
+    [ "$status" -ne 0 ] || { echo "planted '$f' went unnoticed"; return 1; }
+  done
+  # and the unmutated copy passes, so the reds above are the plant's doing
+  cp "${NO_RESTATE[0]}" "$copy"
+  restates_no_threshold "$copy"
 }
 
 @test "the threshold is read out of the script" {

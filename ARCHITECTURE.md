@@ -6513,7 +6513,15 @@ skill's prose. Nothing is lost: the payload keeps `rounds`,
 envelope enum is the 4-value cross-pipeline one. That set is enforced by the
 skill's Step 7 guard (a park outside it skips the record), **not** by the
 payload builder, which passes `payload` through unpoliced by design — and
-`risk_classification`. The emission is **never fatal** — the chain is
+`risk_classification`. One optional key rides beside those five (#2589):
+`size_preflight`, `{verdict, triggers, children_filed}` — `verdict` and
+`triggers` copied from the last `story-readiness` verdict's `size` object
+(`pass` | `stop` | `skipped`), and `children_filed` the number of child stories
+a refinement-time split filed, so the size-stop rate at readiness time can be
+set beside the rate at resolve-issue §2. The builder carries it only when the
+state has it and refuses one of any other shape; a split filed by
+`file-split-children.zsh` is recorded as `parked` / `split-recommended`.
+resolve-issue's own telemetry builders are unchanged. The emission is **never fatal** — the chain is
 wrapped as `{ … } || echo <advisory>`, so a failure is said once in-session and
 never changes the run's outcome (the review loop's `|| true` with a visible
 note) — and one record is emitted per run at whichever ending it reached
