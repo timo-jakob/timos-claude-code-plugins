@@ -510,7 +510,8 @@ Emit exactly one fenced `json` block and no other prose. Shape:
   "resolved_objections": [
     { "objection": "The acceptance criterion 'fast' has no measurable target.", "resolved": false, "note": "still awaiting the p95 number" }
   ],
-  "expected_docs_pages": ["docs/how-to/use-the-rest-api.md"]
+  "expected_docs_pages": ["docs/how-to/use-the-rest-api.md"],
+  "proposed_split": null
 }
 ```
 
@@ -627,6 +628,11 @@ Rules for the payload:
   refactor, library-internal) and whenever `proposed_story_spec` is still
   `null` — this field is **visibility, not enforcement**, and never blocks
   convergence.
+- **`proposed_split`** (#2589) — `null`, unless an objection says the draft's
+  declared inventory stops the size check. Then it is the split you propose:
+  `[{ "title", "body", "files" }, …]`, two or more child stories, each `body` a
+  bounded story's prose and each `files` that child's own declared inventory —
+  every repo-relative path the child will touch, never empty.
 - **Never write to GitHub, never fabricate evidence.** If the repo has no
   OpenAPI/tests/persona to mine, say so in a recommendation and draft from the
   prose alone — a grounded "I couldn't find X" beats an invented test case.

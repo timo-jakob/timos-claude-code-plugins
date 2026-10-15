@@ -909,3 +909,74 @@ skill_step0() {
   assert_eq "$(echo "$output" | jq -c 'keys')" "$PAYLOAD_KEYS" "payload keys"
   assert_eq "$(find "$BATS_TEST_TMPDIR/iso" -mindepth 1 | wc -l | tr -d ' ')" 0 "files created by the builder"
 }
+
+# --- the optional size_preflight object (#2589) ------------------------------
+
+SPLIT_PARKED='{"rounds":2,"objections_raised":1,"objections_resolved":0,"outcome":"parked","park_type":"split-recommended","risk_classification":"normal","size_preflight":{"verdict":"stop","triggers":["files","bootstrap-straddle"],"children_filed":3}}'
+
+@test "#2589 a present size_preflight rides into the payload as a sixth key" {
+  put "$SPLIT_PARKED"
+  build_split --state "$ST"
+  [ "$status" -eq 0 ]
+  [ -z "$stderr" ]
+  assert_eq "$(echo "$output" | jq -c 'keys')" \
+    '["objections_raised","objections_resolved","park_type","risk_classification","rounds","size_preflight"]' "payload keys"
+  assert_eq "$(echo "$output" | jq -c '.size_preflight')" \
+    '{"verdict":"stop","triggers":["files","bootstrap-straddle"],"children_filed":3}' "size_preflight"
+  assert_eq "$(echo "$output" | jq -r '.park_type')" "split-recommended" "park_type"
+}
+
+@test "#2589 an absent or null size_preflight leaves the payload at its five keys" {
+  put "$READY"
+  build_split --state "$ST"
+  [ "$status" -eq 0 ]
+  assert_eq "$(echo "$output" | jq -c 'keys')" "$PAYLOAD_KEYS" "payload keys (absent)"
+  put "$(printf '%s' "$READY" | jq -c '. + {size_preflight: null}')"
+  build_split --state "$ST"
+  [ "$status" -eq 0 ]
+  assert_eq "$(echo "$output" | jq -c 'keys')" "$PAYLOAD_KEYS" "payload keys (null)"
+}
+
+@test "#2589 a skipped verdict with no triggers is accepted" {
+  put "$(printf '%s' "$READY" | jq -c '. + {size_preflight: {verdict: "skipped", triggers: [], children_filed: 0}}')"
+  build_split --state "$ST"
+  [ "$status" -eq 0 ]
+  assert_eq "$(echo "$output" | jq -r '.size_preflight.verdict')" "skipped" "verdict"
+}
+
+@test "#2589 a malformed size_preflight is refused with exit 1 and nothing on stdout" {
+  local bad
+  for bad in '"stop"' \
+             '{"verdict":"overridden","triggers":[],"children_filed":0}' \
+             '{"verdict":"stop","triggers":["size"],"children_filed":0}' \
+             '{"verdict":"stop","triggers":"files","children_filed":0}' \
+             '{"verdict":"stop","triggers":["files"],"children_filed":-1}' \
+             '{"verdict":"stop","triggers":["files"],"children_filed":1.5}' \
+             '{"verdict":"stop","triggers":["files"],"children_filed":"3"}' \
+             '{"verdict":"stop","triggers":["files"]}' \
+             '{"verdict":"stop","triggers":["files"],"children_filed":0,"extra":1}'; do
+    put "$(printf '%s' "$READY" | jq -c --argjson p "$bad" '. + {size_preflight: $p}')"
+    build_split --state "$ST"
+    [ "$status" -eq 1 ] || { echo "accepted size_preflight $bad"; return 1; }
+    [ -z "$output" ] || { echo "stdout on refused size_preflight $bad: $output"; return 1; }
+    assert_contains "$stderr" "size_preflight"
+  done
+}
+
+@test "#2589 --print-outcome refuses a malformed size_preflight too" {
+  put "$(printf '%s' "$READY" | jq -c '. + {size_preflight: {verdict: "nope", triggers: [], children_filed: 0}}')"
+  build_split --state "$ST" --print-outcome
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+}
+
+@test "#2589 a split park emits a record that validates and carries size_preflight unmodified" {
+  run emit_run "$SPLIT_PARKED" 30
+  [ "$status" -eq 0 ]
+  assert_eq "$(echo "$output" | jq -r '.outcome')" "parked" "outcome"
+  assert_eq "$(echo "$output" | jq -c '.payload.size_preflight')" \
+    '{"verdict":"stop","triggers":["files","bootstrap-straddle"],"children_filed":3}' "size_preflight"
+  printf '%s\n' "$output" > "$BATS_TEST_TMPDIR/one.jsonl"
+  run zsh "$V" "$BATS_TEST_TMPDIR/one.jsonl" --require-records
+  [ "$status" -eq 0 ]
+}

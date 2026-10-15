@@ -68,7 +68,7 @@ builder_payload() {
       [ -n "$expr" ] || { echo "the promotion step's payload expression was not found" >&2; return 1; }
       out="$(jq -nc --argjson offered 2 --argjson promoted 1 "$expr")" ;;
     refine-issue)
-      printf '%s' '{"rounds":3,"objections_raised":4,"objections_resolved":4,"outcome":"refined-ready","risk_classification":"low"}' > "$W/rf.json"
+      printf '%s' '{"rounds":3,"objections_raised":4,"objections_resolved":4,"outcome":"refined-ready","risk_classification":"low","size_preflight":{"verdict":"pass","triggers":[],"children_filed":0}}' > "$W/rf.json"
       out="$(zsh "$REPO_ROOT/development/skills/refine-issue/scripts/build-refine-telemetry-record.zsh" --state "$W/rf.json")" ;;
     "resolve-issue, story mode")
       printf '%s' '{"outcome":"pr-opened","dependency_precheck":"PROCEED","gate_verdict":"READY","risk":"elevated","pr":413,"story_spec_present":true,"review_loop_run_ids":["review-loop-1752403000-8f3a"],"fallbacks_fired":["user_docs"]}' > "$W/st.json"

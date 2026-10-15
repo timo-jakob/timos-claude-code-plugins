@@ -583,9 +583,8 @@ failure costs the record, never the run. **The stop branch has three terminals**
 - **(b) The human accepts the split.** Record it (no `--override`), then park with
   the park block: the `needs-split` label and the `SPLIT` comment, the branch **un-pushed**, **no PR**,
   emit the run's record (§7) and stop. Point the human at
-  `/development:refine-issue`, whose `split-recommended` exit records
-  `candidate_children` and **parks — it files nothing**; filing the children
-  stays the human's job.
+  `/development:refine-issue`, which, once the human accepts a split there,
+  **files the children as native sub-issues** of this story (#2589).
 - **(c) No human present** (autonomous — an E3 child included). Never prompt:
   take (b) without the question.
 

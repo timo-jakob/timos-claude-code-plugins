@@ -169,6 +169,7 @@ Normative: `ARCHITECTURE.md`, *The suggestion-promotion enrichment*.
 | `objections_resolved` | integer | how many of them were resolved |
 | `park_type` | string or `null` | `needs-decision`, `split-recommended` or `deferred` on a parked run; `null` on a refined-ready one |
 | `risk_classification` | string or `null` | the risk classification the refined story carries |
+| `size_preflight` | object or absent | `verdict` and `triggers` of the last readiness size check, and `children_filed` by a refinement-time split |
 
 Normative: `ARCHITECTURE.md`, *Refine-issue telemetry*.
 
