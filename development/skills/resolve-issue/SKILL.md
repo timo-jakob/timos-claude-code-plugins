@@ -586,7 +586,8 @@ outcome="$("$B" --state <scratch>/size-verdict.json [--override human] --print-o
 started (#1227). Telemetry is never fatal: a
 failure costs the record, never the run. **The stop branch has three terminals**:
 
-- **(a) The human overrides.** Interactive only: one `AskUserQuestion` naming
+- **(a) The human overrides.** Interactive only (mode `attended`, §0a's
+  `resolve-session.zsh`): one `AskUserQuestion` naming
   the triggers and counts (and any earlier `OVERRIDDEN` comment), answered *build it
   as one change*. Record it with `--override human`, run the clear block, and continue
   with the rest of Step 2. **Only that explicit answer is an override** — silence, a
@@ -597,7 +598,8 @@ failure costs the record, never the run. **The stop branch has three terminals**
   emit the run's record (§7) and stop. Point the human at
   `/development:refine-issue`, which, once the human accepts a split there,
   **files the children as native sub-issues** of this story (#2589).
-- **(c) No human present** (autonomous — an E3 child included). Never prompt:
+- **(c) No human present** (autonomous: mode `unattended`, §0a's
+  `resolve-session.zsh` — an E3 child included). Never prompt:
   take (b) without the question.
 
 **Any other answer** is no override: if it narrows the plan, record this stop and
@@ -801,7 +803,8 @@ a defaulted `mktemp` dir is unrecoverable after the run exits.
 The loop consolidates each round (`consolidate-findings.zsh`, §#561) and exits
 with a status JSON + code:
 
-- **`CONVERGED`** (exit 0) → on an **interactive** run with at least one waived
+- **`CONVERGED`** (exit 0) → on an **interactive** run (mode `attended`, §0a's
+  `resolve-session.zsh`) with at least one waived
   suggestion, first offer the **suggestion promotion** phase below (#994) — its
   gate also reads the `enable_suggestions` setting, and skips the phase when off —
   unless this loop *is* the promotion sub-loop, which never re-offers it (the
@@ -861,7 +864,8 @@ with a status JSON + code:
 - **`ESCALATE_CONFLICT` / `ESCALATE_NO_CONVERGENCE` / `ESCALATE_AMBIGUOUS`
   (10–12) / `BUDGET_EXHAUSTED` (13)** → do **not** commit or open a PR — go to
   *Escalation* below. Opening a PR here would spend CI on unconverged work.
-  On an interactive run, `BUDGET_EXHAUSTED` and `ESCALATE_NO_CONVERGENCE` first
+  On an interactive run (mode `attended`, §0a's `resolve-session.zsh`),
+  `BUDGET_EXHAUSTED` and `ESCALATE_NO_CONVERGENCE` first
   enter the **interactive extension** (offer more rounds / guidance) before any
   comment; the others, and all autonomous runs, go straight to the typed comment.
   Whichever ending the run then reaches, emit the run's record (§7) before

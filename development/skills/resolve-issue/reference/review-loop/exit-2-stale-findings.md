@@ -4,6 +4,10 @@
      from the item's own line, so its indentation is the item's. -->
 <!-- markdownlint-disable MD007 MD032 -->
 
+Whether a human is present is §0a's determination, read from
+`scripts/resolve-session.zsh`: `attended` takes the interactive arm, `unattended`
+takes the autonomous arm and never prompts.
+
 <!-- moved: round-protocol-recover -->
    **Recover by cause, then re-invoke** — the round is not lost. One arm below
    (the missing-confirmation-count one) is a **pre-invocation** check rather than a

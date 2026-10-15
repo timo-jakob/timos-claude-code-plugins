@@ -4,6 +4,10 @@
      item 5, so its numbering cannot restart at 1 here. -->
 <!-- markdownlint-disable MD029 -->
 
+Whether a human is present is §0a's determination, read from
+`scripts/resolve-session.zsh`: `attended` takes the interactive arm, `unattended`
+takes the autonomous arm and never prompts.
+
 <!-- moved: interactive-extension-steps-5-7 -->
 5. **If they granted rounds** (with or without guidance): **first apply one fix
    pass, then resume.** The escalated round broke *before* its own fix pass ran

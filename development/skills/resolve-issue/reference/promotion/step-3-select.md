@@ -4,6 +4,10 @@
      its numbering cannot restart at 1 here. -->
 <!-- markdownlint-disable MD029 -->
 
+Whether a human is present is §0a's determination, read from
+`scripts/resolve-session.zsh`: `attended` takes the interactive arm, `unattended`
+takes the autonomous arm and never prompts.
+
 <!-- moved: suggestion-promotion-step-3 -->
 3. **Multi-select** which to promote (0..N) with `AskUserQuestion`
    (`multiSelect: true`), at most **3 suggestions per question** so the fourth

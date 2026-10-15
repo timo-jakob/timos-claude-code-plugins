@@ -8,6 +8,10 @@
 > `start` before its step 0a, which the frozen text below does not say. An
 > epic-kind rung is an epic run of its own (#1227).
 
+Whether a human is present is §0a's determination, read from
+`scripts/resolve-session.zsh`: `attended` takes the interactive arm, `unattended`
+takes the autonomous arm and never prompts.
+
 <!-- moved: interactive-remediation -->
 Applies **only** with a human present, and only to a **shape (i)**
 `REJECT_BLOCKED` — one that actually enumerated an **OPEN** blocker:
