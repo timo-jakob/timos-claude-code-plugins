@@ -105,6 +105,14 @@ alongside the summary so the human still sees the story's full cost:
    side-channel).
 <!-- /moved: interactive-extension -->
 
+**The convergence verdict decides the recommendation (#2576).** Step 1's summary
+ends with a **Convergence verdict** line, the same verdict the unattended
+automatic grant reads (`build-escalation.zsh --format verdict`). In step 2, mark
+**Grant +3 rounds** on `BUDGET_EXHAUSTED` as recommended only when that line
+reads *passes*. When it fails, recommend no bare-rounds option, and name the
+failing conditions the line lists. A human grant is recorded with
+`record-grant.zsh --source human`, the default.
+
 **Read on, in this order.** Steps 5–7 continue in
 `reference/interactive/extension-grant.md`, and the amendments to step 5 in
 `reference/interactive/extension-ceiling.md`.

@@ -413,3 +413,71 @@ sidecar_slack() {
   [ "$(cat "$W/.max-rounds")" = "8" ]
   contains "$stderr" "could not read MAX_ROUNDS_SIDECAR_SLACK"
 }
+
+# --- the grant's source, its ledger and the automatic cap (#2576) -------------
+
+# grant <add> <source> — one grant, with the escalated status at the ceiling now
+# in force (the loop's effective_max_rounds), as each resume would leave it
+grant() {
+  local eff="${3:-}"
+  if [ -n "$eff" ]; then
+    printf '{"status":"BUDGET_EXHAUSTED","rounds":%s,"max_rounds":5,"effective_max_rounds":%s,"closing_sweep_granted":false}\n' "$eff" "$eff" > "$ST"
+  fi
+  run --separate-stderr zsh "$S" --work-dir "$W" --status "$ST" --add "$1" --source "$2"
+}
+
+@test "#2576 a grant defaults to source human and is appended to the ledger" {
+  seed_status 5 false
+  run zsh "$S" --work-dir "$W" --status "$ST" --add 3
+  [ "$status" -eq 0 ]
+  [ "$(jq -c . "$W/grants.jsonl")" = '{"source":"human","add":3,"ceiling":8,"original_max_rounds":5}' ]
+}
+
+@test "#2576 --max-rounds 5: automatic ceilings are 8, then 10 (cut to the cap), then no grant" {
+  grant 3 automatic 5
+  [ "$status" -eq 0 ]
+  [ "$output" = "8" ]
+  grant 3 automatic 8
+  [ "$status" -eq 0 ]
+  [ "$output" = "10" ]
+  contains "$stderr" "cutting the automatic grant to the remaining headroom (would have been 11, cap 10)"
+  [ "$(cat "$W/.max-rounds")" = "10" ]
+  grant 3 automatic 10
+  [ "$status" -eq 3 ]
+  [ -z "$output" ]
+  contains "$stderr" "no automatic grant"
+  # nothing written on the refused grant: two ledger lines, ceiling unchanged
+  [ "$(grep -c '' "$W/grants.jsonl")" -eq 2 ]
+  [ "$(cat "$W/.max-rounds")" = "10" ]
+  [ "$(jq -sc '[.[] | [.source, .add]]' "$W/grants.jsonl")" = '[["automatic",3],["automatic",2]]' ]
+}
+
+@test "#2576 the cap is 2 x the ORIGINAL max_rounds, read from the ledger's first line" {
+  # a later status JSON whose max_rounds was raised by the caller must not move
+  # the cap: the first grant recorded the original
+  grant 3 automatic 5
+  [ "$status" -eq 0 ]
+  printf '{"status":"BUDGET_EXHAUSTED","rounds":8,"max_rounds":8,"effective_max_rounds":8,"closing_sweep_granted":false}\n' > "$ST"
+  run --separate-stderr zsh "$S" --work-dir "$W" --status "$ST" --add 3 --source automatic
+  [ "$status" -eq 0 ]
+  [ "$output" = "10" ]
+}
+
+@test "#2576 human grants are not capped by the automatic cap" {
+  grant 3 human 5
+  grant 3 human 8
+  grant 3 human 11
+  [ "$status" -eq 0 ]
+  [ "$output" = "14" ]
+  [ "$(jq -sc '[.[] | .source]' "$W/grants.jsonl")" = '["human","human","human"]' ]
+}
+
+@test "#2576 an unknown --source is a usage error and writes nothing" {
+  seed_status 5 false
+  run --separate-stderr zsh "$S" --work-dir "$W" --status "$ST" --add 3 --source robot
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  contains "$stderr" "--source must be human or automatic"
+  [ ! -e "$W/.max-rounds" ]
+  [ ! -e "$W/grants.jsonl" ]
+}

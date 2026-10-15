@@ -21,7 +21,7 @@
 # produced this bug. One writer, one job, its own tests.
 #
 # Usage:
-#   record-grant.zsh --work-dir DIR --status FILE --add N
+#   record-grant.zsh --work-dir DIR --status FILE --add N [--source human|automatic]
 #     --work-dir  the loop's work-dir — the granted ceiling is written to
 #                 <work-dir>/.max-rounds
 #     --status    the loop's status JSON, read for the BASE ceiling
@@ -30,6 +30,21 @@
 #                 grants counter is stateless prose, so two invocations at the
 #                 same count are indistinguishable and no delta can be inferred
 #                 from it. This script never reads that counter.
+#     --source    who granted it (#2576): `human` (the default — the attended
+#                 interactive extension) or `automatic` (the unattended grant a
+#                 passing convergence verdict buys, build-escalation.zsh
+#                 --format verdict). Every grant is appended to the work-dir's
+#                 grant ledger, <work-dir>/grants.jsonl, one JSON line
+#                 {source, add, ceiling, original_max_rounds} — `add` is the
+#                 rise actually written, after any cut or clamp — which the
+#                 loop counts by source into its status JSON and telemetry.
+#
+# The automatic cap (#2576): an AUTOMATIC grant never takes the ceiling past
+# 2 x the original --max-rounds — the `max_rounds` of the status JSON at the
+# run's first grant, carried in every ledger line as `original_max_rounds`. A
+# grant that would cross it is cut to the remaining headroom; with no headroom
+# nothing is written, nothing is printed on stdout, and the exit is 3. Human
+# grants keep today's rules.
 #
 # The BASE ceiling is the one ACTUALLY IN FORCE, floored by any grant this
 # work-dir already carries:
@@ -46,12 +61,13 @@
 # Prints the new ceiling — and nothing else — on stdout.
 #
 # Exit codes: 0 ok · 2 usage · 1 internal (unreadable status JSON, jq missing,
-#             a write that failed)
+#             a write that failed) · 3 an automatic grant with no headroom left
+#             under its cap (nothing written)
 
 emulate -L zsh
 setopt nounset pipefail
 
-local work_dir="" status_file="" add=""
+local work_dir="" status_file="" add="" source="human"
 # A DANGLING value flag (`--add` as the last word — the shape a caller produces
 # from an unquoted empty variable) must not reach `shift 2`: zsh refuses the
 # shift, returns 1 and leaves the positional parameters UNCHANGED, so with no
@@ -74,15 +90,16 @@ while [[ $# -gt 0 ]]; do
   --work-dir) _need_val "$1" $# "${2:-}"; work_dir="$2"; shift 2 ;;
   --status) _need_val "$1" $# "${2:-}"; status_file="$2"; shift 2 ;;
   --add) _need_val "$1" $# "${2:-}"; add="$2"; shift 2 ;;
+  --source) _need_val "$1" $# "${2:-}"; source="$2"; shift 2 ;;
   -h|--help)
-    print -r -- "usage: record-grant.zsh --work-dir DIR --status FILE --add N"
+    print -r -- "usage: record-grant.zsh --work-dir DIR --status FILE --add N [--source human|automatic]"
     exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
   *) print -u2 -- "unexpected argument: $1"; exit 2 ;;
   esac
 done
 
-local usage="usage: record-grant.zsh --work-dir DIR --status FILE --add N"
+local usage="usage: record-grant.zsh --work-dir DIR --status FILE --add N [--source human|automatic]"
 [[ -n "$work_dir" ]] || { print -u2 -- "record-grant: --work-dir is required
 $usage"; exit 2 }
 [[ -n "$status_file" ]] || { print -u2 -- "record-grant: --status is required
@@ -94,6 +111,8 @@ $usage"; exit 2 }
 # overflow, so bound the width too and normalise with 10# below.
 [[ "$add" == <-> ]] && [[ ${#add} -le 18 ]] && (( 10#$add >= 1 )) || {
   print -u2 -- "record-grant: --add must be a positive integer of at most 18 digits (got: $add)"; exit 2 }
+[[ "$source" == human || "$source" == automatic ]] || {
+  print -u2 -- "record-grant: --source must be human or automatic (got: $source)"; exit 2 }
 [[ -d "$work_dir" ]] || { print -u2 -- "record-grant: --work-dir is not a directory: $work_dir"; exit 2 }
 [[ -s "$status_file" ]] || { print -u2 -- "record-grant: status file missing or empty: $status_file"; exit 1 }
 
@@ -166,6 +185,30 @@ fi
 
 local new_max=$(( base + add ))
 
+# The run's ORIGINAL ceiling: the first ledger line's, else this status JSON's
+# max_rounds (this is the run's first grant). A ledger line that does not read
+# as a bounded integer is ignored, the fail-quiet direction the sidecar takes.
+local ledger="$work_dir/grants.jsonl" original=$base_max
+if [[ -s "$ledger" ]]; then
+  local first_orig=""
+  first_orig=$(head -n 1 -- "$ledger" | jq -r '.original_max_rounds // empty' 2>/dev/null)
+  if [[ "$first_orig" == <-> ]] && (( ${#first_orig} <= 18 )); then
+    original=$(( 10#$first_orig ))
+  fi
+fi
+
+if [[ "$source" == automatic ]]; then
+  local auto_cap=$(( 2 * original ))
+  if (( base >= auto_cap )); then
+    print -u2 -- "record-grant: no automatic grant — the ceiling in force ($base) is already at the automatic cap (2 x the original --max-rounds $original = $auto_cap)"
+    exit 3
+  fi
+  if (( new_max > auto_cap )); then
+    print -u2 -- "record-grant: cutting the automatic grant to the remaining headroom (would have been $new_max, cap $auto_cap)"
+    new_max=$auto_cap
+  fi
+fi
+
 # Never echo a ceiling the loop would not honour. The reader clamps anything
 # above `max_rounds + MAX_ROUNDS_SIDECAR_SLACK`, so a base inflated by a stale
 # or foreign sidecar would otherwise have this script report a number to the
@@ -213,5 +256,12 @@ print -r -- "$new_max" > "$tmp" || {
   print -u2 -- "record-grant: could not write $tmp"; rm -f -- "$tmp" 2>/dev/null; exit 1 }
 mv -- "$tmp" "$max_rounds_file" || {
   print -u2 -- "record-grant: could not install $max_rounds_file"; rm -f -- "$tmp" 2>/dev/null; exit 1 }
+
+# The ledger line comes after the ceiling is installed, so a recorded grant is
+# always one the loop can adopt. A ledger that cannot be appended to costs only
+# the source count in telemetry, never the grant: say so and carry on.
+jq -nc --arg src "$source" --argjson add "$(( new_max - base ))" --argjson ceil "$new_max" --argjson orig "$original" \
+  '{source:$src, add:$add, ceiling:$ceil, original_max_rounds:$orig}' >> "$ledger" 2>/dev/null || \
+  print -u2 -- "record-grant: could not append to $ledger — the grant is in force, but its source is not recorded"
 
 print -r -- "$new_max"

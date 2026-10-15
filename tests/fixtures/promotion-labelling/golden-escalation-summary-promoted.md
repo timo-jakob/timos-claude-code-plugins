@@ -24,3 +24,5 @@ The round budget (2) was spent with blockers still open.
 **Convergence assessment**
 
 Blocking findings by round: 4 → 4. Blockers are not falling, but the remaining ones are new rather than carried — one more round may still help; judge from the table.
+
+**Convergence verdict:** fails (trend) — more rounds alone are not recommended; give guidance, waive or stop.

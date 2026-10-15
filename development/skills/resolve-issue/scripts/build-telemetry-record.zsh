@@ -103,6 +103,10 @@ jq -c '
                    then $s.status else null end),
       rounds: ($s.rounds // 0),
       max_rounds: ($s.max_rounds // 0),
+      # round grants by source (#2576): `human` from the attended extension,
+      # `automatic` from a passing convergence verdict on an unattended run.
+      # An older status JSON with no `grants` key reads as none of either.
+      grants: {human: ($s.grants.human // 0), automatic: ($s.grants.automatic // 0)},
       # promotion sub-loop marker (#995). A promotion pass is a SECOND full
       # invocation for one story, so counting its record alongside the phase-1
       # one inflates the per-record convergence rate and adds a second

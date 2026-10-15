@@ -5144,7 +5144,7 @@ mode's non-terminal
 11 conflict; 12 no-convergence; 13 budget; 2 usage; 1 operational — e.g. a red
 gate after a fix, which emits status `ERROR`) alongside a machine-readable
 status JSON (`{status, rounds, max_rounds, effective_max_rounds,
-max_rounds_source, promotion_phase,
+max_rounds_source, grants, promotion_phase,
 closing_sweep_granted, possible_false_trip_auto_continues, carry_unconfirmed, repo_type,
 review_skill, topic_review_skills, escalation_reasons, residue_replaced_reasons, history,
 round_changelists, final_changelist, next_ref}`), where `next_ref` (#2055) is
@@ -5165,7 +5165,13 @@ actually in force) and `max_rounds_source` (`"flag"` or `"work-dir"`) are
 `<work-dir>/.max-rounds` **without** touching `max_rounds`, which keeps
 reporting the value the caller passed, exactly as it does under a granted
 closing sweep. On a run with no grant the two agree, so every existing
-`max_rounds` consumer reads what it always did — and
+`max_rounds` consumer reads what it always did — and `grants` (#2576) is an
+**always-present** `{human, automatic}` pair of counts, read from the
+`<work-dir>/grants.jsonl` ledger `record-grant.zsh` appends one line to per
+grant (`--source human`, the default, or `automatic`), cleared with the
+sidecar on a fresh run and `{0, 0}` on a run with no grant; an automatic grant
+never takes the ceiling past 2 × the run's original `--max-rounds`, and is cut
+to the remaining headroom or, with none, not made (exit 3) — and
 `possible_false_trip_auto_continues` (#1498) is an
 **always-present** integer — how many rounds the run took on the all-ambiguous
 auto-continue above, `0` on every run that never did, counting *continuations*
@@ -6278,6 +6284,8 @@ there now). The payload holds `status`, `escalation`
 later; so a `null` here means "not an escalation", **not** "succeeded", and the
 `escalation` breakdown's null bucket silently contains failed `ERROR` runs —
 read `outcome` when you want success/failure), `rounds`, `max_rounds`,
+`grants` (#2576: `{human, automatic}` counts copied from the status JSON, so
+automatic grants are told apart from human ones),
 `promotion_phase`, `possible_false_trip_auto_continues`, `findings_by_round`,
 `gate_by_round`, `step_wall_s_by_round`, `skipped_dimensions_by_round`,
 `convergence_assessment`, and `fixed`

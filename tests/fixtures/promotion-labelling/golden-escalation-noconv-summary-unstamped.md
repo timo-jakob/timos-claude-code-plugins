@@ -26,3 +26,5 @@ A blocker survived two consecutive review rounds unchanged — the fix passes ar
 **Convergence assessment**
 
 Blocking findings by round: 3 → 3. 3 blocker(s) carried across rounds unmoved by the fix pass — extending alone is unlikely to help; give direction, waive, or split.
+
+**Convergence verdict:** fails (trend, stuck) — more rounds alone are not recommended; give guidance, waive or stop.
