@@ -185,6 +185,8 @@ Normative: `ARCHITECTURE.md`, *Refine-issue telemetry*.
 | `review_loop_run_ids` | array of strings | the `run_id` of every review-loop record the run spawned |
 | `escalation_status` | string or `null` | the escalation exit that ended the run; `null` on every run that did not end escalated |
 | `fallbacks_fired` | array of strings | the same-PR steps that no-oped: drawn from `acceptance_tests`, `user_docs`, `c4_currency` |
+| `session_mode` | string or `null` | `attended` or `unattended`, the session mode §0a resolved; `null` when the run recorded none |
+| `session_mode_source` | string or `null` | `env` when `resolve_session` set the mode, `inferred` when the run's own inference did; `null` exactly when `session_mode` is |
 
 Normative: `ARCHITECTURE.md`, *Resolve-issue telemetry*.
 

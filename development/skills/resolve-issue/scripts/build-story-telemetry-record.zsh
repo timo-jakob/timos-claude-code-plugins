@@ -31,8 +31,11 @@
 #     "review_loop_run_ids": ["review-loop-…", …],
 #     "escalation_status": "ESCALATE_CONFLICT" | "ESCALATE_NO_CONVERGENCE"
 #                          | "ESCALATE_AMBIGUOUS" | "BUDGET_EXHAUSTED" | null,
-#     "fallbacks_fired": ["acceptance_tests" | "user_docs" | "c4_currency", …] }
-# Absent optional keys read as null / false / [].
+#     "fallbacks_fired": ["acceptance_tests" | "user_docs" | "c4_currency", …],
+#     "session_mode": "attended" | "unattended" | null,     (#2575: §0a's
+#     "session_mode_source": "env" | "inferred" | null }     resolve-session.zsh)
+# Absent optional keys read as null / false / []. The two session keys are a
+# pair: both null, or both set — one without the other is refused.
 #
 # A state whose facts CONTRADICT its outcome is rejected rather than emitted —
 # e.g. `pr-opened` with a NEEDS_REFINEMENT gate, `escalated` with no typed
@@ -164,6 +167,12 @@ problems=$(print -r -- "$state" | jq -r '
       ( if ((($s.fallbacks_fired | dflt([])) | type) != "array")
           or ([ ($s.fallbacks_fired | dflt([]))[] | select((type != "string") or (enum(["acceptance_tests","user_docs","c4_currency"]) | not)) ] | length > 0)
         then "fallbacks_fired must be an array drawn from acceptance_tests | user_docs | c4_currency" else empty end ),
+      ( if ($s.session_mode == null or ($s.session_mode | type == "string" and enum(["attended","unattended"]))) | not
+        then "session_mode must be attended | unattended | null" else empty end ),
+      ( if ($s.session_mode_source == null or ($s.session_mode_source | type == "string" and enum(["env","inferred"]))) | not
+        then "session_mode_source must be env | inferred | null" else empty end ),
+      ( if ($s.session_mode == null) != ($s.session_mode_source == null)
+        then "session_mode and session_mode_source are a pair: both null or both set" else empty end ),
       # the facts must agree with the outcome they are filed under
       ( if ($dp | type) == "string" and ($dp | startswith("REJECT_")) and $o != "precheck-parked"
         then "a \($dp) precheck can only end precheck-parked" else empty end ),
@@ -225,5 +234,7 @@ print -r -- "$state" | jq -c '
       review_loop_run_ids: (($s.review_loop_run_ids | dflt([]))
         | reduce .[] as $id ([]; if index([$id]) then . else . + [$id] end)),
       escalation_status: $s.escalation_status,
-      fallbacks_fired: (($s.fallbacks_fired | dflt([])) | unique)
+      fallbacks_fired: (($s.fallbacks_fired | dflt([])) | unique),
+      session_mode: $s.session_mode,
+      session_mode_source: $s.session_mode_source
     }' || { print -u2 -- "build-story-telemetry-record: failed to build payload"; exit 1 }

@@ -43,7 +43,7 @@ FAILED='{"outcome":"failed","dependency_precheck":"PROCEED","gate_verdict":"READ
   [ "$(jq -c '.fallbacks_fired' <<<"$output")" = '["user_docs"]' ]
   # exactly the documented keys — an envelope key (pr, issue, ts, wall_s) here
   # would give a consumer two places to read one fact
-  [ "$(jq -c 'keys' <<<"$output")" = '["dependency_precheck","escalation_status","fallbacks_fired","gate_verdict","mode","review_loop_run_ids","risk","story_spec_present"]' ]
+  [ "$(jq -c 'keys' <<<"$output")" = '["dependency_precheck","escalation_status","fallbacks_fired","gate_verdict","mode","review_loop_run_ids","risk","session_mode","session_mode_source","story_spec_present"]' ]
   build "$SUCCESS" --print-outcome
   [ "$status" -eq 0 ]
   [ "$output" = "success" ]
@@ -99,8 +99,27 @@ FAILED='{"outcome":"failed","dependency_precheck":"PROCEED","gate_verdict":"READ
 @test "absent optional keys read as null / false / []" {
   build '{"outcome":"precheck-parked","dependency_precheck":"REJECT_CYCLE"}'
   [ "$status" -eq 0 ]
-  [ "$(jq -c '[.gate_verdict, .risk, .story_spec_present, .review_loop_run_ids, .escalation_status, .fallbacks_fired]' <<<"$output")" \
-    = '[null,null,false,[],null,[]]' ]
+  [ "$(jq -c '[.gate_verdict, .risk, .story_spec_present, .review_loop_run_ids, .escalation_status, .fallbacks_fired, .session_mode, .session_mode_source]' <<<"$output")" \
+    = '[null,null,false,[],null,[],null,null]' ]
+}
+
+# --- the session mode (#2575) -------------------------------------------------
+
+@test "#2575 each session mode and source is carried into the payload unchanged" {
+  local m src
+  for m in attended unattended; do
+    for src in env inferred; do
+      build "$(jq -c --arg m "$m" --arg s "$src" '.session_mode = $m | .session_mode_source = $s' <<<"$SUCCESS")"
+      [ "$status" -eq 0 ] || { echo "$m/$src: $stderr"; return 1; }
+      [ "$(jq -c '[.session_mode, .session_mode_source]' <<<"$output")" = "[\"$m\",\"$src\"]" ]
+    done
+  done
+}
+
+@test "#2575 the explicit null pair is accepted and emitted as null" {
+  build "$(jq -c '.session_mode = null | .session_mode_source = null' <<<"$SUCCESS")"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '[.session_mode, .session_mode_source]' <<<"$output")" = '[null,null]' ]
 }
 
 @test "review_loop_run_ids are de-duplicated in first-seen order; fallbacks are a set" {
@@ -168,6 +187,20 @@ refuses() {
 
 @test "an escalation_status on a non-escalated outcome is refused" {
   refuses '{"outcome":"failed","dependency_precheck":"PROCEED","gate_verdict":"READY","escalation_status":"BUDGET_EXHAUSTED"}' "the outcome must be escalated"
+}
+
+@test "#2575 a session mode outside its enum is refused" {
+  refuses "$(jq -c '.session_mode = "present" | .session_mode_source = "env"' <<<"$SUCCESS")" "session_mode must be attended | unattended | null"
+  refuses "$(jq -c '.session_mode = false | .session_mode_source = "env"' <<<"$SUCCESS")" "session_mode must be attended | unattended | null"
+}
+
+@test "#2575 a session mode source outside its enum is refused" {
+  refuses "$(jq -c '.session_mode = "attended" | .session_mode_source = "settings"' <<<"$SUCCESS")" "session_mode_source must be env | inferred | null"
+}
+
+@test "#2575 a half-null session pair is refused, either way round" {
+  refuses "$(jq -c '.session_mode = "unattended"' <<<"$SUCCESS")" "session_mode and session_mode_source are a pair"
+  refuses "$(jq -c '.session_mode_source = "inferred"' <<<"$SUCCESS")" "session_mode and session_mode_source are a pair"
 }
 
 @test "every contradiction is reported, not just the first" {
