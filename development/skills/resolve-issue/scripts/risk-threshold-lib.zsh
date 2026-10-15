@@ -16,6 +16,17 @@
 # admit (`30`, `1.5`, `-0.1`, `0.0005`, `abc`): behaves exactly like OFF, and the
 # caller announces it. ON — any other value, up to and including 1.
 #
+# THE EXTENSION BAR (#2577): the environment variable `extension_risk_threshold`,
+# parsed by the SAME rule, applies only in an EXTENSION ROUND — a round past the
+# run's original --max-rounds that a recorded grant (#1576 `.max-rounds`) bought.
+# Four states. DEFAULT — unset or empty: 0.10 (100 thousandths). OFF — any
+# spelling of zero: the extension bar is off, and an extension round
+# consolidates exactly like a normal one. IGNORED — anything the rule does not
+# admit: behaves exactly like DEFAULT, and the caller announces it. ON — the
+# value. The bar an extension round applies is max(the base when ON, the
+# extension value), so an extension round never blocks on less than a normal
+# round does.
+#
 # THE ASSESSMENT: a JSON array of
 #   { file, line, dimension, title,       ← the finding identity
 #     p, p_why, impact, impact_why }      ← the assessment
@@ -31,24 +42,79 @@
 # scoping makes these assignments land there. Prints nothing: announcing an
 # ignored value is the caller's job, worded for what that caller does.
 risk_threshold_parse() {
-  thr_raw="${corner_case_risk_threshold-}" thr_state="off" thr_milli=0
-  [[ -n "$thr_raw" ]] || return 0
+  local rp_state="off" rp_milli=0
+  thr_raw="${corner_case_risk_threshold-}"
+  _risk_parse_decimal "$thr_raw"
+  thr_state="$rp_state" thr_milli=$rp_milli
+  return 0
+}
+
+# _risk_parse_decimal VALUE — the ONE rule both variables are read by, into the
+# CALLER's `rp_state` (off | ignored | on) and `rp_milli` (thousandths; 0 unless
+# on). Empty is off.
+_risk_parse_decimal() {
+  local v="$1"
+  rp_state="off" rp_milli=0
+  [[ -n "$v" ]] || return 0
   # One leading digit at most (0 or 1), then up to three decimals. The digit class
   # is what refuses `30` and `-0.1`; the decimal cap refuses `0.0005`; the range
   # check below refuses `1.5`, which the shape alone would admit.
-  if [[ "$thr_raw" =~ '^([01]?)(\.([0-9]{1,3}))?$' && "$thr_raw" != "." ]]; then
-    local thr_int="${match[1]:-0}" thr_frac="${match[3]-}"
-    thr_frac="${(r:3::0:)thr_frac}"
-    thr_milli=$(( 10#$thr_int * 1000 + 10#$thr_frac ))
-    if (( thr_milli > 1000 )); then
-      thr_state="ignored"
-    elif (( thr_milli > 0 )); then
-      thr_state="on"
+  if [[ "$v" =~ '^([01]?)(\.([0-9]{1,3}))?$' && "$v" != "." ]]; then
+    local v_int="${match[1]:-0}" v_frac="${match[3]-}"
+    v_frac="${(r:3::0:)v_frac}"
+    rp_milli=$(( 10#$v_int * 1000 + 10#$v_frac ))
+    if (( rp_milli > 1000 )); then
+      rp_state="ignored"
+    elif (( rp_milli > 0 )); then
+      rp_state="on"
     fi
   else
-    thr_state="ignored"
+    rp_state="ignored"
   fi
-  [[ "$thr_state" != "ignored" ]] || thr_milli=0
+  [[ "$rp_state" != "ignored" ]] || rp_milli=0
+  return 0
+}
+
+# The extension bar's default, in thousandths and as the spelling a stamp records.
+RISK_EXTENSION_DEFAULT_MILLI=100
+RISK_EXTENSION_DEFAULT_RAW="0.10"
+
+# risk_extension_parse — read `extension_risk_threshold` (#2577) into the CALLER's
+# `ext_raw`, `ext_state` (default | off | ignored | on) and `ext_milli` (the
+# extension value in thousandths; the default for default and ignored, 0 for
+# off). Prints nothing: announcing an ignored value is the caller's job.
+risk_extension_parse() {
+  local rp_state="off" rp_milli=0
+  ext_raw="${extension_risk_threshold-}"
+  if [[ -z "$ext_raw" ]]; then
+    ext_state="default" ext_milli=$RISK_EXTENSION_DEFAULT_MILLI
+    return 0
+  fi
+  _risk_parse_decimal "$ext_raw"
+  case "$rp_state" in
+    on) ext_state="on" ext_milli=$rp_milli ;;
+    off) ext_state="off" ext_milli=0 ;;
+    *) ext_state="ignored" ext_milli=$RISK_EXTENSION_DEFAULT_MILLI ;;
+  esac
+  return 0
+}
+
+# risk_extension_effective — the bar of an extension round, from the CALLER's
+# parsed `thr_*` and `ext_*` (call both parsers first), into the caller's
+# `eff_raw` (the spelling the winning side was given) and `eff_milli`. 0 when the
+# extension bar is off: the round then uses the base exactly like a normal round,
+# so the caller must not mark it. Otherwise max(base when on, extension); a tie
+# names the base.
+risk_extension_effective() {
+  eff_raw="" eff_milli=0
+  [[ "$ext_state" != "off" ]] || return 0
+  if [[ "$thr_state" == "on" ]] && (( thr_milli >= ext_milli )); then
+    eff_raw="$thr_raw" eff_milli=$thr_milli
+  elif [[ "$ext_state" == "on" ]]; then
+    eff_raw="$ext_raw" eff_milli=$ext_milli
+  else
+    eff_raw="$RISK_EXTENSION_DEFAULT_RAW" eff_milli=$ext_milli
+  fi
   return 0
 }
 

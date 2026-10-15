@@ -298,7 +298,8 @@ local demoted_def='
             p: $it.risk_assessment.p, impact: $it.risk_assessment.impact,
             risk_thousandths: $it.risk_assessment.risk_thousandths,
             p_why: $it.risk_assessment.p_why, impact_why: $it.risk_assessment.impact_why,
-            threshold: $it.risk_assessment.threshold } as $r
+            threshold: $it.risk_assessment.threshold,
+            bar: $it.risk_assessment.bar } as $r
         | if $i == null then . + [$r] else .[$i] = $r end);
   # the identities the promotion phase raised (`promoted: true`), line-insensitive
   # like the #1064 exclusion: a demoted finding the human picked and the
@@ -464,8 +465,11 @@ dossier=$(jq -cn --argjson s "$status_json" --argjson p "$promotion_status_json"
     }
   # present only when non-empty (#1921), so a dossier with no demotion keeps
   # exactly its previous shape for every reader of the hidden block
+  # an extension-bar demotion (#2577) also names the bar and the effective
+  # threshold it was judged against; any other entry keeps its #1921 shape
   | if ($demmap | length) == 0 then . else . + { risk_demoted: [ $demmap[]
-        | {file, line, dimension, title, round, p, impact, risk_thousandths} ] } end
+        | {file, line, dimension, title, round, p, impact, risk_thousandths}
+          + (if .bar == "extension" then {bar, threshold} else {} end) ] } end
   | if $p == null then . else . + { promotion: {
       rounds: ($p.rounds // ($prounds | length)),
       status: $p.status,
@@ -584,7 +588,13 @@ section=$(jq -rn --argjson s "$status_json" --argjson p "$promotion_status_json"
   # RISK-DEMOTED (#1921), above the waived list and never folded into it.
   + ( [ demoted_set($s; $p)[] ] as $dem
       | if ($dem | length) == 0 then [] else
-          [ ("**Demoted by the risk threshold (`corner_case_risk_threshold` = `\($dem | max_by(.seq) | .threshold | cell)`):** "
+          # the heading names the base threshold from a base-bar record; when
+          # every record is an extension-bar demotion (#2577) it names that bar
+          # instead, and each extension row is marked in its risk cell
+          [ ([ $dem[] | select(.bar != "extension") ] as $base
+             | (if ($base | length) > 0
+                then "**Demoted by the risk threshold (`corner_case_risk_threshold` = `\($base | max_by(.seq) | .threshold | cell)`):** "
+                else "**Demoted by the extension bar (effective threshold = `\($dem | max_by(.seq) | .threshold | cell)`):** " end)
              + "these findings cleared a reviewer'"'"'s blocking bar, but each one'"'"'s risk (probability × impact) "
              + "is below the threshold, so the loop logged them as suggestions and did not fix them. "
              + "Promote any of them if you disagree with its assessment."),
@@ -593,6 +603,7 @@ section=$(jq -rn --argjson s "$status_json" --argjson p "$promotion_status_json"
             "|---|---|---|---|---|---|" ]
           + [ $dem[] | "| `\((.title | cell)[0:120])` — `\(((.file // "") | cell)[0:120])\(linepart)`"
                        + " | \(.round) | \(.p) | \(.impact) | \(.risk_thousandths / 1000)"
+                       + (if .bar == "extension" then " (extension bar, threshold \(.threshold | cell))" else "" end)
                        + " | \(.p_why | cell); \(.impact_why | cell) |" ]
           + [ "" ] end )
   # the rendered waived list leaves out what the demoted table above already

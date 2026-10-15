@@ -868,3 +868,21 @@ EOF
   [ "${output#*$'\n'}" = "$plain" ]
   lacks "$output" "demoted"
 }
+
+# --- #2577: extension-bar demotions in the round block -------------------------
+
+@test "#2577 AC6 an extension round's demotions name the extension bar and its effective threshold" {
+  cat > "$CL" <<'EOF'
+{"round":6,"summary":{"critical":0,"high":0,"low":1,"blocking":0,"conflicts":0,"risk_demoted":1},
+ "blocking":[],
+ "suggestions":[
+   {"file":"app.py","line":2000,"dimension":"bugs","title":"stale cache never invalidated","demoted":true,
+    "risk_assessment":{"p":0.15,"p_why":"w","impact":0.4,"impact_why":"w","risk":0.06,"risk_thousandths":60,"threshold":"0.10","threshold_thousandths":100,"bar":"extension"}}],
+ "conflicts":[],"non_converging":false}
+EOF
+  run zsh "$S" --changelist "$CL" --round 6 --verdict "awaiting fix"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | grep -c -- '^- demoted by the extension bar (effective threshold = 0.10): 1$')" -eq 1 ]
+  echo "$output" | grep -qxF -- '- demoted suggestion: `app.py:2000` [bugs] "stale cache never invalidated" — p 0.15 × impact 0.4 = risk 0.06 < 0.10'
+  lacks "$output" "corner_case_risk_threshold"
+}

@@ -1905,3 +1905,140 @@ EOF
   run -2 zsh "$S" --findings "$F" --risk ''
   contains "$output" "--risk requires a non-empty value"
 }
+
+# --- #2577: the extension bar -------------------------------------------------
+# --extension marks an extension round. Its bar is max(base when on,
+# extension_risk_threshold; default 0.10), and every stamp records it with
+# `bar: "extension"`. The WARNING below is risk 0.060 (p 0.15 x impact 0.4).
+
+_ext_fixture() {
+  printf '%s' '[{"severity":"WARNING","dimension":"bugs","file":"a.zsh","line":1,"title":"t","description":"d","reviewer":"r"}]' > "$F"
+  printf '%s' '[{"file":"a.zsh","line":1,"dimension":"bugs","title":"t","p":0.15,"p_why":"w","impact":0.4,"impact_why":"w"}]' > "$BATS_TEST_TMPDIR/r.json"
+}
+
+# the threshold a single assessed item was judged against, as "<raw> <milli> <bar|-> <demoted|kept>"
+_ext_reading() {
+  reading=$(printf '%s' "$output" | jq -r '[.blocking[], .suggestions[]][0]
+    | "\(.risk_assessment.threshold) \(.risk_assessment.threshold_thousandths) \(.risk_assessment.bar // "-") \(if .demoted == true then "demoted" else "kept" end)"')
+}
+
+@test "#2577 AC1 the same risk-0.060 WARNING is kept without --extension and demoted with it (base 0.04, extension unset)" {
+  _ext_fixture
+  run -0 env -u extension_risk_threshold corner_case_risk_threshold=0.04 zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/r.json"
+  _ext_reading
+  [ "$reading" = "0.04 40 - kept" ]
+  run -0 env -u extension_risk_threshold corner_case_risk_threshold=0.04 zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/r.json" --extension
+  _ext_reading
+  [ "$reading" = "0.10 100 extension demoted" ]
+  [ "$(echo "$output" | jq '.summary.risk_demoted')" -eq 1 ]
+  [ "$(echo "$output" | jq '.summary.blocking')" -eq 0 ]
+}
+
+@test "#2577 AC4 the effective bar is max(base, extension): each side can win, and a tie names the base" {
+  _ext_fixture
+  local -a cases=('0.2||0.2 200 extension demoted' '0.04|0.15|0.15 150 extension demoted'
+                  '0.04|0.05|0.05 50 extension kept' '0.1|.100|0.1 100 extension demoted'
+                  'UNSET|0.05|0.05 50 extension kept' 'abc|0.07|0.07 70 extension demoted')
+  local c base ext want
+  for c in "${cases[@]}"; do
+    base="${c%%|*}"; ext="${c#*|}"; ext="${ext%%|*}"; want="${c##*|}"
+    if [ "$base" = UNSET ]; then
+      run -0 --separate-stderr env -u corner_case_risk_threshold extension_risk_threshold="$ext" zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/r.json" --extension
+    elif [ -z "$ext" ]; then
+      run -0 --separate-stderr env -u extension_risk_threshold corner_case_risk_threshold="$base" zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/r.json" --extension
+    else
+      run -0 --separate-stderr env corner_case_risk_threshold="$base" extension_risk_threshold="$ext" zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/r.json" --extension
+    fi
+    _ext_reading
+    [ "base [$base] ext [$ext]: $reading" = "base [$base] ext [$ext]: $want" ]
+  done
+}
+
+@test "#2577 AC4 a zero extension_risk_threshold turns the bar off: --extension then changes nothing, base on or off" {
+  _ext_fixture
+  local z
+  for z in 0 0.0 .000; do
+    run -0 env corner_case_risk_threshold=0.04 zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/r.json"
+    printf '%s\n' "$output" > "$BATS_TEST_TMPDIR/a.json"
+    run -0 env corner_case_risk_threshold=0.04 extension_risk_threshold="$z" zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/r.json" --extension
+    printf '%s\n' "$output" > "$BATS_TEST_TMPDIR/b.json"
+    cmp "$BATS_TEST_TMPDIR/a.json" "$BATS_TEST_TMPDIR/b.json"
+    run -0 env -u corner_case_risk_threshold zsh "$S" --findings "$F"
+    printf '%s\n' "$output" > "$BATS_TEST_TMPDIR/a.json"
+    run -0 env -u corner_case_risk_threshold extension_risk_threshold="$z" zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/r.json" --extension
+    printf '%s\n' "$output" > "$BATS_TEST_TMPDIR/b.json"
+    cmp "$BATS_TEST_TMPDIR/a.json" "$BATS_TEST_TMPDIR/b.json"
+  done
+}
+
+@test "#2577 AC4 an invalid extension_risk_threshold behaves as unset (0.10) and is announced, naming the value" {
+  _ext_fixture
+  local v
+  for v in abc 15 1.5 -0.1 0.0005; do
+    run -0 --separate-stderr env corner_case_risk_threshold=0.04 extension_risk_threshold="$v" zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/r.json" --extension
+    _ext_reading
+    [ "value [$v]: $reading" = "value [$v]: 0.10 100 extension demoted" ]
+    [ "$stderr" = "consolidate-findings: extension_risk_threshold='$v' is not a decimal in [0, 1] with at most three decimals — IGNORED, so the default 0.10 applies (e.g. 0.15, not 15)" ]
+  done
+  # without --extension the variable is never read, so nothing is announced
+  run -0 --separate-stderr env corner_case_risk_threshold=0.04 extension_risk_threshold=abc zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/r.json"
+  [ -z "$stderr" ]
+}
+
+@test "#2577 an ignored base in an extension round is announced, and the extension bar alone applies" {
+  _ext_fixture
+  run -0 --separate-stderr env -u extension_risk_threshold corner_case_risk_threshold=30 zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/r.json" --extension
+  _ext_reading
+  [ "$reading" = "0.10 100 extension demoted" ]
+  [ "$stderr" = "consolidate-findings: corner_case_risk_threshold='30' is not a decimal in [0, 1] with at most three decimals — IGNORED, so only the extension bar applies this round (e.g. 0.05, not 5 or 30)" ]
+  # with no --risk (hook mode) nothing is assessed, so nothing is announced
+  run -0 --separate-stderr env -u extension_risk_threshold corner_case_risk_threshold=30 zsh "$S" --findings "$F" --extension
+  [ -z "$stderr" ]
+}
+
+@test "#2577 AC5 CRITICAL, decided red and human-promoted findings still block in an extension round at the highest bar" {
+  cat > "$F" <<'EOF'
+[
+ {"severity":"CRITICAL","dimension":"security","file":"src/e.zsh","line":50,"title":"token written to the log","description":"d","reviewer":"s"},
+ {"severity":"WARNING","dimension":"code_quality","file":"src/f.zsh","line":60,"title":"rename the helper","description":"d","reviewer":"q"},
+ {"severity":"WARNING","dimension":"contract","file":"docs/g.md","line":70,"title":"MD013 line too long","description":"decides: pre-commit run markdownlint","reviewer":"c","decided":"red"}
+]
+EOF
+  echo '[{"file":"src/f.zsh","line":60,"dimension":"code_quality","title":"rename the helper"}]' > "$BATS_TEST_TMPDIR/promote.json"
+  cat > "$BATS_TEST_TMPDIR/r.json" <<'EOF'
+[
+ {"file":"src/e.zsh","line":50,"dimension":"security","title":"token written to the log","p":0,"p_why":"never reached","impact":0.1,"impact_why":"cosmetic"},
+ {"file":"src/f.zsh","line":60,"dimension":"code_quality","title":"rename the helper","p":0.15,"p_why":"rare","impact":0.4,"impact_why":"naming"},
+ {"file":"docs/g.md","line":70,"dimension":"contract","title":"MD013 line too long","p":0,"p_why":"lint only","impact":0.1,"impact_why":"cosmetic"}
+]
+EOF
+  run -0 env -u corner_case_risk_threshold extension_risk_threshold=1 zsh "$S" --findings "$F" --promote "$BATS_TEST_TMPDIR/promote.json" --risk "$BATS_TEST_TMPDIR/r.json" --extension
+  [ "$(echo "$output" | jq '.summary.blocking')" -eq 3 ]
+  [ "$(echo "$output" | jq '.summary.risk_demoted')" -eq 0 ]
+  echo "$output" | jq -e '.blocking[] | select(.title == "token written to the log") | .severity == "CRITICAL" and .risk_assessment.bar == "extension" and .risk_assessment.threshold_thousandths == 1000 and (has("demoted") | not)' >/dev/null
+  # a WARNING the extension bar demotes (risk 0.060 < 1), raised back by the human's pick
+  echo "$output" | jq -e '.blocking[] | select(.title == "rename the helper") | .severity == "WARNING" and .promoted == true and .risk_assessment.risk_thousandths == 60 and .risk_assessment.bar == "extension" and (has("demoted") | not)' >/dev/null
+  echo "$output" | jq -e '.blocking[] | select(.title == "MD013 line too long") | .decided == "red" and .risk_assessment.bar == "extension" and (has("demoted") | not)' >/dev/null
+}
+
+@test "#2577 without --extension the golden round is byte-identical whatever extension_risk_threshold says" {
+  golden="$REPO_ROOT/tests/fixtures/consolidate-findings/risk-changelist.golden.json"
+  fixture="$REPO_ROOT/tests/fixtures/consolidate-findings/risk-findings.json"
+  _risk_for_fixture
+  local v
+  for v in 0.5 0 abc; do
+    run -0 env -u corner_case_risk_threshold extension_risk_threshold="$v" zsh "$S" --findings "$fixture" --round 2 --risk "$BATS_TEST_TMPDIR/risk.json"
+    printf '%s\n' "$output" > "$BATS_TEST_TMPDIR/b.json"
+    cmp "$golden" "$BATS_TEST_TMPDIR/b.json"
+  done
+}
+
+@test "#2577 --extension takes no value: a following argument is still parsed as its own" {
+  _ext_fixture
+  run -0 env -u extension_risk_threshold corner_case_risk_threshold=0.04 zsh "$S" --extension --findings "$F" --risk "$BATS_TEST_TMPDIR/r.json"
+  _ext_reading
+  [ "$reading" = "0.10 100 extension demoted" ]
+  run zsh "$S" --findings "$F" --extension yes
+  [ "$status" -eq 2 ]
+  contains "$output" "unexpected argument: yes"
+}

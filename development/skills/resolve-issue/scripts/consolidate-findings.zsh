@@ -167,10 +167,22 @@
 #     threshold OFF or IGNORED, --risk is accepted and the file is never read, and
 #     no key above appears: the output is byte-identical to a run without it.
 #
+#   - Extension bar (#2577): --extension marks THIS round as an extension round
+#     (the loop decides it from the grant ledger: `grants.jsonl` non-empty and
+#     the round past the `original_max_rounds` its first line records). Unless `extension_risk_threshold` turns the bar off
+#     (any spelling of zero), the demotion above runs against the EFFECTIVE bar,
+#     max(corner_case_risk_threshold when on, extension_risk_threshold; default
+#     0.10), even with the base threshold off, and every stamp records it
+#     (`threshold`, `threshold_thousandths`) plus `bar: "extension"`, which is how
+#     the progress block and the dossier mark a finding the extension bar
+#     demoted. The exemptions are the demotion's own. An unparseable
+#     extension_risk_threshold is announced on stderr and behaves as the
+#     default. Without --extension, or with the bar off, nothing here differs.
+#
 # Usage:
 #   consolidate-findings.zsh --findings FILE [--round N] [--prev FILE]
 #                            [--promote FILE] [--adjudicated FILE]
-#                            [--fix-touched FILE] [--risk FILE]
+#                            [--fix-touched FILE] [--risk FILE] [--extension]
 #     --findings  aggregate findings JSON for THIS round (required)
 #     --round     round number (default 1)
 #     --prev      previous round's changelist JSON (this script's own output);
@@ -193,6 +205,8 @@
 #                 #1920's shape: a JSON array of {file, line, dimension, title,
 #                 p, p_why, impact, impact_why}. Read only while the threshold
 #                 is ON; a malformed file is then exit 2, naming the entry.
+#     --extension this round is an extension round (#2577): demote against the
+#                 effective extension bar described above.
 #
 # Exit codes: 0 ok · 2 usage error (including a malformed --risk while the
 #             threshold is on) · 1 internal (unreadable / invalid JSON)
@@ -200,7 +214,7 @@
 emulate -L zsh
 setopt nounset pipefail
 
-local usage="usage: consolidate-findings.zsh --findings FILE [--round N] [--prev FILE] [--promote FILE] [--adjudicated FILE] [--fix-touched FILE] [--risk FILE]"
+local usage="usage: consolidate-findings.zsh --findings FILE [--round N] [--prev FILE] [--promote FILE] [--adjudicated FILE] [--fix-touched FILE] [--risk FILE] [--extension]"
 
 # A value flag with no value, or one whose value is the NEXT FLAG, is a caller
 # mistake that this script used to turn into the wrong failure. Under `nounset`
@@ -225,7 +239,7 @@ _need_val() {  # $1 = flag, $2 = remaining arg count, $3 = candidate value
     print -u2 -- "consolidate-findings: $1 requires a non-empty value"; exit 2 }
 }
 
-local findings="" round=1 prev="" promote="" adjudicated="" fix_touched="" risk_file=""
+local findings="" round=1 prev="" promote="" adjudicated="" fix_touched="" risk_file="" extension=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
   --findings) _need_val "$1" $# "${2:-}"; findings="$2"; shift 2 ;;
@@ -238,6 +252,7 @@ while [[ $# -gt 0 ]]; do
   # the file's CONTENTS that may legitimately be empty — see below
   --fix-touched) _need_val "$1" $# "${2:-}"; fix_touched="$2"; shift 2 ;;
   --risk) _need_val "$1" $# "${2:-}"; risk_file="$2"; shift 2 ;;
+  --extension) extension=1; shift ;;
   -h|--help) print -r -- "$usage"; exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
   *) print -u2 -- "unexpected argument: $1"; exit 2 ;;
@@ -401,6 +416,21 @@ source "${0:A:h}/risk-threshold-lib.zsh" || {
   print -u2 -- "consolidate-findings: could not load risk-threshold-lib.zsh"; exit 1 }
 local thr_raw="" thr_state="off" thr_milli=0 risk_json='[]' riskon='false'
 risk_threshold_parse
+# The extension bar (#2577): in an extension round whose bar is not turned off,
+# the threshold the program reads becomes the effective one, and `extbar` marks
+# every stamp. Any other round leaves thr_* exactly as parsed above. `bar:
+# "extension"` marks the KIND of round the stamp was made in, not which side of
+# max(base, extension) won: the effective `threshold` beside it carries that.
+local ext_raw="" ext_state="off" ext_milli=0 eff_raw="" eff_milli=0 extbar='false'
+if (( extension )); then
+  risk_extension_parse
+  [[ "$ext_state" != "ignored" ]] || print -r -u2 -- "consolidate-findings: extension_risk_threshold='${ext_raw}' is not a decimal in [0, 1] with at most three decimals — IGNORED, so the default ${RISK_EXTENSION_DEFAULT_RAW} applies (e.g. 0.15, not 15)"
+  risk_extension_effective
+  if (( eff_milli > 0 )); then
+    [[ "$thr_state" != "ignored" || -z "$risk_file" ]] || print -r -u2 -- "consolidate-findings: corner_case_risk_threshold='${thr_raw}' is not a decimal in [0, 1] with at most three decimals — IGNORED, so only the extension bar applies this round (e.g. 0.05, not 5 or 30)"
+    thr_raw="$eff_raw" thr_state="on" thr_milli=$eff_milli extbar='true'
+  fi
+fi
 if [[ -n "$risk_file" ]]; then
   if [[ "$thr_state" == "ignored" ]]; then
     print -r -u2 -- "consolidate-findings: corner_case_risk_threshold='${thr_raw}' is not a decimal in [0, 1] with at most three decimals — IGNORED, so no finding is demoted (e.g. 0.05, not 5 or 30)"
@@ -485,10 +515,11 @@ def riskstamp:
   if has("_risk") then
     ._risk as $k | $k.top as $e
     | del(._risk)
-    | . + { risk_assessment: { p: $e.p, p_why: $e.p_why, impact: $e.impact,
+    | . + { risk_assessment: ({ p: $e.p, p_why: $e.p_why, impact: $e.impact,
               impact_why: $e.impact_why, risk: ($e.r / 1000),
               risk_thousandths: $e.r, threshold: $thr_raw,
-              threshold_thousandths: $thr_milli } }
+              threshold_thousandths: $thr_milli }
+              + (if $extbar then { bar: "extension" } else {} end)) }
     | if (.severity == "WARNING") and $k.all and ($e.r < $thr_milli)
          and (.decided != "red") and (.group_red != true)
       then . + { severity: "SUGGESTION", priority: prio("SUGGESTION"),
@@ -925,7 +956,7 @@ jq -c --argjson round "$round" --argjson prev "$prev_json" --argjson promote "$p
   --argjson adjudicated "$adjudicated_json" \
   --argjson fixtouched "$fix_touched_json" --argjson has_touched "$has_touched" \
   --argjson riskon "$riskon" --argjson risk "$risk_json" \
-  --arg thr_raw "$thr_raw" --argjson thr_milli "$thr_milli" \
+  --arg thr_raw "$thr_raw" --argjson thr_milli "$thr_milli" --argjson extbar "$extbar" \
   "$PROG" -- "$findings" || {
   print -u2 -- "consolidate-findings: invalid findings JSON: $findings"; exit 1
 }

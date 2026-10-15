@@ -31,7 +31,9 @@
 # true`, stamped by consolidate-findings.zsh --risk) carries a
 # `- demoted by risk threshold (corner_case_risk_threshold = V): N` line and one
 # `- demoted suggestion:` line per finding with its p × impact = risk — only
-# when N > 0, so a run with the threshold off is byte-identical.
+# when N > 0, so a run with the threshold off is byte-identical. In an
+# extension round (#2577, stamps carrying `bar: "extension"`) the count line reads
+# `- demoted by the extension bar (effective threshold = V): N` instead.
 #
 # The new/carried split (and everything derived from it: fixed-since, the
 # escalating possible-false-trip lines) is rendered ONLY when every blocker
@@ -233,8 +235,13 @@ jq -r --arg ts "$(date +%H:%M:%S)" --argjson r "$round" --arg v "$verdict" \
     (if (.summary.adjudicated_dropped // 0) > 0 then
        "- adjudicated re-raises dropped: \(.summary.adjudicated_dropped)"
      else empty end),
+    # an extension round (#2577) demotes against the extension bar, which may
+    # differ from corner_case_risk_threshold or apply with it off — so the line
+    # names that bar and the effective threshold its stamps record
     (if ($demoted | length) > 0 then
-       "- demoted by risk threshold (corner_case_risk_threshold = \($demoted[0].risk_assessment.threshold // "?" | safe)): \($demoted | length)"
+       (if $demoted[0].risk_assessment.bar == "extension"
+        then "- demoted by the extension bar (effective threshold = \($demoted[0].risk_assessment.threshold // "?" | safe)): \($demoted | length)"
+        else "- demoted by risk threshold (corner_case_risk_threshold = \($demoted[0].risk_assessment.threshold // "?" | safe)): \($demoted | length)" end)
      else empty end),
     ($demoted[] | "- demoted suggestion: `\(.file | safe)\(if (.line | type) == "number" then ":\(.line)" else "" end)` [\(.dimension | dimlabel)] \"\(.title | safe)\""
        + " — p \(.risk_assessment.p) × impact \(.risk_assessment.impact) = risk \(.risk_assessment.risk) < \(.risk_assessment.threshold // "?" | safe)"),

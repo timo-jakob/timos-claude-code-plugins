@@ -14,7 +14,8 @@ byte-frozen span.
 
 While the threshold is on, the risk subagent (*Risk subagent brief* below) makes
 the assessment this section describes, and the conductor dispatches it and
-passes `--risk`.
+passes `--risk`. In an extension round (below) it does so whatever the
+threshold says.
 
 **First read the variable.** It lives in the environment and nothing in the
 conversation shows it:
@@ -27,8 +28,9 @@ Then take exactly one of the three states `reference/residue/risk-threshold.md` 
 threshold — assess before filing (#1920)* defines, which the scripts parse with
 one shared parser (`scripts/risk-threshold-lib.zsh`):
 
-- **Off** (unset, empty, any spelling of zero): skip this pass. Make no
-  assessment and pass no `--risk`. The round consolidates exactly as before.
+- **Off** (unset, empty, any spelling of zero): skip this pass, except in an
+  extension round (below). Make no assessment and pass no `--risk`. The round
+  consolidates exactly as before.
 - **Ignored** (not a decimal in [0, 1] with at most three decimals): behave as
   off, say so once in your narration, and write the one-line PR Summary note
   naming the value that `reference/residue/risk-threshold.md` prescribes for this state, once per run,
@@ -36,6 +38,34 @@ one shared parser (`scripts/risk-threshold-lib.zsh`):
 - **On**: in step mode, everything below applies, every round, including the
   promotion sub-loop's rounds and the closing sweep. Hook mode supplies no
   assessment (see below).
+
+**Extension rounds raise the bar (#2577).** A round is an **extension round**
+when the work-dir's grant ledger, `grants.jsonl`, is non-empty **and** the
+round's number is above the `original_max_rounds` its first line records.
+`record-grant.zsh` appends a line for every grant, human or automatic, so this
+is exactly the test the loop applies; the `--max-rounds` you resume with does
+not decide it. The #1434 closing sweep of a run with no grant is not one; the
+closing sweep of an extended run is. Before an
+extension round, also read the second variable:
+
+```bash
+printenv extension_risk_threshold   # exit 1 → unset, the default 0.10
+```
+
+- **Any spelling of zero:** the extension bar is off. Treat the round exactly
+  like a normal one, by the three states above.
+- **Anything else:** run this pass in that round **even when
+  `corner_case_risk_threshold` is off**. Dispatch the risk subagent and pass
+  `--risk` as below. The loop adds `--extension` to the consolidator itself, so
+  pass no extra flag. The round demotes against the higher of the two
+  thresholds.
+- **A value the rule does not admit:** it behaves as the default, `0.10`. Say so
+  once in your narration, and write a one-line PR Summary note naming the value,
+  once per run, whichever terminal the run reaches.
+
+A human grant's `severity_bar` is unaffected: the risk bar decides at
+consolidation what blocks, and the fix subagent still applies the human's bar
+to what remains.
 
 **What to assess.** Every finding in the round's panel aggregate, the file you
 pass as `--findings-file`, whose severity is `CRITICAL` or `WARNING` after the
@@ -118,7 +148,9 @@ resolve-story-loop.zsh … --resume --findings-file <…> \
 
 **Where a demotion shows.** A demoted finding never disappears.
 
-- The round's progress block names it.
+- The round's progress block names it. An extension round's line names the
+  extension bar and the effective threshold instead of
+  `corner_case_risk_threshold`, and the dossier marks such a row the same way.
 - The PR dossier lists it in its own table, above the waived suggestions.
 - The suggestion-promotion prompt offers it back like any other waived
   suggestion — under `reference/promotion/gate.md`'s own derivation, which keeps a finding's

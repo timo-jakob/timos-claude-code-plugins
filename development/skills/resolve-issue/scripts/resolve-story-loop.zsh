@@ -594,7 +594,9 @@ while [[ $# -gt 0 ]]; do
   # --promote, it is never persisted, because every round is assessed afresh (a
   # fix pass can change a finding's probability). Checked up front while the
   # threshold is on, so a malformed file refuses the round before any state is
-  # written; with the threshold off or ignored it is forwarded unread.
+  # written; with the threshold off or ignored it is forwarded unread — except
+  # into an extension round (#2577), whose bar reads it unless
+  # extension_risk_threshold turns that bar off.
   --risk) _need_val "$1" $# "${2:-}"; risk="$2"; shift 2 ;;
   # --step-timings (#2197): the conductor's per-step wall times for the round
   # this invocation consolidates. Telemetry only — read by _step_wall_rec, which
@@ -633,7 +635,8 @@ while [[ $# -gt 0 ]]; do
     print -r -- "                             # Hook mode reads <findings-path>.carry.json instead."
     print -r -- "  [--promote FILE]"
     print -r -- "  [--risk FILE]              # step mode: this round's risk assessment (#1921), read only"
-    print -r -- "                             # while corner_case_risk_threshold is on; demotes low-risk Warnings."
+    print -r -- "                             # while corner_case_risk_threshold is on, or in an extension round"
+    print -r -- "                             # (extension_risk_threshold, #2577); demotes low-risk Warnings."
     print -r -- "  [--step-timings FILE]      # step mode: {panel, decide, risk, fix} seconds for this round (#2197)"
     print -r -- "  [--work-dir DIR] [--status-file PATH] [--telemetry-file PATH] [--telemetry-dir DIR]"
     print -r -- "  [--parent-run-id ID]       # the resolve-issue run this loop runs under (#1226)"
@@ -1607,6 +1610,33 @@ _pft_count() {
   print -r -- "$n"
 }
 
+# Is round $1 an EXTENSION round (#2577)? Decided from the GRANT LEDGER, never
+# from this invocation's --max-rounds: the documented resume after a grant
+# passes the RAISED ceiling as the flag (extension-grant.md step 5, and the
+# automatic grant's echoed ceiling), so a flag-relative test would see no
+# granted round at all. `<work-dir>/grants.jsonl` is written by record-grant.zsh
+# for human and automatic grants alike (#2576) and cleared on a fresh run; every
+# line carries the run's `original_max_rounds`. A round is an extension round
+# when the ledger is non-empty and the round is past the first line's
+# `original_max_rounds` — so the #1434 closing sweep of an extended run counts,
+# and that of a run with no grant does not. With no readable ledger (absent, or
+# a first line that is not a bounded integer) the fallback is the flag-relative
+# test: past --max-rounds AND the ceiling adopted from the work-dir sidecar.
+# Exit 0 = extension round. ONE definition, used by both call sites (the
+# up-front --risk validation and the consolidator's --extension), so the two
+# cannot disagree.
+_is_extension_round() {   # $1 = round
+  local ledger="$work_dir/grants.jsonl" orig=""
+  if [[ -s "$ledger" ]]; then
+    orig=$(head -n 1 -- "$ledger" | jq -r '.original_max_rounds // empty' 2>/dev/null) || orig=""
+    if [[ "$orig" == <-> ]] && (( ${#orig} <= 18 )); then
+      (( $1 > 10#$orig ))
+      return
+    fi
+  fi
+  (( $1 > max_rounds )) && [[ "$max_rounds_source" == "work-dir" ]]
+}
+
 # The rung itself: 0 (and the marker appended, the count incremented) when the
 # round auto-continues, non-zero when it must escalate.
 #
@@ -2343,6 +2373,18 @@ if (( resume )); then
   # of the loop with an empty status — refuse it as a usage error instead
   (( resume_round + 1 <= effective_max )) || {
     print -u2 -- "resolve-story-loop: --resume would start at round $(( resume_round + 1 )) but the ceiling in force is $effective_max (--max-rounds $max_rounds, source $max_rounds_source) — raise --max-rounds above $effective_max"; exit 2 }
+  # The round about to run is an EXTENSION round (#2577) when a grant bought it
+  # (_is_extension_round, decided from the grant ledger), and the consolidator
+  # then reads --risk against the extension bar even with
+  # corner_case_risk_threshold off — so the up-front check above, which skipped
+  # a base-off file, runs here for that case, with the same library and words.
+  if [[ -n "$risk" && "${thr_state-off}" != "on" ]] && _is_extension_round $(( resume_round + 1 )); then
+    local ext_raw="" ext_state="off" ext_milli=0
+    risk_extension_parse
+    if [[ "$ext_state" != "off" ]]; then
+      risk_validate_file "resolve-story-loop" "$risk" || exit 2
+    fi
+  fi
   # an older work-dir (or one whose file was cleaned up) simply starts empty
   [[ -f "$adjudicated_file" && -s "$adjudicated_file" ]] || print -r -- '[]' > "$adjudicated_file" || {
     print -u2 -- "resolve-story-loop: could not initialise $adjudicated_file"; exit 1 }
@@ -3287,6 +3329,12 @@ while (( round <= effective_max )); do
   # this round's risk assessment (#1921) — this invocation's round only, since
   # step mode runs one round per invocation and each round is assessed afresh
   [[ -n "$risk" ]] && consolidate_args+=( --risk "$risk" )
+  # an EXTENSION round (#2577) — past the run's original --max-rounds as the
+  # grant ledger records it (_is_extension_round, the same test the up-front
+  # --risk validation uses). The #1434 closing sweep of a run with no grant is
+  # past the ceiling too, but it has no ledger, so it keeps the normal bar; the
+  # closing sweep of an extended run is an extension round.
+  _is_extension_round "$round" && consolidate_args+=( --extension )
   consolidate_args+=( --adjudicated "$adjudicated_file" )
   # the PREVIOUS round's fix-touched set (#1435), so each blocker is stamped with
   # where it came from. `-f` not `-s`: an empty set is a real answer (every

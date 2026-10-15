@@ -122,9 +122,51 @@ residue: the residue filter reuses the loop's assessment. A finding the loop
 assessed but never demotes — a Critical, your own pick, a tool-confirmed one —
 is kept at residue too, whatever its risk.
 
+## A higher bar in extra rounds
+
+When a run spends its whole round budget and is granted more rounds — by you,
+or automatically when it is converging (#2576) — those **extension rounds**
+apply a higher floor (#2577). Extra rounds only finish a run if they stop
+finding new low-impact blockers faster than they fix them, so a Warning has to
+be riskier to block there.
+
+```json title="~/.claude/settings.json"
+{
+  "env": {
+    "corner_case_risk_threshold": "0.04",
+    "extension_risk_threshold": "0.10"
+  }
+}
+```
+
+| `extension_risk_threshold` | Extension rounds use |
+| -------------------------- | -------------------- |
+| unset or `""` | the default, `0.10` |
+| `0.001` … `1` | that value |
+| `0` (or `0.0`) | the extension bar is **off**: the normal floor, exactly like other rounds |
+| anything else | the default, `0.10`, and the PR says the value was ignored |
+
+The floor in an extension round is the **higher** of `corner_case_risk_threshold`
+and `extension_risk_threshold`, so it is never lower than in a normal round. It
+applies even when `corner_case_risk_threshold` is off. Criticals, your own picks
+and tool-confirmed findings are still never demoted.
+
+The one extra round a run gets to re-check everything after its last clean round
+is not an extension round unless a grant paid for it, so it keeps the normal
+floor.
+
+A finding demoted this way shows like any other, marked with the bar: the
+progress log reads `demoted by the extension bar (effective threshold = 0.10)`,
+and its row in the PR table says `extension bar, threshold 0.10`.
+
+**Why 0.10.** Across 576 assessments the risk pass wrote in 174 rounds, 58% were
+below `0.04`, 81% below `0.10` and 91% below `0.15`. At a floor of `0.04`, 243 of
+them block; at `0.10`, 109 still do.
+
 ## What it does not touch
 
-The floor does not change when a run ends in residue. It also does not change
+The floor does not change when a run ends in residue, and residue is filtered by
+`corner_case_risk_threshold` alone, never by the extension bar. It also does not change
 how the review dossier's machine-readable block counts residue it dropped: that
 block still counts those findings as open. Carrying a separate dropped count
 there is #1932.

@@ -6,7 +6,8 @@
 Each round's heavy work runs in **fresh subagents**, not in the conductor's
 context: a **panel** subagent reviews, a **decide** subagent settles the
 round's `decides:` claims, a **risk** subagent assesses its blockers while
-`corner_case_risk_threshold` is on, a **fix** subagent fixes. The conductor
+`corner_case_risk_threshold` is on and in an extension round (#2577), a **fix**
+subagent fixes. The conductor
 keeps the round boundary, the gate, consolidation and every human decision, and
 exchanges work with the subagents only through the `round-handoff/v1` and
 `round-verdict/v1` files (ARCHITECTURE.md, *Round handoff and verdict
@@ -177,6 +178,8 @@ verification (`reference/promotion.md`). The risk pass (#1921) is not an
 exception: while `corner_case_risk_threshold` is on, the risk subagent assesses
 the aggregate and the conductor passes its verdict's `risk_file` as `--risk`
 unopened; when the threshold is off or ignored, no risk subagent is dispatched.
+An extension round (#2577) is the exception: it is assessed even then, as *The
+risk pass* says.
 
 #### Verdict recovery arms (#1937)
 
