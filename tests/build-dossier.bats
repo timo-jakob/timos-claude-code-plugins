@@ -1493,3 +1493,48 @@ window_status() {  # $@ = one JSON array per round
   hidden_json | jq -e 'has("risk_demoted") | not' >/dev/null
   [ "$(echo "$output" | grep -c 'Demoted by the risk threshold')" -eq 0 ]
 }
+
+# --- #2577: extension-bar demotions in the PR body ------------------------------
+
+# round 1 demotes under the base (0.04); round 6, an extension round, demotes a
+# second finding under the extension bar (0.10)
+ext_demoted_status() {  # $1 = include the base-bar round (1) or not (0)
+  local base_rc='{"round":1,"summary":{"critical":0,"high":0,"low":1,"blocking":0,"conflicts":0,"risk_demoted":1},"blocking":[],"suggestions":[{"priority":"Low","dimension":"tests","file":"tests/a.bats","line":10,"title":"mutation drops the check","demoted":true,"risk_assessment":{"p":0.03,"p_why":"base view","impact":0.4,"impact_why":"a weak test","risk":0.012,"risk_thousandths":12,"threshold":"0.04","threshold_thousandths":40}}]}'
+  local ext_rc='{"round":6,"summary":{"critical":0,"high":0,"low":1,"blocking":0,"conflicts":0,"risk_demoted":1},"blocking":[],"suggestions":[{"priority":"Low","dimension":"bugs","file":"app.py","line":2000,"title":"stale cache never invalidated","demoted":true,"risk_assessment":{"p":0.15,"p_why":"rare input","impact":0.4,"impact_why":"a wrong message","risk":0.06,"risk_thousandths":60,"threshold":"0.10","threshold_thousandths":100,"bar":"extension"}}]}'
+  local rcs
+  if [ "$1" = 1 ]; then rcs="[$base_rc,$ext_rc]"; else rcs="[$ext_rc]"; fi
+  jq -n --argjson rcs "$rcs" '{status:"CONVERGED",rounds:6,max_rounds:5,repo_type:"claude-plugin",round_changelists:$rcs,
+    final_changelist:{summary:{critical:0,high:0,low:1,blocking:0,conflicts:0},blocking:[],suggestions:[]}}' > "$ST"
+}
+
+@test "#2577 AC6 extension-bar demotions only: the heading names the extension bar, each row is marked" {
+  ext_demoted_status 0
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qxF -- "**Demoted by the extension bar (effective threshold = \`0.10\`):** these findings cleared a reviewer's blocking bar, but each one's risk (probability × impact) is below the threshold, so the loop logged them as suggestions and did not fix them. Promote any of them if you disagree with its assessment."
+  echo "$output" | grep -qxF -- '| `stale cache never invalidated` — `app.py:2000` | 6 | 0.15 | 0.4 | 0.06 (extension bar, threshold 0.10) | rare input; a wrong message |'
+  [ "$(echo "$output" | grep -c corner_case_risk_threshold)" -eq 0 ]
+  [ "$(hidden_json | jq -c '.risk_demoted')" = \
+    '[{"file":"app.py","line":2000,"dimension":"bugs","title":"stale cache never invalidated","round":6,"p":0.15,"impact":0.4,"risk_thousandths":60,"bar":"extension","threshold":"0.10"}]' ]
+}
+
+@test "#2577 AC6 extension-bar demotions in two rounds at different thresholds: the heading names the latest round's" {
+  local r6='{"round":6,"summary":{"critical":0,"high":0,"low":1,"blocking":0,"conflicts":0,"risk_demoted":1},"blocking":[],"suggestions":[{"priority":"Low","dimension":"bugs","file":"app.py","line":2000,"title":"stale cache never invalidated","demoted":true,"risk_assessment":{"p":0.15,"p_why":"rare input","impact":0.4,"impact_why":"a wrong message","risk":0.06,"risk_thousandths":60,"threshold":"0.10","threshold_thousandths":100,"bar":"extension"}}]}'
+  local r7='{"round":7,"summary":{"critical":0,"high":0,"low":1,"blocking":0,"conflicts":0,"risk_demoted":1},"blocking":[],"suggestions":[{"priority":"Low","dimension":"bugs","file":"lib.py","line":5,"title":"retry loop logs twice","demoted":true,"risk_assessment":{"p":0.2,"p_why":"flaky net","impact":0.5,"impact_why":"noisy log","risk":0.1,"risk_thousandths":100,"threshold":"0.15","threshold_thousandths":150,"bar":"extension"}}]}'
+  jq -n --argjson rcs "[$r6,$r7]" '{status:"CONVERGED",rounds:7,max_rounds:5,repo_type:"claude-plugin",round_changelists:$rcs, final_changelist:{summary:{critical:0,high:0,low:1,blocking:0,conflicts:0},blocking:[],suggestions:[]}}' > "$ST"
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qF -- "**Demoted by the extension bar (effective threshold = \`0.15\`):**"
+  [ "$(echo "$output" | grep -cF -- 'effective threshold = `0.10`')" -eq 0 ]
+}
+
+@test "#2577 AC6 mixed: the heading keeps the base threshold, and only the extension row is marked" {
+  ext_demoted_status 1
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qF -- "**Demoted by the risk threshold (\`corner_case_risk_threshold\` = \`0.04\`):**"
+  echo "$output" | grep -qxF -- '| `mutation drops the check` — `tests/a.bats:10` | 1 | 0.03 | 0.4 | 0.012 | base view; a weak test |'
+  echo "$output" | grep -qxF -- '| `stale cache never invalidated` — `app.py:2000` | 6 | 0.15 | 0.4 | 0.06 (extension bar, threshold 0.10) | rare input; a wrong message |'
+  # the base-bar entry keeps its #1921 shape in the hidden block
+  [ "$(hidden_json | jq -c '[.risk_demoted[] | keys | length]')" = '[8,10]' ]
+}

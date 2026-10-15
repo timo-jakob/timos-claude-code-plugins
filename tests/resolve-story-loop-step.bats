@@ -3927,3 +3927,158 @@ RISK_APP='[{"file":"app.py","line":1,"dimension":"bugs","title":"print without f
   [ "$(jq -r '.next_ref' <<<"$json")" = "reference/review-loop/exit-2-stale-findings.md" ]
   [ -f "$skill_dir/$(jq -r '.next_ref' <<<"$json")" ]
 }
+
+# --- #2577: the extension bar -------------------------------------------------
+# A WARNING assessed at p 0.15 x impact 0.4 = risk 0.060: above a 0.04 base,
+# below the 0.10 extension default. Round 1 is the ceiling (--max-rounds 1), a
+# grant buys round 2, and the extension round demotes what the normal round kept.
+
+ext_warn() {  # $1 = line, $2 = title
+  printf '[{"severity":"WARNING","dimension":"bugs","file":"app.py","line":%d,"title":"%s","description":"d","reviewer":"r"}]' "$1" "$2"
+}
+ext_risk() {  # $1 = line, $2 = title
+  printf '[{"file":"app.py","line":%d,"dimension":"bugs","title":"%s","p":0.15,"p_why":"needs a rare input","impact":0.4,"impact_why":"a wrong message"}]' "$1" "$2"
+}
+
+# round 1 at the ceiling with the risk-0.060 WARNING, then a grant of +3 ($1 =
+# record-grant's --source, default human). The grant's echoed ceiling is left in
+# $EXT_CEILING: the documented resume passes it as --max-rounds
+# (reference/interactive/extension-grant.md step 5; the automatic grant resumes
+# at the ceiling record-grant.zsh echoed).
+ext_round1_and_grant() {
+  ext_warn 1 "print without flush" > "$F"
+  ext_risk 1 "print without flush" > "$BATS_TEST_TMPDIR/risk-1.json"
+  step --max-rounds 1 --status-file "$BATS_TEST_TMPDIR/st.json" --risk "$BATS_TEST_TMPDIR/risk-1.json"
+  [ "round 1: $status" = "round 1: 13" ]
+  run -0 --separate-stderr zsh "$REPO_ROOT/development/skills/resolve-issue/scripts/record-grant.zsh" \
+    --work-dir "$WD" --status "$BATS_TEST_TMPDIR/st.json" --add 3 --source "${1:-human}"
+  EXT_CEILING="$output"
+  echo "print(2)" > "$R/app.py"   # the in-session fix
+  ext_warn 2000 "stale cache never invalidated" > "$F"
+  ext_risk 2000 "stale cache never invalidated" > "$BATS_TEST_TMPDIR/risk-2.json"
+}
+
+@test "#2577 AC1 base 0.04, extension unset: the risk-0.060 WARNING blocks in a normal round and is demoted in the extension round" {
+  export corner_case_risk_threshold=0.04
+  unset extension_risk_threshold
+  ext_round1_and_grant
+  [ "$EXT_CEILING" = "4" ]
+  # round 1 (normal): kept blocking under the base, no extension mark
+  jq -e '.summary.blocking == 1 and (.blocking[0].risk_assessment | .threshold == "0.04" and .threshold_thousandths == 40 and (has("bar") | not))' "$WD/changelist-1.json" >/dev/null
+  # round 2 (extension, bought by the grant), resumed as documented with the
+  # RAISED ceiling: the flag ties the sidecar, so the source is "flag" — the
+  # grant ledger, not the flag, makes it an extension round
+  step --resume --max-rounds "$EXT_CEILING" --status-file "$BATS_TEST_TMPDIR/st.json" --risk "$BATS_TEST_TMPDIR/risk-2.json"
+  [ "$(echo "$output" | jq -r '.max_rounds_source')" = "flag" ]
+  jq -e '.summary.blocking == 0 and .summary.risk_demoted == 1 and (.suggestions[0] | .demoted == true and .risk_assessment.risk_thousandths == 60 and .risk_assessment.threshold == "0.10" and .risk_assessment.threshold_thousandths == 100 and .risk_assessment.bar == "extension")' "$WD/changelist-2.json" >/dev/null
+}
+
+@test "#2577 AC1 a resume that passes the ORIGINAL --max-rounds detects the extension round too (the sidecar is adopted)" {
+  export corner_case_risk_threshold=0.04
+  unset extension_risk_threshold
+  ext_round1_and_grant
+  step --resume --max-rounds 1 --status-file "$BATS_TEST_TMPDIR/st.json" --risk "$BATS_TEST_TMPDIR/risk-2.json"
+  [ "$(echo "$output" | jq -r '.max_rounds_source')" = "work-dir" ]
+  jq -e '.summary.blocking == 0 and (.suggestions[0] | .demoted == true and .risk_assessment.bar == "extension")' "$WD/changelist-2.json" >/dev/null
+}
+
+@test "#2577 AC1 an AUTOMATIC grant resumed at its echoed ceiling makes an extension round as well" {
+  export corner_case_risk_threshold=0.04
+  unset extension_risk_threshold
+  ext_round1_and_grant automatic
+  # the automatic cap (2 x the original 1) cuts the +3 to a ceiling of 2
+  [ "$EXT_CEILING" = "2" ]
+  step --resume --max-rounds "$EXT_CEILING" --status-file "$BATS_TEST_TMPDIR/st.json" --risk "$BATS_TEST_TMPDIR/risk-2.json"
+  jq -e '.summary.blocking == 0 and (.suggestions[0] | .demoted == true and .risk_assessment.bar == "extension")' "$WD/changelist-2.json" >/dev/null
+}
+
+@test "#2577 the closing full sweep of a grant-extended run is an extension round: the risk-0.060 WARNING is demoted" {
+  export corner_case_risk_threshold=0.04
+  unset extension_risk_threshold
+  printf '%s' "$CRIT" > "$F"
+  step --max-rounds 1 --status-file "$BATS_TEST_TMPDIR/st.json"
+  [ "round 1: $status" = "round 1: 13" ]
+  run -0 --separate-stderr zsh "$REPO_ROOT/development/skills/resolve-issue/scripts/record-grant.zsh" \
+    --work-dir "$WD" --status "$BATS_TEST_TMPDIR/st.json" --add 1
+  [ "$output" = "2" ]
+  echo "print(2)" > "$R/fixed.py"
+  printf '[]' > "$F"
+  step --resume --max-rounds 2 --status-file "$BATS_TEST_TMPDIR/st.json"
+  [ "$status" -eq 20 ]
+  [ "$(cat "$WD/.closing-sweep")" = "3" ]
+  # round 3 is the closing sweep granted one round past the granted ceiling
+  ext_warn 1 "print without flush" > "$F"
+  ext_risk 1 "print without flush" > "$BATS_TEST_TMPDIR/risk-3.json"
+  step --resume --max-rounds 2 --status-file "$BATS_TEST_TMPDIR/st.json" --risk "$BATS_TEST_TMPDIR/risk-3.json"
+  [ "$(echo "$output" | jq '.closing_sweep_granted')" = "true" ]
+  jq -e '.summary.blocking == 0 and .summary.risk_demoted == 1 and (.suggestions[0] | .demoted == true and .risk_assessment.risk_thousandths == 60 and .risk_assessment.bar == "extension")' "$WD/changelist-3.json" >/dev/null
+}
+
+@test "#2577 AC2 the closing sweep of a run with NO grant keeps the base bar: the same WARNING still blocks" {
+  export corner_case_risk_threshold=0.04
+  unset extension_risk_threshold
+  printf '%s' "$CRIT" > "$F"
+  step --max-rounds 2
+  [ "$status" -eq 20 ]
+  echo "print(2)" > "$R/fixed.py"
+  printf '[]' > "$F"
+  step --resume --max-rounds 2
+  [ "$status" -eq 20 ]
+  [ "$(cat "$WD/.closing-sweep")" = "3" ]
+  # round 3 is past --max-rounds, but no grant bought it
+  ext_warn 1 "print without flush" > "$F"
+  ext_risk 1 "print without flush" > "$BATS_TEST_TMPDIR/risk-3.json"
+  step --resume --max-rounds 2 --risk "$BATS_TEST_TMPDIR/risk-3.json"
+  [ "$(echo "$output" | jq -r '.max_rounds_source')" = "flag" ]
+  jq -e '.summary.blocking == 1 and (.blocking[0].risk_assessment | .threshold == "0.04" and .risk_thousandths == 60 and (has("bar") | not))' "$WD/changelist-3.json" >/dev/null
+}
+
+@test "#2577 AC3 base off: the extension round still applies the 0.10 default to --risk" {
+  unset corner_case_risk_threshold extension_risk_threshold
+  ext_round1_and_grant
+  # round 1 (normal, base off): --risk forwarded unread, so no stamp at all
+  jq -e '.summary.blocking == 1 and (.blocking[0] | has("risk_assessment") | not)' "$WD/changelist-1.json" >/dev/null
+  step --resume --max-rounds "$EXT_CEILING" --status-file "$BATS_TEST_TMPDIR/st.json" --risk "$BATS_TEST_TMPDIR/risk-2.json"
+  jq -e '.summary.blocking == 0 and (.suggestions[0] | .demoted == true and .risk_assessment.threshold_thousandths == 100 and .risk_assessment.bar == "extension")' "$WD/changelist-2.json" >/dev/null
+}
+
+@test "#2577 AC3 base off: a malformed --risk is refused up front in an extension round, and forwarded unread when the bar is off" {
+  unset corner_case_risk_threshold extension_risk_threshold
+  ext_round1_and_grant
+  printf 'not json\n' > "$BATS_TEST_TMPDIR/bad.json"
+  # unset (the 0.10 default) and an invalid value (which behaves as unset) both
+  # keep the bar on, so the loop refuses the file before anything is written
+  local v
+  for v in UNSET abc; do
+    if [ "$v" = UNSET ]; then unset extension_risk_threshold; else export extension_risk_threshold="$v"; fi
+    run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+      zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" --resume --max-rounds "$EXT_CEILING" \
+      --status-file "$BATS_TEST_TMPDIR/st.json" --risk "$BATS_TEST_TMPDIR/bad.json"
+    [ "$v: $status" = "$v: 2" ]
+    # the path is the canonicalised one (`:A`), so match the message and the name
+    contains "$stderr" "resolve-story-loop: --risk is not exactly one JSON array: "
+    contains "$stderr" "/bad.json"
+    [ ! -e "$WD/changelist-2.json" ]
+  done
+  # extension_risk_threshold=0 turns the bar off: the file is forwarded unread
+  export extension_risk_threshold=0
+  step --resume --max-rounds "$EXT_CEILING" --status-file "$BATS_TEST_TMPDIR/st.json" --risk "$BATS_TEST_TMPDIR/bad.json"
+  [ -f "$WD/changelist-2.json" ]
+  jq -e '.summary.blocking == 1 and (.blocking[0] | has("risk_assessment") | not)' "$WD/changelist-2.json" >/dev/null
+}
+
+@test "#2577 AC3 base off: a normal round is byte-identical with or without --risk, whatever extension_risk_threshold says" {
+  unset corner_case_risk_threshold
+  printf '%s' "$WARN_APP" > "$F"
+  printf '%s' "$RISK_APP" > "$BATS_TEST_TMPDIR/risk-1.json"
+  local v
+  for v in UNSET 0.5 0 abc; do
+    rm -rf "$WD" "$BATS_TEST_TMPDIR/wd-plain"
+    if [ "$v" = UNSET ]; then unset extension_risk_threshold; else export extension_risk_threshold="$v"; fi
+    step --risk "$BATS_TEST_TMPDIR/risk-1.json"
+    [ "$status" -eq 20 ]
+    step --work-dir "$BATS_TEST_TMPDIR/wd-plain"
+    [ "$status" -eq 20 ]
+    cmp "$WD/changelist-1.json" "$BATS_TEST_TMPDIR/wd-plain/changelist-1.json"
+  done
+}

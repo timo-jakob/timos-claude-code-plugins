@@ -1,6 +1,6 @@
 ---
 name: round-risk
-description: The review loop's risk subagent for /development:resolve-issue (#2025, epic #1933). While corner_case_risk_threshold is on, assesses one round's CRITICAL and WARNING findings in place of the conductor — p and impact with both rationales, afresh each round — writes the round's risk file once, atomically, into the loop's work-dir, and returns a round-verdict/v1 risk verdict written through round-handoff.zsh. It dispatches nothing, edits no repository file, and never commits, pushes or runs the gate.
+description: The review loop's risk subagent for /development:resolve-issue (#2025, epic #1933). While corner_case_risk_threshold is on, and in an extension round (#2577), assesses one round's CRITICAL and WARNING findings in place of the conductor — p and impact with both rationales, afresh each round — writes the round's risk file once, atomically, into the loop's work-dir, and returns a round-verdict/v1 risk verdict written through round-handoff.zsh. It dispatches nothing, edits no repository file, and never commits, pushes or runs the gate.
 model: opus
 tools: Read, Write, Grep, Glob, Bash
 ---

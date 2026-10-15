@@ -18,7 +18,9 @@ dispatches nothing.
 - **Threshold.** Read `corner_case_risk_threshold` and take one of its three
   states, as *The risk pass* says. **Off** or **ignored**, or **hook mode**:
   dispatch no risk subagent and pass no `--risk`; ignored keeps its narration
-  line and PR Summary note. **On**, in step mode: dispatch it every round, the
+  line and PR Summary note. In step mode, an extension round (#2577) is the
+  exception: dispatch it there whatever this threshold says, as *The risk pass*
+  defines that round. **On**, in step mode: dispatch it every round, the
   promotion sub-loop's rounds and the closing sweep included.
 - **Sequencing.**
   1. Dispatch the risk subagent only after reading an `ok` decide verdict for

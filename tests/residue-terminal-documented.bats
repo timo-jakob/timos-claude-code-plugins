@@ -1238,7 +1238,7 @@ sweepable() {
   local t; t="$(flat "$f")"
   local -a needles=(
     'printenv corner_case_risk_threshold'
-    '**Off** (unset, empty, any spelling of zero): skip this pass.'
+    '**Off** (unset, empty, any spelling of zero): skip this pass, except in an extension round (below).'
     '**Ignored** (not a decimal in [0, 1] with at most three decimals): behave as off'
     'whose severity is `CRITICAL` or `WARNING` after the decided pass'
     'Use the definitions `reference/residue/risk-threshold.md` § *1. Assess every residual blocker* gives'

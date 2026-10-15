@@ -4563,9 +4563,10 @@ false_trips,adjudicated_dropped}, blocking[], suggestions[], conflicts[],
 non_converging, false_trips[], escalation_reasons[] }`, where each `blocking[]` item additionally
 carries `false_trip: bool` (#983), `class` when `--fix-touched` was given
 (#1435), and, when the overlay raised it,
-`promoted: true` (#995). With `corner_case_risk_threshold` on and `--risk` given,
-an assessed item also carries `risk_assessment`, a demoted one `demoted: true`,
-and the summary `risk_demoted` — see *Runtime setting:
+`promoted: true` (#995). With `corner_case_risk_threshold` on, or in an
+extension round (#2577), and `--risk` given, an assessed item also carries
+`risk_assessment` (with `bar: "extension"` in an extension round), a demoted one
+`demoted: true`, and the summary `risk_demoted` — see *Runtime setting:
 `corner_case_risk_threshold`* (#1921). A fourth stamp, **`decided: "red"|"green"` (#1584)**,
 rides on **every** item — `blocking[]` and `suggestions[]` alike — when the
 round decided the claim the merged item is titled from. A `green` record does
@@ -8298,6 +8299,41 @@ file more (epic #1795: 3 children became 21).
     non-empty. The hidden `waived_low` still lists demoted items, because the
     Approver folds it into its risk register; only the rendered waived list
     leaves them out.
+- **Extension bar (#2577): a raised bar in rounds a grant bought.** An
+  **extension round** is one a recorded grant paid for: the work-dir's grant
+  ledger `grants.jsonl`, which `record-grant.zsh` appends to for human and
+  automatic grants alike (#2576), is non-empty and the round is past the
+  `original_max_rounds` its first line records. It is decided from the ledger,
+  never from the resume's `--max-rounds`, because the documented resume after a
+  grant passes the raised ceiling as that flag. With no readable ledger the
+  fallback is past `--max-rounds` with `max_rounds_source: "work-dir"`. The #1434
+  closing sweep of a run with no grant is not one; the closing sweep of an
+  extended run is. `resolve-story-loop.zsh` decides it and passes
+  `consolidate-findings.zsh --extension`.
+  - **Value:** `extension_risk_threshold`, parsed by the same library rule.
+    Unset or `""` is the **default, `0.10`**; any spelling of zero turns the
+    extension bar **off**, and extension rounds then consolidate exactly like
+    normal ones; a value the rule does not admit is **ignored**, behaves as the
+    default and is announced on stderr and once in the PR Summary.
+  - **Effective bar:** `max(corner_case_risk_threshold when on,
+    extension_risk_threshold)`, so an extension round never blocks on less than
+    a normal round. With the base off the bar still applies: the conductor runs
+    the risk pass in extension rounds, and the loop then validates `--risk` up
+    front. Normal rounds with the base off are byte-identical.
+  - **Same demotion, marked.** The exemptions are the demotion's own (`CRITICAL`,
+    promoted, tool-red). Every stamp records the effective `threshold` and
+    `threshold_thousandths` plus `bar: "extension"`; the progress block's count
+    line then reads `demoted by the extension bar (effective threshold = V)`, and
+    the dossier marks each such row and adds `bar` and `threshold` to its
+    `risk_demoted` entry.
+  - **Why 0.10.** 576 per-finding assessments in 174 `risk-<R>.json` files
+    written by the #1921 risk pass: 58% are below `0.04`, 81% below `0.10` and
+    91% below `0.15`. At a `0.04` base 243 of them block; at `0.10`, 109 still
+    do. The sample includes `CRITICAL`s (never demoted) and re-raised findings
+    once per round; the telemetry JSONL records no per-finding risk.
+  - **Untouched:** the residue builder keeps reading `corner_case_risk_threshold`
+    alone (#2580), and a human grant's free-text `severity_bar` still steers the
+    fix subagent on what the risk bar left blocking.
 
 The procedures are `development/skills/resolve-issue/reference/residue/risk-threshold.md`,
 § *Risk threshold — assess before filing (#1920)*, which amends the frozen
