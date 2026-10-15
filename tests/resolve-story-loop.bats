@@ -4423,7 +4423,7 @@ JSON
   clean_loop
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r 'keys_unsorted | join(",")')" = \
-    "status,rounds,max_rounds,effective_max_rounds,max_rounds_source,promotion_phase,closing_sweep_granted,possible_false_trip_auto_continues,carry_unconfirmed,repo_type,review_skill,topic_review_skills,escalation_reasons,residue_replaced_reasons,history,round_changelists,final_changelist,next_ref" ]
+    "status,rounds,max_rounds,effective_max_rounds,max_rounds_source,grants,promotion_phase,closing_sweep_granted,possible_false_trip_auto_continues,carry_unconfirmed,repo_type,review_skill,topic_review_skills,escalation_reasons,residue_replaced_reasons,history,round_changelists,final_changelist,next_ref" ]
 }
 
 @test "#1072 a plan whose topic_review_skills is missing or not an array of strings is an internal error, never exported" {
@@ -4596,4 +4596,88 @@ next_ref_table() {
   loop --max-rounds 2 --review-cmd "$(residue_review touched.py)" --fix-cmd "$residue_fix"
   [ "$status" -eq 14 ]
   [ "$(echo "$output" | jq -r '.next_ref')" = "reference/residue/branch.md" ]
+}
+
+# ---- the unattended automatic grant (#2576), end to end ----------------------
+#
+# A run whose blocking count falls (2 -> 1, the second round's blocker a new
+# one, nothing carried, no CRITICAL on the last round) exhausts its budget; the convergence verdict
+# passes; record-grant.zsh --source automatic raises the ceiling; and the very
+# next --resume runs under it and converges with no prompt — the grant counted
+# as automatic in the status JSON.
+
+@test "#2576 END-TO-END: a falling, unstuck run is granted +3 automatically and resumes to CONVERGED" {
+  WD="$BATS_TEST_TMPDIR/wd-auto"
+  local ST="$BATS_TEST_TMPDIR/auto-status.json" CNT="$BATS_TEST_TMPDIR/auto-round"
+  # round 1 carries a CRITICAL so the (still live, until #2580) residue terminal
+  # cannot fire on the two-round window; the LAST round's is a WARNING only
+  local TWO='[{"severity":"CRITICAL","dimension":"bugs","file":"app.py","line":1,"title":"first","description":"d","reviewer":"r"},{"severity":"WARNING","dimension":"bugs","file":"app.py","line":2,"title":"second","description":"d","reviewer":"r"}]'
+  local ONE='[{"severity":"WARNING","dimension":"tests","file":"app.py","line":400,"title":"a different one","description":"d","reviewer":"r"}]'
+  local REV="$BATS_TEST_TMPDIR/auto-review.sh"
+  printf '%s\n' '#!/usr/bin/env bash' \
+    "c=\$(cat '$CNT' 2>/dev/null || echo 0); c=\$((c + 1)); echo \"\$c\" > '$CNT'" \
+    "if [ \"\$c\" -eq 1 ]; then printf '%s' '$TWO' > \"\$REVIEW_FINDINGS\"; else printf '%s' '$ONE' > \"\$REVIEW_FINDINGS\"; fi" > "$REV"
+  chmod +x "$REV"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 2 --status-file "$ST" \
+    --review-cmd "$REV" --fix-cmd 'true'
+  [ "$status" -eq 13 ] || { echo "status=$status"; echo "$output" | jq -c '{status, h: [.history[] | {blocking, non_converging}], esc: .escalation_reasons}'; return 1; }
+  [ "$(jq -c '[.history[].blocking]' "$ST")" = '[2,1]' ]
+
+  local BE="$REPO_ROOT/development/skills/resolve-issue/scripts/build-escalation.zsh"
+  run zsh "$BE" --status "$ST" --format verdict
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.converging' <<<"$output")" = "true" ]
+
+  local RG="$REPO_ROOT/development/skills/resolve-issue/scripts/record-grant.zsh"
+  run --separate-stderr zsh "$RG" --work-dir "$WD" --status "$ST" --add 3 --source automatic
+  [ "$status" -eq 0 ]
+  [ "$output" = "4" ]   # 2 + 3 = 5, cut to the cap of 2 x the original 2
+
+  resume_clean "$WD" 2
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  [ "$(echo "$output" | jq '.effective_max_rounds')" -eq 4 ]
+  [ "$(echo "$output" | jq -c '.grants')" = '{"human":0,"automatic":1}' ]
+}
+
+@test "#2576 grants is always present, {0,0} with no ledger, and a fresh run clears the ledger" {
+  WD="$BATS_TEST_TMPDIR/wd-ledger"
+  seed_resumable "$WD"
+  [ "$(echo "$output" | jq -c '.grants')" = '{"human":0,"automatic":0}' ]
+  printf '%s\n' '{"source":"human","add":3,"ceiling":4,"original_max_rounds":1}' > "$WD/grants.jsonl"
+  # a FRESH run on the same work-dir must not inherit the previous run's grants
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 1 \
+    --review-cmd 'printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  [ ! -e "$WD/grants.jsonl" ]
+  [ "$(echo "$output" | jq -c '.grants')" = '{"human":0,"automatic":0}' ]
+}
+
+@test "#2576 the cap bounds GRANTS only: a capped automatic grant still gets its one closing-sweep round" {
+  # --max-rounds 1: the automatic cap is 2, so the grant is cut to a ceiling of
+  # 2. A zero-blocker delta round 2 at that ceiling still promotes the closing
+  # full sweep to round 3 — one past the cap, once, the #1434 safety net.
+  WD="$BATS_TEST_TMPDIR/wd-capsweep"
+  local ST="$BATS_TEST_TMPDIR/capsweep-status.json"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 1 --status-file "$ST" \
+    --review-cmd 'printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  [ "$status" -eq 13 ]
+  local RG="$REPO_ROOT/development/skills/resolve-issue/scripts/record-grant.zsh"
+  run --separate-stderr zsh "$RG" --work-dir "$WD" --status "$ST" --add 3 --source automatic
+  [ "$status" -eq 0 ]
+  [ "$output" = "2" ]
+  # the granted round's fix pass, as the conductor applies it before resuming:
+  # it moves the tree, so round 2 is a DELTA round (a zero-blocker one)
+  echo "x = 2" > "$R/helper.py"
+  resume_clean "$WD" 1
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  [ "$(echo "$output" | jq '.rounds')" -eq 3 ]
+  # the grant's ceiling stays 2; the sweep's one round is what reads as 3
+  [ "$(cat "$WD/.max-rounds")" = "2" ]
+  [ "$(echo "$output" | jq '.effective_max_rounds')" -eq 3 ]
+  [ "$(echo "$output" | jq '.closing_sweep_granted')" = "true" ]
+  [ "$(echo "$output" | jq -c '.grants')" = '{"human":0,"automatic":1}' ]
 }

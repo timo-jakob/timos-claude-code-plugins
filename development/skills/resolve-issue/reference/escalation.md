@@ -4,9 +4,9 @@ On-demand reference for `development/skills/resolve-issue/SKILL.md` — read it 
 step that points here is reached, never up front.
 
 It carries the escalation terminal — the typed comment taken directly on an
-autonomous run or an `ESCALATE_CONFLICT` / `ESCALATE_AMBIGUOUS` exit, and on
-an interactive `BUDGET_EXHAUSTED` / `ESCALATE_NO_CONVERGENCE` only once the
-interactive extension (pointed at below) has not converged the run.
+`ESCALATE_CONFLICT` / `ESCALATE_AMBIGUOUS` exit, and on a `BUDGET_EXHAUSTED` /
+`ESCALATE_NO_CONVERGENCE` only once the interactive extension (attended) or the
+automatic grant (unattended), both pointed at below, has not converged the run.
 
 Every `<!-- moved: … -->` block below is byte-identical to the text it was
 carved out of; `scripts/verify-reference-move.zsh` proves that against the
@@ -17,6 +17,22 @@ pinned pre-move commit, and is what keeps this file honest.
 Whether a human is present is §0a's determination, read from
 `scripts/resolve-session.zsh`: `attended` takes the interactive arm, `unattended`
 takes the autonomous arm and never prompts.
+
+**An unattended run first tries an automatic grant (#2576).** On a
+`BUDGET_EXHAUSTED` or `ESCALATE_NO_CONVERGENCE` exit in mode `unattended`, run
+`build-escalation.zsh --status <status.json> --format verdict` before any
+comment. On `"converging": true`, run `record-grant.zsh --work-dir <work-dir>
+--status <status.json> --add 3 --source automatic`. Then, exactly as a human
+grant does (step 5 in `reference/interactive/extension-grant.md`, with its
+amendments in `reference/interactive/extension-ceiling.md`: the run's
+`loop_args` and `--carry-accounting`), apply one fix pass and take the next
+round's boundary, resuming with `--max-rounds` set to the ceiling
+`record-grant.zsh` echoed, and never prompt. Another `BUDGET_EXHAUSTED` or
+`ESCALATE_NO_CONVERGENCE` comes back to this paragraph, never to the extension's
+steps 1–2. A failing verdict, and `record-grant.zsh`'s exit 3 (no headroom under
+its cap of 2 × the original `--max-rounds`), both take the terminal below
+unchanged. An attended run never takes this branch; it gets the interactive
+extension.
 
 <!-- moved: escalation-head -->
 A bad escalation costs a human an afternoon; a good one costs two minutes. On

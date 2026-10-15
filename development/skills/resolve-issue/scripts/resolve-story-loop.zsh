@@ -42,6 +42,9 @@
 #     adopted by `--resume` below, so a grant reaches the loop mechanically
 #     instead of living in the conductor's memory across a context that
 #     compacts. Like its siblings it is per-RUN and cleared on a fresh start.
+#     `<work-dir>/grants.jsonl` is its ledger (#2576): one line per grant,
+#     human or automatic, appended by the same writer, counted into the status
+#     JSON's always-present `grants` and cleared with it.
 # A fifth per-run work-dir file, `<work-dir>/.possible-false-trip-continued`
 # (#1498), records the identities this run has already spent its one automatic
 # all-ambiguous continuation on. One line per identity, tab-separated:
@@ -828,6 +831,15 @@ emit_and_exit() {
   # directory — never to the target repo, since the plugin lives in the plugin
   # cache and a repo-relative path would resolve nowhere. The table is closed;
   # every status it does not name (CONVERGED, SKIPPED, ERROR) carries null.
+  # grants (#2576) is ALWAYS present: how many grants record-grant.zsh logged
+  # in this run's ledger, by source. An absent or unreadable ledger counts 0/0,
+  # which is a run with no grant — never a reason to fail the status.
+  local grants_json='{"human":0,"automatic":0}'
+  if [[ -s "$work_dir/grants.jsonl" ]]; then
+    grants_json=$(jq -sc '{human: ([.[] | select(.source == "human")] | length),
+                           automatic: ([.[] | select(.source == "automatic")] | length)}' \
+      "$work_dir/grants.jsonl" 2>/dev/null) || grants_json='{"human":0,"automatic":0}'
+  fi
   local next_ref=""
   case "$st" in
     AWAITING_FIX)           next_ref="reference/review-loop/exit-20-awaiting-fix.md" ;;
@@ -844,9 +856,9 @@ emit_and_exit() {
     --argjson clists "$clists" --argjson promotion_phase "$promotion_phase" \
     --argjson granted "$granted_json" --argjson residue_replaced "$residue_replaced" \
     --argjson pftc "$pft_continues" --argjson cu "$carry_unconfirmed_json" \
-    --argjson topics "$topic_review_skills" \
+    --argjson topics "$topic_review_skills" --argjson grants "$grants_json" \
     '{status:$status, rounds:$rounds, max_rounds:$max,
-      effective_max_rounds:$effmax, max_rounds_source:$maxsrc,
+      effective_max_rounds:$effmax, max_rounds_source:$maxsrc, grants:$grants,
       promotion_phase:$promotion_phase, closing_sweep_granted:$granted,
       possible_false_trip_auto_continues:$pftc,
       carry_unconfirmed:$cu,
@@ -2415,8 +2427,8 @@ else
   # never reported as this run's rounds.
   rm_state_err=$(rm -f -- "$work_dir"/tree-*.txt(N) "$work_dir"/dispatch-tree-*.txt(N) "$work_dir"/verify-*.json(N) "$closing_sweep_file" \
     "$pft_marker" "$max_rounds_file" "$work_dir"/.max-rounds.tmp.*(N) "$work_dir"/fix-touched-*.txt(N) "$work_dir"/fix-base-*.txt(N) \
-    "$work_dir"/gate-[0-9]*.json(N) "$work_dir/.selected-attest" 2>&1) || \
-    print -ru2 -- "resolve-story-loop: could not clear the previous run's iteration state in $work_dir (${rm_state_err}) — a foreign fix-verification carry, closing-sweep marker, possible-false-trip marker, max-rounds sidecar (.max-rounds, .max-rounds.tmp.*), fix-touched set or gate record may be adopted (#1434, #1435, #1498, #1576, #1973)"
+    "$work_dir"/gate-[0-9]*.json(N) "$work_dir/.selected-attest" "$work_dir/grants.jsonl" 2>&1) || \
+    print -ru2 -- "resolve-story-loop: could not clear the previous run's iteration state in $work_dir (${rm_state_err}) — a foreign fix-verification carry, closing-sweep marker, possible-false-trip marker, max-rounds sidecar (.max-rounds, .max-rounds.tmp.*), grant ledger, fix-touched set or gate record may be adopted (#1434, #1435, #1498, #1576, #1973, #2576)"
   print -r -- '[]' > "$adjudicated_file" || {
     print -u2 -- "resolve-story-loop: could not initialise $adjudicated_file"; exit 1 }
   # (the telemetry run-id sidecar is cleared far earlier — see the #995 note

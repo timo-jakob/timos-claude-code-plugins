@@ -1171,3 +1171,120 @@ EOF
   [ -z "$output" ]
   contains "$stderr" "build-escalation: --branch requires a value (got the flag --compare-url)"
 }
+
+# --- the convergence verdict (#2576) ------------------------------------------
+#
+# One judgement read by both the attended grant prompt and the unattended
+# automatic grant. vstat builds a status from a per-round list of blocking
+# items: `n` plain new blockers, plus the last round's own items when given.
+
+# vstat <status> <counts-json-array> [<last-round-blocking-json>]
+vstat() {
+  jq -n --arg st "$1" --argjson counts "$2" --argjson last "${3:-null}" '
+    def plain(n): [range(n) | {priority:"Warning", dimension:"bugs", file:"a.py", line:., title:"t\(.)", non_converging:false}];
+    ($counts | length) as $n
+    | {status:$st, rounds:$n, max_rounds:5,
+       history:[range($n) as $i | {round:($i+1), blocking:$counts[$i], conflicts:0}],
+       round_changelists:[range($n) as $i
+         | {round:($i+1),
+            blocking:(if ($i == $n - 1) and ($last != null) then $last else plain($counts[$i]) end)}],
+       final_changelist:{blocking:[]}}' > "$ST"
+}
+
+verdict() {
+  run --separate-stderr zsh "$S" --status "$ST" --format verdict
+  [ "$status" -eq 0 ] || { echo "verdict exited $status: $stderr"; return 1; }
+}
+
+@test "#2576 verdict PASSES on a falling series with nothing carried and no CRITICAL" {
+  vstat BUDGET_EXHAUSTED '[17,2,0,7,4]'
+  verdict
+  [ "$(jq -c '{converging, failures, trend}' <<<"$output")" = '{"converging":true,"failures":[],"trend":"improving"}' ]
+  # it is ONE JSON object and nothing else
+  [ "$(grep -c '' <<<"$output")" -eq 1 ]
+}
+
+@test "#2576 verdict fails on trend: the #2122 series ending 4 -> 5, and 2 -> 0 -> 7" {
+  vstat BUDGET_EXHAUSTED '[17,2,0,7,4,5]'
+  verdict
+  [ "$(jq -c '{converging, failures}' <<<"$output")" = '{"converging":false,"failures":["trend"]}' ]
+  vstat ESCALATE_NO_CONVERGENCE '[2,0,7]'
+  verdict
+  [ "$(jq -c '.failures' <<<"$output")" = '["trend"]' ]
+  # a flat series is not falling either
+  vstat BUDGET_EXHAUSTED '[3,3]'
+  verdict
+  [ "$(jq -c '.failures' <<<"$output")" = '["trend"]' ]
+}
+
+@test "#2576 verdict fails as stuck on a carried blocker that is not a flagged false trip" {
+  vstat ESCALATE_NO_CONVERGENCE '[3,1]' '[{"priority":"Warning","dimension":"tests","file":"b.py","line":3,"title":"s","non_converging":true}]'
+  verdict
+  [ "$(jq -c '{converging, failures, carried}' <<<"$output")" = '{"converging":false,"failures":["stuck"],"carried":1}' ]
+}
+
+@test "#2576 a carried match flagged possible_false_trip is not stuck" {
+  vstat ESCALATE_NO_CONVERGENCE '[3,1]' '[{"priority":"Warning","dimension":"tests","file":"b.py","line":3,"title":"s","non_converging":true,"possible_false_trip":true}]'
+  verdict
+  [ "$(jq -c '{converging, failures, false_trips}' <<<"$output")" = '{"converging":true,"failures":[],"false_trips":1}' ]
+}
+
+@test "#2576 an unstamped last round cannot show nothing is stuck, so it fails as stuck" {
+  vstat BUDGET_EXHAUSTED '[3,1]' '[{"priority":"Warning","dimension":"tests","file":"b.py","line":3,"title":"s"}]'
+  verdict
+  [ "$(jq -c '{failures, carried}' <<<"$output")" = '{"failures":["stuck"],"carried":null}' ]
+}
+
+@test "#2576 verdict fails as critical when the last round has a Critical open" {
+  vstat BUDGET_EXHAUSTED '[3,1]' '[{"priority":"Critical","dimension":"bugs","file":"c.py","line":9,"title":"c","non_converging":false}]'
+  verdict
+  [ "$(jq -c '{failures, critical}' <<<"$output")" = '{"failures":["critical"],"critical":1}' ]
+}
+
+@test "#2576 verdict fails as too-few-rounds on a single round" {
+  vstat ESCALATE_NO_CONVERGENCE '[2]'
+  verdict
+  [ "$(jq -c '{converging, failures, trend}' <<<"$output")" = '{"converging":false,"failures":["too-few-rounds"],"trend":null}' ]
+}
+
+@test "#2576 every failing condition is listed, in order" {
+  vstat BUDGET_EXHAUSTED '[1,2]' '[{"priority":"Critical","dimension":"bugs","file":"c.py","line":9,"title":"c","non_converging":true},{"priority":"Warning","dimension":"bugs","file":"d.py","line":1,"title":"d","non_converging":false}]'
+  verdict
+  [ "$(jq -c '.failures' <<<"$output")" = '["trend","stuck","critical"]' ]
+}
+
+@test "#2576 the attended summary names the verdict and recommends +3 only when it passes" {
+  vstat BUDGET_EXHAUSTED '[4,2]'
+  run zsh "$S" --status "$ST" --format summary
+  [ "$status" -eq 0 ]
+  contains "$output" "**Convergence verdict:** passes (falling, nothing stuck, no CRITICAL) — **+3 rounds** is the recommended option."
+  vstat BUDGET_EXHAUSTED '[2,4]'
+  run zsh "$S" --status "$ST" --format summary
+  [ "$status" -eq 0 ]
+  contains "$output" "**Convergence verdict:** fails (trend) — more rounds alone are not recommended; give guidance, waive or stop."
+  run grep -cF '+3 rounds** is the recommended option' <<<"$output"
+  [ "$status" -eq 1 ]
+}
+
+@test "#2576 --format accepts verdict and still refuses anything else" {
+  vstat BUDGET_EXHAUSTED '[4,2]'
+  run --separate-stderr zsh "$S" --status "$ST" --format json
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  contains "$stderr" "--format must be 'comment', 'summary' or 'verdict'"
+}
+
+@test "#2576 the extension recommends +3 only on a passing verdict, and the escalation shard grants automatically" {
+  local ext esc
+  ext="$(tr '\n' ' ' < "$REPO_ROOT/development/skills/resolve-issue/reference/interactive/extension.md" | tr -s ' ')"
+  esc="$(tr '\n' ' ' < "$REPO_ROOT/development/skills/resolve-issue/reference/escalation.md" | tr -s ' ')"
+  contains "$ext" "Step 1's summary ends with a **Convergence verdict** line, the same verdict the unattended automatic grant reads (\`build-escalation.zsh --format verdict\`)."
+  contains "$ext" '**The convergence verdict decides the recommendation (#2576).** Step 1'"'"'s summary ends'
+  contains "$ext" 'In step 2, mark **Grant +3 rounds** on `BUDGET_EXHAUSTED` as recommended only when that line reads *passes*. When it fails, recommend no bare-rounds option, and name the failing conditions the line lists.'
+  contains "$ext" 'A human grant is recorded with `record-grant.zsh --source human`, the default.'
+  contains "$esc" '**An unattended run first tries an automatic grant (#2576).** On a `BUDGET_EXHAUSTED` or `ESCALATE_NO_CONVERGENCE` exit in mode `unattended`, run `build-escalation.zsh --status <status.json> --format verdict` before any comment. On `"converging": true`, run `record-grant.zsh --work-dir <work-dir> --status <status.json> --add 3 --source automatic`.'
+  contains "$esc" 'Then, exactly as a human grant does (step 5 in `reference/interactive/extension-grant.md`, with its amendments in `reference/interactive/extension-ceiling.md`: the run'"'"'s `loop_args` and `--carry-accounting`), apply one fix pass and take the next round'"'"'s boundary, resuming with `--max-rounds` set to the ceiling `record-grant.zsh` echoed, and never prompt. Another `BUDGET_EXHAUSTED` or `ESCALATE_NO_CONVERGENCE` comes back to this paragraph, never to the extension'"'"'s steps 1–2.'
+  contains "$esc" 'A failing verdict, and `record-grant.zsh`'"'"'s exit 3 (no headroom under its cap of 2 × the original `--max-rounds`), both take the terminal below unchanged.'
+  contains "$esc" 'An attended run never takes this branch; it gets the interactive extension.'
+  contains "$(tr '\n' ' ' < "$REPO_ROOT/development/skills/resolve-issue/SKILL.md" | tr -s ' ')" 'comment, and on an unattended run they first try the automatic grant (#2576); the others go straight to the typed comment.'
+}

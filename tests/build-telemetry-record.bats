@@ -71,7 +71,7 @@ EOF
   done
   # ...and exactly the payload keys it does own
   [ "$(echo "$output" | jq -c 'keys_unsorted | sort')" = \
-    '["convergence_assessment","escalation","findings_by_round","fixed","gate_by_round","max_rounds","possible_false_trip_auto_continues","promotion_phase","rounds","skipped_dimensions_by_round","status","step_wall_s_by_round","waived"]' ]
+    '["convergence_assessment","escalation","findings_by_round","fixed","gate_by_round","grants","max_rounds","possible_false_trip_auto_continues","promotion_phase","rounds","skipped_dimensions_by_round","status","step_wall_s_by_round","waived"]' ]
 }
 
 @test "#2197 step_wall_s_by_round is read from history[]: a timed round, and a pre-key line reads null" {
@@ -747,4 +747,15 @@ EOF
            payload:{status:"CONVERGED", rounds:2, max_rounds:5,
                     possible_false_trip_auto_continues:3}}' > "$b"
   diff <(zsh "$ROLL" "$a" 2>&1) <(zsh "$ROLL" "$b" 2>&1)
+}
+
+@test "#2576 grants are copied by source, and an older status with no grants key reads as none" {
+  printf '%s\n' '{"status":"CONVERGED","rounds":6,"max_rounds":5,"grants":{"human":1,"automatic":2}}' > "$ST"
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c '.grants')" = '{"human":1,"automatic":2}' ]
+  printf '%s\n' '{"status":"CONVERGED","rounds":2,"max_rounds":5}' > "$ST"
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c '.grants')" = '{"human":0,"automatic":0}' ]
 }

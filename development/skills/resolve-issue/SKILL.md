@@ -867,7 +867,8 @@ with a status JSON + code:
   On an interactive run (mode `attended`, §0a's `resolve-session.zsh`),
   `BUDGET_EXHAUSTED` and `ESCALATE_NO_CONVERGENCE` first
   enter the **interactive extension** (offer more rounds / guidance) before any
-  comment; the others, and all autonomous runs, go straight to the typed comment.
+  comment, and on an unattended run they first try the automatic grant (#2576);
+  the others go straight to the typed comment.
   Whichever ending the run then reaches, emit the run's record (§7) before
   stopping. That includes a loop `ERROR` that stops the run.
 

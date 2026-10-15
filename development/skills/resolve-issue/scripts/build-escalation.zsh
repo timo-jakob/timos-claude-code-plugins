@@ -14,7 +14,7 @@
 #
 # Usage:
 #   build-escalation.zsh --status FILE [--issue N] [--branch NAME] [--compare-url URL]
-#                        [--format comment|summary] [--grants N]
+#                        [--format comment|summary|verdict] [--grants N]
 #     --status       the loop's status JSON (required)
 #     --issue        issue number (for the header, optional)
 #     --branch       pushed branch holding the diff-so-far (optional, linked)
@@ -22,10 +22,27 @@
 #     --format       `comment` (default) for the issue comment the skill posts,
 #                    or `summary` for the in-session grant prompt — same data,
 #                    minus the options list, branch note and marker. Both render
-#                    the #1435 blocker-class histogram.
+#                    the #1435 blocker-class histogram. `verdict` (#2576) prints
+#                    ONLY the machine-readable convergence verdict, one JSON
+#                    object (see below), for the unattended automatic grant.
 #     --grants       interactive-extension grants already consumed (optional;
 #                    rendered against the soft cap so the human sees the
 #                    context at the grant prompt, #969)
+#
+# The convergence verdict (#2576) is the one judgement both the attended grant
+# prompt (`summary`) and the unattended automatic grant (`verdict`) read:
+#   {"converging": bool, "failures": [...], "series": [N, ...],
+#    "trend": "improving"|"flat"|"regressing"|null, "carried": N|null,
+#    "false_trips": N, "critical": N}
+# It passes (`converging: true`, `failures: []`) only when all three hold:
+#   falling   the last round's blocking count is strictly below the round
+#             before it — the assessment's `improving` trend. Fewer than two
+#             rounds fails as `too-few-rounds`; anything else as `trend`.
+#   unstuck   no carried blocker remains on the last round other than matches
+#             flagged possible_false_trip (carried minus false trips is 0). An
+#             unstamped last round cannot show that, so it fails as `stuck`.
+#   no CRITICAL  the last round's Critical count is 0, else `critical`.
+# `failures` lists every failing condition, in that order.
 #
 # Exit codes: 0 ok · 2 usage · 1 internal (unreadable / invalid status JSON)
 
@@ -57,14 +74,14 @@ while [[ $# -gt 0 ]]; do
   --compare-url) _need_val "$1" $# "${2:-}"; compare_url="$2"; shift 2 ;;
   --format) _need_val "$1" $# "${2:-}"; fmt="$2"; shift 2 ;;
   --grants) _need_val "$1" $# "${2:-}"; grants="$2"; shift 2 ;;
-  -h|--help) print -r -- "usage: build-escalation.zsh --status FILE [--issue N] [--branch NAME] [--compare-url URL] [--format comment|summary] [--grants N]"; exit 0 ;;
+  -h|--help) print -r -- "usage: build-escalation.zsh --status FILE [--issue N] [--branch NAME] [--compare-url URL] [--format comment|summary|verdict] [--grants N]"; exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
   *) print -u2 -- "unexpected argument: $1"; exit 2 ;;
   esac
 done
-[[ -n "$status_file" ]] || { print -u2 -- "usage: build-escalation.zsh --status FILE [--issue N] [--branch NAME] [--compare-url URL] [--format comment|summary] [--grants N]"; exit 2 }
-[[ "$fmt" == "comment" || "$fmt" == "summary" ]] || {
-  print -u2 -- "build-escalation: --format must be 'comment' or 'summary'"; exit 2 }
+[[ -n "$status_file" ]] || { print -u2 -- "usage: build-escalation.zsh --status FILE [--issue N] [--branch NAME] [--compare-url URL] [--format comment|summary|verdict] [--grants N]"; exit 2 }
+[[ "$fmt" == "comment" || "$fmt" == "summary" || "$fmt" == "verdict" ]] || {
+  print -u2 -- "build-escalation: --format must be 'comment', 'summary' or 'verdict'"; exit 2 }
 [[ -z "$grants" || "$grants" == <-> ]] || {
   print -u2 -- "build-escalation: --grants must be a non-negative integer (got: $grants)"; exit 2 }
 [[ -z "$issue" || "$issue" == <-> ]] || {
@@ -357,6 +374,45 @@ assessment=$(jq -r --arg st "$st" '
          end)
     end' "$status_file")
 
+# --- the convergence verdict (#2576): the header states the three conditions.
+# It reuses the assessment's own reading of the last round — the stamped test,
+# the carried and false-trip counts, the improving trend — so the prompt and
+# the automatic grant cannot disagree with the prose above.
+local verdict=""
+verdict=$(jq -c '
+  (.round_changelists // []) as $rs
+  | ([ $rs[] | ((.blocking // []) | length) ]) as $series
+  | (if ($rs | length) == 0 then [] else ($rs[-1].blocking // []) end) as $lastblk
+  | ((($lastblk | length) == 0) or ([ $lastblk[] | has("non_converging") ] | all)) as $stamped
+  | (if $stamped then ([ $lastblk[] | select(.non_converging == true) ] | length) else null end) as $carried
+  | (if $stamped then ([ $lastblk[] | select((.non_converging == true) and (.possible_false_trip == true)) ] | length) else 0 end) as $ftrips
+  | (if ($rs | length) == 0 then 0
+     else ($rs[-1].summary.critical
+           // ([ $lastblk[] | select(((.severity // .priority // "") | ascii_upcase) == "CRITICAL") ] | length)) end) as $crit
+  | (if ($series | length) < 2 then null
+     elif $series[-1] < $series[-2] then "improving"
+     elif $series[-1] == $series[-2] then "flat"
+     else "regressing" end) as $trend
+  | [ (if ($series | length) < 2 then "too-few-rounds" else empty end),
+      (if ($series | length) >= 2 and $trend != "improving" then "trend" else empty end),
+      (if ($carried == null) or (($carried - $ftrips) > 0) then "stuck" else empty end),
+      (if $crit > 0 then "critical" else empty end) ] as $f
+  | {converging: ($f | length == 0), failures: $f, series: $series, trend: $trend,
+     carried: $carried, false_trips: $ftrips, critical: $crit}' "$status_file") || {
+  print -u2 -- "build-escalation: could not build the convergence verdict from $status_file"; exit 1 }
+
+if [[ "$fmt" == "verdict" ]]; then
+  print -r -- "$verdict"
+  exit 0
+fi
+
+local verdict_line=""
+if [[ "$(jq -r '.converging' <<< "$verdict")" == "true" ]]; then
+  verdict_line="passes (falling, nothing stuck, no CRITICAL) — **+3 rounds** is the recommended option."
+else
+  verdict_line="fails ($(jq -r '.failures | join(", ")' <<< "$verdict")) — more rounds alone are not recommended; give guidance, waive or stop."
+fi
+
 # --- summary render (interactive, #562 resume): shares the extraction above,
 # omits options / branch note / marker — the skill drives the live options.
 if [[ "$fmt" == "summary" ]]; then
@@ -392,6 +448,8 @@ if [[ "$fmt" == "summary" ]]; then
       print -r --
       print -r -- "$assessment"
     fi
+    print -r --
+    print -r -- "**Convergence verdict:** ${verdict_line}"
     if [[ -n "$grants" ]]; then
       print -r --
       print -r -- "Grants consumed: ${grants} (soft cap 5)."
