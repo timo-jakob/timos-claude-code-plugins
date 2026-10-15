@@ -481,3 +481,11 @@ grant() {
   [ ! -e "$W/.max-rounds" ]
   [ ! -e "$W/grants.jsonl" ]
 }
+
+@test "#2576 the cap bounds grants only, and both statements of it say the closing sweep may still follow" {
+  grep -qF '# grants keep today'"'"'s rules. The cap bounds the GRANTS only: the one' "$S"
+  grep -qF '# follow a capped grant, once — the safety net is never skipped for the cap.' "$S"
+  local arch
+  arch="$(tr '\n' ' ' < "$REPO_ROOT/ARCHITECTURE.md" | tr -s ' ')"
+  contains "$arch" 'The cap bounds the grants only: the one closing-sweep round the loop grants beyond its ceiling (#1434) may still follow a capped grant, once, as the safety net it is'
+}

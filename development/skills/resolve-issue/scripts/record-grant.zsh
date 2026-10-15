@@ -44,7 +44,9 @@
 # run's first grant, carried in every ledger line as `original_max_rounds`. A
 # grant that would cross it is cut to the remaining headroom; with no headroom
 # nothing is written, nothing is printed on stdout, and the exit is 3. Human
-# grants keep today's rules.
+# grants keep today's rules. The cap bounds the GRANTS only: the one
+# closing-sweep round the loop grants beyond its ceiling (#1434) may still
+# follow a capped grant, once — the safety net is never skipped for the cap.
 #
 # The BASE ceiling is the one ACTUALLY IN FORCE, floored by any grant this
 # work-dir already carries:

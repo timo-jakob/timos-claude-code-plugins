@@ -5171,7 +5171,9 @@ closing sweep. On a run with no grant the two agree, so every existing
 grant (`--source human`, the default, or `automatic`), cleared with the
 sidecar on a fresh run and `{0, 0}` on a run with no grant; an automatic grant
 never takes the ceiling past 2 × the run's original `--max-rounds`, and is cut
-to the remaining headroom or, with none, not made (exit 3) — and
+to the remaining headroom or, with none, not made (exit 3). The cap bounds the
+grants only: the one closing-sweep round the loop grants beyond its ceiling
+(#1434) may still follow a capped grant, once, as the safety net it is — and
 `possible_false_trip_auto_continues` (#1498) is an
 **always-present** integer — how many rounds the run took on the all-ambiguous
 auto-continue above, `0` on every run that never did, counting *continuations*

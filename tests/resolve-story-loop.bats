@@ -4653,3 +4653,31 @@ next_ref_table() {
   [ ! -e "$WD/grants.jsonl" ]
   [ "$(echo "$output" | jq -c '.grants')" = '{"human":0,"automatic":0}' ]
 }
+
+@test "#2576 the cap bounds GRANTS only: a capped automatic grant still gets its one closing-sweep round" {
+  # --max-rounds 1: the automatic cap is 2, so the grant is cut to a ceiling of
+  # 2. A zero-blocker delta round 2 at that ceiling still promotes the closing
+  # full sweep to round 3 — one past the cap, once, the #1434 safety net.
+  WD="$BATS_TEST_TMPDIR/wd-capsweep"
+  local ST="$BATS_TEST_TMPDIR/capsweep-status.json"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 1 --status-file "$ST" \
+    --review-cmd 'printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"' --fix-cmd 'true'
+  [ "$status" -eq 13 ]
+  local RG="$REPO_ROOT/development/skills/resolve-issue/scripts/record-grant.zsh"
+  run --separate-stderr zsh "$RG" --work-dir "$WD" --status "$ST" --add 3 --source automatic
+  [ "$status" -eq 0 ]
+  [ "$output" = "2" ]
+  # the granted round's fix pass, as the conductor applies it before resuming:
+  # it moves the tree, so round 2 is a DELTA round (a zero-blocker one)
+  echo "x = 2" > "$R/helper.py"
+  resume_clean "$WD" 1
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  [ "$(echo "$output" | jq '.rounds')" -eq 3 ]
+  # the grant's ceiling stays 2; the sweep's one round is what reads as 3
+  [ "$(cat "$WD/.max-rounds")" = "2" ]
+  [ "$(echo "$output" | jq '.effective_max_rounds')" -eq 3 ]
+  [ "$(echo "$output" | jq '.closing_sweep_granted')" = "true" ]
+  [ "$(echo "$output" | jq -c '.grants')" = '{"human":0,"automatic":1}' ]
+}
