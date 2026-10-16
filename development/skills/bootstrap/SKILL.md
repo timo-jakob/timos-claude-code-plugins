@@ -2087,8 +2087,10 @@ For each detected language, merge in the appropriate config from
   as `--gate-command`, so the workflow, the hook and `.maintenance.yml` carry
   one command (`make check` unless one is recorded):
   - `templates/languages/go/Makefile.tmpl` → `Makefile` — the one place the
-    gate's non-Go tools are pinned (golangci-lint, diff-cover, and trivy when
-    it is the declared vulnerability tool); its targets are `fmt`, `lint`,
+    gate's installed non-Go tools are pinned (golangci-lint, diff-cover,
+    trivy, gitleaks and pre-commit, whatever `tools.vulnerabilities`
+    declares, since the gate's license and secrets stages run under every
+    declaration, #2614); its targets are `fmt`, `lint`,
     `test`, `generate`, `build`, `image`, `check` (runs
     `scripts/go-gate.zsh`), `hooks` (`git config core.hooksPath hooks`) and
     `setup` (`hooks`, then installs the pinned tools into `.tools/`). A
@@ -2102,15 +2104,25 @@ For each detected language, merge in the appropriate config from
     `hooks` and `setup` targets and the variables they read when absent,
     with `check` running `zsh scripts/go-gate.zsh`.
   - `templates/languages/go/scripts/go-gate.zsh.tmpl` →
-    `scripts/go-gate.zsh` (`chmod +x`) — stages 1–6 in order: format, lint,
+    `scripts/go-gate.zsh` (`chmod +x`) — stages 1–13 in order: format, lint,
     proto (`buf lint`, then `buf breaking` against the base branch; skipped
     with a notice when there is no `buf.yaml`, and `buf breaking` alone when
     the base branch has none), generation drift (skipped without
     `buf.gen.yaml`), tests with the 90% new-code floor (`diff-cover` against
-    the base branch; skipped with a notice when no `*.go` file changed), and
-    vulnerabilities (`govulncheck`, plus `trivy fs` when trivy is declared;
-    skipped when `tools.vulnerabilities` is `none`). The first failing stage
-    stops the run.
+    the base branch; skipped with a notice when no `*.go` file changed),
+    vulnerabilities (`govulncheck`, plus `trivy fs --scanners
+    vuln,secret,misconfig` when trivy is declared; skipped when
+    `tools.vulnerabilities` is `none`), then the source-only checks CI runs
+    (#2614): secrets (`gitleaks git` over the base branch's `..HEAD`), no
+    cluster deploy (`scripts/check-no-cluster-deploy.zsh`), license (`trivy
+    fs --scanners license`, under every `tools.vulnerabilities` value),
+    pre-commit (`SKIP=gitleaks,trivy-fs pre-commit run --all-files`; skipped
+    without `.pre-commit-config.yaml`), contracts lint and contracts semver
+    (`contracts-lint.yml`'s Spectral run and `contracts-semver.yml`'s
+    checker, each only when its paths changed against the base branch), and
+    docs (`docs.yml`'s `mkdocs build --strict` and pandoc manuals, only when
+    a docs source changed). Each skipped stage prints a notice. The first
+    failing stage stops the run.
   - `templates/languages/go/hooks/pre-commit.tmpl` → `hooks/pre-commit` and
     `templates/languages/go/hooks/pre-push.tmpl` → `hooks/pre-push` (both
     `chmod +x`) — pre-commit runs the pre-commit framework's
@@ -2118,15 +2130,21 @@ For each detected language, merge in the appropriate config from
     `pre-push` stage, which `core.hooksPath` would otherwise bypass.
   - `templates/languages/go/.github/workflows/go-ci.yml.tmpl` →
     `.github/workflows/go-ci.yml` — one job, `gate` (`fetch-depth: 0`,
-    `make setup`, then the gate command). Step 4 requires its `gate` context
-    in addition to the existing Go contexts.
+    `make setup`, then the gate command), whose two `if: always()` upload
+    steps keep the contract semver findings (`contracts-semver-<pr>`) and the
+    coverage reports (`coverage-reports`) the gate wrote. Step 4 requires
+    its `gate` context in addition to the existing Go contexts.
   - Pin the gate's Go tools through the module's `tool` directives:
-    `go get -tool golang.org/x/vuln/cmd/govulncheck@latest` and
-    `go get -tool github.com/boumenot/gocover-cobertura@latest`, plus
+    `go get -tool golang.org/x/vuln/cmd/govulncheck@latest`,
+    `go get -tool github.com/boumenot/gocover-cobertura@latest` and
+    `go get -tool github.com/mikefarah/yq/v4@latest`, plus
     `go get -tool github.com/bufbuild/buf/cmd/buf@latest` only when
-    `buf.yaml` or `buf.gen.yaml` is present. The gate runs them as
-    `go tool <name>`, so `go.mod` is their one pin. Skip this when there is
-    no `go.mod` yet, and name the three commands in the final report.
+    `buf.yaml` or `buf.gen.yaml` is present, and
+    `go get -tool github.com/oasdiff/oasdiff@latest` only when §3i renders
+    the contracts machinery. The gate runs them as `go tool <name>`, and
+    reaches the checker scripts that call `yq` and `oasdiff` by name through
+    shims, so `go.mod` is their one pin. Skip this when there is no `go.mod`
+    yet, and name the commands in the final report.
 
   **Copy** three more files (no placeholders in the first; render the last
   two):
@@ -5780,7 +5798,8 @@ push; CI's required `gate` check still gates every PR. **Never run
 `install-precommit-hooks.zsh` on a Go primary:** with `core.hooksPath` set, git
 ignores `.git/hooks/`, so its install would wire nothing. Of the steps above,
 only the `pre-commit` install offer applies, since `hooks/pre-commit` calls it;
-Step 4a.5 runs as on every other language path.
+Step 4a.5 runs as on every other language path, but before that gate run, whose
+`pre-commit` stage would otherwise fail on the files 4a.5 normalizes.
 
 ### 4a.5. Normalize pre-existing files: `pre-commit run --all-files` until clean
 
@@ -6880,7 +6899,7 @@ checklist replaces the SonarCloud items with:
 For a **Go primary** (#2122) the checklist adds, each only when it is genuinely
 outstanding:
 
-- (unless Step 4a's gate ran a stage, not `skip every stage`, and its
+- (unless Step 4a's gate ran its Go stages, not `skip format — no Go package yet`, and its
   install-iac-hooks.zsh exited 0 or found the hook already wired) Run `make setup`
   — it wires `core.hooksPath`, then installs the gate's pinned tools — then the gate command
   (`make check` unless one is recorded), which the pre-push hook runs on every

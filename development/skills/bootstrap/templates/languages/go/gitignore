@@ -9,6 +9,9 @@
 coverage.out
 coverage.txt
 coverage.xml
+# the gate's contract semver findings, which CI uploads for the Approver (#2614)
+contracts-semver-findings.json
+contracts-ops-semver-findings.json
 # the gate's pinned tools, installed by `make setup` (#2122)
 .tools/
 vendor/

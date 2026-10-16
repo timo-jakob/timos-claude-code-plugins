@@ -36,3 +36,27 @@ jobs:
       - run: make setup
       - run: |
           {{GATE_COMMAND}}
+      # What the gate's stages wrote (#2614); an upload is a step, not a check. The gate stops at
+      # its first failing stage, so each file exists only when the stage that writes it was
+      # reached: the coverage reports from the tests stage, the findings from the contracts
+      # semver stage, which runs only on a contract change. Finding none is expected.
+      - name: upload the contract semver findings
+        # for the Approver, which reads them even when the gate failed
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: contracts-semver-${{ github.event.pull_request.number || github.sha }}
+          path: |
+            contracts-semver-findings.json
+            contracts-ops-semver-findings.json
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: upload the coverage reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-reports
+          path: |
+            coverage.out
+            coverage.xml
+          if-no-files-found: ignore

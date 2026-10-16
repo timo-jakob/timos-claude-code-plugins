@@ -7,19 +7,18 @@
 #   make fmt | lint | test | generate | build | image   developer conveniences, one tool each
 #
 # `check` runs the gate MECHANISM, scripts/go-gate.zsh, through zsh rather than by its executable bit, so a
-# checkout that lost the mode still gates. golangci-lint, diff-cover and trivy are pinned HERE and nowhere
-# else: `make setup` installs exactly these versions locally and in CI. buf, govulncheck and gocover-cobertura
-# are Go tool dependencies pinned in go.mod and run with `go tool`.
+# checkout that lost the mode still gates. golangci-lint, diff-cover, trivy, gitleaks and pre-commit are pinned
+# HERE and nowhere else: `make setup` installs exactly these versions locally and in CI, whatever
+# .maintenance.yml declares, since the gate's license and secrets stages run under every declaration. buf,
+# govulncheck, gocover-cobertura, oasdiff and yq are Go tool dependencies pinned in go.mod and run with `go tool`.
 GOLANGCI_LINT_VERSION := v2.12.2
 DIFF_COVER_VERSION := 10.2.0
 TRIVY_VERSION := v0.72.0
+GITLEAKS_VERSION := v8.30.1
+PRE_COMMIT_VERSION := 4.3.0
 
 TOOLS := $(CURDIR)/.tools
 export PATH := $(TOOLS)/bin:$(PATH)
-
-# trivy is installed only when .maintenance.yml declares it (tools.vulnerabilities: trivy)
-VULNERABILITIES := $(shell awk '/^tools:/ { t = 1; next } t && /^[^[:space:]\#]/ { t = 0 } \
-	t && $$1 == "vulnerabilities:" { print $$2; exit }' .maintenance.yml 2>/dev/null)
 
 .PHONY: check hooks setup fmt lint test generate build image
 
@@ -43,11 +42,25 @@ setup: hooks
 		"$(TOOLS)/venv/bin/pip" install --quiet "diff-cover==$(DIFF_COVER_VERSION)" && \
 		ln -sf "$(TOOLS)/venv/bin/diff-cover" "$(TOOLS)/bin/diff-cover"; \
 	fi
-	@if [ "$(VULNERABILITIES)" = trivy ] && ! trivy --version 2>/dev/null | grep -qx "Version: $(TRIVY_VERSION:v%=%)"; then \
+	@if ! "$(TOOLS)/venv/bin/pip" show pre-commit 2>/dev/null | grep -qx "Version: $(PRE_COMMIT_VERSION)"; then \
+		echo "make setup: installing pre-commit $(PRE_COMMIT_VERSION)"; \
+		python3 -m venv "$(TOOLS)/venv" && \
+		"$(TOOLS)/venv/bin/pip" install --quiet "pre-commit==$(PRE_COMMIT_VERSION)" && \
+		ln -sf "$(TOOLS)/venv/bin/pre-commit" "$(TOOLS)/bin/pre-commit"; \
+	fi
+	@if ! trivy --version 2>/dev/null | grep -qx "Version: $(TRIVY_VERSION:v%=%)"; then \
 		echo "make setup: installing trivy $(TRIVY_VERSION)"; \
 		curl -sSfL -o "$(TOOLS)/install-trivy.sh" \
 			"https://raw.githubusercontent.com/aquasecurity/trivy/$(TRIVY_VERSION)/contrib/install.sh" && \
 			sh "$(TOOLS)/install-trivy.sh" -b "$(TOOLS)/bin" "$(TRIVY_VERSION)" || exit 1; \
+	fi
+	@if ! gitleaks version 2>/dev/null | grep -qxE "v?$(GITLEAKS_VERSION:v%=%)"; then \
+		echo "make setup: installing gitleaks $(GITLEAKS_VERSION)"; \
+		os="$$(uname -s | tr '[:upper:]' '[:lower:]')"; \
+		case "$$(uname -m)" in x86_64 | amd64) arch=x64 ;; *) arch=arm64 ;; esac; \
+		url="https://github.com/gitleaks/gitleaks/releases/download/$(GITLEAKS_VERSION)"; \
+		curl -sSfL -o "$(TOOLS)/gitleaks.tar.gz" "$$url/gitleaks_$(GITLEAKS_VERSION:v%=%)_$${os}_$${arch}.tar.gz" && \
+			tar -xzf "$(TOOLS)/gitleaks.tar.gz" -C "$(TOOLS)/bin" gitleaks || exit 1; \
 	fi
 
 fmt:

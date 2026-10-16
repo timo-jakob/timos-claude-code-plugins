@@ -2597,8 +2597,9 @@ restatement_sites() {
     case "$rel" in
       # wiring and index sites, which carry no restatement of the rules
       development/skills/bootstrap/scripts/*) continue ;;
+      development/skills/bootstrap/templates/languages/go/scripts/go-gate.zsh.tmpl) continue ;;
       development/skills/bootstrap/templates/common/scripts/*) continue ;;  # authoritative
-      docs/how-to/index.md|MAINTAINING.md|ARCHITECTURE.md) continue ;;
+      docs/how-to/index.md|docs/reference/repo-scripts.md|MAINTAINING.md|ARCHITECTURE.md) continue ;;
     esac
     printf '%s\n' "$REPO_ROOT/$rel"
   done < <(cd "$REPO_ROOT" && grep -rln 'no-cluster-deploy' \
@@ -3052,6 +3053,8 @@ guarded_creator_gaps() {
     case "$rel" in
       # wiring and index sites, which carry no restatement of the rules
       development/skills/bootstrap/scripts/*|docs/how-to/index.md|MAINTAINING.md|ARCHITECTURE.md) continue ;;
+      development/skills/bootstrap/templates/languages/go/scripts/go-gate.zsh.tmpl) continue ;;
+      docs/reference/repo-scripts.md) continue ;;
       development/skills/bootstrap/templates/common/scripts/*) continue ;;  # the authoritative header
     esac
     contains "$table" "$(basename "$rel")"
