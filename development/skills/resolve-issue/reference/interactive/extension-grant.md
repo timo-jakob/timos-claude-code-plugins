@@ -137,5 +137,11 @@ takes the autonomous arm and never prompts.
    later with `/development:resolve-issue <N>`.
 <!-- /moved: interactive-extension-steps-5-7 -->
 
+**The exit-14 arm of step 5 is retired by #2580 and can no longer fire.** The
+loop never emits `CONVERGED_WITH_RESIDUE` any more, so a resumed run ends
+`CONVERGED`, another escalation, `AWAITING_FIX` or an operational error — the
+arms step 5 keeps. A round with non-critical blockers left ends
+`BUDGET_EXHAUSTED` or `ESCALATE_NO_CONVERGENCE` and comes back to step 1.
+
 **Read on:** `reference/interactive/extension-ceiling.md` amends step 5 above —
 read it BEFORE acting on step 5.

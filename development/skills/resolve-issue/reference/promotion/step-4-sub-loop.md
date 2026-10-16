@@ -5,6 +5,11 @@
      its numbering cannot restart at 1 here. -->
 <!-- markdownlint-disable MD029 -->
 
+**The residue terminal is retired (#2580).** Where the block below orders a step
+after a blocking phase that "ended `CONVERGED_WITH_RESIDUE`", that ending no
+longer exists: the loop never emits it, so the promotion phase only ever follows
+`CONVERGED`.
+
 <!-- moved: suggestion-promotion-step-4 -->
 4. **Write the promote file and run the sub-loop.** The selected identity keys
    go to a JSON array file **outside the repo** (the scratch dir the work-dir

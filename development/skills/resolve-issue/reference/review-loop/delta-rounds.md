@@ -87,8 +87,8 @@ gate is item 3's — proving a full run lifts the loop's selected-run backstop.
 
 **Why this is safe.** A selector that misses a dependency lets a regression
 surface one round late — at the closing sweep's full gate, as an ordinary red
-that step 6 fixes — never in a PR: every round that can end the run
-(`CONVERGED`, `CONVERGED_WITH_RESIDUE`) is a full-scope round, and the gate
+that step 6 fixes — never in a PR: the round that can open one (`CONVERGED`)
+is a full-scope round, and the gate
 before it is full. (The loop's own refusal of a selected attestation into the
 sweep is the backstop for a session that skipped item 3's gate; its red there
 exits `ERROR`, which is why item 3 starts the gate rather than relying on it.)

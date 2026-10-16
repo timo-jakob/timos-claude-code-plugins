@@ -20,6 +20,16 @@
 # pin literal WORDING across sites that must agree clause for clause. This pins
 # only that a TERM and its exit code are present, and each site says it in its
 # own voice — a wording pin would red on every legitimate rephrase.
+#
+# #2580 RETIRED the terminal: `CONVERGED` is the only review-loop ending that
+# opens a PR again. The sites that named the terminal are being migrated one
+# story at a time, so this suite now holds two explicit lists instead of a
+# roster: NOT_YET_MIGRATED (the sites later stories own, each of which must still
+# name the terminal until its own story migrates it and shrinks the list in the
+# same PR) and KEPT (the seven sites that keep naming it — six inside byte-frozen
+# spans, and condition-2-removed.md, which #2601 deletes whole). Every other
+# markdown site naming it is a stray, except ARCHITECTURE.md, whose telemetry
+# recipes still count historical records carrying the status.
 
 bats_require_minimum_version 1.5.0
 load assertions
@@ -35,15 +45,29 @@ setup() {
   RI_REF="$REPO_ROOT/development/skills/resolve-issue/reference"
   SKILL="$(resolve_issue_corpus "$REPO_ROOT" "$BATS_TEST_TMPDIR/resolve-issue-corpus.md")"
   SCRIPTS="$REPO_ROOT/development/skills/resolve-issue/scripts"
-  # the story's Scope §8 site list, as paths
-  ROSTER=(
-    "$SCRIPTS/resolve-story-loop.zsh"
-    "$SCRIPTS/build-dossier.zsh"
-    "$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
-    "$REPO_ROOT/development/skills/open-pr/SKILL.md"
-    "$REPO_ROOT/ARCHITECTURE.md"
-    "$REPO_ROOT/docs/explanation/review-loop.md"
-    "$REPO_ROOT/docs/reference/commands.md"
+  # #2580 AC7: the sites later stories still own, repo-relative, each with the
+  # story that migrates it. Each must still name the terminal; the story that
+  # migrates one removes it from this list in its own PR.
+  NOT_YET_MIGRATED=(
+    "development/skills/bootstrap/templates/common/approver-policy-core.md.tmpl|#2586"
+    "development/skills/resolve-issue/scripts/build-dossier.zsh|#2599"
+    "development/skills/open-pr/SKILL.md|#2599"
+    "docs/explanation/review-loop.md|#2599"
+    "docs/explanation/workflow-resolve-issue.md|#2599"
+    "development/skills/resolve-issue/scripts/build-residue-issues.zsh|#2600"
+    "development/skills/resolve-issue/reference/residue/step-1-plan.md|#2600"
+  )
+  # ...and the sites that keep naming it: six inside byte-frozen spans, plus
+  # condition-2-removed.md, kept unedited because #2601 deletes it whole. Only
+  # #2601 shrinks this set (by residue/branch.md and condition-2-removed.md).
+  KEPT=(
+    "development/skills/resolve-issue/reference/escalation.md"
+    "development/skills/resolve-issue/reference/interactive/extension-grant.md"
+    "development/skills/resolve-issue/reference/promotion/step-4-sub-loop.md"
+    "development/skills/resolve-issue/reference/promotion/step-7-terminal.md"
+    "development/skills/resolve-issue/reference/residue/branch.md"
+    "development/skills/resolve-issue/reference/review-loop/exit-20-awaiting-fix.md"
+    "development/skills/resolve-issue/reference/residue/condition-2-removed.md"
   )
 }
 
@@ -107,226 +131,105 @@ _invariant_in_awaiting_fix_branch() {
   }
 }
 
-# The §9 precondition, tied to the terminal it qualifies rather than matched
-# anywhere in the file. A file-wide topic match was not a check at all: three of
-# the required sites mention "full sweep" many times for unrelated reasons, so
-# the precondition could be deleted from the exit-table entry beside
-# CONVERGED_WITH_RESIDUE and the sweep would still pass on a leftover mention
-# hundreds of lines away. Either order, because sites state it both ways.
-# `{0,250}` and not more: BSD grep caps an interval at 255 repetitions.
-SWEEP_NEAR_TERMINAL='CONVERGED_WITH_RESIDUE.{0,250}(full sweep|closing sweep)|(full sweep|closing sweep).{0,250}CONVERGED_WITH_RESIDUE'
 
-@test "#1435 every site in the story's roster names CONVERGED_WITH_RESIDUE" {
-  local f
-  for f in "${ROSTER[@]}"; do
-    grep -q 'CONVERGED_WITH_RESIDUE' "$f" || {
-      echo "site does not name the residue terminal: $f"; return 1; }
+@test "#2580 AC7 every site not yet migrated still names the residue terminal" {
+  # A site that stops naming it has been migrated: the story that did it removes
+  # the site from NOT_YET_MIGRATED in the same PR, or this reds.
+  local e f owner
+  for e in "${NOT_YET_MIGRATED[@]}"; do
+    f="${e%%|*}"; owner="${e##*|}"
+    grep -q 'CONVERGED_WITH_RESIDUE' "$REPO_ROOT/$f" || {
+      echo "$f no longer names the residue terminal — $owner migrated it, so remove it from NOT_YET_MIGRATED"; return 1; }
   done
 }
 
-@test "#1435 the exit code 14 is stated wherever the terminal is introduced" {
-  # A status name without its code sends a reader to guess at the one thing a
-  # caller actually branches on. build-dossier is excluded on purpose: it names
-  # the terminal but never dispatches on the code.
-  #
-  # The needle is anchored to the terminal, NOT to a bare `14`: every one of
-  # these files carries the attribution `#1435`, whose own text contains `14`, so
-  # a loose match would pass on all five with every mention of the exit code
-  # deleted — a green test about nothing. Requiring `14` within a short span of
-  # `CONVERGED_WITH_RESIDUE` on the FLATTENED text ties the number to its role
-  # while still tolerating a line wrap between them.
-  #
-  # Proximity ALONE is not enough, though, and this is the trap: the real sites
-  # spell it `` `CONVERGED_WITH_RESIDUE` (#1435) `` — backtick, space, paren,
-  # hash — four non-alphanumerics, well inside the span, so `1435` itself would
-  # satisfy a needle that stops at `14`. The trailing `([^0-9]|$)` is what
-  # requires the matched `14` to be a whole number rather than a prefix of one.
-  # (`grep -E` has no lookahead, so the character class is the portable form; it
-  # still matches `(14, #1435)`, `(exit 14)` and `#   14  CONVERGED…`.)
-  # open-pr/SKILL.md is IN this list, and is the site the comment above is really
-  # about: its procedure is the one that branches on the loop's exit status when
-  # deciding whether to append the dossier. Omitting it would let
-  # "(exit 14, #1435)" be deleted from the delegated procedure with the whole
-  # suite green.
-  # residue.md and promotion.md joined this list with #1503: each INTRODUCES the
-  # terminal (residue.md's whole subject is it), so each owes the exit code
-  # beside it. Since #2056 the residue site is reference/residue/branch.md, the
-  # shard exit 14's next_ref opens. Since #2057 the promotion site is
-  # reference/promotion/step-7-terminal.md, the shard that states the exit.
-  # review-loop.md deliberately does not — it names the terminal only
-  # as a hand-off from the AWAITING_FIX branch, and the conductor's exit table is
-  # what introduces it with its code.
+@test "#2580 AC7 the kept set is exactly seven sites, and each still names the terminal" {
+  [ "${#KEPT[@]}" -eq 7 ]
   local f
-  for f in "$SCRIPTS/resolve-story-loop.zsh" \
-           "$REPO_ROOT/development/skills/resolve-issue/SKILL.md" \
-           "$REPO_ROOT/development/skills/resolve-issue/reference/residue/branch.md" \
-           "$REPO_ROOT/development/skills/resolve-issue/reference/promotion/step-7-terminal.md" \
-           "$REPO_ROOT/development/skills/open-pr/SKILL.md" \
-           "$REPO_ROOT/ARCHITECTURE.md" \
-           "$REPO_ROOT/docs/explanation/review-loop.md" \
-           "$REPO_ROOT/docs/reference/commands.md"; do
-    grep -qE 'CONVERGED_WITH_RESIDUE[^A-Za-z0-9]{0,40}(exit )?[`*]{0,2}14([^0-9]|$)' <<< "$(flat "$f")" || {
-      echo "site does not state exit 14 next to the terminal it belongs to: $f"; return 1; }
+  for f in "${KEPT[@]}"; do
+    grep -q 'CONVERGED_WITH_RESIDUE' "$REPO_ROOT/$f" || {
+      echo "kept site no longer names the residue terminal: $f"; return 1; }
   done
 }
 
-@test "#1435 non-vacuity: a distant 'full sweep' does not satisfy the §9 detector" {
-  # The detector's whole point is PROXIMITY. Prove it: a file that names the
-  # terminal and also says "full sweep" — but hundreds of characters away, which
-  # is exactly the shape a file-wide topic match accepted — must NOT satisfy it,
-  # while the same two phrases adjacent must.
-  local far="$BATS_TEST_TMPDIR/far.md" near="$BATS_TEST_TMPDIR/near.md" pad
-  pad="$(head -c 600 < /dev/zero | tr '\0' 'x')"
-  printf 'the loop may exit CONVERGED_WITH_RESIDUE here.\n%s\nand only a full sweep may declare it.\n' \
-    "$pad" > "$far"
-  run -1 grep -qiE "$SWEEP_NEAR_TERMINAL" <<< "$(flat "$far")"
-  printf 'CONVERGED_WITH_RESIDUE is declarable only from the closing full sweep.\n' > "$near"
-  grep -qiE "$SWEEP_NEAR_TERMINAL" <<< "$(flat "$near")"
-}
-
-@test "#1435 roster tripwire: exactly eighteen markdown sites name the terminal" {
-  # A derived sweep answers "do the sites agree?", never "did a site appear or
-  # vanish?" — so the roster is recorded here and a site that appears or vanishes
-  # reds until this file is updated in the same PR.
-  #
-  # It has already earned its keep: `open-pr/SKILL.md` is NOT in the story's
-  # Scope §8 list, but it owns the delegated procedure that appends the dossier,
-  # and it gated that on `CONVERGED` alone — so a residue PR would have shipped
-  # with no dossier at all. Adding it here is the tripwire working, not a
-  # loosening of it.
-  # ROOT-ANCHORED on the way in, re-relativised on the way out: all_markdown
-  # emits repo-relative paths, which a bare `xargs grep` resolves against the
-  # CALLER's cwd — so the sweep would find nothing (and the comparison would fail
-  # for a reason that has nothing to do with the roster) whenever bats runs from
-  # anywhere but the repo root. The sibling repo-wide sweep below already
-  # prefixes "$REPO_ROOT/" for the same reason.
-  local found
+@test "#2580 AC7 tripwire: every markdown site naming the terminal is on a list, or is ARCHITECTURE.md" {
+  # The derived set, root-anchored on the way in and re-relativised on the way
+  # out (all_markdown emits repo-relative paths, which a bare `xargs grep` would
+  # resolve against the caller's cwd). A migrated site that names the terminal
+  # again, or a new site that starts to, reds here. ARCHITECTURE.md is the one
+  # stated exception: its telemetry recipes and legacy attribution still count
+  # historical records carrying the status, and #2580's state-machine section
+  # names it to retire it.
+  local found want e
   found="$(all_markdown | sed "s#^#$REPO_ROOT/#" \
            | xargs grep -l 'CONVERGED_WITH_RESIDUE' 2>/dev/null \
            | sed "s#^$REPO_ROOT/##" | sort)"
-  # #1503 moved the review-loop procedure into reference/*.md, so five of these
-  # are the same sites re-homed: the conductor keeps the exit-code table (hence
-  # SKILL.md stays on the roster) while residue.md, promotion.md, escalation.md,
-  # interactive.md and review-loop.md carry the procedure behind each branch.
-  # #2055 split review-loop.md into shards, and its mentions fell into two of
-  # them: delta-rounds.md and exit-20-awaiting-fix.md. Eleven became twelve.
-  # #2056 split residue.md: its index still names the terminal, and its mentions
-  # fell into three shards — branch.md, condition-2-removed.md and
-  # step-1-plan.md. Twelve became fifteen.
-  # #2057 split promotion.md: its index no longer names the terminal, and its
-  # mentions fell into three shards — gate.md, step-4-sub-loop.md and
-  # step-7-terminal.md. Fifteen became seventeen.
-  # #2058 split interactive.md: its index no longer names the terminal, and its
-  # mentions all fell into one shard, extension-grant.md (step 5). Still
-  # seventeen.
-  # The workflow walkthrough (docs/explanation/workflow-resolve-issue.md) names
-  # the terminal among the loop's endings. Seventeen became eighteen.
-  [ "$found" = "ARCHITECTURE.md
-development/skills/bootstrap/templates/common/approver-policy-core.md.tmpl
-development/skills/open-pr/SKILL.md
-development/skills/resolve-issue/SKILL.md
-development/skills/resolve-issue/reference/escalation.md
-development/skills/resolve-issue/reference/interactive/extension-grant.md
-development/skills/resolve-issue/reference/promotion/gate.md
-development/skills/resolve-issue/reference/promotion/step-4-sub-loop.md
-development/skills/resolve-issue/reference/promotion/step-7-terminal.md
-development/skills/resolve-issue/reference/residue.md
-development/skills/resolve-issue/reference/residue/branch.md
-development/skills/resolve-issue/reference/residue/condition-2-removed.md
-development/skills/resolve-issue/reference/residue/step-1-plan.md
-development/skills/resolve-issue/reference/review-loop/delta-rounds.md
-development/skills/resolve-issue/reference/review-loop/exit-20-awaiting-fix.md
-docs/explanation/review-loop.md
-docs/explanation/workflow-resolve-issue.md
-docs/reference/commands.md" ] || {
-    echo "markdown roster changed; expected the eighteen known sites, got:"
-    echo "$found"; return 1; }
+  want="$( { printf '%s\n' "${KEPT[@]}" ARCHITECTURE.md
+             for e in "${NOT_YET_MIGRATED[@]}"; do printf '%s\n' "${e%%|*}"; done; } \
+           | grep -E '\.md(\.tmpl)?$' | sort)"
+  [ "$found" = "$want" ] || {
+    echo "the markdown sites naming the residue terminal changed; expected:"
+    echo "$want"; echo "got:"; echo "$found"; return 1; }
 }
 
-@test "#1435 the loop's own four internal sites carry the terminal" {
-  local S="$SCRIPTS/resolve-story-loop.zsh"
-  # the exit-code header block
-  grep -qE '^#   14  CONVERGED_WITH_RESIDUE' "$S"
-  # the $loop_status -> exit code map
-  grep -qE 'CONVERGED_WITH_RESIDUE\) code=14' "$S"
-  # the per-round verdict case, which is what progress.md renders
-  grep -q 'CONVERGED_WITH_RESIDUE)$' "$S"
-  # ...and the telemetry outcome mapping, whose deliberate catch-all is
-  # `failed`, so an unnamed status would be counted a failure
-  grep -qE 'CONVERGED\|CONVERGED_WITH_RESIDUE\|SKIPPED\)' "$S"
-}
-
-@test "#1435 ARCHITECTURE carries BOTH copies of the outcome mapping" {
-  # The mapping is written twice — once for v1 records, once for the v0 legacy
-  # attribution — and a half-applied edit would make the rollup disagree with
-  # itself about whether a residue run succeeded.
-  grep -q 'CONVERGED`, `CONVERGED_WITH_RESIDUE` (#1435) and `SKIPPED` → `success`' \
-    "$REPO_ROOT/ARCHITECTURE.md"
+@test "#2580 ARCHITECTURE keeps the historical mapping and drops the loop's residue arm" {
+  # The legacy attribution still reads historical records carrying the status as
+  # the success they were; the loop's own narrowing has no arm for it, since the
+  # loop no longer emits it.
   grep -q '`CONVERGED`/`CONVERGED_WITH_RESIDUE`/`SKIPPED` →' "$REPO_ROOT/ARCHITECTURE.md"
+  local t; t="$(flat "$REPO_ROOT/ARCHITECTURE.md")"
+  grep -q 'narrows onto the contract.s 4-value `outcome` enum: `CONVERGED` and `SKIPPED` → `success`' <<< "$t"
+  grep -q 'The loop has no arm for `CONVERGED_WITH_RESIDUE` (#1435) since #2580 retired it' <<< "$t"
+  run ! grep -q 'CONVERGED`, `CONVERGED_WITH_RESIDUE` (#1435) and `SKIPPED` → `success`' <<< "$t"
 }
 
-@test "#1435 no tracked markdown still asserts that ONLY CONVERGED opens a PR" {
-  # REPO-WIDE, not a roster: the failure mode this guards against is a stale
-  # claim surviving in a file nobody listed.
-  local f hits=""
-  while IFS= read -r f; do
-    local t; t="$(flat "$REPO_ROOT/$f")"
-    grep -q 'Only `CONVERGED` proceeds to commit' <<< "$t" && hits+="$f (only-CONVERGED-opens-a-PR)"$'\n'
-    grep -q 'no PR is opened until it exits `CONVERGED`\.' <<< "$t" && hits+="$f (until-it-exits-CONVERGED)"$'\n'
-    grep -q 'every run the loop \*\*converges\*\* ends on a' <<< "$t" && hits+="$f (every-converging-run-ends-full)"$'\n'
-  done < <(all_markdown)
-  [ -z "$hits" ] || { echo "stale pre-#1435 claims still present:"; echo "$hits"; return 1; }
+@test "#2580 AC5 AC10 the migrated sites state that CONVERGED is the only ending that opens a PR" {
+  # #1435 swept the tree for this claim as stale; #2580 makes it the rule again,
+  # so the sweep is inverted into positive pins at the sites that state it.
+  local skill arch
+  skill="$(flat "$REPO_ROOT/development/skills/resolve-issue/SKILL.md")"
+  arch="$(flat "$REPO_ROOT/ARCHITECTURE.md")"
+  grep -q '\*\*`CONVERGED` is the only review-loop ending that opens a PR\*\*' <<< "$skill"
+  grep -q '\*\*Exit 14 is retired (#2580)\*\* and is never reused.' <<< "$skill"
+  grep -q '\*\*`CONVERGED` is the only review-loop ending that opens a PR\*\*; no escalation has ever opened one.' <<< "$arch"
+  grep -q '### The residue terminal — retired (#1435, #2580)' "$REPO_ROOT/ARCHITECTURE.md"
+  grep -q 'A residue-shaped round now ends the way it did before #1435: `ESCALATE_NO_CONVERGENCE` (12) at a non-converging rung, `BUDGET_EXHAUSTED` (13) at the ceiling.' <<< "$arch"
+  grep -q 'Only `CONVERGED` proceeds to commit + open-pr' <<< "$arch"
+  # the frontmatter, and the page generated from it
+  local g
+  for g in "$REPO_ROOT/development/skills/resolve-issue/SKILL.md" "$REPO_ROOT/docs/reference/commands.md"; do
+    grep -q 'CONVERGED is the only review-loop ending that opens a PR: the residue terminal (exit 14) is retired' <<< "$(flat "$g")" || {
+      echo "$g does not state the rule in the frontmatter wording"; return 1; }
+  done
+  grep -q 'The residue terminal is retired (#2580), so nothing reaches this branch.' <<< "$(flat "$RI_REF/residue.md")"
 }
 
-@test "#1435 the loop's own header no longer ends its sentence at CONVERGED" {
-  # the script half of the same claim — the sweep above only reads markdown
-  run ! grep -q 'opened until this exits CONVERGED\.' "$SCRIPTS/resolve-story-loop.zsh"
+@test "#2580 AC1 the loop's header and exit table state the retirement" {
+  local t; t="$(flat "$SCRIPTS/resolve-story-loop.zsh")"
+  grep -q 'opened until this exits CONVERGED (0), the only review-loop ending that opens a # PR' <<< "$t"
+  grep -qE '^#   14  retired by #2580' "$SCRIPTS/resolve-story-loop.zsh"
+  # ...and nothing can emit it: no status, no code, no predicate, no next_ref row
+  run ! grep -q 'loop_status="CONVERGED_WITH_RESIDUE"' "$SCRIPTS/resolve-story-loop.zsh"
+  run ! grep -qE 'CONVERGED_WITH_RESIDUE\) +code=14' "$SCRIPTS/resolve-story-loop.zsh"
+  run ! grep -q '_residue_holds()' "$SCRIPTS/resolve-story-loop.zsh"
+  run ! grep -q 'next_ref="reference/residue/branch.md"' "$SCRIPTS/resolve-story-loop.zsh"
 }
 
-@test "#1435 non-vacuity: each negative needle reds on a real mutated site" {
-  # A grep for a string nobody writes passes forever. Mutate a PROSE site and a
-  # CODE site back to their pre-#1435 wording and prove each needle catches it,
-  # so a green run means the claim is genuinely gone rather than never
-  # expressible. Both file kinds, because the flattening these needles depend on
-  # can behave differently on a comment-wrapped line than on prose.
+@test "#2580 non-vacuity: the list checks and the tripwire red on a planted mutation" {
+  # (1) a not-yet-migrated site that loses the term reds the list check
   local probe="$BATS_TEST_TMPDIR/probe.md"
-
-  # (1) PROSE site — ARCHITECTURE's two-line sentence, verbatim as it stood
-  printf 'runs\n**entirely in the worktree** — nothing is pushed and no PR is opened until it\nexits `CONVERGED`. It sits in\n' > "$probe"
-  grep -q 'no PR is opened until it exits `CONVERGED`\.' <<< "$(flat "$probe")"
-
-  # (2) PROSE site — the open-pr sentence, and review-loop.md's full-sweep promise
-  printf 'Only `CONVERGED` proceeds to commit + open-pr; no escalation ever opens a PR\n' > "$probe"
-  grep -q 'Only `CONVERGED` proceeds to commit' <<< "$(flat "$probe")"
-  printf 'escalating opens no PR at all. So: every run the loop **converges** ends on a\nfull-diff review.\n' > "$probe"
-  grep -q 'every run the loop \*\*converges\*\* ends on a' <<< "$(flat "$probe")"
-
-  # (3) CODE site — the loop header comment, wrapped exactly as it was
-  local cprobe="$BATS_TEST_TMPDIR/probe.zsh"
-  printf '# round budget. Runs entirely in the worktree: nothing is pushed and no PR is\n# opened until this exits CONVERGED.\n' > "$cprobe"
-  grep -q 'opened until this exits CONVERGED\.' "$cprobe"
-
-  # (4) and the ROSTER check reds when a site loses the term
-  local roster_probe="$BATS_TEST_TMPDIR/roster.md"
-  printf 'The loop exits CONVERGED and opens a PR.\n' > "$roster_probe"
-  run ! grep -q 'CONVERGED_WITH_RESIDUE' "$roster_probe"
-
-  # (5) the exit-14 needle is NOT the bare substring `14`: a site that names the
-  # terminal and cites the issue, but never states the code, must red. Both
-  # spellings are probed — the DISTANT one, and the ADJACENT one the real sites
-  # actually use, which is the shape a proximity-only needle passes on.
-  local code_probe="$BATS_TEST_TMPDIR/code.md"
-  printf 'A run can end CONVERGED_WITH_RESIDUE instead of escalating (#1435).\n' > "$code_probe"
-  run ! grep -qE 'CONVERGED_WITH_RESIDUE[^A-Za-z0-9]{0,40}(exit )?[`*]{0,2}14([^0-9]|$)' <<< "$(flat "$code_probe")"
-  printf '### Residue: `CONVERGED_WITH_RESIDUE` (#1435)\n' > "$code_probe"
-  run ! grep -qE 'CONVERGED_WITH_RESIDUE[^A-Za-z0-9]{0,40}(exit )?[`*]{0,2}14([^0-9]|$)' <<< "$(flat "$code_probe")"
-  printf '`CONVERGED`, `CONVERGED_WITH_RESIDUE` (#1435) and `SKIPPED` are success.\n' > "$code_probe"
-  run ! grep -qE 'CONVERGED_WITH_RESIDUE[^A-Za-z0-9]{0,40}(exit )?[`*]{0,2}14([^0-9]|$)' <<< "$(flat "$code_probe")"
-  # ...and it matches when the code IS stated, in each spelling the sites use
-  printf 'ends `CONVERGED_WITH_RESIDUE` (exit 14) instead (#1435).\n' > "$code_probe"
-  grep -qE 'CONVERGED_WITH_RESIDUE[^A-Za-z0-9]{0,40}(exit )?[`*]{0,2}14([^0-9]|$)' <<< "$(flat "$code_probe")"
-  printf '#   14  CONVERGED_WITH_RESIDUE    (the run OPENS ITS PR)\n' > "$code_probe"
-  grep -qE '^#   14  CONVERGED_WITH_RESIDUE' "$code_probe"
+  printf 'The loop exits CONVERGED and opens a PR.\n' > "$probe"
+  run ! grep -q 'CONVERGED_WITH_RESIDUE' "$probe"
+  # (2) the tripwire's derivation sees a planted stray: copy a migrated site,
+  # plant the term, and the same grep the tripwire runs now finds it
+  sed 's/^## Single-issue flow$/## Single-issue flow — CONVERGED_WITH_RESIDUE/' \
+    "$REPO_ROOT/development/skills/resolve-issue/SKILL.md" > "$probe"
+  grep -q 'CONVERGED_WITH_RESIDUE' "$probe"
+  run ! grep -q 'CONVERGED_WITH_RESIDUE' "$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
+  # (3) the inverted pin reds when the rule sentence is reverted
+  sed 's/\*\*`CONVERGED` is the only review-loop ending that opens a$/**`CONVERGED` and the residue terminal open a/' \
+    "$REPO_ROOT/development/skills/resolve-issue/SKILL.md" > "$probe"
+  run ! grep -q '\*\*`CONVERGED` is the only review-loop ending that opens a PR\*\*' <<< "$(flat "$probe")"
 }
 
 @test "#1435 the residue reference actually invokes the builder, with both labels" {
@@ -411,32 +314,6 @@ docs/reference/commands.md" ] || {
   # ...and rule (a) survives, which is exactly why the roster and exit-14 tests
   # stayed green on this mutation before the pin above existed
   grep -q 'PR-opening terminal\*\* — `CONVERGED` (exit 0) \*\*or\*\* `CONVERGED_WITH_RESIDUE` (exit 14, #1435)' <<< "$tb"
-}
-
-@test "#1435 resolve-issue §6 carries its OWN dossier-append gate, pinned by content" {
-  # Round 6 pinned open-pr's two rules by content precisely because the roster
-  # tripwire counts FILES, not occurrences. The identical gap sat one file over:
-  # resolve-issue/SKILL.md §6 restates the same gate in its own words, and nothing
-  # grepped it. `CONVERGED_WITH_RESIDUE` occurs dozens of times in that file, so
-  # the roster test is satisfied whatever §6 says, and the exit-14 proximity test
-  # is satisfied by the terminal list near the top — reverting §6 to
-  # CONVERGED-only left the whole suite green while the DELEGATING skill told the
-  # operator to skip the dossier on exactly the PR that must not lose it.
-  local F="$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
-  local t; t="$(flat "$F")"
-  grep -q 'reached a \*\*PR-opening\*\* terminal (§3.5) — `CONVERGED` \*\*or\*\* `CONVERGED_WITH_RESIDUE` (#1435); those two, and no escalation — append the \*\*Review dossier\*\*' <<< "$t"
-}
-
-@test "#1435 non-vacuity: §6's gate needle reds when the clause is reverted" {
-  local F="$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
-  local m="$BATS_TEST_TMPDIR/skill.md"
-  # line-oriented, so the pattern sits inside one raw line (the clause wraps)
-  sed 's/^loop ran and reached a \*\*PR-opening\*\* terminal (§3.5) — `CONVERGED` \*\*or\*\*/loop ran and reached `CONVERGED` (§3.5), and/' "$F" > "$m"
-  local tm; tm="$(flat "$m")"
-  run ! grep -q 'reached a \*\*PR-opening\*\* terminal (§3.5) — `CONVERGED` \*\*or\*\* `CONVERGED_WITH_RESIDUE` (#1435); those two, and no escalation — append the \*\*Review dossier\*\*' <<< "$tm"
-  # the mutation is surgical: the file still names the terminal everywhere else,
-  # which is exactly why the roster and proximity tests stayed green on it
-  grep -q 'CONVERGED_WITH_RESIDUE' <<< "$tm"
 }
 
 @test "#1435 the Approver template's residue rule is pinned by CONTENT, not by filename" {
@@ -539,126 +416,6 @@ docs/reference/commands.md" ] || {
   run -1 _invariant_in_awaiting_fix_branch "$F"
 }
 
-@test "#1435 §9 every site that names exit 14 also states the full-sweep precondition" {
-  # The amendment is explicit that this is part of what exit 14 MEANS, not a
-  # separate rule filed beside it — so it belongs at the same sites, and a site
-  # that names the terminal while omitting the precondition tells a reader the
-  # loop can open a PR off a delta round, which is the defect being fixed.
-  #
-  # DERIVED since #1503, not transcribed. The old closed list did not grow when
-  # the move added five files that name the terminal, so the property had quietly
-  # stopped covering them — a roster that reds only when someone remembers to
-  # edit it. Candidates are now every markdown site naming the terminal, minus an
-  # exclusion set that is STATED and pinned rather than left to omission:
-  #
-  #   - open-pr/SKILL.md and approver-policy-core.md.tmpl are CONSUMERS — they
-  #     react to a residue PR; they never tell anyone when residue may be
-  #     declared, so the precondition is not theirs to state (both were excluded
-  #     by omission before, with no reason recorded);
-  #   - reference/{promotion,escalation,interactive}.md carry PROCEDURE
-  #     moved byte-for-byte by #1503 and frozen by verify-reference-move.zsh. The
-  #     conductor's exit table introduces the terminal and states the
-  #     precondition, and reference/review-loop.md — where the declaring round
-  #     lives — is REQUIRED below rather than excluded.
-  #   - reference/residue.md LEFT this set in #1571. Its frozen span still says
-  #     nothing about the precondition, but the section that story appended
-  #     outside the span states it while explaining which condition was removed —
-  #     so the file now satisfies the sweep on its own text. It is listed nowhere
-  #     here on purpose: re-adding it would re-permit a residue.md that never
-  #     names the precondition. #2056 split it: the #1571 section is now
-  #     reference/residue/condition-2-removed.md, and the index at the old path
-  #     states the precondition itself, so neither is listed either.
-  #   - reference/residue/{branch,step-1-plan}.md JOINED this set with #2056.
-  #     They hold only the frozen residue-branch span, cut by step, for the same
-  #     reason as the procedure files above.
-  #   - reference/promotion.md LEFT this set with #2057: its index no longer
-  #     names the terminal. The shards that do — reference/promotion/{gate,
-  #     step-4-sub-loop,step-7-terminal}.md — JOINED it in its place: they carry
-  #     the same procedure, the frozen suggestion-promotion span cut by step
-  #     (plus gate.md's enable_suggestions note, which names the terminal only
-  #     as a hand-off to the residue branch), for the same reason.
-  #   - reference/interactive.md LEFT this set with #2058: its index no longer
-  #     names the terminal. The shard that does —
-  #     reference/interactive/extension-grant.md, step 5 of the frozen
-  #     interactive-extension span — JOINED it in its place, for the same
-  #     reason.
-  #
-  # The exclusion set is itself asserted, so a NEW site naming the terminal
-  # without the precondition reds here instead of quietly joining the excluded.
-  local f t exp got
-  exp="$(printf '%s\n' \
-    'development/skills/bootstrap/templates/common/approver-policy-core.md.tmpl' \
-    'development/skills/open-pr/SKILL.md' \
-    'development/skills/resolve-issue/reference/escalation.md' \
-    'development/skills/resolve-issue/reference/interactive/extension-grant.md' \
-    'development/skills/resolve-issue/reference/promotion/gate.md' \
-    'development/skills/resolve-issue/reference/promotion/step-4-sub-loop.md' \
-    'development/skills/resolve-issue/reference/promotion/step-7-terminal.md' \
-    'development/skills/resolve-issue/reference/residue/branch.md' \
-    'development/skills/resolve-issue/reference/residue/step-1-plan.md' | sort)"
-  got=""
-  while IFS= read -r f; do
-    [ -n "$f" ] || continue
-    grep -q 'CONVERGED_WITH_RESIDUE' "$REPO_ROOT/$f" || continue
-    t="$(flat "$REPO_ROOT/$f")"
-    if grep -qiE "$SWEEP_NEAR_TERMINAL" <<< "$t"; then
-      continue
-    fi
-    got="$got$f"$'\n'
-  done < <(all_markdown)
-  got="$(printf '%s' "$got" | sort)"
-  if [ "$got" != "$exp" ]; then
-    echo "the set of exit-14 sites WITHOUT the sweep precondition changed."
-    echo "expected (the stated consumers + the frozen procedure files):"
-    printf '%s\n' "$exp"
-    echo "got:"
-    printf '%s\n' "$got"
-    return 1
-  fi
-  # ...and every site that is NOT excluded really does state it, including the
-  # loop itself and the round protocol the declaring round lives in — since
-  # #2055, both review-loop/ shards that name the terminal.
-  for f in "$SCRIPTS/resolve-story-loop.zsh" \
-           "$REPO_ROOT/development/skills/resolve-issue/SKILL.md" \
-           "$REPO_ROOT/development/skills/resolve-issue/reference/review-loop/delta-rounds.md" \
-           "$REPO_ROOT/development/skills/resolve-issue/reference/review-loop/exit-20-awaiting-fix.md" \
-           "$REPO_ROOT/ARCHITECTURE.md" \
-           "$REPO_ROOT/docs/explanation/review-loop.md" \
-           "$REPO_ROOT/docs/reference/commands.md"; do
-    t="$(flat "$f")"
-    grep -qiE "$SWEEP_NEAR_TERMINAL" <<< "$t" || {
-      echo "site names exit 14 but never the sweep precondition NEAR the terminal: $f"; return 1; }
-  done
-  # The two normative sites say it in the strong form. Since #1571 that form
-  # names the SURVIVING PAIR by their original numbers — condition 2 was removed
-  # and 3 was deliberately NOT renumbered, so "1 and 3" is the assertion, and a
-  # site that renumbers the full-sweep rule to 2 reds here. That is the point:
-  # every other surface says "condition 3" meaning the full sweep.
-  grep -q 'Conditions 1 and 3, BOTH required' <<< "$(flat "$SCRIPTS/resolve-story-loop.zsh")"
-  grep -q 'Conditions 1 and 3, BOTH required' <<< "$(flat "$REPO_ROOT/ARCHITECTURE.md")"
-
-  # PER-SITE CONTENT PINS for the two PROSE sites, because proximity alone is
-  # satisfied there by an ACCIDENT. In both files the only pair inside the
-  # ±250-char window is a neighbouring bullet about a DIFFERENT rule — the #1434
-  # one-round grant abutting the terminal's own heading — while the real
-  # precondition sits ~600-1000 flattened chars away and satisfies nothing. So
-  # the derived sweep above would stay green with the actual sentence deleted.
-  # It remains the tripwire for a NEW site; these pins hold the sentence that
-  # matters at the sites that have one.
-  grep -q 'the declaring round ran as a \*\*full sweep\*\*' \
-    <<< "$(flat "$REPO_ROOT/ARCHITECTURE.md")" || {
-    echo "ARCHITECTURE.md no longer states condition 3 (the declaring round ran as a full sweep)"
-    return 1; }
-  grep -q 'only that sweep may declare residue' \
-    <<< "$(flat "$REPO_ROOT/docs/explanation/review-loop.md")" || {
-    echo "the explanation page no longer says only the closing sweep may declare residue"
-    return 1; }
-  grep -q 'reached only from a full sweep' \
-    <<< "$(flat "$REPO_ROOT/docs/explanation/review-loop.md")" || {
-    echo "the explanation page no longer says the terminal is reached only from a full sweep"
-    return 1; }
-}
-
 @test "#1435 §9 non-vacuity: the PRE-AMENDMENT two-condition wording is gone everywhere" {
   # The pre-amendment claim, transcribed verbatim. If any site still says the
   # terminal takes two conditions IN THIS WORDING, a reader following it
@@ -710,13 +467,10 @@ docs/reference/commands.md" ] || {
   # the definition of "filed" lives with the rule, since every row depends on it
   grep -q 'means \*\*created AND parented\*\*' <<< "$t"
 
-  # the consumers POINT rather than restate
+  # the consumers POINT rather than restate. (§6's own pointer went with the
+  # residue Summary duty, #2580.)
   grep -q 'apply \*\*the remainder rule\*\*' <<< "$t"
   grep -q 'Both feed the remainder rule in step 1' <<< "$t"
-  # #1503 re-homed §6's pointer from "§3.5's remainder rule" to the file the rule
-  # now lives in; the claim it makes — §6 POINTS rather than restating — is
-  # unchanged.
-  grep -q 'decided by \*\*.reference/residue/step-1-plan.md..s remainder rule\*\*' <<< "$t"
 }
 
 @test "#1435 the arm-vs-remainder distinction is stated where the mistake is made" {
@@ -831,45 +585,6 @@ sweepable() {
   sweepable | grep -qx 'ARCHITECTURE.md'
 }
 
-@test "#1571 AC1 the predicate's header states the removal AND names the upstream rail" {
-  local t; t="$(flat "$SCRIPTS/resolve-story-loop.zsh")"
-  # the removal itself, said in words rather than left as a silent deletion
-  grep -q 'Condition 2 .* was REMOVED' <<< "$t" || {
-    echo "the header no longer records that condition 2 was removed"; return 1; }
-  # ...and WHERE the guarantee went, which is the whole reason removing it is safe
-  grep -q 'scope-findings.* filters every round.s findings' <<< "$t" || {
-    echo "the header no longer names scope-findings as the upstream rail"; return 1; }
-  # ...and WHY the round-granular reading had to go, or a later reader
-  # "restores" it and makes the terminal unreachable again.
-  #
-  # A bare `unreachable` needle does NOT do that: the same file says "the
-  # sha256sum arm is otherwise unreachable and untestable" and "that no longer
-  # makes residue unreachable on the sweep", so deleting the explanation would
-  # still match. Pin the explanation's own claim instead.
-  grep -q 'unreachable FROM the closing sweep' <<< "$t" || {
-    echo "the header no longer says why the round-granular reading was unreachable"; return 1; }
-  grep -q 'against an empty set every blocker is' <<< "$t" || {
-    echo "the header no longer gives the MECHANISM (an empty set puts every blocker outside)"; return 1; }
-}
-
-@test "#1571 AC2 the predicate reads no fix-touched set and no ceiling — one rule, both rungs" {
-  # Extracted from the FUNCTION BODY, not the file: the header legitimately
-  # discusses the retired condition at length, and a file-wide grep would be
-  # satisfied by that prose while the code still read the set.
-  local body
-  body="$(awk '/^_residue_holds\(\) \{/{f=1} f{print} f&&/^\}/{exit}' \
-    "$SCRIPTS/resolve-story-loop.zsh")"
-  [ -n "$body" ]
-  # non-vacuity: the extraction really did capture the predicate
-  grep -q 'summary.critical' <<< "$body" || {
-    echo "the extracted body is not _residue_holds"; return 1; }
-  grep -q 'fix-touched' <<< "$body" && {
-    echo "_residue_holds still reads a fix-touched set"; return 1; }
-  grep -qE 'effective_max|max_rounds' <<< "$body" && {
-    echo "_residue_holds carries a ceiling test — the rungs decide that, not the predicate"; return 1; }
-  return 0
-}
-
 @test "#1571 the fix-touched capture and its class consumer are DELIBERATELY untouched" {
   # Removing the predicate's read is not a licence to delete the capture: the
   # `class` stamp, the progress histogram and the waived-suggestion exemption all
@@ -982,39 +697,6 @@ sweepable() {
     echo "residue/condition-2-removed.md no longer states that \$scoped is the only input to .blocking"; return 1; }
 }
 
-@test "#1571 non-vacuity: AC2's negative needles red on a predicate that DID read the set" {
-  # AC2 asserts two ABSENCES over the extracted `_residue_holds` body. Its only
-  # control proves the extraction found the function — not that either needle
-  # could ever fire. An awk range that terminated early, or a restored read
-  # spelled `fix_touched` / `$ft_file`, would leave both bans vacuous while the
-  # condition was back. So drive the SHIPPED extraction over a scratch copy with
-  # the pre-#1571 reads planted back in, and prove each needle bites.
-  local probe="$BATS_TEST_TMPDIR/probe-loop.zsh"
-  # Plant BOTH banned shapes immediately after the predicate's opening line, so
-  # the awk range certainly captures them. One streaming pass, not an in-place
-  # edit: `sed -i` and `perl -0pi` differ across platforms in ways that fail
-  # SILENTLY here — a plant that does not land makes this control pass while
-  # proving nothing, which is the exact failure it exists to rule out.
-  awk '{ print }
-       /^_residue_holds\(\) \{/ {
-         print "  touched=\"$work_dir/fix-touched-$(( r - 1 )).txt\""
-         print "  (( round == effective_max )) || return 1"
-       }' "$SCRIPTS/resolve-story-loop.zsh" > "$probe"
-  # the plant really landed, or every assertion below is vacuous
-  grep -q 'fix-touched-\$(( r - 1 ))' "$probe"
-
-  local body
-  body="$(awk '/^_residue_holds\(\) \{/{f=1} f{print} f&&/^\}/{exit}' "$probe")"
-  [ -n "$body" ]
-  # the extraction still found the predicate (same control AC2 uses)...
-  grep -q 'summary.critical' <<< "$body"
-  # ...and now BOTH of AC2's needles must fire, or AC2 proves nothing
-  grep -q 'fix-touched' <<< "$body" || {
-    echo "AC2's fix-touched needle does not fire on a body that reads the set"; return 1; }
-  grep -qE 'effective_max|max_rounds' <<< "$body" || {
-    echo "AC2's ceiling needle does not fire on a body carrying a ceiling test"; return 1; }
-}
-
 @test "#1571 the EXPLANATION page carries a positive pin, not only the negative sweep" {
   # This file's own methodology (see the per-site pins above): a negative sweep
   # bans literal transcriptions of the OLD claim, so a REWORDED revert slips
@@ -1072,31 +754,6 @@ sweepable() {
   # ...and neither the index nor ANY shard may carry the instruction the
   # deferral replaced — the whole of what review-loop.md was before #2055
   run ! grep -rq 'has to drop those' "$RI_REF/review-loop.md" "$RI_REF/review-loop"
-}
-
-@test "#1571 the skill frontmatter and its generated page carry a positive pin" {
-  # The LAST #1571 site covered only by the negative sweep. Every other one
-  # (the loop header, residue.md, review-loop.md, the explanation page,
-  # ARCHITECTURE.md, the Approver template) has a positive pin, for the reason
-  # this file states elsewhere: a negative sweep bans literal transcriptions of
-  # the OLD claim, so a REWORDED revert slips past it. Mutation this closes:
-  # rewrite the frontmatter to "blockers all sit in the files its own last fix
-  # pass touched" and regenerate commands.md — no condition-2 needle matches
-  # that wording, and the user-facing command reference then documents a firing
-  # condition the loop no longer applies.
-  local f="$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
-  local g="$REPO_ROOT/docs/reference/commands.md"
-  local ft; ft="$(flat "$f")"
-  grep -q 'non-critical ends .CONVERGED_WITH_RESIDUE. (exit 14)' <<< "$ft" || {
-    echo "SKILL.md's frontmatter no longer states the post-#1571 residue condition"; return 1; }
-  # the generated page must say the same thing, or the two have drifted
-  local gt; gt="$(flat "$g")"
-  grep -q 'non-critical ends .CONVERGED_WITH_RESIDUE. (exit 14)' <<< "$gt" || {
-    echo "docs/reference/commands.md was not regenerated from the frontmatter"; return 1; }
-  # non-vacuity: neither may carry the retired clause in ANY spelling that
-  # still names the last fix pass
-  run ! grep -qE 'last fix pass touched|confined to its own last fix pass' "$f"
-  run ! grep -qE 'last fix pass touched|confined to its own last fix pass' "$g"
 }
 
 @test "#1571 the cross-file pointer resolves — both ends pinned" {
@@ -1255,4 +912,45 @@ sweepable() {
   for n in "${needles[@]}"; do
     grep -qF -- "$n" <<< "$t" || { echo "review-loop.md lost the #1921 clause: $n"; return 1; }
   done
+}
+
+# --- #2580: the retirement notes, outside the frozen spans ------------------
+
+@test "#2580 AC4 AC5 every kept shard carries its retirement note outside the frozen span" {
+  grep -q 'The exit-14 arm of step 5 is retired by #2580 and can no longer fire.' <<< "$(flat "$RI_REF/interactive/extension-grant.md")"
+  grep -q 'The residue terminal is retired (#2580).\*\* The block above still sends a `CONVERGED_WITH_RESIDUE` exit to the residue branch; that can no longer happen.' <<< "$(flat "$RI_REF/escalation.md")"
+  grep -q 'the promotion phase only ever follows `CONVERGED`.' <<< "$(flat "$RI_REF/promotion/step-4-sub-loop.md")"
+  grep -q 'so the phase only ever follows `CONVERGED`, and the sub-loop.s exit 14 stays as unreachable as the block already says.' <<< "$(flat "$RI_REF/promotion/step-7-terminal.md")"
+  grep -q 'only a \*\*zero-blocker\*\* delta round promotes the closing sweep' <<< "$(flat "$RI_REF/review-loop/exit-20-awaiting-fix.md")"
+  grep -q 'Retired with the residue terminal (#2580).\*\* The block below runs only on `CONVERGED_WITH_RESIDUE` (exit 14), which the loop no longer emits, so this branch never runs.' <<< "$(flat "$RI_REF/residue/branch.md")"
+  # every note sits OUTSIDE its file's frozen span: the frozen text still matches
+  # the pinned pre-move commit
+  run -0 zsh "$SCRIPTS/verify-reference-move.zsh"
+}
+
+@test "#2580 AC5 the migrated shards no longer route anything to the residue branch" {
+  grep -q 'continue to the version bump (§4). The waived suggestions still' <<< "$(flat "$RI_REF/promotion/gate.md")"
+  grep -q 'the round that can open one (`CONVERGED`) is a full-scope round' <<< "$(flat "$RI_REF/review-loop/delta-rounds.md")"
+  # the conductor still lists the residue branch's pointer (the reachability
+  # sweeps need every shipped shard reachable) but says it can no longer be
+  # reached; #2600 removes both with the filing path
+  grep -q 'The residue branch it pointed to stays listed below, unreachable, until #2600 removes the filing path.' <<< "$(flat "$REPO_ROOT/development/skills/resolve-issue/SKILL.md")"
+}
+
+@test "#2580 AC6 SKILL.md §6 no longer carries the residue Summary duty" {
+  local t; t="$(flat "$REPO_ROOT/development/skills/resolve-issue/SKILL.md")"
+  grep -q 'The residue Summary duty (#1435) went with its terminal (#2580): a run that opens its PR has no open blocker left to disclose.' <<< "$t"
+  grep -q 'reached `CONVERGED` (§3.5) — the only PR-opening terminal since #2580 — append the \*\*Review dossier\*\*' <<< "$t"
+  run ! grep -q 'Residue in the PR body (#1435)' <<< "$t"
+  run ! grep -q 'reference/residue/step-1-plan.md' "$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
+}
+
+@test "#2580 the rule sentences of the retirement are pinned where they are stated" {
+  grep -qF '**Exit 14 is retired (#2580)** and is never reused.' "$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
+  grep -qF 'and continue to the version bump (§4). The waived suggestions still' <<< "$(flat "$RI_REF/promotion/gate.md")"
+  local r; r="$(flat "$RI_REF/residue.md")"
+  grep -qF 'The loop no longer emits that status and no `next_ref` names these shards: `CONVERGED` is the only review-loop ending that opens a PR.' <<< "$r"
+  grep -qF 'The filing shards stay until #2600 removes the filing path; `reference/residue/risk-threshold.md` stays for good, because the risk pass reads it.' <<< "$r"
+  grep -qF 'It is split into shards under `reference/residue/`, each at most 20,000 bytes (#2056).' <<< "$r"
+  grep -qF '`CONVERGED` is the only ending that opens a PR.' <<< "$(flat "$RI_REF/review-loop/exit-20-awaiting-fix.md")"
 }

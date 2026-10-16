@@ -32,8 +32,7 @@ yourself.
   (nothing was offered, so nothing was declined), and converge with every
   suggestion waived. Say so in one line in the conversation — "suggestion
   promotion skipped: `enable_suggestions` is off; N suggestion(s) waived" — and
-  continue to the version bump (§4), via the **residue branch** first when the
-  blocking phase ended `CONVERGED_WITH_RESIDUE`. The waived suggestions still
+  continue to the version bump (§4). The waived suggestions still
   land in the dossier's *Waived suggestions* list, as on any run that promotes
   nothing.
 

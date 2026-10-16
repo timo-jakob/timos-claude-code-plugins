@@ -252,6 +252,15 @@
    is how the two statements of it came to disagree once already.
 <!-- /moved: round-protocol-steps-3-4 -->
 
+**The residue terminal is retired (#2580).** The block above still has a delta
+round promote the closing sweep rather than declare `CONVERGED_WITH_RESIDUE`, and
+waits for an exit 14 only the sweep could produce. Neither applies any more: the
+loop never emits that status, only a **zero-blocker** delta round promotes the
+closing sweep, and a round with non-critical blockers left ends
+`ESCALATE_NO_CONVERGENCE` or `BUDGET_EXHAUSTED`. `CONVERGED` is the only ending
+that opens a PR. The #1571 note below records the residue rule as it stood
+before.
+
 **Residue condition 2 was removed (#1571).** The procedure above still describes the fix-touched set as an input to the
 **residue decision**. That is no longer true, and the paragraph saying so sits
 inside a byte-frozen `moved:` span, so the correction is recorded here rather
