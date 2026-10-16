@@ -14,7 +14,8 @@
 #
 # Usage:
 #   build-escalation.zsh --status FILE [--issue N] [--branch NAME] [--compare-url URL]
-#                        [--format comment|summary|verdict] [--grants N]
+#                        [--format comment|summary|verdict|clean-stop] [--grants N]
+#                        [--cap-reached] [--work-dir DIR]
 #     --status       the loop's status JSON (required)
 #     --issue        issue number (for the header, optional)
 #     --branch       pushed branch holding the diff-so-far (optional, linked)
@@ -25,6 +26,20 @@
 #                    the #1435 blocker-class histogram. `verdict` (#2576) prints
 #                    ONLY the machine-readable convergence verdict, one JSON
 #                    object (see below), for the unattended automatic grant.
+#                    `clean-stop` (#2579) is the comment an unattended run posts
+#                    when it stops without converging: the failing convergence
+#                    conditions (or the automatic-grant cap), the remaining
+#                    blockers, round history and class histogram, the branch,
+#                    and the exact attended resume command. Only a
+#                    BUDGET_EXHAUSTED or ESCALATE_NO_CONVERGENCE status is
+#                    accepted, and a passing verdict needs --cap-reached.
+#     --cap-reached  clean-stop only: the automatic grant was refused for want
+#                    of headroom (record-grant.zsh exit 3) — names `cap`
+#     --work-dir     clean-stop only: the kept durable work-dir, named in the
+#                    comment so the human can find it. A path under $HOME is
+#                    printed as `~/…`: the comment is posted to an issue, often
+#                    on a public repo, and the expanded home directory names
+#                    the local account
 #     --grants       interactive-extension grants already consumed (optional;
 #                    rendered against the soft cap so the human sees the
 #                    context at the grant prompt, #969)
@@ -65,7 +80,7 @@ _need_val() {  # $1 = flag, $2 = remaining arg count, $3 = candidate value
     print -u2 -- "build-escalation: $1 requires a non-empty value"; exit 2 }
 }
 
-local status_file="" issue="" branch="" compare_url="" fmt="comment" grants=""
+local status_file="" issue="" branch="" compare_url="" fmt="comment" grants="" cap=0 kept_wd=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
   --status) _need_val "$1" $# "${2:-}"; status_file="$2"; shift 2 ;;
@@ -74,14 +89,18 @@ while [[ $# -gt 0 ]]; do
   --compare-url) _need_val "$1" $# "${2:-}"; compare_url="$2"; shift 2 ;;
   --format) _need_val "$1" $# "${2:-}"; fmt="$2"; shift 2 ;;
   --grants) _need_val "$1" $# "${2:-}"; grants="$2"; shift 2 ;;
-  -h|--help) print -r -- "usage: build-escalation.zsh --status FILE [--issue N] [--branch NAME] [--compare-url URL] [--format comment|summary|verdict] [--grants N]"; exit 0 ;;
+  --cap-reached) cap=1; shift ;;
+  --work-dir) _need_val "$1" $# "${2:-}"; kept_wd="$2"; shift 2 ;;
+  -h|--help) print -r -- "usage: build-escalation.zsh --status FILE [--issue N] [--branch NAME] [--compare-url URL] [--format comment|summary|verdict|clean-stop] [--grants N] [--cap-reached] [--work-dir DIR]"; exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
   *) print -u2 -- "unexpected argument: $1"; exit 2 ;;
   esac
 done
-[[ -n "$status_file" ]] || { print -u2 -- "usage: build-escalation.zsh --status FILE [--issue N] [--branch NAME] [--compare-url URL] [--format comment|summary|verdict] [--grants N]"; exit 2 }
-[[ "$fmt" == "comment" || "$fmt" == "summary" || "$fmt" == "verdict" ]] || {
-  print -u2 -- "build-escalation: --format must be 'comment', 'summary' or 'verdict'"; exit 2 }
+[[ -n "$status_file" ]] || { print -u2 -- "usage: build-escalation.zsh --status FILE [--issue N] [--branch NAME] [--compare-url URL] [--format comment|summary|verdict|clean-stop] [--grants N] [--cap-reached] [--work-dir DIR]"; exit 2 }
+[[ "$fmt" == "comment" || "$fmt" == "summary" || "$fmt" == "verdict" || "$fmt" == "clean-stop" ]] || {
+  print -u2 -- "build-escalation: --format must be 'comment', 'summary', 'verdict' or 'clean-stop'"; exit 2 }
+[[ "$fmt" == "clean-stop" || ( $cap -eq 0 && -z "$kept_wd" ) ]] || {
+  print -u2 -- "build-escalation: --cap-reached and --work-dir are for --format clean-stop only"; exit 2 }
 [[ -z "$grants" || "$grants" == <-> ]] || {
   print -u2 -- "build-escalation: --grants must be a non-negative integer (got: $grants)"; exit 2 }
 [[ -z "$issue" || "$issue" == <-> ]] || {
@@ -403,6 +422,93 @@ verdict=$(jq -c '
 
 if [[ "$fmt" == "verdict" ]]; then
   print -r -- "$verdict"
+  exit 0
+fi
+
+# --- clean-stop render (#2579): the unattended run that cannot converge. It
+# shares every extraction above, and replaces the options list with WHY the run
+# stopped and HOW to resume it.
+if [[ "$fmt" == "clean-stop" ]]; then
+  [[ "$st" == BUDGET_EXHAUSTED || "$st" == ESCALATE_NO_CONVERGENCE ]] || {
+    print -u2 -- "build-escalation: a clean stop is only for BUDGET_EXHAUSTED or ESCALATE_NO_CONVERGENCE (got: $st)"; exit 2 }
+  local -a why=()
+  local f=""
+  for f in $(jq -r '.failures[]' <<< "$verdict"); do
+    case "$f" in
+      too-few-rounds) why+=( "**too-few-rounds** — fewer than two rounds ran, so no trend can show the run is converging" ) ;;
+      trend) why+=( "**trend** — the last round's blocking count is not below the round before it" ) ;;
+      stuck) why+=( "**stuck** — a blocker carried across rounds unmoved by the fix pass (or the last round is unstamped)" ) ;;
+      critical) why+=( "**critical** — the last round still has a CRITICAL blocker" ) ;;
+    esac
+  done
+  (( cap )) && why+=( "**cap** — the automatic grants reached their cap of 2 × the original \`--max-rounds\`, so no more rounds can be granted unattended" )
+  (( ${#why} > 0 )) || {
+    print -u2 -- "build-escalation: the convergence verdict passes, so this run takes the automatic grant, not a clean stop (pass --cap-reached when record-grant.zsh refused it)"; exit 2 }
+  {
+    print -r -- "## 🛑 Review loop clean stop — \`${st}\`"
+    print -r --
+    print -r -- "This unattended run could not converge, so it **stopped cleanly**: no PR, \`main\` untouched, and the review loop's state kept so an attended session can continue from round ${rounds}."
+    print -r --
+    print -r -- "**Why it stopped**"
+    print -r --
+    for f in "${why[@]}"; do print -r -- "- $f"; done
+    if [[ -n "$detail" ]]; then
+      print -r --
+      print -r -- "**Remaining blockers**"
+      print -r --
+      print -r -- "$detail"
+    fi
+    print -r --
+    print -r -- "**Round history** (${rounds}/${max_rounds} rounds)"
+    print -r --
+    print -r -- "$history_lines"
+    if [[ -n "$round_table" ]]; then
+      print -r --
+      print -r -- "**Per-round progress**"
+      print -r --
+      print -r -- "$round_table"
+    fi
+    if [[ -n "$class_hist" ]]; then
+      print -r --
+      print -r -- "**Blocker classes (last two rounds)**"
+      print -r --
+      print -r -- "$class_hist"
+    fi
+    print -r --
+    print -r -- "**Resume** — in an attended session, run:"
+    print -r --
+    print -r -- "\`\`\`text"
+    print -r -- "/development:resolve-issue ${issue:-<N>} --resume"
+    print -r -- "\`\`\`"
+    print -r --
+    print -r -- "It checks out the branch and continues the loop from round ${rounds} through the interactive extension, where you grant rounds, give guidance or stop. A plain re-run starts fresh."
+    if [[ -n "$kept_wd" ]]; then
+      # never the expanded home directory in a posted comment: it names the
+      # local account. The prefix test quotes $HOME, so a glob character in it
+      # matches only itself, and the fold slices by length rather than by
+      # pattern; only a whole leading path component is folded.
+      local shown_wd="$kept_wd"
+      if [[ -n "${HOME:-}" && "$HOME" != "/" ]]; then
+        if [[ "$kept_wd" == "$HOME" ]]; then
+          shown_wd="~"
+        elif [[ "$kept_wd" == "$HOME"/* ]]; then
+          shown_wd="~/${kept_wd:$(( ${#HOME} + 1 ))}"
+        fi
+      fi
+      print -r --
+      print -r -- "_Kept review-loop state: \`${shown_wd}\`._"
+    fi
+    if [[ -n "$branch" || -n "$compare_url" ]]; then
+      print -r --
+      if [[ -n "$compare_url" ]]; then
+        print -r -- "_Diff so far: [\`${branch:-branch}\`](${compare_url}) — pushed for review, **no PR opened**._"
+      else
+        print -r -- "_Diff so far is on branch \`${branch}\` — pushed for review, **no PR opened**._"
+      fi
+    fi
+    print -r --
+    print -r -- "<!-- review-loop-clean-stop: ${st} -->"
+  }
   exit 0
 fi
 

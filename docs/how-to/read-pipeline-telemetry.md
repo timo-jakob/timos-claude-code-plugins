@@ -188,6 +188,8 @@ Normative: `ARCHITECTURE.md`, *Refine-issue telemetry*.
 | `fallbacks_fired` | array of strings | the same-PR steps that no-oped: drawn from `acceptance_tests`, `user_docs`, `c4_currency` |
 | `session_mode` | string or `null` | `attended` or `unattended`, the session mode §0a resolved; `null` when the run recorded none |
 | `session_mode_source` | string or `null` | `env` when `resolve_session` set the mode, `inferred` when the run's own inference did; `null` exactly when `session_mode` is |
+| `clean_stop` | boolean | `true` when an unattended run that could not converge stopped cleanly, keeping its state for `--resume` (#2579); `false` on every other ending |
+| `convergence_failures` | array | why a clean stop stopped: `too-few-rounds`, `trend`, `stuck`, `critical`, `cap`; `[]` unless `clean_stop` is `true` |
 
 Normative: `ARCHITECTURE.md`, *Resolve-issue telemetry*.
 

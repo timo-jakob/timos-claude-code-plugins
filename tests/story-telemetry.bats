@@ -392,6 +392,18 @@ advised() {
   contains "$stderr" "[--no-review]"
 }
 
+@test "#2579 args: --resume is parsed in any position, and the help names it" {
+  run --separate-stderr zsh "$D" args 412 --resume
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '{issue_ref, resume, no_review}' <<<"$output")" = '{"issue_ref":"412","resume":true,"no_review":false}' ]
+  run --separate-stderr zsh "$D" args --resume --no-review 412
+  [ "$(jq -c '{resume, no_review}' <<<"$output")" = '{"resume":true,"no_review":true}' ]
+  run --separate-stderr zsh "$D" args 412
+  [ "$(jq -r '.resume' <<<"$output")" = "false" ]
+  rejects 412 --bogus
+  contains "$stderr" "[--resume]"
+}
+
 @test "args and start make relative sink paths absolute against their own cwd" {
   mkdir -p "$BATS_TEST_TMPDIR/cwd"
   cd "$BATS_TEST_TMPDIR/cwd"

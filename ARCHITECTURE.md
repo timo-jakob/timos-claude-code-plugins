@@ -6559,7 +6559,7 @@ first instrumentation built on the conventions in *Per-pipeline telemetry
 instrumentation* above. The procedure is the skill's `reference/telemetry.md`.
 
 **Invocation.** `/development:resolve-issue <issue-number|url>
-[--telemetry-file PATH] [--telemetry-dir DIR] [--no-review]`, the flags in any
+[--telemetry-file PATH] [--telemetry-dir DIR] [--no-review] [--resume]`, the flags in any
 position. `story-telemetry.zsh args` parses them and makes both paths absolute
 once, so every later caller names the same file whatever its cwd. The
 invocation help is printed and the run stops, with no record, on any of: no
@@ -6567,7 +6567,29 @@ arguments, an unknown flag, a sink flag with no value or a flag-shaped one, a
 repeated sink flag, an empty issue reference, or more than one issue reference.
 A leading `~` in a sink path is expanded first, since a slash command's
 arguments reach the shell unexpanded. `--no-review` is the
-skill's own review-loop switch, handed back as `no_review: true`.
+skill's own review-loop switch, handed back as `no_review: true`. `--resume`
+(#2579) is handed back as `resume: true`: an attended run continues an
+unattended clean stop from its last round, through the interactive extension.
+`clean-stop.zsh read` refuses it in mode `unattended` (exit 4) and when no
+marker is kept (exit 3).
+
+**The clean stop (#2579).** An unattended run that exits `BUDGET_EXHAUSTED` or
+`ESCALATE_NO_CONVERGENCE` and is not granted rounds automatically (#2576: the
+convergence verdict fails, or the 2 × cap leaves no headroom) opens no PR. It
+pushes its branch, and keeps its review-loop state in a durable directory any
+later session can derive, `$HOME/.claude/resolve-issue/<repo-slug>/<N>/`
+(`work-dir/`, `status.json` and the `clean-stop.json` marker), keyed by the
+user-level telemetry sink's repo slug. The marker, `clean-stop/v1`, records
+`{issue, branch, work_dir, status_file, status, last_round, ceiling,
+convergence_failures, run_id}`, with `convergence_failures` drawn from
+`too-few-rounds`, `trend`, `stuck`, `critical` and `cap`. The run posts
+`build-escalation.zsh --format clean-stop`'s comment and adds
+`needs-human-decision`. `ESCALATE_CONFLICT` / `ESCALATE_AMBIGUOUS`, and every
+attended escalation, keep the escalation terminal. A successful `clean-stop.zsh
+read` moves the work-dir's `.telemetry-run-ids` ledger aside to `stopped-run-ids`
+in the durable directory, so a resumed run's record never lists the stopped
+run's review-loop ids again. A resumed run that opens its PR removes the durable
+directory.
 
 **Mechanics — `story-telemetry.zsh`, three deterministic steps.**
 
@@ -6631,6 +6653,8 @@ record's `run_id`, as it always was.
 | `fallbacks_fired` | which planned same-PR steps no-oped — a set drawn from `acceptance_tests`, `user_docs`, `c4_currency`: whether the same-PR lifecycles actually reach stories |
 | `session_mode` | `attended` \| `unattended` \| `null` — the session mode §0a resolved with `resolve-session.zsh` (#2575); `null` when the run recorded none |
 | `session_mode_source` | `env` (the `resolve_session` setting decided) \| `inferred` (the run's own inference did) \| `null`. The two are a pair: both `null` or both set, and the builder refuses one without the other |
+| `clean_stop` | `true` only for the unattended clean stop (#2579); `false` on every other ending, today's escalation terminal included. The builder refuses `true` unless the run is `escalated`, in session mode `unattended`, on `BUDGET_EXHAUSTED` or `ESCALATE_NO_CONVERGENCE` |
+| `convergence_failures` | the clean stop's failing conditions, drawn from `too-few-rounds`, `trend`, `stuck`, `critical`, `cap`; non-empty exactly when `clean_stop` is `true`, else `[]` |
 
 The builder's state carries a fine-grained ending — `pr-opened`, `gate-parked`,
 `precheck-parked`, `escalated`, `failed` — plus the facts above and `pr`, and

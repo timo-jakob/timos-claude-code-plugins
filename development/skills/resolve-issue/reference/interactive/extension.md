@@ -17,6 +17,18 @@ Whether a human is present is §0a's determination, read from
 `scripts/resolve-session.zsh`: `attended` takes the interactive arm, `unattended`
 takes the autonomous arm and never prompts.
 
+**Entered from `--resume` (#2579).** An attended `/development:resolve-issue
+<N> --resume` comes here directly, with the stopped run's status: the marker
+`clean-stop.zsh read` printed (§0a) names its `status_file` and `work_dir`. Start
+at step 1 with that status file. Every resume invocation of the loop passes the
+marker's `work_dir` as `--work-dir` and its `status_file` as `--status-file`, so
+the loop continues from the marker's `last_round`. The run's record passes that
+`work_dir` as `--loop-work-dir`: `read` already set the stopped run's id ledger
+aside, so the record lists only this run's loops. The grants, guidance and
+stop are exactly as below. When the resumed run opens its PR, run
+`clean-stop.zsh clear --repo-dir <worktree> --issue <N>`; any other ending keeps
+the durable directory.
+
 <!-- moved: interactive-extension -->
 **Interactive extension (human present, `BUDGET_EXHAUSTED` /
 `ESCALATE_NO_CONVERGENCE` only, #562-resume).** When the run is

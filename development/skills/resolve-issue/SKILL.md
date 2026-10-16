@@ -36,7 +36,7 @@ flow, plus the epic orchestration.
 
 **User input:** $ARGUMENTS — a single issue number / URL, or an epic's, plus
 the optional telemetry sink flags `--telemetry-file PATH` / `--telemetry-dir DIR`
-(#1226) and `--no-review` (§3.5), in any position.
+(#1226), `--no-review` (§3.5) and `--resume` (§0a, #2579), in any position.
 
 **Read each reference file once (#2055).** A `reference/` file whose text is
 still in your context is not read again: a re-read only adds its rules a second
@@ -150,7 +150,7 @@ gh issue view <N> --json number,title,body,state,labels,url
 Operate on the **session's repo** (`gh repo view --json nameWithOwner`); the
 issue must belong to it. If `$ARGUMENTS` is empty, print the invocation help
 (`/development:resolve-issue <issue-number|url> [--telemetry-file PATH]
-[--telemetry-dir DIR] [--no-review]`) and stop.
+[--telemetry-dir DIR] [--no-review] [--resume]`) and stop.
 
 ## Single-issue flow
 
@@ -166,6 +166,25 @@ invoked, its one line `<mode> <source>` decides:
 child or the maintenance pipeline stays autonomous whatever the line says (E3
 cannot prompt). Say the mode and its source once, quoting any stderr warning,
 and note both for the run's record. An exit 2 is your own malformed call: fix it.
+
+**Then, on `--resume` (#2579)** — `story-telemetry.zsh args` reported
+`resume: true` — check the kept clean stop before anything else:
+`"<skill-base-dir>/scripts/clean-stop.zsh" read --repo-dir <worktree> --issue <N>
+--mode <mode>`. Exit 4 (mode `unattended`) and exit 3 (no marker) refuse the
+resume: relay the stderr line, emit the run's record as `failed`, and stop. On
+exit 0, run the dependency precheck below as usual; on `PROCEED`, check out the
+marker's `branch` from `origin` and run §1b (detect the repo type and load its
+profile), but skip §0b, §1, §2 and §3 (the stopped run passed the readiness
+gate, so record `gate_verdict: READY`). Then enter the interactive extension
+with the marker (`reference/interactive/extension.md`).
+
+**Without `--resume`**, an unattended run always runs
+`"<skill-base-dir>/scripts/clean-stop.zsh" clear --repo-dir <worktree> --issue
+<N>` before round 1, whether or not a marker exists, so it never adopts a
+stopped run's work-dir, status file or grant ledger. An attended run runs
+`clean-stop.zsh read --repo-dir <worktree> --issue <N> --mode attended` instead,
+and only on its exit 0 says once that a kept clean stop exists. It then starts
+fresh in its scratch work-dir and leaves the kept one alone.
 
 Dependencies are enforced from **GitHub-native `blockedBy` relationships** —
 the single source of truth (#583); prose declares nothing. Before anything
@@ -798,7 +817,12 @@ child run's `loop_args` — the run E3 started for it, never the epic run's
 explicit `--work-dir` and `--status-file` (paths you remember)**: the work-dir
 is the loop's resumable state and the status file its verdict — the interactive
 extension below re-invokes the loop with `--resume` on the *same* work-dir, and
-a defaulted `mktemp` dir is unrecoverable after the run exits.
+a defaulted `mktemp` dir is unrecoverable after the run exits. **In mode
+`unattended` they are the durable pair** (#2579): `clean-stop.zsh dir --repo-dir
+<worktree> --issue <N>` prints `work_dir` and `status_file` under
+`$HOME/.claude/resolve-issue/<repo-slug>/<N>/`, outside every checkout, so a
+clean stop (`reference/escalation.md`) leaves state a later attended `--resume`
+can find. Create the work-dir before round 1.
 
 The loop consolidates each round (`consolidate-findings.zsh`, §#561) and exits
 with a status JSON + code:
