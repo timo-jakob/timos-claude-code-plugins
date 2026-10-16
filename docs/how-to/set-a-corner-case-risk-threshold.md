@@ -1,17 +1,16 @@
-# Set a corner-case risk threshold for review residue
+# Set a corner-case risk threshold
 
-When the [local review loop](../explanation/review-loop.md) ends **with
-residue** — converged, but with non-critical blockers left over —
-`/development:resolve-issue` opens the PR and files every remaining blocker as a
-`review-residue` follow-up issue. Each
-of those, once resolved, runs its own review loop — which can file residue of
-its own. Epic #1795 grew from 3 children to 21 that way, and most of the
-follow-ups described corner cases nobody would ever hit.
+The [local review loop](../explanation/review-loop.md) stops only when the
+reviewers have no blockers left. Many of the warnings a panel raises describe
+corner cases nobody would ever hit, and without a floor every one of them costs
+a fix round. In epic #1795 the runs that could not clear such warnings filed them
+as follow-up issues, and the epic grew from 3 children to 21 that way. That
+ending is retired (#2580): a run now either converges or stops.
 
-`corner_case_risk_threshold` sets a floor. Before filing, the run assesses each
-remaining blocker's **risk** — how likely it is, times how bad it would be — and
-does not file the ones below your floor. It lists them in the PR instead, so you
-can see what was dropped and why.
+`corner_case_risk_threshold` sets a floor. In every review round the run assesses
+each blocking finding's **risk** — how likely it is, times how bad it would be —
+and demotes a non-critical one below your floor to a suggestion: logged and
+listed in the PR, but not fixed.
 
 ## Turn it on
 
@@ -25,8 +24,7 @@ Add the variable to your settings:
 }
 ```
 
-The next `/development:resolve-issue` run uses it, in every review round and
-again when it files residue. As with
+The next `/development:resolve-issue` run uses it, in every review round. As with
 any `env` setting, restart the session if a mid-session edit does not seem to
 apply.
 
@@ -36,18 +34,19 @@ The value is a decimal from 0 to 1 — a risk, not a percentage.
 
 | Value | State |
 | ----- | ----- |
-| unset, `""`, `0` (or `0.0`) | **off** — every residual blocker is filed, exactly as before |
+| unset, `""`, `0` (or `0.0`) | **off** — no finding is demoted, exactly as before |
 | `0.001` … `1` (at most three decimals; `.05` and `1.0` work too) | **on** |
 | anything else — `30`, `1.5`, `-0.1`, `0.0005`, `abc` | **ignored**, and the run says so |
 
-An ignored value fails safe to "file everything": a percent-style `5` or `30`
-never silently drops the whole remainder, and the PR says the value was ignored.
+An ignored value fails safe to "demote nothing": a percent-style `5` or `30`
+never silently waves every warning through, and the PR says the value was
+ignored.
 
 Risk is `p × impact`, so a useful floor is small. As a guide, from a
-retrospective assessment of #1795's 15 residue issues:
+retrospective assessment of the 15 non-critical blockers #1795's runs left over:
 
-| Threshold | Filed | Dropped |
-| --------- | ----- | ------- |
+| Threshold | Still block | Demoted |
+| --------- | ----------- | ------- |
 | off | 15 | 0 |
 | `0.05` | 4 | 11 |
 | `0.1` | 3 | 12 |
@@ -75,22 +74,14 @@ impact half exists to keep.
 | `0.4` | misleading output, or a run that needs a manual retry or a human to notice |
 | `0.1` | cosmetic, or a test-only nicety |
 
-A finding whose risk is **equal to** the threshold is kept. A finding the run
-did not assess is kept too — only an explicit assessment below the floor drops
-anything.
-
-## What you see in the PR
-
-A PR whose residue had findings dropped carries a **Dropped by the risk
-threshold** paragraph above the review dossier: one row per dropped finding with
-its probability, impact, risk and the reasoning behind both. The dossier itself
-still counts them as open, so the paragraph is what tells you they were **not**
-filed. If you disagree with an assessment, file that finding by hand.
+A finding whose risk is **equal to** the threshold still blocks. A finding the
+run did not assess blocks too — only an explicit assessment below the floor
+demotes anything.
 
 ## What it does inside the review loop
 
-The same floor applies to every review round, not only to residue (#1921). The
-loop no longer spends fix rounds on a corner case below your floor.
+The floor applies to every review round (#1921), so the loop no longer spends
+fix rounds on a corner case below your floor.
 
 In each round, the run assesses every blocking finding the reviewers raised,
 using the same probability and impact rules. A **Warning** whose risk is below
@@ -116,11 +107,6 @@ A demoted finding never disappears:
 
 If you turned the promotion prompt off (`enable_suggestions`), the progress log
 and the PR table are the only places a demotion shows.
-
-A finding the loop already assessed is not assessed again when it ends up as
-residue: the residue filter reuses the loop's assessment. A finding the loop
-assessed but never demotes — a Critical, your own pick, a tool-confirmed one —
-is kept at residue too, whatever its risk.
 
 ## A higher bar in extra rounds
 
@@ -163,15 +149,7 @@ and its row in the PR table says `extension bar, threshold 0.10`.
 below `0.04`, 81% below `0.10` and 91% below `0.15`. At a floor of `0.04`, 243 of
 them block; at `0.10`, 109 still do.
 
-## What it does not touch
+## Where the procedure lives
 
-The floor does not change when a run ends in residue, and residue is filtered by
-`corner_case_risk_threshold` alone, never by the extension bar. It also does not change
-how the review dossier's machine-readable block counts residue it dropped: that
-block still counts those findings as open. Carrying a separate dropped count
-there is #1932.
-
-The procedures the run follows are in `development/skills/resolve-issue/reference/`:
-
-- `review-loop/risk-pass.md`, section *The risk pass*;
-- `residue/risk-threshold.md`, section *Risk threshold — assess before filing*.
+The procedure the run follows is in `development/skills/resolve-issue/reference/`:
+`review-loop/risk-pass.md`, section *The risk pass*.

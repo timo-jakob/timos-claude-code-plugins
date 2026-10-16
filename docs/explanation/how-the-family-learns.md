@@ -47,7 +47,7 @@ escalates, is granted more rounds and finishes writes two: one for each ending.
 
 | Pipeline | When it writes |
 | --- | --- |
-| review loop | At each terminal exit: converged, converged with residue, escalated, failed |
+| review loop | At each terminal exit: converged, escalated, failed |
 | refine-issue | Once per issue refined; an epic walk writes one per child |
 | resolve-issue | Once per story that reaches the dependency precheck; an epic writes one per invocation, linked to its children |
 | maintenance | Once per run that passes discovery |
@@ -98,9 +98,9 @@ changes the next runs](diagrams/improvement-loop.svg)
 | **Run** | The workflows run on target repositories and on this repository itself; this repository's own C4 docs, for example, are checked by the same rules it ships | Automated |
 | **Evidence — telemetry** | One record per run ending, as above | Automated, best-effort |
 | **Evidence — session logs** | `scripts/capture-session-log.zsh` bundles a run's transcript and its subagents' transcripts into one archive that is handed back for analysis | Manual: captured on request |
-| **Evidence — issues** | Review residue is filed as follow-up issues; maintenance keeps one debt issue per scanner; a non-converging run escalates with a typed comment | Automated |
+| **Evidence — issues** | An epic's holistic test files a regression issue; maintenance keeps one debt issue per scanner; a non-converging run escalates with a typed comment | Automated |
 | **Analysis** | Someone reads the evidence and decides what to change | Manual today; a retrospective skill, a self-assessment scorecard and eval suites are planned (#1624) |
-| **Improvement issue** | The change is filed as an issue on this repository — and so are the gaps between a stated position and what is delivered | Residue and debt issues automated; the rest by hand |
+| **Improvement issue** | The change is filed as an issue on this repository — and so are the gaps between a stated position and what is delivered | Regression and debt issues automated; the rest by hand |
 | **Refine and resolve** | The issue goes through the same workflows as any other | Automated; a human approves plugin PRs |
 | **Release** | Each change bumps its plugin's version and marketplace entry; CI checks the two agree | Bump by the agent or by hand; the check is automated |
 | **Pickup** | Locally, `scripts/refresh-local-install.zsh` reinstalls the released plugins. In a bootstrapped repository, generated files carry a provenance marker; maintenance reports which ones have drifted from the current templates, and a monthly workflow keeps a tracking issue open while they do | Detection automated; applying the fix is manual |
