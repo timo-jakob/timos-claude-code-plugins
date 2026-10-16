@@ -1135,6 +1135,15 @@ see `reference/epic-telemetry.md` § Epic telemetry (#1227)
 **Before E1, read the mode** — `epic_strictly_sequential` can make E3 wholly sequential:
 see `reference/sequential.md` § Strictly sequential mode
 
+**Also before E1, resolve the walk mode once (#2585):**
+`"<skill-base-dir>/scripts/resolve-session.zsh" --inferred unattended`. The walk
+is **attended** only when its line says `attended`; otherwise it is
+**unattended**. Every child E3 drives runs in that mode — its §0a takes the walk
+mode rather than resolving its own, and a parallel sub-agent receives the mode
+in its prompt next to `child_start_args`. A child of an attended walk never
+takes the clean stop (#2579): an escalation takes today's terminal, and E3's
+triage of it below is unchanged.
+
 ### E1. Enumerate the children
 
 **Native sub-issues are the source of truth for parenthood (#802)** — the same
@@ -1536,6 +1545,32 @@ the rest against the escalated child:
   dependency);
 - never fail silently — the escalation already posted its own typed comment on
   the child (§#564).
+
+**In an unattended walk, a clean stop is triaged by one script (#2585).**
+A clean-stopped child (#2579) is a typed escalation, so the triage above holds,
+but who walks, who is parked and who is skipped is decided by
+`"<skill-base-dir>/scripts/epic-clean-stop-triage.zsh" --repo "$REPO" --children
+<open children in walk order> --deps <file>` (plus `--clean-stopped <children
+that clean-stopped this invocation>` once any has). Call it once before the
+first child and again after each child that clean-stops. `--deps` is a JSON
+Lines file holding one `read-dependencies.zsh --repo "$REPO" --issue <N>` record
+per child. Then:
+
+- never walk a child in `skip` — a kept `clean-stop.json` marker makes a child
+  clean-stopped on a later walk too, so its kept work-dir is never overwritten;
+- park every child in `parked` not yet handled this invocation, never branch it,
+  and leave the epic note that it is blocked on the `blocked_by` children;
+- walk, in `walk` order, only the children of `walk` E3 has not yet handled
+  this invocation. `--children` is the epic's full open list from E1 on every
+  call, so a re-call's `walk` can list children already resolved, escalated or
+  parked.
+
+Exit 3 means the script cannot prove any child independent: park every child
+not yet resolved and quote its stderr in the summary. Exit 2 is your own call:
+fix it and re-run once. The summary comment below prints the script's `summary`
+lines, adding to each clean-stopped child's line a link to its clean-stop
+comment. How its `counts` and its `skip` feed the epic record is stated in
+`reference/epic-telemetry.md`.
 
 The same triage applies when a child's **dependency precheck rejects it**
 (§0a): epic-driven resolve is autonomous, so the rejection posts the child's

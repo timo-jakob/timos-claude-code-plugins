@@ -59,7 +59,7 @@ refused() {
   [ "$status" -eq 0 ]
   [ "$(jq -r '.mode' <<<"$output")" = "epic" ]
   [ "$(jq -r '.e1_classification' <<<"$output")" = "native_children" ]
-  [ "$(jq -c '.children' <<<"$output")" = '{"total":11,"completed_before":9,"resolved_this_run":2,"escalated":0,"parked":0,"queued":0}' ]
+  [ "$(jq -c '.children' <<<"$output")" = '{"total":11,"completed_before":9,"resolved_this_run":2,"escalated":0,"parked":0,"queued":0,"clean_stopped":0,"parked_behind_clean_stop":0}' ]
   [ "$(jq -c '.split' <<<"$output")" = '{"parallel":0,"sequential":2}' ]
   [ "$(jq -c '.child_run_ids' <<<"$output")" = '["resolve-issue-1791300000-1a2b","resolve-issue-1791303600-3c4d"]' ]
   [ "$(jq -c '.e4' <<<"$output")" = '{"ran":true,"result":"green"}' ]
@@ -418,7 +418,54 @@ e1_table_values() {
   local f doc
   for f in development/skills/resolve-issue/reference/epic-telemetry.md ARCHITECTURE.md; do
     doc="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/$f")"
-    contains "$doc" 'Every child **open** at that read goes in the **first** of these buckets whose test it meets: `resolved_this_run` (closed as completed during this run), `escalated` (ended on a typed escalation), `parked` (parked by E3'"'"'s triage: a §0a dependency rejection, a precheck tooling failure — exit 1, or an exit 2 that recurs after the fixed re-run or whose malformation cannot be seen — a §2 size pre-flight stop or error, and every child that depends on an escalated or parked child, or, under `override=on`, on a child stopped short of `MERGED` at §6'"'"'s human-only stop), then `queued` (every other open child: a PR awaiting a human merge, a child whose own story run ended `failed` for a cause E3'"'"'s triage does not park — an abandoned red gate, a gate or loop error, or a round protocol that stopped before any loop invocation — and every child when E1b halts)'
+    contains "$doc" 'Every child **open** at that read goes in the **first** of these buckets whose test it meets: `resolved_this_run` (closed as completed during this run), `escalated` (ended on a typed escalation, or in the `skip` of E3'"'"'s clean-stop triage — a child skipped for a kept marker from an earlier walk counts here too), `parked` (parked by E3'"'"'s triage: a §0a dependency rejection, a precheck tooling failure — exit 1, or an exit 2 that recurs after the fixed re-run or whose malformation cannot be seen — a §2 size pre-flight stop or error, and every child that depends on an escalated or parked child, or, under `override=on`, on a child stopped short of `MERGED` at §6'"'"'s human-only stop), then `queued` (every other open child: a PR awaiting a human merge, a child whose own story run ended `failed` for a cause E3'"'"'s triage does not park — an abandoned red gate, a gate or loop error, or a round protocol that stopped before any loop invocation — and every child when E1b halts)'
     lacks "$doc" 'a child whose own story run ended `failed`,'
+  done
+}
+
+# --- the clean-stop sub-counts (#2585) ----------------------------------------
+
+# an unattended walk where one child clean-stopped and two dependants parked
+# behind it, one other child escalated otherwise
+CLEAN_STOP='{"outcome":"escalated","e1_classification":"native_children",
+  "children":{"total":6,"completed_before":1,"resolved_this_run":1,"escalated":2,"parked":2,"queued":0,
+              "clean_stopped":1,"parked_behind_clean_stop":2},
+  "split":{"parallel":0,"sequential":1},
+  "child_run_ids":["resolve-issue-1-aaaa","resolve-issue-2-bbbb","resolve-issue-3-cccc"],
+  "readiness_preflight":{"gated":5,"needs_refinement":0}}'
+
+@test "#2585 AC3 the sub-counts ride in children, outside the bucket sum" {
+  build "$CLEAN_STOP"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '.children | {clean_stopped, parked_behind_clean_stop}' <<<"$output")" = '{"clean_stopped":1,"parked_behind_clean_stop":2}' ]
+  # the five buckets alone sum to total: 1 + 1 + 2 + 2 + 0 = 6
+  [ "$(jq '.children | .completed_before + .resolved_this_run + .escalated + .parked + .queued' <<<"$output")" -eq 6 ]
+  build "$CLEAN_STOP" --print-outcome
+  [ "$output" = "escalated" ]
+}
+
+@test "#2585 AC3 absent sub-counts default to 0" {
+  build "$E1B_HALT"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '.children | {clean_stopped, parked_behind_clean_stop}' <<<"$output")" = '{"clean_stopped":0,"parked_behind_clean_stop":0}' ]
+}
+
+@test "#2585 AC3 a sub-count larger than its bucket is refused" {
+  refused "$(with '.children.clean_stopped = 3' "$CLEAN_STOP")" \
+    "children.clean_stopped (3) exceeds children.escalated (2): a clean stop is an escalation"
+  refused "$(with '.children.parked_behind_clean_stop = 3' "$CLEAN_STOP")" \
+    "children.parked_behind_clean_stop (3) exceeds children.parked (2)"
+  # equal is fine
+  build "$(with '.children.clean_stopped = 2' "$CLEAN_STOP")"
+  [ "$status" -eq 0 ]
+}
+
+@test "#2585 AC3 the sub-counts are non-negative integers like every count" {
+  local v
+  for v in -1 1.5 '"1"'; do
+    refused "$(with ".children.clean_stopped = $v" "$CLEAN_STOP")" \
+      "children must be an object of non-negative integers: total, completed_before, resolved_this_run, escalated, parked, queued, clean_stopped, parked_behind_clean_stop"
+    refused "$(with ".children.parked_behind_clean_stop = $v" "$CLEAN_STOP")" \
+      "children must be an object of non-negative integers"
   done
 }
