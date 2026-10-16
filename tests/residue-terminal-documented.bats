@@ -49,7 +49,6 @@ setup() {
   # story that migrates it. Each must still name the terminal; the story that
   # migrates one removes it from this list in its own PR.
   NOT_YET_MIGRATED=(
-    "development/skills/bootstrap/templates/common/approver-policy-core.md.tmpl|#2586"
     "development/skills/resolve-issue/scripts/build-dossier.zsh|#2599"
     "development/skills/open-pr/SKILL.md|#2599"
     "docs/explanation/review-loop.md|#2599"
@@ -316,43 +315,40 @@ _invariant_in_awaiting_fix_branch() {
   grep -q 'PR-opening terminal\*\* — `CONVERGED` (exit 0) \*\*or\*\* `CONVERGED_WITH_RESIDUE` (exit 14, #1435)' <<< "$tb"
 }
 
-@test "#1435 the Approver template's residue rule is pinned by CONTENT, not by filename" {
-  # The roster tripwire lists approver-policy-core.md.tmpl, but listing a path
-  # only asserts that the string occurs somewhere in it. That template is the
-  # artifact every bootstrapped repo's Approver actually reads the dossier
-  # through, and it carries four claims the residue terminal depends on. Each is
-  # pinned separately below, because they fail independently — and the worst of
-  # them (the REQUEST_CHANGES rule) can be inverted while leaving the mention
-  # that keeps the tripwire green.
+@test "#2586 the Approver template treats open > 0 as a finding, pinned by CONTENT" {
+  # The template is the artifact every bootstrapped repo's Approver reads the
+  # dossier through. #1435 had it extend leniency to open blockers; #2580 retired
+  # the terminal that produced them, and #2586 turned the rule round: open > 0
+  # now means something bypassed the loop, so it is a REQUEST_CHANGES finding.
   local F="$REPO_ROOT/development/skills/bootstrap/templates/common/approver-policy-core.md.tmpl"
   local t; t="$(flat "$F")"
-  # (a) the reading of the machine-readable count
-  grep -q '`dimensions.<lens>.open > 0` means blockers were deliberately left open, not missed' <<< "$t"
-  # (b) BOTH firing conditions, which are what make the leniency safe. Since
-  #     #1571 the second is the FULL-SWEEP read, not the fix-touched membership
-  #     that condition 2 used to require — the template must not keep promising
-  #     an Approver a guarantee the loop stopped making.
-  grep -q 'found \*\*zero Criticals\*\* and the round declaring it had read the \*\*whole\*\* change' <<< "$t"
-  # (c) the label pair, which is how a human finds the follow-ups
-  grep -q '`review-residue` + `needs-refinement`' <<< "$t"
-  # (d) the rule itself, in the NEGATIVE form — an Approver that blocks on
-  #     `open > 0` blocks exactly the PRs this terminal exists to ship
-  grep -q 'Do \*\*not\*\* `REQUEST_CHANGES` merely because `open > 0`' <<< "$t"
-  # ...and the escape hatch that keeps (d) from being a blank cheque
-  grep -q 'Do still raise a finding if the diff shows the open item is \*\*not\*\* what the dossier says it is' <<< "$t"
+  grep -q '`dimensions.<lens>.open > 0` is a finding: `REQUEST_CHANGES`.' <<< "$t"
+  grep -q 'So a dossier that reports `open > 0` means something bypassed the loop, or the dossier does not describe this PR.' <<< "$t"
+  grep -q 'raise a finding naming each lens with `open > 0`, and do not lower that lens.s residual-risk weight.' <<< "$t"
+  grep -q 'An older dossier carries no `open` key at all; absent means 0.' <<< "$t"
+  # the section's closing sentence names open > 0 as the dossier's one gate, and
+  # Confidence calibration binds the posted verdict to it
+  grep -q 'Within a dossier, `open > 0` (above) is the one thing that adds a gate; everything else in it is context that only ever \*reduces\* unnecessary friction.' <<< "$t"
+  grep -q -- '- A Review dossier reporting `open > 0` on any lens: cap at `LOW`, whatever else holds.' <<< "$t"
+  # the maintenance-bot special case yields to that cap rather than overriding it
+  grep -q 'the bot is on the allowlist by default. It does not apply when the Review dossier reports `open > 0` on any lens: the cap at `LOW` above holds.' <<< "$t"
+  run ! grep -q 'the dossier only ever \*reduces\* unnecessary friction, never adds a gate.' <<< "$t"
+  # the leniency and its two companions are gone (#2586 AC2)
+  run ! grep -q 'Do \*\*not\*\* `REQUEST_CHANGES` merely because `open > 0`' <<< "$t"
+  run ! grep -q 'Read the Summary before extending that leniency' <<< "$t"
+  run ! grep -q 'Unless it reports `open > 0`' <<< "$t"
+  run ! grep -q 'CONVERGED_WITH_RESIDUE' "$F"
 }
 
-@test "#1435 non-vacuity: the template's REQUEST_CHANGES rule reds when inverted" {
-  # The needle that matters most, proven discriminating: invert the rule while
-  # leaving the terminal's name in place, which is the mutation the file-level
-  # tripwire cannot see.
+@test "#2586 non-vacuity: the template's open > 0 rule reds when inverted back to leniency" {
+  # Invert the rule in a scratch copy, the way a regression would, and prove the
+  # positive pin above fails on it.
   local F="$REPO_ROOT/development/skills/bootstrap/templates/common/approver-policy-core.md.tmpl"
   local m="$BATS_TEST_TMPDIR/policy.md.tmpl"
-  sed 's/Do \*\*not\*\* `REQUEST_CHANGES`$/`REQUEST_CHANGES`/' "$F" > "$m"
-  local tm; tm="$(flat "$m")"
-  run ! grep -q 'Do \*\*not\*\* `REQUEST_CHANGES` merely because `open > 0`' <<< "$tm"
-  # the terminal is still named, so the roster tripwire would still list the file
-  grep -q 'CONVERGED_WITH_RESIDUE' <<< "$tm"
+  sed 's/is a finding: `REQUEST_CHANGES`\.\*\* The review$/is tracked risk: do not `REQUEST_CHANGES`.** The review/' "$F" > "$m"
+  # the mutation landed
+  run ! cmp -s "$F" "$m"
+  run ! grep -q '`dimensions.<lens>.open > 0` is a finding: `REQUEST_CHANGES`.' <<< "$(flat "$m")"
 }
 
 @test "#1435 AC22 the round protocol states the cadence invariant on the AWAITING_FIX branch" {

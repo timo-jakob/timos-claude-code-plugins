@@ -410,7 +410,12 @@ pin_each() {
 
 @test "APPROVER.md: the always-human kinds, the COMMENT verdict and the exact opt-in value" {
   pin_each "$APPROVER_DOC" \
-    'kinds of change always go to a human, whatever the review concludes: residue' \
+    'A review dossier with `open > 0` is a finding: the Approver posts' \
+    '`REQUEST_CHANGES`, because the review loop never opens a PR with blockers left' \
+    're-rendering its `.claude/approver-policy.md` from the bootstrap template; that' \
+    'unless a review dossier reports `open > 0`, which still caps at `LOW`.' \
+    'Two kinds of change always go to a human, whatever the review concludes:' \
+    '`.github/workflows/*` and the approval/identity machinery. On those the Approver' \
     '"Needs a human" list (or `REQUEST_CHANGES` when the review already gives it),' \
     'never `APPROVE`. Nothing is recorded in the repository.' \
     '`CLAUDE_PLUGIN_APPROVER=1` (exactly `1`; any other value is off). Then run' \
