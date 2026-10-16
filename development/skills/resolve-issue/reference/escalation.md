@@ -5,8 +5,10 @@ step that points here is reached, never up front.
 
 It carries the escalation terminal — the typed comment taken directly on an
 `ESCALATE_CONFLICT` / `ESCALATE_AMBIGUOUS` exit, and on a `BUDGET_EXHAUSTED` /
-`ESCALATE_NO_CONVERGENCE` only once the interactive extension (attended) or the
-automatic grant (unattended), both pointed at below, has not converged the run.
+`ESCALATE_NO_CONVERGENCE` of an attended run only once the interactive
+extension, pointed at below, has not converged it. An unattended
+`BUDGET_EXHAUSTED` / `ESCALATE_NO_CONVERGENCE` that the automatic grant does
+not converge takes the clean stop below instead of the terminal.
 
 Every `<!-- moved: … -->` block below is byte-identical to the text it was
 carved out of; `scripts/verify-reference-move.zsh` proves that against the
@@ -30,9 +32,49 @@ round's boundary, resuming with `--max-rounds` set to the ceiling
 `record-grant.zsh` echoed, and never prompt. Another `BUDGET_EXHAUSTED` or
 `ESCALATE_NO_CONVERGENCE` comes back to this paragraph, never to the extension's
 steps 1–2. A failing verdict, and `record-grant.zsh`'s exit 3 (no headroom under
-its cap of 2 × the original `--max-rounds`), both take the terminal below
-unchanged. An attended run never takes this branch; it gets the interactive
+its cap of 2 × the original `--max-rounds`), both take the clean stop in the
+next paragraph. An attended run never takes this branch; it gets the interactive
 extension.
+
+**An unattended run that cannot converge stops cleanly (#2579).** When that
+automatic grant is not taken — the verdict fails, or `record-grant.zsh` exits 3
+— a `BUDGET_EXHAUSTED` or `ESCALATE_NO_CONVERGENCE` exit in mode `unattended`
+takes this clean stop instead of the terminal below. It ships nothing and keeps
+the run resumable:
+
+1. Push the branch as the bot and create no PR object, exactly as the
+   terminal's step 1.
+2. Write the marker beside the durable work-dir the run has been using
+   (`clean-stop.zsh dir`, §3.5):
+
+   ```bash
+   "<skill-base-dir>/scripts/clean-stop.zsh" write --repo-dir <worktree> \
+     --issue <N> --branch <branch> --run-id <this run's run_id> [--cap-reached]
+   ```
+
+   Pass `--cap-reached` exactly when `record-grant.zsh` exited 3. The marker's
+   `convergence_failures` are the failing conditions, plus `cap`. An exit 2 is
+   your own call: a passing verdict without `--cap-reached` was a grant, not a
+   stop.
+3. Build the comment with the clean-stop format, then post it and add
+   `needs-human-decision` as the terminal's step 3 does:
+
+   ```bash
+   "<skill-base-dir>/scripts/build-escalation.zsh" --status <status.json> \
+     --format clean-stop --issue <N> --branch <branch> \
+     --compare-url "https://github.com/$REPO/tree/<branch>" \
+     --work-dir <the marker's work_dir> [--cap-reached]
+   ```
+
+   It names the failing conditions (or the cap), the remaining blockers, the
+   round history and class histogram, the branch and the attended resume
+   command, `/development:resolve-issue <N> --resume`.
+4. Emit the run's record with `clean_stop: true` and the marker's
+   `convergence_failures` (`reference/telemetry.md` step 4), then stop.
+
+`ESCALATE_CONFLICT` and `ESCALATE_AMBIGUOUS` on an unattended run, and every
+escalation on an attended run, take the terminal below unchanged; their records
+carry `clean_stop: false`.
 
 <!-- moved: escalation-head -->
 A bad escalation costs a human an afternoon; a good one costs two minutes. On

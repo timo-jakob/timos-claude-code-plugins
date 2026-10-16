@@ -1271,7 +1271,7 @@ verdict() {
   run --separate-stderr zsh "$S" --status "$ST" --format json
   [ "$status" -eq 2 ]
   [ -z "$output" ]
-  contains "$stderr" "--format must be 'comment', 'summary' or 'verdict'"
+  contains "$stderr" "--format must be 'comment', 'summary', 'verdict' or 'clean-stop'"
 }
 
 @test "#2576 the extension recommends +3 only on a passing verdict, and the escalation shard grants automatically" {
@@ -1284,7 +1284,101 @@ verdict() {
   contains "$ext" 'A human grant is recorded with `record-grant.zsh --source human`, the default.'
   contains "$esc" '**An unattended run first tries an automatic grant (#2576).** On a `BUDGET_EXHAUSTED` or `ESCALATE_NO_CONVERGENCE` exit in mode `unattended`, run `build-escalation.zsh --status <status.json> --format verdict` before any comment. On `"converging": true`, run `record-grant.zsh --work-dir <work-dir> --status <status.json> --add 3 --source automatic`.'
   contains "$esc" 'Then, exactly as a human grant does (step 5 in `reference/interactive/extension-grant.md`, with its amendments in `reference/interactive/extension-ceiling.md`: the run'"'"'s `loop_args` and `--carry-accounting`), apply one fix pass and take the next round'"'"'s boundary, resuming with `--max-rounds` set to the ceiling `record-grant.zsh` echoed, and never prompt. Another `BUDGET_EXHAUSTED` or `ESCALATE_NO_CONVERGENCE` comes back to this paragraph, never to the extension'"'"'s steps 1–2.'
-  contains "$esc" 'A failing verdict, and `record-grant.zsh`'"'"'s exit 3 (no headroom under its cap of 2 × the original `--max-rounds`), both take the terminal below unchanged.'
+  contains "$esc" 'A failing verdict, and `record-grant.zsh`'"'"'s exit 3 (no headroom under its cap of 2 × the original `--max-rounds`), both take the clean stop in the next paragraph.'
   contains "$esc" 'An attended run never takes this branch; it gets the interactive extension.'
   contains "$(tr '\n' ' ' < "$REPO_ROOT/development/skills/resolve-issue/SKILL.md" | tr -s ' ')" 'comment, and on an unattended run they first try the automatic grant (#2576); the others go straight to the typed comment.'
+}
+
+# --- #2579: the clean-stop comment --------------------------------------------
+
+@test "#2579 clean-stop, verdict-failed arm: names the failing conditions, the history and the resume command, and offers no options" {
+  vstat BUDGET_EXHAUSTED '[2,4]'
+  run --separate-stderr zsh "$S" --status "$ST" --format clean-stop --issue 77 --branch feat/77-x \
+    --work-dir /home/u/.claude/resolve-issue/o-r/77/work-dir
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qxF -- '## 🛑 Review loop clean stop — `BUDGET_EXHAUSTED`'
+  echo "$output" | grep -qxF -- '- **trend** — the last round'"'"'s blocking count is not below the round before it'
+  [ "$(echo "$output" | grep -c -- '^- \*\*cap\*\*')" -eq 0 ]
+  echo "$output" | grep -qxF -- '**Round history** (2/5 rounds)'
+  echo "$output" | grep -qxF -- '- Round 2: 4 blocking, 0 conflict(s)'
+  echo "$output" | grep -qxF -- '/development:resolve-issue 77 --resume'
+  echo "$output" | grep -qxF -- '_Kept review-loop state: `/home/u/.claude/resolve-issue/o-r/77/work-dir`._'
+  echo "$output" | grep -qxF -- '_Diff so far is on branch `feat/77-x` — pushed for review, **no PR opened**._'
+  echo "$output" | grep -qxF -- '<!-- review-loop-clean-stop: BUDGET_EXHAUSTED -->'
+  echo "$output" | grep -qxF -- 'This unattended run could not converge, so it **stopped cleanly**: no PR, `main` untouched, and the review loop'"'"'s state kept so an attended session can continue from round 2.'
+  echo "$output" | grep -qxF -- 'It checks out the branch and continues the loop from round 2 through the interactive extension, where you grant rounds, give guidance or stop. A plain re-run starts fresh.'
+  echo "$output" | grep -qxF -- '**Per-round progress**'
+  # a clean stop is not the escalation comment: no options list, no escalation marker
+  [ "$(echo "$output" | grep -c -- 'How to proceed')" -eq 0 ]
+  [ "$(echo "$output" | grep -c -- 'review-loop-escalation')" -eq 0 ]
+  # the procedure always passes --compare-url (escalation.md step 3): the branch is a link
+  run --separate-stderr zsh "$S" --status "$ST" --format clean-stop --issue 77 --branch feat/77-x \
+    --compare-url https://github.com/o/r/tree/feat/77-x --work-dir /home/u/.claude/resolve-issue/o-r/77/work-dir
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qxF -- '_Diff so far: [`feat/77-x`](https://github.com/o/r/tree/feat/77-x) — pushed for review, **no PR opened**._'
+  [ "$(echo "$output" | grep -c -- 'Diff so far is on branch')" -eq 0 ]
+}
+
+@test "#2579 clean-stop renders the remaining blockers and the class histogram, and a placeholder resume command without --issue" {
+  jq -n '{status:"BUDGET_EXHAUSTED", rounds:2, max_rounds:5,
+    history:[{round:1,blocking:2,conflicts:0},{round:2,blocking:2,conflicts:0}],
+    round_changelists:[
+      {round:1, blocking:[{priority:"Warning",dimension:"bugs",file:"a.py",line:1,title:"t1",class:"new_defect"},
+                          {priority:"Warning",dimension:"bugs",file:"a.py",line:2,title:"t2",class:"under_assertion"}]},
+      {round:2, blocking:[{priority:"Critical",dimension:"bugs",file:"a.py",line:9,title:"unchecked index",class:"incomplete_propagation"},
+                          {priority:"Warning",dimension:"tests",file:"t.py",line:3,title:"weak assert",class:"under_assertion"}]}],
+    final_changelist:{blocking:[{priority:"Critical",dimension:"bugs",file:"a.py",line:9,title:"unchecked index"},
+                                {priority:"High",dimension:"tests",file:"t.py",line:3,title:"weak assert"}]}}' > "$ST"
+  run --separate-stderr zsh "$S" --status "$ST" --format clean-stop
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qxF -- '**Remaining blockers**'
+  echo "$output" | grep -qxF -- '- `a.py:9` [bugs/Critical] unchecked index'
+  echo "$output" | grep -qxF -- '**Blocker classes (last two rounds)**'
+  echo "$output" | grep -qxF -- '| 2 | 0 | 1 | 1 |'
+  echo "$output" | grep -qxF -- '/development:resolve-issue <N> --resume'
+}
+
+@test "#2579 clean-stop with --cap-reached on a failing verdict lists the failing conditions, then cap" {
+  vstat BUDGET_EXHAUSTED '[2,4]'
+  run --separate-stderr zsh "$S" --status "$ST" --format clean-stop --issue 77 --cap-reached
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | grep -E '^- \*\*(too-few-rounds|trend|stuck|critical|cap)\*\*' | cut -d'*' -f3 | tr '\n' ' ')" = "trend cap " ]
+}
+
+@test "#2579 clean-stop names every failing condition, in the verdict's order" {
+  vstat ESCALATE_NO_CONVERGENCE '[3]' '[{"priority":"Critical","dimension":"bugs","file":"a.py","line":1,"title":"x","non_converging":true}]'
+  run --separate-stderr zsh "$S" --status "$ST" --format clean-stop --issue 77
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | grep -E '^- \*\*(too-few-rounds|trend|stuck|critical|cap)\*\*' | cut -d'*' -f3 | tr '\n' ' ')" = "too-few-rounds stuck critical " ]
+  echo "$output" | grep -qxF -- '<!-- review-loop-clean-stop: ESCALATE_NO_CONVERGENCE -->'
+}
+
+@test "#2579 clean-stop, cap arm: a passing verdict is refused without --cap-reached and names the cap with it" {
+  vstat BUDGET_EXHAUSTED '[4,2]'
+  run --separate-stderr zsh "$S" --status "$ST" --format clean-stop --issue 77
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  contains "$stderr" "the convergence verdict passes, so this run takes the automatic grant, not a clean stop"
+  run --separate-stderr zsh "$S" --status "$ST" --format clean-stop --issue 77 --cap-reached
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qxF -- '- **cap** — the automatic grants reached their cap of 2 × the original `--max-rounds`, so no more rounds can be granted unattended'
+  [ "$(echo "$output" | grep -cE '^- \*\*(too-few-rounds|trend|stuck|critical)\*\*')" -eq 0 ]
+}
+
+@test "#2579 clean-stop refuses every other status, and its flags are refused on the other formats" {
+  local st
+  for st in ESCALATE_CONFLICT ESCALATE_AMBIGUOUS CONVERGED; do
+    vstat "$st" '[2,4]'
+    run --separate-stderr zsh "$S" --status "$ST" --format clean-stop --cap-reached
+    [ "$st: $status" = "$st: 2" ]
+    [ -z "$output" ]
+    contains "$stderr" "a clean stop is only for BUDGET_EXHAUSTED or ESCALATE_NO_CONVERGENCE (got: $st)"
+  done
+  vstat BUDGET_EXHAUSTED '[2,4]'
+  run --separate-stderr zsh "$S" --status "$ST" --cap-reached
+  [ "$status" -eq 2 ]
+  contains "$stderr" "--cap-reached and --work-dir are for --format clean-stop only"
+  run --separate-stderr zsh "$S" --status "$ST" --format summary --work-dir /tmp/x
+  [ "$status" -eq 2 ]
+  contains "$stderr" "--cap-reached and --work-dir are for --format clean-stop only"
 }

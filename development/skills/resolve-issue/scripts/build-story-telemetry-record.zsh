@@ -33,9 +33,17 @@
 #                          | "ESCALATE_AMBIGUOUS" | "BUDGET_EXHAUSTED" | null,
 #     "fallbacks_fired": ["acceptance_tests" | "user_docs" | "c4_currency", …],
 #     "session_mode": "attended" | "unattended" | null,     (#2575: §0a's
-#     "session_mode_source": "env" | "inferred" | null }     resolve-session.zsh)
+#     "session_mode_source": "env" | "inferred" | null,     resolve-session.zsh)
+#     "clean_stop": bool,               (#2579) the unattended clean stop
+#     "convergence_failures": ["too-few-rounds" | "trend" | "stuck"
+#                              | "critical" | "cap", …] }
 # Absent optional keys read as null / false / []. The two session keys are a
 # pair: both null, or both set — one without the other is refused.
+# `clean_stop: true` is accepted only on an `escalated` run in session mode
+# `unattended` whose escalation_status is BUDGET_EXHAUSTED or
+# ESCALATE_NO_CONVERGENCE, and only with a non-empty convergence_failures; a
+# non-empty convergence_failures needs clean_stop true. Every other escalation —
+# today's autonomous terminal included — records clean_stop false.
 #
 # A state whose facts CONTRADICT its outcome is rejected rather than emitted —
 # e.g. `pr-opened` with a NEEDS_REFINEMENT gate, `escalated` with no typed
@@ -173,6 +181,18 @@ problems=$(print -r -- "$state" | jq -r '
         then "session_mode_source must be env | inferred | null" else empty end ),
       ( if ($s.session_mode == null) != ($s.session_mode_source == null)
         then "session_mode and session_mode_source are a pair: both null or both set" else empty end ),
+      ( if (($s.clean_stop | dflt(false)) | type) != "boolean"
+        then "clean_stop must be a boolean" else empty end ),
+      ( if ((($s.convergence_failures | dflt([])) | type) != "array")
+          or ([ ($s.convergence_failures | dflt([]))[] | select((type != "string") or (enum(["too-few-rounds","trend","stuck","critical","cap"]) | not)) ] | length > 0)
+        then "convergence_failures must be an array drawn from too-few-rounds | trend | stuck | critical | cap" else empty end ),
+      ( if $s.clean_stop == true and ($o != "escalated" or $s.session_mode != "unattended"
+             or (($es | type) != "string") or ($es | enum(["BUDGET_EXHAUSTED","ESCALATE_NO_CONVERGENCE"]) | not))
+        then "clean_stop needs an escalated, unattended run whose escalation_status is BUDGET_EXHAUSTED or ESCALATE_NO_CONVERGENCE" else empty end ),
+      ( if $s.clean_stop == true and ((($s.convergence_failures | dflt([])) | type) == "array") and (($s.convergence_failures | dflt([])) | length) == 0
+        then "clean_stop needs the failing convergence_failures" else empty end ),
+      ( if $s.clean_stop != true and ((($s.convergence_failures | dflt([])) | type) == "array") and (($s.convergence_failures | dflt([])) | length) > 0
+        then "convergence_failures is set, so clean_stop must be true" else empty end ),
       # the facts must agree with the outcome they are filed under
       ( if ($dp | type) == "string" and ($dp | startswith("REJECT_")) and $o != "precheck-parked"
         then "a \($dp) precheck can only end precheck-parked" else empty end ),
@@ -236,5 +256,7 @@ print -r -- "$state" | jq -c '
       escalation_status: $s.escalation_status,
       fallbacks_fired: (($s.fallbacks_fired | dflt([])) | unique),
       session_mode: $s.session_mode,
-      session_mode_source: $s.session_mode_source
+      session_mode_source: $s.session_mode_source,
+      clean_stop: ($s.clean_stop | dflt(false)),
+      convergence_failures: ($s.convergence_failures | dflt([]))
     }' || { print -u2 -- "build-story-telemetry-record: failed to build payload"; exit 1 }

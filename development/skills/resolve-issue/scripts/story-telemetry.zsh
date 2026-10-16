@@ -7,9 +7,10 @@
 #
 #   story-telemetry.zsh args [WORD ...]
 #       Parse the skill's $ARGUMENTS: exactly one issue reference, plus
-#       --telemetry-file PATH, --telemetry-dir DIR and --no-review in ANY
-#       position. Prints {"issue_ref", "telemetry_file", "telemetry_dir",
-#       "no_review"} (absent sink flags → null, absent --no-review → false). The
+#       --telemetry-file PATH, --telemetry-dir DIR, --no-review and --resume
+#       (#2579) in ANY position. Prints {"issue_ref", "telemetry_file",
+#       "telemetry_dir", "no_review", "resume"} (absent sink flags → null, an
+#       absent boolean flag → false). The
 #       two paths are made ABSOLUTE against this call's cwd, so every later
 #       caller — each loop invocation, the emitter — names the same file
 #       whatever directory it runs from. No arguments, an unknown flag, a sink
@@ -82,7 +83,7 @@ local EMITTER="${STORY_TELEMETRY_EMITTER_BIN:-${self_dir}/../../../scripts/telem
 local BUILDER="${STORY_TELEMETRY_BUILDER_BIN:-${self_dir}/build-story-telemetry-record.zsh}"
 local EPIC_BUILDER="${STORY_TELEMETRY_EPIC_BUILDER_BIN:-${self_dir}/build-epic-telemetry-record.zsh}"
 
-local invocation_help="usage: /development:resolve-issue <issue-number|url> [--telemetry-file PATH] [--telemetry-dir DIR] [--no-review]
+local invocation_help="usage: /development:resolve-issue <issue-number|url> [--telemetry-file PATH] [--telemetry-dir DIR] [--no-review] [--resume]
   flags may appear in any position; sink precedence is --telemetry-file >
   --telemetry-dir (DIR/<repo-slug>.jsonl) > ~/.claude/telemetry/<repo-slug>.jsonl"
 
@@ -113,7 +114,7 @@ _need_val() {  # $1 = flag, $2 = remaining arg count, $3 = candidate value
 # --- args -------------------------------------------------------------------
 
 _cmd_args() {
-  local ref="" tfile="" tdir="" seen_file=0 seen_dir=0 no_review=false
+  local ref="" tfile="" tdir="" seen_file=0 seen_dir=0 no_review=false resume=false
   _args_fail() {
     print -ru2 -- "story-telemetry: $1"
     print -ru2 -- "$invocation_help"
@@ -136,6 +137,9 @@ _cmd_args() {
     # the skill's own review-loop switch (§3.5): parsed here so it never reads
     # as an unknown flag, and handed back for the conductor to act on
     --no-review) no_review=true; shift ;;
+    # continue an unattended clean stop (#2579): the conductor checks the
+    # session mode and the kept marker (clean-stop.zsh read) before using it
+    --resume) resume=true; shift ;;
     -*) _args_fail "unknown flag: $1" ;;
     *)
       [[ -n "$1" ]] || _args_fail "an empty issue reference"
@@ -149,10 +153,11 @@ _cmd_args() {
   [[ -n "$tfile" ]] && tfile="$(_abs_path "$tfile")"
   [[ -n "$tdir" ]] && tdir="$(_abs_path "$tdir")"
   jq -nc --arg ref "$ref" --arg f "$tfile" --arg d "$tdir" --argjson nr "$no_review" \
+    --argjson rs "$resume" \
     '{issue_ref:$ref,
       telemetry_file:(if $f == "" then null else $f end),
       telemetry_dir:(if $d == "" then null else $d end),
-      no_review:$nr}' || {
+      no_review:$nr, resume:$rs}' || {
     print -u2 -- "story-telemetry args: failed to print the parsed arguments"; exit 1 }
 }
 

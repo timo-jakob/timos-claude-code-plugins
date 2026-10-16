@@ -148,6 +148,7 @@ decided. None may be guessed at the end.
 | `fallbacks_fired` | Steps 2 and 3 | `acceptance_tests` when the acceptance planner exited 1; `user_docs` when the user-docs step no-oped for any of its reasons; `c4_currency` when the C4 check no-oped (`[]`, exit 1, or skipped on a detection failure) |
 | `escalation_status` | §3.5 | the `ESCALATE_*` / `BUDGET_EXHAUSTED` status the run **ended** on, and **only** when step 4 below picks the `escalated` row. It is `null` on every other ending, including after either of §3.5's PR-opening terminals, a `--no-review` `SKIPPED`, a loop `ERROR`, and an escalation that a later grant superseded. Never write a non-escalation status here: the builder refuses it and the record is lost |
 | `pr` | Step 6 | the opened PR's number |
+| `clean_stop`, `convergence_failures` | §3.5 | `true` and the marker's `convergence_failures` only when the run took the unattended clean stop (`reference/escalation.md`, #2579); `false` and `[]` on every other ending, today's escalation terminal included. The builder refuses `clean_stop: true` unless the run is `escalated`, in mode `unattended`, on `BUDGET_EXHAUSTED` or `ESCALATE_NO_CONVERGENCE` |
 
 "The last precheck this run ran" includes §0a's re-verification after an
 interactive remediation. When the human picks "Both" and the blockers merge,
@@ -181,7 +182,8 @@ emits nothing, so pick the row before writing the state, not after.
   "dependency_precheck": "PROCEED", "gate_verdict": "READY", "risk": "elevated",
   "pr": 413, "story_spec_present": true,
   "escalation_status": null, "fallbacks_fired": ["c4_currency"],
-  "session_mode": "unattended", "session_mode_source": "env" }
+  "session_mode": "unattended", "session_mode_source": "env",
+  "clean_stop": false, "convergence_failures": [] }
 ```
 
 ```bash

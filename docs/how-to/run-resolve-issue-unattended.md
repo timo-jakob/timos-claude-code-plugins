@@ -55,3 +55,28 @@ the size pre-flight's override, the extra review rounds after an escalation,
 the options for a review that did not apply, and suggestion promotion. The
 run's telemetry
 record carries the mode and its source (`session_mode`, `session_mode_source`).
+
+## When an unattended run cannot finish
+
+An unattended run that spends its review rounds without converging first takes
+extra rounds automatically, but only when the rounds so far show it is getting
+there. When they do not — the blockers are not falling, one is stuck, a
+Critical is still open, or the extra rounds are used up — the run **stops
+cleanly**:
+
+- it opens no PR, so `main` stays untouched;
+- it pushes its branch and comments on the issue, naming why it stopped and the
+  blockers that remain, and adds the `needs-human-decision` label;
+- it keeps the review's state in `~/.claude/resolve-issue/<repo>/<issue>/`,
+  outside every checkout, so the next session can find it.
+
+To continue it, run this in a session where you are present:
+
+```text
+/development:resolve-issue <issue> --resume
+```
+
+The run checks out the pushed branch and picks up from the last round. It then
+asks you what to do next: grant more rounds, give guidance, or stop. `--resume`
+is refused in an unattended session, and when no stopped run is kept for that
+issue. A plain re-run without `--resume` starts over.

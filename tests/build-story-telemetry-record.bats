@@ -43,7 +43,7 @@ FAILED='{"outcome":"failed","dependency_precheck":"PROCEED","gate_verdict":"READ
   [ "$(jq -c '.fallbacks_fired' <<<"$output")" = '["user_docs"]' ]
   # exactly the documented keys — an envelope key (pr, issue, ts, wall_s) here
   # would give a consumer two places to read one fact
-  [ "$(jq -c 'keys' <<<"$output")" = '["dependency_precheck","escalation_status","fallbacks_fired","gate_verdict","mode","review_loop_run_ids","risk","session_mode","session_mode_source","story_spec_present"]' ]
+  [ "$(jq -c 'keys' <<<"$output")" = '["clean_stop","convergence_failures","dependency_precheck","escalation_status","fallbacks_fired","gate_verdict","mode","review_loop_run_ids","risk","session_mode","session_mode_source","story_spec_present"]' ]
   build "$SUCCESS" --print-outcome
   [ "$status" -eq 0 ]
   [ "$output" = "success" ]
@@ -400,4 +400,69 @@ refuses() {
   run --separate-stderr env PATH="$SB" "$SB/zsh" "$B" --state "$ST"
   [ "$status" -eq 1 ]
   contains "$stderr" "jq not found on PATH"
+}
+
+# --- the clean stop (#2579) -----------------------------------------------------
+
+# an unattended clean stop: escalated, typed BUDGET_EXHAUSTED or
+# ESCALATE_NO_CONVERGENCE, with its failing conditions
+clean_state() {  # $1 = escalation_status, $2 = convergence_failures JSON, $3 = session mode
+  jq -nc --arg es "$1" --argjson f "$2" --arg m "${3:-unattended}" \
+    '{outcome:"escalated", dependency_precheck:"PROCEED", gate_verdict:"READY", risk:"normal",
+      escalation_status:$es, session_mode:$m, session_mode_source:"env",
+      clean_stop:true, convergence_failures:$f}'
+}
+
+@test "#2579 a clean stop records outcome escalated, clean_stop true and its convergence_failures" {
+  build "$(clean_state BUDGET_EXHAUSTED '["trend","stuck"]')"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '{escalation_status, clean_stop, convergence_failures}' <<<"$output")" = '{"escalation_status":"BUDGET_EXHAUSTED","clean_stop":true,"convergence_failures":["trend","stuck"]}' ]
+  build "$(clean_state ESCALATE_NO_CONVERGENCE '["cap"]')" --print-outcome
+  [ "$status" -eq 0 ]
+  [ "$output" = "escalated" ]
+}
+
+@test "#2579 today's escalation records clean_stop false and no convergence_failures" {
+  build "$ESCALATED"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '{clean_stop, convergence_failures}' <<<"$output")" = '{"clean_stop":false,"convergence_failures":[]}' ]
+  build "$SUCCESS"
+  [ "$(jq -c '{clean_stop, convergence_failures}' <<<"$output")" = '{"clean_stop":false,"convergence_failures":[]}' ]
+}
+
+@test "#2579 clean_stop true is refused on any other ending, status or session mode" {
+  local msg='clean_stop needs an escalated, unattended run whose escalation_status is BUDGET_EXHAUSTED or ESCALATE_NO_CONVERGENCE'
+  # attended
+  build "$(clean_state BUDGET_EXHAUSTED '["trend"]' attended)"
+  [ "$status" -eq 1 ]; [ -z "$output" ]; contains "$stderr" "$msg"
+  # another typed status
+  local es
+  for es in ESCALATE_CONFLICT ESCALATE_AMBIGUOUS; do
+    build "$(clean_state "$es" '["trend"]')"
+    [ "$es: $status" = "$es: 1" ]; contains "$stderr" "$msg"
+  done
+  # no session mode at all
+  build "$(clean_state BUDGET_EXHAUSTED '["trend"]' | jq -c '.session_mode = null | .session_mode_source = null')"
+  [ "$status" -eq 1 ]; contains "$stderr" "$msg"
+  # another ending
+  build "$(jq -c '. + {clean_stop:true, convergence_failures:["trend"], session_mode:"unattended", session_mode_source:"env"}' <<<"$SUCCESS")"
+  [ "$status" -eq 1 ]; contains "$stderr" "$msg"
+  build "$(jq -c '. + {clean_stop:true, convergence_failures:["trend"], session_mode:"unattended", session_mode_source:"env"}' <<<"$FAILED")"
+  [ "$status" -eq 1 ]; contains "$stderr" "$msg"
+}
+
+@test "#2579 clean_stop and convergence_failures come together, and the failures are a closed set" {
+  build "$(clean_state BUDGET_EXHAUSTED '[]')"
+  [ "$status" -eq 1 ]; contains "$stderr" "clean_stop needs the failing convergence_failures"
+  build "$(clean_state BUDGET_EXHAUSTED '["trend"]' | jq -c '.clean_stop = false')"
+  [ "$status" -eq 1 ]; contains "$stderr" "convergence_failures is set, so clean_stop must be true"
+  build "$(clean_state BUDGET_EXHAUSTED '["slow"]')"
+  [ "$status" -eq 1 ]; contains "$stderr" "convergence_failures must be an array drawn from too-few-rounds | trend | stuck | critical | cap"
+  build "$(clean_state BUDGET_EXHAUSTED '["trend"]' | jq -c '.clean_stop = "yes"')"
+  [ "$status" -eq 1 ]; contains "$stderr" "clean_stop must be a boolean"
+  local f
+  for f in too-few-rounds trend stuck critical cap; do
+    build "$(clean_state BUDGET_EXHAUSTED "[\"$f\"]")"
+    [ "$f: $status" = "$f: 0" ]
+  done
 }
