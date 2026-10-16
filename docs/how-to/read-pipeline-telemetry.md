@@ -199,7 +199,7 @@ Normative: `ARCHITECTURE.md`, *Resolve-issue telemetry*.
 | --- | --- | --- |
 | `mode` | string | always `epic` |
 | `e1_classification` | string | how the invocation found the epic's children — `native_children`, `backfilled`, `inline_slices`, or a `halt_*` value |
-| `children` | object | `total`, `completed_before`, `resolved_this_run`, `escalated`, `parked`, `queued` — every open child counted in exactly one bucket |
+| `children` | object | `total`, `completed_before`, `resolved_this_run`, `escalated`, `parked`, `queued`, `clean_stopped`, `parked_behind_clean_stop` — every open child is counted in exactly one of the buckets from `completed_before` to `queued`. The last two are sub-counts kept out of that sum (#2585): the escalated children that stopped cleanly, in this walk or an earlier one, and the parked children waiting on one |
 | `split` | object | `parallel` and `sequential`: how many children's PRs this run opened by each path (integers) |
 | `child_run_ids` | array of strings | the `run_id` of every child run started this invocation |
 | `e4` | object | `ran` (boolean) and `result` (`green`, `regression` or `null`) of the whole-epic verification |

@@ -20,9 +20,15 @@
 #         precedence below, computed here from the facts, or the state is refused
 #     "e1_classification": one of the ten values below,             REQUIRED
 #     "children": { "total", "completed_before", "resolved_this_run",
-#                   "escalated", "parked", "queued" },               REQUIRED
+#                   "escalated", "parked", "queued",                 REQUIRED
+#                   "clean_stopped", "parked_behind_clean_stop" },
 #         non-negative integers over the invocation's FIRST read of
-#         read-sub-issues.zsh; the five buckets must sum to total
+#         read-sub-issues.zsh; the five buckets must sum to total. The last
+#         two (#2585, default 0) are SUB-COUNTS kept out of that sum:
+#         clean_stopped — the escalated children in the clean-stop triage's
+#         skip — never exceeds escalated, and
+#         parked_behind_clean_stop — the parked children blocked through a
+#         clean-stopped child — never exceeds parked
 #     "split": { "parallel", "sequential" },     only children whose PR E3
 #                                                opened this run (default 0, 0)
 #     "child_run_ids": ["resolve-issue-…", …],   every child run started, in
@@ -126,6 +132,10 @@ local norm=""
 norm=$(print -r -- "$state" | jq -c '
   def dflt(d): if . == null then d else . end;
   .split = (.split | dflt({parallel:0, sequential:0}))
+  | if (.children | type) == "object"
+    then .children.clean_stopped = (.children.clean_stopped | dflt(0))
+         | .children.parked_behind_clean_stop = (.children.parked_behind_clean_stop | dflt(0))
+    else . end
   | .child_run_ids = (.child_run_ids | dflt([]))
   | .e4 = (.e4 | dflt({ran:false, result:null}))
   | .e5_closed = (.e5_closed | dflt(false))
@@ -156,8 +166,8 @@ problems=$(print -r -- "$norm" | jq -r '
                "halt_backfill_vet","halt_backfill_error","halt_backfill_partial",
                "halt_unclassified"]) | not)
         then "unknown e1_classification: \($s.e1_classification | tojson)" else empty end ),
-      ( if counts($s.children; ["total","completed_before","resolved_this_run","escalated","parked","queued"]) | not
-        then "children must be an object of non-negative integers: total, completed_before, resolved_this_run, escalated, parked, queued" else empty end ),
+      ( if counts($s.children; ["total","completed_before","resolved_this_run","escalated","parked","queued","clean_stopped","parked_behind_clean_stop"]) | not
+        then "children must be an object of non-negative integers: total, completed_before, resolved_this_run, escalated, parked, queued, clean_stopped, parked_behind_clean_stop" else empty end ),
       ( if counts($s.split; ["parallel","sequential"]) | not
         then "split must be an object of non-negative integers: parallel, sequential" else empty end ),
       ( if ($s.child_run_ids | type) != "array"
@@ -230,6 +240,10 @@ problems=$(print -r -- "$norm" | jq -r "$derive"'
         then "an E4 that could not reach a verdict has e4.ran: false" else empty end ),
       ( if $s.failure_cause == "e5_error" and $s.e5_closed
         then "a failed E5 close has e5_closed: false" else empty end ),
+      ( if $c.clean_stopped > $c.escalated
+        then "children.clean_stopped (\($c.clean_stopped)) exceeds children.escalated (\($c.escalated)): a clean stop is an escalation" else empty end ),
+      ( if $c.parked_behind_clean_stop > $c.parked
+        then "children.parked_behind_clean_stop (\($c.parked_behind_clean_stop)) exceeds children.parked (\($c.parked))" else empty end ),
       ( if ($c.completed_before + $c.resolved_this_run + $c.escalated + $c.parked + $c.queued) != $c.total
         then "children do not sum to total: completed_before + resolved_this_run + escalated + parked + queued must equal \($c.total)" else empty end ),
       ( if $opened > $nruns
@@ -256,7 +270,8 @@ print -r -- "$norm" | jq -c '
   | {
       mode: "epic",
       e1_classification: $s.e1_classification,
-      children: ($s.children | {total, completed_before, resolved_this_run, escalated, parked, queued}),
+      children: ($s.children | {total, completed_before, resolved_this_run, escalated, parked, queued,
+                                clean_stopped, parked_behind_clean_stop}),
       split: ($s.split | {parallel, sequential}),
       # de-duplicated, start order kept: an id listed twice would read as two
       # child runs to a consumer counting them
