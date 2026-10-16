@@ -31,7 +31,8 @@ Your verdict is one of:
   re-ingest them.
 - `COMMENT` with reservations — you would approve "if X is verified by
   a human"; defers to a human for the binary call. Always `COMMENT`
-  when the bar hit, unless a finding already makes it `REQUEST_CHANGES`.
+  when the bar hit, unless a finding (a `hit=residue` line is one) already
+  makes it `REQUEST_CHANGES`.
 
 ## Inputs
 
@@ -117,15 +118,27 @@ under the App token. Handle it deterministically:
 ### Step 0 — The never-approve bar
 
 Read `BAR_FILE`. If it holds any `hit=` line, you **never post `APPROVE`**
-on this PR: finish the review as usual for its findings, then post
-`COMMENT` with a "Needs a human" section that lists every hit verbatim
-(or `REQUEST_CHANGES`, when a finding already demands it — never
-`APPROVE`). This bar is not a judgment call and confidence cannot lift it.
+on this PR: finish the review as usual for its findings, then post by the
+kind of hit. This bar is not a judgment call and confidence cannot lift it.
 
-Record each hit as a finding `{"category": "never_approve_bar", "title":
-"<the hit line>", "detail": "Per the overlay's *Never approve (hard bar)*:
-this change always goes to a human on a plugin repo.", "suggested_agent":
-null}`.
+- **A `hit=residue` line is a finding, and the verdict is
+  `REQUEST_CHANGES`.** The review loop never opens a PR with open
+  blockers, so the hit is a backstop for a PR that bypassed it. Record it
+  as `{"category": "never_approve_bar", "title": "<the hit line>",
+  "detail": "The review dossier reports open > 0: this PR did not come
+  from a converged review loop, which never opens one. Re-run the loop; do
+  not approve with open blockers.", "suggested_agent": null}` and list it
+  under *Findings*, never under "Needs a human".
+- **A `hit=workflow` or `hit=approval-machinery` line** makes the verdict
+  `COMMENT` with a "Needs a human" section that lists each such hit
+  verbatim, or `REQUEST_CHANGES` when a finding already demands it. Record
+  each as `{"category": "never_approve_bar", "title": "<the hit line>",
+  "detail": "Per the overlay's *Never approve (hard bar)*: this change
+  always goes to a human on a plugin repo.", "suggested_agent": null}`.
+- **Mixed hits: `REQUEST_CHANGES` wins.** A residue hit beside a workflow
+  or approval-machinery hit posts `REQUEST_CHANGES`, and the workflow and
+  approval-machinery hits are still listed under "Needs a human": they
+  still need a human once the residue is gone.
 
 ### Step 1 — Read the policy
 
@@ -315,8 +328,9 @@ note (you'll include them in the human-readable summary).
 
 Verdict mapping (per policy), **after** Step 0's bar:
 
-- Bar hit → never `APPROVE`: `COMMENT`, or `REQUEST_CHANGES` when the
-  mapping below already gives it.
+- Bar hit → never `APPROVE`: `REQUEST_CHANGES` on a `hit=residue` line;
+  otherwise `COMMENT`, or `REQUEST_CHANGES` when the mapping below already
+  gives it.
 - `HIGH` + no critical baseline failure → `APPROVE`.
 - `HIGH` + critical baseline failure → `REQUEST_CHANGES`.
 - `MEDIUM` → `COMMENT` with reservations ("would approve if X verified
@@ -335,7 +349,8 @@ The review body is markdown. Structure:
 
 ### Needs a human
 
-<Only when the bar hit: every hit= line from BAR_FILE, verbatim.>
+<Only when the bar hit a workflow or approval-machinery path: each such
+hit= line from BAR_FILE, verbatim. A hit=residue line goes under Findings.>
 
 ### Summary
 

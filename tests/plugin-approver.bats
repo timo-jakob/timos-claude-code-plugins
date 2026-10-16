@@ -243,12 +243,23 @@ dossier() { printf 'x\n<!-- review-dossier: %s -->\n' "$1" > body; }
   grep -qF '`POLICY_FILE` or `BAR_FILE` is unset, missing or unreadable.' "$AGENT"
 }
 
-@test "agent: Step 0 — any hit= line means it never posts APPROVE, and COMMENTs with a Needs-a-human list" {
+@test "agent: Step 0 — any hit= line means it never posts APPROVE; residue is a REQUEST_CHANGES finding, the rest a Needs-a-human COMMENT" {
   grep -q '^### Step 0 — The never-approve bar' "$AGENT"
-  grep -qF 'If it holds any `hit=` line, you **never post `APPROVE`**' "$AGENT"
-  grep -qF '`COMMENT` with a "Needs a human" section that lists every hit verbatim' "$AGENT"
-  grep -qF 'This bar is not a judgment call and confidence cannot lift it.' "$AGENT"
-  grep -qF 'Record each hit as a finding `{"category": "never_approve_bar", "title":' "$AGENT"
+  pin_each "$AGENT" \
+    'If it holds any `hit=` line, you **never post `APPROVE`**' \
+    'kind of hit. This bar is not a judgment call and confidence cannot lift it.' \
+    '- **A `hit=residue` line is a finding, and the verdict is' \
+    '`REQUEST_CHANGES`.** The review loop never opens a PR with open' \
+    'blockers, so the hit is a backstop for a PR that bypassed it. Record it' \
+    'as `{"category": "never_approve_bar", "title": "<the hit line>",' \
+    '"detail": "The review dossier reports open > 0: this PR did not come' \
+    'from a converged review loop, which never opens one. Re-run the loop; do' \
+    'not approve with open blockers.", "suggested_agent": null}` and list it' \
+    'under *Findings*, never under "Needs a human".' \
+    '- **A `hit=workflow` or `hit=approval-machinery` line** makes the verdict' \
+    '`COMMENT` with a "Needs a human" section that lists each such hit' \
+    'verbatim, or `REQUEST_CHANGES` when a finding already demands it. Record' \
+    'always goes to a human on a plugin repo.", "suggested_agent": null}`.'
 }
 
 @test "agent: Step 8 waits for CI to settle and never reads a pending check as green" {
@@ -316,10 +327,21 @@ dossier() { printf 'x\n<!-- review-dossier: %s -->\n' "$1" > body; }
   [ "$(printf '%s\n' "$output" | sort -u)" = "{{APPROVER_LANG}}" ]
 }
 
-@test "policy: the overlay is headed for claude-plugin and makes any bar hit a COMMENT" {
+@test "policy: the overlay is headed for claude-plugin; a residue hit is a REQUEST_CHANGES finding, a workflow or machinery hit a COMMENT" {
   grep -qx '# Overlay — Claude plugin' "$OVERLAY"
-  grep -qF 'Any `hit=` line means the verdict is `COMMENT`' "$OVERLAY"
-  grep -qF "overrides the core's leniency for disclosed residue. On a plugin repo," "$OVERLAY"
+  grep -qF 'Any `hit=` line means the verdict is never `APPROVE`. A `hit=residue` line is' "$OVERLAY"
+  grep -qF 'a finding and makes the verdict `REQUEST_CHANGES`: a dossier with `open > 0`' "$OVERLAY"
+  grep -qF '`hit=workflow` or `hit=approval-machinery` line makes the verdict `COMMENT`,' "$OVERLAY"
+  # the human-approval path for residue and the core leniency it overrode are gone (#2587)
+  no_residue_human_path "$OVERLAY"
+}
+
+# A residue hit is a finding, never a request for human approval (#2587): the
+# overlay must not route residue to a human, nor override a core leniency that
+# no longer exists. Shared by the overlay test above and its mutation control.
+no_residue_human_path() {
+  if grep -qF 'residue goes to a human' "$1"; then return 1; fi
+  if grep -qF 'leniency' "$1"; then return 1; fi
 }
 
 @test "policy: the overlay covers plugin test idioms and the plugin.json + marketplace.json bump" {
@@ -330,9 +352,12 @@ dossier() { printf 'x\n<!-- review-dossier: %s -->\n' "$1" > body; }
 
 @test "policy: the overlay's load-bearing sentences" {
   pin_each "$OVERLAY" \
-    'identity machinery. The one exception is `REQUEST_CHANGES`, when the core'"'"'s' \
-    'calibration already gives it; the verdict is never `APPROVE`. This bar' \
-    'residue goes to a human.' \
+    'means the PR did not come from a converged review loop, which never opens one,' \
+    'so the hit is a backstop for a PR that bypassed the loop, not a request for' \
+    'human approval. This agrees with the core'"'"'s rule for `open > 0`. A' \
+    'naming every such hit in a "Needs a human" list. The one exception is' \
+    '`REQUEST_CHANGES`, when the core'"'"'s calibration or a `hit=residue` line already' \
+    'gives it; the hits are still listed.' \
     'The bar is not a judgment call, and no confidence level lifts it. An empty' \
     '`BAR_FILE` means the bar is clear; the core'"'"'s criteria then decide as usual.' \
     'bump is a REQUEST_CHANGES finding, because installs would never see the change.' \
@@ -377,8 +402,12 @@ pin_each() {
     '- `APPROVE` — confidence HIGH, the risk register has no load-bearing' \
     'entries, **and** the never-approve bar is clear.' \
     'a human"; defers to a human for the binary call. Always `COMMENT`' \
-    'when the bar hit, unless a finding already makes it `REQUEST_CHANGES`.' \
-    '- Bar hit → never `APPROVE`: `COMMENT`, or `REQUEST_CHANGES` when the' \
+    'when the bar hit, unless a finding (a `hit=residue` line is one) already' \
+    'makes it `REQUEST_CHANGES`.' \
+    '- Bar hit → never `APPROVE`: `REQUEST_CHANGES` on a `hit=residue` line;' \
+    'otherwise `COMMENT`, or `REQUEST_CHANGES` when the mapping below already' \
+    '<Only when the bar hit a workflow or approval-machinery path: each such' \
+    'hit= line from BAR_FILE, verbatim. A hit=residue line goes under Findings.>' \
     '- Do not post `APPROVE` when `BAR_FILE` holds any `hit=` line — under' \
     'is not metadata-grounded in this sense: it was computed before you ran,' \
     'The operator-facing companion is `development/skills/bootstrap/docs/APPROVER.md`'
@@ -395,7 +424,8 @@ pin_each() {
     '- Any other exit: stop. Post nothing, mint nothing, remove `$SCRATCH`, and relay' \
     'A failed `sed`, `gh pr view` or `gh api` above is the same stop, and the block' \
     'never the value (#640). Capture the path; never `cat` or `echo` the token.' \
-    'say "Needs a human" and list every `hit=` line.' \
+    'list every `hit=` line: a `hit=residue` line as the finding that made the' \
+    'verdict `REQUEST_CHANGES`, and the workflow and approval-machinery lines under' \
     'head or body change, a failed re-read, unsettled CI or a conflicting PR), say' \
     '`/development-claude-plugin:approve` — never report its derived verdict as posted.' \
     'print `usage: /development-claude-plugin:approve [<pr-number>]` and stop.'
@@ -405,7 +435,34 @@ pin_each() {
   pin_each "$SKILL" \
     '- **Opt-in per session, never recorded.**' \
     'distinct from the Maintenance App that authored the PR.' \
-    '- **The never-approve bar is a script, not a judgment**: residue, workflow'
+    '- **The never-approve bar is a script, not a judgment**: workflow changes and' \
+    'approval/identity machinery always reach a human, and residue (`open > 0`) is' \
+    'refused as a backstop finding, since the review loop never opens such a PR. Its result'
+}
+
+@test "mixed hits: residue beside a workflow or machinery hit posts REQUEST_CHANGES and still lists the others under Needs a human (#2587)" {
+  pin_each "$OVERLAY" \
+    '`REQUEST_CHANGES`, when the core'"'"'s calibration or a `hit=residue` line already' \
+    'gives it; the hits are still listed.'
+  pin_each "$AGENT" \
+    '- **Mixed hits: `REQUEST_CHANGES` wins.** A residue hit beside a workflow' \
+    'or approval-machinery hit posts `REQUEST_CHANGES`, and the workflow and' \
+    'approval-machinery hits are still listed under "Needs a human": they' \
+    'still need a human once the residue is gone.'
+  pin_each "$SKILL" \
+    'list every `hit=` line: a `hit=residue` line as the finding that made the' \
+    'verdict `REQUEST_CHANGES`, and the workflow and approval-machinery lines under'
+}
+
+@test "mutation control: writing the residue-to-a-human rule back into the overlay reds its pin (#2587)" {
+  local m="$BATS_TEST_TMPDIR/overlay.md.tmpl"
+  sed 's/^gives it; the hits are still listed\.$/gives it; the hits are still listed. On a plugin repo, residue goes to a human./' "$OVERLAY" > "$m"
+  # the mutation landed, and the overlay test's check reds on it
+  grep -qF 'On a plugin repo, residue goes to a human.' "$m"
+  run no_residue_human_path "$m"
+  [ "$status" -ne 0 ]
+  # and the real overlay passes the same check
+  no_residue_human_path "$OVERLAY"
 }
 
 @test "APPROVER.md: the always-human kinds, the COMMENT verdict and the exact opt-in value" {
@@ -510,6 +567,23 @@ step12_script() {
   contains "$output" "Policy render or PR fetch failed — posting nothing."
   lacks "$output" "BAR_RC="
   [ "$(cat "$GH_LOG")" = "pr view 42 --json headRefOid -q .headRefOid" ]
+}
+
+@test "skill Step 3 prints the bar's hit lines and Step 6 lists them from that output, since Step 5 removed SCRATCH (#2587)" {
+  pin_each "$SKILL" \
+    'block prints them with `SCRATCH` and `BAR_RC`, then the bar'"'"'s `hit=` lines; later' \
+    'take the `hit=` lines from Step 3'"'"'s output — Step 5 has removed `$SCRATCH` — and'
+  [ "$(extract_block "$SKILL" '## Step 3 — Policy and never-approve bar' | tail -n 1)" = 'cat "$SCRATCH/bar"' ]
+  stub_gh
+  extract_block "$SKILL" '## Step 3 — Policy and never-approve bar' \
+    | sed -e "s|<skill-base-dir>|$REPO_ROOT/development-claude-plugin/skills/approve|" \
+      -e 's|<the PR_NUMBER Step 1 printed>|42|' -e 's|<the REPO Step 1 printed>|o/r|' > step3.sh
+  cd "$REPO_ROOT"
+  TMPDIR="$BATS_TEST_TMPDIR" STUB_HEAD=abc123 STUB_BODY=Summary STUB_PATHS=.github/workflows/ci.yml \
+    run bash "$BATS_TEST_TMPDIR/step3.sh"
+  [ "$status" -eq 0 ]
+  [ "${lines[3]}" = "BAR_RC=3" ]
+  starts_with "${lines[4]}" "hit="
 }
 
 @test "skill Step 1 runs: a failed author lookup is an error with exit 1, never the off state (#2300)" {
@@ -700,7 +774,7 @@ step12_script() {
     "{ echo \"::error::could not re-read PR #\$PR_NUMBER's head and body — posting nothing; re-run the review\" >&2; exit 1; }" \
     '($changed) — posting nothing; re-run /development-claude-plugin:approve" >&2'
   pin_each "$SKILL" \
-    'say "Needs a human" and list every `hit=` line. If the agent posted nothing (a' \
+    '"Needs a human". If the agent posted nothing (a' \
     'head or body change, a failed re-read, unsettled CI or a conflicting PR), say' \
     'that no review was posted, give the reason, and say to re-run' \
     '`/development-claude-plugin:approve` — never report its derived verdict as posted.'
