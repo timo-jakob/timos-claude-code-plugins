@@ -18,7 +18,7 @@ what you want to achieve.
 - [Read your pipeline telemetry](read-pipeline-telemetry.md)
 - [Switch fable agents to opus when the fable budget runs out](switch-fable-agents-to-opus.md)
 - [Turn off suggestion prompts after the review loop converges](turn-off-suggestion-prompts.md)
-- [Set a corner-case risk threshold for review residue](set-a-corner-case-risk-threshold.md)
+- [Set a corner-case risk threshold](set-a-corner-case-risk-threshold.md)
 - [Run epics strictly sequentially, with nothing in the background](run-epics-strictly-sequentially.md)
 - [Run resolve-issue unattended, so it never waits on a prompt](run-resolve-issue-unattended.md)
 - [See how long a running test gate has left](see-how-long-a-gate-has-left.md)

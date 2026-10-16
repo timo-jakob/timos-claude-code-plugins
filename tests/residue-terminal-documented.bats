@@ -49,10 +49,6 @@ setup() {
   # story that migrates it. Each must still name the terminal; the story that
   # migrates one removes it from this list in its own PR.
   NOT_YET_MIGRATED=(
-    "development/skills/resolve-issue/scripts/build-dossier.zsh|#2599"
-    "development/skills/open-pr/SKILL.md|#2599"
-    "docs/explanation/review-loop.md|#2599"
-    "docs/explanation/workflow-resolve-issue.md|#2599"
     "development/skills/resolve-issue/scripts/build-residue-issues.zsh|#2600"
     "development/skills/resolve-issue/reference/residue/step-1-plan.md|#2600"
   )
@@ -261,58 +257,33 @@ _invariant_in_awaiting_fix_branch() {
   grep -q 'losing only the \*\*parent\*\* read leaves the plan filtered on the repo-wide half' <<< "$(flat "$S1")"
 }
 
-@test "#1435 open-pr carries BOTH residue rules, pinned independently" {
-  # open-pr/SKILL.md is the delegated procedure, and #1435 widened TWO separate
-  # rules in it:
-  #   (a) the dossier-APPEND gate — which terminals get a dossier at all;
-  #   (b) the EMPTY-OUTPUT guard — on which terminals an exit-0 silence from
-  #       build-dossier is an error rather than the sanctioned no-loop no-op.
-  # Every other assertion in this file is satisfied by rule (a) alone: the roster
-  # test greps the file once, the exit-14 proximity test matches at (a) (rule (b)
-  # spells the terminal with a letter immediately after, so it never carried that
-  # needle), and the roster tripwire counts FILES, not occurrences. Delete rule
-  # (b)'s "either PR-opening terminal" clause and the whole suite stays green
-  # while the guard reverts to a CONVERGED-means-exit-0 reading — which is
-  # precisely how a residue PR ships with an empty dossier, on the silence that
-  # rule exists to catch.
+@test "open-pr appends a dossier and opens a PR only on CONVERGED, pinned by content" {
+  # open-pr/SKILL.md is the delegated procedure for opening the PR. #2599 made
+  # CONVERGED its only PR-opening ending: a loop that ran a round and ended
+  # anything else, or a build-dossier refusal (including open > 0), stops it.
   local F="$REPO_ROOT/development/skills/open-pr/SKILL.md"
   local t; t="$(flat "$F")"
-
-  # (a) the append gate names both terminals, with the code beside the new one
-  grep -q 'PR-opening terminal\*\* — `CONVERGED` (exit 0) \*\*or\*\* `CONVERGED_WITH_RESIDUE` (exit 14, #1435)' <<< "$t"
-  # (b) the empty-output guard names both terminals in its own sentence
-  grep -q 'on \*\*either\*\* PR-opening terminal, `CONVERGED` or `CONVERGED_WITH_RESIDUE` — treat empty output at exit 0 as the same error' <<< "$t"
-
-  # ...and an occurrence tripwire, so a THIRD rule (or the loss of one) has to be
-  # acknowledged here rather than passing under the file-level roster count. The
-  # two occurrences are exactly (a) and (b) above.
-  [ "$(grep -c 'CONVERGED_WITH_RESIDUE' "$F")" -eq 2 ]
+  grep -qF 'it ended **`CONVERGED`** (exit 0), the only review-loop ending that opens a PR,' <<< "$t"
+  grep -qF "**If the caller's loop ran a round and ended anything else, stop and report to the caller: open no PR.**" <<< "$t"
+  grep -qF '**A non-zero exit stops the PR**' <<< "$t"
+  grep -qF "That includes build-dossier's refusal of a status that still carries open blockers (\`open > 0\`)" <<< "$t"
+  grep -qF 'when the loop is known to have run a round and ended `CONVERGED`, treat empty output at exit 0 as the same error.' <<< "$t"
+  grep -qF 'never open it without the dossier' <<< "$t"
+  # the retired ending is gone from the procedure entirely
+  run grep -c 'CONVERGED_WITH_RESIDUE' "$F"
+  [ "$output" = "0" ]
 }
 
-@test "#1435 non-vacuity: each open-pr needle reds when its own rule is reverted" {
-  # Both needles above are long literals, and a long literal that nobody proves
-  # discriminating is the same trap as a grep for a string nobody writes. Mutate
-  # each rule back to its pre-#1435 wording IN ISOLATION and prove the matching
-  # needle is the one that fails — otherwise a single edit could satisfy both.
+@test "non-vacuity: open-pr's CONVERGED-only gate reds when the residue ending is restored" {
+  # Revert the append gate to the two-ending wording in a scratch copy, the way
+  # a regression would, and prove the gate needle above fails on it.
   local F="$REPO_ROOT/development/skills/open-pr/SKILL.md"
   local m="$BATS_TEST_TMPDIR/openpr.md"
-
-  # (a) reverted: the append gate names CONVERGED only
-  sed 's/PR-opening terminal\*\* — `CONVERGED` (exit 0) \*\*or\*\*/converged terminal** — `CONVERGED` (exit 0), not/' "$F" > "$m"
-  local ta; ta="$(flat "$m")"
-  run ! grep -q 'PR-opening terminal\*\* — `CONVERGED` (exit 0) \*\*or\*\* `CONVERGED_WITH_RESIDUE` (exit 14, #1435)' <<< "$ta"
-  # rule (b) is untouched, so ITS needle still matches — the two are independent
-  grep -q 'on \*\*either\*\* PR-opening terminal, `CONVERGED` or `CONVERGED_WITH_RESIDUE` — treat empty output at exit 0 as the same error' <<< "$ta"
-
-  # (b) reverted: the empty-output guard drops the terminal pair. `sed` is
-  # line-oriented and this rule WRAPS, so the pattern has to sit inside one raw
-  # line — the needles above read the flattened text, the mutations do not.
-  sed 's/^`CONVERGED_WITH_RESIDUE` — treat empty output/it — treat empty output/' "$F" > "$m"
-  local tb; tb="$(flat "$m")"
-  run ! grep -q 'on \*\*either\*\* PR-opening terminal, `CONVERGED` or `CONVERGED_WITH_RESIDUE` — treat empty output at exit 0 as the same error' <<< "$tb"
-  # ...and rule (a) survives, which is exactly why the roster and exit-14 tests
-  # stayed green on this mutation before the pin above existed
-  grep -q 'PR-opening terminal\*\* — `CONVERGED` (exit 0) \*\*or\*\* `CONVERGED_WITH_RESIDUE` (exit 14, #1435)' <<< "$tb"
+  sed 's/^it ended \*\*`CONVERGED`\*\* (exit 0), the only review-loop ending that opens a PR,$/it reached a **PR-opening terminal** — `CONVERGED` (exit 0) **or** `CONVERGED_WITH_RESIDUE` (exit 14),/' "$F" > "$m"
+  # the mutation landed
+  grep -qF 'CONVERGED_WITH_RESIDUE' "$m"
+  run grep -qF 'it ended **`CONVERGED`** (exit 0), the only review-loop ending that opens a PR,' <<< "$(flat "$m")"
+  [ "$status" -eq 1 ]
 }
 
 @test "#2586 the Approver template treats open > 0 as a finding, pinned by CONTENT" {
@@ -693,21 +664,23 @@ sweepable() {
     echo "residue/condition-2-removed.md no longer states that \$scoped is the only input to .blocking"; return 1; }
 }
 
-@test "#1571 the EXPLANATION page carries a positive pin, not only the negative sweep" {
-  # This file's own methodology (see the per-site pins above): a negative sweep
-  # bans literal transcriptions of the OLD claim, so a REWORDED revert slips
-  # past it; a positive pin requires the CURRENT claim to be present, which a
-  # revert cannot satisfy however it is phrased. residue.md, ARCHITECTURE.md and
-  # resolve-story-loop.zsh each got one for #1571. The user-facing page — the one
-  # a human actually reads — did not, so a reworded return to three conditions
-  # passed the whole suite.
+@test "#2599 the explanation pages state CONVERGED as the only PR-opening ending, by content" {
+  # A negative sweep bans literal transcriptions of the old claim, so a reworded
+  # revert slips past it; these positive pins require the current claim, which a
+  # revert cannot satisfy however it is phrased. #2599 rewrote both pages.
   local t; t="$(flat "$REPO_ROOT/docs/explanation/review-loop.md")"
-  grep -q '\*\*Two\*\* conditions are required' <<< "$t" || {
-    echo "the explanation page no longer states the residue terminal's TWO conditions"; return 1; }
-  grep -q 'A third condition used to sit between them' <<< "$t" || {
-    echo "the explanation page no longer records that condition 2 was removed"; return 1; }
-  grep -q 'removed\*\* (#1571)' <<< "$t" || {
-    echo "the explanation page no longer attributes the removal to #1571"; return 1; }
+  grep -qF '**`CONVERGED` is the only ending that opens a PR**' <<< "$t"
+  grep -qF 'run takes the automatic extension (#2576) instead, and if blockers survive it, the clean stop (#2579)' <<< "$t"
+  grep -qF '### Why the residue ending was retired' <<< "$t"
+  grep -qF 'still in the tracker under the `review-residue` label, as history.' <<< "$t"
+  # the residue section and its conditions are gone, not merely joined
+  run grep -qE 'What "residue" costs you|\*\*Two\*\* conditions are required|Converged with residue' <<< "$t"
+  [ "$status" -eq 1 ]
+  t="$(flat "$REPO_ROOT/docs/explanation/workflow-resolve-issue.md")"
+  grep -qF '**This is the only ending that opens a PR.**' <<< "$t"
+  grep -qF 'takes an automatic extension (#2576) and, if blockers survive it, stops cleanly (#2579)' <<< "$t"
+  run grep -qF 'labelled `review-residue`' <<< "$t"
+  [ "$status" -eq 1 ]
 }
 
 @test "#1571 reference/review-loop.md's correction note is pinned" {
@@ -752,19 +725,15 @@ sweepable() {
   run ! grep -rq 'has to drop those' "$RI_REF/review-loop.md" "$RI_REF/review-loop"
 }
 
-@test "#1571 the cross-file pointer resolves — both ends pinned" {
-  # The explanation page tells the reader to open a section of the residue reference BY
-  # NAME. Nothing asserted either end: rename the heading (leaving every body
-  # sentence intact) or delete the pointer, and the suite stayed green while a
-  # user-facing instruction named a section that does not exist. (The parked
-  # section's pointer went to #1581 with the rest of that handling, so this is
-  # the only pointer of the shape left in-tree — the pin stands on its own.)
+@test "#1571 the residue reference keeps its condition-2 heading, and no user page points at it any more" {
+  # The explanation page once sent readers to this section by name. #2599
+  # retired that page's residue section, so the pointer is gone; the heading
+  # stays pinned until #2601 deletes the shard whole.
   local heading='Condition 2 — removed; the story-diff rail is upstream'
   grep -qF "## $heading (#1571)" "$RI_REF/residue/condition-2-removed.md" || {
-    echo "residue/condition-2-removed.md's #1571 section heading changed — the explanation page points at it by name"
-    return 1; }
-  grep -qF "$heading" "$REPO_ROOT/docs/explanation/review-loop.md" || {
-    echo "the explanation page no longer points at residue/condition-2-removed.md's #1571 section"; return 1; }
+    echo "residue/condition-2-removed.md's #1571 section heading changed"; return 1; }
+  run grep -rqF "$heading" "$REPO_ROOT/docs/explanation" "$REPO_ROOT/docs/how-to"
+  [ "$status" -eq 1 ]
 }
 
 @test "#1920 reference/residue/ states the risk-threshold procedure, by content" {

@@ -29,7 +29,7 @@ Nothing is branched or built until the story has passed three checks.
 1. **Step 1 — branch.** A branch named `<type>/<issue>-<slug>` is created off a freshly fetched `main`.
 2. **Step 1b — load the profile.** The skill detects the repo type and loads `development-<type>:resolve-profile`. The
    profile says which test gate is blessed, what a version bump means here, which review panel applies, and how a fix
-   pass, the docs and any residue are handled. A type without a profile falls back to generic rules.
+   pass and the docs are handled. A type without a profile falls back to generic rules.
 3. **Step 2 — implement.** The change is written from the issue's `story-spec/v1` block, or from its prose when there
    is none. Acceptance tests for the story's test cases ship in the same PR, and so do the user docs the change needs.
    A size pre-flight runs before the first edit: a change that would touch too many files, or straddle plugins, stops
@@ -52,7 +52,7 @@ Nothing is branched or built until the story has passed three checks.
 
 Before any PR exists, the change goes through up to five review rounds on your machine. Each round reviews an exact,
 named snapshot of the working tree, so its findings can never be about code that has since changed. The full story —
-budgets, residue, promotion, what you see while it runs — is in [The local review loop](review-loop.md).
+budgets, promotion, what you see while it runs — is in [The local review loop](review-loop.md).
 
 1. **Mint the tree identity.** The conductor records exactly which tree this round reviews.
 2. **Run the full test gate,** in the background, against that tree.
@@ -73,13 +73,13 @@ budgets, residue, promotion, what you see while it runs — is in [The local rev
 ### How the loop ends {#resolve-how-the-loop-ends}
 
 - **CONVERGED** — zero blockers on a *full* sweep of the change. A delta round can never converge on its own: when a
-  delta finds nothing, the loop promotes one closing full sweep to confirm it.
-- **CONVERGED_WITH_RESIDUE** — no CRITICAL finding in the last two rounds and the declaring round was a full sweep,
-  but some WARNINGs remain. The PR opens, and each remaining blocker is filed as a follow-up issue labelled
-  `review-residue`.
+  delta finds nothing, the loop promotes one closing full sweep to confirm it. **This is the only ending that opens a
+  PR.**
 - **Out of budget, or not converging** — with you present, the skill asks: grant three more rounds, give guidance and
-  retry, or stop. Unattended, or when you stop, it **escalates**: the branch is pushed, no PR is opened, and the issue
-  gets a `needs-human-decision` comment describing what is unresolved.
+  retry, or stop. Unattended, a run whose blockers are all non-critical takes an automatic extension (#2576) and, if
+  blockers survive it, stops cleanly (#2579): no PR, and its state is kept for a later run. When you stop, or an
+  unattended run cannot extend, it **escalates**: the branch is pushed, no PR is opened, and the issue gets a
+  `needs-human-decision` comment describing what is unresolved.
 
 ## Epics {#resolve-epics}
 
@@ -95,8 +95,8 @@ budgets, residue, promotion, what you see while it runs — is in [The local rev
    going.
 5. **E4 — holistic test.** Once the children have merged, the profile's gate runs over the merged result. A
    regression is filed and the epic stays open.
-6. **E5 — close the epic,** with a checklist of its children and the E4 result. Residue issues filed along the way keep
-   it open for the next run.
+6. **E5 — close the epic,** with a checklist of its children and the E4 result. A child still open — one that stopped
+   cleanly, say — keeps it open for the next run.
 
 ## Who does what {#resolve-who-does-what}
 

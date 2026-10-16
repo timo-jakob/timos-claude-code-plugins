@@ -7,7 +7,7 @@ on work that still has open review blockers.
 
 The procedure the skill follows is split for context economy: `SKILL.md` is a
 conductor holding each step's invocation contract and a pointer, while the
-branches described on this page — the round protocol, the residue ending, the
+branches described on this page — the round protocol, the
 suggestion-promotion phase, escalation and the interactive extension — live in
 `development/skills/resolve-issue/reference/*.md` and are read only when the run
 actually reaches them.
@@ -146,12 +146,8 @@ independent repeat of it. Three kinds of round:
   escalating opens no PR at all. So: every run that reaches plain **Converged**
   ends on a full-diff review. Two things open a PR without one, and each is a
   deliberate, stated trade: the `--no-review` fast path and the "nothing to
-  review" choices below — both explicit human decisions. **Converged with
-  residue** (below) is *not* one of them: it takes over an ending that would
-  otherwise have been an escalation, but only a full sweep may declare it, so a
-  run whose residue conditions hold on a delta round promotes that sweep first.
-  Both PR-opening endings are reached from a full-diff review, and residue also
-  files every remaining blocker as a labelled follow-up issue.)
+  review" choices below — both explicit human decisions. Plain **Converged** is
+  the only review-loop ending that opens a PR at all.)
 
 Without this, a long run is N independent full reviews rather than N iterations:
 round 9 re-reads all 49 changed files with no memory of what eight earlier rounds
@@ -204,43 +200,23 @@ only to bound the hard tail. A round can end the loop in one of a few ways:
   the very last round of the budget, the loop grants the closing full sweep
   exactly one round beyond the ceiling — once, and only for that sweep. The
   budget you set is still what gets reported; the extra round is a fact about
-  this run, not a bigger budget.
-- **Converged with residue** (`CONVERGED_WITH_RESIDUE`, exit 14) — the run was
-  *about* to exhaust its budget or
-  declare itself stuck, and neither was the honest verdict. Two things were
-  true at once: the last two rounds found **no Critical at all**; and the round
-  saying so had read the **whole** change, not just the slice it was scoped to.
-  The first says this is not shipped behaviour going wrong. The second is what
-  earns the right to say it: a round scoped to a slice can only speak for that
-  slice, so a run whose first condition holds on a *delta* round does not
-  end there.
-
-  A third condition used to sit between them — that every open blocker lay in a
-  file the loop's own previous fix pass had just written. It was **removed**
-  (#1571), because it was already guaranteed a step earlier: every round's
-  findings are scoped to the change itself before they are counted, so a blocker
-  in code this run never touched is dropped long before it could become residue.
-  Read *Condition 2 — removed; the story-diff rail is upstream* in the residue
-  reference for why re-checking it made the ending unreachable. A run whose
-  remaining condition holds on a *delta* round promotes the
-  closing full sweep first — one more round — and
-  only that sweep may declare residue. So the run **opens the PR** and files the
-  remainder as follow-up issues instead of asking you for another round. This
-  and plain **Converged** are the only two endings that open a PR, and both are
-  reached only from a full sweep.
-- **Budget exhausted** — the rounds ran out with blockers still open, and the
-  residue conditions above did **not** hold — typically a Critical somewhere in
-  the two-round window; a one-round budget, a promotion pass (where residue
-  never fires) or an unreadable round record also end here.
+  this run, not a bigger budget. **`CONVERGED` is the only ending that opens a
+  PR**: `main` only ever receives work the panel has no blockers left on.
+- **Budget exhausted** — the rounds ran out with blockers still open.
 - **Not converging** — the *same* blocker survived two rounds unchanged; more
-  automated fixing clearly is not moving it. Same rule: this is the ending only
-  when the residue conditions do not hold — **and** only when the loop could not
-  take the free round below.
+  automated fixing clearly is not moving it. This is the ending only when the
+  loop could not take the free round below.
 - **Conflict / ambiguous** — two reviewers gave opposing recommendations, or the
-  repository type could not be resolved to a review panel. Neither is ever
-  replaced by residue: no automated ending can pick between two opposed
-  recommendations, and an unresolvable repo type is about dispatch rather than
-  findings.
+  repository type could not be resolved to a review panel. No automated ending
+  can pick between two opposed recommendations, and an unresolvable repo type is
+  about dispatch rather than findings.
+
+None of the last three opens a PR. When a human is driving, a run whose
+blockers are all non-critical goes to the [interactive
+extension](#when-a-human-is-driving-the-interactive-extension). An unattended
+run takes the automatic extension (#2576) instead, and if blockers survive it,
+the clean stop (#2579): the run records why it stopped and leaves its state for
+a later run, rather than shipping the blockers.
 
 ### The free round on an all-ambiguous carry
 
@@ -272,71 +248,30 @@ the match was against, so re-wording a finding cannot buy a second one. If an
 identity comes back ambiguous again, that repetition is itself the evidence, and
 the run stops as it always did.
 
-### What "residue" costs you, and what it buys
+### Why the residue ending was retired
 
-The residue ending is the one place the loop opens a PR without a human ever
-seeing an escalation, so it is deliberately narrow. **Two** conditions are
-required: two consecutive zero-Critical rounds, and the round declaring it having
-run as a full sweep. A first round can never qualify — there is no second round
-to make the zero-Critical window out of.
+The loop once had a second PR-opening ending: a run whose last two rounds found
+no Critical, and whose closing full sweep still left non-critical blockers, could
+open its PR and file those blockers as labelled follow-up issues. It was retired
+(#2580). `main` is the stable build, and that ending shipped work with known
+blockers still in it. A residue-shaped run now goes to an extension, or to the
+clean stop, as described above. The follow-up issues earlier runs filed are
+still in the tracker under the `review-residue` label, as history.
 
-A third condition used to sit between them, requiring every remaining blocker to
-be inside the previous round's own edits. It was **removed** (#1571) as already
-guaranteed a step earlier — every round's findings are scoped to the change
-itself before they are counted — and because its round-by-round reading made the
-ending unreachable from the very sweep it was meant to be declared on.
-
-The two do not fail the same way. The first failing sends the run back to the
-ordinary escalation. The second failing does **not** — a delta round meeting the
-first promotes the closing full sweep and carries on, so residue costs one more
-review round than the conditions alone suggest. That round is the one that reads
-every file the delta rounds structurally could not, which is what the extra round
-buys.
-
-What you get is a PR that says so. Its Summary names the residue ending and the
-follow-up issues it filed, and its review dossier records the terminal state, so
-a residue PR is never mistakable for a clean one. Each follow-up issue carries
-the finding's file, line, dimension, severity and *class* — whether it is a
-fresh defect, an incomplete propagation of the last fix, or a test assertion
-that has not caught up.
-
-Not every remaining blocker has to become an issue. With
-[`corner_case_risk_threshold`](../how-to/set-a-corner-case-risk-threshold.md)
-set, the run first assesses each one's probability and impact, and a blocker
-whose risk falls below the floor is listed in the PR — with the assessment
-behind it — instead of filed. Unset, every remaining blocker is filed.
-
-The same floor also works earlier, inside the loop itself. Each round, the run
-assesses the reviewers' blocking findings. A non-critical one whose risk falls
-below the floor — unless you promoted it or a tool confirmed it — is **demoted
-to a suggestion**: logged in the round's progress
-and in the PR, but not fixed. That keeps the fix pass from spending round after
-round on corner cases nobody would hit. You can still promote any demoted
+With [`corner_case_risk_threshold`](../how-to/set-a-corner-case-risk-threshold.md)
+set, the run assesses the reviewers' blocking findings in every round. A
+non-critical one whose risk falls below the floor — unless you promoted it or a
+tool confirmed it — is **demoted to a suggestion**: logged in the round's
+progress and in the PR, but not fixed. That keeps the fix pass from spending
+round after round on corner cases nobody would hit, which is what most often
+left a run with only non-critical blockers. You can still promote any demoted
 finding back at convergence.
 
-The follow-up issues a residue run files are attached as **native sub-issues** of the story's epic (or of
-the story itself when there is no epic), and every one is labelled
-`needs-refinement`. What happens next depends on which of those two it was.
-
-**If the story had an epic**, the epic is still open, so it now carries open
-`needs-refinement` children. The run that filed them will not close the epic —
-that is correct, not a stall — and the next `/development:resolve-issue` on it
-walks it as an epic and **stops** at the readiness pre-flight, because a finding
-title is not a story. That halt is the prompt to refine the residue before
-building it, and the label is why you meet a child already carrying the reason
-it stopped, rather than a surprise.
-
-**If there was no epic**, the residue hangs off the story itself — and the story
-closes when this PR merges, so nothing walks it again and no pre-flight ever
-meets you. There the residue reaches you through its two labels and through the
-PR body, which names every issue it filed. Search `review-residue` when you want
-the backlog.
-
-The same class split now rides in the **grant prompt** too. When a run *does*
-escalate, the summary shows the last two rounds broken down by class, so
-"would another round help?" is answerable from what the rounds were finding
-rather than from a blocker count that may have been flat for reasons that had
-nothing to do with progress.
+When a run escalates, the **grant prompt** shows the last two rounds' blockers
+broken down by class — a fresh defect, an incomplete propagation of the last
+fix, or a test assertion that has not caught up — so "would another round help?"
+is answerable from what the rounds were finding rather than from a blocker count
+that may have been flat for reasons that had nothing to do with progress.
 
 There are also two ways a round can be **refused rather than counted** —
 neither cleared by re-running the review itself. If a round's delta is

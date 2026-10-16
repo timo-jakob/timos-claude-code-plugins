@@ -64,9 +64,9 @@ and subagents judge.
   repository, approves every rewrite of an issue, chooses between a park and another round, and grants more review
   rounds when a run runs out of budget.
 - **The human approver** approves PRs where no bot may. On a Claude-plugin repository that is every PR by default;
-  even with the plugin Approver opted in, a PR that changes workflows or the approval machinery, or that carries review
-  residue, still goes to a human. On an app repository the Approver bot takes this role — see
-  [The Claude Approver](claude-approver.md).
+  even with the plugin Approver opted in, a PR that changes workflows or the approval machinery still goes to a human,
+  and one whose review dossier still reports open blockers is refused. On an app repository the Approver bot takes
+  this role — see [The Claude Approver](claude-approver.md).
 
 ### Bot identities {#bot-identities}
 

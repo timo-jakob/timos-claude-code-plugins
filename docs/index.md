@@ -30,7 +30,7 @@ separate.
 - [Set up a composition repo (pin a constellation, promote it)](how-to/set-up-a-composition-repo.md)
 - [Read your pipeline telemetry](how-to/read-pipeline-telemetry.md)
 - [Switch fable agents to opus when the fable budget runs out](how-to/switch-fable-agents-to-opus.md)
-- [Set a corner-case risk threshold for review residue](how-to/set-a-corner-case-risk-threshold.md)
+- [Set a corner-case risk threshold](how-to/set-a-corner-case-risk-threshold.md)
 - [Maintain this repo (quarterly template refresh)](how-to/maintain-this-repo.md)
 - [Contribute (signed commits, branch protection)](how-to/contributing.md)
 - [Add support for a new language plugin](adding-a-language-plugin.md)
