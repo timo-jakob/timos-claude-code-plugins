@@ -1382,3 +1382,24 @@ verdict() {
   [ "$status" -eq 2 ]
   contains "$stderr" "--cap-reached and --work-dir are for --format clean-stop only"
 }
+
+@test "#2579 clean-stop never posts the expanded home directory: a path under HOME is printed as ~/" {
+  vstat BUDGET_EXHAUSTED '[2,4]'
+  # under HOME: folded
+  run --separate-stderr env HOME=/Users/someone zsh "$S" --status "$ST" --format clean-stop --issue 77 \
+    --work-dir /Users/someone/.claude/resolve-issue/o-r/77/work-dir
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qxF -- '_Kept review-loop state: `~/.claude/resolve-issue/o-r/77/work-dir`._'
+  [ "$(echo "$output" | grep -c -- '/Users/someone')" -eq 0 ]
+  # a sibling directory sharing HOME as a string prefix is not under it
+  run --separate-stderr env HOME=/Users/someone zsh "$S" --status "$ST" --format clean-stop --issue 77 \
+    --work-dir /Users/someone2/.claude/x
+  echo "$output" | grep -qxF -- '_Kept review-loop state: `/Users/someone2/.claude/x`._'
+  # a glob character in HOME matches only itself
+  run --separate-stderr env 'HOME=/Users/a[b]' zsh "$S" --status "$ST" --format clean-stop --issue 77 \
+    --work-dir '/Users/a[b]/.claude/x'
+  echo "$output" | grep -qxF -- '_Kept review-loop state: `~/.claude/x`._'
+  run --separate-stderr env 'HOME=/Users/a[b]' zsh "$S" --status "$ST" --format clean-stop --issue 77 \
+    --work-dir /Users/ab/.claude/x
+  echo "$output" | grep -qxF -- '_Kept review-loop state: `/Users/ab/.claude/x`._'
+}

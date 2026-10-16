@@ -36,7 +36,10 @@
 #     --cap-reached  clean-stop only: the automatic grant was refused for want
 #                    of headroom (record-grant.zsh exit 3) — names `cap`
 #     --work-dir     clean-stop only: the kept durable work-dir, named in the
-#                    comment so the human can find it
+#                    comment so the human can find it. A path under $HOME is
+#                    printed as `~/…`: the comment is posted to an issue, often
+#                    on a public repo, and the expanded home directory names
+#                    the local account
 #     --grants       interactive-extension grants already consumed (optional;
 #                    rendered against the soft cap so the human sees the
 #                    context at the grant prompt, #969)
@@ -480,8 +483,20 @@ if [[ "$fmt" == "clean-stop" ]]; then
     print -r --
     print -r -- "It checks out the branch and continues the loop from round ${rounds} through the interactive extension, where you grant rounds, give guidance or stop. A plain re-run starts fresh."
     if [[ -n "$kept_wd" ]]; then
+      # never the expanded home directory in a posted comment: it names the
+      # local account. The prefix test quotes $HOME, so a glob character in it
+      # matches only itself, and the fold slices by length rather than by
+      # pattern; only a whole leading path component is folded.
+      local shown_wd="$kept_wd"
+      if [[ -n "${HOME:-}" && "$HOME" != "/" ]]; then
+        if [[ "$kept_wd" == "$HOME" ]]; then
+          shown_wd="~"
+        elif [[ "$kept_wd" == "$HOME"/* ]]; then
+          shown_wd="~/${kept_wd:$(( ${#HOME} + 1 ))}"
+        fi
+      fi
       print -r --
-      print -r -- "_Kept review-loop state: \`${kept_wd}\`._"
+      print -r -- "_Kept review-loop state: \`${shown_wd}\`._"
     fi
     if [[ -n "$branch" || -n "$compare_url" ]]; then
       print -r --
