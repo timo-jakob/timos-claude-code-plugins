@@ -202,7 +202,9 @@ grep -rhn -E "(python|node|go|java)-version:" development/skills/bootstrap/templ
 # one `gate` job installs every tool its gate script runs by release URL, #1604 —
 # these are NOT `uses:` pins, so Renovate never sees them and Step 2 never covers
 # them). tests/iac-tools.zsh reads its fixture-harness pins from those same lines.
-grep -rhn -E "^\s*[A-Z_]+_VERSION:\s+" development/skills/bootstrap/templates/ | sort -u
+# The Go Makefile's `_VERSION :=` pins and go-gate.zsh's Spectral and pandoc pins
+# are the same class; its GITLEAKS_VERSION mirrors the gitleaks hook `rev:` (Step 3).
+grep -rhn -E "^\s*[A-Z_]+_VERSION\s*:=?\s+|^(spectral_cli|pandoc_image)=" development/skills/bootstrap/templates/ | sort -u
 
 # …and the two sites that MIRROR the templates' yq pin. Both exist so the bats
 # suite exercises the same mikefarah yq the shipped workflows use (their own
@@ -755,15 +757,16 @@ reached only two):
 ```sh
 grep -rln 'no-cluster-deploy' development/skills/bootstrap docs MAINTAINING.md \
   ARCHITECTURE.md | LC_ALL=C sort \
-  | grep -vE '^(MAINTAINING|ARCHITECTURE)\.md$|/scripts/|^docs/how-to/index\.md$'
+  | grep -vE '^(MAINTAINING|ARCHITECTURE)\.md$|/scripts/|^docs/(how-to/index|reference/repo-scripts)\.md$'
 ```
 
-The bare `grep` returns twelve paths; the filter above drops the **six** that
+The bare `grep` returns fifteen paths; the filter above drops the **nine** that
 are **wiring, index or authoritative** sites and carry no restatement —
-`MAINTAINING.md`, `ARCHITECTURE.md`, `docs/how-to/index.md`, and three paths
-under a `scripts/` directory (two wiring scripts plus the authoritative
-header) — leaving the six the table lists. `restatement_sites()` in `tests/no-cluster-deploy.bats` is
-the authoritative filter — this snippet mirrors it, so if the two ever disagree,
+`MAINTAINING.md`, `ARCHITECTURE.md`, `docs/how-to/index.md`,
+`docs/reference/repo-scripts.md`, and five paths under a `scripts/` directory
+(four wiring scripts plus the authoritative header) — leaving the six the table
+lists. `restatement_sites()` in `tests/no-cluster-deploy.bats` is the
+authoritative filter — this snippet mirrors it, so if the two ever disagree,
 the test wins.
 
 `tests/no-cluster-deploy.bats` pins the substantive clauses across the

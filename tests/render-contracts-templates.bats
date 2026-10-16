@@ -324,6 +324,68 @@ assert_valid_yaml() {
   contains "$output" 'nothing to lint'
 }
 
+@test "#2614 contracts: the Go gate's newest-major selector agrees with contracts-lint.yml's on every fixture" {
+  # The Go gate lints contracts itself (contract §12: no CI-only checks), so it carries its own
+  # zsh copy of the selection. Both selectors run, each sliced between its own sentinels, on the
+  # same trees: the same specs selected, and the same refusal of a newest vN with no openapi.yaml.
+  render_contracts
+  local wf="$OUT/common/.github/workflows/contracts-lint.yml"
+  local gate_tmpl="$TEMPLATES/languages/go/scripts/go-gate.zsh.tmpl"
+  local wf_probe="$BATS_TEST_TMPDIR/wf-select.bash" gate_probe="$BATS_TEST_TMPDIR/gate-select.zsh"
+  {
+    echo 'set -euo pipefail'
+    echo 'shopt -s nullglob'
+    sed -n '/# --- selector-start/,/# --- selector-end/p' "$wf" | sed 's/^[[:space:]]\{1,10\}//'
+    echo 'printf "%s\n" "${specs[@]}"'
+  } > "$wf_probe"
+  {
+    echo 'emulate -L zsh'
+    echo 'setopt pipefail no_unset'
+    sed -n '/^# --- selector-start/,/^# --- selector-end/p' "$gate_tmpl"
+    echo 'contract_specs'
+  } > "$gate_probe"
+  # the gate's slice holds both functions, and nothing past the selector
+  run cat "$gate_probe"
+  contains "$output" 'newest_major() {'
+  contains "$output" 'contract_specs() {'
+  lacks "$output" 'go list'
+
+  local root="$BATS_TEST_TMPDIR/parity" t wf_out gate_out wf_rc gate_rc
+  mkdir -p "$root/both/contracts/v1" "$root/both/contracts/v2" "$root/both/contracts/ops/v1" "$root/both/contracts/ops/v2"
+  touch "$root/both/contracts/v1/openapi.yaml" "$root/both/contracts/v2/openapi.yaml" \
+    "$root/both/contracts/ops/v1/openapi.yaml" "$root/both/contracts/ops/v2/openapi.yaml"
+  mkdir -p "$root/vsort/contracts/v9" "$root/vsort/contracts/v10"
+  touch "$root/vsort/contracts/v9/openapi.yaml" "$root/vsort/contracts/v10/openapi.yaml"
+  mkdir -p "$root/opsonly/contracts/ops/v1"
+  touch "$root/opsonly/contracts/ops/v1/openapi.yaml"
+  # v1e5 is a number to zsh arithmetic (1e5), so only the strict-integer guard keeps it out
+  mkdir -p "$root/draft/contracts/v2" "$root/draft/contracts/v3-draft" "$root/draft/contracts/v2.bak" \
+    "$root/draft/contracts/v1e5"
+  touch "$root/draft/contracts/v2/openapi.yaml" "$root/draft/contracts/v3-draft/openapi.yaml" \
+    "$root/draft/contracts/v2.bak/openapi.yaml" "$root/draft/contracts/v1e5/openapi.yaml"
+  mkdir -p "$root/misnamed/contracts/ops/v1" "$root/misnamed/contracts/ops/v2"
+  touch "$root/misnamed/contracts/ops/v1/openapi.yaml" "$root/misnamed/contracts/ops/v2/openapi.yml"
+  mkdir -p "$root/emptydir/contracts/v1" "$root/emptydir/contracts/v2"
+  touch "$root/emptydir/contracts/v1/openapi.yaml"
+  mkdir -p "$root/empty"
+  for t in both vsort opsonly draft misnamed emptydir empty; do
+    wf_rc=0 gate_rc=0
+    wf_out="$(cd "$root/$t" && bash "$wf_probe" 2>&1)" || wf_rc=$?
+    gate_out="$(cd "$root/$t" && zsh "$gate_probe" 2>&1)" || gate_rc=$?
+    [ "$wf_rc" = "$gate_rc" ] || { echo "$t: workflow exit $wf_rc, gate exit $gate_rc"; return 1; }
+    # the selected specs, without either side's prose
+    wf_out="$(grep -E '^contracts/.*/openapi\.yaml$' <<< "$wf_out" || true)"
+    gate_out="$(grep -E '^contracts/.*/openapi\.yaml$' <<< "$gate_out" || true)"
+    [ "$wf_out" = "$gate_out" ] || { printf '%s: workflow\n%s\ngate\n%s\n' "$t" "$wf_out" "$gate_out"; return 1; }
+  done
+  # non-vacuous: the fixtures exercised a selection and a refusal on both sides
+  run bash -c "cd '$root/vsort' && zsh '$gate_probe'"
+  [ "$output" = 'contracts/v10/openapi.yaml' ]
+  run bash -c "cd '$root/misnamed' && zsh '$gate_probe'"
+  [ "$status" -eq 1 ]
+  contains "$output" 'refusing to fall back to an older, frozen major'
+}
+
 @test "#692 contracts: the publish workflow publishes per live major (runtime discovery + matrix)" {
   render_contracts
   local wf="$OUT/common/.github/workflows/spec-publish.yml"

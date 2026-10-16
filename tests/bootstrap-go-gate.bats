@@ -25,32 +25,45 @@ setup() {
   R="$BATS_TEST_TMPDIR/repo"
   mkdir -p "$STUB"
   : > "$CALLS"
-  export CALLS
+  # the real yq, which `go tool yq` stands in for (mikefarah's, as the tests above use)
+  REAL_YQ="$(type -P yq)"
+  export CALLS REAL_YQ
   write_stubs
 }
 
 # Every tool the gate and `make setup` call, as a logging stub whose verdict an
-# env var sets. `go` covers `go test` and every `go tool …` the gate runs.
+# env var sets. `go` covers `go test` and every `go tool …` the gate runs:
+# `go tool yq` runs the real yq, and `go tool oasdiff` classifies a contract
+# diff as $OASDIFF_CLASS says (breaking, additive or editorial), as
+# tests/check-contracts-semver.bats' oasdiff stub does.
 write_stubs() {
   cat > "$STUB/go" <<'EOF'
 #!/bin/sh
 echo "go $*" >> "$CALLS"
 if [ "$1" = tool ]; then
+  if [ "$2" = -n ]; then
+    [ "$3" = "${GO_TOOL_MISSING:-}" ] && { echo "go: no such tool \"$3\"" >&2; exit 2; }
+    exit 0
+  fi
   case "$2 ${3:-}" in
     "buf lint") exit "${BUF_LINT_RC:-0}" ;;
     "buf breaking") exit "${BUF_BREAKING_RC:-0}" ;;
     "buf generate")
       if [ -n "${BUF_GEN_FILE:-}" ]; then printf '%s\n' "$BUF_GEN_CONTENT" > "$BUF_GEN_FILE"; fi
       exit "${BUF_GEN_RC:-0}" ;;
+    "oasdiff breaking") [ "${OASDIFF_CLASS:-editorial}" = breaking ] && echo '[{"level":3}]' || echo '[]'; exit 0 ;;
+    "oasdiff diff") [ "${OASDIFF_CLASS:-editorial}" = additive ] && echo '{"paths":{"/x":1}}' || echo '{}'; exit 0 ;;
+    "oasdiff "*) echo '[]'; exit 0 ;;
   esac
   case "$2" in
     gocover-cobertura) cat; exit 0 ;;
     govulncheck) exit "${GOVULN_RC:-0}" ;;
+    yq) shift 2; exec "$REAL_YQ" "$@" ;;
   esac
 fi
 if [ "$1" = list ]; then
   printf '%s' "${GO_PACKAGES-example.invalid/app}"
-  exit 0
+  exit "${GO_LIST_RC:-0}"
 fi
 if [ "$1" = test ]; then
   echo "mode: atomic" > coverage.out
@@ -73,29 +86,108 @@ EOF
 echo "diff-cover $*" >> "$CALLS"
 exit "${DIFFCOVER_RC:-0}"
 EOF
+  # the license scan's verdict is its own, so a license finding can fail alone
   cat > "$STUB/trivy" <<'EOF'
 #!/bin/sh
 echo "trivy $*" >> "$CALLS"
+[ "$1" = --version ] && { echo "Version: ${TRIVY_VERSION_OUT:-0.72.0}"; exit 0; }
+case " $* " in
+  *" --scanners license "*) exit "${TRIVY_LICENSE_RC:-0}" ;;
+esac
 exit "${TRIVY_RC:-0}"
 EOF
+  cat > "$STUB/gitleaks" <<'EOF'
+#!/bin/sh
+echo "gitleaks $*" >> "$CALLS"
+[ "$1" = version ] && { echo "${GITLEAKS_VERSION_OUT:-8.30.1}"; exit 0; }
+exit "${GITLEAKS_RC:-0}"
+EOF
+  # a SKIP list in the environment is logged on a line of its own
   cat > "$STUB/pre-commit" <<'EOF'
 #!/bin/sh
 echo "pre-commit $*" >> "$CALLS"
+if [ -n "${SKIP:-}" ]; then echo "pre-commit SKIP=$SKIP" >> "$CALLS"; fi
+exit "${PRECOMMIT_RC:-0}"
+EOF
+  cat > "$STUB/node" <<'EOF'
+#!/bin/sh
 exit 0
 EOF
-  # `make setup`'s diff-cover install: a venv whose pip reports the pinned version
+  cat > "$STUB/npx" <<'EOF'
+#!/bin/sh
+echo "npx $*" >> "$CALLS"
+exit "${SPECTRAL_RC:-0}"
+EOF
+  cat > "$STUB/curl" <<'EOF'
+#!/bin/sh
+echo "curl $*" >> "$CALLS"
+exit 1
+EOF
+  # pandoc in docker: a run writes the manual it was asked for into the directory mounted at
+  # /out and prints $PANDOC_LOG for the PDF; the probe reports its dangling link unless
+  # $PROBE_SILENT is set
+  cat > "$STUB/docker" <<'EOF'
+#!/bin/sh
+echo "docker $*" >> "$CALLS"
+case " $* " in
+  *" --entrypoint "*)
+    [ -n "${PROBE_SILENT:-}" ] || echo "LaTeX Warning: There were undefined references."
+    exit "${PROBE_RC:-0}" ;;
+esac
+out="" target="" prev=""
+for a in "$@"; do
+  case "$prev" in
+    -v) case "$a" in *:/out) out="${a%:/out}" ;; esac ;;
+    -o) target="${a#/out/}" ;;
+  esac
+  prev="$a"
+done
+[ -n "${PANDOC_NO_OUTPUT:-}" ] || echo manual > "$out/$target"
+[ "$target" = manual.pdf ] && printf '%s\n' "${PANDOC_LOG:-}"
+exit "${PANDOC_RC:-0}"
+EOF
+  # `make setup`'s venv installs, and the docs stage's: a venv whose pip reports the pinned
+  # diff-cover and pre-commit versions, and logs an install
   cat > "$STUB/python3" <<'EOF'
 #!/bin/sh
 echo "python3 $*" >> "$CALLS"
 if [ "$1 $2" = "-m venv" ]; then
   mkdir -p "$3/bin"
-  printf '#!/bin/sh\n[ "$1" = show ] && echo "Version: 10.2.0"\nexit 0\n' > "$3/bin/pip"
+  cat > "$3/bin/pip" <<'PIP'
+#!/bin/sh
+case "$1 ${2:-}" in
+  "show diff-cover") echo "Version: 10.2.0" ;;
+  "show pre-commit") echo "Version: ${PIP_PRE_COMMIT_VERSION:-4.3.0}" ;;
+  install*) echo "pip $*" >> "$CALLS"; exit "${PIP_INSTALL_RC:-0}" ;;
+esac
+exit 0
+PIP
   printf '#!/bin/sh\necho "diff-cover $*" >> "$CALLS"\nexit "${DIFFCOVER_RC:-0}"\n' > "$3/bin/diff-cover"
-  chmod +x "$3/bin/pip" "$3/bin/diff-cover"
+  printf '#!/bin/sh\necho "mkdocs $*" >> "$CALLS"\nexit "${MKDOCS_RC:-0}"\n' > "$3/bin/mkdocs"
+  chmod +x "$3/bin/pip" "$3/bin/diff-cover" "$3/bin/mkdocs"
 fi
 exit 0
 EOF
   chmod +x "$STUB"/*
+}
+
+# A directory to put alone on PATH: the stubs and the system tools the gate runs,
+# without any tool named in <tool>…, so a test can take a tool the host has away.
+path_without() {
+  local dir="$BATS_TEST_TMPDIR/path-without" p t
+  rm -rf "$dir"
+  mkdir -p "$dir"
+  for p in "$STUB"/*; do
+    t="${p##*/}"
+    case " $* " in *" $t "*) continue ;; esac
+    ln -s "$p" "$dir/$t"
+  done
+  for t in git awk sed grep cat mktemp rm chmod mkdir env sh bash zsh tr head tail dirname basename \
+    ls cp mv uname date sort wc cut tee find xargs jq yq; do
+    case " $* " in *" $t "*) continue ;; esac
+    if p="$(type -P "$t")"; then ln -s "$p" "$dir/$t"; fi
+  done
+  echo "$dir"
 }
 
 # Render the Go gate set into <dir> through the real renderer, default branch
@@ -122,6 +214,11 @@ go_repo() {
   printf 'primary: go\ntools:\n  static_analysis: sonarcloud\n  vulnerabilities: %s\n  code_scanning: none\n' \
     "$vulns" > "$R/.maintenance.yml"
   printf '.tools/\ncoverage.out\ncoverage.xml\n' > "$R/.gitignore"
+  # bootstrap renders the real checker; a logging stub stands in for it here, and one case
+  # below runs the real one
+  mkdir -p "$R/scripts"
+  printf '#!/bin/sh\necho "no-cluster-deploy $*" >> "$CALLS"\nexit "${NCD_RC:-0}"\n' \
+    > "$R/scripts/check-no-cluster-deploy.zsh"
   git -C "$R" add -A
   git -C "$R" commit -q -m base
   git -C "$R" remote add origin "$REMOTE"
@@ -129,10 +226,42 @@ go_repo() {
   git -C "$R" checkout -q -b feat
 }
 
+# A contract spec at <dir>/openapi.yaml whose version triangle holds: info.version
+# <version>, servers URL major <major>.
+mkspec() {
+  mkdir -p "$R/$1"
+  printf 'openapi: 3.1.0\ninfo:\n  title: T\n  version: "%s"\nservers:\n  - url: /v%s\npaths: {}\n' \
+    "$2" "$3" > "$R/$1/openapi.yaml"
+}
+
+# The docs sources bootstrap renders, with the real chapter-order script: a site
+# named Dashboard Service whose nav holds one page.
+docs_sources() {
+  mkdir -p "$R/docs" "$R/scripts/pandoc"
+  printf 'site_name: Dashboard Service\nrepo_name: "acme/dashboard-service" # the repository\n' > "$R/mkdocs.yml"
+  printf 'nav:\n  - Home: index.md\n' >> "$R/mkdocs.yml"
+  printf '# Dashboard Service\n' > "$R/docs/index.md"
+  printf 'mkdocs-material==9.5.0\n' > "$R/requirements-docs.txt"
+  cp "$TEMPLATES/common/scripts/docs-nav-to-chapters.zsh" "$R/scripts/"
+}
+
+# The real contract semver checker, which bootstrap renders with a contract surface.
+semver_checker() {
+  mkdir -p "$R/.github/scripts"
+  cp "$TEMPLATES/common/.github/scripts/check-contracts-semver.sh" "$R/.github/scripts/"
+}
+
 # Commit every change in the fixture repo on its current branch.
 commit_all() {
   git -C "$R" add -A
   git -C "$R" commit -q -m "${1:-change}"
+}
+
+# Make the fixture's current commit origin/trunk too, so the next change is the only one
+# the branch adds.
+publish_base() {
+  git -C "$R" push -q origin HEAD:trunk
+  git -C "$R" fetch -q origin
 }
 
 # The rendered gate in the fixture repo, with the stubs first on PATH.
@@ -185,10 +314,10 @@ gate_with() {
 @test "#2122: a recorded gate command reaches go-ci.yml and hooks/pre-push verbatim; the default is make check" {
   local out="$BATS_TEST_TMPDIR/out"
   render_go "$out"
-  [ "$(yq -r '.jobs.gate.steps[-1].run' "$out/.github/workflows/go-ci.yml")" = 'make check' ]
+  [ "$(yq -r '.jobs.gate.steps[4].run' "$out/.github/workflows/go-ci.yml")" = 'make check' ]
   rm -rf "$out"
   render_go "$out" --gate-command 'make check-ci'
-  [ "$(yq -r '.jobs.gate.steps[-1].run' "$out/.github/workflows/go-ci.yml")" = 'make check-ci' ]
+  [ "$(yq -r '.jobs.gate.steps[4].run' "$out/.github/workflows/go-ci.yml")" = 'make check-ci' ]
   grep -qxF '{ make check-ci; } </dev/null || exit 1' "$out/hooks/pre-push"
 }
 
@@ -208,7 +337,11 @@ gate_with() {
   # make check runs a zsh script, and ubuntu-latest ships no zsh
   contains "$(yq -r '.jobs.gate.steps[2].run' "$wf")" 'sudo apt-get install -y --no-install-recommends zsh'
   [ "$(yq -r '.jobs.gate.steps[3].run' "$wf")" = 'make setup' ]
-  [ "$(yq -r '.jobs.gate.steps | length' "$wf")" = 5 ]
+  [ "$(yq -r '.jobs.gate.steps[4].run' "$wf")" = 'make check' ]
+  # the gate command, then only the two upload steps (#2614)
+  [ "$(yq -r '.jobs.gate.steps | length' "$wf")" = 7 ]
+  [ "$(yq -r '.jobs.gate.steps[5].uses' "$wf")" = 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9' ]
+  [ "$(yq -r '.jobs.gate.steps[6].uses' "$wf")" = 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9' ]
   if command -v yamllint >/dev/null 2>&1; then
     run yamllint -c "$REPO_ROOT/.yamllint" --strict "$wf"
     [ "$status" -eq 0 ] || { echo "$output"; false; }
@@ -235,6 +368,60 @@ gate_with() {
   run ! grep -qiE 'golangci-lint|diff-cover' "$GO_TMPL/.github/workflows/go-ci.yml.tmpl"
 }
 
+@test "#2614: trivy, gitleaks, pre-commit, Spectral and pandoc are each pinned once; oasdiff and yq run through go tool" {
+  local gate="$GO_TMPL/scripts/go-gate.zsh.tmpl" make="$GO_TMPL/Makefile.tmpl"
+  [ "$(grep -c '^TRIVY_VERSION := v' "$make")" -eq 1 ]
+  [ "$(grep -c '^GITLEAKS_VERSION := v' "$make")" -eq 1 ]
+  [ "$(grep -c '^PRE_COMMIT_VERSION := [0-9]' "$make")" -eq 1 ]
+  [ "$(grep -c '^spectral_cli="@stoplight/spectral-cli@[0-9][0-9.]*"$' "$gate")" -eq 1 ]
+  [ "$(grep -c '^pandoc_image="pandoc/extra:[0-9][0-9.]*"$' "$gate")" -eq 1 ]
+  # the gate names no version of any of them anywhere else, and neither do the hooks or CI
+  run ! grep -rlE 'TRIVY_VERSION :=|GITLEAKS_VERSION :=|PRE_COMMIT_VERSION :=|pre-commit==[0-9]' \
+    "$GO_TMPL/scripts" "$GO_TMPL/hooks" "$GO_TMPL/.github"
+  [ "$(grep -c 'spectral-cli@' "$gate")" -eq 1 ]
+  [ "$(grep -c 'pandoc/extra' "$gate")" -eq 1 ]
+  run ! grep -rlE 'spectral-cli@|pandoc/extra' "$GO_TMPL/.github" "$GO_TMPL/hooks" "$make"
+  # Spectral and pandoc run from the pins, never a literal
+  grep -q 'npx --yes "$spectral_cli" lint --ruleset .spectral.yaml --fail-severity error' "$gate"
+  [ "$(grep -c '"$pandoc_image"' "$gate")" -eq 3 ]
+  # oasdiff and yq: shims that run go tool, and no bare invocation of either outside a comment
+  grep -qF "printf '#!/bin/sh\nexec go tool %s \"\$@\"\n' \"\$t\"" "$gate"
+  grep -qx 'for t in oasdiff yq; do' "$gate"
+  run grep -E "^([^#]*[;&|(])?[[:space:]]*(oasdiff|yq)[[:space:]]" "$gate"
+  [ "$status" -eq 1 ] || { echo "$output"; false; }
+}
+
+@test "#2614: make setup installs trivy, gitleaks and pre-commit whatever tools.vulnerabilities declares" {
+  local v out="$BATS_TEST_TMPDIR/setup"
+  render_go "$out" >/dev/null
+  git -C "$out" init -q
+  # no install guard reads .maintenance.yml any more
+  run ! grep -q 'VULNERABILITIES' "$out/Makefile"
+  for v in trivy snyk none; do
+    printf 'primary: go\ntools:\n  vulnerabilities: %s\n' "$v" > "$out/.maintenance.yml"
+    rm -rf "$out/.tools"
+    : > "$CALLS"
+    # every tool reports a stale version, so each is installed; the stub curl fails the download
+    run env PATH="$STUB:$PATH" TRIVY_VERSION_OUT=0.1.0 PIP_PRE_COMMIT_VERSION=4.0.0 \
+      make --no-print-directory -C "$out" setup
+    [ "$status" -ne 0 ]
+    contains "$output" 'make setup: installing trivy v0.72.0'
+    grep -q '^curl .*aquasecurity/trivy/v0.72.0/contrib/install.sh$' "$CALLS"
+    contains "$output" 'make setup: installing pre-commit 4.3.0'
+    grep -q '^pip install --quiet pre-commit==4.3.0$' "$CALLS"
+    [ -L "$out/.tools/bin/pre-commit" ]
+    run env PATH="$STUB:$PATH" GITLEAKS_VERSION_OUT=8.0.0 make --no-print-directory -C "$out" setup
+    [ "$status" -ne 0 ]
+    contains "$output" 'make setup: installing gitleaks v8.30.1'
+    grep -qE '^curl .*gitleaks/releases/download/v8\.30\.1/gitleaks_8\.30\.1_(linux|darwin)_(x64|arm64)\.tar\.gz$' "$CALLS"
+  done
+  # at the pinned versions nothing is downloaded
+  : > "$CALLS"
+  run env PATH="$STUB:$PATH" make --no-print-directory -C "$out" setup
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  run ! grep -q '^curl' "$CALLS"
+}
+
 # --- the gate script: stage selection and skip notices --------------------------
 
 @test "#2122: with no proto inputs and no Go change, the gate passes and prints a skip notice for each skipped stage" {
@@ -251,24 +438,329 @@ gate_with() {
   grep -q '^golangci-lint run$' "$CALLS"
   grep -q '^go test -race -coverprofile=coverage.out -covermode=atomic ./...$' "$CALLS"
   grep -q '^go tool govulncheck ./...$' "$CALLS"
-  grep -q '^trivy fs --config trivy.yaml --scanners vuln .$' "$CALLS"
+  grep -q '^trivy fs --config trivy.yaml --scanners vuln,secret,misconfig .$' "$CALLS"
   run ! grep -q '^diff-cover' "$CALLS"
   run ! grep -q '^go tool buf' "$CALLS"
 }
 
-@test "#2122: tools.vulnerabilities none skips the vulnerability stage with a notice, and snyk runs govulncheck alone" {
+@test "#2614: the source-only stages run after vulnerabilities in order, and the path-gated ones print a skip notice" {
+  go_repo trivy
+  echo docs > "$R/README.md"
+  commit_all
+  run --separate-stderr gate
+  [ "$status" -eq 0 ] || { echo "$output $stderr"; false; }
+  # stage lines in order, each path-gated stage skipping with its reason
+  [ "$(grep -o '^go-gate: [a-z -]*' <<< "$output" | sed -n '/vulnerabilities/,$p' | tr '\n' '|')" = \
+    'go-gate: vulnerabilities|go-gate: secrets|go-gate: no cluster deploy|go-gate: license|go-gate: skip pre-commit |go-gate: skip contracts lint |go-gate: skip contracts semver |go-gate: skip docs |go-gate: passed|' ]
+  contains "$output" 'go-gate: skip pre-commit — no .pre-commit-config.yaml'
+  contains "$output" 'go-gate: skip contracts lint — no change under contracts/ or to .spectral.yaml against origin/trunk'
+  contains "$output" 'go-gate: skip contracts semver — no change under contracts/ or to its checker against origin/trunk'
+  contains "$output" 'go-gate: skip docs — no change to the docs sources against origin/trunk'
+  grep -qx 'gitleaks git --no-banner --redact --log-opts=origin/trunk..HEAD .' "$CALLS"
+  grep -qx 'no-cluster-deploy ' "$CALLS"
+  grep -qx 'trivy fs --config trivy.yaml --scanners license .' "$CALLS"
+  run ! grep -qE '^(npx|docker|mkdocs|pre-commit)' "$CALLS"
+}
+
+@test "#2122/#2614: tools.vulnerabilities none skips the vulnerability stage, snyk runs govulncheck alone, and the license and secrets stages run under all three" {
   go_repo none
   run --separate-stderr gate
   [ "$status" -eq 0 ]
   contains "$output" 'go-gate: skip vulnerabilities — tools.vulnerabilities is none'
-  run ! grep -qE '^(go tool govulncheck|trivy)' "$CALLS"
+  run ! grep -qE '^(go tool govulncheck|trivy fs .* --scanners vuln)' "$CALLS"
+  grep -qx 'trivy fs --config trivy.yaml --scanners license .' "$CALLS"
+  grep -q '^gitleaks git ' "$CALLS"
   rm -rf "$R" "$REMOTE"
   : > "$CALLS"
   go_repo snyk
   run --separate-stderr gate
   [ "$status" -eq 0 ]
   grep -q '^go tool govulncheck ./...$' "$CALLS"
-  run ! grep -q '^trivy' "$CALLS"
+  run ! grep -q '^trivy fs .* --scanners vuln' "$CALLS"
+  grep -qx 'trivy fs --config trivy.yaml --scanners license .' "$CALLS"
+  grep -q '^gitleaks git ' "$CALLS"
+  rm -rf "$R" "$REMOTE"
+  : > "$CALLS"
+  go_repo trivy
+  run --separate-stderr gate
+  [ "$status" -eq 0 ]
+  grep -qx 'trivy fs --config trivy.yaml --scanners license .' "$CALLS"
+  grep -q '^gitleaks git ' "$CALLS"
+}
+
+@test "#2614: a committed secret, a cluster deploy, a license finding and a pre-commit hook failure each fail the gate" {
+  go_repo snyk
+  run --separate-stderr gate_with GITLEAKS_RC=1
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'go-gate: FAIL secrets — gitleaks found a secret in a commit on origin/trunk..HEAD'
+  run --separate-stderr gate_with NCD_RC=1
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'go-gate: FAIL no cluster deploy — see the checker'"'"'s message above'
+  run --separate-stderr gate_with TRIVY_LICENSE_RC=1
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'go-gate: FAIL license — trivy fs --scanners license'
+  # with a pre-commit config the stage runs every hook over every file, but the two scans
+  # the secrets and vulnerability stages already run
+  printf 'repos: []\n' > "$R/.pre-commit-config.yaml"
+  commit_all
+  : > "$CALLS"
+  run --separate-stderr gate
+  [ "$status" -eq 0 ] || { echo "$stderr"; false; }
+  contains "$output" 'go-gate: pre-commit'
+  grep -qx 'pre-commit run --all-files' "$CALLS"
+  grep -qx 'pre-commit SKIP=gitleaks,trivy-fs' "$CALLS"
+  run --separate-stderr gate_with PRECOMMIT_RC=1
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'go-gate: FAIL pre-commit'
+}
+
+@test "#2614: a missing gitleaks or pre-commit fails its stage naming make setup" {
+  local p
+  go_repo none
+  printf 'repos: []\n' > "$R/.pre-commit-config.yaml"
+  commit_all
+  p="$(path_without gitleaks)"
+  run --separate-stderr bash -c 'cd "$1" && env PATH="$2" "$3" scripts/go-gate.zsh' _ "$R" "$p" "$ZSH"
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'go-gate: FAIL secrets — gitleaks is not installed; run make setup'
+  p="$(path_without pre-commit)"
+  run --separate-stderr bash -c 'cd "$1" && env PATH="$2" "$3" scripts/go-gate.zsh' _ "$R" "$p" "$ZSH"
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'go-gate: FAIL pre-commit — pre-commit is not installed; run make setup'
+  p="$(path_without trivy)"
+  run --separate-stderr bash -c 'cd "$1" && env PATH="$2" "$3" scripts/go-gate.zsh' _ "$R" "$p" "$ZSH"
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'go-gate: FAIL license — trivy is not installed; run make setup'
+}
+
+@test "#2614: the real no-cluster-deploy checker, reaching yq through go tool, fails the gate on a workflow that deploys to a cluster" {
+  go_repo none
+  cp "$TEMPLATES/common/scripts/check-no-cluster-deploy.zsh" "$R/scripts/"
+  commit_all
+  run --separate-stderr gate
+  [ "$status" -eq 0 ] || { echo "$output $stderr"; false; }
+  # the checker called yq by name, and the shim ran the go.mod-pinned one
+  grep -q '^go tool yq ' "$CALLS"
+  mkdir -p "$R/.github/workflows"
+  printf 'on: push\njobs:\n  deploy:\n    runs-on: ubuntu-latest\n    steps:\n      - run: kubectl apply -f k8s/\n' \
+    > "$R/.github/workflows/deploy.yml"
+  commit_all
+  run --separate-stderr gate
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'deploy.yml'
+  contains "$stderr" 'go-gate: FAIL no cluster deploy — see the checker'"'"'s message above'
+}
+
+@test "#2614: a missing jq or go tool yq fails the no cluster deploy stage naming it" {
+  local p
+  go_repo none
+  p="$(path_without jq)"
+  run --separate-stderr bash -c 'cd "$1" && env PATH="$2" "$3" scripts/go-gate.zsh' _ "$R" "$p" "$ZSH"
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'go-gate: FAIL no cluster deploy — jq is not installed'
+  lacks "$stderr" 'make setup'
+  run --separate-stderr gate_with GO_TOOL_MISSING=yq
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'go-gate: FAIL no cluster deploy — go tool yq is missing; go get -tool adds it'
+}
+
+# --- contracts ------------------------------------------------------------------
+
+@test "#2614: a contract change lints the newest major of each family with the pinned Spectral, and a Spectral error fails" {
+  go_repo none
+  semver_checker
+  mkspec contracts/v1 1.0.0 1
+  mkspec contracts/ops/v1 1.0.0 1
+  printf 'extends: []\n' > "$R/.spectral.yaml"
+  commit_all
+  publish_base
+  mkspec contracts/v2 2.0.0 2
+  commit_all
+  run --separate-stderr gate
+  [ "$status" -eq 0 ] || { echo "$output $stderr"; false; }
+  contains "$output" 'go-gate: linting contracts/v2/openapi.yaml contracts/ops/v1/openapi.yaml'
+  grep -qx 'npx --yes @stoplight/spectral-cli@6.15.0 lint --ruleset .spectral.yaml --fail-severity error contracts/v2/openapi.yaml contracts/ops/v1/openapi.yaml' "$CALLS"
+  run --separate-stderr gate_with SPECTRAL_RC=1
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'go-gate: FAIL contracts lint — spectral'
+  # a .spectral.yaml change alone runs the stage too
+  git -C "$R" reset -q --hard origin/trunk
+  printf 'extends: [spectral:oas]\n' > "$R/.spectral.yaml"
+  commit_all
+  : > "$CALLS"
+  run --separate-stderr gate
+  [ "$status" -eq 0 ]
+  grep -q '^npx --yes @stoplight/spectral-cli@6.15.0 lint ' "$CALLS"
+}
+
+@test "#2614: a newest vN directory without openapi.yaml fails the contracts lint stage loudly" {
+  go_repo none
+  mkspec contracts/v1 1.0.0 1
+  commit_all
+  publish_base
+  mkdir -p "$R/contracts/v2"
+  printf 'openapi: 3.1.0\n' > "$R/contracts/v2/openapi.yml"
+  commit_all
+  run --separate-stderr gate
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'go-gate: contracts/v2/ is the newest major of contracts but has no openapi.yaml'
+  contains "$stderr" 'go-gate: FAIL contracts lint — the newest contract major has no openapi.yaml'
+  run ! grep -q '^npx' "$CALLS"
+}
+
+@test "#2614: the contracts semver stage writes both findings files, and an in-place breaking change fails it" {
+  go_repo none
+  semver_checker
+  mkspec contracts/v1 1.0.0 1
+  mkspec contracts/ops/v1 1.0.0 1
+  commit_all
+  publish_base
+  # an additive change shipped as a minor bump passes, and writes both findings files
+  mkspec contracts/v1 1.1.0 1
+  commit_all
+  run --separate-stderr gate_with OASDIFF_CLASS=additive
+  [ "$status" -eq 0 ] || { echo "$output $stderr"; false; }
+  contains "$output" 'go-gate: contracts semver'
+  # the checker called oasdiff by name, and the shim ran the go.mod-pinned one
+  grep -q '^go tool oasdiff ' "$CALLS"
+  [ "$(jq -r '.violations | length' "$R/contracts-semver-findings.json")" = 0 ]
+  [ "$(jq -r '.violations | length' "$R/contracts-ops-semver-findings.json")" = 0 ]
+  # the same change classified breaking is an in-place breaking change to a live major
+  rm -f "$R"/contracts-*semver-findings.json
+  run --separate-stderr gate_with OASDIFF_CLASS=breaking
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'go-gate: FAIL contracts semver — see the checker'"'"'s messages above, and the findings files it wrote'
+  jq -r '.violations[]' "$R/contracts-semver-findings.json" | grep -q 'never an in-place edit'
+  # the ops half still ran and wrote its file after the business half failed
+  [ -f "$R/contracts-ops-semver-findings.json" ]
+}
+
+@test "#2614: a failing ops half alone fails the contracts semver stage — the two exit codes are OR'd" {
+  go_repo none
+  semver_checker
+  mkspec contracts/v1 1.0.0 1
+  mkspec contracts/ops/v1 1.0.0 1
+  commit_all
+  publish_base
+  # retiring the live ops major fails the ops half, while the business half passes
+  git -C "$R" rm -rq contracts/ops
+  commit_all
+  run --separate-stderr gate
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'go-gate: FAIL contracts semver'
+  [ "$(jq -r '.violations | length' "$R/contracts-semver-findings.json")" = 0 ]
+  [ "$(jq -r '.violations | length' "$R/contracts-ops-semver-findings.json")" -gt 0 ]
+}
+
+@test "#2614: a contract change with no checker on disk fails naming it, and a missing node fails naming the tool" {
+  local p
+  go_repo none
+  mkspec contracts/v1 1.0.0 1
+  commit_all
+  p="$(path_without node)"
+  run --separate-stderr bash -c 'cd "$1" && env PATH="$2" "$3" scripts/go-gate.zsh' _ "$R" "$p" "$ZSH"
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'go-gate: FAIL contracts lint — node is not installed'
+  lacks "$stderr" 'make setup'
+  run --separate-stderr gate
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'go-gate: FAIL contracts semver — .github/scripts/check-contracts-semver.sh is missing; re-run /development:bootstrap'
+}
+
+# --- docs -----------------------------------------------------------------------
+
+@test "#2614: a docs change builds the site strictly and both manuals with the pinned pandoc image, titled from mkdocs.yml" {
+  go_repo none
+  docs_sources
+  commit_all
+  run --separate-stderr gate
+  [ "$status" -eq 0 ] || { echo "$output $stderr"; false; }
+  contains "$output" 'go-gate: docs'
+  grep -qx 'pip install --quiet -r requirements-docs.txt' "$CALLS"
+  grep -qE '^mkdocs build --strict --site-dir /.+/site$' "$CALLS"
+  grep -q '^docker run --rm .* pandoc/extra:3.5 --pdf-engine=xelatex --toc -V fontsize=11pt --metadata title=Dashboard Service --metadata author=acme/dashboard-service --lua-filter=scripts/pandoc/break-long-tokens.lua --include-in-header=scripts/pandoc/manual-header.tex -o /out/manual.pdf docs/index.md$' "$CALLS"
+  grep -q '^docker run --rm .* pandoc/extra:3.5 --toc --metadata title=Dashboard Service --metadata author=acme/dashboard-service -o /out/manual.epub docs/index.md$' "$CALLS"
+  grep -q '^docker run --rm --entrypoint sh pandoc/extra:3.5 -c ' "$CALLS"
+  # the site and the manuals are built outside the repository: the tree stays clean
+  [ -z "$(git -C "$R" status --porcelain --untracked-files=all -- . ':!.tools')" ]
+  # once the docs are on the base branch, the stage skips
+  publish_base
+  : > "$CALLS"
+  run --separate-stderr gate
+  [ "$status" -eq 0 ]
+  contains "$output" 'go-gate: skip docs — no change to the docs sources against origin/trunk'
+  run ! grep -qE '^(mkdocs|docker)' "$CALLS"
+}
+
+@test "#2614: a strict mkdocs warning, a missing glyph, an unresolved reference, a missing manual and a blind probe each fail the docs stage" {
+  go_repo none
+  docs_sources
+  commit_all
+  run --separate-stderr gate_with MKDOCS_RC=1
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'go-gate: FAIL docs — mkdocs build --strict'
+  run --separate-stderr gate_with PANDOC_LOG='[WARNING] Missing character: There is no ≥ in font lmroman10-regular'
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'Missing character: There is no ≥'
+  contains "$stderr" 'go-gate: FAIL docs — xelatex dropped the characters above from manual.pdf'
+  run --separate-stderr gate_with PANDOC_LOG='LaTeX Warning: There were undefined references.'
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'go-gate: FAIL docs — manual.pdf has unresolved references'
+  run --separate-stderr gate_with PROBE_SILENT=1
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'go-gate: FAIL docs — pandoc no longer reports undefined references'
+  run --separate-stderr gate_with PROBE_RC=125
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'go-gate: FAIL docs — the pandoc probe container failed'
+  run --separate-stderr gate_with PANDOC_NO_OUTPUT=1
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'go-gate: FAIL docs — a manual was not produced'
+  run --separate-stderr gate_with PANDOC_RC=1
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'go-gate: FAIL docs — pandoc manual.pdf'
+}
+
+@test "#2614: a docs change with no mkdocs.yml skips the docs stage, and a missing python3 or docker fails it naming the tool" {
+  local p
+  go_repo none
+  mkdir -p "$R/docs"
+  echo notes > "$R/docs/notes.md"
+  commit_all
+  run --separate-stderr gate
+  [ "$status" -eq 0 ]
+  contains "$output" 'go-gate: skip docs — no mkdocs.yml'
+  docs_sources
+  commit_all
+  p="$(path_without python3)"
+  run --separate-stderr bash -c 'cd "$1" && env PATH="$2" "$3" scripts/go-gate.zsh' _ "$R" "$p" "$ZSH"
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'go-gate: FAIL docs — python3 is not installed'
+  p="$(path_without docker)"
+  run --separate-stderr bash -c 'cd "$1" && env PATH="$2" "$3" scripts/go-gate.zsh' _ "$R" "$p" "$ZSH"
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'go-gate: FAIL docs — docker is not installed'
+  lacks "$stderr" 'make setup'
+}
+
+# --- CI uploads -----------------------------------------------------------------
+
+@test "#2614: the gate job uploads the contract semver findings and the coverage reports, always, and an absent file is no error" {
+  local out="$BATS_TEST_TMPDIR/out" wf s
+  render_go "$out"
+  wf="$out/.github/workflows/go-ci.yml"
+  s='.jobs.gate.steps[5]'
+  [ "$(yq -r "$s.if" "$wf")" = 'always()' ]
+  [ "$(yq -r "$s.with.name" "$wf")" = 'contracts-semver-${{ github.event.pull_request.number || github.sha }}' ]
+  [ "$(yq -r "$s.with.path" "$wf")" = "$(printf 'contracts-semver-findings.json\ncontracts-ops-semver-findings.json')" ]
+  [ "$(yq -r "$s.with[\"if-no-files-found\"]" "$wf")" = ignore ]
+  s='.jobs.gate.steps[6]'
+  [ "$(yq -r "$s.if" "$wf")" = 'always()' ]
+  [ "$(yq -r "$s.with.name" "$wf")" = coverage-reports ]
+  [ "$(yq -r "$s.with.path" "$wf")" = "$(printf 'coverage.out\ncoverage.xml')" ]
+  [ "$(yq -r "$s.with[\"if-no-files-found\"]" "$wf")" = ignore ]
+  # the artifact name the Approver reads is the one contracts-semver.yml uploads
+  grep -qF 'name: contracts-semver-${{ github.event.pull_request.number || github.sha }}' \
+    "$TEMPLATES/common/.github/workflows/contracts-semver.yml.tmpl"
 }
 
 @test "#2122: a format diff, a lint finding, a failing test, a govulncheck and a trivy finding each fail the gate" {
@@ -364,12 +856,29 @@ gate_with() {
   contains "$stderr" 'gen/api.pb.go'
 }
 
-@test "#2122: a go.mod with no Go package yet passes with one skip notice and runs no tool" {
-  go_repo none
+@test "#2122: a go.mod with no Go package yet skips the Go stages but still runs the source-only ones" {
+  go_repo trivy
+  printf 'version: v2\n' > "$R/buf.yaml"
+  printf 'version: v2\nplugins:\n  - local: protoc-gen-go\n    out: gen\n' > "$R/buf.gen.yaml"
+  commit_all
   run --separate-stderr gate_with GO_PACKAGES=
   [ "$status" -eq 0 ]
-  contains "$output" 'go-gate: skip every stage — no Go package yet'
+  contains "$output" 'go-gate: skip format — no Go package yet'
+  contains "$output" 'go-gate: skip govulncheck — no Go package yet'
+  grep -qx 'trivy fs --config trivy.yaml --scanners vuln,secret,misconfig .' "$CALLS"
+  grep -q '^go tool buf lint$' "$CALLS"
+  grep -q '^go tool buf generate$' "$CALLS"
   run ! grep -q 'golangci-lint' "$CALLS"
+  run ! grep -q '^go test' "$CALLS"
+  grep -q '^gitleaks git ' "$CALLS"
+}
+
+@test "#2614: a failing go list ./... fails the gate rather than skipping the Go stages" {
+  go_repo none
+  run --separate-stderr gate_with GO_LIST_RC=1
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'go-gate: FAIL go list ./...'
+  lacks "$output" 'no Go package yet'
 }
 
 # --- the coverage floor ---------------------------------------------------------
@@ -386,12 +895,12 @@ gate_with() {
   [ "$status" -eq 0 ]
 }
 
-@test "#2122: a base branch that is not fetched fails the tests stage and names git fetch" {
+@test "#2122: a base branch that is not fetched fails the gate before its first stage and names git fetch" {
   go_repo none
   git -C "$R" update-ref -d refs/remotes/origin/trunk
   run --separate-stderr gate
   [ "$status" -eq 1 ]
-  contains "$stderr" 'go-gate: FAIL coverage floor — origin/trunk is not a commit here; run git fetch origin'
+  contains "$stderr" 'go-gate: FAIL base branch — origin/trunk is not a commit here; run git fetch origin'
 }
 
 @test "#2122: a missing gate tool fails naming make setup; an unknown argument exits 2; --help prints the header" {
@@ -490,7 +999,7 @@ gate_with() {
   contains "$block" 'Skip the script too while `pre-commit` is not on PATH'
   contains "$block" 'Unless the hook was already wired, a red gate never blocks bootstrap or Step 4e'"'"'s push'
   contains "$block" '**Never run `install-precommit-hooks.zsh` on a Go primary:**'
-  contains "$block" 'Of the steps above, only the `pre-commit` install offer applies, since `hooks/pre-commit` calls it; Step 4a.5 runs as on every other language path.'
+  contains "$block" 'Of the steps above, only the `pre-commit` install offer applies, since `hooks/pre-commit` calls it; Step 4a.5 runs as on every other language path, but before that gate run, whose `pre-commit` stage would otherwise fail on the files 4a.5 normalizes.'
 }
 
 @test "#2122: no Taskfile or task test reference is left in bootstrap SKILL.md, the Go templates, development-go, its marketplace entry or plugins.md" {
@@ -524,7 +1033,14 @@ gate_with() {
   contains "$block" '`iac/` → `languages/go/`, the plugin-owned set → `go-ci.yml`, `scripts/go-gate.zsh`, `hooks/pre-commit` and `hooks/pre-push`, and a `Makefile` merge that appends the `check`, `hooks` and `setup` targets and the variables they read when absent'
   contains "$block" 'Step 4 requires its `gate` context in addition to the existing Go contexts.'
   contains "$block" '`go get -tool github.com/bufbuild/buf/cmd/buf@latest` only when `buf.yaml` or `buf.gen.yaml` is present'
-  contains "$block" 'The gate runs them as `go tool <name>`, so `go.mod` is their one pin. Skip this when there is no `go.mod` yet, and name the three commands in the final report.'
+  contains "$block" '`go get -tool github.com/mikefarah/yq/v4@latest`, plus'
+  contains "$block" '`go get -tool github.com/oasdiff/oasdiff@latest` only when §3i renders the contracts machinery'
+  contains "$block" 'The gate runs them as `go tool <name>`, and reaches the checker scripts that call `yq` and `oasdiff` by name through shims, so `go.mod` is their one pin.'
+  contains "$block" 'Skip this when there is no `go.mod` yet, and name the commands in the final report.'
+  # the Makefile pins every installed gate tool, whatever tools.vulnerabilities declares (#2614)
+  contains "$block" 'gate'"'"'s installed non-Go tools are pinned (golangci-lint, diff-cover, trivy, gitleaks and pre-commit, whatever `tools.vulnerabilities` declares'
+  contains "$block" 'stages 1–13 in order'
+  contains "$block" 'whose two `if: always()` upload steps keep the contract semver findings (`contracts-semver-<pr>`) and the coverage reports (`coverage-reports`) the gate wrote'
   # §3a: a Go primary records gate:, and tools: like every non-IaC primary
   row="$(sed -n '/^- `\.maintenance\.yml` (render/,/^- `LICENSE`/p' "$SKILL" | tr -s '[:space:]' ' ')"
   contains "$row" 'On the §3l IaC path and a Go primary (#2122) it records `gate:`, the gate command (#1604)'
@@ -542,7 +1058,7 @@ gate_with() {
   local block
   block="$(sed -n '/^For a \*\*Go primary\*\* (#2122) the checklist adds/,/^For the \*\*IaC path\*\*/p' "$SKILL" | tr -s '[:space:]' ' ')"
   starts_with "$block" 'For a **Go primary** (#2122) the checklist adds'
-  contains "$block" '(unless Step 4a'"'"'s gate ran a stage, not `skip every stage`, and its install-iac-hooks.zsh exited 0 or found the hook already wired) Run `make setup`'
+  contains "$block" '(unless Step 4a'"'"'s gate ran its Go stages, not `skip format — no Go package yet`, and its install-iac-hooks.zsh exited 0 or found the hook already wired) Run `make setup`'
   contains "$block" '(only when Step 4a found core.hooksPath already `hooks` and the gate failing) The pre-push hook IS wired'
   contains "$block" '(only when §3d skipped the `go get -tool` pins, as on a repo with no `go.mod` yet) Pin the gate'"'"'s Go tools'
 }
