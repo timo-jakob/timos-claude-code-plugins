@@ -404,8 +404,8 @@ if [[ -n "$fix_touched" ]]; then
 fi
 
 # The risk demotion (#1921). The threshold is parsed by the SAME parser the
-# residue builder uses, so a value can never demote here and be read differently
-# there. `riskon` is the one gate the program reads: it is true only when the
+# loop uses for its up-front --risk check, so a value can never demote here and
+# be read differently there. `riskon` is the one gate the program reads: it is true only when the
 # threshold is ON *and* an assessment was supplied. Every other combination —
 # threshold off, ignored, or on with no --risk (hook mode supplies none) — leaves
 # `risk_json` empty and the program on exactly its pre-#1921 path, which is the

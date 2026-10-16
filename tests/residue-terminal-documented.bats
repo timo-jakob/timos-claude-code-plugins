@@ -48,10 +48,9 @@ setup() {
   # #2580 AC7: the sites later stories still own, repo-relative, each with the
   # story that migrates it. Each must still name the terminal; the story that
   # migrates one removes it from this list in its own PR.
-  NOT_YET_MIGRATED=(
-    "development/skills/resolve-issue/scripts/build-residue-issues.zsh|#2600"
-    "development/skills/resolve-issue/reference/residue/step-1-plan.md|#2600"
-  )
+  # #2600 migrated the last two (it deleted them with the filing path), so the
+  # list is empty; the test below keeps it that way.
+  NOT_YET_MIGRATED=()
   # ...and the sites that keep naming it: six inside byte-frozen spans, plus
   # condition-2-removed.md, kept unedited because #2601 deletes it whole. Only
   # #2601 shrinks this set (by residue/branch.md and condition-2-removed.md).
@@ -127,15 +126,11 @@ _invariant_in_awaiting_fix_branch() {
 }
 
 
-@test "#2580 AC7 every site not yet migrated still names the residue terminal" {
-  # A site that stops naming it has been migrated: the story that did it removes
-  # the site from NOT_YET_MIGRATED in the same PR, or this reds.
-  local e f owner
-  for e in "${NOT_YET_MIGRATED[@]}"; do
-    f="${e%%|*}"; owner="${e##*|}"
-    grep -q 'CONVERGED_WITH_RESIDUE' "$REPO_ROOT/$f" || {
-      echo "$f no longer names the residue terminal — $owner migrated it, so remove it from NOT_YET_MIGRATED"; return 1; }
-  done
+@test "#2580 AC7 every site is migrated: the not-yet-migrated list is empty" {
+  # #2580 listed the sites later stories owned; each story shrank the list in its
+  # own PR, and #2600 removed the last two. A site re-added here would be a
+  # migration nobody owns.
+  [ "${#NOT_YET_MIGRATED[@]}" -eq 0 ]
 }
 
 @test "#2580 AC7 the kept set is exactly seven sites, and each still names the terminal" {
@@ -227,34 +222,43 @@ _invariant_in_awaiting_fix_branch() {
   run ! grep -q '\*\*`CONVERGED` is the only review-loop ending that opens a PR\*\*' <<< "$(flat "$probe")"
 }
 
-@test "#1435 the residue reference actually invokes the builder, with both labels" {
-  # build-residue-issues.zsh has NO caller inside the repo's scripts — the skill
-  # is the only thing that runs it and the only thing that turns its plan into
-  # real issues. Without this, deleting the residue branch's code block leaves
-  # the suite green while a shipped script becomes dead code and residue runs
-  # file nothing. #1503 moved that branch, byte-for-byte, into
-  # reference/residue.md, and #2056 split it across reference/residue/ — read
-  # each claim in the SHARD that holds it rather than through the corpus, so the
-  # invocation cannot drift back into the conductor unnoticed: step 1 builds the
-  # plan (step-1-plan.md), step 4 creates and attaches (steps-4-5.md).
-  local S1="$RI_REF/residue/step-1-plan.md" S4="$RI_REF/residue/steps-4-5.md"
-  grep -q 'scripts/build-residue-issues.zsh' "$S1"
-  # the label pair the builder EMITS and the pair the skill APPLIES must not
-  # drift apart — they are two halves of the same idempotency key
-  grep -q -- '--label review-residue' "$S4"
-  grep -q -- '--label needs-refinement' "$S4"
-  # ...and the attach that makes the idempotency read able to see them at all
-  grep -q 'sub_issues' "$S4"
+@test "the residue filing path is gone: no tracked file names the builder or a step shard" {
+  # #2600 deleted the filing script, its suite and the three step shards. Dead
+  # code a suite keeps green looks alive, so the sweep covers every tracked file,
+  # minus the dated records under docs/superpowers/, the fixtures, and this suite
+  # (which has to spell the names to look for them).
+  local hits
+  hits="$(_filing_path_mentions "$REPO_ROOT")"
+  [ -z "$hits" ] || { echo "the removed filing path is still named in:"; echo "$hits"; return 1; }
+  # ...and the files themselves are gone
+  local f
+  for f in scripts/build-residue-issues.zsh reference/residue/step-1-plan.md \
+           reference/residue/steps-2-3.md reference/residue/steps-4-5.md; do
+    [ ! -e "$REPO_ROOT/development/skills/resolve-issue/$f" ]
+  done
+  [ ! -e "$REPO_ROOT/tests/build-residue-issues.bats" ]
+}
 
-  # The POSITIVE counterpart to the two negative sweeps below. Those ban literal
-  # transcriptions of the OLD claims, so a REWORDED revert slips past them; these
-  # require the current claims to be present, which a revert cannot satisfy
-  # however it is phrased.
-  # the union key itself
-  grep -q 'unparented issue IS matched by the idempotency key' <<< "$(flat "$S4")"
-  # ...and the fourth-combination diagnostic's stated half, whose only other
-  # coverage is the script's own tests — deleting it here is invisible otherwise
-  grep -q 'losing only the \*\*parent\*\* read leaves the plan filtered on the repo-wide half' <<< "$(flat "$S1")"
+@test "non-vacuity: the filing-path sweep reds on a planted mention" {
+  # A scratch repo with one planted mention per needle in a swept file, the same
+  # mentions in each excluded place, and a clean file: the sweep must name
+  # exactly the swept files, so an empty result above means absence, not
+  # blindness, and the exclusions exclude only what they say.
+  local root="$BATS_TEST_TMPDIR/planted-tree" n
+  mkdir -p "$root/docs/superpowers" "$root/tests/fixtures" "$root/a"
+  git -C "$root" init -q
+  local -a plants=(build-residue-issues step-1-plan.md steps-2-3.md steps-4-5.md)
+  for n in 0 1 2 3; do
+    printf 'see %s\n' "${plants[$n]}" > "$root/a/swept-$n.md"
+  done
+  printf 'see build-residue-issues\n' > "$root/docs/superpowers/old.md"
+  printf 'see steps-4-5.md\n' > "$root/tests/fixtures/f.md"
+  printf 'see step-1-plan.md\n' > "$root/tests/residue-terminal-documented.bats"
+  printf 'nothing here\n' > "$root/a/clean.md"
+  git -C "$root" add -A
+  run _filing_path_mentions "$root"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'a/swept-0.md\na/swept-1.md\na/swept-2.md\na/swept-3.md')" ]
 }
 
 @test "open-pr appends a dossier and opens a PR only on CONVERGED, pinned by content" {
@@ -320,6 +324,29 @@ _invariant_in_awaiting_fix_branch() {
   # the mutation landed
   run ! cmp -s "$F" "$m"
   run ! grep -q '`dimensions.<lens>.open > 0` is a finding: `REQUEST_CHANGES`.' <<< "$(flat "$m")"
+}
+
+@test "#2586 #2599 ARCHITECTURE states the dossier open field as always 0 and open > 0 as a finding, by content" {
+  # The Review dossier section is the contract the template and build-dossier.zsh
+  # implement; a revert to the residue-era leniency would contradict both.
+  local t; t="$(flat "$REPO_ROOT/ARCHITECTURE.md")"
+  grep -qF 'and `build-dossier.zsh` refuses anything else (#2599) — so every dossier it emits reports `open` 0, and the section has no "still open" rendering and no residue paragraph.' <<< "$t"
+  grep -qF 'The field stays because the Approver backstops read it: `approver-policy-core` treats `open > 0` as a `REQUEST_CHANGES` finding with confidence capped at `LOW` (#2586)' <<< "$t"
+  # the residue-era tracked-risk reading and the filed-follow-up rendering are gone
+  run ! grep -qF 'reads `open > 0` as scoped, disclosed, *tracked* risk' <<< "$t"
+  run ! grep -qF 'K still open (filed as follow-up issue(s))' <<< "$t"
+}
+
+@test "#2586 non-vacuity: the ARCHITECTURE dossier pins red when the rule reverts to leniency" {
+  local F="$REPO_ROOT/ARCHITECTURE.md"
+  local m="$BATS_TEST_TMPDIR/ARCHITECTURE.md"
+  sed -e 's/treats$/reads/' -e 's/^   `open > 0` as a `REQUEST_CHANGES` finding with confidence capped at `LOW`$/   `open > 0` as scoped, disclosed, *tracked* risk/' -e 's/and `build-dossier.zsh` refuses$/and `build-dossier.zsh` accepts/' "$F" > "$m"
+  # the mutation landed
+  run ! cmp -s "$F" "$m"
+  run ! grep -qF 'treats `open > 0` as a `REQUEST_CHANGES` finding with confidence capped at `LOW` (#2586)' <<< "$(flat "$m")"
+  run ! grep -qF 'and `build-dossier.zsh` refuses anything else (#2599)' <<< "$(flat "$m")"
+  run grep -qF 'reads `open > 0` as scoped, disclosed, *tracked* risk' <<< "$(flat "$m")"
+  [ "$status" -eq 0 ]
 }
 
 @test "#1435 AC22 the round protocol states the cadence invariant on the AWAITING_FIX branch" {
@@ -407,71 +434,6 @@ _invariant_in_awaiting_fix_branch() {
   [ -z "$hits" ] || { echo "stale two-condition claims still present:"; echo "$hits"; return 1; }
 }
 
-@test "#1435 the remainder rule is stated ONCE, and the other sites point at it" {
-  # This rule fragmented across five sites over three review rounds, and every
-  # round found another site restating it inconsistently — a CRITICAL twice. The
-  # cure is structural, not another patch: ONE statement, with pointers.
-  #
-  # So the pin is a COUNT, not a wording check. A future edit that "helpfully"
-  # re-explains the three rows at a consumer site reds here, which is the whole
-  # point — the sites disagreed precisely because each carried its own copy.
-  #
-  # Counted across the whole skill (#1503), not the conductor alone: the rule
-  # itself moved to reference/residue/step-1-plan.md while §6's pointer stayed in SKILL.md,
-  # so a conductor-only count would read 0 canonical statements and a
-  # reference-only count would miss a copy planted back in the conductor.
-  local F="$SKILL"
-
-  # exactly one canonical statement, carrying the decision table
-  [ "$(grep -c 'THE REMAINDER RULE' "$F")" -eq 1 ]
-  local t; t="$(flat "$F")"
-  # ...and it really is a table with all three rows, or the count pins a heading
-  grep -q '| Filed | The Summary owes | Why |' <<< "$t"
-  grep -q '| \*\*none\*\* |' <<< "$t"
-  grep -q '| \*\*some, not all\*\* |' <<< "$t"
-  grep -q '| \*\*all\*\* |' <<< "$t"
-
-  # the definition of "filed" lives with the rule, since every row depends on it
-  grep -q 'means \*\*created AND parented\*\*' <<< "$t"
-
-  # the consumers POINT rather than restate. (§6's own pointer went with the
-  # residue Summary duty, #2580.)
-  grep -q 'apply \*\*the remainder rule\*\*' <<< "$t"
-  grep -q 'Both feed the remainder rule in step 1' <<< "$t"
-}
-
-@test "#1435 the arm-vs-remainder distinction is stated where the mistake is made" {
-  # Both CRITICALs in this area were the same error: reading the ARM the run
-  # arrived by instead of the remainder's state. The rule says so outright, and
-  # the two sites most likely to shortcut it repeat the warning locally — that is
-  # a pointer with a reason attached, not a restatement of the rows.
-  #
-  # Read from the residue shards, NOT the corpus (#1503): the test's whole claim
-  # is WHERE the warning sits, and since #2056 the residue shards are the only
-  # files a session reaching CONVERGED_WITH_RESIDUE opens — reference/residue/
-  # branch.md first (exit 14's next_ref), then risk-threshold.md, step-1-plan.md,
-  # steps-2-3.md and steps-4-5.md, in the index's read order. On the corpus these
-  # three sentences could migrate into the conductor with the suite still green,
-  # leaving the residue branch without the warning at the two arms where both
-  # prior CRITICALs were made. Each is read in the shard holding it.
-  grep -q 'The antecedent is the remainder, never the arm you arrived by' <<< "$(flat "$RI_REF/residue/step-1-plan.md")"
-  # step 4's create/attach prose, the site that restated it wrongly last round
-  grep -q '"every create failed" is a route, not a row' <<< "$(flat "$RI_REF/residue/steps-4-5.md")"
-  # step 3's unmatched arm, the other one
-  grep -q 'this arm is a route, not a row' <<< "$(flat "$RI_REF/residue/steps-2-3.md")"
-}
-
-@test "#1435 non-vacuity: a second copy of the rule reds the count pin" {
-  # Proves the count is doing work. Plant a duplicate heading and the pin fails;
-  # without this the `-eq 1` could be passing because the string is rare rather
-  # than because it is unique. Mutates the corpus, matching the pin above.
-  local F="$SKILL"
-  local m="$BATS_TEST_TMPDIR/dup.md"
-  cat "$F" > "$m"
-  printf '\n**THE REMAINDER RULE — restated helpfully somewhere else.**\n' >> "$m"
-  [ "$(grep -c 'THE REMAINDER RULE' "$m")" -eq 2 ]
-}
-
 # --- #1435 restatement sweeps: the two claims that kept going stale ----------
 #
 # These are not belt-and-braces. Both invariants below were restated at half a
@@ -489,6 +451,19 @@ sweepable() {
   git -C "$REPO_ROOT" ls-files '*.md' '*.md.tmpl' '*.zsh' \
     | grep -v '^docs/superpowers/' \
     | grep -v '^tests/residue-terminal-documented.bats$'
+}
+
+# Every tracked file under $1 that names the removed residue filing path (#2600):
+# the builder or one of the three step shards. Excluded the way sweepable()
+# excludes: the dated records, the fixtures, and this suite. Prints repo-relative
+# paths, one per line; prints nothing when none does.
+_filing_path_mentions() {
+  local root="$1"
+  git -C "$root" ls-files \
+    | grep -v -e '^docs/superpowers/' -e '^tests/fixtures/' -e '^tests/residue-terminal-documented.bats$' \
+    | tr '\n' '\0' \
+    | (cd "$root" && xargs -0 grep -lIE 'build-residue-issues|step-1-plan[.]md|steps-2-3[.]md|steps-4-5[.]md' 2>/dev/null) \
+    || true
 }
 
 @test "#1435 no site still describes the residue idempotency key as parent-scoped" {
@@ -738,102 +713,55 @@ sweepable() {
 
 @test "#1920 reference/residue/ states the risk-threshold procedure, by content" {
   # The procedure lives OUTSIDE the frozen residue-branch span, so nothing that
-  # verifies the span guards it. Each needle is one clause a session at the
-  # residue terminal must meet: the pointer that makes it read the section at
-  # all, how to read the variable and its three states, both probability
-  # definitions, all four impact anchors, the keep rule, every amendment to the
-  # frozen steps, and the fixed PR paragraph that overrides the dossier claim of
-  # filing.
-  #
-  # Since #2056 the pointer sits in reference/residue/branch.md — the shard exit
-  # 14's next_ref opens — and names the risk-threshold shard; the old one said
-  # "at the end of this file", a position a split cannot keep. Every other
-  # clause is pinned in reference/residue/risk-threshold.md.
-  grep -qF -- 'Before step 1, read `reference/residue/risk-threshold.md` § *Risk threshold — assess before filing (#1920)*' \
-    <<< "$(flat "$RI_REF/residue/branch.md")" || {
-    echo "residue/branch.md no longer sends the session to the risk threshold before step 1"; return 1; }
-  # Both routes on to the step shards: branch.md ends with the frozen block, so
-  # without these sentences a session following next_ref never reaches step 1.
-  grep -qF -- 'Then read the steps: `reference/residue/step-1-plan.md`, `reference/residue/steps-2-3.md` and `reference/residue/steps-4-5.md`' \
-    <<< "$(flat "$RI_REF/residue/branch.md")" || {
-    echo "residue/branch.md no longer routes the session on to the step shards"; return 1; }
+  # verifies the span guards it. #2600 removed the filing steps it amended, so
+  # the needles left are the clauses the loop's risk pass reads from it: how to
+  # read the variable and its three states (risk-pass.md takes them from §
+  # *Risk threshold*), and both probability definitions and all four impact
+  # anchors (risk-pass.md takes them from § *1. Assess every residual blocker*).
   local t; t="$(flat "$RI_REF/residue/risk-threshold.md")"
-  grep -qF -- 'They are in `reference/residue/step-1-plan.md`, `reference/residue/steps-2-3.md` and `reference/residue/steps-4-5.md`' <<< "$t" || {
-    echo "residue/risk-threshold.md no longer names the step shards"; return 1; }
   local -a needles=(
     'printenv corner_case_risk_threshold'
-    'Skip the rest of this section: make no assessment, pass no new flag'
+    'Skip the rest of this section: make no assessment, pass no new flag.'
     'say so in the PR Summary in one line naming the value'
-    'you misread the state: go back to step 1 below, assess, and re-run the builder'
+    '**On — any other value** (`0.05`, `.05`, `1`).'
     'the probability that a plausible future change breaks exactly that unpinned behaviour'
     'the probability that the described input or state actually arises'
     '| `1.0` | a false result that is trusted'
     '| `0.7` | a hang, runaway resource use'
     '| `0.4` | degraded or misleading output'
     '| `0.1` | cosmetic'
-    '**Risk** is `p × impact`. A finding is **kept** (filed) when `risk >= threshold`'
-    'A finding you leave out is **kept**'
-    'to **both** invocations, the real plan and the `--dry-run`'
-    'It is never "file everything" or "file nothing".'
-    'None of them is the `--status` arm, so none of them stops the run with no PR'
-    'with the variable **blanked for those two calls only**'
-    '**`threshold_state` is `ignored`**'
-    '**A dropped finding an EARLIER run already filed is not dropped.**'
-    'takes **step 3'"'"'s arm 2**'
-    'read it as that set **minus the records that stay dropped** after the settling above'
-    'take the arms **in order; the first arm that settles a record settles it**'
-    'Run the repo-wide listing **once, on its own**'
-    '**a lookup that did not happen** — a read this record needed exited non-zero'
-    '→ it **stays dropped**, and the Summary says in one line that its earlier-run status could not be checked'
-    'Step 3'"'"'s read-failed arm (*count the builder-filtered set as filed*) does **not** apply here'
-    'found nowhere, both reads having succeeded → it **stays dropped**'
-    'the dropped record'"'"'s `dropped` array is **non-empty** — the builder dropped at least one finding'
-    'an all-filed rejoin is the **all** row'
-    'With an **empty** `dropped` array, an empty dry-run is still that anomaly arm'
-    'matched against `<scratch>/residue-listing.json`, never by running the listing again'
-    'present in the repo-wide listing but not settled by arm 1 (absent from step 2'"'"'s read, or that read failed)'
-    'settle it by **all** of that arm'"'"'s own sub-arms'
-    'A `--child` read that fails never sends a listing-matched record to the arm below'
-    'exited non-zero: **only** step 2'"'"'s `sub_issues` read, or (for a record absent from it) the repo-wide listing; the `--child` read belongs to the arm above and is settled there'
-    '**because every candidate was dropped** only when both hold'
-    'whether it stays dropped or rejoined, as filed or as untracked'
-    'This overrides the frozen *dry-run list is itself EMPTY* arm'
-    'is vacuously true of no candidates'
-    '**An EMPTY remainder takes no remainder-rule row.**'
-    '**They were NOT filed** — each one'
-    '**each staying-dropped record'"'"'s `row`, pasted as it is** — never re-rendered'
-    'state the three numbers — filed, dropped, and (if any) untracked'
   )
   local n
   for n in "${needles[@]}"; do
     grep -qF -- "$n" <<< "$t" || { echo "residue/risk-threshold.md lost the #1920 clause: $n"; return 1; }
   done
-  # ...and the heading the pointer above names. The pointer is prose, not a
+  # ...and the heading the risk pass names. The pointer is prose, not a
   # `see reference/X.md §` pointer, so the conductor-budget pointer sweep does
-  # not check it; the ARCHITECTURE.md section and the how-to page name the
-  # same heading.
+  # not check it; the ARCHITECTURE.md section names the same heading.
   grep -qxF '## Risk threshold — assess before filing (#1920)' "$RI_REF/residue/risk-threshold.md" || {
-    echo "residue/risk-threshold.md renamed the #1920 section heading that its pointer, ARCHITECTURE.md and the how-to name"
+    echo "residue/risk-threshold.md renamed the #1920 section heading that risk-pass.md and ARCHITECTURE.md name"
     return 1; }
+  # branch.md, after its frozen block, says the filing steps are gone
+  grep -qF -- '**The filing steps the block above leads into were removed (#2600)**' \
+    <<< "$(flat "$RI_REF/residue/branch.md")"
 }
 
-@test "#1921 AC10 reference/residue/risk-threshold.md assesses only unstamped residual blockers, and passes [] when none" {
-  # the in-loop stamp is reused, never re-assessed — the residue step's half of
-  # "assessed once between the loop and residue"
-  local t; t="$(flat "$RI_REF/residue/risk-threshold.md")"
-  local -a needles=(
-    '**Assess only what the loop has not already assessed (#1921).**'
-    'A residual blocker that carries that stamp is **not assessed again**'
-    '(its dropped record says `assessed_in: "loop"`)'
-    'a `--risk` entry naming a stamped finding is exit 2 (*already assessed in the loop*)'
-    'when there are none you still pass `--risk`, holding `[]`'
-    'For each **unstamped** finding in the BLOCKING phase'
-    'Carrying a dropped count in the dossier is the follow-up story (#1932).'
-  )
-  local n
-  for n in "${needles[@]}"; do
-    grep -qF -- "$n" <<< "$t" || { echo "residue/risk-threshold.md lost the #1921 clause: $n"; return 1; }
-  done
+@test "#1921 AC10 reference/residue/risk-threshold.md keeps the section the risk pass points at, and no builder protocol" {
+  # #1921 made the loop's risk pass assess every blocker in-loop, pointing at
+  # section 1 for its definitions. #2600 removed the builder that reused those
+  # stamps, so what is left is that section and the emptied amendments heading.
+  local f="$RI_REF/residue/risk-threshold.md"
+  local t; t="$(flat "$f")"
+  [ "$(grep -cxF '## Risk threshold — assess before filing (#1920)' "$f")" -eq 1 ]
+  [ "$(grep -cxF '### 1. Assess every residual blocker — before step 1' "$f")" -eq 1 ]
+  [ "$(grep -cxF '### 2. Amendments to the frozen branch' "$f")" -eq 1 ]
+  grep -qF -- 'For a test-strength finding, impact is the impact of the **defect the unpinned behaviour would let through**' <<< "$t"
+  grep -qF -- 'The filing steps these amendments changed were removed with the filing path (#2600), so there is nothing left to amend.' <<< "$t"
+  # the builder protocol is gone
+  lacks "$t" 'builder'
+  lacks "$t" '--dropped-file'
+  lacks "$t" 'assessed_in'
+  lacks "$t" 're-run the builder'
   # the pre-#1921 claim that the loop is untouched, and #1921 as future work, are gone
   lacks "$t" 'what the loop fixes before it gets there, and the dossier itself'
   lacks "$t" 'are the follow-up story (#1921)'
@@ -915,7 +843,9 @@ sweepable() {
   grep -qF 'and continue to the version bump (§4). The waived suggestions still' <<< "$(flat "$RI_REF/promotion/gate.md")"
   local r; r="$(flat "$RI_REF/residue.md")"
   grep -qF 'The loop no longer emits that status and no `next_ref` names these shards: `CONVERGED` is the only review-loop ending that opens a PR.' <<< "$r"
-  grep -qF 'The filing shards stay until #2600 removes the filing path; `reference/residue/risk-threshold.md` stays for good, because the risk pass reads it.' <<< "$r"
+  grep -qF '#2600 removed the filing path — the script that built the plan and the three step shards that filed it. `reference/residue/risk-threshold.md` stays for good, because the risk pass reads it.' <<< "$r"
   grep -qF 'It is split into shards under `reference/residue/`, each at most 20,000 bytes (#2056).' <<< "$r"
+  grep -qF 'One such block remains: `residue-branch` in `branch.md`. The three step blocks were deleted with their shards (#2600).' <<< "$r"
+  grep -qF 'Nothing reaches this branch, and there is nothing further to read for it: `reference/residue/risk-threshold.md` § *Risk threshold — assess before filing (#1920)* stays only because the loop'"'"'s risk pass reads it.' <<< "$(flat "$RI_REF/residue/branch.md")"
   grep -qF '`CONVERGED` is the only ending that opens a PR.' <<< "$(flat "$RI_REF/review-loop/exit-20-awaiting-fix.md")"
 }

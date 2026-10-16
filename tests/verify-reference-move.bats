@@ -99,7 +99,7 @@
 # adding. Be precise about what its absence costs, because the earlier wording
 # here was wrong and #1551 carries the correction: an emptied MANIFEST against
 # the REAL reference tree is still caught, by the stray-sentinel sweep, which
-# finds nineteen sentinels no manifest row declares and exits 1 — measured, not
+# finds sixteen sentinels no manifest row declares and exits 1 — measured, not
 # reasoned. The guard is the second net for the case where BOTH were lost
 # together (an emptied manifest AND a reference tree carrying no sentinels),
 # which is the only state that would otherwise reach `all 0 declared chunks are
@@ -336,16 +336,16 @@ _gap_text() {  # $1 = the reference/review-loop/ directory
 
 # --- the happy path, and that it is not vacuous ------------------------------
 
-@test "#1547 the real tree verifies, reporting all nineteen declared chunks" {
+@test "#1547 the real tree verifies, reporting all sixteen declared chunks" {
   _require_pre_move_commit
   run -0 zsh "$VERIFY" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
-  contains "$output" "all 19 declared chunks are byte-identical"
+  contains "$output" "all 16 declared chunks are byte-identical"
 }
 
 @test "#1547 --quiet suppresses the ok lines and the summary, leaving stdout empty" {
   # `--quiet` is what CI and the conductor invoke, and every other invocation in
   # the tree — here and in resolve-issue-conductor-budget.bats — reads only the
-  # status. So `--quiet) quiet=0 ;;` would make the flag a no-op, print nineteen
+  # status. So `--quiet) quiet=0 ;;` would make the flag a no-op, print sixteen
   # `ok` lines and the summary on every quiet run, and no test would notice.
   # Paired with the case above, which pins that they ARE printed without it.
   _require_pre_move_commit
@@ -370,7 +370,7 @@ _gap_text() {  # $1 = the reference/review-loop/ directory
   _require_pre_move_commit
   cd "$BATS_TEST_TMPDIR"
   run -0 zsh "$VERIFY" --base "$PRE_MOVE_SHA"
-  contains "$output" "all 19 declared chunks are byte-identical"
+  contains "$output" "all 16 declared chunks are byte-identical"
 }
 
 # --- per-chunk failures ------------------------------------------------------
@@ -879,15 +879,16 @@ PY
   # check, which is backwards on both counts.
 }
 
-@test "#1582 the split still verifies byte-identical, at nineteen chunks" {
-  # Nineteen since #2058 re-cut the interactive-extension span into two across
+@test "#1582 the split still verifies byte-identical, at sixteen chunks" {
+  # Sixteen since #2600 deleted the residue branch's three step chunks with their
+  # shards; nineteen after #2058 re-cut the interactive-extension span into two across
   # reference/interactive/; eighteen after #2057 re-cut the suggestion-promotion
   # span into five across reference/promotion/; fourteen after #2056 re-cut the residue branch into
   # four across reference/residue/; eleven after #2055 re-cut the round-protocol
   # tail into four.
   _require_pre_move_commit
   run -0 zsh "$VERIFY" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
-  contains "$output" "all 19 declared chunks are byte-identical"
+  contains "$output" "all 16 declared chunks are byte-identical"
   # every round-protocol chunk accounted for, IN its shard, so a row silently
   # dropped from the manifest cannot leave this green
   contains "$output" "ok   round-protocol-head"
@@ -1089,38 +1090,40 @@ PY
   contains "$stderr$output" "the manifest no longer declares both round-protocol-step-2 and round-protocol-recover, so their seam cannot be checked"
 }
 
-# --- #2056: the residue branch, re-cut into four across reference/residue/ ----
+# --- #2056/#2600: the residue branch, one frozen chunk in reference/residue/ ---
 
-@test "#2056 the residue branch is re-cut into four chunks, each IN the shard its row names" {
+@test "#2056 the residue branch keeps one frozen chunk, residue-branch in branch.md; its step chunks are retired" {
+  # #2056 re-cut the residue branch into four chunks across reference/residue/;
+  # #2600 deleted the three step shards with the filing path, and their rows and
+  # cut group with them. A one-chunk group has no seam, so none is checked.
   local v="$REPO_ROOT/development/skills/resolve-issue/scripts/verify-reference-move.zsh"
   local ref="$REPO_ROOT/development/skills/resolve-issue/reference"
-  # the outer bounds of the former single chunk, pinned in full: the first
-  # chunk's FIRST anchor and the last chunk's LAST anchor are the old ones
-  grep -qF -- "\"residue-branch	residue/branch.md	Runs **only** on \\\`CONVERGED_WITH_RESIDUE\\\` (exit 14). The loop has already	" "$v"
-  grep -qF -- "\"residue-branch-steps-4-5	residue/steps-4-5.md	" "$v"
-  grep -qF -- "	  them, and do not read the story's own work as unstartable." "$v"
-  local n shard
-  for n in residue-branch:branch.md residue-branch-step-1:step-1-plan.md \
-           residue-branch-steps-2-3:steps-2-3.md residue-branch-steps-4-5:steps-4-5.md; do
-    shard="${n#*:}"; n="${n%%:*}"
-    grep -qF -- "\"$n	residue/$shard	" "$v"
-    [ "$(grep -rxF -- "<!-- moved: $n -->" "$ref" | wc -l | tr -d ' ')" -eq 1 ]
-    [ "$(grep -rxF -- "<!-- /moved: $n -->" "$ref" | wc -l | tr -d ' ')" -eq 1 ]
-    [ "$(grep -cxF -- "<!-- moved: $n -->" "$ref/residue/$shard")" -eq 1 ]
-    [ "$(grep -cxF -- "<!-- /moved: $n -->" "$ref/residue/$shard")" -eq 1 ]
+  grep -qF -- "\"residue-branch	residue/branch.md	Runs **only** on \\\`CONVERGED_WITH_RESIDUE\\\` (exit 14). The loop has already	blocking phase from scratch and will re-derive them." "$v"
+  [ "$(grep -rxF -- '<!-- moved: residue-branch -->' "$ref" | wc -l | tr -d ' ')" -eq 1 ]
+  [ "$(grep -rxF -- '<!-- /moved: residue-branch -->' "$ref" | wc -l | tr -d ' ')" -eq 1 ]
+  [ "$(grep -cxF -- '<!-- moved: residue-branch -->' "$ref/residue/branch.md")" -eq 1 ]
+  [ "$(grep -cxF -- '<!-- /moved: residue-branch -->' "$ref/residue/branch.md")" -eq 1 ]
+  # the step chunks are gone: no manifest row, no sentinel, no shard, no cut group
+  local n
+  for n in residue-branch-step-1 residue-branch-steps-2-3 residue-branch-steps-4-5; do
+    run grep -qF -- "\"$n	" "$v"
+    [ "$status" -eq 1 ]
+    run grep -rqF -- "<!-- moved: $n -->" "$ref"
+    [ "$status" -eq 1 ]
   done
+  # reference/residue/ holds exactly the three shards that remain
+  [ "$(cd "$ref/residue" && ls | tr '\n' ' ')" = "branch.md condition-2-removed.md risk-threshold.md " ]
+  run grep -qF -- 'residue-branch residue-branch-step-1' "$v"
+  [ "$status" -eq 1 ]
   # the index carries no frozen text of its own (a column-0 sentinel; its prose
   # names the sentinel form inline, which is not one)
   run grep -qE -- '^<!-- moved: .+ -->$' "$ref/residue.md"
   [ "$status" -ne 0 ]
-  # and each chunk verified, in its shard
+  # and the remaining chunk verified, in its shard
   _require_pre_move_commit
   run -0 zsh "$VERIFY" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
   contains "$output" "ok   residue-branch — "
   contains "$output" "→ reference/residue/branch.md"
-  contains "$output" "→ reference/residue/step-1-plan.md"
-  contains "$output" "→ reference/residue/steps-2-3.md"
-  contains "$output" "→ reference/residue/steps-4-5.md"
 }
 
 # Replace the manifest's LAST_LINE anchor $2 with $3 in a copy of the script at
@@ -1129,33 +1132,6 @@ PY
 _mutate_anchor() {
   OLD="$2" NEW="$3" perl -pe 'BEGIN { $o = $ENV{OLD}; $n = $ENV{NEW} } s/\t\Q$o\E$/\t$n/' "$VERIFY" > "$1"
   grep -qF -- "	$3" "$1"
-}
-
-@test "#2056 the seam check FIRES on each residue seam when a chunk's last anchor moves up" {
-  # Each mutant moves one chunk's LAST anchor to the line above it, inside its
-  # own chunk, so the original line below falls out of the verified region.
-  _require_pre_move_commit
-  local m="$BATS_TEST_TMPDIR/verify-residue-seam.zsh"
-
-  _mutate_anchor "$m" 'blocking phase from scratch and will re-derive them.' \
-    'the escalation comment, so they survive somewhere. The next run re-decides the'
-  run zsh "$m" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
-  [ "$status" -eq 1 ]
-  contains "$stderr$output" "the seam residue-branch → residue-branch-step-1 leaves original lines uncovered"
-  contains "$stderr$output" "blocking phase from scratch and will re-derive them."
-
-  # The manifest is a zsh double-quoted literal, so an anchor's `"` is `\"` there.
-  _mutate_anchor "$m" '   is, pass it on rather than paraphrasing it as \"the read failed\".' \
-    '   **parent** read leaves the plan filtered on the repo-wide half. Whichever it'
-  run zsh "$m" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
-  [ "$status" -eq 1 ]
-  contains "$stderr$output" "the seam residue-branch-step-1 → residue-branch-steps-2-3 leaves original lines uncovered"
-
-  _mutate_anchor "$m" '   issues filed\" there is the silent loss this whole branch exists to prevent.' \
-    "   yes while none of *this* run's candidates is filed — and reporting \\\"0 follow-up"
-  run zsh "$m" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
-  [ "$status" -eq 1 ]
-  contains "$stderr$output" "the seam residue-branch-steps-2-3 → residue-branch-steps-4-5 leaves original lines uncovered"
 }
 
 # --- #2058: the interactive procedures, split across reference/interactive/ ----

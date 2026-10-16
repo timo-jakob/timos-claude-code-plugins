@@ -1,10 +1,12 @@
 #!/usr/bin/env bats
 #
 # #1921 AC7: consolidate-findings.zsh (the in-loop demotion) and
-# build-residue-issues.zsh (the residue filter) read `corner_case_risk_threshold`
-# through ONE parser, risk-threshold-lib.zsh. If they disagreed on a single
-# spelling, a finding could be demoted in the loop and then filed as residue, or
-# the reverse, with nothing downstream noticing.
+# resolve-story-loop.zsh (the up-front --risk check) read
+# `corner_case_risk_threshold` through ONE parser, risk-threshold-lib.zsh. If
+# they disagreed on a single spelling, the loop could refuse an assessment the
+# consolidator would have ignored, or let through one it then reads differently,
+# with nothing downstream noticing. (#2600 removed the third reader, the residue
+# filing script, with the filing path.)
 #
 # Checked two ways. Behaviourally: each value in #1920's table is fed to both
 # scripts, and the state (off / ignored / on) and threshold_thousandths each one
@@ -19,7 +21,7 @@ setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   SCRIPTS="$REPO_ROOT/development/skills/resolve-issue/scripts"
   CON="$SCRIPTS/consolidate-findings.zsh"
-  RES="$SCRIPTS/build-residue-issues.zsh"
+  LOOP="$SCRIPTS/resolve-story-loop.zsh"
   LIB="$SCRIPTS/risk-threshold-lib.zsh"
 
   # one WARNING finding, assessed at risk 0 so it is demoted whenever the
@@ -28,13 +30,26 @@ setup() {
   printf '%s' '[{"severity":"WARNING","dimension":"bugs","file":"a.zsh","line":1,"title":"t","description":"d","reviewer":"r"}]' > "$F"
   RISK="$BATS_TEST_TMPDIR/risk.json"
   printf '%s' '[{"file":"a.zsh","line":1,"dimension":"bugs","title":"t","p":0,"p_why":"w","impact":0.1,"impact_why":"w"}]' > "$RISK"
+  # ...and the same entry malformed (an impact off the four anchors), which the
+  # loop refuses up front only when it parses the threshold as on
+  BAD="$BATS_TEST_TMPDIR/bad-risk.json"
+  printf '%s' '[{"file":"a.zsh","line":1,"dimension":"bugs","title":"t","p":0,"p_why":"w","impact":0.5,"impact_why":"w"}]' > "$BAD"
 
-  # the residue side: the same finding as a residual blocker
-  ST="$BATS_TEST_TMPDIR/status.json"
-  printf '%s' '{"status":"CONVERGED_WITH_RESIDUE","rounds":1,"final_changelist":{"blocking":[]}}' > "$ST"
-  CL="$BATS_TEST_TMPDIR/changelist.json"
-  printf '%s' '{"round":1,"blocking":[{"file":"a.zsh","line":1,"dimension":"bugs","title":"t","priority":"High"}]}' > "$CL"
-  DROPPED="$BATS_TEST_TMPDIR/dropped.json"
+  # the loop side: a one-file repo whose story diff holds the finding's file
+  R="$BATS_TEST_TMPDIR/repo"
+  mkdir -p "$R"
+  git -C "$R" init -q
+  git -C "$R" config user.email t@example.com
+  git -C "$R" config user.name tester
+  echo base > "$R/README.md"
+  git -C "$R" add -A
+  git -C "$R" commit -qm base
+  git -C "$R" branch -M main
+  echo 'print 1' > "$R/a.zsh"
+  STUB="$BATS_TEST_TMPDIR/detect.sh"
+  printf '#!/usr/bin/env bash\necho "$DETECT_LANGS_JSON"\n' > "$STUB"
+  chmod +x "$STUB"
+  WD="$BATS_TEST_TMPDIR/wd"
 }
 
 # Each helper runs its script and leaves its reading, "<state> <thousandths|->",
@@ -55,16 +70,38 @@ con_reading() {  # $1 = the value
   fi
 }
 
-# the residue builder's reading, from its dropped record — removed first, so a
-# run that writes none cannot be read as the previous value's
-res_reading() {  # $1 = the value
-  rm -f "$DROPPED"
-  run -0 --separate-stderr env corner_case_risk_threshold="$1" GH_BIN=/usr/bin/false \
-    zsh "$RES" --status "$ST" --changelist "$CL" --issue 1 --dry-run --risk "$RISK" --dropped-file "$DROPPED"
-  reading=$(jq -r '"\(.threshold_state) \(.threshold_thousandths // "-")"' "$DROPPED")
+# one fresh step-mode round of the loop on $R, with $2 as its --risk
+loop_round() {  # $1 = the value, $2 = the --risk file
+  rm -rf "$WD"
+  run --separate-stderr env corner_case_risk_threshold="$1" DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$LOOP" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" --risk "$2"
 }
 
-@test "#1921 AC7 both scripts read every value in #1920's table into the same state and thousandths" {
+# the loop's reading. Its own parse decides one thing, whether the up-front check
+# validates the --risk file: a malformed file is exit 2 exactly when the loop
+# reads the threshold as on. The thousandths and the ignored notice come from
+# the round it then runs, stamped into changelist-1.json. The two must agree.
+loop_reading() {  # $1 = the value
+  local gate milli
+  loop_round "$1" "$BAD"
+  if [ "$status" -eq 2 ]; then gate=on; else gate=not-on; fi
+  loop_round "$1" "$RISK"
+  milli=$(jq -r '[.blocking[], .suggestions[]][0].risk_assessment.threshold_thousandths // empty' "$WD/changelist-1.json")
+  if [ -n "$milli" ]; then
+    reading="on $milli"
+  elif grep -qF IGNORED <<< "$stderr"; then
+    reading="ignored -"
+  else
+    reading="off -"
+  fi
+  # the gate and the round agree on whether the threshold is on
+  local round_on=not-on
+  [ "${reading%% *}" != on ] || round_on=on
+  [ "value [$1] gate: $gate" = "value [$1] gate: $round_on" ]
+}
+
+@test "#1921 AC7 the consolidator and the loop read every value in #1920's table into the same state and thousandths" {
   local v reading
   local -a values=('' 0 0.0 .000 0.05 .05 1 1.0 30 1.5 -0.1 0.0005 abc)
   local -a expect=('off -' 'off -' 'off -' 'off -' 'on 50' 'on 50' 'on 1000' 'on 1000'
@@ -74,8 +111,8 @@ res_reading() {  # $1 = the value
     v="${values[$i]}"
     con_reading "$v"
     [ "value [$v] consolidator: $reading" = "value [$v] consolidator: ${expect[$i]}" ]
-    res_reading "$v"
-    [ "value [$v] residue: $reading" = "value [$v] residue: ${expect[$i]}" ]
+    loop_reading "$v"
+    [ "value [$v] loop: $reading" = "value [$v] loop: ${expect[$i]}" ]
   done
 }
 
@@ -83,15 +120,19 @@ res_reading() {  # $1 = the value
   run --separate-stderr env -u corner_case_risk_threshold zsh "$CON" --findings "$F" --risk "$RISK"
   [ "$status" -eq 0 ]
   printf '%s' "$output" | jq -e '[.blocking[], .suggestions[]] | all(has("risk_assessment") | not)' >/dev/null
-  run --separate-stderr env -u corner_case_risk_threshold GH_BIN=/usr/bin/false \
-    zsh "$RES" --status "$ST" --changelist "$CL" --issue 1 --dry-run --risk "$RISK" --dropped-file "$DROPPED"
-  [ "$status" -eq 0 ]
-  [ "$(jq -r .threshold_state "$DROPPED")" = "off" ]
+  # the loop forwards a malformed file unread while the threshold is off
+  rm -rf "$WD"
+  run --separate-stderr env -u corner_case_risk_threshold DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$LOOP" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" --risk "$BAD"
+  [ "$status" -ne 2 ]
+  [ -f "$WD/changelist-1.json" ]
+  jq -e '[.blocking[], .suggestions[]] | all(has("risk_assessment") | not)' "$WD/changelist-1.json" >/dev/null
 }
 
 @test "#1921 AC7 one parser: every reader sources the library, and none carries its own" {
   local s
-  for s in "$CON" "$RES" "$SCRIPTS/resolve-story-loop.zsh"; do
+  for s in "$CON" "$LOOP"; do
     grep -qF 'risk-threshold-lib.zsh' "$s"
     grep -qF 'risk_threshold_parse' "$s"
     # the parser's regex and the validator's anchor check live in the library only
@@ -105,6 +146,9 @@ res_reading() {  # $1 = the value
   done
   grep -qF '(\.([0-9]{1,3}))?$' "$LIB"
   grep -qF '[1, 4, 7, 10]' "$LIB"
+  # the library names exactly its two remaining readers
+  grep -qF '# script that reads either (#1921): consolidate-findings.zsh (the in-loop' "$LIB"
+  grep -qF '# demotion) and resolve-story-loop.zsh (the up-front --risk check).' "$LIB"
 }
 
 # --- #2577: extension_risk_threshold is read by the same rule -----------------

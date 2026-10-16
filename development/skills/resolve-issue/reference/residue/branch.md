@@ -52,9 +52,8 @@ the escalation comment, so they survive somewhere. The next run re-decides the
 blocking phase from scratch and will re-derive them.
 <!-- /moved: residue-branch -->
 
-**Read on, in this order, before acting.** The branch continues in other shards.
-Before step 1, read `reference/residue/risk-threshold.md` § *Risk threshold —
-assess before filing (#1920)*. Then read the steps:
-`reference/residue/step-1-plan.md`, `reference/residue/steps-2-3.md` and
-`reference/residue/steps-4-5.md`. The read order is listed in
-`reference/residue.md`.
+**The filing steps the block above leads into were removed (#2600)**, together
+with the script that built their plan. Nothing reaches this branch, and there is
+nothing further to read for it: `reference/residue/risk-threshold.md` § *Risk
+threshold — assess before filing (#1920)* stays only because the loop's risk
+pass reads it. The read order is listed in `reference/residue.md`.

@@ -4663,8 +4663,8 @@ bytes** and the index at most 3,000. `review-loop.md` is the first so split:
 exit shards, the passes, `carry.md`, `subagents.md` and `briefs/<name>.md`, one
 per round subagent, which `development/agents/round-<name>.md` points at.
 `residue.md` is the second (#2056): `reference/residue/` holds `branch.md` (the
-exit-14 entry point), `risk-threshold.md`, `step-1-plan.md`, `steps-2-3.md`,
-`steps-4-5.md` and `condition-2-removed.md`. `promotion.md` is the third
+retired exit-14 entry point), `risk-threshold.md` and `condition-2-removed.md`;
+issue #2600 deleted its three filing-step shards with the filing path. `promotion.md` is the third
 (#2057): `reference/promotion/` holds `gate.md` (the gate and steps 1–2),
 `step-3-select.md`, `step-4-sub-loop.md` (steps 4–6), `step-7-terminal.md` and
 `step-8-status-files.md`. `interactive.md` is the fourth and last (#2058):
@@ -4976,73 +4976,11 @@ concurrency is an ordering, not a flag pair that exists everywhere. The ordering
 is the session's, stated in `development/skills/resolve-issue/reference/review-loop/core.md`
 § The round protocol, and restated nowhere else; the loop itself is unchanged by it.
 
-**Filing the remainder** is `build-residue-issues.zsh`, on the same
-build-vs-post split `build-escalation.zsh` uses: it **builds** a JSON array of
-`{title, body, labels, parent}` (one entry per residual blocking finding, each
-body naming the file, line, dimension, severity and derived class) and
-`resolve-issue`'s `reference/residue/steps-4-5.md` step 4 makes the `gh issue create` calls. Linkage is a
-**native sub-issue** — of the story's **epic** when it has one, of the **story**
-otherwise — and every residue issue carries **both** `review-residue` and
-`needs-refinement`. Idempotency is pinned on **label + exact title**: a candidate
-is already filed when a `review-residue` issue carries that exact rendered title,
-looked up as the **union of two reads** — the parent's native sub-issues, and a
-bounded repo-wide `review-residue` listing (`--state all`). So an immediate
-second run is a no-op.
-
-The repo-wide half is not redundancy. Filing is create-THEN-attach, two API
-calls, so a create that succeeds before a failed or interrupted attach leaves a
-real `review-residue` issue that is nobody's sub-issue; a parent-scoped read
-cannot see it, and every re-run would file it again — each duplicate carrying
-`needs-refinement` and halting the parent's epic walk a second time on one
-finding. The union admits one deliberate over-suppression in exchange: a
-labelled issue under a **different** parent whose rendered title collides exactly
-(the title carries file, line and dimension, so a collision means the same
-finding in the same place). Consumers that classify a candidate against the
-parent-scoped read **alone** — `resolve-issue`'s `reference/residue/steps-2-3.md` step 3 does — therefore see
-a builder-filtered candidate as *unmatched*; that means created-but-unparented
-(re-attach it) or the cross-parent collision (do not), never a wrong
-`--changelist`. Those two reads are the script's only network use — `--dry-run`
-skips both entirely (which is also how the skill gets the RENDERED candidate
-titles for its idempotency test, since the filed title is a composite, never the
-finding's own), and a failed read is **fail-open** with a loud stderr warning,
-because refusing would block a green, reviewed PR on a GitHub outage. The two
-degrade independently: losing the repo-wide half narrows the key back to the
-parent (announced, since it silently reopens the unattached-duplicate hole),
-while losing both leaves the plan unfiltered. Three input classes are refused up front
-(exit 2): a
-`--status` whose `.status` is not `CONVERGED_WITH_RESIDUE` — residue is filed
-only for a run that OPENED its PR, and the terminal it replaces is an escalation
-that opened none; a `--changelist` whose `.round` disagrees with the
-status's `.rounds`, which would file an earlier round's already-cleared
-findings; and an `--issue`/`--epic` that is not a **positive** issue number,
-since `0` would become `parent: 0`, an `issues/0/sub_issues` 404 on the
-fail-open path, and a body reading "story #0".
-
-**Known consequence, and it differs by linkage shape.** Native sub-issues are
-authoritative for parenthood (#802), so a parent that acquires them walks as an
-**epic** on the next `/development:resolve-issue` run, and E1b halts that walk on
-any child the readiness gate sends back — which an auto-generated finding title
-always is. The halt is the *intended* prompt (residue must be refined before it
-is built), and the `needs-refinement` label is what makes it legible rather than
-a surprise.
-
-It does **not** apply to both shapes, though #1435 says it does, and in neither
-shape is it unconditional — the reachability turns on the parent's *observed*
-state, which the skill reads rather than assumes:
-
-- **Epic-parented, epic OPEN** — as described: it acquires open
-  `needs-refinement` children, its own E5 correctly declines to close it (the
-  positive-evidence rule wants `total == completed`), and the next run halts at
-  E1b.
-- **Epic-parented, epic already CLOSED** — Step 0 stops on a non-`OPEN` issue, so
-  no pre-flight ever runs.
-- **Story-parented** — the halt fires only in the window between filing and
-  merge, and permanently if the PR is never opened or never merged (a real state
-  in a human-approval repo). Once the PR merges, `Closes #<story>` closes the
-  story and Step 0 stops.
-
-Wherever the halt does not fire, the surfacing mechanism is the label pair and
-the PR Summary's named issue numbers — which is why §6 requires them.
+**Filing the remainder was removed (#2600).** Since #2580 no review-loop ending
+leaves blockers open on a PR, so the script that filed them as `review-residue`
+issues, and the reference steps that drove it, were deleted. Existing
+`review-residue` issues and the label stay as they are; #2569 to #2573 were the
+last ones filed.
 
 Per round: run panel (scoped per `scope_mode`) → `scope-findings` (always against
 the **full** story diff) → `consolidate-findings`.
@@ -7192,30 +7130,21 @@ the PR body by `open-pr`:
    `clean` or with a fixed count, waived Low suggestions, and the reviewers who
    contributed. Since #1435 each dimension also carries `open`: the blockers
    still open in the **blocking phase's** `final_changelist.blocking` when the PR
-   was opened. Two things it is deliberately not. Not read off `$terminal` — the
-   promotion phase is the terminal whenever it ran, and a residue run is routed
-   through it, so keying on `$terminal` would report 0 for exactly the runs the
-   field exists for. And not **summed** across the phases either: residue is
-   single-phase, so the blocking phase is the only one whose leftovers can be
-   open on a PR and the only one the residue branch files from, and summing would
-   let a renderable-but-not-clean promotion phase (#1064 keeps that shape)
-   inflate a count the very next line calls filed. It is 0 on every terminal
-   but `CONVERGED_WITH_RESIDUE`, which opens its PR with blockers filed as
-   follow-up issues — so that dimension reads "N blocking found, K still open
-   (filed as follow-up issue(s))" instead of claiming a fix that did not happen,
-   and the section opens with an explicit residue paragraph, because `status`
-   reports the terminal *phase* (#1064) and would otherwise read `CONVERGED`.
-   **"Filed" needs no per-phase qualifier**: residue is single-phase by
-   construction — the loop never declares it in a promotion sub-loop — so every
-   open blocker that reaches the dossier came from the blocking phase, the one
-   the residue branch files from. `approver-policy-core` reads `open > 0` as
-   scoped, disclosed, *tracked* risk — never as a fix to confirm. The script also
-   **refuses** a `--status` naming a non-PR-opening **or non-terminal** status
-   (exit 1) — the escalations, `ERROR`, `STALE_FINDINGS`, and `AWAITING_FIX`,
-   which step mode rewrites over the status file every round and is therefore the
-   likeliest one handed over by mistake: each carries blockers by construction,
-   so it would otherwise render a residue paragraph attesting to a merge that
-   never happened. `--promotion-status` gets the narrower cousin — the
+   was opened. It is not **summed** across the phases: a renderable-but-not-clean
+   promotion phase (#1064 keeps that shape) must not inflate it. Since
+   `CONVERGED` is the only ending that opens a PR (#2580), the blocking phase
+   always ends with an empty final changelist, and `build-dossier.zsh` refuses
+   anything else (#2599) — so every dossier it emits reports `open` 0, and the
+   section has no "still open" rendering and no residue paragraph. The field
+   stays because the Approver backstops read it: `approver-policy-core` treats
+   `open > 0` as a `REQUEST_CHANGES` finding with confidence capped at `LOW`
+   (#2586), since such a dossier was not produced by a converged loop or does not
+   describe this PR. The script also **refuses** a `--status` naming a
+   non-PR-opening **or non-terminal** status (exit 1) — the escalations, `ERROR`,
+   `STALE_FINDINGS`, and `AWAITING_FIX`, which step mode rewrites over the status
+   file every round and is therefore the likeliest one handed over by mistake:
+   each carries blockers by construction, so it would otherwise render a dossier
+   attesting to a merge that never happened. `--promotion-status` gets the narrower cousin — the
    **non-endings** only, since #1064 deliberately renders an escalating promotion
    phase ("and the phase exited **X**") and only a non-ending can put a status
    the loop never terminates on into the opening sentence; and
@@ -8176,43 +8105,30 @@ opus](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/docs/how
 
 The second maintainer-set runtime switch beside `switch_fable_to_opus`, and like
 it read from the environment so it needs no file edit. It sets a **floor on the
-risk of a review-residue follow-up**: on a `CONVERGED_WITH_RESIDUE` ending,
-every residual blocker used to become a `review-residue` issue however unlikely
-or harmless its scenario, and each of those runs its own review loop that can
-file more (epic #1795: 3 children became 21).
+risk of a blocking finding**: every `WARNING` used to block however unlikely or
+harmless its scenario, and a loop that must fix each one can grow a story far
+past its scope (epic #1795: 3 children became 21). #1920 first applied the floor
+to the review-residue follow-ups a `CONVERGED_WITH_RESIDUE` ending filed; #2580
+retired that ending and #2600 removed the filing script, so the floor now acts
+only inside the loop.
 
 - **Value:** a decimal in [0, 1] with at most three decimals (`0.05`, `.05`,
   `1`). Unset, `""` and any spelling of zero (`0`, `0.0`) are **off** — today's
-  behaviour, byte-for-byte: no assessment is made and
-  `build-residue-issues.zsh`'s stdout is unchanged. A value the rule does not
+  behaviour, byte-for-byte: no assessment is made. A value the rule does not
   admit (`30`, `1.5`, `-0.1`, `0.0005`, `abc`) is **ignored** — it behaves as off
   — and is announced once, on stderr and in the PR Summary, so a percent-style
-  value fails safe to "file everything" and the maintainer still hears about it.
-- **The assessment is the conductor's; the arithmetic is the builder's.** Before
-  building the plan the conductor records, per residual blocker, a probability
-  `p` (two decimals; defined per finding kind — test-strength for the `tests`
-  dimension, defect otherwise) and an impact from four anchors (`1.0` trusted
-  false result / data loss / security, `0.7` hang, runaway resources or wrong
-  shipped behaviour, `0.4` degraded output or a manual retry, `0.1` cosmetic),
-  each with a rationale, keyed by the loop-wide `{file, line, dimension, title}`
-  identity. `build-residue-issues.zsh --risk FILE --dropped-file FILE` computes
-  `risk = p × impact` in integer thousandths and keeps a finding when `risk >=
-  threshold`. A finding with no assessment is **kept**; a malformed assessment is
-  exit 2 naming the entry, never drop-all or keep-all. `--risk` without
-  `--dropped-file` (or the reverse) is refused on the arguments alone.
-- **Nothing is dropped silently.** Whenever `--dropped-file` is passed (the
-  procedure passes it only when the threshold is on) the builder writes the
-  dropped record, whatever state it parsed, listing each dropped finding with p,
-  impact, risk, both rationales, the `issue_title` an issue for it would carry —
-  so a finding an earlier run already filed is recognised and classified like
-  any builder-filtered candidate, not dropped — and a `row`, the PR table row
-  pre-rendered with its untrusted text neutralised. The PR Summary pastes those
-  rows under a fixed paragraph above
-  the dossier, whose residue wording is gated on the status alone and would
-  otherwise claim they were filed. The dossier's residue counts are unchanged, so
-  its hidden block's `open` still counts findings dropped at residue; #1932 owns
-  that.
-- **Scope (#1921): every blocking finding, not only residue.** With the
+  value fails safe to "every blocker blocks" and the maintainer still hears
+  about it.
+- **The assessment is the conductor's; the arithmetic is the scripts'.** The
+  conductor records, per blocking finding, a probability `p` (two decimals;
+  defined per finding kind — test-strength for the `tests` dimension, defect
+  otherwise) and an impact from four anchors (`1.0` trusted false result / data
+  loss / security, `0.7` hang, runaway resources or wrong shipped behaviour,
+  `0.4` degraded output or a manual retry, `0.1` cosmetic), each with a
+  rationale, keyed by the loop-wide `{file, line, dimension, title}` identity.
+  `risk = p × impact` is computed in integer thousandths. A malformed assessment
+  is exit 2 naming the entry, never demote-all or keep-all.
+- **Scope (#1921): every blocking finding, every round.** With the
   threshold on, the conductor assesses each round's `CRITICAL` and `WARNING`
   findings after the decided pass, writes `<work-dir>/risk-<R>.json` in the same
   shape, and passes it with `resolve-story-loop.zsh --risk` (step mode only;
@@ -8237,15 +8153,9 @@ file more (epic #1795: 3 children became 21).
     eligibility.
   - **Off or ignored:** `--risk` is accepted and never read, no key above
     appears, and the changelist is byte-identical.
-  - **One parser.** `consolidate-findings.zsh`, `resolve-story-loop.zsh` and
-    `build-residue-issues.zsh` source one parser and one assessment validator,
+  - **One parser.** `consolidate-findings.zsh` and `resolve-story-loop.zsh`
+    source one parser and one assessment validator,
     `scripts/risk-threshold-lib.zsh`, so no value is read two ways.
-  - **Assessed once.** The residue builder reuses a blocker's
-    `risk_assessment` stamp instead of re-assessing it (`assessed_in: "loop"`,
-    versus `"residue"` for a `--risk` entry), and refuses with exit 2 a `--risk`
-    entry naming a stamped finding. A stamp below its own recorded threshold on
-    a surviving blocker marks one the loop kept on purpose, and the builder
-    keeps it too.
   - **Visibility.** A demotion is shown in the progress block and in the
     dossier: a paragraph and table above the waived suggestions, and an
     optional `risk_demoted` array in the hidden block, present only when
@@ -8284,14 +8194,13 @@ file more (epic #1795: 3 children became 21).
     91% below `0.15`. At a `0.04` base 243 of them block; at `0.10`, 109 still
     do. The sample includes `CRITICAL`s (never demoted) and re-raised findings
     once per round; the telemetry JSONL records no per-finding risk.
-  - **Untouched:** the residue builder keeps reading `corner_case_risk_threshold`
-    alone (#2580), and a human grant's free-text `severity_bar` still steers the
+  - **Untouched:** a human grant's free-text `severity_bar` still steers the
     fix subagent on what the risk bar left blocking.
 
-The procedures are `development/skills/resolve-issue/reference/residue/risk-threshold.md`,
-§ *Risk threshold — assess before filing (#1920)*, which amends the frozen
-residue branch without editing it, and `reference/review-loop/risk-pass.md`, § *The risk
-pass* (#1921). User-facing docs: [how-to: set a corner-case risk
+The procedures are `development/skills/resolve-issue/reference/review-loop/risk-pass.md`,
+§ *The risk pass* (#1921), and the threshold states and definitions it reads in
+`reference/residue/risk-threshold.md`, § *Risk threshold — assess before filing
+(#1920)*. User-facing docs: [how-to: set a corner-case risk
 threshold](docs/how-to/set-a-corner-case-risk-threshold.md).
 
 ## Runtime setting: `epic_strictly_sequential`
