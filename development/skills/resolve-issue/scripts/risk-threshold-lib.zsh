@@ -1,12 +1,11 @@
 # risk-threshold-lib.zsh — the ONE definition of `corner_case_risk_threshold`
 # (#1920) and of a well-formed risk assessment, SOURCED (never executed) by every
 # script that reads either (#1921): consolidate-findings.zsh (the in-loop
-# demotion), resolve-story-loop.zsh (the up-front --risk check) and
-# build-residue-issues.zsh (the residue filter).
+# demotion) and resolve-story-loop.zsh (the up-front --risk check).
 #
-# Why a shared file: the threshold decides which findings block and which get
-# filed. Two parsers that disagreed on one spelling (`.05`, `1.0`, `0.0005`) would
-# demote a finding in the loop and then file it as residue, or the reverse — and
+# Why a shared file: the threshold decides which findings block. Two parsers that
+# disagreed on one spelling (`.05`, `1.0`, `0.0005`) would let the loop accept an
+# assessment the consolidator then reads differently, or the reverse — and
 # nothing downstream would notice. One parser cannot disagree with itself.
 #
 # THE THRESHOLD: the environment variable `corner_case_risk_threshold`, a decimal

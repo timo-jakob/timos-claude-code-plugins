@@ -186,12 +186,6 @@ MANIFEST=(
 "
 "residue-branch	residue/branch.md	Runs **only** on \`CONVERGED_WITH_RESIDUE\` (exit 14). The loop has already	blocking phase from scratch and will re-derive them.
 "
-"residue-branch-step-1	residue/step-1-plan.md	1. **Build the plan.** Deterministic, and it creates nothing:	   is, pass it on rather than paraphrasing it as \"the read failed\".
-"
-"residue-branch-steps-2-3	residue/steps-2-3.md	2. **Always run \`--dry-run\` too, and diff the two lengths.** The real plan is	   issues filed\" there is the silent loss this whole branch exists to prevent.
-"
-"residue-branch-steps-4-5	residue/steps-4-5.md	4. **Create each issue, then attach it as a native sub-issue.** One \`gh issue	  them, and do not read the story's own work as unstartable.
-"
 "suggestion-promotion	promotion/gate.md	Low suggestions never block, so every one the panel raises is **waived** the	   entitled to know that before they pick, not after.
 "
 "suggestion-promotion-step-3	promotion/step-3-select.md	3. **Multi-select** which to promote (0..N) with \`AskUserQuestion\`	     run does.
@@ -553,8 +547,7 @@ fi
 # --- each re-cut span covers its source with no gap and no overlap -----------
 # A frozen span re-cut into chunks across several shards: the former
 # `round-protocol-tail`, cut into four, one per step shard (#2055), and the
-# former `residue-branch`, cut into four across reference/residue/ (#2056), and
-# the former `suggestion-promotion`, cut into five across reference/promotion/
+# former `suggestion-promotion`, cut into five across reference/promotion/
 # (#2057), and the former `interactive-extension`, cut into two across
 # reference/interactive/ (#2058).
 # Each chunk is byte-checked on its own above, which proves nothing about the
@@ -572,7 +565,6 @@ fi
 # group here.
 typeset -a CUT_GROUPS=(
   "round-protocol-tail round-protocol-step-2 round-protocol-recover round-protocol-steps-3-4"
-  "residue-branch residue-branch-step-1 residue-branch-steps-2-3 residue-branch-steps-4-5"
   "suggestion-promotion suggestion-promotion-step-3 suggestion-promotion-step-4 suggestion-promotion-step-7 suggestion-promotion-step-8"
   "interactive-extension interactive-extension-steps-5-7"
 )
