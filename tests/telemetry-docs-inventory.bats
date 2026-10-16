@@ -9,8 +9,12 @@
 # story's criterion is that they match what MERGED, not what was proposed. So
 # for every pipeline the documented key set is compared with the key set the
 # real payload builder emits for a valid fixture state (states copied from each
-# builder's own suite). A key a builder gains or loses reds here until the table
-# follows, and a row dropped from or added to a table reds here too.
+# builder's own suite). A top-level key a builder gains or loses reds here until
+# the table follows, and a row dropped from or added to a table reds here too.
+# Sub-keys are checked only where the fixture emits an object (see
+# table_matches_builder): review-loop's gate_by_round, step_wall_s_by_round and
+# skipped_dimensions_by_round come out empty, so their sub-keys are unchecked
+# until #2610.
 #
 # WHY THE JOIN EXAMPLES ARE EXECUTED: the page promises a runnable query. Each
 # bash block in the join section is run against a small all-pipeline fixture
@@ -104,7 +108,12 @@ builder_payload() {
 # is jq's number, `array of …` an array, `X or null` either), and a Meaning cell
 # that opens with a backticked name names exactly the sub-keys of an emitted
 # object: its leading names, read with parentheses dropped and up to the first
-# ` — `, `:` or `;`, equal the object's keys.
+# ` — `, `:` or `;`, equal the object's keys. An emitted array of objects is
+# read the same way against its first element, once a leading `per round: ` is
+# stripped from the cell; an array with no object at [0] in the fixture has no
+# element to compare and is skipped — so review-loop's gate_by_round,
+# step_wall_s_by_round and skipped_dimensions_by_round, empty in this fixture,
+# are not sub-key-checked (#2610).
 table_matches_builder() {
   local doc built payload k t m bt named emitted
   doc="$(doc_keys "$1" "$2")"
@@ -119,9 +128,16 @@ table_matches_builder() {
     k="${k//[\` ]/}"; t="$(sed 's/^ *//; s/ *$//; s/`//g; s/integer/number/g; s/array of [a-z]*/array/g; s/ or /|/g' <<<"$t")"
     bt="$(jq -r --arg k "$k" '.[$k] | type' <<<"$payload")"
     [[ "|$t|" == *"|$bt|"* ]] || { echo "$1: \`$k\` is documented as $t, emitted as $bt" >&2; return 1; }
-    [ "$bt" = object ] && [[ "${m# }" == '`'* ]] || continue
+    case "$bt" in
+      object) sel='.[$k]' ;;
+      array)
+        [ "$(jq -r --arg k "$k" '.[$k][0] | type' <<<"$payload")" = object ] || continue
+        m="${m# }"; m="${m#per round: }"; sel='.[$k][0]' ;;
+      *) continue ;;
+    esac
+    [[ "${m# }" == '`'* ]] || continue
     named="$(sed 's/ ([^)]*)//g; s/ — .*//; s/[:;].*//' <<<"$m" | grep -o '`[a-z_]*`' | tr -d '`' | LC_ALL=C sort -u)"
-    emitted="$(jq -r --arg k "$k" '.[$k] | keys[]' <<<"$payload" | LC_ALL=C sort)"
+    emitted="$(jq -r --arg k "$k" "$sel | keys[]" <<<"$payload" | LC_ALL=C sort)"
     [ "$named" = "$emitted" ] || {
       printf '%s: `%s` sub-keys drifted\n--- documented\n%s\n--- emitted\n%s\n' "$1" "$k" "$named" "$emitted" >&2
       return 1
@@ -370,6 +386,20 @@ join_example_holds() {
   [ "$status" -ne 0 ]
   run table_matches_builder "maintenance" "$fx"
   [ "$status" -eq 1 ]
+  # an array of objects: a per-round sub-key dropped from findings_by_round
+  sed '/^| `findings_by_round` |/ s/, `false_trips`//' "$HOWTO" > "$fx"
+  run diff -q "$HOWTO" "$fx"
+  [ "$status" -ne 0 ]
+  run table_matches_builder "review-loop" "$fx"
+  [ "$status" -eq 1 ]
+  contains "$output" '`findings_by_round` sub-keys drifted'
+  # and one the builder never emits added to it
+  sed '/^| `findings_by_round` |/ s/, `false_trips`/, `false_trips`, `region`/' "$HOWTO" > "$fx"
+  run diff -q "$HOWTO" "$fx"
+  [ "$status" -ne 0 ]
+  run table_matches_builder "review-loop" "$fx"
+  [ "$status" -eq 1 ]
+  contains "$output" '`findings_by_round` sub-keys drifted'
   # and the untouched page passes the same function
   run table_matches_builder "approve" "$HOWTO"
   [ "$status" -eq 0 ]
