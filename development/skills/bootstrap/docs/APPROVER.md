@@ -95,7 +95,8 @@ The short version:
     a level. Each risk-factor match drops half a level. PRs with > 30
     changed files or > 1000 net added lines cap at `MEDIUM`. Ambiguous
     type caps at `LOW`. `claude-maintenance[bot]` PRs with green CI
-    and zero new findings start at `HIGH` and can `APPROVE` directly.
+    and zero new findings start at `HIGH` and can `APPROVE` directly,
+    unless a review dossier reports `open > 0`, which still caps at `LOW`.
 11. **Render the verdict.** `HIGH` + clean baseline → `APPROVE`. `LOW`
     → `REQUEST_CHANGES`. `MEDIUM` → `COMMENT`-with-reservations.
 
@@ -592,9 +593,15 @@ and `/development:maintenance` call the skill for you: each asks
 `development/scripts/approval/plugin-approver-override.zsh`, and on
 `override=on` drives `/development-claude-plugin:approve` itself.
 
-Three kinds of change always go to a human, whatever the review concludes: residue
-(a review dossier with `open > 0`), `.github/workflows/*`, and the
-approval/identity machinery. On those the Approver posts `COMMENT` with a
+A review dossier with `open > 0` is a finding: the Approver posts
+`REQUEST_CHANGES`, because the review loop never opens a PR with blockers left
+(the residue terminal that did is retired). A consumer repo gets this rule by
+re-rendering its `.claude/approver-policy.md` from the bootstrap template; that
+file is not drift-tracked, so nothing updates it on its own.
+
+Two kinds of change always go to a human, whatever the review concludes:
+`.github/workflows/*` and the approval/identity machinery. On those the Approver
+posts `COMMENT` with a
 "Needs a human" list (or `REQUEST_CHANGES` when the review already gives it),
 never `APPROVE`. Nothing is recorded in the repository.
 Unset the variable and the repo is human-only again.
