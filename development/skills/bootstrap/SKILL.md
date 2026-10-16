@@ -4557,7 +4557,11 @@ disposition is explicit** — do not leave it to inference:
   `src/test/msw-setup.ts`, the sample test, and both `contracts-*.yml` workflows:
   `git checkout`/remove them from the staging + working tree (none of them is
   green without the rest of §3k's machinery), and rewrite each discarded path's
-  per-file entry (*Keep the run's facts as you go*) to `failed`.
+  per-file entry (*Keep the run's facts as you go*) to `failed` when an npm
+  command failed (§3k's `npm i`/`npm ci`/`npm run generate`, or §3k.5's
+  install), or to `skipped` when the abort came from a rule-3 prompt resolving
+  to skip (§3k's own, or §3k.5's deferred abort) — those paths are discarded
+  because the user declined, so the run parks rather than fails.
 - **Commit only** the seeded `orval.config.ts` **and** its
   `orval-deprecation-transformer.mjs` (both already rendered; the `.mjs` is
   dependency-free and inert until `npm run generate`, and committing it keeps the
