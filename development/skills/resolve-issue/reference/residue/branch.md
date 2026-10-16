@@ -3,6 +3,10 @@
 
 ## Residue branch — file the remainder, then ship (#1435)
 
+**Retired with the residue terminal (#2580).** The block below runs only on
+`CONVERGED_WITH_RESIDUE` (exit 14), which the loop no longer emits, so this
+branch never runs. It stays until #2600 removes the filing path.
+
 <!-- moved: residue-branch -->
 Runs **only** on `CONVERGED_WITH_RESIDUE` (exit 14). The loop has already
 decided; your job is to make the remainder visible.

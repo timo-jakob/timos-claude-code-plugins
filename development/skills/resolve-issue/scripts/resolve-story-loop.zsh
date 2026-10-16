@@ -3,8 +3,10 @@
 # (epic #557, issue #562). Ties the review panel (#560 dispatch) and the
 # consolidator (#561) into an autonomous implement→review→fix loop with a hard
 # round budget. Runs entirely in the worktree: nothing is pushed and no PR is
-# opened until this exits CONVERGED (0) or CONVERGED_WITH_RESIDUE (14, #1435) —
-# no ESCALATE_* / BUDGET_EXHAUSTED exit ever opens one.
+# opened until this exits CONVERGED (0), the only review-loop ending that opens a
+# PR — no ESCALATE_* / BUDGET_EXHAUSTED exit ever opens one. The residue terminal
+# CONVERGED_WITH_RESIDUE (exit 14, #1435) is retired by #2580: the loop never
+# emits it, and exit 14 is never reused.
 #
 # The agentic steps — running the review panel and applying the implementor's
 # fix pass — are model-driven. The canonical wiring is STEP MODE (#971): the
@@ -94,19 +96,15 @@
 #          not of a proximity artifact. It is a CONTINUE, not a grant: nothing
 #          about the budget moves.
 #     -> last round + blockers  => BUDGET_EXHAUSTED
-#     -> ...but EITHER of those two endings becomes CONVERGED_WITH_RESIDUE (14,
-#          #1435) when BOTH surviving residue conditions hold: the last TWO
-#          rounds are both zero-CRITICAL, AND this round ran as a FULL SWEEP
-#          (§9 — a delta round meeting the first promotes the closing sweep
-#          instead of ending here, so exit 14 always speaks for the whole diff).
-#          Condition 2 — the blocker's file being in the PREVIOUS round's
-#          fix-touched set — was REMOVED by #1571; `scope-findings` already
-#          confines every round's findings to the story diff, so the membership
-#          it tested is guaranteed upstream. The run then opens the PR and files
-#          the remainder as follow-up issues instead of spending a human grant on
-#          material the reviewers themselves called non-critical. Evaluated at those two rungs
-#          and NOWHERE else — never pre-empting CONVERGED, ESCALATE_CONFLICT,
-#          ESCALATE_AMBIGUOUS, or an AWAITING_FIX round that still has budget.
+#     -> NOTHING replaces either of those two endings any more. #1435 let a
+#          zero-CRITICAL window on a full sweep turn them into
+#          CONVERGED_WITH_RESIDUE (14), which opened the PR with non-critical
+#          blockers still open; #2580 retired that terminal, its predicate and
+#          the delta-round promotion of the closing sweep it needed. A
+#          residue-shaped round now ends 12 or 13 like any other non-converging
+#          round, and the automatic grant (#2576), the raised bar (#2577) and the
+#          clean stop (#2579) — or, attended, the interactive extension — take
+#          it from there.
 #     -> else: step mode        => AWAITING_FIX (fix in-session, --resume)
 #              hook mode        => fix pass -> re-run tests -> next round
 #
@@ -268,7 +266,7 @@
 #                    round it belongs to was consolidated, so the fix-touched
 #                    set and every `class` derived from it would be computed
 #                    from a tree the reviewers never read — and the round's
-#                    findings, hence its residue verdict, would describe a tree
+#                    findings, hence its class stamps, would describe a tree
 #                    that no longer exists.
 #
 #   --carry-accounting FILE  (#1583) step mode, round >= 2 with a non-empty
@@ -449,11 +447,10 @@
 #
 # Exit codes (also carried as `status` in the JSON on stdout / --status-file):
 #   0   CONVERGED (or SKIPPED with --no-review)
-#   14  CONVERGED_WITH_RESIDUE    (#1435: the run OPENS ITS PR, and the caller
-#                                  files one follow-up issue per remaining
-#                                  blocking finding. A distinct code rather than
-#                                  a second 0, because the follow-up work
-#                                  differs; `outcome: "success"` in telemetry.)
+#   14  retired by #2580          (was CONVERGED_WITH_RESIDUE, #1435. The loop
+#                                  never emits it, and the code is never reused,
+#                                  so an old record or caller reading 14 still
+#                                  means only that.)
 #   20  AWAITING_FIX              (step mode only: blockers remain, budget
 #                                  left — fix in-session, then --resume)
 #   10  ESCALATE_AMBIGUOUS        (dispatch could not pick a panel — #560 —
@@ -771,25 +768,13 @@ emit_and_exit() {
   [[ -n "$changelists_file" && -s "$changelists_file" ]] && clists=$(jq -sc '.' "$changelists_file")
   local esc='[]'
   [[ "$final" != "null" ]] && esc=$(print -r -- "$final" | jq -c '.escalation_reasons // []')
-  # RESIDUE (#1435): the reasons are the changelist's, and on the non-convergence
-  # rung that changelist necessarily carries `non_converging_blocker` — that is
-  # WHY the rung was reached. Copied through unchanged, a run this state exists
-  # to call a SUCCESS would report `escalation_reasons: ["non_converging_blocker"]`
-  # and render `**Final:** CONVERGED_WITH_RESIDUE — non_converging_blocker` into
-  # progress.md: the ending that says "this did not escalate", saying it did. It
-  # would also make the two residue rungs report different shapes, since the
-  # budget rung usually has none.
-  #
-  # So `escalation_reasons` keeps its one meaning — THIS RUN ESCALATED — and the
-  # reasons move to `residue_replaced_reasons`, which records what residue took
-  # the place of. Always present (`[]` everywhere else), for the same reason
-  # `promotion_phase` and `closing_sweep_granted` are: a consumer must never have
-  # to tell "no reasons" from "a status file predating the key".
+  # `residue_replaced_reasons` (#1435) recorded what the residue terminal took
+  # the place of. That terminal is retired (#2580), so nothing replaces an
+  # escalation any more and the key is always `[]`. It stays in the status JSON
+  # rather than disappearing, for the same reason `promotion_phase` and
+  # `closing_sweep_granted` are always present: a consumer must never have to
+  # tell "no reasons" from "a status file predating the key".
   local residue_replaced='[]'
-  if [[ "$st" == "CONVERGED_WITH_RESIDUE" ]]; then
-    residue_replaced="$esc"
-    esc='[]'
-  fi
   local out
   # promotion_phase (#995) is ALWAYS present — a plain boolean, true exactly
   # when this invocation carried OR ADOPTED a promoted set, i.e. when it is the
@@ -833,7 +818,8 @@ emit_and_exit() {
   # for the exit just taken, a path relative to the resolve-issue SKILL's base
   # directory — never to the target repo, since the plugin lives in the plugin
   # cache and a repo-relative path would resolve nowhere. The table is closed;
-  # every status it does not name (CONVERGED, SKIPPED, ERROR) carries null.
+  # every status it does not name (CONVERGED, SKIPPED, ERROR) carries null. It
+  # has no residue row since #2580: the loop never emits that status.
   # grants (#2576) is ALWAYS present: how many grants record-grant.zsh logged
   # in this run's ledger, by source. An absent or unreadable ledger counts 0/0,
   # which is a run with no grant — never a reason to fail the status.
@@ -847,7 +833,6 @@ emit_and_exit() {
   case "$st" in
     AWAITING_FIX)           next_ref="reference/review-loop/exit-20-awaiting-fix.md" ;;
     STALE_FINDINGS)         next_ref="reference/review-loop/exit-2-stale-findings.md" ;;
-    CONVERGED_WITH_RESIDUE) next_ref="reference/residue/branch.md" ;;
     ESCALATE_*|BUDGET_EXHAUSTED) next_ref="reference/escalation.md" ;;
   esac
   out=$(jq -nc \
@@ -882,11 +867,6 @@ emit_and_exit() {
   if [[ -n "$work_dir" && -d "$work_dir" && "$st" != "AWAITING_FIX" && "$st" != "STALE_FINDINGS" ]]; then
     local reasons=""
     [[ -n "$esc" && "$esc" != "[]" ]] && reasons=" — $(print -r -- "$esc" | jq -r 'join(", ")' 2>/dev/null)"
-    # ...and on a residue exit, say what residue REPLACED rather than leaving the
-    # line bare: the human tailing progress.md wants to know the run would
-    # otherwise have escalated, without being told that it did (#1435).
-    [[ -n "$residue_replaced" && "$residue_replaced" != "[]" ]] && \
-      reasons=" — residue replaced: $(print -r -- "$residue_replaced" | jq -r 'join(", ")' 2>/dev/null)"
     { print -r -- "**Final:** ${st}${reasons} ($(date +%H:%M:%S))" >> "$work_dir/progress.md" ; } 2>/dev/null || true
   fi
 
@@ -916,15 +896,16 @@ emit_and_exit() {
     # in the payload. The catch-all is `failed` (ERROR today) rather than a
     # guess, so a status added later is never silently counted as a success.
     local outcome
-    # CONVERGED_WITH_RESIDUE (#1435) is a SUCCESS, named explicitly rather than
-    # left to the catch-all: the run opened its PR. The catch-all is `failed` on
-    # purpose, so a status added later is never silently counted as a success —
-    # which is exactly why this one has to be added here and in ARCHITECTURE.md's
-    # two copies of the mapping, not merely assumed to land right.
+    # The catch-all is `failed` on purpose, so a status added later is never
+    # silently counted as a success. CONVERGED_WITH_RESIDUE has no arm here since
+    # #2580 retired it: this loop never emits it. Historical records carrying it
+    # are still counted a success — by the rollup's mapping (rollup-telemetry.zsh
+    # and ARCHITECTURE.md's two copies), which reads them; this case only ever
+    # sees the status this invocation is about to write.
     case "$st" in
-      CONVERGED|CONVERGED_WITH_RESIDUE|SKIPPED) outcome="success" ;;
-      ESCALATE_*|BUDGET_EXHAUSTED)              outcome="escalated" ;;
-      *)                                        outcome="failed" ;;
+      CONVERGED|SKIPPED)           outcome="success" ;;
+      ESCALATE_*|BUDGET_EXHAUSTED) outcome="escalated" ;;
+      *)                           outcome="failed" ;;
     esac
     # wall_s is REQUIRED and must be non-negative; the emitter rejects a
     # negative outright (exit 2), which `|| true` would swallow — costing the
@@ -1188,9 +1169,9 @@ _run_test_cmd() {  # $1 = the round this gate precedes
 # The set of repo artifacts a round's FIX PASS created or modified, persisted as
 # `<work-dir>/fix-touched-<round>.txt` — repo-relative, one path per line. It is
 # what `consolidate-findings.zsh --fix-touched` derives its `class` from, and
-# what keys the waived-suggestion exemption. The residue decision STOPPED
-# reading it in #1571 (see `_residue_holds`), so a failure here costs the
-# round's `class`, never its residue eligibility.
+# what keys the waived-suggestion exemption. No verdict reads it: the residue
+# predicate stopped in #1571 and was retired with its terminal by #2580, so a
+# failure here costs the round's `class` and nothing else.
 #
 # FILE-SET membership, not hunk-level: it matches the finding's own `.file`
 # granularity and stays robust to the line drift that the #983 proximity matcher
@@ -1215,14 +1196,14 @@ _capture_fix_touched() {   # $1 = base tree id, $2 = round
   # nothing" (an EMPTY set, which stamps every blocker `new_defect`). Announce
   # it, because a round whose `by class:` row is dark is otherwise
   # indistinguishable from one whose fix pass genuinely touched nothing.
-  # It does NOT gate residue: #1571 removed that read.
+  # It gates no verdict.
   rm -f -- "$out"
   [[ -n "$base_tree" ]] || {
-    print -u2 -- "resolve-story-loop: no pre-fix tree identity for round $r — the fix-touched set cannot be computed (#1435); the round that consolidates against it will carry no class, so its by-class row is dark (residue is unaffected since #1571)"
+    print -u2 -- "resolve-story-loop: no pre-fix tree identity for round $r — the fix-touched set cannot be computed (#1435); the round that consolidates against it will carry no class, so its by-class row is dark (no verdict reads the set)"
     return 1 }
   cur=$(_tree_id "$repo" 2>/dev/null) || cur=""
   [[ -n "$cur" ]] || {
-    print -u2 -- "resolve-story-loop: could not compute the post-fix tree identity for round $r — the fix-touched set cannot be computed (#1435); the round that consolidates against it will carry no class, so its by-class row is dark (residue is unaffected since #1571)"
+    print -u2 -- "resolve-story-loop: could not compute the post-fix tree identity for round $r — the fix-touched set cannot be computed (#1435); the round that consolidates against it will carry no class, so its by-class row is dark (no verdict reads the set)"
     return 1 }
   # `pipefail` is set, so a failing diff-tree fails the pipeline rather than
   # yielding an empty set that would read as "the fix pass touched nothing" —
@@ -1245,7 +1226,7 @@ _capture_fix_touched() {   # $1 = base tree id, $2 = round
     diff-tree -r --name-only "$base_tree" "$cur" \
     | sed -E 's#^\./##' | sort -u \
     | sed -e '/^$/d' -e '\#^\.review/#d' -e '\#^\.claude/telemetry/#d' > "$out" || {
-    print -u2 -- "resolve-story-loop: could not diff $base_tree..$cur for the round $r fix-touched set (#1435); the round that consolidates against it will carry no class, so its by-class row is dark (residue is unaffected since #1571)"
+    print -u2 -- "resolve-story-loop: could not diff $base_tree..$cur for the round $r fix-touched set (#1435); the round that consolidates against it will carry no class, so its by-class row is dark (no verdict reads the set)"
     rm -f -- "$out"
     return 1 }
   # ...then drop the loop's OWN caller-chosen in-repo artifacts (#1435). Done
@@ -1302,11 +1283,10 @@ _drop_loop_internal_paths() {  # $1 = file of repo-relative paths
 }
 
 # Promote the NEXT round to the closing full sweep (#1434), granting the one
-# round beyond --max-rounds when the budget is already spent. ONE definition,
-# because #1435 §9 gave it a SECOND trigger: a delta round whose residue
-# conditions hold promotes the sweep exactly as a zero-blocker delta round does.
-# Two copies would let the two triggers drift on the grant arithmetic, which is
-# the part that decides whether the sweep runs at all.
+# round beyond --max-rounds when the budget is already spent. Its one trigger is
+# a zero-blocker delta round. #1435 §9 gave it a second — a delta round whose
+# residue conditions held — and #2580 retired that trigger with the residue
+# terminal, so `CONVERGED` is still only ever declared on a full sweep.
 _promote_closing_sweep() {  # $1 = the round doing the promoting
   # The parameter is named `round` — shadowing the caller's loop variable, which
   # is harmless here (this function reads nothing else from it) and deliberate:
@@ -1422,113 +1402,11 @@ $listing
 Those findings describe a tree that no longer exists. The cadence is: a round's findings reach the loop BEFORE that round's fix pass runs, always — otherwise the fix-touched set (and every \`class\` derived from it) attributes this round's blockers to a fix pass that had already happened. Re-run this round's panel against the current tree and pass its aggregate, or discard the fix and re-consolidate. (This is not --gate-attest, which answers a different question and neither causes nor suppresses this refusal.)"
 }
 
-# --- the residue condition (#1435, amended #1571) ---------------------------
-# TRUE when this round's ending may be `CONVERGED_WITH_RESIDUE` instead of an
-# escalation. Conditions 1 and 3, BOTH required — and they are the safety rail,
-# not a formality, because this is the first path on which the loop opens a PR
-# without a human ever seeing an escalation:
-#
-#   1. the last TWO rounds' changelists both report `.summary.critical == 0` —
-#      nothing consumer-visible is broken, by the reviewers' own reads, and one
-#      clean round is not enough to say so;
-#   3. the declaring round ran as a FULL SWEEP (§9). Enforced by the CALLER, at
-#      the two ladder rungs, not in here — because the answer on a delta round is
-#      not "escalate", it is "promote the closing sweep and come back", and this
-#      predicate has no way to say that.
-#
-# The numbering keeps its gap ON PURPOSE. Condition 2 — "EVERY remaining blocking
-# finding's `.file` is in the PREVIOUS round's fix-touched set" — was REMOVED by
-# #1571, and every other surface still names the surviving two by these numbers;
-# renumbering 3 to 2 would silently repoint every one of them at the condition
-# that was just deleted.
-#
-# WHY IT WAS REMOVED, and why nothing replaces it. Its purpose was that the
-# residue lives in what this story wrote, not in shipped behaviour nobody has
-# just rewritten. That guarantee is REAL and still holds — it is simply enforced
-# UPSTREAM: `review-dispatch.zsh scope-findings` filters every round's findings
-# to the story diff (`_changed_files`: `git diff --name-only <base>` plus
-# `ls-files --others --exclude-standard`) before consolidation, and `$scoped` is
-# the ONLY input to the changelist's `.blocking` — the fix-verification carry
-# goes to `plan`, never to the consolidator. So every blocker that can reach this
-# predicate is in the story diff BY CONSTRUCTION. A blocker in a file this run
-# never opened is dropped a step earlier and never arrives here at all.
-#
-# Re-testing that here would therefore be a test that can never fail, which is
-# worse than no test: it reads as a rail while guaranteeing nothing.
-#
-# The ROUND-granular reading is what had to go, and it is why the terminal built
-# for the closing sweep was unreachable FROM the closing sweep: a zero-blocking
-# delta round promotes the sweep and runs no fix pass, so the loop deliberately
-# writes it an EMPTY fix-touched set (see the `: > "$work_dir/fix-touched-…"`
-# write on the skip-fix path) — and against an empty set every blocker is
-# "outside", so the condition was false by construction on precisely the path
-# that earns the sweep.
-#
-# Condition 3 still exists because 1 alone is satisfiable on any delta round with
-# a plateaued trend — the ordinary case. #1434 guarantees `CONVERGED` is only ever
-# reached from a full sweep, but it earns that sweep only on a ZERO-blocker delta
-# round; residue rounds never return zero, so the sweep would never be earned and
-# a PR would open having reviewed only the slices the deltas happened to cover.
-# The motivating run did exactly that: it declared residue off a delta round, and
-# the sweep that followed (only because an unrelated recovery forced one) found
-# ten blockers in files no delta scope had ever contained.
-#
-# The fix-touched capture itself is UNTOUCHED by #1571: it still feeds
-# `consolidate-findings.zsh --fix-touched`, which stamps each blocker's `class`
-# (`new_defect` / `incomplete_propagation`) for the progress histogram and the
-# grant decision. That is a different consumer; deleting the capture because this
-# predicate stopped reading it would blank every blocker's `class`.
-#
-# The CRITICAL count has exactly ONE source: `<work-dir>/changelist-<N>.json`,
-# which persists across `--resume` because the work-dir accumulators do. Nothing
-# residue-derived is written to `history.jsonl` — a second source for one fact is
-# how two surfaces come to disagree.
-#
-# Every "cannot tell" answer returns FALSE (a missing changelist, an unreadable
-# count, a jq failure): the fallback is the escalation the loop would have raised
-# anyway, so the honest gap costs a human prompt, where the other direction ships
-# a PR nobody agreed to.
-_residue_holds() {   # $1 = round, $2 = this round's changelist
-  local r="$1" cl="$2" prev_cl="" c_cur="" c_prev="" n_blocking=""
-  # NEVER in the promotion sub-loop (#994/#1435). Its blockers are the human's
-  # OWN promoted picks, raised from Low precisely because they said "actually, do
-  # that one" — and #994's contract is that they "are treated as blocking, not
-  # quietly re-waived". Residue would re-waive them, and file the human's
-  # explicit request back to them as a follow-up issue.
-  #
-  # It also keeps the residue story SINGLE-PHASE, which is what lets every
-  # downstream surface state one thing rather than two. Residue always comes from
-  # the blocking phase, so its blockers are always the ones the residue branch
-  # files — the dossier can say "filed" without a per-phase qualifier, the
-  # Approver policy can read `open > 0` as tracked disclosed risk without one,
-  # and §6's Summary always has issue numbers to name. Allowing a second,
-  # never-filed flavour cost four separate conditionals and got the both-residue
-  # case wrong in all of them.
-  [[ -z "$promote" ]] || return 1
-  # Round 1 can never qualify: there is no second changelist to prove the
-  # CRITICAL window. That test would fail on its own; stating it here makes the
-  # boundary a rule rather than an accident of another check. (Before #1571 this
-  # also rested on there being no previous fix pass to attribute residue to —
-  # that half went with condition 2.)
-  (( r >= 2 )) || return 1
-  prev_cl="$work_dir/changelist-$(( r - 1 )).json"
-  [[ -s "$cl" && -s "$prev_cl" ]] || return 1
-  c_cur=$(jq -r '.summary.critical // empty' -- "$cl" 2>/dev/null) || return 1
-  c_prev=$(jq -r '.summary.critical // empty' -- "$prev_cl" 2>/dev/null) || return 1
-  [[ "$c_cur" == 0 && "$c_prev" == 0 ]] || return 1
-  # A round with NO blockers is not a residue round — it is the CONVERGED
-  # condition, decided before this is ever called. Guarded anyway, and since
-  # #1571 the reason is sharper rather than weaker: with the membership test
-  # gone this is the predicate's FINAL check, so on an empty `.blocking` every
-  # test above passes and the function would return TRUE to a question nobody
-  # should be asking here.
-  n_blocking=$(jq '(.blocking // []) | length' -- "$cl" 2>/dev/null) || return 1
-  [[ "$n_blocking" == <-> ]] && (( n_blocking > 0 )) || return 1
-  # ...and that is the whole predicate. No membership test follows (#1571): every
-  # blocker here is in the story diff already, because `scope-findings` filtered
-  # the round's findings to it before they ever became a changelist.
-  return 0
-}
+# The residue predicate `_residue_holds` (#1435, amended #1571) lived here. It
+# decided when a zero-CRITICAL window on a full sweep could turn the two
+# escalating rungs into CONVERGED_WITH_RESIDUE (14). #2580 retired that
+# terminal, so the predicate and both of its ladder rungs are gone; nothing
+# here decides that a run with open blockers may open a PR.
 
 # --- the one-shot all-ambiguous auto-continue (#1498) ------------------------
 # #983 already auto-continues a VERIFIED false trip — a carried match whose title
@@ -2566,7 +2444,7 @@ if (( step_mode && resume )) && [[ -n "$work_dir" && -d "$work_dir" ]]; then
     # compute its own identity, already said so at its AWAITING_FIX exit; and
     # the visible consequence either way is the same and fail-closed: no set, so
     # the round that follows stamps no `class` and its by-class row is dark
-    # (residue is unaffected — #1571 removed that read). Clearing anything left
+    # (no verdict reads the set). Clearing anything left
     # at the path keeps that promise absolute rather than merely likely.
     rm -f -- "$work_dir/fix-touched-$resume_round.txt"
   fi
@@ -2729,7 +2607,7 @@ local cur_tree="" prior_tree="" prior_tree_file="" fix_verification=""
 local scope_mode="" replanned_scope_mode="" delta_json="" carried=0
 local is_final=0 is_closing_sweep=0 is_empty_delta=0 empty_delta_note=""
 local round_scope_empty=0 round_findings_empty=0 rc_empty=0
-local skip_fix=0 residue_promoted_sweep=0 pft_continued_round=0 adj_tmp=""
+local skip_fix=0 pft_continued_round=0 adj_tmp=""
 local -a consolidate_args=() plan_args=()
 while (( round <= effective_max )); do
   # --- this round's working-tree identity (#1434) ---------------------------
@@ -3290,10 +3168,7 @@ while (( round <= effective_max )); do
   # made this path strictly worse than before that change: the loop rewrites
   # those files every round, so a blocker raised on one is unfixable and
   # re-appears each round — driving the run to non-convergence over the loop's
-  # own bookkeeping. Since #1571 the failure mode is worse, not better: with the
-  # residue predicate no longer filtering by file, such a blocker is eligible to
-  # SHIP as residue, so the loop would file a follow-up issue against its own
-  # state files. Same fact, same three consumers, one definition.
+  # own bookkeeping. Same fact, same three consumers, one definition.
   if [[ -n "$wd_rel" ]] || (( ${#loop_internal_files} > 0 )) || (( tdir_active )); then
     scoped_filtered="$work_dir/.scoped-filtered-$round.json"
     local internal_json="[]"
@@ -3352,9 +3227,9 @@ while (( round <= effective_max )); do
   # exists.
   #
   # A REFUSAL, never a repair. The loop cannot know which of the two trees the
-  # reviewers actually read, so it cannot pick one — and a residue verdict
-  # computed from the wrong one is exactly the false audit record §9 and this
-  # guard exist to prevent. `--gate-attest` is a different question ("may I skip
+  # reviewers actually read, so it cannot pick one — and a `class` stamp
+  # computed from the wrong one is exactly the false audit record this guard
+  # exists to prevent. `--gate-attest` is a different question ("may I skip
   # the duplicate test run"), so it neither causes nor suppresses this.
   _cadence_check "$round" stamp
   "$CONSOLIDATE" "${consolidate_args[@]}" > "$changelist" || {
@@ -3533,7 +3408,6 @@ while (( round <= effective_max )); do
   # the one thing delta scoping could hide: a defect that exists only in the
   # interaction between rounds.
   skip_fix=0
-  residue_promoted_sweep=0
   pft_continued_round=0
   if (( blocking == 0 )); then
     if [[ "$scope_mode" == "full" ]]; then
@@ -3546,20 +3420,13 @@ while (( round <= effective_max )); do
       (( step_mode )) && loop_status="AWAITING_FIX"
     fi
   elif (( conflict == 1 )); then loop_status="ESCALATE_CONFLICT"
-  # RESIDUE (#1435) is evaluated at EXACTLY the two rungs the loop would
-  # otherwise end on an escalation, and nowhere else. It never pre-empts
-  # CONVERGED (zero blockers still wins, above), never ESCALATE_CONFLICT (a
-  # human has to pick between opposed recommendations — no ending can guess it),
-  # never ESCALATE_AMBIGUOUS (raised long before this ladder, and about dispatch
-  # rather than findings), and never an AWAITING_FIX round that still has budget:
-  # the loop keeps FIXING while it can, and residue only replaces an ending.
-  #
-  # That placement is also what demotes identity-recurrence from sole trigger to
-  # one input: a `non_converging` blocker still ENDS the loop, it just no longer
-  # decides HOW it ends. Which matters precisely because that signal
-  # false-tripped its way through the #687 run — fixes cluster in the same few
-  # files, so each round's genuinely-new findings kept landing inside the
-  # previous round's proximity window.
+  # The two rungs below END the run, and nothing replaces either ending: #2580
+  # retired the residue rung (#1435) that once turned a zero-CRITICAL window on a
+  # full sweep into CONVERGED_WITH_RESIDUE (14), and with it the delta-round
+  # promotion of the closing sweep that rung needed. A residue-shaped round ends
+  # 12 or 13 here like any other; what happens next is the automatic grant
+  # (#2576) or the clean stop (#2579) unattended, and the interactive extension
+  # attended — never a PR.
   elif (( nonconv == 1 )); then
     if _pft_auto_continue "$round" "$changelist"; then
       # #1498: every carried match of this round is a POSSIBLE false trip, none
@@ -3570,58 +3437,22 @@ while (( round <= effective_max )); do
       # max_rounds or closing_sweep_granted — so the round falls through exactly
       # as an ordinary continuing round does: empty loop_status in hook mode
       # (the fix hook runs, then the next round), AWAITING_FIX in step mode.
-      #
-      # ABOVE the residue rung, and #1571 is why the order is this way round.
-      # It used to sit below, on the rule that residue "only replaces an
-      # ENDING" — sound while residue also required every blocker to be in the
-      # previous round's fix-touched set, which made it rare here. With that
-      # condition removed, residue holds on almost any zero-CRITICAL
-      # non-convergence, so leaving it first let it SWALLOW this rung: a run
-      # that admits it cannot tell a reworded survivor from a new neighbour
-      # would ship the finding as residue instead of spending the round it
-      # still had. That inverts #1435's own principle — the loop keeps FIXING
-      # while it can — because here it CAN: an auto-continue IS the loop
-      # continuing, so this rung is not yet the ending residue is entitled to
-      # replace. Residue still catches everything this declines, one line down.
       pft_continued_round=1
       (( step_mode )) && loop_status="AWAITING_FIX"
-    elif _residue_holds "$round" "$changelist"; then
-      if [[ "$scope_mode" == "full" ]]; then
-        loop_status="CONVERGED_WITH_RESIDUE"
-      else
-        _promote_closing_sweep "$round" || exit 1
-        residue_promoted_sweep=1
-        (( step_mode )) && loop_status="AWAITING_FIX"
-      fi
     else
       loop_status="ESCALATE_NO_CONVERGENCE"
     fi
-  elif (( round == effective_max )); then
-    if _residue_holds "$round" "$changelist"; then
-      if [[ "$scope_mode" == "full" ]]; then
-        loop_status="CONVERGED_WITH_RESIDUE"
-      else
-        _promote_closing_sweep "$round" || exit 1
-        residue_promoted_sweep=1
-        (( step_mode )) && loop_status="AWAITING_FIX"
-      fi
-    else
-      loop_status="BUDGET_EXHAUSTED"
-    fi
+  elif (( round == effective_max )); then loop_status="BUDGET_EXHAUSTED"
   elif (( step_mode )); then loop_status="AWAITING_FIX"
   fi
   case "$loop_status" in
     CONVERGED) verdict="converged" ;;
-    CONVERGED_WITH_RESIDUE)
-      verdict="converged with residue — the last two rounds are zero-CRITICAL and this round read the whole story diff, whose scope every remaining blocker is confined to; opening the PR and filing the rest as follow-ups (#1435, condition 2 removed by #1571)" ;;
     ESCALATE_CONFLICT) verdict="escalating (unresolved conflict)" ;;
     ESCALATE_NO_CONVERGENCE) verdict="escalating (non-converging blocker)" ;;
     BUDGET_EXHAUSTED) verdict="budget exhausted" ;;
     AWAITING_FIX)
       if (( skip_fix )); then
         verdict="no blockers in the delta — round $closing_sweep_round is the closing full sweep; apply no fix, just --resume"
-      elif (( residue_promoted_sweep )); then
-        verdict="residue conditions hold, but on a DELTA round — promoting round $closing_sweep_round to the closing full sweep, which is the only round that may declare residue (#1435); apply blockers in-session, then --resume"
       elif (( pft_continued_round )); then
         verdict="every non-convergence match is a possible false trip and none has continued before — auto-continued once, no grant consumed (#1498); apply blockers in-session, then --resume"
       else
@@ -3629,8 +3460,6 @@ while (( round <= effective_max )); do
       fi ;;
     *) if (( skip_fix )); then
          verdict="no blockers in the delta — promoting round $closing_sweep_round to the closing full sweep"
-       elif (( residue_promoted_sweep )); then
-         verdict="residue conditions hold, but on a DELTA round — promoting round $closing_sweep_round to the closing full sweep, which is the only round that may declare residue (#1435)"
        elif (( pft_continued_round )); then
          verdict="every non-convergence match is a possible false trip and none has continued before — auto-continued once, no grant consumed (#1498); fix pass (in-loop), continuing"
        else
@@ -3647,9 +3476,7 @@ while (( round <= effective_max )); do
   # fix pass. Written on EVERY AWAITING_FIX, including a zero-blocker delta round
   # that promotes the closing sweep and applies no fix at all: the resulting
   # empty set is the honest answer there ("no fix ran, so every blocker the sweep
-  # raises is a `new_defect`"). Since #1571 that no longer makes residue
-  # unreachable on the sweep — the sweep declaring 14 off an empty predecessor
-  # set is the whole point of that story.
+  # raises is a `new_defect`").
   # ...and on every GRANTABLE ESCALATING terminal too, not only AWAITING_FIX. An
   # interactive run can be GRANTED more rounds there, and the interactive
   # extension's step 5 (`reference/interactive/extension-grant.md`) requires a
@@ -3673,9 +3500,9 @@ while (( round <= effective_max )); do
     fix_base_tree=$(_tree_id "$repo" 2>/dev/null) || fix_base_tree=""
     if [[ -n "$fix_base_tree" ]]; then
       print -r -- "$fix_base_tree" > "$work_dir/fix-base-$round.txt" || \
-        print -u2 -- "resolve-story-loop: could not persist the round $round pre-fix tree identity to $work_dir/fix-base-$round.txt — next round's blockers will carry no class (#1435; residue is unaffected since #1571)"
+        print -u2 -- "resolve-story-loop: could not persist the round $round pre-fix tree identity to $work_dir/fix-base-$round.txt — next round's blockers will carry no class (#1435; no verdict reads the set)"
     else
-      print -u2 -- "resolve-story-loop: could not compute the round $round pre-fix tree identity — next round's blockers will carry no class (#1435; residue is unaffected since #1571)"
+      print -u2 -- "resolve-story-loop: could not compute the round $round pre-fix tree identity — next round's blockers will carry no class (#1435; no verdict reads the set)"
     fi
   fi
   if [[ -n "$loop_status" ]]; then break; fi
@@ -3734,11 +3561,8 @@ done
 local code=1
 case "$loop_status" in
   CONVERGED) code=0 ;;
-  # 14, because 10-13 are taken and 20 is AWAITING_FIX. A distinct code, not a
-  # second 0: the caller must be able to tell "converged clean" from "converged
-  # with residue to file" WITHOUT parsing the status JSON, since the two ask for
-  # different follow-up work.
-  CONVERGED_WITH_RESIDUE) code=14 ;;
+  # 14 is RETIRED (#2580), never reused: it was CONVERGED_WITH_RESIDUE (#1435),
+  # and a caller or an old record reading 14 must still mean only that.
   AWAITING_FIX) code=20 ;;
   ESCALATE_CONFLICT) code=11 ;;
   ESCALATE_NO_CONVERGENCE) code=12 ;;

@@ -2275,13 +2275,11 @@ residue_findings() {  # $1 = round, $2 = file
   [ "$(cat "$WD/fix-touched-1.txt")" = "touched.py" ]
 }
 
-@test "#1435 AC19 step mode: a DELTA round satisfying residue promotes the closing sweep, never 14" {
-  # §9. Rounds 1 and 2 satisfy both residue conditions, and round 2 is the
-  # ceiling — under the pre-§9 rule it exited 14 right here. It must not: a delta
-  # round has seen only the slices its scope happened to cover, so a PR opened on
-  # it would carry a dossier asserting a review that never looked at most of the
-  # diff. Instead the round promotes the closing FULL sweep, on the same marker
-  # and the same one-round grant #1434 already uses, and hands the fix back.
+@test "#2580 AC2 step mode: a residue-shaped DELTA round at the ceiling ends BUDGET_EXHAUSTED (13) and promotes no sweep" {
+  # Rounds 1 and 2 are both zero-CRITICAL with a WARNING left, and round 2 is a
+  # DELTA round at the ceiling — the shape that used to promote the closing sweep
+  # so the retired residue terminal (exit 14) could be declared on it (#1435 §9).
+  # #2580 retired both, so the round ends 13 like any other spent budget.
   echo "v0" > "$R/touched.py"
   residue_findings 1 touched.py > "$F"
   step --max-rounds 2
@@ -2290,70 +2288,15 @@ residue_findings() {  # $1 = round, $2 = file
   echo "v1" > "$R/touched.py"
   residue_findings 2 touched.py > "$F"
   step --resume --max-rounds 2
-  [ "$status" -eq 20 ]
-  [ "$(echo "$output" | jq -r '.status')" = "AWAITING_FIX" ]
-  # the marker names round 3, and the grant was taken (3 > --max-rounds 2)
-  [ "$(cat "$WD/.closing-sweep")" = "3" ]
-  echo "$output" | jq -e '.closing_sweep_granted == true' >/dev/null
-  # no residue was declared and no plan is implied by this exit
-  [ "$(echo "$output" | jq -r '.status')" != "CONVERGED_WITH_RESIDUE" ]
-  # STEP mode is the canonical wiring, and its AWAITING_FIX verdict is the only
-  # thing telling the session residue was deferred rather than this being an
-  # ordinary fix turn. Deleting that arm of the verdict case left the suite green
-  # while the session was told plain "awaiting fix" with no mention of the sweep.
-  grep -q 'residue conditions hold, but on a DELTA round — promoting round 3' "$WD/progress.md"
-  grep -q 'apply blockers in-session' "$WD/progress.md"
-}
-
-@test "#1435 AC20 step mode: the closing SWEEP declares residue, and only it" {
-  # The continuation of the fixture above: round 3 runs as the promoted full
-  # sweep, and it is that round which exits 14 — against the whole story diff
-  # rather than a delta slice.
-  echo "v0" > "$R/touched.py"
-  residue_findings 1 touched.py > "$F"
-  step --max-rounds 2
-  [ "$status" -eq 20 ]
-
-  echo "v1" > "$R/touched.py"
-  residue_findings 2 touched.py > "$F"
-  step --resume --max-rounds 2
-  [ "$status" -eq 20 ]
-
-  echo "v2" > "$R/touched.py"
-  residue_findings 3 touched.py > "$F"
-  step --resume --max-rounds 2
-  [ "$status" -eq 14 ]
-  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED_WITH_RESIDUE" ]
-  [ "$(echo "$output" | jq -r '.rounds')" = "3" ]
+  [ "$status" -eq 13 ]
+  [ "$(echo "$output" | jq -r '.status')" = "BUDGET_EXHAUSTED" ]
+  echo "$output" | jq -e '[.round_changelists[].summary.critical] == [0, 0]' >/dev/null
   echo "$output" | jq -e '.final_changelist.summary.blocking > 0' >/dev/null
-}
-
-@test "#1571 AC20 step mode: a sweep blocker outside the fix-touched set SHIPS as residue" {
-  # The case the motivating run actually hit. The sweep reads files no delta
-  # scope ever contained — that is its purpose — so its blockers are by
-  # definition outside the previous round's fix-touched set, and the retired
-  # condition 2 refused them for exactly that reason. Since #1571 the sweep's
-  # own findings are the residue case: in the story diff, non-Critical, and
-  # raised by a round that read the whole change.
-  echo "v0" > "$R/touched.py"
-  residue_findings 1 touched.py > "$F"
-  step --max-rounds 2
-  [ "$status" -eq 20 ]
-
-  echo "v1" > "$R/touched.py"
-  residue_findings 2 touched.py > "$F"
-  step --resume --max-rounds 2
-  [ "$status" -eq 20 ]
-
-  # the sweep raises its blocker in app.py — in scope for a FULL round, and
-  # never written by any fix pass
-  echo "v2" > "$R/touched.py"
-  residue_findings 3 app.py > "$F"
-  step --resume --max-rounds 2
-  [ "$status" -eq 14 ]
-  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED_WITH_RESIDUE" ]
-  # ...and it is the sweep-only blocker that becomes the filed remainder
-  [ "$(echo "$output" | jq -r '.final_changelist.blocking[0].file')" = "app.py" ]
+  # no sweep was promoted and no grant taken
+  [ ! -e "$WD/.closing-sweep" ]
+  echo "$output" | jq -e '.closing_sweep_granted == false' >/dev/null
+  [ "$(echo "$output" | jq -r '.next_ref')" = "reference/escalation.md" ]
+  run ! grep -q 'residue conditions hold' "$WD/progress.md"
 }
 
 @test "#1435 step mode AC3: blockers with budget left still exit AWAITING_FIX (20), not 14" {
@@ -2403,58 +2346,22 @@ residue_findings() {  # $1 = round, $2 = file
   [ "$(cat "$WD/fix-touched-1.txt")" = "touched.py" ]
 }
 
-@test "#1571 step mode: a mixed round SHIPS: the fix-touched split survives as a class stamp, not a veto" {
+@test "#1571 step mode: a mixed round's fix-touched split survives as a class stamp" {
   echo "v0" > "$R/touched.py"
   residue_findings 1 touched.py > "$F"
-  step --max-rounds 2
+  step --max-rounds 3
   [ "$status" -eq 20 ]
 
   echo "v1" > "$R/touched.py"
   # one inside the fix-touched set, one outside it — both in the story diff. The
-  # split must still reach the changelist as `class` (#1571 kept the capture and
-  # its consumers; only the residue predicate stopped reading it)
+  # split must reach the changelist as `class`: the capture and its consumers
+  # outlived the residue predicate that once also read it (#1571, #2580)
   printf '[{"severity":"WARNING","dimension":"bugs","file":"touched.py","line":200,"title":"round 2 unquoted expansion","description":"d2","reviewer":"r"},{"severity":"WARNING","dimension":"bugs","file":"app.py","line":300,"title":"round 2 stale cache never invalidated","description":"d3","reviewer":"r"}]' > "$F"
-  step --resume --max-rounds 2
-  # Round 2 is a DELTA round, so residue holding there PROMOTES the closing
-  # sweep rather than declaring (the §9 rule) — the step-mode difference from
-  # hook mode, where the loop runs on to the sweep inside one invocation.
+  step --resume --max-rounds 3
   [ "$status" -eq 20 ]
-  [ "$(cat "$WD/.closing-sweep")" = "3" ]
   # the round really is MIXED, or this pins nothing the single-blocker case did not
   [ "$(jq '.blocking | length' "$WD/changelist-2.json")" -eq 2 ]
-  # ...and the split still reaches the changelist as a class stamp, which is the
-  # whole point now that it is no longer a residue veto
   [ "$(jq -r '[.blocking[].class] | sort | join(",")' "$WD/changelist-2.json")" = "incomplete_propagation,new_defect" ]
-
-  # the promoted sweep re-raises both, and THAT round ships them as residue
-  echo "v2" > "$R/touched.py"
-  printf '[{"severity":"WARNING","dimension":"bugs","file":"touched.py","line":205,"title":"round 3 unquoted expansion","description":"d4","reviewer":"r"},{"severity":"WARNING","dimension":"bugs","file":"app.py","line":305,"title":"round 3 stale cache never invalidated","description":"d5","reviewer":"r"}]' > "$F"
-  step --resume --max-rounds 2
-  [ "$status" -eq 14 ]
-  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED_WITH_RESIDUE" ]
-}
-
-@test "#1571 step mode: a blocker outside the fix-touched set now ships as residue, not an escalation" {
-  echo "v0" > "$R/touched.py"
-  residue_findings 1 touched.py > "$F"
-  step --max-rounds 2
-  [ "$status" -eq 20 ]
-
-  echo "v1" > "$R/touched.py"
-  # app.py is in the story diff but no fix pass ever wrote it — the case the
-  # retired condition 2 refused and #1571 ships
-  residue_findings 2 app.py > "$F"
-  step --resume --max-rounds 2
-  # a DELTA round promotes the sweep; only the sweep may declare (the §9 rule)
-  [ "$status" -eq 20 ]
-  [ "$(cat "$WD/.closing-sweep")" = "3" ]
-  [ "$(jq -r '[.blocking[].class] | join(",")' "$WD/changelist-2.json")" = "new_defect" ]
-
-  echo "v2" > "$R/touched.py"
-  residue_findings 3 app.py > "$F"
-  step --resume --max-rounds 2
-  [ "$status" -eq 14 ]
-  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED_WITH_RESIDUE" ]
 }
 
 @test "#1435 the fix-touched capture runs BEFORE --test-cmd, so a gate artifact is not the fix pass" {
@@ -2498,7 +2405,7 @@ residue_findings() {  # $1 = round, $2 = file
   # this run.
   echo "v0" > "$R/touched.py"
   residue_findings 1 touched.py > "$F"
-  step --max-rounds 2
+  step --max-rounds 3
   [ "$status" -eq 20 ]
   [ -s "$WD/fix-base-1.txt" ]
 
@@ -2513,18 +2420,18 @@ residue_findings() {  # $1 = round, $2 = file
   #
   # `app.py`, not an invented name: a blocker in a file outside the round's scope
   # is dropped before the ladder is ever reached, so the run would end
-  # AWAITING_FIX with zero blockers and prove nothing about residue.
+  # AWAITING_FIX with zero blockers and prove nothing about the class.
   rm -f "$WD/fix-base-1.txt"
   printf 'app.py\n' > "$WD/fix-touched-1.txt"
 
   echo "v1" > "$R/touched.py"
   residue_findings 2 app.py > "$F"
-  step --resume --max-rounds 2
+  step --resume --max-rounds 3
   # the stale set is GONE, not merely ignored
   [ ! -e "$WD/fix-touched-1.txt" ]
-  # #1571 moved what this protects. The residue predicate no longer reads the
-  # set, so honouring a stale one can no longer fake a residue ending — but
-  # `consolidate-findings --fix-touched` still reads it, so a planted set would
+  # What this protects is the CLASS: `consolidate-findings --fix-touched`
+  # still reads the set (the residue predicate that once also did is retired,
+  # #2580), so a planted set would
   # class this round's blockers against a fix pass that never ran in this run.
   # The clearing is therefore still load-bearing, for the CLASS.
   #
@@ -2533,10 +2440,9 @@ residue_findings() {  # $1 = round, $2 = file
   # information" from "the fix pass touched nothing". Had the stale set been
   # honoured, this blocker would carry `incomplete_propagation` instead.
   [ "$(jq -r '[.blocking[] | .class // "unstamped"] | join(",")' "$WD/changelist-2.json")" = "unstamped" ]
-  # A DELTA round that satisfies residue promotes the closing sweep rather than
-  # declaring (the §9 rule), so this is the promotion, not a ship.
+  # an ordinary fix turn with budget left: nothing promotes a sweep (#2580)
   [ "$status" -eq 20 ]
-  [ "$(cat "$WD/.closing-sweep")" = "3" ]
+  [ ! -e "$WD/.closing-sweep" ]
   # it really did still have the blocker, so this is a real round and not a zero
   echo "$output" | jq -e '.final_changelist.summary.blocking > 0' >/dev/null
 }
@@ -2911,17 +2817,11 @@ _tree_now() { zsh "$REPO_ROOT/development/skills/resolve-issue/scripts/git-tree-
   run ! grep -qF 'state[1]' "$WDO/fix-touched-1.txt"
 }
 
-@test "#1435 AC19 step mode: the NON-CONVERGENCE rung promotes the sweep too" {
-  # Section 9 gates BOTH residue rungs, and each repeats the step-mode
-  # AWAITING_FIX assignment. Every other step-mode residue fixture puts its
-  # finding far outside the proximity window, so nonconv never trips and they all
-  # land on the CEILING rung — leaving this one untested. Surviving mutation:
-  # delete the step-mode assignment from the non-convergence rung; loop_status
-  # stays empty, the round falls through into the hook-mode fix path with no fix
-  # command, loops again inside the same invocation, and dies on the
-  # byte-identical guard as exit 2 instead of exiting 20.
-  #
-  # The SAME title at a CONSTANT line is what makes round 2 non-converging.
+@test "#2580 AC2 step mode: a residue-shaped DELTA round at the non-converging rung ends ESCALATE_NO_CONVERGENCE (12) and promotes no sweep" {
+  # The other rung of the same shape. The SAME title at a CONSTANT line makes
+  # round 2 non-converging; both rounds are zero-CRITICAL. This round used to
+  # promote the closing sweep for the retired residue terminal (#1435 §9); it now
+  # ends 12, so the automatic grant (#2576) or the interactive extension decides.
   echo "v0" > "$R/touched.py"
   printf '[{"severity":"WARNING","dimension":"bugs","file":"touched.py","line":10,"title":"unquoted expansion in the matcher","description":"d1","reviewer":"r"}]' > "$F"
   step --max-rounds 5
@@ -2930,13 +2830,12 @@ _tree_now() { zsh "$REPO_ROOT/development/skills/resolve-issue/scripts/git-tree-
   echo "v1" > "$R/touched.py"
   printf '[{"severity":"WARNING","dimension":"bugs","file":"touched.py","line":10,"title":"unquoted expansion in the matcher","description":"d2","reviewer":"r"}]' > "$F"
   step --resume --max-rounds 5
-  [ "$status" -eq 20 ]
-  [ "$(echo "$output" | jq -r '.status')" = "AWAITING_FIX" ]
+  [ "$status" -eq 12 ]
+  [ "$(echo "$output" | jq -r '.status')" = "ESCALATE_NO_CONVERGENCE" ]
   echo "$output" | jq -e '.final_changelist.non_converging == true' >/dev/null
-  # the sweep was promoted rather than the run ending on the delta round
-  [ "$(cat "$WD/.closing-sweep")" = "3" ]
-  # ...and the session is TOLD that, rather than being left to infer it
-  grep -q 'residue conditions hold, but on a DELTA round — promoting round 3' "$WD/progress.md"
+  echo "$output" | jq -e '[.round_changelists[].summary.critical] == [0, 0]' >/dev/null
+  [ ! -e "$WD/.closing-sweep" ]
+  run ! grep -q 'residue conditions hold' "$WD/progress.md"
 }
 
 
@@ -3083,7 +2982,7 @@ pft_findings() {  # $1 = round
   grep -q 'auto-continued once, no grant consumed (#1498)' "$WD/progress.md"
 }
 
-@test "#1571 the #1498 marker survives --resume, and the refused second match falls through to residue" {
+@test "#1498 the marker survives --resume, and the refused second match escalates" {
   pft_findings 1 > "$F"
   step
   [ "$status" -eq 20 ]
@@ -3096,14 +2995,12 @@ pft_findings() {  # $1 = round
   # that knows nothing but the work-dir
   printf '%s' '[{"severity":"WARNING","dimension":"tests","file":"app.py","line":11,"title":"unquoted variable in the matcher","description":"d3","reviewer":"r"}]' > "$F"
   step --resume
-  # The marker refuses the second continuation — that part is unchanged. What
-  # follows it changed in #1571: the rung no longer ends in
-  # ESCALATE_NO_CONVERGENCE, because residue now catches whatever the
-  # auto-continue declines. On a DELTA round that means promoting the closing
-  # sweep (the §9 rule), so the run continues rather than escalating OR shipping.
-  [ "$status" -eq 20 ]
-  [ "$(echo "$output" | jq -r '.status')" = "AWAITING_FIX" ]
-  [ "$(cat "$WD/.closing-sweep")" = "4" ]
+  # The marker refuses the second continuation, and the rung ends where it
+  # always could: ESCALATE_NO_CONVERGENCE. (#1571 had residue catch it; #2580
+  # retired that terminal.)
+  [ "$status" -eq 12 ]
+  [ "$(echo "$output" | jq -r '.status')" = "ESCALATE_NO_CONVERGENCE" ]
+  [ ! -e "$WD/.closing-sweep" ]
   # round 3 really was another ambiguous carried match — the marker is the ONLY
   # thing that refused it
   echo "$output" | jq -e '[.final_changelist.blocking[] | select(.non_converging == true)] | (length > 0) and all(.possible_false_trip == true)' >/dev/null
@@ -3127,12 +3024,11 @@ pft_findings() {  # $1 = round
   pft_findings 2 > "$F"
   run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
     zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" --resume
-  # the continuation is refused (the bound must not be spent invisibly), and
-  # since #1571 residue catches the rung instead of an escalation — a DELTA
-  # round, so it promotes the closing sweep
-  [ "$status" -eq 20 ]
-  [ "$(echo "$output" | jq -r '.status')" = "AWAITING_FIX" ]
-  [ "$(cat "$WD/.closing-sweep")" = "3" ]
+  # the continuation is refused (the bound must not be spent invisibly), so the
+  # rung escalates — nothing catches it since #2580 retired the residue terminal
+  [ "$status" -eq 12 ]
+  [ "$(echo "$output" | jq -r '.status')" = "ESCALATE_NO_CONVERGENCE" ]
+  [ ! -e "$WD/.closing-sweep" ]
   [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 0 ]
   contains "$stderr" "could not record the round 2 possible-false-trip auto-continue"
   chmod 644 "$WD/.possible-false-trip-continued"
@@ -3172,39 +3068,30 @@ pft_findings() {  # $1 = round
 # so the run exited BUDGET_EXHAUSTED. That is why the terminal built for the
 # closing sweep was unreachable FROM the closing sweep.
 
-@test "#1571 AC3 step mode: zero-blocking delta -> promoted sweep with one WARNING at the ceiling -> exit 14" {
+@test "#2580 AC2 step mode: the zero-blocker closing-sweep promotion is unchanged, and its sweep with a WARNING at the ceiling ends 13, never 14" {
   echo "v0" > "$R/touched.py"
   residue_findings 1 touched.py > "$F"
   step --max-rounds 2
   [ "$status" -eq 20 ]
 
-  # round 2: the in-session fix, then a CLEAN delta round — it promotes the
-  # sweep and applies no fix of its own
+  # round 2: the in-session fix, then a CLEAN delta round — it still promotes
+  # the closing sweep, under the one-round grant (#1434, kept by #2580)
   echo "v1" > "$R/touched.py"
   printf '[]' > "$F"
   step --resume --max-rounds 2
   [ "$status" -eq 20 ]
   [ "$(cat "$WD/.closing-sweep")" = "3" ]
+  echo "$output" | jq -e '.closing_sweep_granted == true' >/dev/null
 
-  # round 3: the promoted closing sweep raises one WARNING. No fix is applied
-  # between the two invocations — the promoting round found nothing to fix, which
-  # is exactly how it leaves an empty set behind.
+  # round 3: the promoted FULL sweep raises one WARNING past the ceiling — the
+  # shape the retired residue terminal shipped as exit 14. It ends 13 now.
   residue_findings 3 touched.py > "$F"
   step --resume --max-rounds 2
-  [ "$status" -eq 14 ]
-  # The promoting round really did leave an EMPTY fix-touched set — the precise
-  # input that made the old predicate false by construction. Asserted HERE, not
-  # after round 2: step mode stamps `fix-base-<r>` at AWAITING_FIX and only
-  # DIFFS it into `fix-touched-<r>` at the next --resume, so before this
-  # invocation the file does not exist yet. Without this the test could pass for
-  # the wrong reason (a NON-empty set would satisfy the retired condition 2 too,
-  # and prove nothing about its removal).
-  [ -f "$WD/fix-touched-2.txt" ]
-  [ ! -s "$WD/fix-touched-2.txt" ]
-  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED_WITH_RESIDUE" ]
-  # ...and the blocker is carried out as the remainder the residue branch files
+  [ "$status" -eq 13 ]
+  [ "$(echo "$output" | jq -r '.status')" = "BUDGET_EXHAUSTED" ]
+  [ "$(echo "$output" | jq '.rounds')" -eq 3 ]
   [ "$(echo "$output" | jq '.final_changelist.blocking | length')" -eq 1 ]
-  [ "$(echo "$output" | jq -r '.final_changelist.blocking[0].file')" = "touched.py" ]
+  [ "$(echo "$output" | jq -r '.next_ref')" = "reference/escalation.md" ]
 }
 
 @test "#1571 AC4 non-vacuity: a CRITICAL in that same sweep still refuses 14 (condition 1 bites)" {
@@ -3233,13 +3120,11 @@ pft_findings() {  # $1 = round
   [ "$(echo "$output" | jq '.final_changelist.summary.critical')" -eq 1 ]
 }
 
-@test "#1571 AC6: the SAME predicate decides at the nonconv rung — but only after #1498's free round" {
-  # Two rules meet here, and the ORDER is the assertion. A carried blocker that
-  # recurs trips non-convergence; #1498 grants one auto-continue for a POSSIBLE
-  # false trip; #1571 made residue permissive enough to swallow the whole rung
-  # if it were tested first. So: the auto-continue is spent FIRST (round 2),
-  # and residue catches the rung only afterwards (round 3) — the run neither
-  # escalates nor ships early.
+@test "#1498 the free round is spent first at the nonconv rung, and the next refused match escalates" {
+  # A carried blocker that recurs trips non-convergence; #1498 grants one
+  # auto-continue for a POSSIBLE false trip. The auto-continue is spent FIRST
+  # (round 2), and the rung escalates only afterwards (round 3). (#1571 had the
+  # residue terminal catch round 3; #2580 retired it.)
   echo "v0" > "$R/touched.py"
   printf '[{"severity":"WARNING","dimension":"bugs","file":"touched.py","line":100,"title":"unquoted expansion in the matcher","description":"d1","reviewer":"r"}]' > "$F"
   step --max-rounds 5
@@ -3254,16 +3139,12 @@ pft_findings() {  # $1 = round
   printf '[{"severity":"WARNING","dimension":"bugs","file":"touched.py","line":103,"title":"unquoted expansion in the dispatcher","description":"d2","reviewer":"r2"}]' > "$F"
   step --resume --max-rounds 5
   [ "$status" -eq 20 ]
-  # the free round was spent HERE, not a residue ending
+  # the free round was spent HERE, not an ending
   [ "$(echo "$output" | jq -r '.status')" = "AWAITING_FIX" ]
   [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 1 ]
-  [ "$(echo "$output" | jq -r '.status')" != "CONVERGED_WITH_RESIDUE" ]
 
-  # ...and the OTHER half of the title: residue catches the rung afterwards.
-  # Round 3 re-raises the same identity, the marker refuses a second free round,
-  # and the fall-through is now residue rather than an escalation. Without this
-  # the test asserted only that the auto-continue happened, never that residue
-  # still catches what it declines.
+  # ...and the OTHER half of the title: round 3 re-raises the same identity, the
+  # marker refuses a second free round, and the rung escalates.
   echo "v2" > "$R/touched.py"
   printf '[{"severity":"WARNING","dimension":"bugs","file":"touched.py","line":106,"title":"unquoted expansion in the matcher","description":"d3","reviewer":"r3"}]' > "$F"
   step --resume --max-rounds 5
@@ -3271,9 +3152,9 @@ pft_findings() {  # $1 = round
   # satisfied by a verdictless exit 1 and by a STALE_FINDINGS exit 2 alike — the
   # very shape AC4 above was just corrected to stop using, so leaving it here
   # would be the same defect one test down (#982).
-  [ "$status" -eq 20 ]
-  [ "$(echo "$output" | jq -r '.status')" = "AWAITING_FIX" ]
-  [ "$(cat "$WD/.closing-sweep")" = "4" ]
+  [ "$status" -eq 12 ]
+  [ "$(echo "$output" | jq -r '.status')" = "ESCALATE_NO_CONVERGENCE" ]
+  [ ! -e "$WD/.closing-sweep" ]
   [ "$(echo "$output" | jq '.possible_false_trip_auto_continues')" -eq 1 ]
 }
 

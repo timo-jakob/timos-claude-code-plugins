@@ -92,6 +92,12 @@ one would fall through to the generic "exited without converging" wording and
 tell the human the opposite of what happened.
 <!-- /moved: escalation-head -->
 
+**The residue terminal is retired (#2580).** The block above still sends a
+`CONVERGED_WITH_RESIDUE` exit to the residue branch; that can no longer happen.
+The loop never emits it, and a residue-shaped round ends `ESCALATE_NO_CONVERGENCE`
+or `BUDGET_EXHAUSTED`, which this terminal handles after the automatic grant and
+the clean stop above (unattended) or the interactive extension (attended).
+
 Read the extension first when the run is interactive and the loop exited
 `BUDGET_EXHAUSTED` or `ESCALATE_NO_CONVERGENCE`:
 see `reference/interactive/extension.md` § Interactive extension (#562-resume)

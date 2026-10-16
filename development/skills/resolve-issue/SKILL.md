@@ -15,11 +15,10 @@ description: >
   Go / JavaScript / Claude-plugin / Kubernetes). Composes git-branch-naming, commit, and open-pr; never pushes
   to the default branch. When a human is driving, a `BUDGET_EXHAUSTED` /
   non-converging review-loop exit becomes an interactive extension (offer more
-  rounds, give guidance, ask questions). A run whose only remaining blockers are
-  non-critical ends
-  `CONVERGED_WITH_RESIDUE` (exit 14) instead — declarable only from the closing
-  full sweep, so a delta round that qualifies promotes that sweep first: it opens
-  the PR and files the remainder as labelled follow-up issues — see [The local
+  rounds, give guidance, ask questions). CONVERGED is the only review-loop
+  ending that opens a PR: the residue terminal (exit 14) is retired, so a run
+  with non-critical blockers left takes the automatic grant and then the clean
+  stop when unattended, or the extension when a human drives — see [The local
   review
   loop](https://timo-jakob.github.io/timos-claude-code-plugins/explanation/review-loop/).
 disable-model-invocation: false
@@ -838,25 +837,13 @@ with a status JSON + code:
   dossier** (per-round blockers found/fixed, dimensions reviewed, waived Low
   suggestions, reviewers) lands in the PR body, with a hidden JSON block the
   Approver re-ingests (#563).
-- **`CONVERGED_WITH_RESIDUE`** (exit 14, #1435) → **also a convergence: it opens
-  the PR.** The loop reached an ending that would otherwise have been
-  `ESCALATE_NO_CONVERGENCE` or `BUDGET_EXHAUSTED`, and found BOTH surviving
-  residue conditions met: its last two rounds were both zero-CRITICAL, **and the
-  declaring round ran as a full sweep** (§9 — a delta round meeting the first
-  promotes that sweep instead of ending here, so this exit always speaks for the
-  whole story diff). Condition 2 — the blocker's file being in the previous
-  round's fix-touched set — was removed in #1571 because `scope-findings` already
-  confines every round's findings to the story diff. Rather than spend a human grant on
-  material the reviewers themselves called non-critical, the run ships and files
-  the remainder. Do **not** build an escalation comment, do **not** enter the
-  interactive extension, and do **not** re-run the loop: this is a terminal
-  success, and `build-escalation.zsh` has no arm for it by design. Continue
-  exactly as `CONVERGED` does — the suggestion-promotion offer (its gate is
-  unchanged) and the kept status JSON for the dossier — and then, **after that
-  phase has resolved and immediately before §4**, take the **residue branch**
-  below. Last, not first: it is the only step here that writes to GitHub before
-  the PR exists, and a promotion sub-loop can still escalate into a run that
-  opens none.
+- **Exit 14 is retired (#2580)** and is never reused. It was the residue terminal
+  (#1435), which opened the PR with non-critical blockers still open. The loop no
+  longer emits it, so **`CONVERGED` is the only review-loop ending that opens a
+  PR**: a residue-shaped round ends `ESCALATE_NO_CONVERGENCE` or
+  `BUDGET_EXHAUSTED` below, like any other round that cannot converge. The
+  residue branch it pointed to stays listed below, unreachable, until #2600
+  removes the filing path.
 - **`AWAITING_FIX` (20)** → not a verdict — the step-mode "narrate, fix
   in-session, `--resume`" turn of the round protocol above. Never build an
   escalation comment from it.
@@ -950,8 +937,8 @@ use and never echoing it), open the PR with
 then `GH_TOKEN="$(cat "$TOKEN_FILE")" gh pr merge <n> --auto --squash
 --delete-branch`. The PR body follows the template (Type / Summary /
 Test plan — include the Step 3 evidence) and carries `Closes #N`. When the review
-loop ran and reached a **PR-opening** terminal (§3.5) — `CONVERGED` **or**
-`CONVERGED_WITH_RESIDUE` (#1435); those two, and no escalation — append the
+loop ran and reached `CONVERGED` (§3.5) — the only PR-opening terminal
+since #2580 — append the
 **Review dossier** via
 `build-dossier.zsh` on the kept status JSON (#563) — appending its output
 **once**, whether or not the suggestion-promotion phase also ran. Two hidden
@@ -969,42 +956,8 @@ hunting for a status file to pass, which is exactly how a reused-scratch leftove
 gets folded into the audit record. Passing one promotion flag without the other is a usage
 error, not a fallback.
 
-**Residue in the PR body (#1435).** When the **blocking phase** ended
-`CONVERGED_WITH_RESIDUE` — the only phase that can, since the loop never declares
-residue in a promotion sub-loop — the Summary **names the residue ending**, how many
-follow-up issues were filed **and their numbers**, and the parent they were
-attached to. A residue PR that reads like an ordinary converged one is the single
-outcome this path must not produce — it is the first ending that opens a PR
-without a human seeing an escalation, and the body is where that is disclosed.
-Report the honest shape when the filing did not fully succeed, too: an empty plan
-(everything was already filed — name those pre-existing numbers), a **partly
-filtered** plan (some candidates were filed by an earlier run: name both sets and
-account for `open`, per the residue branch step 5), a builder failure (name the remaining
-blockers from the status JSON's `final_changelist.blocking` so they are not
-lost), a fail-open warning (a re-run may duplicate), or issues created but not
-parented — an unparented issue is never *filed*, so it counts as untracked when
-you apply the remainder rule, which is keyed on `final_changelist.blocking` and
-not on the plan's entries.
-The dossier rendered in the same body carries the terminal and the per-dimension
-`open` counts, so the Summary must not contradict those **counts** by implying
-the remainder was fixed.
-
-**Agreeing counts are not the whole duty.** The dossier's *wording* — "each was
-filed as a labelled follow-up issue", and per dimension "N still open (filed as
-follow-up issue(s))" — is gated on the **status alone**, so it renders
-identically whether the filing succeeded or never happened; `build-dossier.zsh`
-has no way to learn which. What the Summary owes on top of the counts is decided
-by **`reference/residue/step-1-plan.md`'s remainder rule** — count how much of
-`final_changelist.blocking` is
-filed (created AND parented, from this run or an earlier one) and take that row:
-none → the verbatim override sentence above the dossier; some → the
-reconciliation; all → the issue numbers.
-
-Read the rule there rather than a copy here, and never re-derive it from which
-arm the run took. A narrative mention of a filing failure does not discharge the
-verbatim sentence either: the machine-readable `open > 0` beside it is what
-`approver-policy-core` reads as scoped, disclosed, **tracked** risk, so only a
-sentence that contradicts the claim in words can override it.
+The residue Summary duty (#1435) went with its terminal (#2580): a run that
+opens its PR has no open blocker left to disclose.
 
 When the promotion **prompt was presented**, **name in the Summary** both
 counts — **how many suggestions the human picked, and how many the sub-loop
@@ -1492,10 +1445,12 @@ the readiness pre-flight (E1b)
 already proved every child **open at pre-flight** was `READY` before the first
 one starts, so nothing else needs a human mid-run.
 
-> **One thing DOES arrive mid-run, and it is not epic work (#1435).** A child
-> that ends `CONVERGED_WITH_RESIDUE` attaches its remainder to **this epic** as
-> native sub-issues labelled `review-residue` + `needs-refinement`. They are open
-> children from the moment they are filed, and they were never gated — so
+> **Residue children are not epic work (#1435).** Until #2580 retired the
+> residue terminal (exit 14), a child that ended with residue attached its
+> remainder to **this epic** as native sub-issues labelled `review-residue` +
+> `needs-refinement`; no child files one any more, but those already filed are
+> still on the board. They are open children from the moment they are filed,
+> and they were never gated — so
 > **never walk them in this invocation**: they are findings, not stories, and
 > building code from a finding title is exactly what E1b exists to prevent. Do
 > not re-enumerate the epic's children mid-run and pick one up. Record them in
@@ -1706,11 +1661,11 @@ self-contained record. Only after this
 is the epic truly done — report it closed, with the PR/verification table.
 
 > **A child that ended in residue leaves the epic OPEN, and that is the correct
-> outcome (#1435).** A child resolving under this epic can end
-> `CONVERGED_WITH_RESIDUE`, and its residue branch attaches the remainder to
-> **this epic** as native sub-issues labelled `review-residue` +
-> `needs-refinement` (the same pair E3's note names). They are open
-> children the moment they are filed, so:
+> outcome (#1435).** Until #2580 retired the residue terminal, a child resolved
+> under this epic could end with residue, and its residue branch attached the
+> remainder to **this epic** as native sub-issues labelled `review-residue` +
+> `needs-refinement` (the same pair E3's note names). Those already filed are
+> open children, so:
 >
 > - **E5 must not close the epic.** The positive-evidence rule wants
 >   `total == completed`, and it does not hold. Do **not** special-case them out

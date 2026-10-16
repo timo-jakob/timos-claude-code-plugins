@@ -4602,9 +4602,10 @@ are the auto-continued clear false trips (a subset of `blocking`,
 `resolve-story-loop.zsh` ties the gate (#559), the diff-scoped panel (#560), and
 the consolidator (#561) into an autonomous implement→review→fix loop that runs
 **entirely in the worktree** — nothing is pushed and no PR is opened until it
-exits `CONVERGED` (0) or `CONVERGED_WITH_RESIDUE` (14, #1435). Those two are the
-**only** PR-opening terminals; no escalation has ever opened one, and residue is
-a convergence rather than an exception to that. It sits in
+exits `CONVERGED` (0). **`CONVERGED` is the only review-loop ending that opens a
+PR**; no escalation has ever opened one. The residue terminal #1435 added beside
+it (exit 14) is retired by #2580 — see *The residue terminal — retired* below.
+It sits in
 `/development:resolve-issue` between validate
 (step 3) and open-pr, so CI minutes are only spent on code a panel has already
 converged on. Constants live at the top: `MAX_REVIEW_ROUNDS=5`,
@@ -4856,89 +4857,40 @@ than a refusal, so it cannot pre-empt the more specific `STALE_FINDINGS`
 findings guards. With nothing carried either, both wirings refuse for the
 simpler reason — no reviewer saw anything.
 
-### Residue: `CONVERGED_WITH_RESIDUE` (#1435)
+### The residue terminal — retired (#1435, #2580)
 
-**The blocking rule is severity-only** — `BLOCKING_SEVERITIES=(CRITICAL WARNING)`
-— and **the non-convergence signal measures identity-recurrence**, which
-false-trips because fixes cluster in the same few files. Together they made the
-run on #687 ask a human for more rounds while telling itself the request was
-probably noise: rounds 7-9 produced 49 blocking findings and **zero** Criticals,
-and the blocking trend (34 → 15 → 10 → 5 → 7 → 8 → 15 → 17 → 17) never returned
-to zero, so the only endings left were `BUDGET_EXHAUSTED` and
-`ESCALATE_NO_CONVERGENCE`. Neither is the right verdict for a change whose
-remaining findings are all in the implementer's own last-round edits.
+**#1435 gave the loop a third ending, and #2580 took it away.** A run whose
+remaining blockers were all non-critical could end `CONVERGED_WITH_RESIDUE`
+(exit 14): the last two rounds zero-CRITICAL and the declaring round a full
+sweep, it opened the PR and filed the remainder as `review-residue` follow-ups.
+That shipped known open blockers to `main` — #2122 merged as PR #2574 with five
+open warnings — which a stable build cannot accept, however well the blockers
+are tracked.
 
-So the loop has a third ending. **Conditions 1 and 3, BOTH required:**
+**What is gone.** The residue predicate (`_residue_holds`), both of its ladder
+rungs, and the delta-round promotion of the closing sweep that existed only so
+that exit 14 would speak for the whole diff. A residue-shaped round now ends the
+way it did before #1435: `ESCALATE_NO_CONVERGENCE` (12) at a non-converging
+rung, `BUDGET_EXHAUSTED` (13) at the ceiling. Unattended, the automatic grant
+(#2576) buys rounds under the raised bar (#2577), and the clean stop (#2579)
+ends a run that still cannot converge; attended, the interactive extension
+offers rounds, guidance or a stop. Neither opens a PR.
 
-- **Condition 1** — the last **two** rounds' changelists both report
-  `.summary.critical == 0`; and
-- **Condition 3** — the declaring round ran as a **full sweep**
-  (`scope_mode == "full"`).
-
-**The numbering gap is deliberate (#1571).** Condition 2 — *every remaining
-blocking finding's `.file` is in the previous round's fix-touched set* — was
-**removed**, and the surviving two keep their original numbers so that every
-surface naming "condition 3" still names the full-sweep rule.
-
-**Why condition 2 went, and why nothing replaces it.** Its guarantee — the
-residue lives in what this story wrote, not in shipped behaviour nobody has just
-rewritten — is real and still holds, because it is enforced **upstream**:
-`review-dispatch.zsh scope-findings` filters every round's findings to the story
-diff before consolidation, and `$scoped` is the only input to the changelist's
-`.blocking`. Every blocker that reaches the residue predicate is therefore in the
-story diff *by construction*, and re-testing it there would be a test that can
-never fail. Its **round**-granular reading was also what made the terminal
-unreachable from the closing sweep: the promoting round runs no fix pass, so its
-fix-touched set is deliberately empty, and against an empty set every blocker
-counted as "outside".
-
-**Condition 3 is what makes the dossier's claim true rather than merely
-well-formed.** #1434 guarantees `CONVERGED` is only ever reached from a full
-sweep, but it earns that sweep only on a **zero-blocker** delta round — and a
-residue round never returns zero, so the sweep would never be earned. Condition
-1 is satisfiable on any delta round with a plateaued trend, which is the
-ordinary case rather than an exotic one, so without condition 3 the loop opens a
-PR having reviewed only the slices the deltas happened to cover. That is not
-hypothetical: the run that motivated this amendment declared residue off a delta
-round, and the full sweep that followed — only because an unrelated recovery
-forced one — found ten blockers in files no delta scope had ever contained,
-including a residue arm carrying zero tests whose catch-all reports such runs as
-*failures*.
-
-So a **delta** round whose other two conditions hold does not exit 14. It
-promotes the closing full sweep exactly as a zero-blocker delta round does —
-same `<work-dir>/.closing-sweep` marker, same one-round grant beyond
-`--max-rounds` — and exits `AWAITING_FIX` (step mode) or continues (hook mode),
-so the sweep actually runs. Only that sweep may declare 14, against the whole
-story diff. Two consequences, both intended: a residue ending costs **one more
-review round** than a delta-declared rule would, and the residue set is then the sweep's own. #1434's existing
-promotion trigger is untouched — this is a second trigger, not a replacement.
-
-**Never in the promotion sub-loop.** Its blockers are the human's own promoted
-picks, and #994 contracts those as *treated as blocking, not quietly re-waived* —
-which is exactly what residue would do, filing the human's explicit request back
-to them as a follow-up. Gating it there also keeps residue **single-phase**,
-which is what lets every downstream surface state one thing: residue always comes
-from the blocking phase, so its blockers are always the ones the residue branch
-files, and the dossier, the Approver policy and §6's Summary each need one rule
-rather than a per-phase qualifier.
-
-**Placement is the safety rail.** The residue check is evaluated **only** where
-the loop would otherwise choose `ESCALATE_NO_CONVERGENCE` or
-`BUDGET_EXHAUSTED`. It never pre-empts `CONVERGED` (zero blockers still wins),
-`ESCALATE_CONFLICT`, `ESCALATE_AMBIGUOUS`, or an `AWAITING_FIX` round that still
-has budget — the loop keeps *fixing* while there is budget, and residue only
-replaces an *ending*. That placement is also what demotes identity-recurrence
-from sole trigger to one input: a `non_converging` blocker still ends the loop,
-it just no longer decides **how**. Round 1 is structurally unreachable — there
-is no second changelist to prove the CRITICAL window.
+**What stays.** The zero-blocker promotion of the closing sweep (#1434), so
+`CONVERGED` is still only ever declared on a full sweep. Exit code 14 is
+retired, never reused, so an old record or caller reading it still means only
+that. The status JSON keeps `residue_replaced_reasons`, always `[]` now, for the
+reason `promotion_phase` and `closing_sweep_granted` are always present. The
+rollup and the convergence-rate recipes below keep counting historical
+`CONVERGED_WITH_RESIDUE` records as a success, because those runs did open
+their PR. The fix-touched capture and its `class` stamp outlived the predicate
+that once also read them:
 
 **The fix-touched set** is `<work-dir>/fix-touched-<round>.txt`: repo-relative
 paths, one per line, `./`-normalised and excluding `.review/` and
 `.claude/telemetry/` — the **same** normalisation and exclusions as
 `review-dispatch.zsh`'s `_normalise_paths`, so the `class` stamp and the review
-scope can never disagree about what counts as a repo path. (Until #1571 the
-residue test shared that rule too; it no longer reads the set at all.) Both ends are
+scope can never disagree about what counts as a repo path. Both ends are
 `git write-tree` identities (`git-tree-id.zsh`), diffed with `diff-tree`, so
 tracked edits, deletions and untracked additions compare by one uniform rule. It
 is **file-set membership, not hunk-level**: it matches the finding's own `.file`
@@ -4959,9 +4911,8 @@ suite that writes into the tree must not be charged to the session's fix pass).
 Every failure to compute it leaves **no** file. An **absent** set makes the loop
 omit `--fix-touched` entirely, so no blocker is stamped at all — which is how a
 reader tells *no fix-touched information* from *the fix pass touched nothing* (an
-**empty** set, which stamps every blocker `new_defect`). Since #1571 that costs
-the round's `class` and its `by class:` row, **not** its residue eligibility: the
-predicate no longer reads this set.
+**empty** set, which stamps every blocker `new_defect`). It costs the round's
+`class` and its `by class:` row, and nothing else: no verdict reads the set.
 
 **The class**, derived by `consolidate-findings.zsh --fix-touched` and stamped on
 each `blocking[]` item exactly as `false_trip` and `promoted` are:
@@ -4987,31 +4938,10 @@ turns collapsing from advisory into mandatory, is stated once in
 (*A fix pass subtracts*); `class` is how compliance is measured, not enforced,
 and nothing here restates the rule.
 
-**The CRITICAL count has exactly one source**: `<work-dir>/changelist-<N>.json`,
-which persists across `--resume` because the work-dir accumulators do.
-`history.jsonl`'s per-round line gains **no** residue-derived key — no `class`,
-no `fix_touched`, no residue counter. (It legitimately carries #1434's
-`adjudicated_dropped` as a sixth key and #1973's `gate` as a seventh; the
-invariant here is a negative on the residue keys, not a closed key set.)
-
-**`escalation_reasons` keeps its one meaning on the residue terminal.** The
-reasons are the changelist's, and on the non-convergence rung that changelist
-necessarily carries `non_converging_blocker` — that is *why* the rung was
-reached. Copied through, a run this state exists to call a success would report
-that it escalated, and the two rungs would report different shapes. So on
-`CONVERGED_WITH_RESIDUE` the loop emits `escalation_reasons: []` and moves them
-to **`residue_replaced_reasons`** — always present (`[]` on every other status,
-the same argument `promotion_phase` and `closing_sweep_granted` carry), recording
-what residue took the place of. `progress.md`'s `**Final:**` line renders them as
-`— residue replaced: …` rather than as an escalation.
-
-**Telemetry**: `CONVERGED_WITH_RESIDUE` maps to `outcome: "success"` in the
-loop's `$st` case — named explicitly, never left to the deliberate
-`*) failed` catch-all — and `payload.escalation` correctly stays `null` (it
-tests `^ESCALATE_` / `BUDGET_EXHAUSTED`). `build-escalation.zsh` grows **no**
-arm for the status: residue never escalates, and a comment built from one would
-fall through to the generic "exited without converging" wording and tell the
-human the opposite of what happened.
+`history.jsonl`'s per-round line carries no residue-derived key — no `class`,
+no `fix_touched`, no residue counter — and none is added now that the terminal is
+gone. (It legitimately carries #1434's `adjudicated_dropped` as a sixth key
+and #1973's `gate` as a seventh.)
 
 **The cadence guard (#1435 §10).** A round's per-blocker `class` — and the audit
 record built on it — is only as true as the fix-touched set it reads, and that
@@ -5139,7 +5069,7 @@ band by `record-grant.zsh` into `<work-dir>/.max-rounds` and adopted on the next
 feed the blockers-only slice to the fix hook, re-run the gate, and loop. Reaching
 the last round with blockers still open ⇒ `BUDGET_EXHAUSTED`; an unpickable repo
 type from dispatch ⇒ `ESCALATE_AMBIGUOUS`. Each state is a distinct exit code
-(0 `CONVERGED`/`SKIPPED`; 14 `CONVERGED_WITH_RESIDUE`; 20 `AWAITING_FIX` — step
+(0 `CONVERGED`/`SKIPPED`; 14 retired by #2580, never reused; 20 `AWAITING_FIX` — step
 mode's non-terminal
 "blockers remain, budget left, fix in-session then `--resume`"; 10 ambiguous;
 11 conflict; 12 no-convergence; 13 budget; 2 usage; 1 operational — e.g. a red
@@ -5154,8 +5084,7 @@ relative to the resolve-issue skill's base directory, never to the repo under
 work, since the plugin lives in the plugin cache. It is **always present** and
 set by a closed table: `AWAITING_FIX` →
 `reference/review-loop/exit-20-awaiting-fix.md`; `STALE_FINDINGS`, every cause →
-`reference/review-loop/exit-2-stale-findings.md`; `CONVERGED_WITH_RESIDUE` →
-`reference/residue/branch.md`; every `ESCALATE_*` and `BUDGET_EXHAUSTED` →
+`reference/review-loop/exit-2-stale-findings.md`; every `ESCALATE_*` and `BUDGET_EXHAUSTED` →
 `reference/escalation.md`; every other status (`CONVERGED`, `SKIPPED`,
 `ERROR`) → `null`. A usage error writes no status JSON, so it carries none —
 and where `topic_review_skills` (#1072) is the
@@ -5400,7 +5329,7 @@ tree equals the held hex and whose summary is that proof; the remembered
 identity is the backstop for a session that skipped that gate. **The control
 point is therefore the gate before a
 full-scope round.** open-pr never reads the attestation, but the loop declares
-`CONVERGED` and `CONVERGED_WITH_RESIDUE` only on a full-scope round, and the
+`CONVERGED` only on a full-scope round, and the
 gate before one is always full — so a selector that misses a dependency costs a
 round (the closing sweep or CI catches it), never a shipped regression.
 
@@ -5457,8 +5386,8 @@ The interactive extension is driven by `build-escalation.zsh --format summary`,
 which renders the same status data the escalation comment carries, but
 conversationally (no options list, no branch note, no marker).
 
-`CONVERGED` and `CONVERGED_WITH_RESIDUE` proceed to commit + open-pr; no
-escalation ever opens a PR
+Only `CONVERGED` proceeds to commit + open-pr — the residue terminal that also
+did is retired (#2580) — and no escalation ever opens a PR
 (a draft would trigger CI, defeating the local loop). On an **autonomous** run —
 and on `ESCALATE_CONFLICT` / `ESCALATE_AMBIGUOUS` always — the escalation is
 surfaced as a `needs-human-decision` issue comment (#564). On an **interactive**
@@ -6270,13 +6199,13 @@ already had: a `.jsonl` file **directly** inside the directory — the emitter's
 own write pattern — is dropped from the review scope, the fix-touched set and
 the scoped findings, and only while the directory is the effective sink. The
 loop's own `status` narrows onto the contract's 4-value `outcome` enum:
-`CONVERGED`, `CONVERGED_WITH_RESIDUE` (#1435) and `SKIPPED` → `success`, every
-`ESCALATE_*` and
+`CONVERGED` and `SKIPPED` → `success`, every `ESCALATE_*` and
 `BUDGET_EXHAUSTED` → `escalated`, `ERROR` → `failed`. Nothing is lost, because
 the exact status stays in the payload; the catch-all is `failed` rather than a
-guess, so a status added later is never silently counted a success — which is
-exactly why `CONVERGED_WITH_RESIDUE` had to be named in the mapping (and in both
-copies of it here) rather than assumed to land right.
+guess, so a status added later is never silently counted a success. The loop
+has no arm for `CONVERGED_WITH_RESIDUE` (#1435) since #2580 retired it, but the
+legacy attribution above still names it, so a historical record carrying it is
+read as the success it was.
 
 `build-telemetry-record.zsh` builds that **payload** deterministically from the
 loop's status JSON — it is a payload builder, not a record builder, and carries
@@ -6634,7 +6563,7 @@ record's `run_id`, as it always was.
 | `outcome` | When |
 |---|---|
 | *(no record)* | the run stopped in Step 0, before the precheck: empty arguments, a usage error, the issue not `OPEN`, the issue outside the session repo, a classification failure, the near-miss halt. An epic target gets an **epic** record instead (*Epic mode* below) |
-| `success` | a PR was opened (after `CONVERGED` or `CONVERGED_WITH_RESIDUE`, or after a `--no-review` skip of the loop) |
+| `success` | a PR was opened (after `CONVERGED` — or, on a run before #2580 retired it, `CONVERGED_WITH_RESIDUE` — or after a `--no-review` skip of the loop) |
 | `parked` | the readiness gate returned `NEEDS_REFINEMENT`, or the run ended with its last dependency precheck a rejection — autonomously, on a declined or partial remediation, or on a rejecting re-verification |
 | `escalated` | the run ended on a **loop invocation that exited** `ESCALATE_*` / `BUDGET_EXHAUSTED` |
 | `failed` | any other ending after Step 0a — the last precheck errored, abandoned on a red gate, errored out, or stopped before any loop invocation (a `review-dispatch.zsh plan` failure included, whatever the loop would have called that condition) |

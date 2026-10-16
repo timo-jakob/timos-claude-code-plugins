@@ -4,6 +4,12 @@
      its numbering cannot restart at 1 here. -->
 <!-- markdownlint-disable MD029 -->
 
+**The residue terminal is retired (#2580).** The block below still names
+`CONVERGED_WITH_RESIDUE` (exit 14) as a blocking-phase ending that orders the
+residue branch first; the loop no longer emits it, so the phase only ever
+follows `CONVERGED`, and the sub-loop's exit 14 stays as unreachable as the
+block already says.
+
 <!-- moved: suggestion-promotion-step-7 -->
 7. **Terminal.** The sub-loop clearing the promoted set is the run's final
    `CONVERGED` → continue to **§4 (Version bump)**, taking the **residue branch**
