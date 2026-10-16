@@ -4662,9 +4662,9 @@ bytes** and the index at most 3,000. `review-loop.md` is the first so split:
 `reference/review-loop/` holds `core.md` (`## The round protocol`), the step and
 exit shards, the passes, `carry.md`, `subagents.md` and `briefs/<name>.md`, one
 per round subagent, which `development/agents/round-<name>.md` points at.
-`residue.md` is the second (#2056): `reference/residue/` holds `branch.md` (the
-retired exit-14 entry point), `risk-threshold.md` and `condition-2-removed.md`;
-issue #2600 deleted its three filing-step shards with the filing path. `promotion.md` is the third
+`residue.md` is the second (#2056): `reference/residue/` now holds only
+`risk-threshold.md`, which the risk pass reads; issues #2600 and #2601 deleted
+the residue branch's other shards with the retired ending. `promotion.md` is the third
 (#2057): `reference/promotion/` holds `gate.md` (the gate and steps 1–2),
 `step-3-select.md`, `step-4-sub-loop.md` (steps 4–6), `step-7-terminal.md` and
 `step-8-status-files.md`. `interactive.md` is the fourth and last (#2058):

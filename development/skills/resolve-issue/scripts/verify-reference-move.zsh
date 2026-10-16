@@ -184,8 +184,6 @@ MANIFEST=(
 "
 "round-protocol-steps-3-4	review-loop/exit-20-awaiting-fix.md	3. **On \`AWAITING_FIX\` (exit 20)** — the round is over and the run continues.	   is how the two statements of it came to disagree once already.
 "
-"residue-branch	residue/branch.md	Runs **only** on \`CONVERGED_WITH_RESIDUE\` (exit 14). The loop has already	blocking phase from scratch and will re-derive them.
-"
 "suggestion-promotion	promotion/gate.md	Low suggestions never block, so every one the panel raises is **waived** the	   entitled to know that before they pick, not after.
 "
 "suggestion-promotion-step-3	promotion/step-3-select.md	3. **Multi-select** which to promote (0..N) with \`AskUserQuestion\`	     run does.
