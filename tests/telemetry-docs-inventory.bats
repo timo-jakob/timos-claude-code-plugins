@@ -16,6 +16,10 @@
 # skipped_dimensions_by_round come out empty, so their sub-keys are unchecked
 # until #2610.
 #
+# The epic-mode table's four closed value sets (mode, e1_classification, e4's
+# result, failure_cause) are compared with the values the epic builder's own
+# validation accepts (#2597), so a value the builder gains or loses reds here.
+#
 # WHY THE JOIN EXAMPLES ARE EXECUTED: the page promises a runnable query. Each
 # bash block in the join section is run against a small all-pipeline fixture
 # sink, and its output must equal the json block the page prints after it, so
@@ -145,6 +149,73 @@ table_matches_builder() {
   done < <(section "### $1" "$2" | grep '^| `')
 }
 
+# The values build-epic-telemetry-record.zsh accepts for epic-mode field $1, one
+# per line. For `mode`, the `mode: "…"` literal the payload writes; for every
+# other field, the strings of the `enum([...])` literal in the validation clause
+# testing `$s.<path>` (`e4` is tested as `$s.e4.result`), plus `null` where that
+# clause accepts null. The source is cut into clauses at each `( if `, so an
+# enum literal spanning lines is read whole; comment lines are never read.
+EPIC_BUILDER_REL="development/skills/resolve-issue/scripts/build-epic-telemetry-record.zsh"
+epic_builder_values() {
+  local src path clause
+  src="$(grep -v '^ *#' "$REPO_ROOT/$EPIC_BUILDER_REL")"
+  if [ "$1" = mode ]; then
+    sed -n 's/^ *mode: "\([^"]*\)",*$/\1/p' <<<"$src"
+    return
+  fi
+  path="$1"; [ "$1" = e4 ] && path="e4.result"
+  clause="$(tr '\n' ' ' <<<"$src" | awk '{ gsub(/\( if /, "\n"); print }' \
+    | grep -F "\$s.$path " | grep -F 'enum([' | sed -n 1p)"
+  [ -n "$clause" ] || { echo "no enum clause for \$s.$path in the builder" >&2; return 1; }
+  sed 's/.*enum(\[//; s/\]).*//' <<<"$clause" | grep -o '"[^"]*"' | tr -d '"'
+  if grep -qF "(\$s.$path == null or" <<<"$clause"; then echo null; fi
+}
+
+# The values the epic-mode table's row for key $1 documents on page $2, one per
+# line: the backticked tokens of its Meaning cell, minus any token naming a
+# sub-key of that field in the builder's emitted payload (`ran`, `result` for
+# `e4`). `null` is a value like any other.
+epic_doc_values() {
+  local row subkeys
+  row="$(section "### resolve-issue, epic mode" "$2" | grep -F "| \`$1\` |" | sed -n 1p)"
+  [ -n "$row" ] || { echo "no \`$1\` row in the epic-mode table" >&2; return 1; }
+  subkeys="$(builder_payload "resolve-issue, epic mode" \
+    | jq -r --arg k "$1" '.[$k] | if type == "object" then keys[] else empty end')"
+  awk -F'|' '{ print $4 }' <<<"$row" | grep -o '`[^`]*`' | tr -d '`' \
+    | grep -vxF -e "${subkeys:-}" -e '' | LC_ALL=C sort -u
+}
+
+# Status 0 when the epic-mode table's row for key $1 on page $2 documents
+# exactly the values the builder accepts. A documented value ending in `*` is a
+# prefix (`halt_*`): it must match at least one builder value, and the builder
+# values it matches count as documented. Every other documented value must be a
+# builder value, and every builder value must be documented.
+enum_row_matches_builder() {
+  local doc built d b p hit
+  doc="$(epic_doc_values "$1" "$2")" || return 1
+  built="$(epic_builder_values "$1")" || return 1
+  [ -n "$doc" ] || { echo "the epic-mode \`$1\` row documents no value" >&2; return 1; }
+  [ -n "$built" ] || { echo "the builder accepts no value for \`$1\`" >&2; return 1; }
+  while IFS= read -r d; do
+    if [[ "$d" == *'*' ]]; then
+      p="${d%\*}"; hit=""
+      while IFS= read -r b; do [[ "$b" == "$p"* ]] && hit=1; done <<<"$built"
+      [ -n "$hit" ] || { echo "epic-mode \`$1\`: \`$d\` matches no value the builder accepts" >&2; return 1; }
+    else
+      grep -qxF -e "$d" <<<"$built" || { echo "epic-mode \`$1\`: \`$d\` is documented, the builder does not accept it" >&2; return 1; }
+    fi
+  done <<<"$doc"
+  while IFS= read -r b; do
+    grep -qxF -e "$b" <<<"$doc" && continue
+    hit=""
+    while IFS= read -r d; do [[ "$d" == *'*' && "$b" == "${d%\*}"* ]] && hit=1; done <<<"$doc"
+    [ -n "$hit" ] || { echo "epic-mode \`$1\`: the builder accepts \`$b\`, the table does not document it" >&2; return 1; }
+  done <<<"$built"
+}
+
+# The epic-mode rows whose Meaning cell is a closed value set (#2597).
+EPIC_ENUM_ROWS=(mode e1_classification e4 failure_cause)
+
 # Every payload table the page carries — the heading list itself is pinned, so
 # a new table without a builder mapping reds rather than going unchecked.
 PAYLOAD_TABLES=(
@@ -253,6 +324,20 @@ join_example_holds() {
   for t in "${PAYLOAD_TABLES[@]}"; do
     table_matches_builder "$t" "$HOWTO"
   done
+}
+
+@test "the epic-mode table's closed value sets are exactly the values the builder accepts" {
+  local k
+  for k in "${EPIC_ENUM_ROWS[@]}"; do
+    enum_row_matches_builder "$k" "$HOWTO"
+  done
+  # what each side reads, pinned, so a parser that silently reads nothing — or
+  # reads the header comment — cannot pass by comparing two empty sets
+  [ "$(epic_doc_values e4 "$HOWTO" | tr '\n' ' ')" = "green null regression " ]
+  [ "$(epic_doc_values failure_cause "$HOWTO" | tr '\n' ' ')" = "e4_error e4_regression e5_error error null " ]
+  [ "$(epic_builder_values e4 | LC_ALL=C sort | tr '\n' ' ')" = "green null regression " ]
+  [ "$(epic_builder_values e1_classification | grep -c '^halt_')" -ge 1 ]
+  [ "$(epic_builder_values mode)" = "epic" ]
 }
 
 @test "the page states the tables are the user-facing key list and names the normative sections" {
@@ -403,6 +488,37 @@ join_example_holds() {
   # and the untouched page passes the same function
   run table_matches_builder "approve" "$HOWTO"
   [ "$status" -eq 0 ]
+}
+
+@test "non-vacuity: an epic-mode value removed from, or added to, a row reds the builder comparison" {
+  local fx="$W/howto.md"
+  # $1 = row key, $2 = the sed edit: it must change the page, and the changed
+  # page must red the comparison for that row
+  mutant_reds() {
+    sed "$2" "$HOWTO" > "$fx"
+    run diff -q "$HOWTO" "$fx"
+    [ "$status" -ne 0 ] || { echo "the edit changed nothing: $2" >&2; return 1; }
+    run enum_row_matches_builder "$1" "$fx"
+    [ "$status" -eq 1 ] || { echo "the comparison survived: $2" >&2; return 1; }
+  }
+  # one value removed from each row
+  mutant_reds mode '/^| `mode` | string | always `epic` |$/ s/always `epic`/always/'
+  mutant_reds e1_classification '/^| `e1_classification` |/ s/ `backfilled`,//'
+  mutant_reds e1_classification '/^| `e1_classification` |/ s/, or a `halt_\*` value//'
+  mutant_reds e4 '/^| `e4` |/ s/`green`, `regression` or/`green` or/'
+  mutant_reds failure_cause '/^| `failure_cause` |/ s/`e4_error`, `e5_error` or/`e4_error` or/'
+  mutant_reds failure_cause '/^| `failure_cause` |/ s/; `null` otherwise//'
+  # one value the builder does not accept added to each row
+  mutant_reds mode '/^| `mode` | string | always `epic` |$/ s/always `epic`/always `epic` or `story`/'
+  mutant_reds e1_classification '/^| `e1_classification` |/ s/`inline_slices`,/`inline_slices`, `retried`,/'
+  mutant_reds e4 '/^| `e4` |/ s/`regression` or/`regression`, `skipped` or/'
+  mutant_reds failure_cause '/^| `failure_cause` |/ s/`e5_error` or/`e5_error`, `e6_error` or/'
+  # and the untouched page passes the same function, row by row
+  local k
+  for k in "${EPIC_ENUM_ROWS[@]}"; do
+    run enum_row_matches_builder "$k" "$HOWTO"
+    [ "$status" -eq 0 ]
+  done
 }
 
 @test "non-vacuity: a join example whose query or documented output drifts reds" {
