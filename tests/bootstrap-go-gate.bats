@@ -340,8 +340,8 @@ gate_with() {
   [ "$(yq -r '.jobs.gate.steps[4].run' "$wf")" = 'make check' ]
   # the gate command, then only the two upload steps (#2614)
   [ "$(yq -r '.jobs.gate.steps | length' "$wf")" = 7 ]
-  [ "$(yq -r '[.jobs.gate.steps[5:][] | .uses] | unique | join(",")' "$wf")" = \
-    'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9' ]
+  [ "$(yq -r '.jobs.gate.steps[5].uses' "$wf")" = 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9' ]
+  [ "$(yq -r '.jobs.gate.steps[6].uses' "$wf")" = 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9' ]
   if command -v yamllint >/dev/null 2>&1; then
     run yamllint -c "$REPO_ROOT/.yamllint" --strict "$wf"
     [ "$status" -eq 0 ] || { echo "$output"; false; }
