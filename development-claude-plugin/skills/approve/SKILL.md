@@ -4,9 +4,10 @@ description: >
   Review a claude-plugin PR and post the verdict as the Claude Approver —
   ONLY when CLAUDE_PLUGIN_APPROVER=1 opts this session in (a plugin repo is
   otherwise human-only). Without a registered + installed Approver App it is a
-  clean no-op: a human approves. Changes to workflows, to the approval
-  machinery, or with review residue always go to a human. Pass a PR number or
-  use the current branch's PR.
+  clean no-op: a human approves. Changes to workflows or to the approval
+  machinery always go to a human; a PR whose review dossier still reports open
+  blockers is refused with REQUEST_CHANGES, since the review loop never opens
+  one. Pass a PR number or use the current branch's PR.
 disable-model-invocation: false
 ---
 
@@ -95,8 +96,8 @@ The bar's result holds only for the head and body it judged, so the block
 records both: `HEAD_SHA`, read first, before the body and paths, and
 `BODY_SHA256`, the SHA-256 of the exact body file the bar reads. The agent
 re-checks both against the live PR just before it posts (its Step 12). The
-block prints them with `SCRATCH` and `BAR_RC`; later steps take these values
-verbatim from that output, never from a fresh `gh` read.
+block prints them with `SCRATCH` and `BAR_RC`, then the bar's `hit=` lines; later
+steps take these values verbatim from that output, never from a fresh `gh` read.
 
 ```bash
 PR_NUMBER=<the PR_NUMBER Step 1 printed>; REPO=<the REPO Step 1 printed>
@@ -115,6 +116,7 @@ BAR_RC=0
 "<skill-base-dir>/scripts/never-approve-bar.zsh" --body "$SCRATCH/body" --paths "$SCRATCH/paths" \
   > "$SCRATCH/bar" || BAR_RC=$?
 printf 'SCRATCH=%s\nHEAD_SHA=%s\nBODY_SHA256=%s\nBAR_RC=%s\n' "$SCRATCH" "$HEAD_SHA" "$BODY_SHA256" "$BAR_RC"
+cat "$SCRATCH/bar"
 ```
 
 - `BAR_RC` 0 → clear (`$SCRATCH/bar` is empty); 3 → hit (one `hit=` line per
@@ -184,7 +186,10 @@ rm -rf "$TOKEN_FILE" "$SCRATCH"
 
 Print the posted verdict, the review URL and the agent's full output
 (human-readable verdict, findings and the hidden JSON block). When the bar hit,
-say "Needs a human" and list every `hit=` line. If the agent posted nothing (a
+take the `hit=` lines from Step 3's output — Step 5 has removed `$SCRATCH` — and
+list every `hit=` line: a `hit=residue` line as the finding that made the
+verdict `REQUEST_CHANGES`, and the workflow and approval-machinery lines under
+"Needs a human". If the agent posted nothing (a
 head or body change, a failed re-read, unsettled CI or a conflicting PR), say
 that no review was posted, give the reason, and say to re-run
 `/development-claude-plugin:approve` — never report its derived verdict as posted.
@@ -198,8 +203,9 @@ that no review was posted, give the reason, and say to re-run
   removed after the run.
 - **Review is posted as `claude-approver-<owner>[bot]`**, a read-only identity
   distinct from the Maintenance App that authored the PR.
-- **The never-approve bar is a script, not a judgment**: residue, workflow
-  changes and approval/identity machinery always reach a human. Its result
+- **The never-approve bar is a script, not a judgment**: workflow changes and
+  approval/identity machinery always reach a human, and residue (`open > 0`) is
+  refused as a backstop finding, since the review loop never opens such a PR. Its result
   holds only for the head SHA and body it judged: a push or a body edit before
   the post means no review is posted, and the review that is posted is pinned
   to that head with `commit_id`.

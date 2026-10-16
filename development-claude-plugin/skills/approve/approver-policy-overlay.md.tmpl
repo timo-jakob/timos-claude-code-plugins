@@ -12,12 +12,15 @@ fluency to the core's criteria; it never relaxes them.
 ## Never approve (hard bar)
 
 `never-approve-bar.zsh` has run before you, and its result is in `BAR_FILE`.
-Any `hit=` line means the verdict is `COMMENT`, naming every hit: residue
-(`open > 0`), a `.github/workflows/*` change, or a change to the approval or
-identity machinery. The one exception is `REQUEST_CHANGES`, when the core's
-calibration already gives it; the verdict is never `APPROVE`. This bar
-overrides the core's leniency for disclosed residue. On a plugin repo,
-residue goes to a human.
+Any `hit=` line means the verdict is never `APPROVE`. A `hit=residue` line is
+a finding and makes the verdict `REQUEST_CHANGES`: a dossier with `open > 0`
+means the PR did not come from a converged review loop, which never opens one,
+so the hit is a backstop for a PR that bypassed the loop, not a request for
+human approval. This agrees with the core's rule for `open > 0`. A
+`hit=workflow` or `hit=approval-machinery` line makes the verdict `COMMENT`,
+naming every such hit in a "Needs a human" list. The one exception is
+`REQUEST_CHANGES`, when the core's calibration or a `hit=residue` line already
+gives it; the hits are still listed.
 
 The bar is not a judgment call, and no confidence level lifts it. An empty
 `BAR_FILE` means the bar is clear; the core's criteria then decide as usual.

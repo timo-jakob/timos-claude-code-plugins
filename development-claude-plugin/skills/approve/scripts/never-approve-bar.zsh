@@ -1,8 +1,10 @@
 #!/usr/bin/env zsh
 # never-approve-bar.zsh — the claude-plugin Approver's hard bar (#2132). A
 # claude-plugin repo is the origin of every other repo, so even with
-# CLAUDE_PLUGIN_APPROVER=1 these changes always go to a human: the agent posts
-# COMMENT, never APPROVE.
+# CLAUDE_PLUGIN_APPROVER=1 the agent never posts APPROVE on a hit: a workflow or
+# approval-machinery change goes to a human as a COMMENT, and residue
+# (open > 0) is refused with REQUEST_CHANGES as a backstop, since the review
+# loop never opens such a PR.
 #
 # Usage: never-approve-bar.zsh --body <pr-body-file> --paths <changed-paths-file>
 #   --body   the PR body; every hidden `<!-- review-dossier: {…} -->` block in it
