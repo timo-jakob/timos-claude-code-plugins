@@ -842,8 +842,7 @@ with a status JSON + code:
   longer emits it, so **`CONVERGED` is the only review-loop ending that opens a
   PR**: a residue-shaped round ends `ESCALATE_NO_CONVERGENCE` or
   `BUDGET_EXHAUSTED` below, like any other round that cannot converge. The
-  residue branch it pointed to stays listed below, unreachable, until #2600
-  removes the filing path.
+  residue branch it pointed to was retired with it (#2600, #2601).
 - **`AWAITING_FIX` (20)** → not a verdict — the step-mode "narrate, fix
   in-session, `--resume`" turn of the round protocol above. Never build an
   escalation comment from it.
@@ -896,7 +895,6 @@ before the escalation terminal, so it is listed here rather than reachable only
 through the file that comes after it. The escalation terminal is where the run
 is handed to a human ([an automated state machine](https://timo-jakob.github.io/timos-claude-code-plugins/explanation/philosophy/#pillar-3)):
 
-- see `reference/residue/branch.md` § Residue branch — file the remainder, then ship (#1435)
 - see `reference/promotion/gate.md` § Suggestion promotion on convergence — human-curated, opt-in (#994)
 - see `reference/interactive/extension.md` § Interactive extension (#562-resume)
 - see `reference/escalation.md` § Escalation (any `ESCALATE_*` / `BUDGET_EXHAUSTED` status) — typed, no PR (#564)

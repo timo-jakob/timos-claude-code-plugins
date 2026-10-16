@@ -362,9 +362,13 @@ _unreached_reference_files() {
   # ELEVEN since #1227: the new reference/epic-telemetry.md declares ONE `##`
   # section, *Epic telemetry (#1227)*, the Epic flow's own procedure; its steps
   # are `###`.
+  #
+  # NINE since #2601: reference/residue/branch.md and condition-2-removed.md were
+  # deleted with the residue branch, taking their one `##` heading each; the
+  # residue directory keeps only risk-threshold.md's.
   local n
   n="$(_ref_headings | grep -c .)"
-  [ "$n" -eq 11 ]
+  [ "$n" -eq 9 ]
 }
 
 # --- pointers resolve -------------------------------------------------------
@@ -466,7 +470,7 @@ _unreached_reference_files() {
 
 @test "#1503 non-vacuity: a pointer at a renamed heading reds the sweep" {
   local probe="$BATS_TEST_TMPDIR/probe.md" f h
-  printf 'see `reference/residue/branch.md` § No Such Heading At All\n' > "$probe"
+  printf 'see `reference/residue/risk-threshold.md` § No Such Heading At All\n' > "$probe"
   local resolved=0
   while IFS=$'\t' read -r f h; do
     _headings_of "$REF_DIR/$f" | grep -qxF -- "$h" && resolved=1
@@ -474,7 +478,7 @@ _unreached_reference_files() {
   [ "$resolved" -eq 0 ]
   # ...and the same machinery DOES resolve the real thing, so the control is
   # measuring the sweep rather than a broken extractor
-  printf 'see `reference/residue/branch.md` § Residue branch — file the remainder, then ship (#1435)\n' > "$probe"
+  printf 'see `reference/residue/risk-threshold.md` § Risk threshold — assess before filing (#1920)\n' > "$probe"
   resolved=0
   while IFS=$'\t' read -r f h; do
     _headings_of "$REF_DIR/$f" | grep -qxF -- "$h" && resolved=1
@@ -538,10 +542,14 @@ _unreached_reference_files() {
   bad="$(printf '%s\n' "$targets" | _unreached_reference_files "$fake")"
   [ "$bad" = 'residue/orphan.md' ]
   rm "$fake/residue/orphan.md"
-  # (b) a shard the index stops listing, and no pointer names
-  sed '/`reference\/residue\/condition-2-removed\.md`/d' "$REF_DIR/residue.md" > "$fake/residue.md"
+  # (b) the one shard, with its index entry deleted AND the risk-pass pointer at
+  # it dropped: since #2601 that pointer is the only one landing in residue/
+  sed '/`reference\/residue\/risk-threshold\.md`/d' "$REF_DIR/residue.md" > "$fake/residue.md"
+  bad="$(printf '%s\n' "$targets" | grep -vxF -- 'residue/risk-threshold.md' | _unreached_reference_files "$fake")"
+  printf '%s\n' "$bad" | grep -qxF -- 'residue/risk-threshold.md'
+  # ...while with only the index entry gone, the pointer still reaches it
   bad="$(printf '%s\n' "$targets" | _unreached_reference_files "$fake")"
-  [ "$bad" = 'residue/condition-2-removed.md' ]
+  [ -z "$bad" ]
   # (c) nothing points into residue/ at all: the index is unreached too
   bad="$(printf '%s\n' "$targets" | grep -v '^residue/' | _unreached_reference_files "$REF_DIR")"
   printf '%s\n' "$bad" | grep -qxF -- 'residue.md'
@@ -702,13 +710,13 @@ _unreached_reference_files() {
   else
     skip "no .git at $REPO_ROOT — cannot stage a throwaway tree"
   fi
-  printf 'MUTATED\n' >> "$fake/development/skills/resolve-issue/reference/residue/branch.md"
   # the mutation must land INSIDE the sentinels to be seen, so splice it in
-  python3 - "$fake/development/skills/resolve-issue/reference/residue/branch.md" <<'PY'
+  python3 - "$fake/development/skills/resolve-issue/reference/interactive/remediation.md" <<'PY'
 import io, sys
 p = sys.argv[1]
 s = io.open(p, encoding="utf-8").read()
-s = s.replace("Runs **only** on", "Runs only on", 1)
+assert s.count("Applies **only** with") == 1
+s = s.replace("Applies **only** with", "Applies only with", 1)
 io.open(p, "w", encoding="utf-8").write(s)
 PY
   run zsh "$VERIFY" --base "$PRE_MOVE_SHA" --repo "$fake" --quiet

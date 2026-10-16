@@ -47,7 +47,7 @@ setup() {
     topic-panels.md decided-pass.md risk-pass.md carry.md subagents.md estimates.md
     briefs/panel.md briefs/fix.md briefs/decide.md briefs/risk.md)
   # #2056 split residue.md into reference/residue/, in that index's read order.
-  EXPECTED_RESIDUE_SHARDS=(branch.md risk-threshold.md condition-2-removed.md)
+  EXPECTED_RESIDUE_SHARDS=(risk-threshold.md)
   # #2057 split promotion.md into reference/promotion/, in that index's read order.
   EXPECTED_PROMOTION_SHARDS=(gate.md step-3-select.md step-4-sub-loop.md
     step-7-terminal.md step-8-status-files.md)
@@ -150,9 +150,9 @@ _synth() {
 @test "#2056 a MISSING declared residue shard makes the roster refuse" {
   local root="$BATS_TEST_TMPDIR/short-residue"
   _synth "$root"
-  rm "$root/development/skills/resolve-issue/reference/residue/condition-2-removed.md"
+  rm "$root/development/skills/resolve-issue/reference/residue/risk-threshold.md"
   run -1 resolve_issue_files "$root"
-  contains "$output" "condition-2-removed.md"
+  contains "$output" "risk-threshold.md"
 }
 
 @test "#2057 an UNDECLARED promotion shard makes the roster refuse, naming the promotion roster" {

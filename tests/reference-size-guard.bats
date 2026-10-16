@@ -9,7 +9,9 @@
 #      old path of a split file is at most 3,000.
 #   2. SINGLE HOME — every H2–H4 heading of a split file, as it stood at the
 #      split's base commit, appears exactly once across reference/**: no heading
-#      dropped by the split, none duplicated into two shards.
+#      dropped by the split, none duplicated into two shards. A heading whose
+#      section was deliberately retired (RETIRED below, #2601) is expected 0
+#      times instead, so planting it back still reds.
 #
 # The covered set was an extendable list while the split was under way: #2055
 # review-loop.md, #2056 residue.md and #2057 promotion.md each appended their
@@ -39,6 +41,23 @@ setup() {
     promotion.md:98e51ea59858a3cf247d10cc841ca5f31239f985
     interactive.md:98e51ea59858a3cf247d10cc841ca5f31239f985
   )
+  # Base headings whose sections were retired on purpose, NAME|HEADING, each
+  # expected 0 times across reference/ (#2601 retired the residue branch, its
+  # condition-2 note and the amendments to it).
+  RETIRED=(
+    'residue.md|## Residue branch — file the remainder, then ship (#1435)'
+    'residue.md|## Condition 2 — removed; the story-diff rail is upstream (#1571)'
+    'residue.md|### 2. Amendments to the frozen branch'
+  )
+}
+
+# 0 when heading $2 of split file $1 is on the RETIRED list, 1 otherwise.
+is_retired() {
+  local r
+  for r in "${RETIRED[@]}"; do
+    [ "$r" = "$1|$2" ] && return 0
+  done
+  return 1
 }
 
 # Every covered file under reference root $1, one absolute path per line: the
@@ -69,15 +88,18 @@ base_headings() {
   git -C "$REPO_ROOT" show "$2:$REF_REL/$1" | grep -E '^#{2,4} ' || true
 }
 
-# Every base heading that does not appear exactly once across reference root $1.
+# Every base heading that does not appear exactly once across reference root $1
+# (or, for a RETIRED heading, that appears at all).
 home_problems_in() {
-  local root="$1" s name base h n
+  local root="$1" s name base h n want
   for s in "${SPLIT[@]}"; do
     name="${s%%:*}" base="${s#*:}"
     while IFS= read -r h; do
       [ -n "$h" ] || continue
+      want=1
+      if is_retired "$name" "$h"; then want=0; fi
       n="$(find "$root" -type f -name '*.md' -exec grep -hxF -- "$h" {} + | wc -l | tr -d ' ')"
-      [ "$n" -eq 1 ] || printf '%s heading appears %s times across reference/ (want 1): %s\n' "$name" "$n" "$h"
+      [ "$n" -eq "$want" ] || printf '%s heading appears %s times across reference/ (want %s): %s\n' "$name" "$n" "$want" "$h"
     done < <(base_headings "$name" "$base")
   done
   return 0
@@ -135,10 +157,27 @@ home_problems_in() {
   [ "$output" = 'index residue.md is 3001 bytes (max 3000)' ]
   mv -- "$fx/residue.md.orig" "$fx/residue.md"
 
-  h='## Condition 2 — removed; the story-diff rail is upstream (#1571)'
-  grep -vxF -- "$h" "$fx/residue/condition-2-removed.md" > "$fx/tmp" && mv -- "$fx/tmp" "$fx/residue/condition-2-removed.md"
+  h='## Risk threshold — assess before filing (#1920)'
+  grep -vxF -- "$h" "$fx/residue/risk-threshold.md" > "$fx/tmp" && mv -- "$fx/tmp" "$fx/residue/risk-threshold.md"
   run home_problems_in "$fx"
   [ "$output" = "residue.md heading appears 0 times across reference/ (want 1): $h" ]
+}
+
+@test "MUTATION: a retired residue heading planted back into reference/ reds the single-home guard" {
+  # The retired list must not blind the guard: each retired heading planted
+  # back, anywhere under reference/, is reported against its want of 0.
+  local fx="$BATS_TEST_TMPDIR/ref" r h
+  cp -R "$REPO_ROOT/$REF_REL" "$fx"
+  [ -z "$(home_problems_in "$fx")" ]
+  [ "${#RETIRED[@]}" -eq 3 ]
+  for r in "${RETIRED[@]}"; do
+    h="${r#*|}"
+    cp -- "$fx/residue/risk-threshold.md" "$BATS_TEST_TMPDIR/keep.md"
+    printf '\n%s\n' "$h" >> "$fx/residue/risk-threshold.md"
+    run home_problems_in "$fx"
+    [ "$output" = "residue.md heading appears 1 times across reference/ (want 0): $h" ]
+    mv -- "$BATS_TEST_TMPDIR/keep.md" "$fx/residue/risk-threshold.md"
+  done
 }
 
 @test "#2057 MUTATION: the guards cover reference/promotion/ — an oversized shard, an over-long index, a dropped heading" {

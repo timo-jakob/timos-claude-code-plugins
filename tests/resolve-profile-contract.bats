@@ -2346,7 +2346,7 @@ _moved_needles() {
   local corpus="$BATS_TEST_TMPDIR/bounded-corpus.md"
   _conductor_outside_frozen "$corpus"
   grep -qF -- 'The round protocol' "$corpus"
-  grep -qF -- 'Residue branch' "$corpus"
+  grep -qF -- 'Risk threshold — assess before filing' "$corpus"
 }
 
 @test "#1504 the two deliberate non-moves are still in the conductor" {

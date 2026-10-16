@@ -81,7 +81,7 @@ resolve_issue_files() {
   # #2056 split residue.md the same way, into reference/residue/. Its roster, in
   # that index's read order, under the same discipline.
   local -a residue_shards
-  residue_shards=(branch.md risk-threshold.md condition-2-removed.md)
+  residue_shards=(risk-threshold.md)
   # #2057 split promotion.md the same way, into reference/promotion/. Its roster,
   # in that index's read order, under the same discipline.
   local -a promotion_shards

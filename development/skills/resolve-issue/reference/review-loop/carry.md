@@ -136,33 +136,17 @@ stop. A confirmed-clean `[]` is legitimate and says so in its triple; the
 its own dimension's carry, and each owner accounts for its entries as one of
 confirmed, re-raised, unconfirmed.
 
-**One consequence the procedure above still states the old way.** Its parking
-rule concludes that "Residue cannot rescue it either: a parked blocker sits in a
-file the fix pass deliberately did **not** write, so it fails the residue
-condition by construction", and tells you to read a parked-only run as escalating
-**by design**. That rested entirely on condition 2. A parked blocker that is in
-the story diff is now residue-eligible, so such a run **can** reach the closing
-sweep and exit 14.
+**The parking rule above holds again, for a new reason (#2601).** It concludes
+that a parked-only run escalates by design, and once rested that on a residue
+condition the parked blocker could never meet. The residue ending is retired
+(#2580), so the reason is now simpler: a parked blocker is still an open
+blocker, and only `CONVERGED` opens a PR. A run whose only blockers are parked
+therefore ends `ESCALATE_NO_CONVERGENCE` (12) or `BUDGET_EXHAUSTED` (13), and
+takes the extension or the clean stop from there.
 
-So do not read a parked-only run as escalating by design — that inference is
-retired. **The `File it NOW` rule above is not**: park-time filing stays
-mandatory, and the escalation paths still file nothing, so a park nobody filed
-is still a finding the run dropped. Only the *justification* the frozen text
-gives for it — that filing at a terminal would never happen — no longer holds.
-
-**What the residue branch should DO about it is deliberately not decided
-here — #1581 owns it.** The branch files its plan as built, which means a
-parked finding can end up with two issues — the one the fix pass filed when it
-parked it, and the residue follow-up. That is a known, tracked wart rather than
-a rule you should improvise around: a hand-rolled match between the two is
-exactly what #1581 exists to specify, because the builder's identity is four
-fields and the obvious three-field version silently drops a **non-parked**
-sibling at a colliding spot, losing a residual blocker the dossier claims was
-filed. Do not attempt it here.
-
-The normative statement, with the reasoning and what is deliberately not
-changed, is in `reference/residue/condition-2-removed.md` § *Condition 2 — removed; the story-diff rail is
-upstream (#1571)*.
+**The `File it NOW` rule above stays mandatory**: park-time filing is still the
+only place a parked finding is recorded, since no terminal files anything, so a
+park nobody filed is a finding the run dropped.
 
 ### Carry-driven dispatch (#2008)
 

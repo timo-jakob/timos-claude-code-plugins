@@ -18,7 +18,9 @@ passes `--risk`. In an extension round (below) it does so whatever the
 threshold says.
 
 **First read the variable.** It lives in the environment and nothing in the
-conversation shows it:
+conversation shows it. The states and the definitions below are stated once, in:
+
+see `reference/residue/risk-threshold.md` § Risk threshold — assess before filing (#1920)
 
 ```bash
 printenv corner_case_risk_threshold   # exit 1 → unset
@@ -160,5 +162,3 @@ resolve-story-loop.zsh … --resume --findings-file <…> \
   dossier table are the only records. A pick survives the sub-loop's own risk
   pass: the consolidator demotes before its promotion overlay, which raises the
   pick again.
-- The residue branch reuses the final round's stamp instead of assessing a
-  blocker a second time (`reference/residue/risk-threshold.md` § *Risk threshold*).

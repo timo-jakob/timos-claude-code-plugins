@@ -26,8 +26,8 @@
 # story at a time, so this suite now holds two explicit lists instead of a
 # roster: NOT_YET_MIGRATED (the sites later stories own, each of which must still
 # name the terminal until its own story migrates it and shrinks the list in the
-# same PR) and KEPT (the seven sites that keep naming it — six inside byte-frozen
-# spans, and condition-2-removed.md, which #2601 deletes whole). Every other
+# same PR) and KEPT (the five sites that keep naming it, all inside byte-frozen
+# spans; #2601 deleted residue/branch.md and condition-2-removed.md). Every other
 # markdown site naming it is a stray, except ARCHITECTURE.md, whose telemetry
 # recipes still count historical records carrying the status.
 
@@ -51,17 +51,15 @@ setup() {
   # #2600 migrated the last two (it deleted them with the filing path), so the
   # list is empty; the test below keeps it that way.
   NOT_YET_MIGRATED=()
-  # ...and the sites that keep naming it: six inside byte-frozen spans, plus
-  # condition-2-removed.md, kept unedited because #2601 deletes it whole. Only
-  # #2601 shrinks this set (by residue/branch.md and condition-2-removed.md).
+  # ...and the sites that keep naming it, all inside byte-frozen spans. #2601
+  # shrank this set from seven by deleting residue/branch.md and
+  # condition-2-removed.md whole.
   KEPT=(
     "development/skills/resolve-issue/reference/escalation.md"
     "development/skills/resolve-issue/reference/interactive/extension-grant.md"
     "development/skills/resolve-issue/reference/promotion/step-4-sub-loop.md"
     "development/skills/resolve-issue/reference/promotion/step-7-terminal.md"
-    "development/skills/resolve-issue/reference/residue/branch.md"
     "development/skills/resolve-issue/reference/review-loop/exit-20-awaiting-fix.md"
-    "development/skills/resolve-issue/reference/residue/condition-2-removed.md"
   )
 }
 
@@ -133,8 +131,8 @@ _invariant_in_awaiting_fix_branch() {
   [ "${#NOT_YET_MIGRATED[@]}" -eq 0 ]
 }
 
-@test "#2580 AC7 the kept set is exactly seven sites, and each still names the terminal" {
-  [ "${#KEPT[@]}" -eq 7 ]
+@test "the kept, not-migrated set names exactly the five remaining frozen sites" {
+  [ "${#KEPT[@]}" -eq 5 ]
   local f
   for f in "${KEPT[@]}"; do
     grep -q 'CONVERGED_WITH_RESIDUE' "$REPO_ROOT/$f" || {
@@ -612,33 +610,6 @@ _filing_path_mentions() {
   done
 }
 
-@test "#1571 reference/residue/condition-2-removed.md states the SURVIVING pair and the upstream rail, by content" {
-  # residue.md left the §9 exclusion set in #1571, but the derived detector is
-  # proximity-based and matches its HISTORICAL sentence, not its normative one —
-  # the same accidental-proximity shape this file already pins per-site for
-  # ARCHITECTURE.md and the explanation page. The residue reference is what a
-  # session that reaches the terminal actually opens, so pin it too — since
-  # #2056, in the shard holding the #1571 section.
-  local t; t="$(flat "$RI_REF/residue/condition-2-removed.md")"
-  # Pin what the conditions ARE, not just their numbers: a needle that stops at
-  # "and condition 3" leaves the parenthetical saying what condition 3 IS
-  # deletable with the whole suite green — the proximity sweep is satisfied by
-  # this file's HISTORICAL sentence, not by its normative one.
-  grep -q 'condition 1 (the last two rounds are both zero-CRITICAL) and condition 3' <<< "$t" || {
-    echo "residue/condition-2-removed.md no longer states which two conditions survived"; return 1; }
-  grep -q 'condition 3 (the declaring round ran as a full sweep)' <<< "$t" || {
-    echo "residue/condition-2-removed.md names condition 3 without saying it is the full sweep"; return 1; }
-  # Pin the RAIL SENTENCE, not the bare tool name: condition-2-removed.md says
-  # `scope-findings` twice, and the second is a different claim (what this story
-  # did NOT change). A bare-name needle is satisfied by that one, so the rail
-  # could be narrowed to a single round and this test would stay green — and a
-  # one-round rail is exactly the reading that does not justify the removal.
-  grep -q 'filters \*\*every\*\* round.s findings to the story diff' <<< "$t" || {
-    echo "residue/condition-2-removed.md no longer states that scope-findings filters EVERY round's findings"; return 1; }
-  grep -q 'only\*\* input to the changelist' <<< "$t" || {
-    echo "residue/condition-2-removed.md no longer states that \$scoped is the only input to .blocking"; return 1; }
-}
-
 @test "#2599 the explanation pages state CONVERGED as the only PR-opening ending, by content" {
   # A negative sweep bans literal transcriptions of the old claim, so a reworded
   # revert slips past it; these positive pins require the current claim, which a
@@ -676,39 +647,23 @@ _filing_path_mentions() {
     echo "review-loop.md no longer states the surviving pair"; return 1; }
   grep -q 'Only the residue predicate stopped reading it' <<< "$t" || {
     echo "review-loop.md no longer says the fix-touched set is still load-bearing elsewhere"; return 1; }
-  # ...and the correction to the frozen parking rule, which is the one claim in
-  # that span this story makes false. #2055 put that correction (and the #1581
-  # deferral below) in carry.md, beside the carry rules it amends.
+  # ...and the note on the frozen parking rule in carry.md, beside the carry
+  # rules it amends (#2055). #1571 retired the rule's parked-only inference;
+  # #2601 restored it for a new reason, since the residue ending is gone: a
+  # parked blocker keeps a run from CONVERGED. Park-time filing stays mandatory.
   t="$(flat "$RI_REF/review-loop/carry.md")"
-  grep -q 'do not read a parked-only run as escalating by design' <<< "$t" || {
-    echo "review-loop.md no longer retires the frozen parked-only inference"; return 1; }
-  # Pin the DEFERRAL's claim, not the bare number: `grep '#1581'` matches the
-  # digits anywhere, so the round-4 CRITICAL could be restored verbatim —
-  # "the residue branch therefore has to drop those parked candidates itself,
-  # matching on title; #1581 will settle the exact key" — with every needle here
-  # still firing, putting the three-field hand match (which silently drops a
-  # NON-parked sibling at a colliding spot) back in the file a session reads
-  # every round.
-  grep -q 'files its plan as built' <<< "$t" || {
-    echo "review-loop.md no longer says the branch files the plan as built"; return 1; }
-  grep -q 'Do not attempt it here' <<< "$t" || {
-    echo "review-loop.md no longer forbids improvising the parked match"; return 1; }
-  grep -q '#1581' <<< "$t" || {
-    echo "review-loop.md no longer defers the parked handling to #1581"; return 1; }
+  grep -qF '**The parking rule above holds again, for a new reason (#2601).**' <<< "$t"
+  grep -qF 'a parked blocker is still an open blocker, and only `CONVERGED` opens a PR.' <<< "$t"
+  grep -qF 'therefore ends `ESCALATE_NO_CONVERGENCE` (12) or `BUDGET_EXHAUSTED` (13), and takes the extension or the clean stop from there.' <<< "$t"
+  grep -qF '**The `File it NOW` rule above stays mandatory**' <<< "$t"
+  # the residue-era note and its #1581 deferral are gone
+  lacks "$t" 'exit 14'
+  lacks "$t" 'residue-eligible'
+  lacks "$t" 'files its plan as built'
+  lacks "$t" 'condition-2-removed.md'
   # ...and neither the index nor ANY shard may carry the instruction the
   # deferral replaced — the whole of what review-loop.md was before #2055
   run ! grep -rq 'has to drop those' "$RI_REF/review-loop.md" "$RI_REF/review-loop"
-}
-
-@test "#1571 the residue reference keeps its condition-2 heading, and no user page points at it any more" {
-  # The explanation page once sent readers to this section by name. #2599
-  # retired that page's residue section, so the pointer is gone; the heading
-  # stays pinned until #2601 deletes the shard whole.
-  local heading='Condition 2 — removed; the story-diff rail is upstream'
-  grep -qF "## $heading (#1571)" "$RI_REF/residue/condition-2-removed.md" || {
-    echo "residue/condition-2-removed.md's #1571 section heading changed"; return 1; }
-  run grep -rqF "$heading" "$REPO_ROOT/docs/explanation" "$REPO_ROOT/docs/how-to"
-  [ "$status" -eq 1 ]
 }
 
 @test "#1920 reference/residue/ states the risk-threshold procedure, by content" {
@@ -741,22 +696,21 @@ _filing_path_mentions() {
   grep -qxF '## Risk threshold — assess before filing (#1920)' "$RI_REF/residue/risk-threshold.md" || {
     echo "residue/risk-threshold.md renamed the #1920 section heading that risk-pass.md and ARCHITECTURE.md name"
     return 1; }
-  # branch.md, after its frozen block, says the filing steps are gone
-  grep -qF -- '**The filing steps the block above leads into were removed (#2600)**' \
-    <<< "$(flat "$RI_REF/residue/branch.md")"
 }
 
 @test "#1921 AC10 reference/residue/risk-threshold.md keeps the section the risk pass points at, and no builder protocol" {
   # #1921 made the loop's risk pass assess every blocker in-loop, pointing at
   # section 1 for its definitions. #2600 removed the builder that reused those
-  # stamps, so what is left is that section and the emptied amendments heading.
+  # stamps, and #2601 the amendments heading with the branch it amended.
   local f="$RI_REF/residue/risk-threshold.md"
   local t; t="$(flat "$f")"
   [ "$(grep -cxF '## Risk threshold — assess before filing (#1920)' "$f")" -eq 1 ]
   [ "$(grep -cxF '### 1. Assess every residual blocker — before step 1' "$f")" -eq 1 ]
-  [ "$(grep -cxF '### 2. Amendments to the frozen branch' "$f")" -eq 1 ]
+  run grep -cxF '### 2. Amendments to the frozen branch' "$f"
+  [ "$output" = "0" ]
   grep -qF -- 'For a test-strength finding, impact is the impact of the **defect the unpinned behaviour would let through**' <<< "$t"
-  grep -qF -- 'The filing steps these amendments changed were removed with the filing path (#2600), so there is nothing left to amend.' <<< "$t"
+  lacks "$t" 'residue branch'
+  lacks "$t" 'frozen branch'
   # the builder protocol is gone
   lacks "$t" 'builder'
   lacks "$t" '--dropped-file'
@@ -799,12 +753,14 @@ _filing_path_mentions() {
     '**Never demoted**, at any threshold or risk: a `CRITICAL` item, a human-promoted item (`promoted: true`), and an item a tool decided red'
     'A dedup group is demoted only when every `WARNING` member was assessed and its **highest** member risk is below the threshold.'
     'A demoted finding never disappears.'
-    'The residue branch reuses the final round'"'"'s stamp instead of assessing a blocker a second time'
   )
   local n
   for n in "${needles[@]}"; do
     grep -qF -- "$n" <<< "$t" || { echo "review-loop.md lost the #1921 clause: $n"; return 1; }
   done
+  # the threshold states are pointed at, on a pointer line of their own (#2601)
+  grep -qxF 'see `reference/residue/risk-threshold.md` § Risk threshold — assess before filing (#1920)' "$f"
+  lacks "$t" 'The residue branch reuses the final round'
 }
 
 # --- #2580: the retirement notes, outside the frozen spans ------------------
@@ -815,7 +771,6 @@ _filing_path_mentions() {
   grep -q 'the promotion phase only ever follows `CONVERGED`.' <<< "$(flat "$RI_REF/promotion/step-4-sub-loop.md")"
   grep -q 'so the phase only ever follows `CONVERGED`, and the sub-loop.s exit 14 stays as unreachable as the block already says.' <<< "$(flat "$RI_REF/promotion/step-7-terminal.md")"
   grep -q 'only a \*\*zero-blocker\*\* delta round promotes the closing sweep' <<< "$(flat "$RI_REF/review-loop/exit-20-awaiting-fix.md")"
-  grep -q 'Retired with the residue terminal (#2580).\*\* The block below runs only on `CONVERGED_WITH_RESIDUE` (exit 14), which the loop no longer emits, so this branch never runs.' <<< "$(flat "$RI_REF/residue/branch.md")"
   # every note sits OUTSIDE its file's frozen span: the frozen text still matches
   # the pinned pre-move commit
   run -0 zsh "$SCRIPTS/verify-reference-move.zsh"
@@ -824,10 +779,11 @@ _filing_path_mentions() {
 @test "#2580 AC5 the migrated shards no longer route anything to the residue branch" {
   grep -q 'continue to the version bump (§4). The waived suggestions still' <<< "$(flat "$RI_REF/promotion/gate.md")"
   grep -q 'the round that can open one (`CONVERGED`) is a full-scope round' <<< "$(flat "$RI_REF/review-loop/delta-rounds.md")"
-  # the conductor still lists the residue branch's pointer (the reachability
-  # sweeps need every shipped shard reachable) but says it can no longer be
-  # reached; #2600 removes both with the filing path
-  grep -q 'The residue branch it pointed to stays listed below, unreachable, until #2600 removes the filing path.' <<< "$(flat "$REPO_ROOT/development/skills/resolve-issue/SKILL.md")"
+  # the conductor no longer lists the residue branch's pointer, and says why
+  # (#2601)
+  local k; k="$(flat "$REPO_ROOT/development/skills/resolve-issue/SKILL.md")"
+  grep -qF 'The residue branch it pointed to was retired with it (#2600, #2601).' <<< "$k"
+  lacks "$k" 'reference/residue/branch.md'
 }
 
 @test "#2580 AC6 SKILL.md §6 no longer carries the residue Summary duty" {
@@ -842,10 +798,54 @@ _filing_path_mentions() {
   grep -qF '**Exit 14 is retired (#2580)** and is never reused.' "$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
   grep -qF 'and continue to the version bump (§4). The waived suggestions still' <<< "$(flat "$RI_REF/promotion/gate.md")"
   local r; r="$(flat "$RI_REF/residue.md")"
-  grep -qF 'The loop no longer emits that status and no `next_ref` names these shards: `CONVERGED` is the only review-loop ending that opens a PR.' <<< "$r"
-  grep -qF '#2600 removed the filing path — the script that built the plan and the three step shards that filed it. `reference/residue/risk-threshold.md` stays for good, because the risk pass reads it.' <<< "$r"
-  grep -qF 'It is split into shards under `reference/residue/`, each at most 20,000 bytes (#2056).' <<< "$r"
-  grep -qF 'One such block remains: `residue-branch` in `branch.md`. The three step blocks were deleted with their shards (#2600).' <<< "$r"
-  grep -qF 'Nothing reaches this branch, and there is nothing further to read for it: `reference/residue/risk-threshold.md` § *Risk threshold — assess before filing (#1920)* stays only because the loop'"'"'s risk pass reads it.' <<< "$(flat "$RI_REF/residue/branch.md")"
+  grep -qF 'The loop no longer emits that status and no `next_ref` names a residue shard: `CONVERGED` is the only review-loop ending that opens a PR.' <<< "$r"
+  grep -qF '#2600 removed the filing path, and #2601 retired the branch itself and its condition-2 note.' <<< "$r"
+  grep -qF 'What stays is one shard, `reference/residue/risk-threshold.md`, because the loop'"'"'s risk pass reads it:' <<< "$r"
+  grep -qF '`reference/residue/` holds no `<!-- moved: … -->` block any more' <<< "$r"
   grep -qF '`CONVERGED` is the only ending that opens a PR.' <<< "$(flat "$RI_REF/review-loop/exit-20-awaiting-fix.md")"
+}
+
+# --- #2601: the residue branch and its condition-2 note, retired ------------
+
+# Every file under $1 that names the retired residue branch: its shard, the
+# condition-2 note, or either heading. Swept like reference-pointer-sweeps.bats:
+# git ls-files minus docs/superpowers/ and tests/. Prints repo-relative paths.
+_retired_branch_mentions() {
+  local root="$1"
+  git -C "$root" ls-files \
+    | grep -v -e '^docs/superpowers/' -e '^tests/' \
+    | tr '\n' '\0' \
+    | (cd "$root" && xargs -0 grep -lIF -e 'residue/branch.md' -e 'condition-2-removed.md' \
+         -e 'Residue branch — file the remainder, then ship' \
+         -e 'Condition 2 — removed; the story-diff rail is upstream' 2>/dev/null) \
+    || true
+}
+
+@test "the residue branch is retired: no swept file names its shard, the condition-2 note or their headings" {
+  local hits
+  hits="$(_retired_branch_mentions "$REPO_ROOT")"
+  [ -z "$hits" ] || { echo "the retired residue branch is still named in:"; echo "$hits"; return 1; }
+  [ ! -e "$RI_REF/residue/branch.md" ]
+  [ ! -e "$RI_REF/residue/condition-2-removed.md" ]
+}
+
+@test "non-vacuity: a planted residue/branch.md mention reds the retired-branch sweep" {
+  # A scratch repo: one swept file per needle, the same needles under the two
+  # excluded trees, and a clean file. The sweep names exactly the swept files.
+  local root="$BATS_TEST_TMPDIR/planted-branch" n
+  mkdir -p "$root/docs/superpowers" "$root/tests" "$root/a"
+  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$root" init -q
+  local -a plants=('see residue/branch.md' 'see condition-2-removed.md'
+                   '## Residue branch — file the remainder, then ship (#1435)'
+                   '## Condition 2 — removed; the story-diff rail is upstream (#1571)')
+  for n in 0 1 2 3; do
+    printf '%s\n' "${plants[$n]}" > "$root/a/swept-$n.md"
+  done
+  printf 'see residue/branch.md\n' > "$root/docs/superpowers/old.md"
+  printf 'see condition-2-removed.md\n' > "$root/tests/t.bats"
+  printf 'nothing here\n' > "$root/a/clean.md"
+  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$root" add -A
+  run _retired_branch_mentions "$root"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'a/swept-0.md\na/swept-1.md\na/swept-2.md\na/swept-3.md')" ]
 }

@@ -1,11 +1,12 @@
-<!-- Shard of reference/residue.md (#2056), read in its index's order. The
-     residue filing steps it once preceded were removed (#2600); the loop's
-     risk pass still reads the threshold states and the definitions below. -->
+<!-- Shard of reference/residue.md (#2056), its one remaining shard (#2601).
+     The loop's risk pass reads the threshold states and the definitions
+     below; nothing else under reference/residue/ remains. -->
 
 ## Risk threshold — assess before filing (#1920)
 
 The residue filing steps this section once preceded were removed with the
-filing path (#2600). What stays is what the loop's risk pass reads:
+filing path (#2600), and the residue ending itself with them (#2580, #2601).
+What stays is what the loop's risk pass reads:
 `review-loop/risk-pass.md` § *The risk pass* takes its three threshold states
 from here and its probability and impact definitions from section 1 below.
 
@@ -65,9 +66,3 @@ behaviour would let through**, never of the test gap itself.
 `impact` in tenths), so a risk exactly at the threshold is kept and no
 floating-point rounding moves a finding across it. You judge; the scripts do the
 arithmetic.
-
-### 2. Amendments to the frozen branch
-
-The filing steps these amendments changed were removed with the filing path
-(#2600), so there is nothing left to amend. The branch's one remaining frozen
-block, in `reference/residue/branch.md`, was never amended here.
