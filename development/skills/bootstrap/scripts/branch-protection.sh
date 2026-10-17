@@ -87,6 +87,8 @@ IAC_ONLY="false"
 IAC_ONLY_ENUM_MSG="--iac-only must be one of: false kubernetes opentofu"
 DEFAULT_BRANCH="main"
 REQUIRE_SIGNED_COMMITS="false"
+# the one statement of a boolean flag's value set, shared by its two refusals
+bool_flag_msg() { printf '%s must be true or false' "$1"; }
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -105,18 +107,22 @@ while [[ $# -gt 0 ]]; do
 		shift 2
 		;;
 	--has-dockerfile)
+		[[ $# -ge 2 ]] || die "$(bool_flag_msg "$1")"
 		HAS_DOCKERFILE="$2"
 		shift 2
 		;;
 	--has-ko)
+		[[ $# -ge 2 ]] || die "$(bool_flag_msg "$1")"
 		HAS_KO="$2"
 		shift 2
 		;;
 	--has-codeql)
+		[[ $# -ge 2 ]] || die "$(bool_flag_msg "$1")"
 		HAS_CODEQL="$2"
 		shift 2
 		;;
 	--codeql-languages)
+		[[ $# -ge 2 ]] || die "--codeql-languages needs a value: the CodeQL language list, space- or comma-separated"
 		CODEQL_LANGUAGES="$2"
 		shift 2
 		;;
@@ -126,10 +132,12 @@ while [[ $# -gt 0 ]]; do
 		shift 2
 		;;
 	--default-branch)
+		[[ $# -ge 2 ]] || die "--default-branch needs a value: the branch to protect"
 		DEFAULT_BRANCH="$2"
 		shift 2
 		;;
 	--require-signed-commits)
+		[[ $# -ge 2 ]] || die "$(bool_flag_msg "$1")"
 		REQUIRE_SIGNED_COMMITS="$2"
 		shift 2
 		;;
@@ -142,6 +150,14 @@ done
 # `Kubernetes`, the retired `true`, or a following flag swallowed as the value —
 # and that is exactly the permanent-`expected` state --iac-only exists to prevent
 [[ "$IAC_ONLY" =~ ^(false|kubernetes|opentofu)$ ]] || die "$IAC_ONLY_ENUM_MSG"
+# The booleans are validated for the same reason: each is compared only to the
+# literal `true`, so `True`, `yes` or a swallowed flag would silently read as
+# false — dropping the `image` context, the `analyze` contexts or the signing
+# requirement with no warning, the fail-open the ko-absent path warns about.
+[[ "$HAS_DOCKERFILE" =~ ^(true|false)$ ]] || die "$(bool_flag_msg --has-dockerfile)"
+[[ "$HAS_KO" =~ ^(true|false)$ ]] || die "$(bool_flag_msg --has-ko)"
+[[ "$HAS_CODEQL" =~ ^(true|false)$ ]] || die "$(bool_flag_msg --has-codeql)"
+[[ "$REQUIRE_SIGNED_COMMITS" =~ ^(true|false)$ ]] || die "$(bool_flag_msg --require-signed-commits)"
 # The toolchain names the language-app contexts, so it is required exactly on
 # that path — and never read on the IaC path, which requires `gate` alone.
 if [[ "$IAC_ONLY" == "false" ]]; then
@@ -520,13 +536,18 @@ printf '  • %s\n' "${checks[@]}"
 
 # --- PUT --------------------------------------------------------------------
 http_body=$(mktemp)
+# removed on every exit, the die paths included — no arm deletes it by hand
+trap 'rm -f "$http_body"' EXIT
+# A transport failure (DNS, TLS, a reset connection) fails the assignment, and
+# under `set -e` a bare failure would abort with no message of the script's own.
 http_status=$(curl -sS -o "$http_body" -w '%{http_code}' \
 	-H "Accept: application/vnd.github+json" \
 	-H "Authorization: token $(gh auth token)" \
 	-H "X-GitHub-Api-Version: 2022-11-28" \
 	-X PUT \
 	"https://api.github.com/repos/$REPO/branches/$DEFAULT_BRANCH/protection" \
-	--data "$payload")
+	--data "$payload") ||
+	die "could not reach the GitHub API (curl exited $?) — branch protection NOT applied. Check the network, then re-run this script."
 
 case "$http_status" in
 200)
@@ -550,18 +571,14 @@ Also enable in Settings → General → Pull Requests:
                                             approval gate, plugins#224)
   • Automatically delete head branches     (branch cleanup for auto-merged PRs)
 EOF
-	rm -f "$http_body"
 	exit 0 # not a hard failure — user can do it by hand
 	;;
 *)
 	err "Branch protection failed (HTTP $http_status):"
 	cat "$http_body" >&2
-	rm -f "$http_body"
 	exit 1
 	;;
 esac
-
-rm -f "$http_body"
 
 # --- repo merge settings (auto-merge + delete-branch + squash-only) ----------
 # The maintenance pipeline's approval gate (plugins#224) arms GitHub native
@@ -582,7 +599,8 @@ ms_status=$(curl -sS -o /dev/null -w '%{http_code}' \
 	-H "X-GitHub-Api-Version: 2022-11-28" \
 	-X PATCH \
 	"https://api.github.com/repos/$REPO" \
-	--data '{"allow_auto_merge":true,"delete_branch_on_merge":true,"allow_squash_merge":true,"allow_merge_commit":false,"allow_rebase_merge":false}')
+	--data '{"allow_auto_merge":true,"delete_branch_on_merge":true,"allow_squash_merge":true,"allow_merge_commit":false,"allow_rebase_merge":false}') ||
+	die "could not reach the GitHub API (curl exited $?) — branch protection IS applied, but the repo merge settings are NOT. Check the network, then re-run this script."
 case "$ms_status" in
 200) ok "Repo merge settings applied (auto-merge, head-branch delete, squash-only)" ;;
 403) warn "Could not set repo merge settings (403 — admin needed). Enable manually: Settings → General → Pull Requests → 'Allow auto-merge' + 'Automatically delete head branches'." ;;
@@ -600,7 +618,8 @@ if [[ "$REQUIRE_SIGNED_COMMITS" == "true" ]]; then
 		-H "Authorization: token $(gh auth token)" \
 		-H "X-GitHub-Api-Version: 2022-11-28" \
 		-X POST \
-		"https://api.github.com/repos/$REPO/branches/$DEFAULT_BRANCH/protection/required_signatures")
+		"https://api.github.com/repos/$REPO/branches/$DEFAULT_BRANCH/protection/required_signatures") ||
+		die "could not reach the GitHub API (curl exited $?) — branch protection IS applied, but signed commits are NOT required. Check the network, then re-run this script."
 	case "$sig_status" in
 	200 | 201) ok "Signed commits required on $DEFAULT_BRANCH" ;;
 	403) warn "Could not enable required_signatures (403 — admin needed). Enable manually: Settings → Branches → Edit rule → 'Require signed commits'." ;;
