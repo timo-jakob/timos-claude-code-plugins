@@ -349,6 +349,9 @@ line_of() {
   [ "$(line_of "$EXAMPLES/shell.ts" 'manifest.contractMajor !== 1')" -lt "$(line_of "$EXAMPLES/shell.ts" 'return attempt(remote, slot')" ]
   # each remote's module NAMESPACE is its MfeModule — named exports, no default
   contains "$shell" 'export const workedRemotes: MfeModule[] = [ordersPage, ordersSummary];'
+  # ...and loadRemote hands back that namespace itself: import(url) is
+  # Promise<any>, so a default-export read would pass tsc — pin the body (#1916)
+  contains "$shell" 'export function loadRemote(url: string): Promise<MfeModule> { return import(url); }'
 }
 
 @test "the worked remotes narrow on ctx.kind, register cleanup before their first await, and honour the abort" {
