@@ -170,3 +170,48 @@ section() {
   # the retired claim is gone
   run -1 grep -qF 'parks — it files nothing' "$RESOLVE"
 }
+
+# --- #2602: refine-issue reads resolve-issue's size park ----------------------
+
+@test "#2602 refine-issue Step 0 reads the size park, and a live objection satisfies the precondition" {
+  local t; t="$(tr '\n' ' ' < "$REFINE" | tr -s ' ')"
+  grep -qF '**Read resolve-issue' <<< "$t"
+  grep -qF '"<skill-base-dir>/scripts/read-split-park.zsh" > /tmp/split-park.json' "$REFINE"
+  grep -qF 'A live size objection satisfies it: resolve-issue sent the story here, so do not ask.' <<< "$t"
+  grep -qF 'looks stale: tell the human so, and change no label.' <<< "$t"
+  grep -qF 'An exit 2 or 3 prints nothing: report its stderr and continue without a size objection' <<< "$t"
+}
+
+@test "#2602 refine-issue Step 1 re-sizes the inventory, suppresses the READY shortcut and asks for a split" {
+  local t; t="$(tr '\n' ' ' < "$REFINE" | tr -s ' ')"
+  grep -qF '**A live size objection (#2602)** comes from Step 0' <<< "$t"
+  grep -qF 'Exit 1: the objection carries the re-sized triggers and counts.' <<< "$t"
+  grep -qF 'Exit 0: the plan now passes, so there is **no** objection' <<< "$t"
+  grep -qF 'the objection carries the reader' <<< "$t"
+  grep -qF '**While it is open, the `READY` shortcut below is not offered**' <<< "$t"
+  grep -qF 'ask the first refiner turn for a split, each child a bounded story with its own declared inventory.' <<< "$t"
+  grep -qF 'even on a `READY` verdict: go to Step 2, and ask the first refiner turn for a split' <<< "$t"
+  grep -qF 'Its first non-null `proposed_split` goes to the plan file and split choice of Step 2' <<< "$t"
+  grep -qF 's size-check exit 1, which with an inventory is the re-sized stop.' <<< "$t"
+  grep -qF 'write it to a file and run `size-check.zsh --file <it>` from the repository root.' <<< "$t"
+  grep -qF 'Append the size objection to the verdict' <<< "$t"
+}
+
+@test "#2602 refine-issue never sets or clears needs-split itself, and states each ending" {
+  local t; t="$(tr '\n' ' ' < "$REFINE" | tr -s ' ')"
+  grep -qF '**`needs-split` is never yours to set or clear.**' <<< "$t"
+  grep -qF 'its exit 5 leaves the original' <<< "$t"
+  grep -qF 'A rewrite that narrows the story instead, or any typed parked exit, leaves it on' <<< "$t"
+  run grep -cE -- '--(add|remove)-label needs-split' "$REFINE"
+  [ "$output" = "0" ]
+}
+
+@test "#2602 ARCHITECTURE.md and the refine-issue workflow page describe the park marker and its reader" {
+  local a; a="$(tr '\n' ' ' < "$REPO_ROOT/ARCHITECTURE.md" | tr -s ' ')"
+  grep -qF '**The park carries its inventory (#2602).**' <<< "$a"
+  grep -qF 'the `needs-split` label is the switch, and the newest size pre-flight comment is the evidence.' <<< "$a"
+  grep -qF 'It never sets or clears `needs-split` itself.' <<< "$a"
+  local w; w="$(tr '\n' ' ' < "$REPO_ROOT/docs/explanation/workflow-refine-issue.md" | tr -s ' ')"
+  grep -qF 'A story that resolve-issue' <<< "$w"
+  grep -qF 'arrives with that objection already open' <<< "$w"
+}

@@ -647,3 +647,16 @@ e3_paragraph() {
   contains "$para" 'A pre-flight **error**'
   run -1 grep -E -- '--add-label blocked' <<< "$para"
 }
+
+@test "#2602 the park block writes the inventory marker into the SPLIT comment, the clear block never does" {
+  local block park clear
+  block="$(preflight_block)"
+  park="$(printf '%s\n' "$block" | awk '/^# park block/{f=1; next} /^# clear block/{exit} f')"
+  clear="$(printf '%s\n' "$block" | awk '/^# clear block/{f=1; next} f && /^```/{exit} f')"
+  contains "$park" '<!-- size-preflight-inventory/v1: $(jq -c . <scratch>/size-inventory.json) -->'
+  contains "$park" 'size pre-flight: SPLIT — <triggers + counts>; see /development:refine-issue'
+  lacks "$clear" 'size-preflight-inventory'
+  local flatb; flatb="$(printf '%s' "$block" | tr '\n' ' ' | tr -s ' ')"
+  contains "$flatb" '**The SPLIT comment carries the plan inventory (#2602).**'
+  contains "$flatb" 'Only the park block writes it; the clear block and the `OVERRIDDEN` comment never do.'
+}

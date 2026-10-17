@@ -377,11 +377,28 @@ gh issue view <N> --json number,title,body,state,labels,url,comments
   worse than none, so Step 7 skips the record rather than fabricate one.
   `REPO_ROOT` must be the repo **directory** — `$REPO` is an `owner/name`
   identity, not a path, and the emitter keeps the two on separate flags.
+- **Read resolve-issue's size park first (#2602).** resolve-issue §2(b) sends a
+  story here with the `needs-split` label and a `size pre-flight: SPLIT` comment
+  when its plan stopped the size pre-flight. Pipe the `labels` and `comments` you
+  just fetched to the reader:
+
+  ```bash
+  gh issue view <N> --json labels,comments \
+    | "<skill-base-dir>/scripts/read-split-park.zsh" > /tmp/split-park.json
+  ```
+
+  It prints `{objection, reason, summary, inventory}`. `objection: true`
+  (reason `split`) is a **live size objection**, which Step 1 acts on. A
+  `stale-overridden` or `stale-no-comment` reason means the `needs-split` label
+  looks stale: tell the human so, and change no label. An exit 2 or 3 prints
+  nothing: report its stderr and continue without a size objection, since
+  resolve-issue's pre-flight remains the backstop.
 - **Precondition — the `needs-refinement` label.** This skill is for stories the
-  gate sent back. If the label is **absent**, **warn and confirm** before
-  proceeding ("this issue isn't marked `needs-refinement`; refine it anyway?") —
-  you can refine a story that was never formally gated, but the human should
-  choose that deliberately. If they decline, stop.
+  gate sent back. A live size objection satisfies it: resolve-issue sent the
+  story here, so do not ask. Otherwise, if the label is **absent**, **warn and
+  confirm** before proceeding ("this issue isn't marked `needs-refinement`;
+  refine it anyway?") — you can refine a story that was never formally gated,
+  but the human should choose that deliberately. If they decline, stop.
 - Read the issue's **prior gate comment(s)** in the thread — the refinement
   questions the gate already posted are the objections you start from.
 - **Resume a parked session if one exists (#578).** A prior run may have taken a
@@ -434,6 +451,30 @@ readiness `pass` records `pass` beside its `children_filed`. A `size` stop
 reaches you as a `scope_bounded` objection naming its trigger; the first refiner
 turn that returns a non-null `proposed_split` goes straight to the plan file and
 split choice of Step 2's size-check exit 1, converged or not.
+
+**A live size objection (#2602)** comes from Step 0's reader. Make it concrete
+before anything else:
+
+- **With an `inventory`**, write it to a file and run `size-check.zsh --file
+  <it>` from the repository root. Exit 1: the objection carries the re-sized
+  triggers and counts. Exit 0: the plan now passes, so there is **no**
+  objection; tell the human the `needs-split` label looks stale. Exit 2 or 3,
+  after one re-run of a malformed call: the fallback below.
+- **Without one** (the fallback), the objection carries the reader's `summary`,
+  and Step 2's size check sizes only the draft's declared inventory, as before.
+
+Append the size objection to the verdict's `refinement_questions` for this
+session. **While it is open, the `READY` shortcut below is not offered**, even
+on a `READY` verdict: go to Step 2, and ask the first refiner turn for a split,
+each child a bounded story with its own declared inventory. Its first non-null
+`proposed_split` goes to the plan file and split choice of Step 2's size-check
+exit 1, which with an inventory is the re-sized stop.
+
+**`needs-split` is never yours to set or clear.** A split filed by
+`file-split-children.zsh` (exit 0) removes it, as that script already does; its
+exit 5 leaves the original's labels as they were. A rewrite that narrows the
+story instead, or any typed parked exit, leaves it on: resolve-issue's next
+pre-flight decides, and only its clear block removes it.
 
 If it already returns `READY`, tell the human the story now passes and offer to
 just clear the label (Step 5) — no loop needed. **If they accept**, that
