@@ -7120,6 +7120,18 @@ A stop whose human narrows the plan is followed by a second verdict for the same
 run, so count parked *runs* by the last pre-flight record under each
 `parent_run_id`.
 
+**The park carries its inventory (#2602).** The park's `size pre-flight: SPLIT`
+comment ends with a hidden `<!-- size-preflight-inventory/v1: {…} -->` marker
+holding the plan inventory that stopped, because that plan otherwise stays on
+the un-pushed branch. `/development:refine-issue` reads it with
+`development/skills/refine-issue/scripts/read-split-park.zsh`: the `needs-split`
+label is the switch, and the newest size pre-flight comment is the evidence.
+A newest `SPLIT` is a live size objection, re-sized with `size-check.zsh`. A
+newest `OVERRIDDEN`, or no such comment, means the label is stale. A missing
+or unusable marker falls back to the comment's triggers and counts. While the
+objection is open the skill offers no `READY` shortcut and asks for a split.
+It never sets or clears `needs-split` itself.
+
 **Validating a split (#2584).** When a stop is split unattended (#2578), a
 subagent proposes the grouping, and
 `development/skills/resolve-issue/scripts/plan-story-split.zsh` checks the

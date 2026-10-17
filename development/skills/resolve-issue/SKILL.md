@@ -628,12 +628,20 @@ re-run on the rewritten inventory as a new verdict; else take (b), which records
 gh label create needs-split --color fbca04 \
   --description "Stopped by the size pre-flight — split into smaller stories before implementing" \
   2>/dev/null || true   # idempotent: ignore "already exists"
-gh issue comment <N> --body "size pre-flight: SPLIT — <triggers + counts>; see /development:refine-issue"
+gh issue comment <N> --body "size pre-flight: SPLIT — <triggers + counts>; see /development:refine-issue
+
+<!-- size-preflight-inventory/v1: $(jq -c . <scratch>/size-inventory.json) -->"
 gh issue edit <N> --add-label needs-split
 # clear block — a pass or (a) only, never after the park block
 gh issue comment <N> --body "size pre-flight: OVERRIDDEN by the human — <triggers + counts>"  # (a) only
 gh issue edit <N> --remove-label needs-split 2>/dev/null || true
 ```
+
+**The SPLIT comment carries the plan inventory (#2602).** Its hidden
+`size-preflight-inventory/v1` marker holds `<scratch>/size-inventory.json` as
+written, so `/development:refine-issue` can re-size the plan that stopped: the
+inventory otherwise stays on this un-pushed branch. Only the park block writes
+it; the clear block and the `OVERRIDDEN` comment never do.
 
 **Never `blocked`** — it asserts open blockers, which this check never judges.
 

@@ -46,6 +46,9 @@ re-gate](diagrams/refine-issue.svg)
    every child first and writes nothing if one is still too big. It then files them as sub-issues of the original,
    each labelled `needs-refinement`, turns the original into an epic and posts a comment listing them. The readiness
    gate runs the same check, so a story too big to build is sent back for refinement before anyone starts on it.
+   A story that resolve-issue's own size check stopped arrives with that objection already open, carrying the list
+   of files the plan would have touched, so the skill asks for a split straight away instead of offering to clear
+   the label.
 8. **Approve the exact rewrite.** The skill shows you the final prose, the story spec and every answer that was taken
    automatically, any of which you can overturn. Only your explicit approval of that exact text moves the run on.
    Auto-accept never approves a rewrite.
