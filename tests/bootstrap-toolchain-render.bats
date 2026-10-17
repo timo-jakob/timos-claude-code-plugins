@@ -783,8 +783,9 @@ refresh_setup() {
   none_render_setup
   REFRESH="$REPO_ROOT/development/skills/bootstrap/scripts/refresh-toolchain-files.zsh"
   STAMP="$REPO_ROOT/development/skills/bootstrap/scripts/stamp-marker.zsh"
+  # a mixed-Go repo (#2615): a sole-Go one's Sonar job is go-ci.yml's, not the quality workflow's
   FLAGS=(--project-name demo --project-slug acme/demo --project-key acme_demo --org-key acme
-    --languages go --docker true --security-contact-email "")
+    --languages "go python" --docker true --security-contact-email "")
 }
 
 # a bootstrapped repo at <dir>, as Step 3 + 3.6 leave it, for one toolchain
@@ -1018,9 +1019,9 @@ bootstrapped_repo() { # <dir> <vis> <sa> <v> <cs>
     'Its `refreshed` rows join the Step 2 plan as *Will update (toolchain changed)*; on confirmation, run it again without `--dry-run`.'
     'It also rewrites `SETUP.md`'"'"'s bootstrap-owned `DEFERRED-TOOLS` block on every run.'
     '`conflict` or `ambiguous` (exit 3) → that file was left untouched, so hand it to the `bootstrap-idempotency-reviewer`'
-    '**When the required contexts changed** — a quality workflow refreshed (a tool added or removed), a `conflict` or `ambiguous` one the reviewer'"'"'s approved overwrite changed, or a gap-fill render of `codeql.yml` — re-apply Step 4b'"'"'s branch protection with its full invocation for the new toolchain, which adds the new tool'"'"'s context (`sonarqube`, say) and drops a removed one'"'"'s, and run the Step 4.5 setup script whose trigger the new toolchain meets. A refresh that only rewrote the deferred block needs neither.'
-    'On a Swift repo, a refreshed quality workflow'"'"'s new analyser job still reads `needs: test-and-coverage`, so apply *Swift job wiring* to it.'
-    'A tool changed to `none` leaves only these four files; its own files (`codeql.yml`, `sonar-project.properties`, `.snyk`) stay — removing them is #2126'"'"'s scope.'
+    '**When the required contexts changed** — a quality workflow refreshed (a tool added or removed), a sole-Go repo'"'"'s `go-ci.yml` refreshed (its Sonar job added or removed), a `conflict` or `ambiguous` one the reviewer'"'"'s approved overwrite changed, or a gap-fill render of `codeql.yml` — re-apply Step 4b'"'"'s branch protection with its full invocation for the new toolchain, which adds the new tool'"'"'s context (`sonarqube`, say) and drops a removed one'"'"'s, and run the Step 4.5 setup script whose trigger the new toolchain meets. A refresh that only rewrote the deferred block needs neither.'
+    'On a Swift repo, a refreshed quality workflow'"'"'s new analyser job still reads `needs: test-and-coverage`, so apply *Swift job wiring* to it;'
+    'A tool changed to `none` leaves only these files; its own files (`codeql.yml`, `sonar-project.properties`, `.snyk`) stay — removing them is #2126'"'"'s scope.'
     'So off the §3l path, once the gate above resolved, run the refresh — in whichever of steps 3, 4 and 5 this run reaches first, and once per run:'
     '--code-scanning <v> --dry-run -- <the value flags this run renders with>'
     'It never overwrites a file wholesale: it three-way merges the toolchain delta into the file against the closest render, so only the per-tool blocks the change touches move, a user edit outside them stays, and the provenance marker is kept byte-for-byte.'
@@ -1041,4 +1042,202 @@ bootstrapped_repo() { # <dir> <vis> <sa> <v> <cs>
   for n in "${needles[@]}"; do
     contains "$joined" "$n" || { echo "missing: $n"; return 1; }
   done
+}
+
+# --- #2615: a sole-Go repo's Sonar job is go-ci.yml's ------------------------------------
+
+GOCI=languages/go/.github/workflows/go-ci.yml.tmpl
+
+# render a row's quality workflow, its noop and go-ci.yml into <out>, from <templates>
+sole_go_render() { # <out> <templates> <primary> <languages> <vis> <sa>
+  zsh "$RENDER" --templates "$2" --out "$1" --project-name demo --project-slug acme/demo \
+    --project-key acme_demo --org-key acme --primary "$3" --languages "$4" --docker false \
+    --visibility "$5" --static-analysis "$6" --vulnerabilities trivy --code-scanning none \
+    "$5/.github/workflows/quality-$5.yml.tmpl" "$5/.github/workflows/quality-$5-noop.yml.tmpl" "$GOCI" >/dev/null
+}
+
+sole_go_setup() {
+  REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+  RENDER="$REPO_ROOT/development/skills/bootstrap/scripts/render.zsh"
+}
+
+# each render row: go-ci.yml keeps its push trigger, and no rendered file carries the pair's markers
+sole_go_row_common() { # <out>
+  [ "$(yq -r '.on.push.branches | join(",")' "$1/languages/go/.github/workflows/go-ci.yml")" = main ]
+  run ! grep -rqE 'SOLE_GO-(START|END)' "$1"
+}
+
+@test "toolchain render: #2615 SKILL.md and ARCHITECTURE.md state where a sole-Go repo's Sonar job lives" {
+  local joined arch n
+  joined="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/development/skills/bootstrap/SKILL.md")"
+  arch="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/ARCHITECTURE.md")"
+  local -a needles=(
+    'Kept blocks retain their marker lines, except `SOLE_GO`'"'"'s and `NOT_SOLE_GO`'"'"'s.'
+    '| `SOLE_GO` | the repo is **sole-Go** — `is-sole-go.zsh --primary <p> --languages "<l>"` exits 0: primary `go` and none of `javascript`, `python` or `java` (Swift does not count)'
+    'Wraps `go-ci.yml`'"'"'s Sonar jobs. **Its marker lines are never emitted, kept or stripped** |'
+    '| `NOT_SOLE_GO` | its complement (#2615) — wraps the quality workflows'"'"' and noops'"'"' Sonar jobs'
+    'for a **sole-Go** repo (#2615) the job is `go-ci.yml`'"'"'s instead, and neither the quality workflow nor its noop carries one'
+    'it also carries the Sonar job — `sonarcloud` or `sonarqube`, unchanged except `needs: gate`, downloading that same-workflow `coverage-reports` artifact — inside its `SONARCLOUD` / `SONARQUBE` markers'
+    'So render `go-ci.yml` with this run'"'"'s `--languages`, `--visibility` and toolchain flags too: without them its Sonar job strips silently.'
+    'plus `.github/workflows/go-ci.yml` on a sole-Go repo, whose Sonar job lives there (#2615;'
+    'a sole-Go repo'"'"'s `go-ci.yml` refreshed (its Sonar job added or removed)'
+    'a sole-Go repo'"'"'s, in `go-ci.yml`, reads `needs: gate` and needs no wiring.'
+    '**Swift + another test-lane language** (rare): keep both jobs, rename the Swift job'"'"'s uploaded artifact (e.g. `coverage-reports-swift`) — two uploads must not share one artifact name — and, unless the repo is sole-Go (whose analyser job is `go-ci.yml`'"'"'s and takes no wiring), extend the analyser'"'"'s `needs:` to both jobs and add a matching second download step.'
+    'read from render.zsh'"'"'s own `--primary` and `--languages` (#2615); a render without `--languages` is not sole-Go.'
+    'passed after `--`, and a passthrough without `--languages` is not sole-Go)'
+    'Known limitation: a sole-Go repo bootstrapped before #2615 keeps its old Sonar job in the quality workflow, which the refresh reports `current`; #2617'"'"'s re-run leftovers report tracks removing it.'
+  )
+  for n in "${needles[@]}"; do
+    contains "$joined" "$n" || { echo "missing: $n"; return 1; }
+  done
+  contains "$arch" 'plus `go-ci.yml` on a sole-Go repo (`development/skills/bootstrap/scripts/is-sole-go.zsh`), where its Sonar job lives (#2615)'
+  local goci
+  goci="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/development/skills/bootstrap/templates/$GOCI")"
+  contains "$goci" '# Known limitation: on a Go+Swift repo it sees no Swift coverage, which stays in the quality # workflow (#2718).'
+}
+
+@test "toolchain render: #2615 sole-Go public sonarcloud — the sonarcloud job is go-ci.yml's, needs gate, reads coverage-reports" {
+  sole_go_setup
+  local out="$BATS_TEST_TMPDIR/out" wf="$BATS_TEST_TMPDIR/out/languages/go/.github/workflows/go-ci.yml" q
+  sole_go_render "$out" "$TEMPLATES" go go public sonarcloud
+  sole_go_row_common "$out"
+  [ "$(yq -r '.jobs | keys | join(",")' "$wf")" = gate,sonarcloud ]
+  [ "$(yq -r '.jobs.sonarcloud.needs' "$wf")" = gate ]
+  # the artifact it downloads is the one the gate job uploads in the same workflow
+  [ "$(yq -r '.jobs.gate.steps[] | select(.with.name == "coverage-reports") | .with.path' "$wf")" = \
+    "$(printf 'coverage.out\ncoverage.xml')" ]
+  # inside its SONARCLOUD markers, so static_analysis none still strips it
+  grep -qF '# --- SONARCLOUD-START' "$wf"
+  # the quality workflow and noop lose the Sonar job and nothing else: their jobs are the mixed row's minus it
+  sole_go_render "$BATS_TEST_TMPDIR/mixed" "$TEMPLATES" go "go python" public sonarcloud
+  # the job is the mixed row's quality-public.yml sonarcloud job, unchanged except needs
+  [ "$(yq -o=json -I0 '.jobs.sonarcloud | del(.needs)' "$wf")" = "$(yq -o=json -I0 '.jobs.sonarcloud | del(.needs)' "$BATS_TEST_TMPDIR/mixed/public/.github/workflows/quality-public.yml")" ]
+  for q in quality-public quality-public-noop; do
+    [ "$(yq -r '.jobs | keys | join(",")' "$out/public/.github/workflows/$q.yml")" = "$(yq -r '.jobs | del(.sonarcloud, .sonarqube) | keys | join(",")' "$BATS_TEST_TMPDIR/mixed/public/.github/workflows/$q.yml")" ]
+  done
+  run yamllint -c "$REPO_ROOT/.yamllint" --strict "$wf"
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+}
+
+@test "toolchain render: #2615 sole-Go private sonarqube — the sonarqube job is go-ci.yml's, on the self-hosted runner" {
+  sole_go_setup
+  local out="$BATS_TEST_TMPDIR/out" wf="$BATS_TEST_TMPDIR/out/languages/go/.github/workflows/go-ci.yml" q
+  sole_go_render "$out" "$TEMPLATES" go "go swift" private sonarqube
+  sole_go_row_common "$out"
+  [ "$(yq -r '.jobs | keys | join(",")' "$wf")" = gate,sonarqube ]
+  [ "$(yq -r '.jobs.sonarqube.needs' "$wf")" = gate ]
+  sole_go_render "$BATS_TEST_TMPDIR/mixed" "$TEMPLATES" go "go swift python" private sonarqube
+  # the job is the mixed row's quality-private.yml sonarqube job, unchanged except needs
+  [ "$(yq -o=json -I0 '.jobs.sonarqube | del(.needs)' "$wf")" = "$(yq -o=json -I0 '.jobs.sonarqube | del(.needs)' "$BATS_TEST_TMPDIR/mixed/private/.github/workflows/quality-private.yml")" ]
+  for q in quality-private quality-private-noop; do
+    [ "$(yq -r '.jobs | keys | join(",")' "$out/private/.github/workflows/$q.yml")" = "$(yq -r '.jobs | del(.sonarcloud, .sonarqube) | keys | join(",")' "$BATS_TEST_TMPDIR/mixed/private/.github/workflows/$q.yml")" ]
+  done
+  run yamllint -c "$REPO_ROOT/.yamllint" --strict "$wf"
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+}
+
+@test "toolchain render: #2615 sole-Go static_analysis none renders no Sonar job anywhere, and the coverage upload stays" {
+  sole_go_setup
+  local out="$BATS_TEST_TMPDIR/out" mixed="$BATS_TEST_TMPDIR/mixed" vis f
+  for vis in public private; do
+    rm -rf "$out" "$mixed"
+    sole_go_render "$out" "$TEMPLATES" go go "$vis" none
+    sole_go_render "$mixed" "$TEMPLATES" go "go python" "$vis" none
+    sole_go_row_common "$out"
+    for f in languages/go/.github/workflows/go-ci.yml "$vis/.github/workflows/quality-$vis.yml" \
+      "$vis/.github/workflows/quality-$vis-noop.yml"; do
+      [ "$(yq -r '.jobs | keys | join(",")' "$out/$f")" = "$(yq -r '.jobs | del(.sonarcloud, .sonarqube) | keys | join(",")' "$mixed/$f")" ]
+    done
+    f="$out/languages/go/.github/workflows/go-ci.yml"
+    [ "$(yq -r '.jobs | keys | join(",")' "$f")" = gate ]
+    [ "$(yq -r '.jobs.gate.steps[] | select(.with.name == "coverage-reports") | .if' "$f")" = 'always()' ]
+  done
+}
+
+@test "toolchain render: #2615 Go+python and python-only render byte-identically to the pre-story templates" {
+  sole_go_setup
+  local pre="$BATS_TEST_TMPDIR/pre" f row primary langs vis sa
+  # the pre-story templates are these minus the SOLE_GO blocks and the NOT_SOLE_GO marker lines —
+  # the story added nothing else to them
+  for f in public/.github/workflows/quality-public.yml.tmpl public/.github/workflows/quality-public-noop.yml.tmpl \
+    private/.github/workflows/quality-private.yml.tmpl private/.github/workflows/quality-private-noop.yml.tmpl "$GOCI"; do
+    mkdir -p "$pre/$(dirname "$f")"
+    awk '/--- SOLE_GO-START/{s=1} !s && !/--- NOT_SOLE_GO-(START|END)/{print} /--- SOLE_GO-END/{s=0}' \
+      "$TEMPLATES/$f" > "$pre/$f"
+    # the derivation removed something, so a row never compares a template with itself
+    run ! cmp -s "$TEMPLATES/$f" "$pre/$f"
+  done
+  for row in "go go_python public sonarcloud" "go go_python private sonarqube" "go go_java public none" \
+    "python python public sonarcloud" "python python private sonarqube" "javascript javascript private sonarcloud"; do
+    read -r primary langs vis sa <<< "$row"
+    rm -rf "$BATS_TEST_TMPDIR/new" "$BATS_TEST_TMPDIR/old"
+    sole_go_render "$BATS_TEST_TMPDIR/new" "$TEMPLATES" "$primary" "${langs//_/ }" "$vis" "$sa"
+    sole_go_render "$BATS_TEST_TMPDIR/old" "$pre" "$primary" "${langs//_/ }" "$vis" "$sa"
+    diff -r "$BATS_TEST_TMPDIR/old" "$BATS_TEST_TMPDIR/new" || { echo "row: $row"; return 1; }
+    sole_go_row_common "$BATS_TEST_TMPDIR/new"
+    # and the quality workflow still carries its Sonar job, where one is resolved
+    if [ "$sa" != none ]; then
+      [ "$(yq -r ".jobs | has(\"$sa\")" "$BATS_TEST_TMPDIR/new/$vis/.github/workflows/quality-$vis.yml")" = true ]
+    fi
+  done
+}
+
+@test "toolchain render: #2615 refresh on a sole-Go repo re-composes go-ci.yml — none -> sonarcloud adds the job there, not to quality" {
+  refresh_setup
+  local repo="$BATS_TEST_TMPDIR/repo" fresh="$BATS_TEST_TMPDIR/fresh" q
+  # this fixture is sole-Go: Go alone
+  FLAGS=(--project-name demo --project-slug acme/demo --project-key acme_demo --org-key acme
+    --languages go --docker true --security-contact-email "")
+  bootstrapped_repo "$repo" public none trivy none
+  zsh "$RENDER" --templates "$TEMPLATES" --out "$BATS_TEST_TMPDIR/goci" "${FLAGS[@]}" --primary go --visibility public \
+    --static-analysis none --vulnerabilities trivy --code-scanning none "$GOCI" >/dev/null
+  cp "$BATS_TEST_TMPDIR/goci/languages/go/.github/workflows/go-ci.yml" "$repo/.github/workflows/go-ci.yml"
+  cp -R "$repo" "$BATS_TEST_TMPDIR/before"
+  run --separate-stderr zsh "$REFRESH" --repo "$repo" --visibility public --static-analysis sonarcloud \
+    --vulnerabilities trivy --code-scanning none -- "${FLAGS[@]}" --primary go
+  [ "$status" -eq 0 ] || { echo "$stderr"; return 1; }
+  [ "$(printf '%s\n' "$output" | jq -r 'select(.file == ".github/workflows/go-ci.yml") | "\(.status) \(.base)"')" = \
+    "refreshed none/snyk/codeql" ]
+  [ "$(printf '%s\n' "$output" | jq -r 'select(.file | startswith(".github/workflows/quality")) | .status' | sort -u)" = current ]
+  # the job moved to go-ci.yml, and only there: it is now a fresh sonarcloud render
+  q="$repo/.github/workflows/go-ci.yml"
+  [ "$(yq -r '.jobs | keys | join(",")' "$q")" = gate,sonarcloud ]
+  [ "$(yq -r '.jobs.sonarcloud.needs' "$q")" = gate ]
+  zsh "$RENDER" --templates "$TEMPLATES" --out "$fresh" "${FLAGS[@]}" --primary go --visibility public \
+    --static-analysis sonarcloud --vulnerabilities trivy --code-scanning none "$GOCI" >/dev/null
+  cmp "$q" "$fresh/languages/go/.github/workflows/go-ci.yml"
+  for q in quality-public quality-public-noop; do
+    [ "$(yq -r '.jobs | has("sonarcloud")' "$repo/.github/workflows/$q.yml")" = false ]
+    cmp "$repo/.github/workflows/$q.yml" "$BATS_TEST_TMPDIR/before/.github/workflows/$q.yml"
+  done
+  # a mixed-Go refresh composes only the four files, never go-ci.yml (its verdicts on this
+  # sole-Go tree are beside the point, so only the roster is read)
+  local -a mixed=(--project-name demo --project-slug acme/demo --project-key acme_demo --org-key acme
+    --languages "go python" --docker true --security-contact-email "" --primary go)
+  run --separate-stderr zsh "$REFRESH" --repo "$repo" --visibility public --static-analysis sonarcloud \
+    --vulnerabilities trivy --code-scanning none --dry-run -- "${mixed[@]}"
+  [ "$(printf '%s\n' "$output" | jq -r .file | paste -sd' ' -)" = \
+    ".github/workflows/quality-public.yml .github/workflows/quality-public-noop.yml .pre-commit-config.yaml SETUP.md" ] ||
+    { echo "$status $output $stderr"; return 1; }
+  # a passthrough with no --languages is not sole-Go: the refresh never asks is-sole-go.zsh,
+  # so go-ci.yml is not composed (a stub that answers sole-Go records any call)
+  local bs="$BATS_TEST_TMPDIR/bs"
+  mkdir -p "$bs/scripts"
+  ln -s "$TEMPLATES" "$bs/templates"
+  cp "$REFRESH" "$RENDER" "$bs/scripts/"
+  printf '#!/usr/bin/env zsh\ntouch "${0:A:h}/called"\nexit 0\n' > "$bs/scripts/is-sole-go.zsh"
+  local -a nolangs=(--project-name demo --project-slug acme/demo --project-key acme_demo --org-key acme
+    --docker true --security-contact-email "" --primary go)
+  run --separate-stderr zsh "$bs/scripts/refresh-toolchain-files.zsh" --repo "$repo" --visibility public \
+    --static-analysis sonarcloud --vulnerabilities trivy --code-scanning none --dry-run -- "${nolangs[@]}"
+  [ ! -e "$bs/scripts/called" ] || { echo "$status $output $stderr"; return 1; }
+  run ! grep -q go-ci.yml <<< "$output"
+  # a failing is-sole-go.zsh fails the refresh loudly, never as "not sole-Go" (the refresh's
+  # own prefix: render.zsh would die on the same stub with its own)
+  printf '#!/usr/bin/env zsh\nexit 3\n' > "$bs/scripts/is-sole-go.zsh"
+  run --separate-stderr zsh "$bs/scripts/refresh-toolchain-files.zsh" --repo "$repo" --visibility public \
+    --static-analysis sonarcloud --vulnerabilities trivy --code-scanning none --dry-run -- "${mixed[@]}"
+  [ "$status" -eq 1 ] || { echo "$status $output $stderr"; return 1; }
+  contains "$stderr" "refresh-toolchain-files: is-sole-go.zsh failed (exit 3)"
+  [ -z "$output" ]
 }

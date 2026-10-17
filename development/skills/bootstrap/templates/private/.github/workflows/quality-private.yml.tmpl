@@ -266,6 +266,7 @@ jobs:
           path: coverage.lcov
           if-no-files-found: ignore
   # --- SWIFT-END ---------------------------------------------------------------
+  # --- NOT_SOLE_GO-START -------------------------------------------------------
 
   # --- SONARQUBE-START -------------------------------------------------------
   sonarqube:
@@ -315,6 +316,7 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: https://sonarcloud.io
   # --- SONARCLOUD-END --------------------------------------------------------
+  # --- NOT_SOLE_GO-END ---------------------------------------------------------
 
   # --- TRIVY-START -----------------------------------------------------------
   # Trivy filesystem scan — catches vulnerable 3rd-party deps in lockfiles.

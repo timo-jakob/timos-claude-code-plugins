@@ -5,6 +5,14 @@
 # The job carries no `name:`, matrix or reusable-workflow `uses:`, so GitHub reports it as the
 # status context `gate`, which branch protection requires. The workflow runs on every pull
 # request, unfiltered: a PR it skipped would never report `gate`.
+# --- SOLE_GO-START ---------------------------------------------------------------------------
+#
+# A sole-Go repo's Sonar job runs here too (#2615): after `gate`, on the coverage reports the
+# gate uploads, since the gate replaces the quality workflow's test-and-coverage job it read.
+# Its context name is unchanged. The push trigger below is what lets it see the default branch.
+# Known limitation: on a Go+Swift repo it sees no Swift coverage, which stays in the quality
+# workflow (#2718).
+# --- SOLE_GO-END -----------------------------------------------------------------------------
 
 name: Go CI
 
@@ -60,3 +68,54 @@ jobs:
             coverage.out
             coverage.xml
           if-no-files-found: ignore
+  # --- SOLE_GO-START ---------------------------------------------------------------------------
+
+  # --- SONARQUBE-START -------------------------------------------------------
+  sonarqube:
+    needs: gate
+    runs-on: {{RUNNER}}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: coverage-reports
+          path: .
+        # No continue-on-error: if the gate didn't produce coverage,
+        # Sonar should fail loudly rather than silently report green without it.
+      - name: SonarQube scan
+        # The 40-hex commit pin trips semgrep's SonarQube-docs-API-key
+        # detector; it's a git SHA, not a credential.
+        # nosemgrep: generic.secrets.security.detected-sonarqube-docs-api-key.detected-sonarqube-docs-api-key
+        uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+  # --- SONARQUBE-END ---------------------------------------------------------
+
+  # --- SONARCLOUD-START ------------------------------------------------------
+  sonarcloud:
+    needs: gate
+    runs-on: {{RUNNER}}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Download coverage
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: coverage-reports
+          path: .
+        # No continue-on-error: if the gate didn't produce coverage,
+        # Sonar should fail loudly rather than silently report green without it.
+      - name: SonarCloud scan
+        # The 40-hex commit pin trips semgrep's SonarQube-docs-API-key
+        # detector; it's a git SHA, not a credential.
+        # nosemgrep: generic.secrets.security.detected-sonarqube-docs-api-key.detected-sonarqube-docs-api-key
+        uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: https://sonarcloud.io
+  # --- SONARCLOUD-END --------------------------------------------------------
+  # --- SOLE_GO-END -----------------------------------------------------------------------------
