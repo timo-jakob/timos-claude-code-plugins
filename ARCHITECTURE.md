@@ -7543,6 +7543,39 @@ dependencies stopped being after #583.
   are listed with the cases themselves, and never reach the backfill. New epics declare children natively from
   the start; the backfill is for the pre-#802 stock.
 
+### `follow-up-origin/v1` — where a pipeline-filed follow-up came from (#2581)
+
+Some follow-up issues are filed by the pipeline itself, not by a person. Each
+one carries a machine-readable link to the story it came from, the slice of
+that story it covers, and the source story's PR, so a later run can refine it
+unattended from the source's context.
+
+- **Home.** The record lives in **one comment** on the follow-up, never in its body:
+  auto-refinement (#2588) rewrites the body. The comment is a visible one-line
+  summary (`Filed by /development:resolve-issue from #<source>` plus `, PR
+  #<pr>.` or `; PR not opened yet.`), the marker `<!-- follow-up-origin/v1 -->`,
+  and a fenced JSON record.
+- **Fields.** `schema` (`"follow-up-origin/v1"`), `kind` (`"split-child"` |
+  `"parked-finding"`), `source` (`{repo: "owner/name", issue}`), `pr` (the
+  **source story's** PR number, or `null`), and exactly one of `seam` and
+  `finding`, matching `kind`. A split child's `seam` is `{child, of, criteria}`,
+  where `criteria` is the source's acceptance criteria assigned to that child,
+  verbatim. A parked finding's `finding` is `{file, line, dimension, title,
+  round}`, the identity `consolidate-findings.zsh` uses.
+- **Two producers and one reader.** The fix pass posts a `parked-finding` record
+  when it files a parked finding's follow-up mid-loop, with `pr: null`
+  (`reference/review-loop/exit-20-awaiting-fix.md`). `resolve-issue` §6 then
+  sets `pr` on those follow-ups once the PR opens. #2578 posts a `split-child`
+  record for each child it files. #2588 reads the record to refine the
+  follow-up.
+- **The helper.** `development/skills/resolve-issue/scripts/follow-up-origin.zsh`
+  makes no GitHub calls. It renders the comment, parses it back to the record,
+  sets `pr`, and lists the issues a work-dir's `- parked:` notes name. Setting
+  the PR that is already set returns the comment byte for byte, so the §6 update
+  is idempotent. It refuses a different, already-set PR, and any `split-child`
+  record, whose source story is split before it is implemented and never gets
+  a PR of its own.
+
 ## Story-spec contract (`story-spec/v1`, #574)
 
 The refinement phase (`/development:refine-issue`, epic #573) is where an AI has

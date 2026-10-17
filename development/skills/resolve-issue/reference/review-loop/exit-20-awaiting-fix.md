@@ -252,6 +252,11 @@
    is how the two statements of it came to disagree once already.
 <!-- /moved: round-protocol-steps-3-4 -->
 
+**Parked follow-ups carry their origin (#2581).** The parking step above files
+the follow-up and writes the `- parked:` note; it also posts one origin comment
+on the filed issue, which the fix brief (`reference/review-loop/briefs/fix.md`)
+says how to do.
+
 **The residue terminal is retired (#2580).** The block above still has a delta
 round promote the closing sweep rather than declare `CONVERGED_WITH_RESIDUE`, and
 waits for an exit 14 only the sweep could produce. Neither applies any more: the

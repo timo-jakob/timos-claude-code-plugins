@@ -957,6 +957,16 @@ error, not a fallback.
 The residue Summary duty (#1435) went with its terminal (#2580): a run that
 opens its PR has no open blocker left to disclose.
 
+**Link parked follow-ups to the PR (#2581).** Once open-pr returns the PR number
+`<N>`, run `follow-up-origin.zsh parked-issues --progress <work-dir>/progress.md`
+(`<skill-base-dir>/scripts/`). Exit 1 means no finding was parked: nothing to do.
+For each issue it prints, read the issue's comments, take the one holding the
+`<!-- follow-up-origin/v1 -->` marker, and pipe its body through
+`follow-up-origin.zsh set-pr --pr <N>`; edit the comment only when the output differs from it, so a re-run
+changes nothing. An issue with no origin comment (filed before #2581), or an
+exit 2 from `set-pr`, is named in the Summary and left as it is — never post a
+second origin comment.
+
 When the promotion **prompt was presented**, **name in the Summary** both
 counts — **how many suggestions the human picked, and how many the sub-loop
 actually cleared**; whenever the selection was **non-empty**, add step 4's
