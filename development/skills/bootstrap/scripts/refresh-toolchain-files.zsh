@@ -7,8 +7,11 @@
 # The tool's own new files (sonar-project.properties, infra/sonarqube/, …) are
 # missing on disk, so State D's gap-fill renders them. But the files composed
 # per tool are ALREADY on disk — the quality workflow, its noop, the pre-commit
-# config and SETUP.md — and nothing else updates them: the drift detector compares template
-# hashes, which a toolchain change never moves. This script is that update.
+# config and SETUP.md, plus go-ci.yml on a sole-Go repo, whose Sonar job lives
+# there (#2615; sole-Go is is-sole-go.zsh's verdict on the --primary and
+# --languages passed after `--`, and no --languages there is not sole-Go) — and
+# nothing else updates them: the drift detector compares template hashes, which a
+# toolchain change never moves. This script is that update.
 #
 # It never overwrites a file wholesale. For each of those files it:
 #   1. finds the file's BASE — the render, under every toolchain this visibility
@@ -127,8 +130,28 @@ typeset -a targets=(
 	".pre-commit-config.yaml" "common/.pre-commit-config.yaml.tmpl"
 	"SETUP.md" "common/SETUP.md.tmpl"
 )
-typeset -a tmpls=()
 typeset i
+# a sole-Go repo's Sonar job is go-ci.yml's (#2615), so that file is composed per tool too
+# (a passthrough without --languages is never sole-Go: the verdict needs the list)
+typeset p_primary="" p_languages=""
+integer p_languages_set=0
+for ((i = 1; i < ${#passthrough}; i++)); do
+	case "${passthrough[i]}" in
+	--primary) p_primary="${passthrough[i + 1]}" ;;
+	--languages) p_languages="${passthrough[i + 1]}" && p_languages_set=1 ;;
+	esac
+done
+sole_rc=1
+if ((p_languages_set)); then
+	sole_rc=0
+	zsh "$script_dir/is-sole-go.zsh" --primary "$p_primary" --languages "$p_languages" || sole_rc=$?
+fi
+case $sole_rc in
+0) targets+=(".github/workflows/go-ci.yml" "languages/go/.github/workflows/go-ci.yml.tmpl") ;;
+1) ;;
+*) die "is-sole-go.zsh failed (exit $sole_rc)" ;;
+esac
+typeset -a tmpls=()
 for ((i = 2; i <= ${#targets}; i += 2)); do tmpls+=("${targets[i]}"); done
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/refresh-toolchain.XXXXXX")"

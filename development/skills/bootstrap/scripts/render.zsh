@@ -55,7 +55,14 @@
 #   --languages "<a b c>"         {{LANGUAGES}} + block keep set; may be ""
 #   --primary <s>                 {{PRIMARY}} (+ the GATE block keep set: kept
 #                                 iff the value is in gate_primaries —
-#                                 `kubernetes`, `opentofu` or `go`, #2122)
+#                                 `kubernetes`, `opentofu` or `go`, #2122;
+#                                 + with --languages, the SOLE_GO / NOT_SOLE_GO
+#                                 keep set, from is-sole-go.zsh, #2615: SOLE_GO
+#                                 kept iff sole-Go, NOT_SOLE_GO its complement;
+#                                 without --languages the repo is not sole-Go.
+#                                 Unlike every other tag, their START/END lines
+#                                 are never emitted, so a block they wrap renders
+#                                 as if they were not there)
 #   --gate-command <s>            {{GATE_COMMAND}} — the repository's gate
 #                                 command (#1604, #2122). Its default is per
 #                                 primary and lives here alone: `make check` for
@@ -313,6 +320,20 @@ langs=(${=languages})
 
 has_lang() { ((${langs[(Ie)$1]})); }
 
+# Sole-Go (#2615): decided by is-sole-go.zsh alone, from the --primary and
+# --languages this render was given (an absent --primary is not `go`). A render
+# without --languages is never sole-Go: the verdict needs the language list.
+sole_go=0
+if ((languages_set)); then
+	_rc=0
+	zsh "${0:A:h}/is-sole-go.zsh" --primary "${vals[PRIMARY]:-}" --languages "$languages" || _rc=$?
+	case $_rc in
+	0) sole_go=1 ;;
+	1) ;;
+	*) die "is-sole-go.zsh failed (exit $_rc)" ;;
+	esac
+fi
+
 if ((languages_set)); then
 	vals[LANGUAGES]="$languages"
 	# CodeQL identifier mapping from the SKILL.md placeholder table; an
@@ -465,10 +486,20 @@ keep_block() {
 	SURFACE_WEB_UI) has_surface web_ui ;;
 	SURFACE_GRPC) has_surface grpc ;;
 	GATE) is_gate_primary ;;
+	# the sole-Go pair (#2615); their marker lines are never emitted (render_file)
+	SOLE_GO) ((sole_go)) ;;
+	NOT_SOLE_GO) ((!sole_go)) ;;
 	# the IaC path renders no quality workflow, so it declares no toolchain (#1651)
 	TOOLCHAIN) ! is_iac_primary ;;
 	*) return 2 ;; # unknown tag — the caller fails loudly
 	esac
+}
+
+# The tags whose marker lines a render never emits, kept or stripped (#2615): a
+# block they wrap renders byte-identically to the same content unwrapped.
+is_unmarked_tag() {
+	local tag="${1//-/_}"
+	[[ "$tag" == SOLE_GO || "$tag" == NOT_SOLE_GO ]]
 }
 
 # --- rendering ---------------------------------------------------------------
@@ -495,7 +526,8 @@ render_file() {
 			rc=0
 			keep_block "$tag" || rc=$?
 			case $rc in
-			0) out_lines+=("$line") ;; # kept blocks retain their markers
+			0) # kept blocks retain their markers — except the sole-Go pair's
+				is_unmarked_tag "$tag" || out_lines+=("$line") ;;
 			2) die "$rel:$lineno: unknown block tag '$tag' — teach render.zsh its keep-rule first" ;;
 			*) skip_tag="$tag" ;;
 			esac
@@ -507,7 +539,8 @@ render_file() {
 				[[ "${match[1]}" == "$skip_tag" ]] && skip_tag=""
 				continue
 			fi
-			# kept block's END marker falls through and stays
+			# kept block's END marker falls through and stays — except the sole-Go pair's
+			is_unmarked_tag "${match[1]}" && continue
 		fi
 		[[ -n "$skip_tag" ]] && continue
 

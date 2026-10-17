@@ -438,6 +438,47 @@ EOF
   done
 }
 
+@test "render: #2615 SOLE_GO and NOT_SOLE_GO follow is-sole-go.zsh, and their marker lines are never emitted" {
+  printf 'a: 1\n# --- SOLE_GO-START ---\n# --- SONARCLOUD-START ---\nsole: yes\n# --- SONARCLOUD-END ---\n# --- SOLE_GO-END ---\n  # --- NOT_SOLE_GO-START ---\nmixed: yes\n  # --- NOT_SOLE_GO-END ---\nz: 1\n' > "$T/s.tmpl"
+  local sole mixed
+  # a nested tag keeps its own markers; the sole-Go pair's never appear
+  sole="$(printf 'a: 1\n# --- SONARCLOUD-START ---\nsole: yes\n# --- SONARCLOUD-END ---\nz: 1')"
+  mixed="$(printf 'a: 1\nmixed: yes\nz: 1')"
+  # sole-Go: go alone, and go with swift
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --primary go --languages go --static-analysis sonarcloud s.tmpl
+  [ "$status" -eq 0 ]
+  [ "$(cat "$OUT/s")" = "$sole" ]
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --primary go --languages "go swift" --static-analysis sonarcloud s.tmpl
+  [ "$status" -eq 0 ]
+  [ "$(cat "$OUT/s")" = "$sole" ]
+  # not sole-Go: go with no --languages at all (the verdict needs the list)
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --primary go --static-analysis sonarcloud s.tmpl
+  [ "$status" -eq 0 ]
+  [ "$(cat "$OUT/s")" = "$mixed" ]
+  # not sole-Go: an auxiliary Linux-tested language, a non-Go primary, no --primary
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --primary go --languages "go python" --static-analysis sonarcloud s.tmpl
+  [ "$status" -eq 0 ]
+  [ "$(cat "$OUT/s")" = "$mixed" ]
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --primary python --languages python --static-analysis sonarcloud s.tmpl
+  [ "$status" -eq 0 ]
+  [ "$(cat "$OUT/s")" = "$mixed" ]
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --languages go --static-analysis sonarcloud s.tmpl
+  [ "$status" -eq 0 ]
+  [ "$(cat "$OUT/s")" = "$mixed" ]
+}
+
+@test "render: #2615 a failing is-sole-go.zsh fails the render loudly, writing nothing" {
+  local scripts="$BATS_TEST_TMPDIR/scripts"
+  mkdir -p "$scripts"
+  cp "$SCRIPT" "$scripts/render.zsh"
+  printf '#!/usr/bin/env zsh\nexit 3\n' > "$scripts/is-sole-go.zsh"
+  printf 'a: 1\n' > "$T/a.tmpl"
+  run --separate-stderr zsh "$scripts/render.zsh" --templates "$T" --out "$OUT" --primary go --languages go a.tmpl
+  [ "$status" -eq 1 ]
+  contains "$stderr" "is-sole-go.zsh failed (exit 3)"
+  [ ! -e "$OUT/a" ]
+}
+
 @test "render: #1604 #2425 #2122 the real .maintenance.yml.tmpl records gate: only on a gate primary, with its per-primary default" {
   local primary
   for primary in kubernetes opentofu; do

@@ -640,7 +640,11 @@ flow. Stop and ask for input wherever marked; do not guess.
    tool, the normal way to add a deferred one — gets that tool's own new files
    from the gap-fill above. But the files composed per tool are already on
    disk — `.github/workflows/quality-<visibility>.yml`, its `-noop` companion,
-   `.pre-commit-config.yaml` and `SETUP.md` — and the drift detector never sees
+   `.pre-commit-config.yaml` and `SETUP.md`, plus `.github/workflows/go-ci.yml` on
+   a sole-Go repo, whose Sonar job lives there (#2615; the script asks
+   `is-sole-go.zsh` about the `--primary` and `--languages` passed after `--`,
+   and a passthrough without `--languages` is not sole-Go) —
+   and the drift detector never sees
    a toolchain change, since it compares template hashes. So off the §3l path,
    once the gate above resolved, run the refresh — in whichever of steps 3, 4
    and 5 this run reaches first, and once per run:
@@ -664,15 +668,20 @@ flow. Stop and ask for input wherever marked; do not guess.
    render under this toolchain, as step 5b does. Exit 1 → relay stderr and
    render nothing more; exit 2 → your own invocation, fix it and re-run.
    **When the required contexts changed** — a quality workflow refreshed (a
-   tool added or removed), a `conflict` or `ambiguous` one the reviewer's
+   tool added or removed), a sole-Go repo's `go-ci.yml` refreshed (its Sonar
+   job added or removed), a `conflict` or `ambiguous` one the reviewer's
    approved overwrite changed, or a gap-fill render of `codeql.yml` — re-apply
    Step 4b's branch protection with its full invocation for the new toolchain,
    which adds the new tool's context (`sonarqube`, say) and drops a removed
    one's, and run the Step 4.5 setup script whose trigger the new toolchain meets. A
    refresh that only rewrote the deferred block needs neither. On a Swift repo,
    a refreshed quality workflow's new analyser job still reads
-   `needs: test-and-coverage`, so apply *Swift job wiring* to it. A tool changed to
-   `none` leaves only these four files; its own files (`codeql.yml`,
+   `needs: test-and-coverage`, so apply *Swift job wiring* to it; a sole-Go
+   repo's, in `go-ci.yml`, reads `needs: gate` and needs no wiring. Known
+   limitation: a sole-Go repo bootstrapped before #2615 keeps its old Sonar job
+   in the quality workflow, which the refresh reports `current`; #2617's re-run
+   leftovers report tracks removing it. A tool changed to
+   `none` leaves only these files; its own files (`codeql.yml`,
    `sonar-project.properties`, `.snyk`) stay — removing them is #2126's scope.
 
    **So does the approval model (#1684)**, on every path but §3m, and in
@@ -1681,7 +1690,7 @@ and `# --- TAG-END ---` markers (including the surrounding comment lines).
 `render.zsh` strips them mechanically from its flags (this table is the
 keep-rule reference it implements; tag spellings normalize `-` to `_`, so
 the pre-commit template's `CLAUDE-PLUGIN` matches `CLAUDE_PLUGIN`). Kept
-blocks retain their marker lines. The script **fails loudly on a tag it
+blocks retain their marker lines, except `SOLE_GO`'s and `NOT_SOLE_GO`'s. The script **fails loudly on a tag it
 doesn't know** — when adding a new tag to a template, teach
 `render.zsh`'s `keep_block` its rule (and `tests/render.bats` the case)
 in the same PR:
@@ -1714,6 +1723,8 @@ in the same PR:
 | `SURFACE_GRPC` | `grpc` in `--acceptance-interfaces` |
 | `GATE` | `--primary` is a gate primary — `kubernetes` (the §3l IaC path), `opentofu` or `go`, render.zsh's `gate_primaries` set, matched exactly (gates `.maintenance.yml`'s `gate:` line, #1604, #2425, #2122) |
 | `TOOLCHAIN` | `--primary` is anything but an IaC topic (gates `.maintenance.yml`'s `tools:` block, #1651, and `SETUP.md` §4's `{{REQUIRED_CONTEXTS}}` list, #1670 — §3l renders no quality workflow, so it declares no toolchain) |
+| `SOLE_GO` | the repo is **sole-Go** — `is-sole-go.zsh --primary <p> --languages "<l>"` exits 0: primary `go` and none of `javascript`, `python` or `java` (Swift does not count), read from render.zsh's own `--primary` and `--languages` (#2615); a render without `--languages` is not sole-Go. Wraps `go-ci.yml`'s Sonar jobs. **Its marker lines are never emitted, kept or stripped** |
+| `NOT_SOLE_GO` | its complement (#2615) — wraps the quality workflows' and noops' Sonar jobs; its marker lines are never emitted either, so a non-sole-Go render is byte-identical to one without the tag |
 
 The `SURFACE_*` tags (#766) gate the docs templates' per-interface nav/MOC
 entries (§3h); when `--acceptance-interfaces` isn't passed at all, every
@@ -1749,10 +1760,12 @@ unchanged. Render rules:
 - **Swift-only repo**: the `LINUX_TESTS` block is stripped; update the
   analyser job's (`sonarcloud` or `sonarqube`)
   `needs: test-and-coverage` to `needs: test-and-coverage-swift`.
-- **Swift + another test-lane language** (rare): keep both jobs, extend
-  `needs:` to both, rename the Swift job's uploaded artifact (e.g.
-  `coverage-reports-swift`) and add a matching second download step —
-  two uploads must not share one artifact name.
+- **Swift + another test-lane language** (rare): keep both jobs, rename the
+  Swift job's uploaded artifact (e.g. `coverage-reports-swift`) — two
+  uploads must not share one artifact name — and, unless the repo is
+  sole-Go (whose analyser job is `go-ci.yml`'s and takes no wiring), extend
+  the analyser's `needs:` to both jobs and add a matching second download
+  step.
 - GitHub-hosted macOS minutes are free on public repos but bill at 10×
   Linux on private ones — say so in the Step 2 plan when a private repo on
   SonarCloud (GitHub-hosted runners) has Swift, so the runner cost is a
@@ -1927,7 +1940,9 @@ Inside the files, `render.zsh`'s per-tool block tags compose the jobs from the
 same toolchain flags (*Block stripping in templates*):
 
 - the analyser's job — `sonarcloud` or `sonarqube` — and its noop; none for
-  `static_analysis: none`;
+  `static_analysis: none`; for a **sole-Go** repo (#2615) the job is
+  `go-ci.yml`'s instead, and neither the quality workflow nor its noop carries
+  one (`NOT_SOLE_GO`, below);
 - `trivy-fs` + its noop iff `trivy`; Snyk has **no** CI job (its GitHub App
   does the scanning), so `snyk` adds none, and neither does `none`;
 - the `image` job's scanner (only with a Dockerfile): the Snyk container scan iff
@@ -2133,7 +2148,14 @@ For each detected language, merge in the appropriate config from
     `make setup`, then the gate command), whose two `if: always()` upload
     steps keep the contract semver findings (`contracts-semver-<pr>`) and the
     coverage reports (`coverage-reports`) the gate wrote. Step 4 requires
-    its `gate` context in addition to the existing Go contexts.
+    its `gate` context in addition to the existing Go contexts. On a
+    **sole-Go** repo (*Block stripping in templates*, `SOLE_GO`, #2615) it
+    also carries the Sonar job — `sonarcloud` or `sonarqube`, unchanged except
+    `needs: gate`, downloading that same-workflow `coverage-reports` artifact —
+    inside its `SONARCLOUD` / `SONARQUBE` markers, and the quality workflow and
+    its noop carry none. So render `go-ci.yml` with this run's `--languages`,
+    `--visibility` and toolchain flags too: without them its Sonar job strips
+    silently.
   - Pin the gate's Go tools through the module's `tool` directives:
     `go get -tool golang.org/x/vuln/cmd/govulncheck@latest`,
     `go get -tool github.com/boumenot/gocover-cobertura@latest` and

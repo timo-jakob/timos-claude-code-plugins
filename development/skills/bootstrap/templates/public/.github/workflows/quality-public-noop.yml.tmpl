@@ -36,6 +36,7 @@ jobs:
     runs-on: {{RUNNER}}
     steps:
       - run: echo "Doc-only PR — skipping tests (noop companion for required status check)."
+  # --- NOT_SOLE_GO-START -------------------------------------------------------
 
   # --- SONARCLOUD-START ------------------------------------------------------
   sonarcloud:
@@ -43,6 +44,7 @@ jobs:
     steps:
       - run: echo "Doc-only PR — skipping SonarCloud scan."
   # --- SONARCLOUD-END --------------------------------------------------------
+  # --- NOT_SOLE_GO-END ---------------------------------------------------------
 
   semgrep:
     runs-on: {{RUNNER}}

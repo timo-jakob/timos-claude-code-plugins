@@ -144,7 +144,9 @@ requirement, setup script or required status context; `SETUP.md` lists it in a
 bootstrap-owned `DEFERRED-TOOLS-START`/`END` block instead, rewritten on every
 run. On that re-run `development/skills/bootstrap/scripts/refresh-toolchain-files.zsh`
 merges the toolchain delta into the quality workflow, its noop, the pre-commit
-config and `SETUP.md` already on disk — a three-way merge against the closest render, never a
+config and `SETUP.md` already on disk — plus `go-ci.yml` on a sole-Go repo
+(`development/skills/bootstrap/scripts/is-sole-go.zsh`), where its Sonar job
+lives (#2615) — a three-way merge against the closest render, never a
 wholesale overwrite. `none` is never a default but private `code_scanning`'s.
 Visibility supplies only the defaults (public → `sonarcloud` / `snyk` /
 `codeql`, private → `sonarqube` / `trivy` / `none`); a recorded value wins on
