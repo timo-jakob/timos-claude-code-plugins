@@ -1082,6 +1082,17 @@ none. An epic child that E3 drives emits one too — from the child run E3
 started for it, parented to the epic run (#1227):
 see `reference/telemetry.md` § Story telemetry (#1226)
 
+**First, refine the run's parked follow-ups (#2588).** Once per run, before the
+record, at every ending after a review loop ran, escalations included — the §6
+PR, #2579's clean stop and an escalation terminal, where a parked blocker's run
+usually ends (`ESCALATE_NO_CONVERGENCE`): run `follow-up-origin.zsh parked-issues --progress
+<work-dir>/progress.md`; exit 1 means nothing was parked. Then invoke
+`/development:refine-issue <issue> --follow-up` for each issue it prints. On an
+unattended run (`resolve-session.zsh`, #2575) do it without asking. On an
+attended run ask once, listing them, with auto-refinement recommended and
+"leave them `needs-refinement`" as the other option. **A follow-up that parks
+never stops this run or its epic walk**: name it in the report and go on.
+
 ## Epic flow
 
 You do **not** implement the epic directly — you resolve its children

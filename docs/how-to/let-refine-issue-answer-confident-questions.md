@@ -86,3 +86,28 @@ re-gate.
 Scores come from the model and are not calibrated measurements. Start with
 the default `1` or a high value, and lower it once you trust what gets
 answered for you.
+
+## Follow-ups the pipeline filed
+
+Some follow-up issues are filed by the pipeline, not by you: a finding the
+review loop parked, or a child of a story that was split before it was built.
+Each one links back to the story it came from. That story was already refined,
+so `/development:resolve-issue` refines these follow-ups for you, with
+`/development:refine-issue <issue> --follow-up`, before it finishes:
+
+- **When it runs.** On an unattended run, without asking. On a run you are
+  driving, it asks once, listing the follow-ups, and recommends refining them.
+- **What it uses.** The source story's text and story spec, and the slice the
+  follow-up covers: the split child's criteria, or the parked finding. It uses
+  the same threshold as above to answer the refiner's questions.
+- **When it is accepted.** Only when every question was answered at or above the
+  threshold and every objection is resolved, within three rounds. The rewrite is
+  then written back without your approval, and the readiness gate runs. This is
+  the one place a rewrite is accepted for you.
+- **When it is not.** Any question below the threshold, or no agreement after
+  three rounds, parks the follow-up. It stays `needs-refinement`, and
+  `/development:refine-issue <issue>` resumes from where it stopped.
+- **What it leaves.** One comment on the follow-up lists the answers taken for
+  you, the threshold and the lowest confidence among them. A follow-up is tried
+  once only, and one filed while working on another follow-up is always left for
+  you.

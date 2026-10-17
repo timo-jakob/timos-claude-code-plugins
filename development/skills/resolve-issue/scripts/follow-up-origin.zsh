@@ -4,7 +4,7 @@
 # source story's PR (issue #2581, epic #2582).
 #
 # Why: the pipeline files some follow-ups itself — split children (#2578) and the
-# fix pass's parked findings (reference/review-loop/exit-20-awaiting-fix.md) —
+# fix pass's parked findings (reference/review-loop/briefs/fix.md) —
 # and they used to link their source, if at all, only in prose. #2588 refines
 # each one unattended from its source story's context, which it can only do if
 # it can read, by machine, where the follow-up came from and which slice it

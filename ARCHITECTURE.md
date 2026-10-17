@@ -6399,6 +6399,11 @@ a refinement-time split filed, so the size-stop rate at readiness time can be
 set beside the rate at resolve-issue §2. The builder carries it only when the
 state has it and refuses one of any other shape; a split filed by
 `file-split-children.zsh` is recorded as `parked` / `split-recommended`.
+A second optional key (#2588), `auto_refinement` — `{seed_kind, source_issue,
+threshold, confidences, accept_score, decision}` — rides only on a record from
+the unattended follow-up mode, built by `follow-up-auto-refine.zsh note
+--format json`; the builder carries and refuses it by the same rule, so a human
+run's payload is unchanged.
 resolve-issue's own telemetry builders are unchanged. The emission is **never fatal** — the chain is
 wrapped as `{ … } || echo <advisory>`, so a failure is said once in-session and
 never changes the run's outcome (the review loop's `|| true` with a visible
@@ -7564,7 +7569,8 @@ unattended from the source's context.
   round}`, the identity `consolidate-findings.zsh` uses.
 - **Two producers and one reader.** The fix pass posts a `parked-finding` record
   when it files a parked finding's follow-up mid-loop, with `pr: null`
-  (`reference/review-loop/exit-20-awaiting-fix.md`). `resolve-issue` §6 then
+  (`reference/review-loop/briefs/fix.md`, pointed at from
+  `exit-20-awaiting-fix.md`). `resolve-issue` §6 then
   sets `pr` on those follow-ups once the PR opens. #2578 posts a `split-child`
   record for each child it files. #2588 reads the record to refine the
   follow-up.
@@ -7575,6 +7581,40 @@ unattended from the source's context.
   is idempotent. It refuses a different, already-set PR, and any `split-child`
   record, whose source story is split before it is implemented and never gets
   a PR of its own.
+
+### The unattended follow-up mode — `refine-issue --follow-up` (#2588)
+
+The reader of that record. A pipeline-filed follow-up arrives `needs-refinement`,
+but its source story was refined well enough to build, so `resolve-issue` runs
+`/development:refine-issue <issue> --follow-up` on each one before its record:
+without asking on an unattended run, and after one question on an attended run.
+Every decision is `development/skills/refine-issue/scripts/follow-up-auto-refine.zsh`'s,
+a script with no GitHub calls.
+
+- **Eligibility.** The follow-up carries an origin record and no
+  `<!-- refine-auto: follow-up-origin/v1 -->` comment yet (one attempt per
+  follow-up), and its source carries no origin record. A follow-up filed while
+  resolving a follow-up is second generation and stays for a human.
+  Auto-refinement never splits.
+- **Seed.** `{origin, source: {number, title, prose, story_spec}}`, passed as the
+  refiner's optional `seed` input: context below the issue body, never a human
+  answer or a waiver. The seam or finding comes from the origin record alone.
+- **Accept rule.** Per round: any question below the auto-accept threshold parks
+  `needs-decision`; every objection resolved with no question left is
+  **accept**; round 3 without that parks `deferred`; otherwise the refiner is
+  called again with the automatic answers. An accepted draft is written back
+  like a human-approved one, with `provenance.generated_by` naming the mode, and
+  re-gated: `READY` removes `needs-refinement`. This accept stands in for the
+  human's approval in this mode only. Everywhere else auto-accept still never
+  approves a rewrite.
+- **Park routes.** A park takes refine-issue's typed parked exit with the label
+  kept and no block written, so a human run resumes it; it never stops the
+  calling run or its epic walk.
+- **The record of it.** One comment per attempt — the marker, the source and
+  its `prose_sha256`, the seam or finding, every automatic answer with its
+  confidence, the threshold, the **accept score** (the lowest confidence, or
+  `null` when nothing was answered automatically) and the outcome — and the
+  `auto_refinement` telemetry key (*Refine-issue telemetry*).
 
 ## Story-spec contract (`story-spec/v1`, #574)
 

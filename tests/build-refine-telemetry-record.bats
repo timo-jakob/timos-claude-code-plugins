@@ -980,3 +980,70 @@ SPLIT_PARKED='{"rounds":2,"objections_raised":1,"objections_resolved":0,"outcome
   run zsh "$V" "$BATS_TEST_TMPDIR/one.jsonl" --require-records
   [ "$status" -eq 0 ]
 }
+
+# --- the optional auto_refinement object (#2588) -----------------------------
+
+AUTO='{"seed_kind":"parked-finding","source_issue":2581,"threshold":0.9,"confidences":[0.95,0.92],"accept_score":0.92,"decision":"accept"}'
+
+@test "#2588 a present auto_refinement rides into the payload as an extra key, unmodified" {
+  put "$(printf '%s' "$READY" | jq -c --argjson a "$AUTO" '. + {auto_refinement: $a}')"
+  build_split --state "$ST"
+  [ "$status" -eq 0 ]
+  [ -z "$stderr" ]
+  assert_eq "$(echo "$output" | jq -c 'keys')" \
+    '["auto_refinement","objections_raised","objections_resolved","park_type","risk_classification","rounds"]' "payload keys"
+  assert_eq "$(echo "$output" | jq -c '.auto_refinement')" "$AUTO" "auto_refinement"
+}
+
+@test "#2588 an absent or null auto_refinement leaves a human run's payload at its five keys" {
+  put "$READY"
+  build_split --state "$ST"
+  [ "$status" -eq 0 ]
+  assert_eq "$(echo "$output" | jq -c 'keys')" "$PAYLOAD_KEYS" "payload keys (absent)"
+  put "$(printf '%s' "$READY" | jq -c '. + {auto_refinement: null}')"
+  build_split --state "$ST"
+  [ "$status" -eq 0 ]
+  assert_eq "$(echo "$output" | jq -c 'keys')" "$PAYLOAD_KEYS" "payload keys (null)"
+}
+
+@test "#2588 a parked attempt with no automatic answer carries a null accept score" {
+  put "$(printf '%s' "$READY" | jq -c '. + {outcome: "parked", park_type: "needs-decision", auto_refinement: {seed_kind: "split-child", source_issue: 7, threshold: 1, confidences: [], accept_score: null, decision: "park-needs-decision"}}')"
+  build_split --state "$ST"
+  [ "$status" -eq 0 ]
+  assert_eq "$(echo "$output" | jq -c '.auto_refinement | [.accept_score, .decision]')" '[null,"park-needs-decision"]' "accept score and decision"
+}
+
+@test "#2588 an already-READY shortcut carries decision ready" {
+  put "$(printf '%s' "$READY" | jq -c '. + {auto_refinement: {seed_kind: "split-child", source_issue: 7, threshold: 0.9, confidences: [], accept_score: null, decision: "ready"}}')"
+  build_split --state "$ST"
+  [ "$status" -eq 0 ]
+  assert_eq "$(echo "$output" | jq -c '.auto_refinement.decision')" '"ready"' "decision"
+}
+
+@test "#2588 a malformed auto_refinement is refused with exit 1 and nothing on stdout" {
+  local bad
+  for bad in '"accept"' \
+             '{"seed_kind":"residue","source_issue":7,"threshold":0.9,"confidences":[],"accept_score":null,"decision":"accept"}' \
+             '{"seed_kind":"split-child","source_issue":0,"threshold":0.9,"confidences":[],"accept_score":null,"decision":"accept"}' \
+             '{"seed_kind":"split-child","source_issue":7,"threshold":1.5,"confidences":[],"accept_score":null,"decision":"accept"}' \
+             '{"seed_kind":"split-child","source_issue":7,"threshold":0.9,"confidences":["0.9"],"accept_score":null,"decision":"accept"}' \
+             '{"seed_kind":"split-child","source_issue":7,"threshold":0.9,"confidences":[],"accept_score":2,"decision":"accept"}' \
+             '{"seed_kind":"split-child","source_issue":7,"threshold":0.9,"confidences":[],"accept_score":null,"decision":"approved"}' \
+             '{"seed_kind":"split-child","source_issue":7,"threshold":0.9,"confidences":[],"decision":"accept"}' \
+             '{"seed_kind":"split-child","source_issue":7,"threshold":0.9,"confidences":[],"accept_score":null,"decision":"accept","extra":1}'; do
+    put "$(printf '%s' "$READY" | jq -c --argjson a "$bad" '. + {auto_refinement: $a}')"
+    build_split --state "$ST"
+    [ "$status" -eq 1 ] || { echo "accepted auto_refinement $bad"; return 1; }
+    [ -z "$output" ] || { echo "stdout on refused auto_refinement $bad: $output"; return 1; }
+    assert_contains "$stderr" "auto_refinement"
+  done
+}
+
+@test "#2588 an attempt emits a record that validates and carries auto_refinement unmodified" {
+  run emit_run "$(printf '%s' "$READY" | jq -c --argjson a "$AUTO" '. + {auto_refinement: $a}')" 30
+  [ "$status" -eq 0 ]
+  assert_eq "$(echo "$output" | jq -c '.payload.auto_refinement')" "$AUTO" "auto_refinement"
+  printf '%s\n' "$output" > "$BATS_TEST_TMPDIR/one.jsonl"
+  run zsh "$V" "$BATS_TEST_TMPDIR/one.jsonl" --require-records
+  [ "$status" -eq 0 ]
+}
