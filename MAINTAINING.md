@@ -445,6 +445,17 @@ prerequisites are two installs, `npm i @tanstack/react-query` and
 `npm i -D @testing-library/react`, plus the confirmed `QueryClientProvider` edit
 in `src/main.tsx`; none is pinned here.
 
+**The shell overlay** (#1124, SKILL.md §3k.7) is a sibling tree,
+`languages/javascript/react-shell/`, that renders after §3k.6 and shares no path
+with any layer beneath it, so a base, consumer or React config change never has
+to be repeated there. What it does depend on is the `mfe-contract/v1` types: its
+six framework-free modules import `@{{NPM_SCOPE}}/mfe-contract`, and
+`tests/react-shell-templates.bats` type-checks them against the contract's
+`index.d.ts`, so a contract change that breaks the shell reds there. Keep
+`src/shell/loader.ts` as the shape marker — #1127 and State D's adoption gap
+read that path — and keep each `loader.test.ts` case title in step with the
+suite's pinned list.
+
 `tests/react-templates.bats` checks the load-bearing tokens of each layer
 against that layer's own template, so a forgotten copy usually reds there — but
 it checks tokens, not whole files, so read the diff side by side as well.

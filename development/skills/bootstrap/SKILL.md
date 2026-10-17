@@ -5167,6 +5167,114 @@ rendering, installing, generating and running the tree — the example test gree
 with no backend, the deprecation warning at the call site — is the
 render-and-build smoke check's job (#1063).
 
+### 3k.7. Shell overlay (the default shape of a React repo — #1124)
+
+The **SPA shell** of the MFE composition epic (#1122): the outer route table, the
+application chrome, the seam through which auth, flags and theme reach remotes,
+`/importmap.json` resolution, and the loader that mounts a matched page remote
+through `mfe-contract/v1` (ARCHITECTURE.md, *The `mfe-contract/v1` contract*). A
+plain SPA is a shell with zero remotes, so this one shape also covers the
+small-app case.
+
+**Trigger.** Run this step after §3k.6 when §3k.5's overlay applies (its *Does
+the overlay apply?* check, decided once in Step 2). The shell is the **default**
+shape of a React repo; a remote (#1125) is the exception. Until the shell-or-remote
+recommender (#1127) lands, the step is its own Step 2 plan line, and approving the
+plan approves it:
+
+```text
+React shell overlay (default shape; drop this line if the repo is a remote, #1125)
+```
+
+A dropped line skips the step entirely — not an error, no Step 5 item.
+
+**Shape marker — `src/shell/loader.ts`.** That file marks a repo as a shell, and
+the recommender's (#1127) *shape already determined by an existing marker* gate
+reads it. In State
+D the step is an **adoption gap** only when the marker is present and another
+shell file is missing: offer the missing files in the plan. A React repo with no
+`src/shell/loader.ts` is never offered the shell in State D — without #1127,
+nothing can tell a remote from a deliberately plain app.
+
+**Install first, render second.** Snapshot `package.json` and the lockfile, then
+install the contract package, its scope being the owner part of the repository
+slug, lowercased (the contract's scope-derivation rule):
+
+```text
+npm i -D @<scope>/mfe-contract
+```
+
+Skip the install when `package.json` already lists the package. **If it fails —
+the package is not published until #1899 — restore both files from the snapshot,
+render nothing, and record a Step 5 item naming `@<scope>/mfe-contract` and the
+publishing story, #1899.** The item says outright that a plain re-run will not
+add the shell — no marker lands, so State D never offers it — and that adding it
+once #1899 has published means running this step's install and render by hand.
+
+**Render the shell set** into a staging directory, then write each file under
+the idempotency rules:
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates/languages/javascript/react-shell" \
+  --out "<staging-dir>" --project-slug "<owner/repo>" \
+  src/shell/Shell.tsx src/shell/Chrome.tsx src/shell/routes.ts \
+  src/shell/navigation.ts src/shell/import-map.ts src/shell/loader.ts \
+  src/shell/context.ts src/shell/auth.ts src/shell/loader.test.ts \
+  public/importmap.json
+```
+
+`--project-slug` sets `{{NPM_SCOPE}}`, the only placeholder the set carries, so
+no `{{PLACEHOLDER}}` survives; a non-zero `render.zsh` exit takes the failed
+install's branch above — restore both files, render nothing, record a Step 5
+item — and the run carries on. On either failure the `src/main.tsx` edit below
+is not offered. **Withhold `src/shell/loader.test.ts`** — drop it from the list —
+unless §3k.5 ended with its setup module, `src/test/setup.ts`, on disk, and
+record a Step 5 item naming it: the test needs that jsdom wiring. Record every
+file this step writes under the `react_overlay` telemetry step key (*Keep the
+run's facts as you go*). Each file lands at its own relpath — `src/shell/…` and
+`public/importmap.json` (`{ "imports": {} }`, the local-development map; each
+environment serves its own `/importmap.json`, #1128).
+
+**Layer ordering — composition, not clobbering.** §3d base javascript → §3k
+contract-consumer → §3k.5 React overlay → §3k.6 React Query binding → **this
+step**. The shell set shares no path with any earlier layer, so this step leaves
+every file §3d, §3k, §3k.5 and §3k.6 rendered untouched. An on-disk shell file
+that differs from its template takes **idempotency rule 3's diff prompt**, never
+a blind overwrite.
+
+**The one Vite-owned edit — a §4c-class confirmed edit of `src/main.tsx`.** It
+wraps `<App />` in the shell, with the capabilities created once at module
+scope:
+
+```tsx
+import { defaultCapabilities } from "./shell/context";
+import { Shell } from "./shell/Shell";
+
+const capabilities = defaultCapabilities();
+// …wrap the rendered tree:
+//   <Shell capabilities={capabilities}><App /></Shell>
+```
+
+- **Idempotent skip** when `src/main.tsx` already imports `Shell`.
+- **Confirm before editing**: show the diff and ask; the plan approval alone
+  does not cover it.
+- **Snapshot `src/main.tsx` first.** On a failed edit, a decline, no answer, or
+  no `<App />` to wrap, restore the pre-edit snapshot and record a Step 5 TODO
+  naming the `<Shell>` wrap to add by hand.
+- **It composes with §3k.6's `QueryClientProvider` edit in either order**: wrap
+  whichever element currently renders `<App />`, so the provider and the shell
+  nest without either edit undoing the other.
+
+No other Vite-owned file is written — `index.html` included. The browser-level
+`<script type="importmap">` for dependencies shared with remotes belongs to the
+canvas (#1939).
+
+Verification here is **structural** and type-checked (`tests/react-shell-templates.bats`:
+the six framework-free modules pass `tsc --noEmit --strict`); running
+`src/shell/loader.test.ts` against a rendered tree is the render-and-build smoke
+check's job (#1063).
+
 ### 3l. Infrastructure-as-code repos (no application language) — #1154
 
 Applies when exactly one of `is_kubernetes` and `is_opentofu` is `true`, **the resolved language set is empty**,
@@ -7074,7 +7182,7 @@ kept since the start (*Telemetry — stamp the run's start*) to
   | `api_contracts` | 3i. API contracts machinery |
   | `anti_corruption_adapter` | 3j. Multi-major anti-corruption adapter |
   | `contract_consumer` | 3k. API contract-consumer machinery |
-  | `react_overlay` | 3k.5. React overlay |
+  | `react_overlay` | 3k.5. React overlay, and 3k.7. Shell overlay |
   | `react_query` | 3k.6. React Query binding |
   | `iac` | 3l. Infrastructure-as-code repos |
   | `composition` | 3m. Composition repos |

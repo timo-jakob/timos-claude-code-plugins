@@ -497,7 +497,7 @@ binding_step() {
   sed -n '/^### 3k\.6\. React Query binding/,/^### /p' "$SKILL" | tr -s '[:space:]' ' '
 }
 
-BINDING_END='### 3l. Infrastructure-as-code repos (no application language) — #1154 '
+BINDING_END='### 3k.7. Shell overlay (the default shape of a React repo — #1124) '
 
 @test "binding: SKILL.md carries the §3k.6 step after §3k and §3k.5, rendering all four relpaths" {
   local section k r b l f
@@ -721,10 +721,10 @@ WQN="webui-quality-noop.yml.tmpl"
   [ "$n_all" -gt 0 ]
   [ "$n_all" -eq "$n_step" ] || { echo "webui-quality named outside §3k.5 ($n_all vs $n_step)"; false; }
   # … and rendering the whole javascript tree minus the React overlay yields none
-  # (mfe-contract/ is left out: its {{NPM_SCOPE}} comes from the composition step,
-  # which render.zsh has no flag for)
+  # (mfe-contract/ is left out: its {{NPM_SCOPE}} comes from the composition step;
+  # so is react-shell/, the shell overlay §3k.7 renders on top of React, #1124)
   while IFS= read -r f; do args+=("languages/javascript/$f"); done < <(
-    cd "$JS" && find . -type f ! -path './react/*' ! -path './mfe-contract/*' ! -name .DS_Store \
+    cd "$JS" && find . -type f ! -path './react*/*' ! -path './mfe-contract/*' ! -name .DS_Store \
       | sed 's|^\./||' | LC_ALL=C sort)
   [ "${#args[@]}" -gt 10 ]
   run zsh "$RENDER" --templates "$TEMPLATES" --out "$OUT/non-react" \

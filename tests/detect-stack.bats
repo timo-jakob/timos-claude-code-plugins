@@ -1464,6 +1464,15 @@ _fake_tree() {  # $1.. = ops major dirs; "vN" -> openapi.yaml, "vN:tmpl" -> open
   [ "$(jq -r '[.missing_artifacts[] | select(startswith("mfe-contract/"))] | length' <<<"$out")" -eq 0 ]
 }
 
+@test "detect-stack #1124: a javascript repo is never missing the react-shell overlay" {
+  printf '{ "name": "x", "version": "0.1.0" }\n' > package.json
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.languages | index("javascript")' <<<"$out")" != "null" ]
+  # §3k.7 offers the shell only to a repo that already has src/shell/loader.ts,
+  # so the generic gap-fill list must never carry the overlay's template paths
+  [ "$(jq -r '[.missing_artifacts[] | select(startswith("react-shell/"))] | length' <<<"$out")" -eq 0 ]
+}
+
 @test "detect-stack #729: tsconfig.json alone also detects javascript (never typescript)" {
   printf '{ "compilerOptions": {} }\n' > tsconfig.json
   out=$(bash "$DETECT" 2>/dev/null); rc=$?
