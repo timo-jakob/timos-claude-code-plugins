@@ -2101,6 +2101,16 @@ For each detected language, merge in the appropriate config from
   through `render.zsh` with `--primary go` and — when `.maintenance.yml` records a `gate:` — that value
   as `--gate-command`, so the workflow, the hook and `.maintenance.yml` carry
   one command (`make check` unless one is recorded):
+  - **Copy** `templates/common/scripts/check-contracts-lint.zsh` →
+    `scripts/check-contracts-lint.zsh` and
+    `templates/common/scripts/check-docs.zsh` → `scripts/check-docs.zsh`
+    (verbatim, no placeholders, `chmod +x`; #2640) — the shared checkers the
+    gate's contracts lint and docs stages call with `--caller go-gate`. They
+    hold the newest-major selector, the Spectral pin and the pandoc image pin,
+    so every language gate lints and builds the same way without a copy of
+    its own. A missing one fails its stage naming
+    `re-run /development:bootstrap`. One already on disk goes to the
+    idempotency reviewer like the gate script, as plugin-owned.
   - `templates/languages/go/Makefile.tmpl` → `Makefile` — the one place the
     gate's installed non-Go tools are pinned (golangci-lint, diff-cover,
     trivy, gitleaks and pre-commit, whatever `tools.vulnerabilities`
@@ -5665,6 +5675,8 @@ actually rendered in Step 3 — §3a through §3l):
 | `scripts/go-gate.zsh` | `languages/go/scripts/go-gate.zsh.tmpl` (Go primary only) |
 | `hooks/pre-push` | `languages/go/hooks/pre-push.tmpl` (Go primary only) |
 | `hooks/pre-commit` | `languages/go/hooks/pre-commit.tmpl` (Go primary only) |
+| `scripts/check-contracts-lint.zsh` | `common/scripts/check-contracts-lint.zsh` (Go primary only, #2640) |
+| `scripts/check-docs.zsh` | `common/scripts/check-docs.zsh` (Go primary only, #2640) |
 | `.github/workflows/no-cluster-deploy.yml` | `common/.github/workflows/no-cluster-deploy.yml.tmpl` (not on the §3l IaC path) |
 | `scripts/check-no-cluster-deploy.zsh` | `common/scripts/check-no-cluster-deploy.zsh` (not on the §3l IaC path) |
 | `.github/workflows/api-stability.yml` | `common/.github/workflows/api-stability.yml.tmpl` |

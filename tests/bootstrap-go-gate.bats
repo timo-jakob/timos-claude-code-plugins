@@ -219,6 +219,9 @@ go_repo() {
   mkdir -p "$R/scripts"
   printf '#!/bin/sh\necho "no-cluster-deploy $*" >> "$CALLS"\nexit "${NCD_RC:-0}"\n' \
     > "$R/scripts/check-no-cluster-deploy.zsh"
+  # the shared contracts-lint and docs checkers stages 11 and 13 call, as bootstrap renders them
+  cp "$TEMPLATES/common/scripts/check-contracts-lint.zsh" "$TEMPLATES/common/scripts/check-docs.zsh" \
+    "$R/scripts/"
   git -C "$R" add -A
   git -C "$R" commit -q -m base
   git -C "$R" remote add origin "$REMOTE"
@@ -370,20 +373,23 @@ gate_with() {
 
 @test "#2614: trivy, gitleaks, pre-commit, Spectral and pandoc are each pinned once; oasdiff and yq run through go tool" {
   local gate="$GO_TMPL/scripts/go-gate.zsh.tmpl" make="$GO_TMPL/Makefile.tmpl"
+  local lint="$TEMPLATES/common/scripts/check-contracts-lint.zsh" docs="$TEMPLATES/common/scripts/check-docs.zsh"
   [ "$(grep -c '^TRIVY_VERSION := v' "$make")" -eq 1 ]
   [ "$(grep -c '^GITLEAKS_VERSION := v' "$make")" -eq 1 ]
   [ "$(grep -c '^PRE_COMMIT_VERSION := [0-9]' "$make")" -eq 1 ]
-  [ "$(grep -c '^spectral_cli="@stoplight/spectral-cli@[0-9][0-9.]*"$' "$gate")" -eq 1 ]
-  [ "$(grep -c '^pandoc_image="pandoc/extra:[0-9][0-9.]*"$' "$gate")" -eq 1 ]
+  [ "$(grep -c '^spectral_cli="@stoplight/spectral-cli@[0-9][0-9.]*"$' "$lint")" -eq 1 ]
+  [ "$(grep -c '^pandoc_image="pandoc/extra:[0-9][0-9.]*"$' "$docs")" -eq 1 ]
   # the gate names no version of any of them anywhere else, and neither do the hooks or CI
   run ! grep -rlE 'TRIVY_VERSION :=|GITLEAKS_VERSION :=|PRE_COMMIT_VERSION :=|pre-commit==[0-9]' \
     "$GO_TMPL/scripts" "$GO_TMPL/hooks" "$GO_TMPL/.github"
-  [ "$(grep -c 'spectral-cli@' "$gate")" -eq 1 ]
-  [ "$(grep -c 'pandoc/extra' "$gate")" -eq 1 ]
+  [ "$(grep -c 'spectral-cli@' "$lint")" -eq 1 ]
+  [ "$(grep -c 'pandoc/extra' "$docs")" -eq 1 ]
   run ! grep -rlE 'spectral-cli@|pandoc/extra' "$GO_TMPL/.github" "$GO_TMPL/hooks" "$make"
+  # the shared checkers own both pins (#2640): the Go gate names neither
+  run ! grep -qE 'spectral_cli|pandoc_image|spectral-cli@|pandoc/extra' "$gate"
   # Spectral and pandoc run from the pins, never a literal
-  grep -q 'npx --yes "$spectral_cli" lint --ruleset .spectral.yaml --fail-severity error' "$gate"
-  [ "$(grep -c '"$pandoc_image"' "$gate")" -eq 3 ]
+  grep -q 'npx --yes "$spectral_cli" lint --ruleset .spectral.yaml --fail-severity error' "$lint"
+  [ "$(grep -c '"$pandoc_image"' "$docs")" -eq 3 ]
   # oasdiff and yq: shims that run go tool, and no bare invocation of either outside a comment
   grep -qF "printf '#!/bin/sh\nexec go tool %s \"\$@\"\n' \"\$t\"" "$gate"
   grep -qx 'for t in oasdiff yq; do' "$gate"
@@ -665,6 +671,49 @@ gate_with() {
   run --separate-stderr gate
   [ "$status" -eq 1 ]
   contains "$stderr" 'go-gate: FAIL contracts semver — .github/scripts/check-contracts-semver.sh is missing; re-run /development:bootstrap'
+}
+
+@test "#2640: the gate maps each shared checker's exit — 1 adds no line, 3 skips, any other names the code, a missing one names bootstrap" {
+  go_repo none
+  # a change under contracts/ with no vN major: the real checker exits 3
+  mkdir -p "$R/contracts/schemas"
+  echo '{}' > "$R/contracts/schemas/pet.json"
+  docs_sources
+  commit_all
+  run --separate-stderr gate
+  contains "$output" $'go-gate: contracts lint\ngo-gate: skip contracts lint — no contracts/vN/openapi.yaml'
+  lacks "$stderr" 'FAIL contracts lint'
+  # exit 1: the checker's own FAIL line is the only one, and the gate exits 1
+  printf '#!/bin/sh\necho "go-gate: FAIL contracts lint — from the checker" >&2\nexit 1\n' \
+    > "$R/scripts/check-contracts-lint.zsh"
+  run --separate-stderr gate
+  [ "$status" -eq 1 ]
+  [ "$stderr" = 'go-gate: FAIL contracts lint — from the checker' ]
+  # any other exit is named, with its code
+  printf '#!/bin/sh\nexit 4\n' > "$R/scripts/check-contracts-lint.zsh"
+  run --separate-stderr gate
+  [ "$status" -eq 1 ]
+  [ "$stderr" = 'go-gate: FAIL contracts lint — scripts/check-contracts-lint.zsh exited 4' ]
+  rm "$R/scripts/check-contracts-lint.zsh"
+  run --separate-stderr gate
+  [ "$status" -eq 1 ]
+  [ "$stderr" = 'go-gate: FAIL contracts lint — scripts/check-contracts-lint.zsh is missing; re-run /development:bootstrap' ]
+  # the docs checker, reached with contracts on the base branch
+  cp "$TEMPLATES/common/scripts/check-contracts-lint.zsh" "$R/scripts/"
+  git -C "$R" rm -rq contracts
+  commit_all
+  printf '#!/bin/sh\necho "go-gate: FAIL docs — from the checker" >&2\nexit 1\n' > "$R/scripts/check-docs.zsh"
+  run --separate-stderr gate
+  [ "$status" -eq 1 ]
+  [ "$stderr" = 'go-gate: FAIL docs — from the checker' ]
+  printf '#!/bin/sh\nexit 3\n' > "$R/scripts/check-docs.zsh"
+  run --separate-stderr gate
+  [ "$status" -eq 1 ]
+  [ "$stderr" = 'go-gate: FAIL docs — scripts/check-docs.zsh exited 3' ]
+  rm "$R/scripts/check-docs.zsh"
+  run --separate-stderr gate
+  [ "$status" -eq 1 ]
+  [ "$stderr" = 'go-gate: FAIL docs — scripts/check-docs.zsh is missing; re-run /development:bootstrap' ]
 }
 
 # --- docs -----------------------------------------------------------------------

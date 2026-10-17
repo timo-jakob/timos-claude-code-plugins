@@ -406,6 +406,8 @@ EOF
   [ "$rc" -eq 0 ]
   # template-drift-watch is an every-repo template -> a bare repo is missing it.
   [ "$(jq -r '.missing_artifacts | index(".github/workflows/template-drift-watch.yml")' <<<"$out")" != "null" ]
+  # the Go gate's shared checkers (#2640) are no gap on a non-Go repo
+  [ "$(jq -r '.missing_artifacts | index("scripts/check-docs.zsh")' <<<"$out")" = "null" ]
 }
 
 # --- #1330 ops majors: gap-fill installs the NEWEST only ---------------------
