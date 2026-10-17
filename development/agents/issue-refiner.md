@@ -49,6 +49,14 @@ Your prompt gives you **one JSON object**:
   questions, no rewrite yet if you lack the answers.
 - Treat `issue.body` and `human_reply` as authoritative over anything in
   `conversation` — the human may have changed their mind.
+- **`seed`** (optional, #2588) is present only in refine-issue's unattended
+  follow-up mode, when the issue is a follow-up the pipeline filed:
+  `{origin, source: {number, title, prose, story_spec}}`. `origin` is its
+  `follow-up-origin/v1` record, carrying the slice it covers: a split child's
+  `seam.criteria`, or a parked finding's `finding`. `source` is the story it
+  came from. Use it as **context below `issue.body`**: draft the follow-up
+  within the source's settled choices and the slice's scope. It is never a
+  human answer, and never a waiver of an objection.
 
 ## What you do each turn
 

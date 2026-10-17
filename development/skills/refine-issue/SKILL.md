@@ -12,8 +12,9 @@ description: >
   before/after comment trail. When a session can't converge, take a typed parked
   exit (needs-decision / split-recommended / deferred) that a later run resumes
   from (#578). Pointed at an epic, it walks each needs-refinement child through
-  that single-issue flow and posts an epic-level summary (#580). The intelligence lives in the
-  agent, this skill is the conductor. Composes story-readiness (#559) and
+  that single-issue flow and posts an epic-level summary (#580). With --follow-up
+  it refines a pipeline-filed follow-up unattended, from its source story (#2588).
+  The intelligence lives in the agent, this skill is the conductor. Composes story-readiness (#559) and
   issue-refiner (#575); consumes the story-spec/v1 contract (#574).
 disable-model-invocation: false
 ---
@@ -25,10 +26,10 @@ function; **you** relay between it and the human, and **you** own every GitHub
 write. The payoff of doing this well: the story reaches the implementer precisely
 specified, and a durable machine-readable `story-spec/v1` block rides along.
 
-**User input:** an issue number or URL, optionally with `--auto-accept <t>`.
-Operate on the session's repo (`gh repo view --json nameWithOwner`); the issue
-must belong to it. If empty, print
-`/development:refine-issue <issue-number|url> [--auto-accept <0..1>]` and stop.
+**User input:** an issue number or URL, optionally with `--auto-accept <t>` and
+`--follow-up` (*Unattended follow-up mode*, below). Operate on the session's repo
+(`gh repo view --json nameWithOwner`); the issue must belong to it. If empty, print
+`/development:refine-issue <issue-number|url> [--auto-accept <0..1>] [--follow-up]` and stop.
 
 **Resolve the auto-accept threshold once, before anything else.** The run
 applies it in Step 2. Resolve it once per invocation, not once per epic child:
@@ -258,6 +259,83 @@ this is the guided pass that clears them.
 The walk is **resumable**: re-running on the epic re-enumerates and continues
 from whichever children are still `needs-refinement`.
 
+## Unattended follow-up mode (`--follow-up`, #2588)
+
+`--follow-up` refines a **pipeline-filed follow-up**, one carrying a
+`follow-up-origin/v1` record (#2581), with no human in the loop.
+`/development:resolve-issue` invokes it before its §7 record, and #2578 for each
+split child it files. Every decision is `scripts/follow-up-auto-refine.zsh`'s;
+you relay, and you own every write. Resolve the threshold as above.
+
+**Steps 0 and 1 run as written, with no prompt:** Step 0 first, Step 1 after the
+seed (2. below). On Step 1's already-`READY` shortcut, post the note with
+`--decision ready` after zero rounds, with no answers; otherwise its
+`refinement_questions` are the objections for the rounds. **Every human prompt
+has a fixed unattended answer:**
+
+- Step 0's precondition — a follow-up without `needs-refinement` is not
+  refined: stop, writing nothing;
+- Step 1's shortcut confirmation — clear the label;
+- Step 2's relay and its answers — `decide`;
+- Step 2's approval — `accept`;
+- Step 2's size check stopping, or a non-null `proposed_split` — park
+  `deferred`, never split;
+- Step 5's failed label removal — report it.
+
+Step 2.5 has no prompt: on `accept` it runs as written, before Step 3. **An exit
+2** from `follow-up-auto-refine.zsh` or `follow-up-origin.zsh` is your own
+malformed input: fix it and re-run once. A second exit 2 stops the mode for
+that follow-up: report it and write nothing, so the label stays.
+
+1. **Eligibility.** Write `gh issue view <N> --json comments` to a file and read
+   the source with `follow-up-auto-refine.zsh origin --comments <file>`; exit 1
+   means no record, refused as `no-origin-record` below. Write `gh issue view
+   <source> --json number,title,body,comments` to a second file and run
+   `eligible --comments <file> --source <file>`. Exit 1 prints the refusal: `no-origin-record`,
+   `already-attempted` or `second-generation`. Report it and stop, writing
+   nothing; the follow-up stays `needs-refinement` for a human.
+   **Auto-refinement never splits**, and it never walks an epic.
+2. **Seed.** `seed --comments <file> --source <file>` prints the seed. Pass it
+   as the `seed` field of every `issue-refiner` call (Step 2), with
+   `human_reply` empty on the first round.
+3. **Rounds.** Split each turn with `split-refiner-questions.zsh` (Step 2), then
+   run `decide --split <split.json> --turn <turn.json> --round <R>`. It accepts
+   only a converged turn with a non-empty `resolved_objections`, a non-blank
+   `proposed_prose` and a `proposed_story_spec` object; a converged turn without
+   a draft is `continue` below the cap and `park deferred` at it:
+   - `continue` — call the refiner again with the `auto` answers as
+     `human_reply`, as Step 2 does when every question is `auto`;
+   - `accept` — size the draft (*Step 2 — size the draft before approval*); a
+     draft that stops is parked `deferred`, never split. Otherwise write it back
+     as Steps 2.5 and 3 do, with `provenance.generated_by` set to
+     `issue-refiner via /development:refine-issue --follow-up (unattended)`. Then Step 4 and
+     Step 5: `READY` removes `needs-refinement`; anything else keeps it and
+     posts the gate's questions, Step 5's deferred route;
+   - `park` — take Step 2's typed parked exit with that `park_type`: the resume
+     comment carries the seeded conversation, the label stays and no block is
+     written, so a human's `/development:refine-issue <N>` resumes from it. For
+     `needs-decision` its state's `open_questions` is the `ask` questions'
+     text, `decision` the first of them and `owner` "the maintainer — the
+     unattended mode asked no one". For
+     `deferred`, `open_questions` is the unresolved objections' `objection`
+     text plus any remaining questions, never empty: else "no convergence
+     within the round cap". A size-check park names its own reason instead:
+     "the draft's declared inventory stops the size check", with the triggers.
+
+   Keep every `auto` answer of every round in one list for the note.
+4. **Note.** Post `note --seed <seed> --answers <answers> --threshold-milli
+   <milli> --decision <accept|ready|park-needs-decision|park-deferred>` as one
+   comment on the follow-up, whatever the outcome: `accept` on accept, `ready`
+   on Step 1's shortcut, else `park-needs-decision` or `park-deferred` by the
+   park's type. Its marker is
+   what makes a second run refuse `already-attempted`.
+5. **Telemetry.** Step 7 emits one ordinary record, with `auto_refinement` — the
+   same call with `--format json` — added to its state.
+
+**This mode's `accept` stands in for the human's approval, here and nowhere
+else.** **A park never stops the caller**: report it and return, so the calling
+run, its epic walk and the next follow-up go on.
+
 ## Step 0 — fetch, and check the precondition
 
 ```bash
@@ -281,6 +359,7 @@ gh issue view <N> --json number,title,body,state,labels,url,comments
   # refiner call.
   STATE_OUTCOME=""; PARK_TYPE=""; RISK=""; ROUNDS=""; RAISED=""; RESOLVED=""
   SIZE_PREFLIGHT=""   # optional, never guarded — Step 7's size_preflight (#2589)
+  AUTO_REFINEMENT=""  # optional, never guarded — --follow-up only (#2588)
   # Print the two stamps: Step 7 needs their LITERAL values many tool calls
   # later, and a shell variable does not survive that gap.
   echo "carry into Step 7: T0=$T0 REPO_ROOT=$REPO_ROOT"
@@ -435,7 +514,8 @@ want changes, feed their reply back for another round.
 
 **Auto-accept never approves the rewrite.** The threshold only answers the
 refiner's questions. The approval of the exact rewrite is always the human's,
-whatever the threshold. Present it with a heading **Answers taken
+whatever the threshold. The one exception is the unattended follow-up mode
+below, where its `accept` decision stands in for that approval. Present it with a heading **Answers taken
 automatically**, listing each auto-accepted question, the answer, its
 confidence and its weakest criterion. The human can overturn any of them
 before approving. An overturned answer is a normal human reply: feed it back for
@@ -916,7 +996,8 @@ fabricated value the payload builder deliberately does not police.
 `STATE_OUTCOME`, `PARK_TYPE`, `RISK`, `ROUNDS`, `RAISED`, `RESOLVED` and
 `SIZE_PREFLIGHT` must all be
 re-stated as literals **in the same Bash invocation as the fence**, on the lines
-above the guard (Step 2's rule). Values assigned in an earlier tool call are
+above the guard (Step 2's rule). In the unattended follow-up mode
+`AUTO_REFINEMENT` is one more, re-stated the same way. Values assigned in an earlier tool call are
 gone, and the guard would then skip the record for a run that was measured
 perfectly well. This holds on **every** path here — including Step 1's
 already-`READY` shortcut, which never enters Step 2 and so never reads that rule.
@@ -964,14 +1045,15 @@ else
       jq -n --arg rounds "$ROUNDS" --arg raised "$RAISED" --arg resolved "$RESOLVED" \
             --arg outcome "$STATE_OUTCOME" \
             --arg park_type "${PARK_TYPE:-}" --arg risk "${RISK:-}" \
-            --arg size "${SIZE_PREFLIGHT:-}" \
+            --arg size "${SIZE_PREFLIGHT:-}" --arg auto "${AUTO_REFINEMENT:-}" \
         '{rounds: ($rounds|tonumber),
           objections_raised: ($raised|tonumber),
           objections_resolved: ($resolved|tonumber),
           outcome: $outcome,
           park_type: (if $park_type == "" then null else $park_type end),
           risk_classification: (if $risk == "" then null else $risk end)}
-         + (if $size == "" then {} else {size_preflight: ($size | fromjson)} end)' > "$STATE" \
+         + (if $size == "" then {} else {size_preflight: ($size | fromjson)} end)
+         + (($ARGS.named.auto // "") as $a | if $a == "" then {} else {auto_refinement: ($a | fromjson)} end)' > "$STATE" \
         && OUTCOME="$("$BUILDER" --state "$STATE" --print-outcome)" \
         && "$BUILDER" --state "$STATE" > "$PAYLOAD" \
         && "<skill-base-dir>/../../scripts/telemetry/emit-telemetry.zsh" \
@@ -1030,6 +1112,11 @@ fi
   empty `SIZE_PREFLIGHT` leaves the key out (a verdict with no `size` object,
   such as one from before #2589), and a malformed one makes the builder refuse
   the state, which the `||` advisory reports.
+- `auto_refinement` (#2588) is the other **optional** key, from
+  `AUTO_REFINEMENT`, set only by the unattended follow-up mode: the output of
+  `follow-up-auto-refine.zsh note … --format json`, re-stated as a single-quoted
+  literal like `SIZE_PREFLIGHT`. A human run leaves it empty, so its payload is
+  unchanged.
 - `repo_type` is deliberately **`null`** on this stream: refine-issue never
   detects a stack, and a guessed one would be worse than an absent one.
 - Emit **exactly one record per run**, where a "run" is **one single-issue
@@ -1050,12 +1137,14 @@ fi
   refinement judgment yourself — spawn `issue-refiner`. Never let the agent
   write to GitHub — every side effect (edit, label, comment) is yours.
 - **Human-approved, human-authored write-back.** No bot token, no PR: you edit
-  the issue with the human's auth, and only after they approve the exact rewrite.
+  the issue with the human's auth, and only after they approve the exact rewrite
+  — the unattended follow-up mode's `accept` is the only exception.
 - **Auto-accept answers questions, nothing else.** The threshold
   (`--auto-accept`, else `refine_auto_accept_threshold`, else 1) decides only
   which refiner questions you answer with the refiner's recommendation, and
   `scripts/split-refiner-questions.zsh` makes that decision. It never approves
-  the rewrite, and it never answers the Step 0, Step 1 or Step 5 prompts.
+  the rewrite, and it never answers the Step 0, Step 1 or Step 5 prompts; the
+  unattended follow-up mode, the only exception, answers them as it lists.
   Every auto-taken answer is shown at approval and recorded in Step 6's trail.
 - **The label tells the truth.** Remove `needs-refinement` **only** on a `READY`
   re-gate; otherwise it stays.

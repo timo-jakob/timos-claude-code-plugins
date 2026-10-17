@@ -34,7 +34,12 @@
 #     "risk_classification": "low"|"normal"|"elevated"|null,
 #     "size_preflight": { "verdict": "pass"|"stop"|"skipped",
 #                         "triggers": ["files"|"plugin"|"bootstrap-straddle", …],
-#                         "children_filed": N } }      # OPTIONAL (#2589)
+#                         "children_filed": N },       # OPTIONAL (#2589)
+#     "auto_refinement": { "seed_kind": "split-child"|"parked-finding",
+#                          "source_issue": N, "threshold": T,
+#                          "confidences": [C, …], "accept_score": C|null,
+#                          "decision": "accept"|"ready"|"park-needs-decision"|"park-deferred" } }
+#                                                       # OPTIONAL (#2588)
 #
 # `size_preflight` is the one optional key: refine-issue copies it from the last
 # readiness verdict's `size` object, with `children_filed` the number of child
@@ -43,6 +48,12 @@
 # keys — and a present one that is not that shape is refused (exit 1) rather
 # than passed through, since the payload is OPEN and the validator would not
 # catch it.
+#
+# `auto_refinement` (#2588) follows the same rule: the unattended follow-up mode
+# (`--follow-up`) copies it from `follow-up-auto-refine.zsh note --format json`,
+# so a human run carries none and its payload is unchanged. T, every C and the
+# accept score are numbers in [0, 1]; the accept score is null when no question
+# was answered automatically.
 #
 # Usage:
 #   build-refine-telemetry-record.zsh --state FILE [--print-outcome]
@@ -183,6 +194,32 @@ size_ok="$(print -r -- "$state" | jq -r '
   print -u2 -- "build-refine-telemetry-record: failed to read state.size_preflight"; exit 1 }
 [[ "$size_ok" == ok ]] || { print -u2 -- "build-refine-telemetry-record: $size_ok"; exit 1 }
 
+# The optional auto_refinement object (#2588): absent or null is fine; anything
+# present must be exactly the documented shape, refused here like size_preflight.
+local auto_ok
+auto_ok="$(print -r -- "$state" | jq -r '
+  def unit: type == "number" and . >= 0 and . <= 1;
+  (.auto_refinement // null) as $a
+  | if $a == null then "ok"
+    elif ($a | type) != "object" then "auto_refinement must be an object"
+    elif ($a | keys) != ["accept_score", "confidences", "decision", "seed_kind", "source_issue", "threshold"]
+      then "auto_refinement must carry exactly seed_kind, source_issue, threshold, confidences, accept_score and decision"
+    elif ($a.seed_kind | IN("split-child", "parked-finding") | not)
+      then "auto_refinement.seed_kind must be split-child or parked-finding"
+    elif ($a.source_issue | type) != "number" or $a.source_issue < 1
+         or ($a.source_issue | floor) != $a.source_issue
+      then "auto_refinement.source_issue must be a positive integer"
+    elif ($a.threshold | unit | not) then "auto_refinement.threshold must be a number in [0, 1]"
+    elif ($a.confidences | type) != "array" or any($a.confidences[]; unit | not)
+      then "auto_refinement.confidences must be an array of numbers in [0, 1]"
+    elif ($a.accept_score != null and ($a.accept_score | unit | not))
+      then "auto_refinement.accept_score must be a number in [0, 1] or null"
+    elif ($a.decision | IN("accept", "ready", "park-needs-decision", "park-deferred") | not)
+      then "auto_refinement.decision must be accept, ready, park-needs-decision or park-deferred"
+    else "ok" end')" || {
+  print -u2 -- "build-refine-telemetry-record: failed to read state.auto_refinement"; exit 1 }
+[[ "$auto_ok" == ok ]] || { print -u2 -- "build-refine-telemetry-record: $auto_ok"; exit 1 }
+
 if [[ $print_outcome -eq 1 ]]; then
   print -r -- "$envelope_outcome"
   exit 0
@@ -200,5 +237,8 @@ print -r -- "$state" | jq -c '
       risk_classification: ($s.risk_classification // null)
     }
   + (if ($s.size_preflight // null) == null then {}
-     else {size_preflight: ($s.size_preflight | {verdict, triggers, children_filed})} end)' \
+     else {size_preflight: ($s.size_preflight | {verdict, triggers, children_filed})} end)
+  + (if ($s.auto_refinement // null) == null then {}
+     else {auto_refinement: ($s.auto_refinement
+       | {seed_kind, source_issue, threshold, confidences, accept_score, decision})} end)' \
   || { print -u2 -- "build-refine-telemetry-record: failed to build payload"; exit 1 }
