@@ -93,7 +93,9 @@
 #                                   {{SAST_GATE}}     the SAST gate's name, from
 #                                                     --code-scanning: CodeQL's
 #                                                     `analyze` checks iff codeql,
-#                                                     else the `semgrep` check
+#                                                     else the `semgrep` check (on
+#                                                     a sole-Go render, #2616, the
+#                                                     `gate` check's semgrep stage)
 #                                 The two combinations resolve-tools.zsh rejects —
 #                                 public + sonarqube, private + codeql — are
 #                                 refused here too (exit 2), so neither renders.
@@ -369,10 +371,14 @@ if (( ${+vals[STATIC_ANALYSIS]} && ${+vals[VULNERABILITIES]} && ${+vals[CODE_SCA
 	fi
 fi
 # The SAST gate Snyk Code defers to: CodeQL where it runs (a CodeQL language to
-# analyse, as {{REQUIRED_CONTEXTS}} lists it), else the semgrep job.
+# analyse, as {{REQUIRED_CONTEXTS}} lists it), else the semgrep job — which a
+# sole-Go repo does not require on its own (#2616): there semgrep is a stage of
+# the required `gate` check, so the name is that stage.
 if (( ${+vals[CODE_SCANNING]} )); then
 	if [[ "${vals[CODE_SCANNING]}" == codeql && -n "${vals[CODEQL_LANGUAGES]:-}" ]]; then
 		vals[SAST_GATE]="CodeQL's required \`analyze (<lang>)\` checks"
+	elif ((sole_go)); then
+		vals[SAST_GATE]="the semgrep stage of the required \`gate\` check"
 	else
 		vals[SAST_GATE]="the required \`semgrep\` check"
 	fi
@@ -387,13 +393,21 @@ fi
 # Dockerfile — plus no-cluster-deploy, which comes from its own workflow. Derived
 # only when all three toolchain flags were passed, so a SETUP.md rendered without
 # the toolchain trips the leftover check (its §4 list sits in the TOOLCHAIN
-# block, which the §3l IaC path strips).
+# block, which the §3l IaC path strips). A sole-Go render (#2616) lists the
+# sole-Go set instead — `gate`, the analyser's job, the analyze legs and image —
+# since its gate runs every other check (#2614), matching branch-protection.sh.
 contexts_block=""
 if (( ${+vals[STATIC_ANALYSIS]} && ${+vals[VULNERABILITIES]} && ${+vals[CODE_SCANNING]} )); then
-	typeset -a ctx=(test-and-coverage)
-	[[ "${vals[STATIC_ANALYSIS]}" != none ]] && ctx+=("${vals[STATIC_ANALYSIS]}")
-	[[ "${vals[VULNERABILITIES]}" == trivy ]] && ctx+=(trivy-fs)
-	ctx+=(semgrep license-fs pre-commit no-cluster-deploy)
+	typeset -a ctx=()
+	if ((sole_go)); then
+		ctx=(gate)
+		[[ "${vals[STATIC_ANALYSIS]}" != none ]] && ctx+=("${vals[STATIC_ANALYSIS]}")
+	else
+		ctx=(test-and-coverage)
+		[[ "${vals[STATIC_ANALYSIS]}" != none ]] && ctx+=("${vals[STATIC_ANALYSIS]}")
+		[[ "${vals[VULNERABILITIES]}" == trivy ]] && ctx+=(trivy-fs)
+		ctx+=(semgrep license-fs pre-commit no-cluster-deploy)
+	fi
 	if [[ "${vals[CODE_SCANNING]}" == codeql && -n "${vals[CODEQL_LANGUAGES]:-}" ]]; then
 		typeset _l
 		for _l in "${(@s:,:)vals[CODEQL_LANGUAGES]}"; do

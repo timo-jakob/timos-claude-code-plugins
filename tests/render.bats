@@ -340,6 +340,16 @@ EOF
     --vulnerabilities snyk --code-scanning codeql d.tmpl
   [ "$status" -eq 0 ]
   [ "$(sed -n 3p "$OUT/d")" = 'g: the required `semgrep` check' ]
+  # #2616: a sole-Go render without CodeQL requires no semgrep context, so the gate is named
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --primary go --languages go --visibility private \
+    --static-analysis sonarqube --vulnerabilities snyk --code-scanning none d.tmpl
+  [ "$status" -eq 0 ]
+  [ "$(sed -n 3p "$OUT/d")" = 'g: the semgrep stage of the required `gate` check' ]
+  # a mixed-Go render is not sole-Go: unchanged
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT" --primary go --languages "go python" --visibility private \
+    --static-analysis sonarqube --vulnerabilities snyk --code-scanning none d.tmpl
+  [ "$status" -eq 0 ]
+  [ "$(sed -n 3p "$OUT/d")" = 'g: the required `semgrep` check' ]
   # no toolchain: never a guessed runner — the leftover check names each one
   run zsh "$SCRIPT" --templates "$T" --out "$OUT" d.tmpl
   [ "$status" -eq 1 ]

@@ -10,6 +10,7 @@
 #                        --has-codeql true|false \
 #                        [--codeql-languages "python javascript-typescript ..."] \
 #                        [--iac-only false|kubernetes|opentofu] \
+#                        --sole-go true|false \
 #                        --default-branch main \
 #                        [--require-signed-commits true|false]
 #
@@ -60,6 +61,22 @@
 # the language-app contexts, gated on .github/workflows/go-ci.yml being on disk —
 # the same on-disk rule the `image` (ko) and CodeQL contexts follow.
 #
+# --sole-go is is-sole-go.zsh's verdict on the repo's primary and languages
+# (#2615), required off the IaC path and never read on it. For a sole-Go repo
+# (#2616) the gate runs every source-only check (#2614), so the required set
+# narrows to `gate`, the analyser's job, `image` and the CodeQL legs: the folded
+# contexts (test-and-coverage, semgrep, pre-commit, license-fs, trivy-fs,
+# no-cluster-deploy) are not required. The narrowing applies only when go-ci.yml
+# is on disk, scripts/go-gate.zsh carries #2614's secrets stage (its
+# `gitleaks git` line), .maintenance.yml's recorded `gate:` is absent or
+# `make check`, AND a .pre-commit-config.yaml carrying the semgrep hook
+# (`id: semgrep`) is on disk. With no go-ci.yml nothing would report `gate`; with
+# an absent or pre-#2614 gate script, or a custom recorded gate command, the gate
+# does not run the folded checks; and with no .pre-commit-config.yaml, or one
+# without the semgrep hook, its pre-commit stage runs no semgrep — so in
+# each case today's full set is required, with a warning naming the condition; a
+# go-ci.yml whose `gate` job the probes refuse stops the run.
+#
 # --has-codeql is true exactly when the resolved `code_scanning` is `codeql`;
 # CodeQL's public-only rule is enforced at the plan (resolve-tools.zsh step 4,
 # #1670 D8), not here. --codeql-languages is required when --has-codeql=true,
@@ -87,6 +104,7 @@ IAC_ONLY="false"
 IAC_ONLY_ENUM_MSG="--iac-only must be one of: false kubernetes opentofu"
 DEFAULT_BRANCH="main"
 REQUIRE_SIGNED_COMMITS="false"
+SOLE_GO=""
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -125,6 +143,11 @@ while [[ $# -gt 0 ]]; do
 		IAC_ONLY="$2"
 		shift 2
 		;;
+	--sole-go)
+		[[ $# -ge 2 ]] || die "--sole-go must be true or false (is-sole-go.zsh's verdict on the repo's primary and languages)"
+		SOLE_GO="$2"
+		shift 2
+		;;
 	--default-branch)
 		DEFAULT_BRANCH="$2"
 		shift 2
@@ -149,14 +172,75 @@ if [[ "$IAC_ONLY" == "false" ]]; then
 		die "--static-analysis must be sonarcloud, sonarqube or none (the resolved static_analysis)"
 	[[ "$VULNERABILITIES" =~ ^(snyk|trivy|none)$ ]] ||
 		die "--vulnerabilities must be snyk, trivy or none (the resolved vulnerabilities)"
+	[[ "$SOLE_GO" =~ ^(true|false)$ ]] ||
+		die "--sole-go must be true or false (is-sole-go.zsh's verdict on the repo's primary and languages)"
 fi
 
 REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 [[ -n "$REPO" ]] || die "Could not determine current repo from gh"
 
+# --- the sole-Go narrowing (#2616) -------------------------------------------
+# Applies only with go-ci.yml on disk, a scripts/go-gate.zsh that carries
+# #2614's source-only stages, a recorded `gate:` in .maintenance.yml that is
+# absent or the default `make check`, AND a .pre-commit-config.yaml on disk that
+# carries the semgrep hook. A Go repo bootstrapped before #2122 has no `gate` to
+# require; one bootstrapped before #2614 has a gate that does not yet run the
+# folded checks; a custom recorded gate command need not run scripts/go-gate.zsh
+# at all; and the gate runs semgrep only as a hook of its pre-commit stage, so a
+# missing .pre-commit-config.yaml, or a user-owned one without an `id: semgrep`
+# hook, leaves semgrep unrun. Each keeps today's full set, with a warning naming
+# the condition. The
+# gate-script probe is the secrets stage's `gitleaks git` invocation at the
+# start of a line, which go-gate.zsh.tmpl renders and a pre-#2614 gate script
+# lacks. The recorded gate is read as SKILL.md reads it (`yq -r .gate`; absent,
+# `null` or blank is not a recorded value), by a plain `^gate:` line match when
+# yq is unavailable.
+go_ci=".github/workflows/go-ci.yml"
+go_gate="scripts/go-gate.zsh"
+# the semgrep hook line common/.pre-commit-config.yaml.tmpl renders (`- id: semgrep`)
+semgrep_hook="^[[:space:]]*-?[[:space:]]*id:[[:space:]]*[\"']?semgrep[\"']?[[:space:]]*(#.*)?\$"
+narrow_sole_go="false"
+if [[ "$IAC_ONLY" == "false" && "$SOLE_GO" == "true" ]]; then
+	recorded_gate=""
+	if [[ -f .maintenance.yml ]]; then
+		if command -v yq >/dev/null 2>&1; then
+			recorded_gate="$(yq -r '.gate' .maintenance.yml 2>/dev/null)" || recorded_gate="<unreadable>"
+		else
+			recorded_gate="$(sed -n -e '/^gate:/{' -e 's/^gate:[[:space:]]*//' -e 's/[[:space:]]*$//' \
+				-e "s/^[\"']\\(.*\\)[\"']\$/\\1/" -e 'p' -e 'q' -e '}' .maintenance.yml)"
+		fi
+		[[ "$recorded_gate" == "null" || -z "${recorded_gate//[[:space:]]/}" ]] && recorded_gate=""
+	fi
+	if [[ ! -f "$go_ci" ]]; then
+		warn "\`$go_ci\` is absent — NOT narrowing to the sole-Go set: \`gate\` would never"
+		warn "report, so the full language-app set is required. Re-run"
+		warn "/development:bootstrap to render go-ci.yml."
+	elif [[ ! -f "$go_gate" ]] || ! grep -q '^gitleaks git ' "$go_gate"; then
+		warn "\`$go_gate\` is absent or predates #2614 — NOT narrowing to the sole-Go set:"
+		warn "the gate does not yet run the folded checks, so the full language-app set is"
+		warn "required. Re-run /development:bootstrap to refresh scripts/go-gate.zsh."
+	elif [[ -n "$recorded_gate" && "$recorded_gate" != "make check" ]]; then
+		warn "\`.maintenance.yml\` records the gate command \`$recorded_gate\`, not \`make check\` —"
+		warn "NOT narrowing to the sole-Go set: the gate job need not run scripts/go-gate.zsh,"
+		warn "so the full language-app set is required."
+	elif [[ ! -f .pre-commit-config.yaml ]]; then
+		warn "\`.pre-commit-config.yaml\` is absent — NOT narrowing to the sole-Go set: the"
+		warn "gate's pre-commit stage, which carries semgrep, skips, so the full language-app"
+		warn "set is required. Re-run /development:bootstrap to render .pre-commit-config.yaml."
+	elif ! grep -Eq "$semgrep_hook" .pre-commit-config.yaml; then
+		warn "\`.pre-commit-config.yaml\` carries no semgrep hook — NOT narrowing to the sole-Go"
+		warn "set: the gate's pre-commit stage runs no semgrep, so the full language-app set is"
+		warn "required. Add the \`id: semgrep\` hook bootstrap's template ships, then re-run."
+	else
+		narrow_sole_go="true"
+	fi
+fi
+
 # --- build required-status-checks list ---------------------------------------
 # These names must match the `jobs.<id>` keys in the generated workflow files.
-checks=("test-and-coverage" "semgrep" "pre-commit")
+# A sole-Go repo's gate runs these three, so they are not required there.
+checks=()
+[[ "$narrow_sole_go" == "true" ]] || checks=("test-and-coverage" "semgrep" "pre-commit")
 
 # --- the #1206 direct-to-cluster gate ----------------------------------------
 # `no-cluster-deploy` is the application-repo half of the promotion contract: an
@@ -174,7 +258,10 @@ checks=("test-and-coverage" "semgrep" "pre-commit")
 # wedges every PR at `expected` forever — the failure this file warns about four
 # separate times. branch-protection.sh always runs from the target repo root, so
 # the path is repo-relative.
-if [[ "$IAC_ONLY" == "false" ]]; then
+#
+# Not on a narrowed sole-Go repo: its gate runs the same check (#2614), so the
+# context is dropped even with both halves on disk, by design.
+if [[ "$IAC_ONLY" == "false" && "$narrow_sole_go" == "false" ]]; then
 	# BOTH halves, because the workflow runs the script: a present workflow with
 	# a missing checker makes every PR fail with `no such file or directory`
 	# instead of a verdict — the same wedge one level down.
@@ -422,9 +509,10 @@ if [[ "$IAC_ONLY" == "false" ]]; then
 	# Actions status check (see the quality templates' `# --- Snyk source-code +
 	# open-source scans ---` comment block), so requiring a Snyk context would
 	# produce a permanent stuck-on-expected state.
-	checks+=("license-fs")
+	# license-fs and trivy-fs are a sole-Go gate's stages (#2614), not contexts.
+	[[ "$narrow_sole_go" == "true" ]] || checks+=("license-fs")
 	[[ "$STATIC_ANALYSIS" != "none" ]] && checks+=("$STATIC_ANALYSIS")
-	[[ "$VULNERABILITIES" == "trivy" ]] && checks+=("trivy-fs")
+	[[ "$VULNERABILITIES" == "trivy" && "$narrow_sole_go" == "false" ]] && checks+=("trivy-fs")
 	[[ "$image_required" == "true" ]] && checks+=("image") # ko-image shares the `image` job name (#875)
 	# --- the React WebUI gates (#1946) ------------------------------------------
 	# webui-quality.yml is rendered only by the React overlay (bootstrap §3k.5).
@@ -449,15 +537,19 @@ if [[ "$IAC_ONLY" == "false" ]]; then
 	fi
 	# --- the Go gate (#2122) ------------------------------------------------------
 	# go-ci.yml's one `gate` job runs the repository's recorded gate command; it is
-	# required IN ADDITION to the contexts above (narrowing them is #2128). Gated on
+	# required IN ADDITION to the contexts above, which a sole-Go repo narrows
+	# (#2616, the top of this file). Gated on
 	# the workflow being ON DISK, exactly as `image` is on ko-image.yml: a Go repo
 	# bootstrapped before #2122 has no workflow to report `gate`, and a required
 	# context nothing reports wedges every PR at `expected`. A go-ci.yml whose
-	# `gate` job the IaC path's probes would refuse is dropped with a warning.
-	go_ci=".github/workflows/go-ci.yml"
+	# `gate` job the IaC path's probes would refuse is dropped with a warning —
+	# except on a narrowed sole-Go repo, where `gate` stands in for the folded
+	# contexts: there it refuses, as the IaC path does, before any rule is written.
 	if [[ -f "$go_ci" ]]; then
 		if [[ "$(probe_gate_job "$go_ci")" == 0 && "$(probe_gate_trigger "$go_ci")" == 0 ]]; then
 			checks+=("gate")
+		elif [[ "$narrow_sole_go" == "true" ]]; then
+			die "\`$go_ci\` has no \`gate\` job GitHub reports as \`gate\` on every pull request — NOT applying branch protection: a sole-Go repo's \`gate\` replaces the folded checks, and it would wait at \`expected\` forever. Give go-ci.yml a \`gate\` job with no \`name:\`, \`strategy:\` or reusable-workflow \`uses:\`, on a bare \`pull_request\` trigger (re-run /development:bootstrap to render it), then re-run this script."
 		else
 			warn "\`$go_ci\` has no \`gate\` job GitHub reports as \`gate\` on every pull request —"
 			warn "NOT requiring \`gate\` (it would wait at \`expected\` forever)."

@@ -32,6 +32,15 @@ so a repo bootstrapped before this gate existed can never be wedged at
 `expected` by a required check no workflow reports. The corollary matters when
 adopting: until the pair is rendered, the context is **not** required.
 
+**A sole-Go repository is the one exception.** A Go repository with no
+JavaScript, Python or Java runs this check as a stage of its `gate` job
+(`go-ci.yml`), so once `branch-protection.sh` narrows its rule it requires `gate`
+instead of the folded contexts, `no-cluster-deploy` included — even with both
+halves on disk. The narrowing applies only when the script can tell the gate
+runs those stages (bootstrap's Step 4b lists the conditions); otherwise the full set, with
+`no-cluster-deploy`, stays required. See
+[#2616](https://github.com/timo-jakob/timos-claude-code-plugins/issues/2616).
+
 The workflow deliberately carries **no `paths:` filter**: a required status check resolves by name, and GitHub leaves a
 required check in the `expected` state forever when a path filter skipped the
 workflow that defines it — so a path-conditional required check wedges every
