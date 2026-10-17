@@ -1003,9 +1003,18 @@ repo while still giving both sides one definition. The template's `examples/`
 directory — a shell, a page remote, a widget remote, and a deliberately
 non-conforming remote pinned with `// @ts-expect-error` — is type-checked by
 `tests/mfe-contract.bats` and is neither published nor rendered. The org's
-composition repo (#1891) is the publisher; rendering the template there and the
-publish workflow are #1899, and bootstrap's gap-fill never offers it to any
-other repo.
+composition repo (#1891) is the publisher, and bootstrap's gap-fill never offers
+the package or its workflow to any other repo. **The publisher step (#1899)** is
+an opt-in step of bootstrap §3m that runs after the composition scaffold exits
+`0`: on an explicit yes it renders the package and
+`.github/workflows/mfe-contract-publish.yml`, which publishes the version in
+`mfe-contract/package.json` to the **npmjs.com** registry on a default-branch
+push touching `mfe-contract/**`. Its publish job alone holds `id-token: write`
+and publishes with **provenance** from a public repository. *Rationale:* a
+contract every shell and remote trusts at build time is a supply-chain target,
+and provenance lets a consumer verify the repository and run that built it; npm
+generates it only for a public source repository, so a private one publishes
+without it and says so.
 
 **The scope-derivation rule.** `<scope>` — the template's `{{NPM_SCOPE}}` — is
 the **owner** part of `{{PROJECT_SLUG}}`, **lowercased**, because an npm scope is
