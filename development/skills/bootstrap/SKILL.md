@@ -5447,6 +5447,8 @@ conflict.
    Primary type: composition        Languages: none
    Members:      <name> <image:tag> — one line per member
    Files:        the seven files the scaffold writes (below)
+   Publish:      Publish @<scope>/mfe-contract from this repo? (default: no)
+                 — on yes, the four files the publish step renders (below)
    Finish:       commit, then a bot-authored PR; auto-merge is attempted, and
                  with no branch protection it merges without review wherever
                  the repository allows auto-merge
@@ -5546,9 +5548,45 @@ states. A refusal names the manifest as `new` (the members the user gave) or
 Never continue past a non-zero exit, and never report a scaffold as complete
 without the exit `0` that judged it.
 
+**Publish `@<scope>/mfe-contract` — opt-in (#1899).** One org may run several
+composition repos, and only one of them may own the `mfe-contract/v1` package
+(ARCHITECTURE.md, *The `mfe-contract/v1` contract*). So the plan asks
+`Publish @<scope>/mfe-contract from this repo?`, where `<scope>` is the owner
+part of the repository slug, lowercased, and the answer **defaults to no**: only
+an explicit yes opts in — silence or approving the plan as a whole is a no. **On
+a re-run, an existing `mfe-contract/package.json` means publishing is already
+on**: do not ask again, and treat it as a yes.
+
+On a yes, and only after the scaffold exited `0`, render the package and its
+workflow with bootstrap's own `render.zsh` into a scratch directory outside the
+repository:
+
+```bash
+zsh "<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates/languages/javascript" \
+  --out "<scratch>" --project-slug "<owner/repo>" --default-branch "<branch>" \
+  mfe-contract/index.d.ts mfe-contract/package.json mfe-contract/README.md \
+  .github/workflows/mfe-contract-publish.yml.tmpl
+```
+
+Then copy each of the four rendered files — `mfe-contract/index.d.ts`,
+`mfe-contract/package.json`, `mfe-contract/README.md` and
+`.github/workflows/mfe-contract-publish.yml` — to the same path in the
+repository **only where no file exists there**; an existing file is kept, never
+overwritten. The template's `examples/` directory is never rendered. A non-zero
+`render.zsh` exit fails the run, quoting its message. Record the four files in
+`files` under step `composition` — `written` when copied, `already_present`
+when kept — and a failed render as one `failed` entry for
+`mfe-contract/package.json`. Bootstrap never sets or
+checks the `NPM_TOKEN` secret the workflow publishes with.
+
 **The report names** what was written, what was kept and what was skipped, the
 validator's verdict line, that branch protection was not applied and the arming
-outcome, and the manual steps:
+outcome, and the manual steps — **when the package was rendered**, also: add the
+`NPM_TOKEN` repository secret with publish rights, and create (or join) the npm
+org `<scope>` the package publishes into, then run *MFE Contract Publish* once
+from the **Actions** tab, since the bootstrap PR's merge may already have run it
+without the token; then:
 create the GitHub Environments `staging` and `production` the workflow binds,
 with required reviewers on `production` and its deployments restricted to
 `main`; **when the scaffold printed `wrote renovate.json` or `kept renovate.json`**,

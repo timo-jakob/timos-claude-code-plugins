@@ -2,6 +2,11 @@
   "name": "@{{NPM_SCOPE}}/mfe-contract",
   "version": "1.0.0",
   "description": "mfe-contract/v1 — the types-only shell↔remote mount contract for micro-frontends",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/{{PROJECT_SLUG}}.git",
+    "directory": "mfe-contract"
+  },
   "type": "module",
   "types": "index.d.ts",
   "files": ["index.d.ts"],
