@@ -14,8 +14,8 @@
 #   * the VALIDATOR half runs development-composition/scripts/validate-workspace.zsh
 #     over generated fixtures. Every case the story names is here — valid,
 #     :latest, untagged, an undeclared promotes_from, malformed YAML, and a
-#     missing file — plus the exits its two callers (#1745 bootstrap, #1747
-#     gather) will branch on.
+#     missing file — plus the exits its callers (#1745 bootstrap, #1747
+#     gather, #2660 render-importmap.zsh) will branch on.
 #
 # Conventions carried over from the two sibling skeleton suites:
 #   * needles are chosen so a NEGATED clause cannot satisfy them;
@@ -250,7 +250,8 @@ YAML
   flat="$(printf '%s' "$PLUGINS_SECTION" | tr -s '[:space:]' ' ')"
   contains "$flat" 'never a manifest verdict'
   contains "$flat" 'is read like `3`'
-  contains "$flat" 'two intended callers'
+  contains "$flat" 'Its intended callers are bootstrap'
+  contains "$flat" 'and `render-importmap.zsh`, which judges the manifest with it'
   contains "$flat" 'no validator CI job is ever rendered into a composition repo'
   contains "$flat" 'ships **one skill and one agent**'
   # …and the clauses a reader IMPLEMENTS against, each with a needle of its
@@ -422,7 +423,7 @@ YAML
 }
 
 @test "the contract section documents the validator's typed exit codes (#1744)" {
-  # its two callers (#1745 bootstrap, #1747 gather) branch on these, and the
+  # its callers (#1745 bootstrap, #1747 gather, #2660 renderer) branch on these, and the
   # script's own header states them — so the specification must agree with it
   local flat
   flat="$(printf '%s' "$CONTRACT_SECTION" | tr -s '[:space:]' ' ')"
@@ -1805,4 +1806,165 @@ YAML
   paths="$(sed -n '/^    paths:/,/^  push:/p' "$REPO_ROOT/.github/workflows/script-tests.yml")"
   [ -n "$paths" ]
   contains "$paths" "'development-composition/**'"
+}
+
+# ---------------------------------------------------------------------------
+# The micro-frontend roles and the import-map renderer (#2660)
+# ---------------------------------------------------------------------------
+
+# A manifest written to $1 whose members are given as "name|role|image" in $2…,
+# with staging -> production.
+write_members_manifest() {
+  local out="$1" m name role image
+  shift
+  {
+    printf 'members:\n'
+    for m in "$@"; do
+      IFS='|' read -r name role image <<< "$m"
+      printf '  - name: "%s"\n    repo: acme/%s\n    role: %s\n' "$name" "$name" "$role"
+      printf '    contract: contracts/v1/openapi.yaml\n    image: %s\n' "$image"
+    done
+    printf 'environments:\n  staging:\n    github_environment: staging\n    promotes_from: null\n'
+    printf '    deploy_target: none\n  production:\n    github_environment: production\n'
+    printf '    promotes_from: staging\n    deploy_target: none\n'
+  } > "$out"
+}
+
+SHELL_M='shell|mfe-shell|ghcr.io/acme/shell:1.4.0'
+ORDERS_M='orders-ui|mfe-remote|ghcr.io/acme/orders-ui:2.3.1'
+BILLING_M='billing-ui|mfe-remote|ghcr.io/acme/billing-ui:0.9.0'
+API_M='orders-api|rest-api|ghcr.io/acme/orders-api:1.5.0'
+
+@test "validator: a second mfe-shell is refused, naming it (#2660)" {
+  write_members_manifest "$MANIFEST" "$SHELL_M" 'shell-b|mfe-shell|ghcr.io/acme/shell-b:1.0.0'
+  run --separate-stderr zsh "$VALIDATOR" --manifest "$MANIFEST"
+  [ "$status" -eq 1 ]
+  contains "$stderr" "member 'shell-b': a second mfe-shell"
+}
+
+@test "validator: an mfe-remote with no mfe-shell is refused, naming the remote (#2660)" {
+  write_members_manifest "$MANIFEST" "$API_M" "$ORDERS_M" "$BILLING_M"
+  run --separate-stderr zsh "$VALIDATOR" --manifest "$MANIFEST"
+  [ "$status" -eq 1 ]
+  contains "$stderr" "member 'orders-ui': role mfe-remote needs an mfe-shell"
+}
+
+@test "validator: an mfe member whose name is not a lowercase path segment is refused, naming it (#2660)" {
+  local bad
+  for bad in 'Orders_UI|mfe-remote' 'orders/ui|mfe-remote' '-shell|mfe-shell' \
+    'OrdersUI|mfe-remote' 'orders_ui|mfe-remote' 'orders.ui|mfe-remote'; do
+    write_members_manifest "$MANIFEST" "$SHELL_M" "$bad|ghcr.io/acme/x:1.0.0"
+    run --separate-stderr zsh "$VALIDATOR" --manifest "$MANIFEST"
+    [ "$status" -eq 1 ]
+    contains "$stderr" "member '${bad%%|*}': role ${bad##*|} needs a lowercase path-segment name"
+  done
+}
+
+@test "validator: manifests valid before the mfe roles still validate, free-role names included (#2660)" {
+  write_valid_manifest "$MANIFEST"
+  run zsh "$VALIDATOR" --manifest "$MANIFEST"
+  [ "$status" -eq 0 ]
+  # the name rule binds only the two reserved roles
+  write_members_manifest "$MANIFEST" 'Orders_UI|web-ui|ghcr.io/acme/orders-ui:2.3.1' "$API_M"
+  run zsh "$VALIDATOR" --manifest "$MANIFEST"
+  [ "$status" -eq 0 ]
+  # a remote may precede the shell it needs
+  write_members_manifest "$MANIFEST" "$ORDERS_M" "$SHELL_M" "$BILLING_M" "$API_M"
+  run zsh "$VALIDATOR" --manifest "$MANIFEST"
+  [ "$status" -eq 0 ]
+  contains "$output" 'is valid (4 members, 2 environments)'
+}
+
+RENDERER_REL='development-composition/scripts/render-importmap.zsh'
+
+@test "renderer: every environment maps each remote to /ui/<name>/remote.js, in order, and nothing else (#2660)" {
+  local renderer="$REPO_ROOT/$RENDERER_REL" env
+  write_members_manifest "$MANIFEST" "$SHELL_M" "$ORDERS_M" "$API_M" "$BILLING_M"
+  run zsh "$renderer" --manifest "$MANIFEST"
+  [ "$status" -eq 0 ]
+  for env in staging production; do
+    [ "$(jq -c . "$BATS_TEST_TMPDIR/deploy/$env/importmap.json")" \
+      = '{"imports":{"orders-ui":"/ui/orders-ui/remote.js","billing-ui":"/ui/billing-ui/remote.js"}}' ]
+    contains "$output" "wrote deploy/$env/importmap.json"
+  done
+  # no tag or digest reaches the map
+  run grep -rE '1\.4\.0|2\.3\.1|0\.9\.0|1\.5\.0|sha256' "$BATS_TEST_TMPDIR/deploy"
+  [ "$status" -eq 1 ]
+}
+
+@test "renderer: a shell with no remote renders an empty imports object (#2660)" {
+  write_members_manifest "$MANIFEST" "$SHELL_M" "$API_M"
+  # no flag at all: the repo defaults to the current directory
+  run bash -c "cd '$BATS_TEST_TMPDIR' && zsh '$REPO_ROOT/$RENDERER_REL'"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c . "$BATS_TEST_TMPDIR/deploy/staging/importmap.json")" = '{"imports":{}}' ]
+}
+
+@test "renderer: bumping a remote's tag re-renders byte-identical maps (#2660)" {
+  local renderer="$REPO_ROOT/$RENDERER_REL"
+  write_members_manifest "$MANIFEST" "$SHELL_M" "$ORDERS_M"
+  zsh "$renderer" --manifest "$MANIFEST" >/dev/null
+  cp "$BATS_TEST_TMPDIR/deploy/staging/importmap.json" "$BATS_TEST_TMPDIR/before.json"
+  write_members_manifest "$MANIFEST" "$SHELL_M" 'orders-ui|mfe-remote|ghcr.io/acme/orders-ui:2.4.0'
+  zsh "$renderer" --manifest "$MANIFEST" >/dev/null
+  cmp "$BATS_TEST_TMPDIR/before.json" "$BATS_TEST_TMPDIR/deploy/staging/importmap.json"
+}
+
+@test "renderer: an invalid manifest writes nothing and passes the validator's error through verbatim (#2660)" {
+  local expected
+  write_members_manifest "$MANIFEST" "$SHELL_M" 'shell-b|mfe-shell|ghcr.io/acme/shell-b:1.0.0'
+  expected="$(zsh "$VALIDATOR" --manifest "$MANIFEST" 2>&1 >/dev/null || true)"
+  run --separate-stderr zsh "$REPO_ROOT/$RENDERER_REL" --manifest "$MANIFEST"
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "$expected" ]
+  [ ! -e "$BATS_TEST_TMPDIR/deploy" ]
+}
+
+@test "renderer: keeps the typed exits — 4 missing manifest, 2 usage, 3 tool, 1 unusable environment name (#2660)" {
+  local renderer="$REPO_ROOT/$RENDERER_REL" stub env_name
+  run --separate-stderr zsh "$renderer" --repo "$BATS_TEST_TMPDIR/empty"
+  [ "$status" -eq 4 ]
+  contains "$stderr" 'manifest not found'
+  run --separate-stderr zsh "$renderer" --manifest ''
+  [ "$status" -eq 2 ]
+  contains "$stderr" '--manifest needs a value'
+  write_members_manifest "$MANIFEST" "$SHELL_M" "$ORDERS_M"
+  stub="$(stub_path_without zsh jq)"
+  run --separate-stderr env PATH="$stub" "$(command -v zsh)" "$renderer" --manifest "$MANIFEST"
+  [ "$status" -eq 3 ]
+  # an environment name is a directory under deploy/, so it is refused before any write
+  for env_name in '..' 'prod/eu' '../x'; do
+    write_members_manifest "$MANIFEST" "$SHELL_M" "$ORDERS_M"
+    sed -i.bak "s|^  production:|  \"$env_name\":|" "$MANIFEST"
+    run --separate-stderr zsh "$renderer" --manifest "$MANIFEST"
+    [ "$status" -eq 1 ]
+    contains "$stderr" "environment '$env_name': name is not a usable directory name"
+    [ ! -e "$BATS_TEST_TMPDIR/deploy" ]
+  done
+  # a map that cannot be written is exit 3
+  write_members_manifest "$MANIFEST" "$SHELL_M" "$ORDERS_M"
+  : > "$BATS_TEST_TMPDIR/deploy"
+  run --separate-stderr zsh "$renderer" --manifest "$MANIFEST"
+  [ "$status" -eq 3 ]
+  contains "$stderr" 'could not write'
+}
+
+@test "the contract, the plugin reference and the how-to state the mfe roles and name the renderer (#2660)" {
+  local c s h
+  c="$(printf '%s' "$CONTRACT_SECTION" | tr -s '[:space:]' ' ')"
+  s="$(printf '%s' "$PLUGINS_SECTION" | tr -s '[:space:]' ' ')"
+  h="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/docs/how-to/set-up-a-composition-repo.md")"
+  contains "$c" '`mfe-shell`, the SPA shell (#1124), **zero or one per constellation**, and `mfe-remote`'
+  contains "$c" 'must match **`^[a-z0-9][a-z0-9-]*$`**'
+  contains "$c" 'a remote'"'"'s **specifier is its member name** and its entry **path is `/ui/<name>/remote.js`**'
+  contains "$c" 'The map carries **no image tag or digest**'
+  contains "$s" '| `scripts/render-importmap.zsh` |'
+  contains "$h" 'scripts/render-importmap.zsh'
+  contains "$h" 'It writes `deploy/staging/importmap.json` and `deploy/production/importmap.json`'
+  contains "$h" 're-rendering after the bump writes the same bytes'
+  contains "$h" "renders nothing, and the script exits with the validator's own code and message"
+  contains "$h" 'Re-render and commit the maps in the same pull request'
+  contains "$(jq -er '.description' "$PLUGIN_JSON")" \
+    "render-importmap.zsh, which renders each environment's micro-frontend import map"
+  [ -x "$REPO_ROOT/$RENDERER_REL" ]
 }

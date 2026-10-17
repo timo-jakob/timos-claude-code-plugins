@@ -185,6 +185,54 @@ Never run both bots.
 
 Merging a bump into `main` promotes `staging` like any other merge.
 
+## Render the micro-frontend import map
+
+When the constellation has a browser UI split into micro-frontends, give its SPA shell
+the role `mfe-shell` and each remote the role `mfe-remote`, with lowercase names such
+as `orders-ui`:
+
+```yaml
+members:
+  - name: shell
+    repo: acme/shell
+    role: mfe-shell
+    contract: contracts/v1/openapi.yaml
+    image: ghcr.io/acme/shell:1.4.0
+  - name: orders-ui
+    repo: acme/orders-ui
+    role: mfe-remote
+    contract: contracts/v1/openapi.yaml
+    image: ghcr.io/acme/orders-ui:2.3.1
+```
+
+Then render the map the shell fetches as `/importmap.json`, from the plugin's
+`scripts/render-importmap.zsh`:
+
+```bash
+zsh "<development-composition-root>/scripts/render-importmap.zsh" --repo .
+```
+
+It writes `deploy/staging/importmap.json` and `deploy/production/importmap.json`, each
+mapping every remote's name to `/ui/<name>/remote.js`:
+
+```json
+{
+  "imports": {
+    "orders-ui": "/ui/orders-ui/remote.js"
+  }
+}
+```
+
+The map carries no image tag, so upgrading a remote is a tag bump in
+`.claude-workspace.yaml`, never an edit to the map: re-rendering after the bump writes
+the same bytes. A manifest the validator refuses — two shells, a remote with no shell,
+or a name that is not a lowercase path segment — renders nothing, and the script exits
+with the validator's own code and message. An environment name that is not one plain
+path segment, such as `eu/prod`, also renders nothing and exits 1, though the validator
+accepts it. Re-render and commit the maps in the same pull request whenever the manifest
+gains, loses or renames a remote or an environment; the script never deletes the
+directory of an environment you removed.
+
 ## Keep it maintained
 
 `/development:maintenance` detects the composition repo by its `.claude-workspace.yaml`
