@@ -2568,9 +2568,9 @@ a match never consumes the newline the next line's anchor needs. #1747 added the
 topic marker, the gather and the dispatcher (*Composition maintenance* below),
 and #1748 the injection-hardened bump-triage agent it routes tag bumps to.
 The how-to (`docs/how-to/set-up-a-composition-repo.md`, #1749) completes the
-foundation; the renderers are #719/#720. The validator has exactly **two** intended callers — bootstrap, on the
-repo it has just scaffolded, and the composition maintenance gather
-(`gather-composition-findings.zsh`, #1747).
+foundation; the renderers are #719/#720. The validator's intended callers are bootstrap, on the
+repo it has just scaffolded, the composition maintenance gather
+(`gather-composition-findings.zsh`, #1747), and `render-importmap.zsh` (#2660).
 
 **Promotion records; it never deploys in this release.** `promote.zsh` promotes
 one environment per run: it refuses an undeclared environment or an untagged
@@ -2720,7 +2720,9 @@ defect (a parse failure, a missing or mistyped top-level key) — so a caller ca
 quote it verbatim into a finding. **First** is a defined position, so a later
 check has a place to go and the same manifest always yields the same error:
 document shape — including each `members[]` entry and each `environments`
-value being a mapping — then `members[]` in declaration order, then
+value being a mapping — then `members[]` in declaration order (each member's
+micro-frontend name and second-shell rules included), then the
+remote-without-a-shell rule, then
 `environments`, its whole-mapping checks first (names usable, each declared
 once) and then each environment in declaration order, then the promotion-chain
 walk. The other non-zero exits are
@@ -2774,7 +2776,7 @@ is required is a defect of the same class. Both are named errors.
 | --- | --- |
 | `name` | the member's name within the constellation, a **single-line** string, **unique** among its members, and the name every error about it quotes — two members sharing one would leave every such error naming an offender the reader cannot locate |
 | `repo` | the member's source repository (`owner/name`) — provenance only; nothing reads it to fetch code |
-| `role` | what the member contributes to the constellation (`web-ui`, `rest-api`, …) |
+| `role` | what the member contributes to the constellation (`web-ui`, `rest-api`, …); `mfe-shell` and `mfe-remote` are reserved (below) |
 | `contract` | where that member's published contract lives *inside its own published image* (e.g. `contracts/v1/openapi.yaml`) — resolved in the image, never by fetching the member repo |
 | `image` | the published image, **pinned by tag** |
 
@@ -2823,6 +2825,28 @@ name**. YAML resolves a duplicated key before any validator sees it, so one
 `staging:` declaration would silently override the other; an empty name would
 drop out of the roster and be validated by nothing while still being counted in
 the success line. Both are named errors.
+
+**The micro-frontend roles (#2660).** Two `role` values are **reserved**:
+`mfe-shell`, the SPA shell (#1124), **zero or one per constellation**, and
+`mfe-remote`, a page or widget remote (#1125). Every other role value keeps its
+open meaning, so a manifest valid before them — `role: web-ui` included — is
+valid unchanged. Three rules, each a named error on the first violation: a
+**second** `mfe-shell` is refused, naming it; an `mfe-remote` with **no**
+`mfe-shell` in the constellation is refused, naming the remote; and an
+`mfe-shell` or `mfe-remote` member's `name` must match
+**`^[a-z0-9][a-z0-9-]*$`**, naming the member otherwise. *Rationale:* that name
+becomes both a bare import-map specifier and a URL path segment. **The
+derivation:** a remote's **specifier is its member name** and its entry **path
+is `/ui/<name>/remote.js`** — no extra manifest field.
+`development-composition/scripts/render-importmap.zsh` judges the manifest with
+the validator first, keeping its typed exits and writing nothing on any of them.
+It also exits 1, writing nothing, when an environment name the validator accepts
+is not one plain path segment (`^[A-Za-z0-9][A-Za-z0-9._-]*$`). Otherwise it
+writes `deploy/<env>/importmap.json` for every declared environment:
+`{ "imports": { "<name>": "/ui/<name>/remote.js", … } }`, one entry per
+`mfe-remote` in declaration order and nothing else. The map carries **no image
+tag or digest**, so the member's tag stays the only version pin: bumping it
+re-renders byte-identical maps.
 
 **The chain must be acyclic, with at least one `null` head.** An environment
 naming **itself** is the shortest cycle, but not the only one: `staging`

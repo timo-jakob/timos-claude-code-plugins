@@ -7,9 +7,10 @@
 # `claude-workspace/v1` contract"). This script is its executable half; it
 # restates no rationale, only the checks.
 #
-# It has exactly two callers, both outside this child: bootstrap runs it on the
-# repo it has just scaffolded (#1745), and the composition maintenance gather
-# turns a failure into a finding (#1747). Which failure, though, decides which
+# Its callers: bootstrap runs it on the repo it has just scaffolded (#1745), the
+# composition maintenance gather turns a failure into a finding (#1747), and
+# render-importmap.zsh passes exits 1-4 through unchanged (#2660), so a change
+# to these codes updates its case too. Which failure, though, decides which
 # finding — the exit codes below are typed precisely so a caller never reports
 # one defect as another:
 #
@@ -277,6 +278,10 @@ readonly -a REQUIRED_MEMBER_KEYS=(repo role contract image)
 
 member_count="$(jq '.members | length' <<< "$doc")"
 typeset -a seen_names=()
+# The two reserved micro-frontend roles (#2660): at most one `mfe-shell`, and an
+# `mfe-remote` only beside one. Every other role value keeps its open meaning.
+shell_name=""
+first_remote=""
 idx=0
 while (( idx < member_count )); do
     # `// empty` rather than `// ""`: an absent key and a key explicitly set to
@@ -371,8 +376,26 @@ while (( idx < member_count )); do
         fail "member '$name': image '$image' is pinned to the floating tag ':$tag' — claude-workspace/v1 requires an immutable tag" ;;
     esac
 
+    # A shell's or remote's name becomes a bare import-map specifier AND a URL
+    # path segment (/ui/<name>/remote.js), so it must be a lowercase segment.
+    role="$(jq -r --argjson i "$idx" '.members[$i].role' <<< "$doc")"
+    if [[ "$role" == mfe-shell || "$role" == mfe-remote ]]; then
+        jq -e --argjson i "$idx" '.members[$i].name | test("^[a-z0-9][a-z0-9-]*$")' >/dev/null 2>&1 <<< "$doc" \
+            || fail "member '$name': role $role needs a lowercase path-segment name (^[a-z0-9][a-z0-9-]*\$)"
+        if [[ "$role" == mfe-shell ]]; then
+            [[ -z "$shell_name" ]] \
+                || fail "member '$name': a second mfe-shell — a constellation declares at most one (the first is '$shell_name')"
+            shell_name="$name"
+        elif [[ -z "$first_remote" ]]; then
+            first_remote="$name"
+        fi
+    fi
+
     idx=$(( idx + 1 ))
 done
+
+[[ -z "$first_remote" || -n "$shell_name" ]] \
+    || fail "member '$first_remote': role mfe-remote needs an mfe-shell in the constellation — none is declared"
 
 # ---------------------------------------------------------------------------
 # environments

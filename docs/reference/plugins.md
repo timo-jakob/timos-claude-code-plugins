@@ -777,14 +777,15 @@ foundation; the deploy renderers are
 [#720](https://github.com/timo-jakob/timos-claude-code-plugins/issues/720)
 (Kubernetes). So the plugin ships **one skill and one agent** — the maintenance
 dispatcher and `composition-tag-bump-triage` — plus its scripts and the
-templates the scaffold copies. Bootstrap is the validator's first caller; the
-maintenance gather is its second.
+templates the scaffold copies. The validator's callers are bootstrap, the
+maintenance gather and `render-importmap.zsh`.
 
 | Piece | What it is |
 | --- | --- |
 | `.claude-workspace.yaml` at the repo root | the constellation manifest, and the composition **topic marker** |
 | `scripts/validate-workspace.zsh` | checks a manifest against `claude-workspace/v1` |
 | `scripts/scaffold-composition.zsh` | writes the repo-type skeleton; `/development:bootstrap` runs it |
+| `scripts/render-importmap.zsh` | renders each environment's `deploy/<env>/importmap.json` from the manifest's `mfe-remote` members |
 | `templates/` | the skeleton the scaffold copies: the promote-to-prod workflow, `promote.zsh`, the sockets, `renovate.json` |
 | `/development-composition:maintenance` | the maintenance dispatcher; its `skills/maintenance/scripts/plan-dispatch.zsh` computes the response |
 | `composition-tag-bump-triage` | the agent that triages Renovate image-tag bump PRs |
@@ -905,9 +906,10 @@ otherwise cannot provide what the script needs (a runner problem, never a
 manifest verdict), `4` a manifest file that is missing (whatever should have
 written it did not) or unreadable — the stderr line tells those two apart. Any
 other non-zero status means a tool died before the manifest was judged, and is
-read like `3`; exit `0` is simply no finding. It has exactly two intended
-callers — bootstrap, on the repo it just scaffolded, and the composition
-maintenance gather — and **no validator CI job is ever rendered into a
+read like `3`; exit `0` is simply no finding. Its intended callers are
+bootstrap, on the repo it just scaffolded, the composition maintenance gather,
+and `render-importmap.zsh`, which judges the manifest with it before rendering
+and keeps its typed exits — and **no validator CI job is ever rendered into a
 composition repo**. The full
 field-by-field specification lives in
 [`ARCHITECTURE.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/ARCHITECTURE.md)
