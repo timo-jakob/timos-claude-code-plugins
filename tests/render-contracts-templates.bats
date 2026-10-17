@@ -325,12 +325,13 @@ assert_valid_yaml() {
 }
 
 @test "#2614 contracts: the Go gate's newest-major selector agrees with contracts-lint.yml's on every fixture" {
-  # The Go gate lints contracts itself (contract §12: no CI-only checks), so it carries its own
-  # zsh copy of the selection. Both selectors run, each sliced between its own sentinels, on the
-  # same trees: the same specs selected, and the same refusal of a newest vN with no openapi.yaml.
+  # The Go gate lints contracts itself (contract §12: no CI-only checks), through the shared
+  # check-contracts-lint.zsh (#2640), which carries the zsh copy of the selection. Both selectors
+  # run, each sliced between its own sentinels, on the same trees: the same specs selected, and
+  # the same refusal of a newest vN with no openapi.yaml.
   render_contracts
   local wf="$OUT/common/.github/workflows/contracts-lint.yml"
-  local gate_tmpl="$TEMPLATES/languages/go/scripts/go-gate.zsh.tmpl"
+  local gate_tmpl="$TEMPLATES/common/scripts/check-contracts-lint.zsh"
   local wf_probe="$BATS_TEST_TMPDIR/wf-select.bash" gate_probe="$BATS_TEST_TMPDIR/gate-select.zsh"
   {
     echo 'set -euo pipefail'
@@ -341,6 +342,8 @@ assert_valid_yaml() {
   {
     echo 'emulate -L zsh'
     echo 'setopt pipefail no_unset'
+    # the refusal names its caller, which the checker's argument parsing sets before the slice
+    echo 'caller=go-gate'
     sed -n '/^# --- selector-start/,/^# --- selector-end/p' "$gate_tmpl"
     echo 'contract_specs'
   } > "$gate_probe"

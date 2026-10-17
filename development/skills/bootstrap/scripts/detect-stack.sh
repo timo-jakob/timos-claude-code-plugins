@@ -2005,6 +2005,12 @@ if [[ "$iac_only" == "true" ]]; then
 	# repo would break — a stray Python tree detecting `cli` — which is why
 	# #1193 owns it rather than this slice.
 fi
+# The shared gate checkers (#2640) live in templates/common/ but only the Go gate
+# calls them so far, so they are a gap only where go-gate.zsh is.
+case " ${langs[*]-} " in
+*" go "*) ;;
+*) held_out+=("scripts/check-contracts-lint.zsh" "scripts/check-docs.zsh") ;;
+esac
 [[ "$rest_gappable" == "true" ]] || held_out+=("docs/how-to/use-the-rest-api.md")
 [[ "$webui_gappable" == "true" ]] || held_out+=("docs/how-to/use-the-web-ui.md")
 # The API contracts machinery (#692) is held out CONDITIONALLY on an OpenAPI

@@ -164,8 +164,10 @@ It takes no arguments except `-h` / `--help`; any other argument exits `2`.
 which `make setup` installs into `.tools/` at the versions the Makefile pins, whatever
 `tools.vulnerabilities` declares. `buf`, `govulncheck`, `gocover-cobertura`, `oasdiff` and
 `yq` are Go tool dependencies in `go.mod`, run with `go tool`; the gate puts `oasdiff` and
-`yq` on `PATH` as shims for the checker scripts that call them by name. The script pins the
-Spectral CLI it runs with `npx` and the `pandoc/extra` image it runs with `docker`. `node`,
+`yq` on `PATH` as shims for the checker scripts that call them by name. The Spectral CLI and
+the `pandoc/extra` image are pinned in the two shared checkers stages 11 and 13 call,
+[`scripts/check-contracts-lint.zsh`](#scriptscheck-contracts-lintzsh) and
+[`scripts/check-docs.zsh`](#scriptscheck-docszsh). `node`,
 `python3`, `docker` and `jq` are the machine's own. A missing tool fails the stage that
 needs it: for a `make setup` tool the failure names `make setup`, for a machine tool it names
 the tool, and for a `go tool` one go's own "no such tool" error shows, which `go get -tool`
@@ -186,10 +188,51 @@ prints one `go-gate: skip <stage> — <reason>` line.
 | 8 | `no cluster deploy` | `scripts/check-no-cluster-deploy.zsh` | never |
 | 9 | `license` | `trivy fs --scanners license`, under every `tools.vulnerabilities` value | never |
 | 10 | `pre-commit` | `SKIP=gitleaks,trivy-fs pre-commit run --all-files` | no `.pre-commit-config.yaml` |
-| 11 | `contracts lint` | Spectral over the newest major of `contracts/` and `contracts/ops/`; a newest `vN` without `openapi.yaml` fails | nothing under `contracts/` and no `.spectral.yaml` changed against `origin/<default branch>` |
+| 11 | `contracts lint` | `scripts/check-contracts-lint.zsh`: Spectral over the newest major of `contracts/` and `contracts/ops/`; a newest `vN` without `openapi.yaml` fails | nothing under `contracts/`, no `.spectral.yaml` and not the checker changed against `origin/<default branch>` |
 | 12 | `contracts semver` | `check-contracts-semver.sh` for `contracts/`, then `contracts/ops`, writing `contracts-semver-findings.json` and `contracts-ops-semver-findings.json`; either failing fails the stage | nothing under `contracts/` and not the checker changed |
-| 13 | `docs` | `mkdocs build --strict`, then `manual.pdf` and `manual.epub` with pandoc, failing on a missing glyph or an unresolved reference | no docs source changed (`docs.yml`'s paths); no `mkdocs.yml` |
+| 13 | `docs` | `scripts/check-docs.zsh`: `mkdocs build --strict`, then `manual.pdf` and `manual.epub` with pandoc, failing on a missing glyph or an unresolved reference | no docs source (`docs.yml`'s paths) and not the checker changed; no `mkdocs.yml` |
 
 Every comparison against the base branch needs its history, so CI checks out the full
 history (`fetch-depth: 0`). Locally, a missing `origin/<default branch>` fails the gate
 before its first stage and names `git fetch origin`.
+
+### `scripts/check-contracts-lint.zsh`
+
+Emitted with the Go gate (#2640), as a plugin-owned artifact copied verbatim from
+`templates/common/scripts/check-contracts-lint.zsh`. It is the `contracts lint` stage every
+language gate shares: a gate calls it rather than carrying its own copy of the selection.
+
+**Invocation.** `zsh scripts/check-contracts-lint.zsh [--caller <name>]`, from the repository
+root. `--caller` names the calling gate and prefixes every line the script prints:
+`<caller>: FAIL contracts lint — <reason>` on stderr, `<caller>: linting <specs>` on stdout.
+Without it the prefix is `check-contracts-lint`. `-h` / `--help` prints the header.
+
+**What it does.** It selects the newest strict `vN` major of `contracts/` and of
+`contracts/ops/` that holds an `openapi.yaml`, with the same selection `contracts-lint.yml`
+makes, and refuses a newest `vN` directory without one rather than falling back to an older,
+frozen major. It then runs the Spectral CLI it pins, through `npx`, with the repository's
+`.spectral.yaml` and `--fail-severity error`. It needs `node`.
+
+**Exit codes.** `0` linted; `1` failed, the reason on stderr; `2` an unknown or malformed
+argument; `3` no `contracts/vN/openapi.yaml` to lint, which the gate reports as a skip.
+
+### `scripts/check-docs.zsh`
+
+Emitted with the Go gate (#2640), as a plugin-owned artifact copied verbatim from
+`templates/common/scripts/check-docs.zsh`. It is the `docs` stage every language gate shares.
+
+**Invocation.** `zsh scripts/check-docs.zsh --out <dir> [--caller <name>]`, from the
+repository root. `--out` is an existing directory that receives `site/`, `manual.pdf`,
+`manual.epub` and the pandoc log; the script neither creates nor removes it. `--caller`
+prefixes every line the script prints, as for `check-contracts-lint.zsh`; without it the
+prefix is `check-docs`. `-h` / `--help` prints the header.
+
+**What it does.** It installs `requirements-docs.txt` into `.tools/docs-venv`, runs
+`mkdocs build --strict`, derives the chapter order with `scripts/docs-nav-to-chapters.zsh`,
+and builds `manual.pdf` and `manual.epub` with the `pandoc/extra` image it pins, the way
+`docs.yml` does. It fails on a character xelatex has no glyph for and on an unresolved
+reference, after a probe proves the image still reports one. It needs `python3` and
+`docker`.
+
+**Exit codes.** `0` built; `1` failed, the reason on stderr; `2` an unknown or malformed
+argument, including a missing or empty `--out`, or one that is not an existing directory.
