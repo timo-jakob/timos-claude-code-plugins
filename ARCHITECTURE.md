@@ -7120,6 +7120,23 @@ A stop whose human narrows the plan is followed by a second verdict for the same
 run, so count parked *runs* by the last pre-flight record under each
 `parent_run_id`.
 
+**Validating a split (#2584).** When a stop is split unattended (#2578), a
+subagent proposes the grouping, and
+`development/skills/resolve-issue/scripts/plan-story-split.zsh` checks the
+proposal before anything is filed. It takes the story, the proposal (children
+with title, body, assigned criteria, declared files and `blocked_by`) and,
+optionally, the original inventory. It enforces four invariants:
+
+- every acceptance criterion of the original, from its story-spec block or else
+  its `## Acceptance criteria` checkboxes, lands in exactly one child, verbatim,
+  and every child carries at least one;
+- every child's inventory passes this pre-flight;
+- every file of the original inventory lands in some child;
+- a child is blocked only by an earlier one, so the order is acyclic.
+
+It never invents a grouping and files nothing. A plan that breaks an invariant
+exits 1, naming each gap.
+
 ## Review dossier + Approver re-ingest (#563)
 
 The PR is the durable audit record for why auto-merge happened, so a `CONVERGED`
