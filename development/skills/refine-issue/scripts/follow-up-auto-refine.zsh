@@ -11,24 +11,36 @@
 #
 # Inputs are files the skill writes from `gh`:
 #   --comments FILE  a follow-up's comments: `gh issue view <N> --json comments`
-#                    output, a bare array of comment objects, or an array of
-#                    comment-body strings
+#                    output, or a bare array of its comment objects
 #   --source FILE    the source issue: `gh issue view <S> --json
 #                    number,title,body,comments`
+#
+# Trusted authors (#2645). On a public repository anyone can comment, so an
+# origin record or a refine-auto marker counts only in a comment whose
+# authorAssociation is OWNER, MEMBER or COLLABORATOR, or whose author login is
+# the repository owner's Maintenance App as claude-maintenance-<owner>[bot] (the
+# owner read from the comment's url), a form no user account can hold. The bare
+# login `gh issue view` prints for an App is not trusted, since a user account
+# can hold it; the pipeline posts these comments with a collaborator's `gh`
+# login. Every other comment is ignored by every mode. Each comment, on the
+# follow-up and on the source, must be an object carrying authorAssociation: a
+# bare body string carries no author, so it is exit 2.
 #
 # Modes:
 #   origin --comments FILE
 #       Print the follow-up's follow-up-origin/v1 record (one compact JSON line):
-#       the first comment holding one. Exit 1 when no comment holds one.
+#       the first trusted comment holding one. Exit 1 when none holds one.
 #   eligible --comments FILE --source FILE
-#       Print {"eligible": true|false, "reason": R, "source_issue": N|null}. R is
+#       Print {"eligible": true|false, "reason": R, "source_issue": N|null,
+#       "ignored_untrusted": K}. K counts the untrusted comments, on the
+#       follow-up and on the source, that hold a record or the marker. R is
 #       `eligible`, or the first refusal in this order:
-#         no-origin-record   no comment holds a follow-up-origin/v1 record
-#         already-attempted  a comment holds the refine-auto marker: one
+#         no-origin-record   no trusted comment holds a follow-up-origin/v1 record
+#         already-attempted  a trusted comment holds the refine-auto marker: one
 #                            attempt per follow-up, so a re-run does nothing
-#         second-generation  the source issue itself carries an origin record —
-#                            a follow-up filed while resolving a follow-up stays
-#                            needs-refinement for a human
+#         second-generation  a trusted comment on the source issue carries an
+#                            origin record — a follow-up filed while resolving a
+#                            follow-up stays needs-refinement for a human
 #       Exit 0 eligible, 1 refused.
 #   seed --comments FILE --source FILE
 #       Print the refiner's seed:
@@ -90,23 +102,48 @@ _readable() {   # $1 = flag, $2 = path
 
 command -v jq >/dev/null 2>&1 || _die "jq is required"
 
-# The comment bodies in FILE, as one JSON array of strings.
-_bodies() {   # $1 = comments file
-  jq -c 'if type == "object" then (.comments // error("no comments key")) else . end
+# The comments in FILE as one JSON array of {body, trusted} (#2645). On a public
+# repository anyone can comment, so a record or a marker counts only from a
+# trusted author: an authorAssociation of OWNER, MEMBER or COLLABORATOR, or the
+# repository owner's Maintenance App by its [bot] login only. The owner is read
+# from the comment's own GitHub-generated url, so another owner's
+# claude-maintenance App is not trusted. FILE must hold one JSON document, and
+# every entry must be an object carrying authorAssociation: a bare body string
+# carries no author, and is refused rather than trusted.
+_comments() {   # $1 = comments file, $2 = what to call it in the refusal
+  jq -cs 'if length != 1 then error("not one document") else .[0] end
+    | if type == "object" then (.comments // error("no comments key")) else . end
     | if type != "array" then error("not an array") else . end
-    | map(if type == "string" then . elif type == "object" then (.body // "") else error("bad entry") end)' \
-    -- "$1" 2>/dev/null || _die "--comments $1 is not a comment list (gh issue view --json comments)"
+    | map(if type == "object" and (.authorAssociation | type == "string") then . else error("bad entry") end)
+    | map(((.url // "") | if type == "string" then ([capture("^https://github\\.com/(?<o>[^/]+)/").o][0]) else null end) as $o
+          | ((.author // {}) | if type == "object" then (.login // "") else "" end | ascii_downcase) as $login
+          | {body: ((.body // "") | if type == "string" then . else error("bad body") end),
+             trusted: ((.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR"))
+                       or ($o != null and $login == "claude-maintenance-" + ($o | ascii_downcase) + "[bot]"))})' \
+    -- "$1" 2>/dev/null \
+    || _die "$2 is not a comment list of objects with authorAssociation (gh issue view --json comments); a bare body string carries no author"
 }
 
-# The first origin record among the bodies of comments file $1; returns 1 when
-# none holds one. A body whose marker is followed by an invalid record is not a
-# record: follow-up-origin.zsh parse exits 2 on it, and it is skipped.
-_origin_in() {   # $1 = comments file
-  local bodies n i rec
-  bodies="$(_bodies "$1")" || return 2
-  n="$(jq 'length' <<< "$bodies")"
+# 0 when body $1 holds the refine-auto marker line.
+_has_marker() {   # $1 = body
+  jq -en --arg m "$MARKER" --arg b "$1" '$b | split("\n") | any(.[]; sub("\r$"; "") == $m)' >/dev/null
+}
+
+# 0 when body $1 holds a valid origin record; prints it. A body whose marker is
+# followed by an invalid record is not a record: follow-up-origin.zsh parse
+# exits 2 on it.
+_record() {   # $1 = body
+  print -r -- "$1" | zsh "$ORIGIN_TOOL" parse 2>/dev/null
+}
+
+# The first origin record among the trusted comments (a _comments array, $1);
+# returns 1 when none holds one.
+_origin_in() {   # $1 = _comments JSON
+  local n i rec
+  n="$(jq 'length' <<< "$1")"
   for (( i = 0; i < n; i++ )); do
-    if rec="$(jq -r --argjson i "$i" '.[$i]' <<< "$bodies" | zsh "$ORIGIN_TOOL" parse 2>/dev/null)"; then
+    [[ "$(jq -r --argjson i "$i" '.[$i].trusted' <<< "$1")" == true ]] || continue
+    if rec="$(_record "$(jq -r --argjson i "$i" '.[$i].body' <<< "$1")")"; then
       print -r -- "$rec"
       return 0
     fi
@@ -114,11 +151,22 @@ _origin_in() {   # $1 = comments file
   return 1
 }
 
-# 0 when some body in comments file $1 holds the refine-auto marker line.
-_attempted() {   # $1 = comments file
-  local bodies
-  bodies="$(_bodies "$1")" || return 2
-  jq -e --arg m "$MARKER" 'any(.[]; split("\n") | any(.[]; sub("\r$"; "") == $m))' <<< "$bodies" >/dev/null
+# 0 when some trusted comment ($1, a _comments array) holds the refine-auto marker line.
+_attempted() {   # $1 = _comments JSON
+  jq -e --arg m "$MARKER" 'any(.[]; .trusted and (.body | split("\n") | any(.[]; sub("\r$"; "") == $m)))' \
+    <<< "$1" >/dev/null
+}
+
+# How many untrusted comments ($1, a _comments array) hold a record or the marker.
+_ignored() {   # $1 = _comments JSON
+  local n i body count=0
+  n="$(jq 'length' <<< "$1")"
+  for (( i = 0; i < n; i++ )); do
+    [[ "$(jq -r --argjson i "$i" '.[$i].trusted' <<< "$1")" == false ]] || continue
+    body="$(jq -r --argjson i "$i" '.[$i].body' <<< "$1")"
+    if _has_marker "$body" || _record "$body" >/dev/null; then (( count++ )); fi
+  done
+  print -r -- "$count"
 }
 
 # Validate the source file and print it compact.
@@ -141,11 +189,13 @@ case "$mode" in
       esac
     done
     _readable --comments "$comments"
-    local rec rc=0
-    rec="$(_origin_in "$comments")" || rc=$?
+    local cm rec rc=0
+    cm="$(_comments "$comments" "--comments $comments")" || exit 2
+    rec="$(_origin_in "$cm")" || rc=$?
     case $rc in
       0) print -r -- "$rec" ;;
-      1) print -u2 -- "follow-up-auto-refine: no follow-up-origin/v1 record in the comments"; exit 1 ;;
+      1) print -u2 -- "follow-up-auto-refine: no follow-up-origin/v1 record in the comments ($(_ignored "$cm") untrusted comments holding a record or the marker were ignored)"
+         exit 1 ;;
       *) exit 2 ;;
     esac
     ;;
@@ -161,11 +211,19 @@ case "$mode" in
     done
     _readable --comments "$comments"
     _readable --source "$source"
-    local src rec rc=0
-    src="$(_source_json "$source")"
-    rec="$(_origin_in "$comments")" || rc=$?
-    (( rc <= 1 )) || exit 2
+    local src cm scm rec rc=0
+    src="$(_source_json "$source")" || exit 2
+    cm="$(_comments "$comments" "--comments $comments")" || exit 2
+    rec="$(_origin_in "$cm")" || rc=$?
     if [[ "$mode" == eligible ]]; then
+      # The source's comments are held to the same rule; a source without any
+      # is first-generation.
+      local srcc ignored
+      srcc="$(mktemp "${TMPDIR:-/tmp}/fuar-src.XXXXXX")" || _die "eligible: cannot create a temp file"
+      jq -c '.comments // []' <<< "$src" > "$srcc"
+      scm="$(_comments "$srcc" "the comments of --source $source")" || { rm -f -- "$srcc"; exit 2; }
+      rm -f -- "$srcc"
+      ignored=$(( $(_ignored "$cm") + $(_ignored "$scm") ))
       local reason="eligible" src_issue="null"
       if (( rc == 1 )); then
         reason="no-origin-record"
@@ -173,16 +231,14 @@ case "$mode" in
         src_issue="$(jq -r '.source.issue' <<< "$rec")"
         [[ "$(jq -r '.number' <<< "$src")" == "$src_issue" ]] \
           || _die "eligible: --source is issue #$(jq -r '.number' <<< "$src"), but the origin record names #$src_issue"
-        if _attempted "$comments"; then
+        if _attempted "$cm"; then
           reason="already-attempted"
-        else
-          local srcc; srcc="$(mktemp "${TMPDIR:-/tmp}/fuar-src.XXXXXX")" || _die "eligible: cannot create a temp file"
-          jq -c '.comments // []' <<< "$src" > "$srcc"
-          if _origin_in "$srcc" >/dev/null; then reason="second-generation"; fi
-          rm -f -- "$srcc"
+        elif _origin_in "$scm" >/dev/null; then
+          reason="second-generation"
         fi
       fi
-      jq -cn --arg r "$reason" --argjson s "$src_issue" '{eligible: ($r == "eligible"), reason: $r, source_issue: $s}'
+      jq -cn --arg r "$reason" --argjson s "$src_issue" --argjson g "$ignored" \
+        '{eligible: ($r == "eligible"), reason: $r, source_issue: $s, ignored_untrusted: $g}'
       [[ "$reason" == eligible ]] && exit 0 || exit 1
     fi
     # seed
