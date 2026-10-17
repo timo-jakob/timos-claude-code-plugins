@@ -7625,6 +7625,20 @@ a script with no GitHub calls.
   follow-up), and its source carries no origin record. A follow-up filed while
   resolving a follow-up is second generation and stays for a human.
   Auto-refinement never splits.
+- **Trusted authors (#2645).** On a public repository anyone can comment, and
+  this mode rewrites an issue body without a human approving the text. So an
+  origin record or a refine-auto marker counts only in a comment whose
+  `authorAssociation` is `OWNER`, `MEMBER` or `COLLABORATOR`, or whose author is
+  the repository owner's Maintenance App as `claude-maintenance-<owner>[bot]`,
+  the owner read from the comment's own `url`. No user account can hold a
+  `[bot]` login, but one can hold the bare login `gh issue view` prints for an
+  App, so the bare form is not trusted; the pipeline posts these comments with a
+  collaborator's `gh` login. That holds on the follow-up and on the source
+  alike. A planted record cannot steer the rewrite, and a planted marker cannot
+  block it. Other comments are ignored, and `eligible` reports how many of them
+  held a record or the marker as `ignored_untrusted`. A comment without
+  `authorAssociation`, a bare body string included, is refused (exit 2) rather
+  than trusted.
 - **Seed.** `{origin, source: {number, title, prose, story_spec}}`, passed as the
   refiner's optional `seed` input: context below the issue body, never a human
   answer or a waiver. The seam or finding comes from the origin record alone.

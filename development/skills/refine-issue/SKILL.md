@@ -267,6 +267,18 @@ from whichever children are still `needs-refinement`.
 split child it files. Every decision is `scripts/follow-up-auto-refine.zsh`'s;
 you relay, and you own every write. Resolve the threshold as above.
 
+**Only a trusted author's comment counts (#2645).** An origin record or a
+refine-auto marker counts only in a comment whose `authorAssociation` is
+`OWNER`, `MEMBER` or `COLLABORATOR`, or that the repository owner's Maintenance
+App wrote as `claude-maintenance-<owner>[bot]`, on the follow-up and on the
+source alike; the script ignores every other comment. The bare login `gh issue
+view` prints for an App is not trusted, since a user account can hold it; the
+pipeline posts these comments with a collaborator's `gh` login. So always pass
+`gh issue view --json` output, whose comments carry `authorAssociation`: a
+comment without it is exit 2. When
+`eligible` reports a non-zero `ignored_untrusted`, name that count in your
+report.
+
 **Steps 0 and 1 run as written, with no prompt:** Step 0 first, Step 1 after the
 seed (2. below). On Step 1's already-`READY` shortcut, post the note with
 `--decision ready` after zero rounds, with no answers; otherwise its

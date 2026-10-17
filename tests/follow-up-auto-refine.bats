@@ -22,8 +22,8 @@ setup() {
   zsh "$O" render --kind parked-finding --repo o/r --source 7 --finding "$D/finding.json" > "$D/parked.md"
   zsh "$O" render --kind split-child --repo o/r --source 7 --seam "$D/seam.json" > "$D/split.md"
   # the follow-up's comments, as gh issue view --json comments prints them
-  jq -n --rawfile b "$D/parked.md" '{comments: [{body: "A human note."}, {body: $b}]}' > "$D/fu.json"
-  jq -n --rawfile b "$D/split.md" '{comments: [{body: $b}]}' > "$D/fu-split.json"
+  jq -n --rawfile b "$D/parked.md" '{comments: [{authorAssociation: "OWNER", body: "A human note."}, {authorAssociation: "OWNER", body: $b}]}' > "$D/fu.json"
+  jq -n --rawfile b "$D/split.md" '{comments: [{authorAssociation: "OWNER", body: $b}]}' > "$D/fu-split.json"
   # the source story, with sentinel-wrapped prose and a story-spec block
   jq -n '{number: 7, title: "Source story", comments: [],
           body: "Lead-in outside the sentinels.\n<!-- story-spec:prose:start -->\n## Problem\n\nThe source prose.\n<!-- story-spec:prose:end -->\n\n```json\n{\"schema\":\"story-spec/v1\",\"provenance\":{\"prose_sha256\":\"abc123\"},\"acceptance_criteria\":[\"x\"]}\n```\n"}' > "$D/source.json"
@@ -36,7 +36,7 @@ flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
 @test "origin prints the follow-up's record, and exits 1 when no comment holds one" {
   run -0 zsh "$F" origin --comments "$D/fu.json"
   printf '%s' "$output" | jq -e '.kind == "parked-finding" and .source.issue == 7' >/dev/null
-  printf '%s\n' '{"comments":[{"body":"no record here"}]}' > "$D/none.json"
+  printf '%s\n' '{"comments":[{"authorAssociation":"OWNER","body":"no record here"}]}' > "$D/none.json"
   run -1 --separate-stderr zsh "$F" origin --comments "$D/none.json"
   contains "$stderr" "no follow-up-origin/v1 record"
   [ -z "$output" ]
@@ -46,28 +46,28 @@ flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
 
 @test "eligible admits a follow-up with an origin record, no refine-auto marker and a first-generation source" {
   run -0 zsh "$F" eligible --comments "$D/fu.json" --source "$D/source.json"
-  [ "$output" = '{"eligible":true,"reason":"eligible","source_issue":7}' ]
+  [ "$output" = '{"eligible":true,"reason":"eligible","source_issue":7,"ignored_untrusted":0}' ]
 }
 
 @test "eligible refuses a follow-up with no origin record (no-origin-record)" {
-  printf '%s\n' '{"comments":[{"body":"Filed by hand."}]}' > "$D/none.json"
+  printf '%s\n' '{"comments":[{"authorAssociation":"OWNER","body":"Filed by hand."}]}' > "$D/none.json"
   run -1 zsh "$F" eligible --comments "$D/none.json" --source "$D/source.json"
-  [ "$output" = '{"eligible":false,"reason":"no-origin-record","source_issue":null}' ]
+  [ "$output" = '{"eligible":false,"reason":"no-origin-record","source_issue":null,"ignored_untrusted":0}' ]
 }
 
 @test "eligible refuses a follow-up already attempted, so a second run does nothing (already-attempted)" {
   zsh "$F" seed --comments "$D/fu.json" --source "$D/source.json" > "$D/seed.json"
   printf '[]\n' > "$D/answers.json"
   zsh "$F" note --seed "$D/seed.json" --answers "$D/answers.json" --threshold-milli 900 --decision park-deferred > "$D/note.md"
-  jq -n --rawfile b "$D/parked.md" --rawfile n "$D/note.md" '{comments: [{body: $b}, {body: $n}]}' > "$D/fu2.json"
+  jq -n --rawfile b "$D/parked.md" --rawfile n "$D/note.md" '{comments: [{authorAssociation: "OWNER", body: $b}, {authorAssociation: "OWNER", body: $n}]}' > "$D/fu2.json"
   run -1 zsh "$F" eligible --comments "$D/fu2.json" --source "$D/source.json"
-  [ "$output" = '{"eligible":false,"reason":"already-attempted","source_issue":7}' ]
+  [ "$output" = '{"eligible":false,"reason":"already-attempted","source_issue":7,"ignored_untrusted":0}' ]
 }
 
 @test "eligible refuses a second-generation follow-up whose source is itself a follow-up (second-generation)" {
-  jq --rawfile b "$D/split.md" '.comments = [{body: $b}]' "$D/source.json" > "$D/source-fu.json"
+  jq --rawfile b "$D/split.md" '.comments = [{authorAssociation: "OWNER", body: $b}]' "$D/source.json" > "$D/source-fu.json"
   run -1 zsh "$F" eligible --comments "$D/fu.json" --source "$D/source-fu.json"
-  [ "$output" = '{"eligible":false,"reason":"second-generation","source_issue":7}' ]
+  [ "$output" = '{"eligible":false,"reason":"second-generation","source_issue":7,"ignored_untrusted":0}' ]
 }
 
 @test "eligible refuses a --source that is not the issue the origin record names (exit 2)" {
@@ -75,6 +75,135 @@ flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
   run -2 --separate-stderr zsh "$F" eligible --comments "$D/fu.json" --source "$D/other.json"
   contains "$stderr" "--source is issue #8, but the origin record names #7"
   [ -z "$output" ]
+}
+
+# --- trusted authors (#2645) --------------------------------------------------
+
+@test "origin, eligible and seed ignore an origin record from an untrusted author, and still find a trusted one later" {
+  local assoc
+  for assoc in NONE CONTRIBUTOR FIRST_TIME_CONTRIBUTOR FIRST_TIMER MANNEQUIN; do
+    jq -n --rawfile s "$D/split.md" --rawfile p "$D/parked.md" --arg a "$assoc" \
+      '{comments: [{authorAssociation: $a, author: {login: "stranger"}, body: $s}, {authorAssociation: "COLLABORATOR", body: $p}]}' > "$D/mixed.json"
+    run -0 zsh "$F" origin --comments "$D/mixed.json"
+    printf '%s' "$output" | jq -e '.kind == "parked-finding"' >/dev/null || { echo "origin trusted $assoc"; return 1; }
+    run -0 zsh "$F" seed --comments "$D/mixed.json" --source "$D/source.json"
+    printf '%s' "$output" | jq -e '.origin.kind == "parked-finding"' >/dev/null || { echo "seed trusted $assoc"; return 1; }
+    run -0 zsh "$F" eligible --comments "$D/mixed.json" --source "$D/source.json"
+    [ "$output" = '{"eligible":true,"reason":"eligible","source_issue":7,"ignored_untrusted":1}' ] || { echo "eligible $assoc"; return 1; }
+  done
+  jq -n --rawfile s "$D/split.md" '{comments: [{authorAssociation: "NONE", author: {login: "stranger"}, body: $s}]}' > "$D/only.json"
+  run -1 --separate-stderr zsh "$F" origin --comments "$D/only.json"
+  [ -z "$output" ]
+  contains "$stderr" "(1 untrusted comments holding a record or the marker were ignored)"
+  run -2 --separate-stderr zsh "$F" seed --comments "$D/only.json" --source "$D/source.json"
+  contains "$stderr" "seed: no follow-up-origin/v1 record"
+  run -1 zsh "$F" eligible --comments "$D/only.json" --source "$D/source.json"
+  [ "$output" = '{"eligible":false,"reason":"no-origin-record","source_issue":null,"ignored_untrusted":1}' ]
+}
+
+@test "OWNER, MEMBER and COLLABORATOR are trusted, and so is this repository owner's Maintenance App, in its [bot] login form" {
+  local assoc
+  for assoc in OWNER MEMBER COLLABORATOR; do
+    jq -n --rawfile p "$D/parked.md" --arg a "$assoc" '{comments: [{authorAssociation: $a, body: $p}]}' > "$D/t.json"
+    run -0 zsh "$F" origin --comments "$D/t.json"
+    printf '%s' "$output" | jq -e '.kind == "parked-finding"' >/dev/null || { echo "$assoc"; return 1; }
+  done
+  local login
+  for login in 'claude-maintenance-o[bot]' 'Claude-Maintenance-O[bot]'; do
+    jq -n --rawfile p "$D/parked.md" --arg l "$login" \
+      '{comments: [{authorAssociation: "NONE", author: {login: $l}, url: "https://github.com/o/r/issues/5#issuecomment-1", body: $p}]}' > "$D/app.json"
+    run -0 zsh "$F" origin --comments "$D/app.json"
+    printf '%s' "$output" | jq -e '.kind == "parked-finding"' >/dev/null || { echo "app login $login"; return 1; }
+  done
+  # an owner with capitals in the url
+  jq -n --rawfile p "$D/parked.md" \
+    '{comments: [{authorAssociation: "NONE", author: {login: "claude-maintenance-o[bot]"}, url: "https://github.com/O/r/issues/5#issuecomment-1", body: $p}]}' > "$D/appO.json"
+  run -0 zsh "$F" origin --comments "$D/appO.json"
+  printf '%s' "$output" | jq -e '.kind == "parked-finding"' >/dev/null
+}
+
+@test "the bare and app/ login forms of the Maintenance App are not trusted, since a user account can hold the bare one" {
+  local login
+  for login in claude-maintenance-o app/claude-maintenance-o; do
+    jq -n --rawfile p "$D/parked.md" --arg l "$login" \
+      '{comments: [{authorAssociation: "NONE", author: {login: $l}, url: "https://github.com/o/r/issues/5#issuecomment-1", body: $p}]}' > "$D/app.json"
+    run -1 --separate-stderr zsh "$F" origin --comments "$D/app.json"
+    [ -z "$output" ] || { echo "app login $login trusted"; return 1; }
+  done
+}
+
+@test "another owner's Maintenance App, or an App comment without a url, is not trusted" {
+  jq -n --rawfile p "$D/parked.md" \
+    '{comments: [{authorAssociation: "NONE", author: {login: "claude-maintenance-evil[bot]"}, url: "https://github.com/o/r/issues/5#issuecomment-1", body: $p}]}' > "$D/evil.json"
+  run -1 --separate-stderr zsh "$F" origin --comments "$D/evil.json"
+  [ -z "$output" ]
+  jq -n --rawfile p "$D/parked.md" '{comments: [{authorAssociation: "NONE", author: {login: "claude-maintenance-o[bot]"}, body: $p}]}' > "$D/nourl.json"
+  run -1 --separate-stderr zsh "$F" origin --comments "$D/nourl.json"
+  [ -z "$output" ]
+  jq -n --rawfile p "$D/parked.md" \
+    '{comments: [{authorAssociation: "NONE", author: {login: "claude-maintenance-o[bot]"}, url: "https://github.com/evil/r/issues/5#issuecomment-1", body: $p}]}' > "$D/otherurl.json"
+  run -1 --separate-stderr zsh "$F" origin --comments "$D/otherurl.json"
+  [ -z "$output" ]
+}
+
+@test "a refine-auto marker from an untrusted author does not make eligible refuse already-attempted" {
+  zsh "$F" seed --comments "$D/fu.json" --source "$D/source.json" > "$D/seed.json"
+  printf '[]\n' > "$D/answers.json"
+  zsh "$F" note --seed "$D/seed.json" --answers "$D/answers.json" --threshold-milli 900 --decision park-deferred > "$D/note.md"
+  jq -n --rawfile b "$D/parked.md" --rawfile n "$D/note.md" \
+    '{comments: [{authorAssociation: "OWNER", body: $b}, {authorAssociation: "NONE", author: {login: "stranger"}, body: $n}]}' > "$D/fu3.json"
+  run -0 zsh "$F" eligible --comments "$D/fu3.json" --source "$D/source.json"
+  [ "$output" = '{"eligible":true,"reason":"eligible","source_issue":7,"ignored_untrusted":1}' ]
+}
+
+@test "an untrusted origin record on the source does not make eligible refuse second-generation" {
+  jq --rawfile b "$D/split.md" '.comments = [{authorAssociation: "CONTRIBUTOR", author: {login: "stranger"}, body: $b}]' "$D/source.json" > "$D/source-u.json"
+  run -0 zsh "$F" eligible --comments "$D/fu.json" --source "$D/source-u.json"
+  [ "$output" = '{"eligible":true,"reason":"eligible","source_issue":7,"ignored_untrusted":1}' ]
+  # both ignored at once: the count adds the follow-up's and the source's
+  jq -n --rawfile s "$D/split.md" --rawfile p "$D/parked.md" \
+    '{comments: [{authorAssociation: "NONE", body: $s}, {authorAssociation: "OWNER", body: $p}]}' > "$D/mixed.json"
+  run -0 zsh "$F" eligible --comments "$D/mixed.json" --source "$D/source-u.json"
+  printf '%s' "$output" | jq -e '.ignored_untrusted == 2' >/dev/null
+  # an untrusted comment holding neither is not counted
+  jq -n --rawfile p "$D/parked.md" '{comments: [{authorAssociation: "NONE", body: "Just a note."}, {authorAssociation: "OWNER", body: $p}]}' > "$D/plainu.json"
+  run -0 zsh "$F" eligible --comments "$D/plainu.json" --source "$D/source.json"
+  printf '%s' "$output" | jq -e '.ignored_untrusted == 0' >/dev/null
+}
+
+@test "comments as bare strings, or objects without authorAssociation, are exit 2, on the follow-up and on the source" {
+  jq -n --rawfile p "$D/parked.md" '[$p]' > "$D/bare.json"
+  local m
+  for m in origin eligible seed; do
+    if [ "$m" = origin ]; then
+      run -2 --separate-stderr zsh "$F" origin --comments "$D/bare.json"
+    else
+      run -2 --separate-stderr zsh "$F" "$m" --comments "$D/bare.json" --source "$D/source.json"
+    fi
+    [ -z "$output" ] || { echo "$m printed"; return 1; }
+    contains "$stderr" "is not a comment list of objects with authorAssociation"
+  done
+  jq -n --rawfile p "$D/parked.md" '{comments: [{author: {login: "u"}, body: $p}]}' > "$D/noassoc.json"
+  run -2 --separate-stderr zsh "$F" origin --comments "$D/noassoc.json"
+  contains "$stderr" "a bare body string carries no author"
+  # an empty file, or two JSON documents, is not one comment list
+  : > "$D/empty.json"
+  run -2 --separate-stderr zsh "$F" origin --comments "$D/empty.json"
+  contains "$stderr" "is not a comment list of objects with authorAssociation"
+  cat "$D/fu.json" "$D/fu.json" > "$D/two.json"
+  run -2 --separate-stderr zsh "$F" origin --comments "$D/two.json"
+  contains "$stderr" "is not a comment list of objects with authorAssociation"
+  # a malformed --source is exit 2 for eligible too, even with no origin record
+  printf '%s\n' '{"comments":[{"authorAssociation":"OWNER","body":"no record here"}]}' > "$D/none.json"
+  printf 'not json\n' > "$D/badsrc.json"
+  run -2 --separate-stderr zsh "$F" eligible --comments "$D/none.json" --source "$D/badsrc.json"
+  [ -z "$output" ]
+  contains "$stderr" "must be an issue object with number, title and body"
+  [ "$(grep -cF 'the comments of --source' <<< "$stderr")" = 0 ]
+  jq '.comments = ["a bare body"]' "$D/source.json" > "$D/source-bare.json"
+  run -2 --separate-stderr zsh "$F" eligible --comments "$D/fu.json" --source "$D/source-bare.json"
+  [ -z "$output" ]
+  contains "$stderr" "the comments of --source"
 }
 
 # --- seed ---------------------------------------------------------------------
@@ -329,6 +458,24 @@ _turn()  { printf '%s\n' "{\"questions\":$1,\"resolved_objections\":$2${3-$DRAFT
   grep -qF 'shortcut, else `park-needs-decision` or `park-deferred` by the park' <<< "$t"
   # F: no accept without a draft
   grep -qF 'It accepts only a converged turn with a non-empty `resolved_objections`, a non-blank `proposed_prose` and a `proposed_story_spec` object; a converged turn without a draft is `continue` below the cap and `park deferred` at it' <<< "$t"
+  # G: the trusted-author rule (#2645)
+  grep -qF '**Only a trusted author' <<< "$t"
+  grep -qF 'An origin record or a refine-auto marker counts only in a comment whose `authorAssociation` is `OWNER`, `MEMBER` or `COLLABORATOR`, or that the repository owner' <<< "$t"
+  grep -qF 's Maintenance App wrote as `claude-maintenance-<owner>[bot]`, on the follow-up and on the source alike; the script ignores every other comment.' <<< "$t"
+  grep -qF 'The bare login `gh issue view` prints for an App is not trusted, since a user account can hold it; the pipeline posts these comments with a collaborator' <<< "$t"
+  grep -qF 's `gh` login. So always pass `gh issue view --json` output, whose comments carry `authorAssociation`: a comment without it is exit 2.' <<< "$t"
+  grep -qF 'When `eligible` reports a non-zero `ignored_untrusted`, name that count in your report.' <<< "$t"
+}
+
+@test "ARCHITECTURE.md states the trusted-author rule of the unattended follow-up mode (#2645)" {
+  local a; a="$(flat "$REPO_ROOT/ARCHITECTURE.md")"
+  grep -qF '**Trusted authors (#2645).** On a public repository anyone can comment, and this mode rewrites an issue body without a human approving the text.' <<< "$a"
+  grep -qF 'So an origin record or a refine-auto marker counts only in a comment whose `authorAssociation` is `OWNER`, `MEMBER` or `COLLABORATOR`, or whose author is the repository owner' <<< "$a"
+  grep -qF 's Maintenance App as `claude-maintenance-<owner>[bot]`, the owner read from the comment' <<< "$a"
+  grep -qF 'No user account can hold a `[bot]` login, but one can hold the bare login `gh issue view` prints for an App, so the bare form is not trusted; the pipeline posts these comments with a collaborator' <<< "$a"
+  grep -qF 'That holds on the follow-up and on the source alike. A planted record cannot steer the rewrite, and a planted marker cannot block it.' <<< "$a"
+  grep -qF '`eligible` reports how many of them held a record or the marker as `ignored_untrusted`.' <<< "$a"
+  grep -qF 'A comment without `authorAssociation`, a bare body string included, is refused (exit 2) rather than trusted.' <<< "$a"
 }
 
 @test "the refiner takes the seed as context below the issue body, never as an answer or a waiver" {
