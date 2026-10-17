@@ -191,7 +191,20 @@ jobs:
     # cancellation that prompted this was a hung Linux dependency-install step
     # (25 min in a step that normally takes ~72s), not the suite; hardening that
     # step is #1353's.
-    timeout-minutes: 27
+    #
+    # 54 on 2026-10-07 (#2262) — so read the 27 above as history. 54 is twice
+    # the previous 27, chosen so parallel runs fit; it is not a 1.3x/1.7x
+    # re-measure. Several sessions often run the suite at once (PRs pushed
+    # together, a push and a re-open nudge on the same commit, runs on main),
+    # and under that load one run takes far longer than the median. Green
+    # runs had reached 19-25 min: main took 20m35s (37676438181), 23m14s
+    # (37648035402) and 22m26s (37603540464). On PR #2249 (head b43e5318) run
+    # 37678610776 passed in ~19 min while 37678608387, on the same commit at
+    # the same time, was cancelled at the limit with no failing test, as was
+    # its first re-run; PR #2224's run 37641035696 was cancelled the same way.
+    # 54 still stops a genuine hang well short of GitHub's 6-hour default.
+    # Re-measure when green runs get close to 54.
+    timeout-minutes: 54
     steps:
       - uses: actions/checkout@v7
         with:
