@@ -1913,11 +1913,15 @@ transition:
 
 ```json
 { "stage1": { "group": "<planner group id / tool>", "branch": "<worktree branch>",
-              "pr": 214, "ci_fix_count": 1, "status": "pr_opened" } }
+              "pr": 214, "ci_fix_count": 1, "status": "pr_opened" },
+  "stage2": { "group": "<advisory group id / tool>", "pr": null, "status": "advisory",
+              "advisory_entries": ["<each actions_requiring_review entry, verbatim>"] } }
 ```
 
 `status` moves `agent_spawned` → `pr_opened` → `merged` |
-`awaiting_approval` | `escalated` | `deferred`. Update points: after
+`awaiting_approval` | `escalated` | `deferred`; an advisory group
+(`plan[i].advisory: true`) moves `agent_spawned` → `advisory` directly,
+with `pr: null` and the agent's returned entries in `advisory_entries`. Update points: after
 spawning the group's agent, after the PR opens (record branch + PR
 number), after each CI-fixer invocation (increment `ci_fix_count`), and
 at the stage's terminal state (the post-merge sync for `merged`; the
@@ -1933,6 +1937,9 @@ reality** before acting — the checkpoint says what *was* true, GitHub
 says what *is*:
 
 - `status: merged` → skip the stage; already done.
+- `status: advisory` → skip the stage; render its recorded
+  `advisory_entries` in Phase 9. Nothing is re-spawned, and the restored
+  stage is passed to the telemetry builder with `inherited: true`.
 - a `pr` is recorded → `gh pr view <pr> --json state`: **MERGED** → mark
   `merged`, sync local main, skip; **OPEN** → re-enter the CI cycle on
   it at the recorded `ci_fix_count` (the 3-per-PR fixer budget spans the
@@ -1943,8 +1950,8 @@ says what *is*:
   outward happened, so this is safe.
 - **Never** re-open an existing PR, re-dispatch a group whose PR merged,
   or spawn a second agent for a stage that has an open PR.
-- Mark every restored stage that already **merged** or already records a
-  `pr` with `"inherited": true` — an earlier invocation did that work, so this
+- Mark every restored stage that already **merged**, already records a
+  `pr`, or already ended `advisory` with `"inherited": true` — an earlier invocation did that work, so this
   run's telemetry counts neither the group as worked nor the PR as opened. A
   re-spawned `agent_spawned` stage is this run's work and is not marked.
 
@@ -2286,14 +2293,33 @@ absent; the top-N groups when it is set), in priority order:
    )
    ```
 
-   **`plan[i].isolation` is `false` → spawn WITHOUT `isolation`.** The
-   group's agent acts on GitHub PRs via `gh`, not on local files, so it
+   **`plan[i].isolation` is `false` → spawn WITHOUT `isolation`.** This
+   paragraph and the cascade below cover a group whose `plan[i].advisory`
+   is `false` or absent; an advisory group takes the next paragraph instead.
+   The group's agent acts on GitHub PRs via `gh`, not on local files, so it
    needs no worktree (in `development-python` this is
    `python-dependabot-snyk-triage`; a second language plugin's
    vendor-PR agent carries the same `isolation: false` and is handled
    identically). It returns no worktree branch — steps 3–7 below that
    push/merge a worktree branch do not apply; follow the dispatcher
    SKILL's case list for what such an agent reports back.
+
+   **`plan[i].advisory` is `true` → a read-only advisory group.** Its
+   agent edits nothing and only reports `actions_requiring_review`
+   entries (ARCHITECTURE.md, *`plan[].advisory`*). Spawn it without
+   `isolation`, handing it the group's findings, and then open no PR,
+   push no branch, and run no CI cycle and no approval gate: the
+   vendor-PR post-return cascade does not run. Record the returned
+   `actions_requiring_review` entries in the stage's `phase8-stages`
+   record as `advisory_entries` and set its status to `advisory`; Phase 9
+   renders them and Phase 10b tracks them. An advisory agent that fails,
+   times out, or returns its `actions_requiring_review` field missing or
+   unparseable is recorded `escalated` and reported under
+   `! Needs your attention` — never `advisory`; a present but empty array is
+   a clean review, not a failure. An `advisory: true` group whose
+   `isolation` is not `false` is a dispatcher contract violation: spawn
+   nothing, record the stage `escalated`, and report it under
+   `! Needs your attention`.
 
    **Vendor-PR post-return cascade — the orchestrator owns all CI waiting
    (#645).** The vendor-PR agent **acts and returns in one pass**: it
@@ -3139,7 +3165,7 @@ pushed fixes for — detected, never dispatched:>
   Clean — the topic's tools ran and found nothing.
     <cite any gather `note` that CONTRADICTS that reading — e.g. kubernetes'
      "presence-detected only", which means the tools did not run in the gather>
-  <Else if groups were planned:>
+  <Else if groups were planned — an advisory stage counts as processed:>
   <N> group(s) planned, <M> processed.
   <Otherwise: state the observed state plainly.>
 
@@ -3183,6 +3209,11 @@ pushed fixes for — detected, never dispatched:>
   - PR #<pr>: <reason>
     <If the stage failed CI:> Last failing checks: <names>
     Suggested action: <what the user should do>
+
+<If any topic stage ended advisory with at least one entry — its agent opens no PR by design, so
+ neither section above can hold it (#1815). <N> counts entries, not stages:>
+⚖ Advisory — needs a human decision (<N>):
+  - [<tool>] <entry verbatim>
 --- end <topic> ---
 
 <For each language in supported, a block:>
@@ -3250,6 +3281,11 @@ run start; the 🚀 PRs section below shows what was tackled.>
     Will merge once approved (may take hours/days if approval is delayed).
   - PR #<pr> ("<title>") — approved but BEHIND: armed for auto-merge; merges once the branch is brought up to date (left to the human reviewer).
   - PR #<pr> ("<title>") — approved but BEHIND, no review-requiring protection: not armed; bring the branch up to date and merge it (left to the human reviewer).
+  - ...
+
+<If any stage ended advisory with at least one entry (#1815) — one line per entry, <N> counts entries:>
+⚖ Advisory — needs a human decision (N):
+  - [<tool>] <entry verbatim>
   - ...
 
 <If any vendor PR/stage merged during the approval-poll window:>
@@ -3474,6 +3510,17 @@ PR number:
 - **Applied suppressions** — findings an agent suppressed as false positives
   inside a merged PR (e.g. SonarCloud S-rules marked WONTFIX). The issue
   records *what* was suppressed and the *rationale*, so it stays auditable.
+- **Advisory groups** (#1815) — a stage that ended `advisory` with at least one entry opened
+  no PR, so it is tracked **one issue per advisory group** instead, idempotent
+  on the title `[maintenance] advisory: <topic> <tool>`, found with
+  `gh issue list --label maintenance --state open --search "advisory: <topic> <tool> in:title"`
+  and labelled `maintenance` and `maintenance:pr-followup`. Its body lists
+  every `actions_requiring_review` entry (the stage's `advisory_entries`)
+  verbatim as a checklist, plus the run
+  reference. An existing open issue is edited on re-run, and closed with a
+  one-line comment when a later run that dispatched that topic plans no
+  advisory group for that tool, or ends it `advisory` with no entries. Advisory stages never file the per-PR
+  follow-up below.
 
 Ensure the follow-up label exists once, then for each outcome search for an
 existing open issue before acting:

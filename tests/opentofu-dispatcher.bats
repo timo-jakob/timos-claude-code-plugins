@@ -225,6 +225,42 @@ section() {
   lacks "$s" 'INERT TODAY'
 }
 
+@test "the orchestrator takes an advisory group: no PR, a rendered section, a tracking issue (#1815)" {
+  # the other half of the case list above: setup() binds SKILL and section() to
+  # the dispatcher, so this opens the orchestrator file itself, by heading
+  local orch phase8 render track
+  orch="$REPO_ROOT/development/skills/maintenance/SKILL.md"
+  phase8="$(sed -n '/^## Phase 8 —/,/^## Phase 9 —/p' "$orch" | tr -s '[:space:]' ' ')"
+  render="$(sed -n '/^### Render$/,/^### Emit/p' "$orch" | tr -s '[:space:]' ' ')"
+  track="$(sed -n '/^### 10b — PR-cycle outcome issues/,/^### Report$/p' "$orch" | tr -s '[:space:]' ' ')"
+  [ -n "$phase8" ]
+  [ -n "$render" ]
+  [ -n "$track" ]
+  contains "$phase8" '**`plan[i].advisory` is `true` → a read-only advisory group.**'
+  contains "$phase8" 'open no PR'
+  contains "$phase8" 'the vendor-PR post-return cascade does not run'
+  # the vendor-PR path is scoped away from it, a malformed group never spawns,
+  # and a resume renders the recorded entries without re-spawning
+  contains "$phase8" 'This paragraph and the cascade below cover a group whose `plan[i].advisory` is `false` or absent'
+  contains "$phase8" 'An `advisory: true` group whose `isolation` is not `false` is a dispatcher contract violation: spawn nothing, record the stage `escalated`, and report it under `! Needs your attention`.'
+  contains "$phase8" 'Spawn it without `isolation`, handing it the group'"'"'s findings'
+  contains "$phase8" 'push no branch, and run no CI cycle and no approval gate'
+  contains "$phase8" 'Record the returned `actions_requiring_review` entries in the stage'"'"'s `phase8-stages` record as `advisory_entries` and set its status to `advisory`'
+  contains "$phase8" 'An advisory agent that fails, times out, or returns its `actions_requiring_review` field missing or unparseable is recorded `escalated` and reported under `! Needs your attention` — never `advisory`; a present but empty array is a clean review, not a failure.'
+  contains "$phase8" '`status: advisory` → skip the stage; render its recorded `advisory_entries` in Phase 9. Nothing is re-spawned, and the restored stage is passed to the telemetry builder with `inherited: true`.'
+  contains "$render" '⚖ Advisory — needs a human decision'
+  # a clean (empty) advisory review renders no section and files no issue
+  contains "$render" '<If any topic stage ended advisory with at least one entry — '
+  contains "$render" '<If any stage ended advisory with at least one entry (#1815) — '
+  contains "$track" 'a stage that ended `advisory` with at least one entry opened no PR'
+  contains "$track" '[maintenance] advisory: <topic> <tool>'
+  contains "$track" 'Advisory stages never file the per-PR follow-up below.'
+  contains "$track" '"advisory: <topic> <tool> in:title"'
+  contains "$track" 'labelled `maintenance` and `maintenance:pr-followup`'
+  contains "$track" 'verbatim as a checklist'
+  contains "$track" 'plans no advisory group for that tool, or ends it `advisory` with no entries.'
+}
+
 @test "the routing PREMISE holds — every agent the table routes to exists (#1161)" {
   # the #1160 suite asserted the opposite premise (none exists yet) and asked
   # #1161 to invert it. Inverted: a table naming an agent that has no file makes

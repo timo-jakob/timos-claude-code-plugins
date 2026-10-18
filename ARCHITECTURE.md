@@ -3321,10 +3321,22 @@ orchestrator whether to spawn the group's agent with
 `isolation="worktree"`. It is `true` for every agent that edits local
 files (the overwhelming majority) and `false` for agents that act on
 GitHub PRs via `gh` rather than the working tree (e.g.
-`python-dependabot-snyk-triage`). This is how the orchestrator decides
+`python-dependabot-snyk-triage`) and for a read-only reviewer that edits
+nothing at all (an advisory group, below). This is how the orchestrator decides
 isolation **from the contract**, never by matching an agent name — a
 prerequisite for a second language plugin, whose vendor-PR agent has a
 different name but the same `isolation: false` semantics.
+
+**`plan[].advisory`** (boolean, default `false` when absent) marks a
+group whose agent edits nothing, opens no PR and reports only
+`actions_requiring_review` entries — a read-only reviewer whose findings
+need a human decision rather than a change. It is valid only with
+`isolation: false`. The orchestrator decides it **from the contract**,
+never by matching an agent name or inferring it from what the agent
+returns: an advisory group's stage ends `advisory`, with its entries kept
+for the run summary and a tracking issue, and the vendor-PR post-return
+cascade never runs for it (#1815). No dispatcher sets it yet: the OpenTofu
+reviewer groups adopt it with #2390 (planned).
 
 **`ci_fixer_agent`** (top-level, required) names the language plugin's
 CI-fix agent — the one the orchestrator spawns in Phase 8's CI cycle
@@ -3377,7 +3389,10 @@ The orchestrator processes the plan **sequentially in priority order**:
    `isolation="worktree"` when `plan[i].isolation` is `true`/absent,
    without it when `false`) off the latest base; a worktree group
    returns a worktree branch; push, open a PR, run the same CI cycle,
-   pass the approval gate, merge, sync. Only then move to `plan[i+1]`.
+   pass the approval gate, merge, sync. An advisory group
+   (`plan[i].advisory: true`) returns no worktree branch and opens no PR:
+   its reported entries are recorded and the stage ends `advisory`. Only
+   then move to `plan[i+1]`.
 
 **The approval gate (#224, Phase 2 of #476):** a maintenance merge requires an
 approving review from `claude-approver[bot]` or a human — the pipeline never
@@ -3398,8 +3413,8 @@ merge only if already approved; otherwise arm auto-merge.
 This serialization means each group's work runs against the latest
 post-merge state. There is no local merging, no topological ordering of
 worktree branches, and no rebasing. The pipeline ends when every
-group has either merged, armed auto-merge awaiting approval, or
-escalated.
+group has either merged, armed auto-merge awaiting approval,
+escalated, or reported as advisory.
 
 `missing_tooling` lists tools the project hasn't configured. The
 dispatcher builds it directly from `tooling_configured` (entries with
@@ -6667,10 +6682,13 @@ resumes. `tokens: null`. A session that dies mid-cycle emits nothing.
 
 Every PR list is sorted ascending. Stage 0's PR is opened by the run, so it is in
 `prs.opened` and in `coverage_preflight.pr`, never in `groups`. A vendor-PR
-stage opens no PR, so it adds a worked group and no `prs` entry. On a `--resume`
+stage opens no PR, so it adds a worked group and no `prs` entry, and so does an
+advisory stage (`plan[].advisory`, #1815), which also never counts toward
+`escalations.human_action_required`. On a `--resume`
 every count is scoped to **this** invocation: a stage restored as already merged,
-or with a PR an earlier invocation opened (`inherited: true` in
-`phase8-stages`), is counted neither as worked nor as opened.
+with a PR an earlier invocation opened, or already ended `advisory`
+(`inherited: true` in `phase8-stages`), is counted neither as worked nor as
+opened.
 
 **Outcome — two disjoint tables and one fold.** Table A is read once per
 recorded stage, table B once per run; the record's `outcome` is the worst
@@ -6681,6 +6699,7 @@ contribution of both, per convention 8 above.
 | `merged` | `success` |
 | `awaiting_approval` | `success` — on a human-approves repo the pipeline did its whole job and waits on a person |
 | `deferred` (the `--batch=N` cap) | `success` — a cap the operator asked for is a plan honoured |
+| `advisory` | `success` — a read-only reviewer reported its findings and opens no PR by design |
 | `escalated` | `escalated` |
 
 | B. The run | Contributes |
@@ -6694,7 +6713,8 @@ contribution of both, per convention 8 above.
 **Refused states.** The builder refuses (exit 1) rather than file a record
 whose facts contradict each other: a non-terminal stage status (an aborted
 cycle passes its unfinished stage as `escalated`); a
-`ci_fix_count` above 3; a deferred stage with a PR; one PR recorded by two
+`ci_fix_count` above 3; a deferred stage with a PR; an advisory stage with a
+PR; an advisory `stage0`; one PR recorded by two
 stages; `groups_planned` non-`null` under `--dry-run`, or `null` without it;
 stages recorded on a `--dry-run` or `--no-merge` run; a resumed `--dry-run`;
 a `human_action_required` halt under `--dry-run`; `resumed_from_run_id` or an

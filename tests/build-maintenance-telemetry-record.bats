@@ -60,6 +60,19 @@ outcome() { build --print-outcome; }
   [ "$output" = "success" ]
 }
 
+@test "table A: an advisory stage contributes success" {
+  # a read-only reviewer reported its findings and opens no PR by design (#1815)
+  stages '{"stage1":{"group":"state_encryption","pr":null,"status":"advisory",
+           "advisory_entries":["state_encryption:unencrypted-state — enable encryption"]}}'
+  outcome
+  [ "$status" -eq 0 ]
+  [ "$output" = "success" ]
+  build
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '.groups.worked' <<<"$output")" = "1" ]
+  [ "$(jq -c '[.prs[] | length] | add' <<<"$output")" = "0" ]
+}
+
 @test "table A: an escalated stage contributes escalated" {
   stages '{"stage1":{"pr":217,"ci_fix_count":1,"status":"escalated"}}'
   outcome
@@ -292,6 +305,12 @@ refused() {  # $1 = a substring the refusal must name
   refused "is deferred but records a PR"
 }
 
+@test "refuses an advisory stage that records a PR" {
+  stages '{"stage1":{"pr":214,"status":"advisory"}}'
+  build
+  refused "is advisory but records a PR"
+}
+
 @test "refuses one PR recorded by two stages" {
   stages '{"stage1":{"pr":214,"status":"merged"},"stage2":{"pr":214,"status":"escalated"}}'
   build
@@ -324,6 +343,13 @@ refused() {  # $1 = a substring the refusal must name
   stages '{"stage0":{"status":"deferred"}}'
   build
   refused "stage0 (the coverage pre-flight) is never deferred"
+}
+
+@test "refuses an advisory stage0" {
+  state '.coverage_preflight.spawned = true'
+  stages '{"stage0":{"status":"advisory"}}'
+  build
+  refused "stage0 (the coverage pre-flight) is never advisory"
 }
 
 @test "refuses more groups worked or deferred than were planned" {

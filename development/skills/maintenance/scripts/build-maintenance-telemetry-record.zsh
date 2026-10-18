@@ -34,7 +34,7 @@
 # The outcome fold (ARCHITECTURE.md, *Maintenance telemetry (#1228)*): every
 # stage contributes by table A, the run contributes by table B, and the record's
 # outcome is the WORST contribution, over failed > escalated > parked > success.
-#   A  merged | awaiting_approval | deferred → success;  escalated → escalated
+#   A  merged | awaiting_approval | deferred | advisory → success;  escalated → escalated
 #   B  errors non-empty → failed; dry_run, no_merge or a human_action_required
 #      halt → parked; otherwise → success
 #
@@ -153,8 +153,8 @@ result="$(jq -c -n --argjson s "$state" --argjson st "$stages" '
         | "coverage_preflight must be {spawned: bool, languages: [str]}"),
       ($stages[] | .key as $k | .value as $v
         | if ($v | type) != "object" then "stage \($k) is not an object" else
-          ( (select(($v.status | IN("merged","awaiting_approval","escalated","deferred")) | not)
-              | "stage \($k) status \($v.status | tojson) is not terminal (merged | awaiting_approval | escalated | deferred)"),
+          ( (select(($v.status | IN("merged","awaiting_approval","escalated","deferred","advisory")) | not)
+              | "stage \($k) status \($v.status | tojson) is not terminal (merged | awaiting_approval | escalated | deferred | advisory)"),
             (select(($v.pr | nullable(isint and . >= 1)) | not)
               | "stage \($k) pr must be a positive integer or null"),
             (select(($v.ci_fix_count // 0 | isint and . <= 3) | not)
@@ -164,7 +164,11 @@ result="$(jq -c -n --argjson s "$state" --argjson st "$stages" '
             (select($v.status == "deferred" and $v.pr != null)
               | "stage \($k) is deferred but records a PR"),
             (select($k == "stage0" and $v.status == "deferred")
-              | "stage0 (the coverage pre-flight) is never deferred") )
+              | "stage0 (the coverage pre-flight) is never deferred"),
+            (select($v.status == "advisory" and $v.pr != null)
+              | "stage \($k) is advisory but records a PR"),
+            (select($k == "stage0" and $v.status == "advisory")
+              | "stage0 (the coverage pre-flight) is never advisory") )
           end),
       # cross-field consistency
       (if ($m | type) == "object" then
