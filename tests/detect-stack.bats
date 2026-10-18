@@ -2253,8 +2253,10 @@ missing_has() { jq -r --arg p "$2" '.missing_artifacts | index($p) | type' <<<"$
   [ "$(missing_has "$out" ".github/workflows/kubernetes-ci.yml")" = "null" ]
   [ "$(missing_has "$out" ".pre-commit-config.yaml")" = "number" ]
   # POSITIVE CONTROL: candidates ARE collected, so the null above is a
-  # decision rather than an empty candidate set (this file's convention)
-  [ "$(missing_has "$out" ".github/workflows/gitleaks.yml")" = "number" ]
+  # decision rather than an empty candidate set (this file's convention).
+  # Not gitleaks.yml: a recorded `primary: go` with no other language is
+  # sole-Go, whose render skips it (#2617).
+  [ "$(missing_has "$out" ".github/workflows/template-drift-watch.yml")" = "number" ]
 }
 
 # The OpenTofu IaC path (#1162): the opentofu marker with no detected language
@@ -2641,4 +2643,85 @@ TOOL_SCOPED=(.github/workflows/quality-public.yml .github/workflows/quality-publ
   out=$(bash "$DETECT" 2>/dev/null)
   [ "$(missing_has "$out" ".github/workflows/quality-public.yml")" = "number" ]
   [ "$(missing_has "$out" ".github/workflows/codeql.yml")" = "number" ]
+}
+
+# --- #2617: a sole-Go repo's skipped workflows are not gaps ------------------
+#
+# A sole-Go render no longer emits the workflows its gate replaced, so State-D
+# gap-fill, which renders missing_artifacts blind, must not bring them back. The
+# set is sole-go-skipped-templates.zsh's; detect-stack judges sole-Go from the
+# recorded `primary:` and the detected languages.
+
+sole_go_fixture() { # [visibility, default PUBLIC]
+  printf 'module example.com/x\n\ngo 1.25\n' > go.mod
+  printf 'package main\n\nfunc main() {}\n' > main.go
+  printf 'primary: go\n' > .maintenance.yml
+  _openapi_surface
+  stub_gh "${1:-PUBLIC}"
+}
+
+SOLE_GO_SKIPPED=(.github/workflows/gitleaks.yml .github/workflows/no-cluster-deploy.yml .github/workflows/docs.yml
+  .github/workflows/contracts-lint.yml .github/workflows/contracts-semver.yml
+  .github/workflows/quality-public.yml .github/workflows/quality-public-noop.yml)
+
+@test "detect-stack #2617: a sole-Go repo's missing_artifacts lists none of the skipped workflows" {
+  sole_go_fixture
+  out=$(bash "$DETECT" 2>/dev/null)
+  local p
+  for p in "${SOLE_GO_SKIPPED[@]}"; do
+    [ "$(missing_has "$out" "$p")" = "null" ] || { echo "still a gap: $p"; return 1; }
+  done
+  # what still renders is still a gap
+  [ "$(missing_has "$out" ".github/workflows/docs-deploy.yml")" = "number" ]
+  [ "$(missing_has "$out" ".github/workflows/spec-publish.yml")" = "number" ]
+  [ "$(missing_has "$out" "scripts/check-no-cluster-deploy.zsh")" = "number" ]
+  [ "$(missing_has "$out" ".github/scripts/check-contracts-semver.sh")" = "number" ]
+  [ "$(missing_has "$out" ".github/workflows/go-ci.yml")" = "number" ]
+}
+
+@test "detect-stack #2617: a PRIVATE sole-Go repo holds out its own quality files, not the public pair" {
+  sole_go_fixture PRIVATE
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r .visibility <<<"$out")" = "private" ]
+  [ "$(missing_has "$out" ".github/workflows/quality-private.yml")" = "null" ]
+  [ "$(missing_has "$out" ".github/workflows/quality-private-noop.yml")" = "null" ]
+  [ "$(missing_has "$out" ".github/workflows/gitleaks.yml")" = "null" ]
+  # the control: the same private repo with a Dockerfile still expects them
+  printf 'FROM scratch\n' > Dockerfile
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(missing_has "$out" ".github/workflows/quality-private.yml")" = "number" ]
+  [ "$(missing_has "$out" ".github/workflows/quality-private-noop.yml")" = "number" ]
+}
+
+@test "detect-stack #2617: a sole-Go repo with a Dockerfile keeps the quality files as gaps" {
+  sole_go_fixture
+  printf 'FROM scratch\n' > Dockerfile
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(missing_has "$out" ".github/workflows/quality-public.yml")" = "number" ]
+  [ "$(missing_has "$out" ".github/workflows/quality-public-noop.yml")" = "number" ]
+  [ "$(missing_has "$out" ".github/workflows/gitleaks.yml")" = "null" ]
+}
+
+@test "detect-stack #2617: a leftover skipped workflow stays in existing_artifacts" {
+  sole_go_fixture
+  mkdir -p .github/workflows
+  printf 'name: gitleaks\n' > .github/workflows/gitleaks.yml
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.existing_artifacts[".github/workflows/gitleaks.yml"]' <<<"$out")" = "true" ]
+}
+
+@test "detect-stack #2617: a Go+python repo, and a Go repo with no recorded primary, still list them" {
+  sole_go_fixture
+  printf 'requests\n' > requirements.txt
+  printf 'print(1)\n' > app.py
+  out=$(bash "$DETECT" 2>/dev/null)
+  local p
+  for p in "${SOLE_GO_SKIPPED[@]}"; do
+    [ "$(missing_has "$out" "$p")" = "number" ] || { echo "go+python lost the gap: $p"; return 1; }
+  done
+  rm requirements.txt app.py .maintenance.yml
+  out=$(bash "$DETECT" 2>/dev/null)
+  for p in "${SOLE_GO_SKIPPED[@]}"; do
+    [ "$(missing_has "$out" "$p")" = "number" ] || { echo "no primary lost the gap: $p"; return 1; }
+  done
 }
