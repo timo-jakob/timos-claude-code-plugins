@@ -366,9 +366,13 @@ _unreached_reference_files() {
   # NINE since #2601: reference/residue/branch.md and condition-2-removed.md were
   # deleted with the residue branch, taking their one `##` heading each; the
   # residue directory keeps only risk-threshold.md's.
+  #
+  # SIXTEEN since #2857: the new reference/epic-tree.md declares SEVEN `##`
+  # sections — *The tree (#2857)*, one per Epic-flow step it extends (E1, E1b,
+  # E2, E3, E4 and E5 together) and *The #2695 assumption*.
   local n
   n="$(_ref_headings | grep -c .)"
-  [ "$n" -eq 9 ]
+  [ "$n" -eq 16 ]
 }
 
 # --- pointers resolve -------------------------------------------------------
@@ -417,9 +421,10 @@ _unreached_reference_files() {
   rows="$(_all_pointers | grep -c .)"
   # 8 until #1226 added the two story-telemetry pointers (Step 0 and §7), and 10
   # until the Epic flow pointed at reference/sequential.md (epic_strictly_sequential),
-  # and 11 until the Epic flow pointed at its own telemetry procedure (#1227).
-  if [ "$rows" -ne 12 ]; then
-    printf 'the skill carries %s pointer(s), expected 12.\n' "$rows" >&2
+  # and 11 until the Epic flow pointed at its own telemetry procedure (#1227),
+  # and 12 until E1, E1b, E3 and E4 each pointed at reference/epic-tree.md (#2857).
+  if [ "$rows" -ne 16 ]; then
+    printf 'the skill carries %s pointer(s), expected 16.\n' "$rows" >&2
     printf 'A pointer was added or removed — update this count in the same PR,\n' >&2
     printf 'and check the step that gained or lost one still reaches its procedure.\n' >&2
     _all_pointers >&2
