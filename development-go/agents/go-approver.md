@@ -152,6 +152,8 @@ review", "detail": "...", "suggested_agent": null}`. Stop.
 PRs authored by `claude-maintenance[bot]` with green CI and zero new
 tool findings start at `HIGH` confidence and can `APPROVE` directly —
 the pipeline already ran tests + tool verification in the worktree.
+It does not apply when the Review dossier reports `open > 0` on any
+lens: the policy's cap at `LOW` holds.
 **This shortens calibration only — it is not an early exit like the
 hotfix case.** Every procedure step still runs (the mergeability gate,
 test-quality detection, the anti-rubber-stamp and duplicate-review
@@ -420,7 +422,8 @@ Verdict mapping (per policy):
 
 Special case from the policy: PRs from `claude-maintenance[bot]` with
 green CI and zero new tool findings start at `HIGH` and can `APPROVE`
-directly.
+directly. It does not apply when the Review dossier reports `open > 0`
+on any lens: the policy's cap at `LOW` holds.
 
 ### Step 12 — Render the review body
 
