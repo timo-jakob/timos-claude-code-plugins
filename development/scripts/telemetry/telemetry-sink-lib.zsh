@@ -21,12 +21,56 @@
 # holds an EXCLUSIVE `zsystem flock` on the sink file itself (zsh/system — macOS
 # ships no flock(1)), waiting at most TELEMETRY_LOCK_TIMEOUT_S seconds. A reader
 # that must see whole files (#1980's backup) takes a SHARED lock on the same file.
+#
+# THE TOKENS OBJECT (#2720): the one definition of a well-formed `tokens` value,
+# shared by emit-telemetry.zsh (which refuses a malformed --tokens, exit 2) and
+# validate-telemetry.zsh (which sources this file for it, exit 1), so the
+# emitter never writes a record the validator rejects.
 
 zmodload zsh/system 2>/dev/null || {
   print -ru2 -- "telemetry-sink-lib: the zsh/system module is unavailable (needed for zsystem flock)"
   return 3 }
 
 typeset -gr TELEMETRY_LOCK_TIMEOUT_S=10
+
+# TLM_TOKENS_JQ_DEF — a jq definition, prepended to a jq program. `tokens_problem`
+# takes a non-null `tokens` value and yields nothing when it is well-formed, else
+# one diagnostic naming `tokens`. Well-formed: an object with exactly the keys
+# source, coverage, by_model and total; source and coverage non-empty strings;
+# by_model an object (possibly empty) whose every value has exactly the keys
+# input, cache_write_5m, cache_write_1h, cache_read, output and thinking, each a
+# non-negative integer; total a non-negative integer equal to input +
+# cache_write_5m + cache_write_1h + cache_read + output over every model —
+# thinking is part of output and never added again. Free of apostrophes: it is
+# spliced into single-quoted jq programs.
+typeset -gr TLM_TOKENS_JQ_DEF='
+  def tokens_problem:
+    def tcount: (type == "number") and (. == floor) and (. >= 0);
+    def tstr: (type == "string") and (length > 0);
+    if type != "object" then "tokens must be null or an object (got: " + type + ")"
+    else
+      (["by_model","coverage","source","total"]) as $want
+      | ($want - keys) as $miss | (keys - $want) as $extra
+      | if ($miss | length) > 0 then "tokens is missing key(s): " + ($miss | join(", "))
+        elif ($extra | length) > 0 then "tokens has unknown key(s): " + ($extra | join(", "))
+        elif (.source | tstr) | not then "tokens.source must be a non-empty string"
+        elif (.coverage | tstr) | not then "tokens.coverage must be a non-empty string"
+        elif (.by_model | type) != "object" then "tokens.by_model must be an object"
+        else
+          ([ .by_model | to_entries[] | .key as $m | .value
+             | if type != "object" then "tokens.by_model.\($m) must be an object"
+               elif keys != ["cache_read","cache_write_1h","cache_write_5m","input","output","thinking"]
+               then "tokens.by_model.\($m) must have exactly the keys input, cache_write_5m, cache_write_1h, cache_read, output, thinking"
+               elif ([.[] | tcount] | all) | not
+               then "tokens.by_model.\($m) counts must be non-negative integers"
+               else empty end ] | .[0])
+          // (if (.total | tcount) | not then "tokens.total must be a non-negative integer"
+              elif .total != ([.by_model[] | .input + .cache_write_5m + .cache_write_1h + .cache_read + .output] | add // 0)
+              then "tokens.total must equal input + cache_write_5m + cache_write_1h + cache_read + output over every model (thinking is not added)"
+              else empty end)
+        end
+    end;
+'
 
 # tlm_derive_repo DIR — print the `owner/name` identity of the repo at DIR.
 # Derived from the git remote; falls back to the MAIN checkout's basename (the

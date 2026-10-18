@@ -213,13 +213,63 @@ emit_dir_split() { run --separate-stderr zsh "$S" --repo-dir "$RD" --telemetry-d
   [ "$(echo "$output" | jq '.ts')" -gt 1700000000 ]
 }
 
+# A well-formed tokens object (#2720): the shape tokens-for-window.zsh prints.
+TOKENS_OBJ='{"source":"transcript","coverage":"session+subagents","by_model":{"claude-opus-5-5":{"input":2,"cache_write_5m":0,"cache_write_1h":73996,"cache_read":30038,"output":251,"thinking":16}},"total":104287}'
+
 @test "tokens is null unless supplied — never estimated" {
   emit --pipeline p --outcome success --wall-s 60
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.tokens | type')" = "null" ]
-  emit --pipeline p --outcome success --wall-s 60 --tokens 4096
+  printf '%s\n' "$TOKENS_OBJ" > "$BATS_TEST_TMPDIR/tokens.json"
+  emit_split --pipeline p --outcome success --wall-s 60 --tokens "$BATS_TEST_TMPDIR/tokens.json"
   [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq '.tokens')" -eq 4096 ]
+  [ "$(echo "$output" | jq -c '.tokens')" = "$TOKENS_OBJ" ]
+}
+
+@test "--tokens - reads the object from stdin" {
+  run --separate-stderr bash -c "printf '%s' '$TOKENS_OBJ' | zsh '$S' --repo-dir '$RD' --telemetry-file '$SINK' --pipeline p --outcome success --wall-s 1 --tokens -"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c '.tokens')" = "$TOKENS_OBJ" ]
+}
+
+@test "a bare number for --tokens is a usage error, and nothing is written" {
+  emit --pipeline p --outcome success --wall-s 1 --tokens 4096
+  [ "$status" -eq 2 ]
+  contains "$output" "--tokens takes FILE|- holding a tokens object, not a number"
+  [ ! -f "$SINK" ]
+}
+
+@test "--payload - and --tokens - together are a usage error" {
+  emit --pipeline p --outcome success --wall-s 1 --payload - --tokens -
+  [ "$status" -eq 2 ]
+  contains "$output" "cannot both read stdin"
+  [ ! -f "$SINK" ]
+}
+
+@test "a --tokens object that is not well-formed is refused with exit 2, naming tokens" {
+  local bad
+  for bad in "$(jq -c '.total = 104303' <<<"$TOKENS_OBJ")" \
+             "$(jq -c '.by_model["claude-opus-5-5"].output = "251"' <<<"$TOKENS_OBJ")" \
+             "$(jq -c 'del(.coverage)' <<<"$TOKENS_OBJ")" \
+             "$(jq -c '.estimated = true' <<<"$TOKENS_OBJ")" \
+             'null' '[1]' '{"a":1} {"b":2}' 'not json'; do
+    printf '%s\n' "$bad" > "$BATS_TEST_TMPDIR/bad.json"
+    emit_split --pipeline p --outcome success --wall-s 1 --tokens "$BATS_TEST_TMPDIR/bad.json"
+    [ "$status" -eq 2 ]
+    [ -z "$output" ]
+    contains "$stderr" "--tokens"
+  done
+  [ ! -f "$SINK" ]
+}
+
+@test "a --tokens path that is missing or a directory is a usage error" {
+  emit --pipeline p --outcome success --wall-s 1 --tokens "$BATS_TEST_TMPDIR/absent.json"
+  [ "$status" -eq 2 ]
+  contains "$output" "--tokens file does not exist"
+  emit --pipeline p --outcome success --wall-s 1 --tokens "$BATS_TEST_TMPDIR"
+  [ "$status" -eq 2 ]
+  contains "$output" "--tokens is a directory"
+  [ ! -f "$SINK" ]
 }
 
 # ------------------------------------------------------------- repo identity
@@ -1219,8 +1269,8 @@ _clone_with_remote() {  # $1 = directory name
 }
 
 @test "non-numeric and negative numeric flags are rejected, not silently coerced" {
-  for pair in "--wall-s:soon" "--issue:abc" "--pr:#12" "--ts:yesterday" "--tokens:lots" \
-              "--wall-s:-1" "--issue:-3" "--tokens:1.5" "--ts:-5"; do
+  for pair in "--wall-s:soon" "--issue:abc" "--pr:#12" "--ts:yesterday" \
+              "--wall-s:-1" "--issue:-3" "--ts:-5"; do
     emit --pipeline p --outcome success --wall-s 1 "${pair%%:*}" "${pair#*:}"
     [ "$status" -eq 2 ]
     contains "$output" "must be a non-negative integer"
@@ -1229,22 +1279,20 @@ _clone_with_remote() {  # $1 = directory name
 }
 
 @test "zero is a legitimate numeric value, emitted as 0 rather than null" {
-  emit --pipeline p --outcome success --wall-s 0 --issue 0 --tokens 0
+  emit --pipeline p --outcome success --wall-s 0 --issue 0
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq '.wall_s')" -eq 0 ]
   [ "$(echo "$output" | jq '.issue')" -eq 0 ]
-  [ "$(echo "$output" | jq '.tokens')" -eq 0 ]
   [ "$(echo "$output" | jq -r '.wall_s | type')" = "number" ]
 }
 
 @test "leading zeros are normalized rather than exploding at JSON build time" {
   # `<->` accepts 007 but JSON forbids it — without normalization this reached
   # --argjson and surfaced as a generic internal error.
-  emit --pipeline p --outcome success --wall-s 007 --issue 012 --tokens 0004096
+  emit --pipeline p --outcome success --wall-s 007 --issue 012
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq '.wall_s')" -eq 7 ]
   [ "$(echo "$output" | jq '.issue')" -eq 12 ]
-  [ "$(echo "$output" | jq '.tokens')" -eq 4096 ]
 }
 
 @test "a dangling final value flag is a usage error, not a silent 'omitted'" {
@@ -1336,8 +1384,9 @@ _clone_with_remote() {  # $1 = directory name
 # ---------------------------------------------------------------- round-trip
 
 @test "every emitter output validates against the contract" {
+  printf '%s\n' "$TOKENS_OBJ" > "$BATS_TEST_TMPDIR/tokens.json"
   emit --pipeline review-loop --outcome success --wall-s 312 --issue 1 --pr 2 \
-    --repo-type python --parent-run-id par-1-0000 --tokens 10
+    --repo-type python --parent-run-id par-1-0000 --tokens "$BATS_TEST_TMPDIR/tokens.json"
   [ "$status" -eq 0 ]
   run bash -c "printf '%s\n' '$output' | zsh '$V' - --require-records"
   [ "$status" -eq 0 ]

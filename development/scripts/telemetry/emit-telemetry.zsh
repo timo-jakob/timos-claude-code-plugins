@@ -18,7 +18,7 @@
 #   emit-telemetry.zsh --pipeline NAME --outcome OUTCOME --kind enrichment \
 #     --run-id ID [OPTIONS]
 #   OPTIONS: [--repo OWNER/NAME] [--repo-dir DIR] [--repo-type T] [--issue N]
-#     [--pr N] [--run-id ID] [--parent-run-id ID] [--ts EPOCH] [--tokens N]
+#     [--pr N] [--run-id ID] [--parent-run-id ID] [--ts EPOCH] [--tokens FILE|-]
 #     [--payload FILE|-] [--telemetry-file PATH] [--telemetry-dir DIR]
 #
 #     --pipeline  An OPEN identifier matching [A-Za-z0-9._-]+ — not a closed
@@ -51,8 +51,15 @@
 #                 already use "repo" to mean a path.
 #     --ts        unix seconds to stamp (default: now). Pinning it keeps tests
 #                 deterministic; a caller passes its own start time.
-#     --tokens    best-effort token count. Omitted → null. NEVER estimated:
-#                 a withheld number beats a confidently wrong one.
+#     --tokens    FILE (or `-` for stdin) holding a tokens object — the one
+#                 tokens-for-window.zsh prints (#2719) — embedded unmodified as
+#                 `tokens`; when the reader prints `null`, omit --tokens. It
+#                 must be well-formed (TLM_TOKENS_JQ_DEF in
+#                 telemetry-sink-lib.zsh, the definition the validator uses
+#                 too); anything else, a bare number included, is a usage
+#                 error. Omitted → null. NEVER estimated: a withheld number
+#                 beats a confidently wrong one. Only one of --payload and
+#                 --tokens may read stdin.
 #     --payload   FILE (or `-` for stdin) holding a JSON OBJECT, embedded
 #                 unmodified as `payload`. Omitted → {}.
 #                 On --kind enrichment the payload MUST carry a non-empty
@@ -103,13 +110,16 @@
 #      --pipeline outside [A-Za-z0-9._-]+, a non-numeric/negative/out-of-range
 #      numeric, --repo-dir not a directory, a --telemetry-dir that exists and is
 #      NOT a directory, --wall-s on an enrichment, a --payload that is a
-#      directory, missing, unreadable, or not a single JSON object
+#      directory, missing, unreadable, or not a single JSON object, a --tokens
+#      that is a bare number, a directory, missing, unreadable, or not one
+#      well-formed tokens object, and --payload - together with --tokens -
 #   3  internal — environment/tool failure: jq missing, a failed --payload read
 #      (stdin or file) after the operand checks passed, record build failure,
 #      a failed stdout write (closed pipe), an uncreatable or unappendable sink,
 #      a sink lock not acquired within 10 s, an unset or empty HOME when the
 #      user-level default is the sink, the zsh/system module missing,
-#      a clock that cannot be read (when --ts is omitted), and — defensively,
+#      a clock that cannot be read (when --ts is omitted), a failed --tokens
+#      read after the operand checks passed, and — defensively,
 #      since the basename fallback all but guarantees an identity — an
 #      underivable repo
 #
@@ -152,7 +162,7 @@ usage (enrichment):
   --run-id is REQUIRED for --kind enrichment (it is the join key).
 
 OPTIONS: [--repo OWNER/NAME] [--repo-dir DIR] [--repo-type T] [--issue N] [--pr N]
-  [--run-id ID] [--parent-run-id ID] [--ts EPOCH] [--tokens N] [--payload FILE|-]
+  [--run-id ID] [--parent-run-id ID] [--ts EPOCH] [--tokens FILE|-] [--payload FILE|-]
   [--telemetry-file PATH] [--telemetry-dir DIR]
 
 Sink precedence: --telemetry-file > --telemetry-dir (DIR/<repo-slug>.jsonl)
@@ -252,7 +262,7 @@ else
 fi
 
 local fname fval
-for fval in "wall-s:$wall" "issue:$issue" "pr:$pr" "tokens:$tokens" "ts:$ts"; do
+for fval in "wall-s:$wall" "issue:$issue" "pr:$pr" "ts:$ts"; do
   fname="${fval%%:*}"; fval="${fval#*:}"
   [[ -z "$fval" || "$fval" == <-> ]] || {
     print -ru2 -- "emit-telemetry: --$fname must be a non-negative integer (got: $fval)"; exit 2 }
@@ -262,6 +272,14 @@ for fval in "wall-s:$wall" "issue:$issue" "pr:$pr" "tokens:$tokens" "ts:$ts"; do
   [[ -z "$fval" || ${#fval} -le 18 ]] || {
     print -ru2 -- "emit-telemetry: --$fname is out of range (max 18 digits, got: $fval)"; exit 2 }
 done
+
+# --tokens names an INPUT, not a count (#2720): a bare number is the retired
+# integer form, refused by name rather than as a missing file. And stdin can
+# feed only one of the two JSON inputs.
+[[ "$tokens" != <-> ]] || {
+  print -ru2 -- "emit-telemetry: --tokens takes FILE|- holding a tokens object, not a number (got: $tokens)"; exit 2 }
+[[ "$payload_src" != "-" || "$tokens" != "-" ]] || {
+  print -ru2 -- "emit-telemetry: --payload - and --tokens - cannot both read stdin"; exit 2 }
 
 [[ -d "$repo_dir" ]] || {
   print -ru2 -- "emit-telemetry: --repo-dir is not a directory: $repo_dir"; exit 2 }
@@ -304,7 +322,6 @@ done
 [[ -n "$wall" ]]   && wall=$((   10#$wall ))
 [[ -n "$issue" ]]  && issue=$((  10#$issue ))
 [[ -n "$pr" ]]     && pr=$((     10#$pr ))
-[[ -n "$tokens" ]] && tokens=$(( 10#$tokens ))
 ts=$(( 10#$ts ))
 
 
@@ -362,14 +379,43 @@ if [[ -n "$payload_src" ]]; then
     print -ru2 -- "emit-telemetry: --payload must be a single JSON object"; exit 2 }
 fi
 
+# --- tokens -----------------------------------------------------------------
+
+# Read the same way as --payload, then held to the shared definition, so a
+# record this script writes is never one validate-telemetry.zsh rejects.
+local tokens_json='null' tokens_problem=""
+if [[ -n "$tokens" ]]; then
+  if [[ "$tokens" == "-" ]]; then
+    tokens_json="$(cat)" || {
+      print -ru2 -- "emit-telemetry: failed to read --tokens from stdin"; exit 3 }
+  else
+    [[ ! -d "$tokens" ]] || {
+      print -ru2 -- "emit-telemetry: --tokens is a directory: $tokens"; exit 2 }
+    [[ -e "$tokens" ]] || {
+      print -ru2 -- "emit-telemetry: --tokens file does not exist: $tokens"; exit 2 }
+    [[ -r "$tokens" ]] || {
+      print -ru2 -- "emit-telemetry: --tokens file not readable: $tokens"; exit 2 }
+    tokens_json="$(<"$tokens")" || {
+      print -ru2 -- "emit-telemetry: failed to read --tokens file: $tokens"; exit 3 }
+  fi
+  print -r -- "$tokens_json" | jq -e -s 'length == 1' >/dev/null || {
+    print -ru2 -- "emit-telemetry: --tokens must be a single JSON value"; exit 2 }
+  tokens_problem=$(print -r -- "$tokens_json" | jq -r "$TLM_TOKENS_JQ_DEF"'
+    if . == null then "tokens must be an object; omit --tokens for null" else tokens_problem end') || {
+    print -ru2 -- "emit-telemetry: failed to check --tokens"; exit 3 }
+  [[ -z "$tokens_problem" ]] || {
+    print -ru2 -- "emit-telemetry: --tokens is not a well-formed tokens object: $tokens_problem"; exit 2 }
+  tokens_json=$(print -r -- "$tokens_json" | jq -c .) || {
+    print -ru2 -- "emit-telemetry: failed to read --tokens"; exit 3 }
+fi
+
 # --- build the record -------------------------------------------------------
 
 # Nullable fields become JSON null (never the string "null", never omitted).
-local issue_json='null' pr_json='null' tokens_json='null' wall_json='null'
+local issue_json='null' pr_json='null' wall_json='null'
 local parent_json='null' repo_type_json='null'
 [[ "$issue" == <-> ]] && issue_json="$issue"
 [[ "$pr" == <-> ]] && pr_json="$pr"
-[[ "$tokens" == <-> ]] && tokens_json="$tokens"
 [[ "$wall" == <-> ]] && wall_json="$wall"
 [[ -n "$parent_run_id" ]] && parent_json="$(jq -n --arg v "$parent_run_id" '$v')"
 [[ -n "$repo_type" ]] && repo_type_json="$(jq -n --arg v "$repo_type" '$v')"

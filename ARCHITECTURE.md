@@ -5585,7 +5585,7 @@ stops the drift. Design spec:
   "pr": 456,                               // nullable linkage
   "outcome": "success",                    // success | parked | escalated | failed
   "wall_s": 312,                           // REQUIRED on kind:"run"
-  "tokens": null,                          // best-effort; null until reliably measurable
+  "tokens": null,                          // null, or the tokens object below; never estimated
   "payload": { }                           // pipeline-specific detail, OPEN
 }
 ```
@@ -5606,8 +5606,32 @@ Rules that carry the contract's weight:
   emitter rejects `--wall-s` under `--kind enrichment`, and the validator rejects
   a non-null enrichment `wall_s`. Without that, any consumer summing `wall_s`
   without filtering `kind` would double-count every enriched run.
-  **`tokens` is never estimated** — it stays `null` until the harness exposes a
-  real number, because a withheld figure beats a confidently wrong one.
+  **`tokens` is never estimated** — it is `null` unless a caller passes
+  `--tokens`, because a withheld figure beats a confidently wrong one.
+- **`tokens` is `object | null` (#2720).** The object is the one
+  `development/scripts/telemetry/tokens-for-window.zsh` prints (#2719); when it
+  prints `null`, the caller omits `--tokens`:
+
+  ```json
+  {"source": "transcript", "coverage": "session+subagents",
+   "by_model": {"claude-opus-5-5": {"input": 2, "cache_write_5m": 0, "cache_write_1h": 73996,
+                                   "cache_read": 30038, "output": 251, "thinking": 16}},
+   "total": 104287}
+  ```
+
+  It is well-formed when it has exactly the keys `source`, `coverage`,
+  `by_model` and `total`. `source` and `coverage` are non-empty strings.
+  `by_model` is an object, possibly empty, keyed by model id; each value has
+  exactly the keys `input`, `cache_write_5m`, `cache_write_1h`, `cache_read`,
+  `output` and `thinking`, each a non-negative integer. **The `total` rule:**
+  `total` is a non-negative integer equal to `input + cache_write_5m +
+  cache_write_1h + cache_read + output` summed over every model — `thinking` is
+  part of `output`, reported and never added again. The emitter takes it as
+  `--tokens FILE|-` (a bare number, or `--payload -` with `--tokens -`, is a
+  usage error) and refuses a malformed object with exit 2; the validator rejects
+  any other `tokens` with exit 1. Both read the one definition,
+  `TLM_TOKENS_JQ_DEF` in `telemetry-sink-lib.zsh`, so the emitter never writes a
+  record the validator rejects.
 - **`run_id` is the join key.** A minted id is
   `<pipeline>-<epoch>-<4 hex rand>`, with the random suffix drawn from
   `/dev/urandom` rather than derived from the timestamp, so two runs stamped the

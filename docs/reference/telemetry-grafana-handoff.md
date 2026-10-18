@@ -125,7 +125,7 @@ never be added to the enforcer and missed here without CI noticing.
 | `pr` | integer, non-negative | nullable |
 | `outcome` | string, `"success"`, `"parked"`, `"escalated"` or `"failed"` | required |
 | `wall_s` | integer, non-negative | required on `kind: "run"`; **`null`** on enrichments |
-| `tokens` | integer, non-negative — never estimated | nullable |
+| `tokens` | object — `source`, `coverage`, `by_model` (per model: `input`, `cache_write_5m`, `cache_write_1h`, `cache_read`, `output`, `thinking`) and `total`, which sums the five non-`thinking` counts over every model; never estimated | nullable |
 | `payload` | object, open — pipeline-specific detail | required |
 
 Three rules a consumer must encode rather than infer:

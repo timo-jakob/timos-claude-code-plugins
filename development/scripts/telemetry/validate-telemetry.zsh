@@ -7,8 +7,9 @@
 # stream against the CLOSED envelope: the `schema` literal, exactly the 14
 # documented top-level keys, correct types (with `run_id` / `repo` / `pipeline`
 # required to be NON-EMPTY strings), the `kind` and `outcome` enums,
-# non-negative-integer numerics, and `wall_s` — required on runs, null on
-# enrichments.
+# non-negative-integer numerics, `tokens` — null or a well-formed tokens object
+# (TLM_TOKENS_JQ_DEF in telemetry-sink-lib.zsh, #2720) — and `wall_s` — required
+# on runs, null on enrichments.
 #
 # `payload` is OPEN by design: any keys inside it are accepted. Unknown keys at
 # the TOP level are rejected — that boundary is the whole point of the split.
@@ -153,6 +154,11 @@ if [[ "$src" != "-" ]]; then
     print -u2 -- "validate-telemetry: file not readable: $src"; exit 2 }
 fi
 
+# The tokens object's one definition, TLM_TOKENS_JQ_DEF, is shared with the
+# emitter (#2720).
+source "${0:A:h}/telemetry-sink-lib.zsh" || {
+  print -u2 -- "validate-telemetry: cannot load telemetry-sink-lib.zsh"; exit 3 }
+
 # One jq program over the whole stream. `--raw-input` keeps malformed lines
 # reportable (a `fromjson?` failure is a violation, not a crash). -n makes the
 # program run ONCE so `inputs` sees EVERY line — without it jq consumes line 1
@@ -163,7 +169,7 @@ fi
 local raw
 raw=$(
   if [[ "$src" == "-" ]]; then cat; else cat -- "$src"; fi \
-  | jq -R -r -n "$envelope_keys_def"'
+  | jq -R -r -n "$envelope_keys_def$TLM_TOKENS_JQ_DEF"'
     # `envelope_keys` — the CLOSED envelope, exactly 14 keys — is prepended from
     # $envelope_keys_def above, so `--print-envelope-keys` and this program can
     # only ever agree. Everything below is single-quoted and must stay free of
@@ -239,8 +245,10 @@ raw=$(
            then "issue must be a non-negative integer or null" else empty end),
           (if ($r | has("pr")) and (($r.pr | is_nullable_count) | not)
            then "pr must be a non-negative integer or null" else empty end),
-          (if ($r | has("tokens")) and (($r.tokens | is_nullable_count) | not)
-           then "tokens must be a non-negative integer or null" else empty end),
+          # tokens: null, or the object tokens_problem (TLM_TOKENS_JQ_DEF,
+          # prepended above) finds nothing wrong with.
+          (if ($r | has("tokens")) and ($r.tokens != null)
+           then ($r.tokens | tokens_problem) else empty end),
 
           # wall_s is a RUN measure: required on runs, and null on enrichments
           # (a non-null enrichment wall_s would double-count run time for any
