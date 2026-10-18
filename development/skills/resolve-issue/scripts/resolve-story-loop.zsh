@@ -305,6 +305,12 @@
 # Telemetry note: an extended run (escalate -> grant -> --resume) appends one
 # record per terminal exit, each spanning from .t0 — so consecutive records of
 # one extended loop overlap and wall_s must not be summed across them.
+# In step mode round 1's panel runs BEFORE the first invocation, so the
+# conductor passes the loop's logical start as `--t0 EPOCH` (#1976) on the
+# fresh start; it replaces this invocation's own clock as `t0`, and `.t0`,
+# `ts` and `wall_s` all follow from it. Without it the first invocation's
+# clock is the start, as before. Refused beside --resume (which adopts `.t0`)
+# and beside --review-cmd (hook mode times its own panel).
 # Each terminal exit that emits a record also writes that record's `run_id` to
 # `<work-dir>/.telemetry-run-id` (#995), so a later enrichment can JOIN the run
 # it enriches instead of minting an orphan id. It is best-effort like the
@@ -435,7 +441,7 @@
 #       [--issue N] [--telemetry-file PATH] [--telemetry-dir DIR] \
 #       [--parent-run-id ID] [--gate-attest TREE_ID] [--gate-summary FILE] \
 #       [--findings-tree TREE_ID] [--carry-accounting FILE] [--promote FILE] \
-#       [--risk FILE] [--step-timings FILE]                             # step mode
+#       [--risk FILE] [--step-timings FILE] [--t0 EPOCH]                # step mode
 #   resolve-story-loop.zsh --repo PATH [--base REF] \
 #       --review-cmd CMD --fix-cmd CMD [--test-cmd CMD] \
 #       [--promote FILE] ...                                      # hook mode
@@ -514,7 +520,7 @@ local repo="" base="origin/main" review_cmd="" fix_cmd="" test_cmd="" findings_f
 local max_rounds=$MAX_REVIEW_ROUNDS status_file="" work_dir="" no_review=0
 local issue="" telemetry_file="" resume=0 gate_attest="" findings_tree="" promote=""
 local carry_accounting="" parent_run_id="" telemetry_dir="" risk="" gate_summary=""
-local step_timings=""
+local step_timings="" t0_given=""
 
 # A value flag with no value, or one whose value is the NEXT FLAG, is a caller
 # mistake — and both are silent disasters here. Under `nounset` a dangling
@@ -599,6 +605,9 @@ while [[ $# -gt 0 ]]; do
   # this invocation consolidates. Telemetry only — read by _step_wall_rec, which
   # turns anything unusable into nulls rather than failing the round.
   --step-timings) _need_val "$1" $# "${2:-}"; step_timings="$2"; shift 2 ;;
+  # --t0 (#1976): the loop's logical start, captured by the conductor before
+  # round 1's panel ran. Validated below, then it replaces the loop's own t0.
+  --t0) _need_val "$1" $# "${2:-}"; t0_given="$2"; shift 2 ;;
   --max-rounds) _need_val "$1" $# "${2:-}"; max_rounds="$2"; shift 2 ;;
   --status-file) _need_val "$1" $# "${2:-}"; status_file="$2"; shift 2 ;;
   --work-dir) _need_val "$1" $# "${2:-}"; work_dir="$2"; shift 2 ;;
@@ -635,6 +644,8 @@ while [[ $# -gt 0 ]]; do
     print -r -- "                             # while corner_case_risk_threshold is on, or in an extension round"
     print -r -- "                             # (extension_risk_threshold, #2577); demotes low-risk Warnings."
     print -r -- "  [--step-timings FILE]      # step mode: {panel, decide, risk, fix} seconds for this round (#2197)"
+    print -r -- "  [--t0 EPOCH]               # step mode, fresh start only: the loop's logical start, taken"
+    print -r -- "                             # before round 1's panel (#1976); refused beside --resume"
     print -r -- "  [--work-dir DIR] [--status-file PATH] [--telemetry-file PATH] [--telemetry-dir DIR]"
     print -r -- "  [--parent-run-id ID]       # the resolve-issue run this loop runs under (#1226)"
     print -r -- "  [--no-review]   # fast path; mutually exclusive with --promote, --carry-accounting and --risk"
@@ -753,6 +764,23 @@ fi
 # terminal-exit time, and lose the whole record behind `|| true`.
 [[ -z "$issue" || ${#issue} -le 18 ]] || {
   print -u2 -- "resolve-story-loop: --issue is out of range (max 18 digits, got: $issue)"; exit 2 }
+
+# --t0 (#1976) becomes the record's `--ts`, so it carries the same two guards as
+# --issue for the same reason: a value the emitter rejects at terminal-exit time
+# costs the whole record behind `|| true`. A future-dated value needs no guard —
+# the wall_s clamp turns it into 0.
+[[ -z "$t0_given" || "$t0_given" == <-> ]] || {
+  print -u2 -- "resolve-story-loop: --t0 must be a non-negative integer epoch (got: $t0_given)"; exit 2 }
+[[ -z "$t0_given" || ${#t0_given} -le 18 ]] || {
+  print -u2 -- "resolve-story-loop: --t0 is out of range (max 18 digits, got: $t0_given)"; exit 2 }
+# A --resume adopts <work-dir>/.t0, so a second start would either be silently
+# dropped or split the loop's (repo, issue, ts) group. Hook mode runs round 1's
+# panel inside this invocation, so its own clock is already right.
+[[ -n "$t0_given" ]] && (( resume )) && {
+  print -u2 -- "resolve-story-loop: --t0 is fresh-start only; a --resume adopts <work-dir>/.t0"; exit 2 }
+[[ -n "$t0_given" && -n "$review_cmd" ]] && {
+  print -u2 -- "resolve-story-loop: --t0 is step-mode only; hook mode runs round 1's panel inside the invocation and times it itself"; exit 2 }
+[[ -n "$t0_given" ]] && t0="$t0_given"
 
 # emit the status JSON (stdout + optional --status-file) and exit with `code`.
 emit_and_exit() {

@@ -181,3 +181,11 @@ longer exists: the loop never emits it, so the promotion phase only ever follows
    re-prompted — this phase runs once per story. New blockers (regressions)
    gate normally.
 <!-- /moved: suggestion-promotion-step-4 -->
+
+**The sub-loop takes its own logical start (#1976).** The template in step 4
+above sits in a byte-frozen span, so this is recorded here: read
+`T0=$(date +%s)` before the sub-loop's round-1 panel (the ordered procedure's
+step 1), and append `--t0 "$T0"` to the sub-loop's round-1 fresh-start
+invocation only — never beside `--resume`, which adopts its `<work-dir>/.t0` and
+is refused with it. The capture is the sub-loop's own, never the blocking
+phase's `T0`, so its `ts` stays distinct from the blocking phase's.

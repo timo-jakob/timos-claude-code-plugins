@@ -6134,9 +6134,11 @@ swallowed — a telemetry failure drops the record, never the run. It is never a
 on the non-terminal `AWAITING_FIX`
 (#971) or the `STALE_FINDINGS` refusal (#974) — both resume the same loop, so a
 record there would double-count it. A step-mode loop spans several invocations,
-and each terminal record spans from the loop's logical start (`.t0`), so
-consecutive records of one extended loop (escalate → grant → `--resume`) overlap
-and their `wall_s` must not be summed — count records, but derive per-loop
+and each terminal record spans from the loop's logical start (`.t0`) — in step
+mode the conductor's `--t0`, captured before round 1's panel ran (#1976);
+otherwise the first invocation's own clock — so consecutive records of one
+extended loop (escalate → grant → `--resume`) overlap and their `wall_s` must
+not be summed — count records, but derive per-loop
 timing from the last record only. **The v1 envelope carries no ordering key for
 that "last"**: both records share the same `ts` (the loop passes `.t0`), the
 minted `run_id`'s suffix is random rather than monotonic, and `parent_run_id`

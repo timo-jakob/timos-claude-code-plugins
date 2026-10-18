@@ -230,5 +230,13 @@ boundary's own signal-never-arrived arm instead of blocking again.
 Each round:
 <!-- /moved: round-protocol-head -->
 
+**Capture the loop's logical start at round 1's boundary (#1976).** Step 1
+above predates it and sits in a byte-frozen span, so it is recorded here: on a
+loop's **first** round boundary, step 1 also reads `T0=$(date +%s)` first,
+before the `T` mint, the gate and the panel, and holds it with `T`. Round 1's
+panel runs before the loop's first invocation, so the loop's own clock would
+start after it; `T0` is passed to that invocation as `--t0`
+(`step-2-invocation.md`). Later boundaries capture no `T0`.
+
 **Each round continues in the shards `reference/review-loop.md` lists (#2055)**:
 read them in its read order before round 1's step 1.
