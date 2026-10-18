@@ -395,12 +395,15 @@ fi
 # the toolchain trips the leftover check (its §4 list sits in the TOOLCHAIN
 # block, which the §3l IaC path strips). A sole-Go render (#2616) lists the
 # sole-Go set instead — `gate`, the analyser's job, the analyze legs and image —
-# since its gate runs every other check (#2614), matching branch-protection.sh.
+# since its gate runs every other check (#2614), matching branch-protection.sh —
+# plus test-and-coverage on a Go+Swift render, whose Swift job reports under that
+# name and runs the Swift tests the gate does not.
 contexts_block=""
 if (( ${+vals[STATIC_ANALYSIS]} && ${+vals[VULNERABILITIES]} && ${+vals[CODE_SCANNING]} )); then
 	typeset -a ctx=()
 	if ((sole_go)); then
 		ctx=(gate)
+		has_lang swift && ctx+=(test-and-coverage)
 		[[ "${vals[STATIC_ANALYSIS]}" != none ]] && ctx+=("${vals[STATIC_ANALYSIS]}")
 	else
 		ctx=(test-and-coverage)

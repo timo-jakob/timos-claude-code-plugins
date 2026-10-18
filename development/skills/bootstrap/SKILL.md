@@ -1448,7 +1448,7 @@ fails loudly rather than guessing:
 | --- | --- |
 | `{{RUNNER}}` / `{{SWIFT_RUNNER}}` | the quality workflows' runner rule, from `--static-analysis`: `self-hosted` / `[self-hosted, macos]` iff `sonarqube`, else `ubuntu-latest` / `macos-latest`. `codeql.yml` keeps its hard-coded `ubuntu-latest` — it renders only on public repos |
 | `{{SAST_GATE}}` | the SAST gate Snyk Code defers to, from `--code-scanning`: CodeQL's `analyze (<lang>)` checks iff `codeql`, else the required `semgrep` check — on a **sole-Go** render (#2616) the semgrep stage of the required `gate` check instead |
-| `{{REQUIRED_CONTEXTS}}` | `SETUP.md` §4's required-check list, one bullet per context, from all three toolchain flags plus `--languages` and `--docker`: `test-and-coverage`, the analyser's job, `trivy-fs` iff `trivy` (Snyk has no CI job), `semgrep`, `license-fs`, `pre-commit`, `no-cluster-deploy`, one `analyze (<lang>)` per CodeQL language iff `codeql`, and `image` iff a Dockerfile (D1 in #1670; a ko repo's `image` comes from `ko-image.yml`, which `SETUP.md` §4's `image` note covers). For a **sole-Go** render (render.zsh's own sole-Go derivation, #2615) the list is the sole-Go set instead (#2616): `gate`, the analyser's job, the `analyze (<lang>)` legs and `image` on the same conditions |
+| `{{REQUIRED_CONTEXTS}}` | `SETUP.md` §4's required-check list, one bullet per context, from all three toolchain flags plus `--languages` and `--docker`: `test-and-coverage`, the analyser's job, `trivy-fs` iff `trivy` (Snyk has no CI job), `semgrep`, `license-fs`, `pre-commit`, `no-cluster-deploy`, one `analyze (<lang>)` per CodeQL language iff `codeql`, and `image` iff a Dockerfile (D1 in #1670; a ko repo's `image` comes from `ko-image.yml`, which `SETUP.md` §4's `image` note covers). For a **sole-Go** render (render.zsh's own sole-Go derivation, #2615) the list is the sole-Go set instead (#2616): `gate`, the analyser's job, the `analyze (<lang>)` legs and `image` on the same conditions, plus `test-and-coverage` when `--languages` includes `swift` (its Swift job reports under that name and the gate runs no Swift) |
 
 Output is byte-identical across sessions for the same inputs.
 
@@ -5921,7 +5921,10 @@ The script applies a single protection rule that:
   the `analyze (<lang>)` legs as above: its gate runs the folded checks
   (`test-and-coverage`, `semgrep`, `pre-commit`, `license-fs`, `trivy-fs`,
   `no-cluster-deploy`), so none of them is required, and a re-run narrows an
-  existing rule the same way. Otherwise the script keeps the full set. The toolchain always comes from
+  existing rule the same way. Otherwise the script keeps the full set. A narrowed
+  Go+Swift repo still requires `test-and-coverage` when a `quality-*.yml` on disk
+  carries the `test-and-coverage-swift` job: that job runs the Swift tests and
+  coverage floor, reports as `test-and-coverage`, and the gate runs no Swift. The toolchain always comes from
   *Resolve the toolchain*'s `key=value` output, never from visibility — the
   script accepts no visibility at all. With
   `--iac-only kubernetes` it requires the `kubernetes-ci.yml` `gate` context **instead of**

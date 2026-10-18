@@ -501,6 +501,8 @@ setup_parts() { # <vis> <sa> <v> <cs> -> "needle<TAB>0|1" lines
     list="$(s4_list "$out/common/SETUP.md")"
     want="$({
       echo gate
+      # Go+Swift: the Swift job reports as test-and-coverage, and the gate runs no Swift
+      [ "$langs" = go_swift ] && echo test-and-coverage
       [ "$sa" = none ] || echo "$sa"
       [ "$cs" = none ] || { echo "analyze (go)"; [ "$langs" = go_swift ] && echo "analyze (swift)"; }
       [ "$docker" = true ] && echo image

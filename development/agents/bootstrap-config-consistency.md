@@ -37,7 +37,9 @@ Walk through every cross-reference and verify both sides agree:
      `trivy-fs` and `no-cluster-deploy` included. You need no verdict on that
      decision: a folded job present in such a repo's workflows but absent from
      `checks` is not a finding when `checks` holds the narrowed set — `gate`,
-     the analyser's job, `image` and the `analyze (<lang>)` legs.
+     the analyser's job, `image` and the `analyze (<lang>)` legs. On a Go+Swift
+     repo that set also holds `test-and-coverage`, which the
+     `test-and-coverage-swift` job reports: the gate runs no Swift.
    - React overlay (§3k.5): `.github/workflows/webui-quality.yml` and its
      companion `webui-quality-noop.yml` (`webui-quality*.yml`). Their jobs
      report under their `name:`, not their ID, so compare the **names**.

@@ -75,7 +75,9 @@
 # does not run the folded checks; and with no .pre-commit-config.yaml, or one
 # without the semgrep hook, its pre-commit stage runs no semgrep — so in
 # each case today's full set is required, with a warning naming the condition; a
-# go-ci.yml whose `gate` job the probes refuse stops the run.
+# go-ci.yml whose `gate` job the probes refuse stops the run. A narrowed Go+Swift
+# repo keeps `test-and-coverage`, which its quality workflow's
+# `test-and-coverage-swift` job reports and the gate does not run.
 #
 # --has-codeql is true exactly when the resolved `code_scanning` is `codeql`;
 # CodeQL's public-only rule is enforced at the plan (resolve-tools.zsh step 4,
@@ -257,6 +259,16 @@ fi
 # A sole-Go repo's gate runs these three, so they are not required there.
 checks=()
 [[ "$narrow_sole_go" == "true" ]] || checks=("test-and-coverage" "semgrep" "pre-commit")
+# Except on a Go+Swift repo, which is sole-Go (#2615) but runs its Swift tests and
+# coverage floor only in the quality workflow's `test-and-coverage-swift` job. That
+# job reports as `test-and-coverage` and the gate runs no Swift, so the context
+# stays required wherever a quality workflow on disk carries the job.
+for quality_wf in .github/workflows/quality-public.yml .github/workflows/quality-private.yml; do
+	if [[ "$narrow_sole_go" == "true" && -f "$quality_wf" ]] &&
+		grep -q '^  test-and-coverage-swift:' "$quality_wf"; then
+		checks=("test-and-coverage")
+	fi
+done
 
 # --- the #1206 direct-to-cluster gate ----------------------------------------
 # `no-cluster-deploy` is the application-repo half of the promotion contract: an

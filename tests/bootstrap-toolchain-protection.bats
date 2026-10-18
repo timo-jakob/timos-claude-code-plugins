@@ -188,7 +188,7 @@ protect_in_fixture() {
 # A complete, otherwise-valid language-app invocation, then the given flags.
 protect_valid_plus() {
   (cd "$W" && env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --static-analysis sonarcloud --vulnerabilities snyk --default-branch main "$@")
+    --static-analysis sonarcloud --vulnerabilities snyk --sole-go false --default-branch main "$@")
 }
 
 # One boolean flag refuses every non-boolean value with its typed message, before
@@ -283,7 +283,7 @@ protect_with_tmpdir() {
   chmod +x "$STUB_BIN/mktemp"
   (cd "$W" && env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
     --static-analysis sonarcloud --vulnerabilities snyk --has-dockerfile false \
-    --has-codeql false --default-branch main "$@")
+    --has-codeql false --sole-go false --default-branch main "$@")
 }
 
 @test "#1352: a curl transport failure on the protection PUT is diagnosed and leaves no temp file" {
@@ -615,6 +615,48 @@ stage_go_gate() {
   done
 }
 
+@test "#2616: a narrowed Go+Swift repo keeps test-and-coverage, which its quality workflow's Swift job reports" {
+  protection_stubs
+  stage_go_ci
+  stage_go_gate
+  touch "$W/.github/workflows/ko-image.yml"
+  local vis
+  for vis in public private; do
+    rm -f "$W"/.github/workflows/quality-*.yml
+    printf 'jobs:\n  test-and-coverage-swift:\n    name: test-and-coverage\n' > "$W/.github/workflows/quality-$vis.yml"
+    : > "$CURL_DATA"
+    run protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy --has-dockerfile false \
+      --has-ko true --has-codeql false --sole-go true --default-branch main
+    [ "$status" -eq 0 ] || { echo "$vis exited $status: $output"; return 1; }
+    [ "$(put_contexts)" = "$(printf '%s\n' gate image sonarcloud test-and-coverage | LC_ALL=C sort)" ] ||
+      { echo "$vis: got [$(put_contexts | paste -sd, -)]"; return 1; }
+  done
+  # the keep applies only to a narrowed repo: --sole-go false, and a sole-Go fallback,
+  # keep the full set with the Swift job on disk, semgrep and pre-commit included
+  local full
+  full="$(printf '%s\n' gate image license-fs pre-commit semgrep sonarcloud test-and-coverage trivy-fs | LC_ALL=C sort)"
+  : > "$CURL_DATA"
+  run protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy --has-dockerfile false \
+    --has-ko true --has-codeql false --sole-go false --default-branch main
+  [ "$status" -eq 0 ]
+  [ "$(put_contexts)" = "$full" ] || { echo "sole-go false: got [$(put_contexts | paste -sd, -)]"; return 1; }
+  mv "$W/scripts/go-gate.zsh" "$W/scripts/go-gate.zsh.off"
+  : > "$CURL_DATA"
+  run protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy --has-dockerfile false \
+    --has-ko true --has-codeql false --sole-go true --default-branch main
+  [ "$status" -eq 0 ]
+  [ "$(put_contexts)" = "$full" ] || { echo "fallback: got [$(put_contexts | paste -sd, -)]"; return 1; }
+  mv "$W/scripts/go-gate.zsh.off" "$W/scripts/go-gate.zsh"
+  # a sole-Go quality workflow that names the Swift job only outside a job key keeps the plain sole-Go set
+  printf 'jobs:\n  # test-and-coverage-swift: rendered only with Swift\n  license-fs:\n    needs: [test-and-coverage-swift]\n' \
+    > "$W/.github/workflows/quality-private.yml"
+  : > "$CURL_DATA"
+  run protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy --has-dockerfile false \
+    --has-ko true --has-codeql false --sole-go true --default-branch main
+  [ "$status" -eq 0 ]
+  [ "$(put_contexts)" = "$(printf '%s\n' gate image sonarcloud | LC_ALL=C sort)" ]
+}
+
 @test "#2616: a mixed-Go repo (--sole-go false) with a real gate job requires the full language-app set plus gate" {
   protection_stubs
   stage_go_ci
@@ -788,7 +830,10 @@ full_go_set() {
   contains "$joined" 'refuses** — exit 1, `NOT applying branch protection`, no rule written — as the IaC path does: list the unapplied rule and merge settings as an outstanding Step 5 item quoting the message.'
   contains "$joined" '`--sole-go` (off the §3l path), `--default-branch` and'
   contains "$joined" 'For a sole-Go repo that `branch-protection.sh` narrows the comparison set is the **sole-Go set** (Step 4b states when, #2616)'
-  contains "$joined" 'For a **sole-Go** render (render.zsh'"'"'s own sole-Go derivation, #2615) the list is the sole-Go set instead (#2616): `gate`, the analyser'"'"'s job, the `analyze (<lang>)` legs and `image` on the same conditions |'
+  contains "$joined" 'For a **sole-Go** render (render.zsh'"'"'s own sole-Go derivation, #2615) the list is the sole-Go set instead (#2616): `gate`, the analyser'"'"'s job, the `analyze (<lang>)` legs and `image` on the same conditions, plus `test-and-coverage` when `--languages` includes `swift` (its Swift job reports under that name and the gate runs no Swift) |'
+  contains "$joined" 'A narrowed Go+Swift repo still requires `test-and-coverage` when a `quality-*.yml` on disk carries the `test-and-coverage-swift` job: that job runs the Swift tests and coverage floor, reports as `test-and-coverage`, and the gate runs no Swift.'
+  contains "$(tr -s '[:space:]' ' ' < "$REPO_ROOT/development/skills/bootstrap/templates/common/SETUP.md.tmpl")" \
+    'A Go repository with Swift keeps `test-and-coverage`: its Swift job reports under that name, and the gate runs no Swift.'
 }
 
 @test "#2616: the consistency agent's §2 and the no-cluster-deploy how-to state the sole-Go exception" {
@@ -796,6 +841,7 @@ full_go_set() {
   agent="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/development/agents/bootstrap-config-consistency.md")"
   contains "$agent" 'Sole-Go exception (#2616): for a Go repo with no JavaScript, Python or Java (`is-sole-go.zsh` exits 0), `branch-protection.sh` decides at apply time (bootstrap Step 4b) whether to require `gate` instead of the folded contexts — `test-and-coverage`, `semgrep`, `pre-commit`, `license-fs`, `trivy-fs` and `no-cluster-deploy` included.'
   contains "$agent" 'You need no verdict on that decision: a folded job present in such a repo'"'"'s workflows but absent from `checks` is not a finding when `checks` holds the narrowed set — `gate`, the analyser'"'"'s job, `image` and the `analyze (<lang>)` legs.'
+  contains "$agent" 'On a Go+Swift repo that set also holds `test-and-coverage`, which the `test-and-coverage-swift` job reports: the gate runs no Swift.'
   howto="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/docs/how-to/keep-app-repos-out-of-the-cluster.md")"
   contains "$howto" 'so once `branch-protection.sh` narrows its rule it requires `gate` instead of the folded contexts, `no-cluster-deploy` included — even with both halves on disk.'
   contains "$howto" 'The narrowing applies only when the script can tell the gate runs those stages (bootstrap'"'"'s Step 4b lists the conditions); otherwise the full set, with `no-cluster-deploy`, stays required.'

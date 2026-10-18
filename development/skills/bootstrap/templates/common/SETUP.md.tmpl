@@ -786,7 +786,7 @@ To do it manually instead: repo Settings → Branches → Add rule for `{{DEFAUL
   {{REQUIRED_CONTEXTS}}
   <!-- --- TOOLCHAIN-END --- -->
   <!-- --- SOLE_GO-START --- -->
-  - **Sole-Go (#2616):** a Go repository with no JavaScript, Python or Java: its `gate` job (`go-ci.yml`) runs the tests and coverage floor, semgrep, pre-commit, the license and vulnerability scans and the no-cluster-deploy check itself, so none of them is a required context of its own.
+  - **Sole-Go (#2616):** a Go repository with no JavaScript, Python or Java: its `gate` job (`go-ci.yml`) runs the tests and coverage floor, semgrep, pre-commit, the license and vulnerability scans and the no-cluster-deploy check itself, so none of them is a required context of its own. A Go repository with Swift keeps `test-and-coverage`: its Swift job reports under that name, and the gate runs no Swift.
   <!-- --- SOLE_GO-END --- -->
   <!-- --- NOT_SOLE_GO-START --- -->
   - **`no-cluster-deploy` (§3h)**, listed above, is required on every application repository only **when BOTH `.github/workflows/no-cluster-deploy.yml` and `scripts/check-no-cluster-deploy.zsh` are on disk** (absent, the script warns and omits the context, exactly as it does for `image`/`ko-image.yml`, so a repo predating the gate is never wedged at `expected`). Unlike `image`, it carries **no path filter at all** — a required check whose workflow a `paths:` filter skipped sits at `expected` forever and wedges every PR that misses those paths. It is a static scan of `.github/workflows/**`, so running it unconditionally costs seconds. It is **not** in the IaC set below: an infrastructure repo is the one place a cluster write belongs.
