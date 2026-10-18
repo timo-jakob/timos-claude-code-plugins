@@ -776,26 +776,18 @@ jobs:
   contains "$output" 'PASSED: 1 workflow file(s) scanned'
 }
 
-@test "KNOWN GAP: a YAML-BOOLEAN if: is read as no condition, so the creator exempts (#1432)" {
-  # PINS A STATED GAP, not a desired behaviour. The extractor keeps `if:` only
-  # when its JSON type is "string", so `if: false` — a YAML boolean, and the
-  # usual way to park a step — records NO condition, PASS 1 reads the creator as
-  # unconditional, and PASS 2's `-z` arm exempts everything at or after it. That
-  # is the gate's ONE documented fail-OPEN, stated at all three known-gaps
-  # mirrors (the checker header, SETUP.md.tmpl §3h, and the how-to).
+@test "a creator parked with a YAML-BOOLEAN if: false does NOT exempt an unguarded deploy (#1478)" {
+  # Was the gate's one documented fail-OPEN (#1432). `if: false` — a YAML
+  # boolean, and the usual way to park a step — never runs and creates no
+  # cluster, so it must confer no exemption on the real deploy after it. The
+  # extractor maps a boolean `false` to the condition `false`, so PASS 2's
+  # byte-identical arm no longer matches the unguarded deploy and the `-z` arm
+  # no longer fires.
   #
-  # MUTATION THIS CATCHES: changing the extractor to
-  # `cond: (if .value."if" == null then null else (.value."if" | tostring) end)`
-  # makes the boolean a condition and flips this to a red. Every other fixture
-  # carries a string `if:` or none, so both spellings map identically there and
-  # the whole suite would stay green while three consumer-facing documents
-  # started telling every bootstrapped repo the opposite of what the check does.
-  # NOTE that bare stringification is NOT the right fix — see the `if: true`
-  # case below, which it would wrongly red. A fix maps `false` to a condition
-  # and `true` to unconditional.
-  #
-  # If the gap is ever CLOSED, this case changes in the same PR as those three
-  # prose sites — which is the whole point of pinning it.
+  # MUTATION THIS CATCHES: reverting the extractor to keep `if:` only when it is
+  # a string reads the parked creator as unconditional again, and this exits 0.
+  # The opposite mutation — stringifying every boolean — is the `if: true` case
+  # below's job, which it would red.
   wf it.yml "name: it
 on:
   pull_request:
@@ -807,6 +799,35 @@ jobs:
         if: false
         run: kind create cluster
       - name: ship
+        run: helm upgrade --install myapp ./chart"
+  check
+  [ "$status" -eq 1 ]
+  # name the DEPLOY step, so the case cannot pass on a finding reported
+  # against the parked creator
+  contains "$output" "step 'ship'"
+}
+
+@test "a creator and a deploy BOTH parked with YAML if: false keep the byte-identical exemption (#1478)" {
+  # The boolean `false` reaches PASS 2's byte-identical arm, not just its `-z`
+  # arm: a deploy parked the same way as its creator never runs either, so the
+  # pair runs together or not at all and stays exempt — the same rule a string
+  # condition gets.
+  #
+  # MUTATION THIS CATCHES: mapping `false` to anything that is not the same
+  # value for every step (or dropping the byte-identical `continue`) reds this
+  # pair, while the unguarded case above still passes.
+  wf it.yml "name: it
+on:
+  pull_request:
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - name: parked kind
+        if: false
+        run: kind create cluster
+      - name: ship
+        if: false
         run: helm upgrade --install myapp ./chart"
   check
   [ "$status" -eq 0 ]

@@ -649,15 +649,6 @@ a cluster:
   so a job whose first creator is `if:`-guarded and whose second is
   unconditional is judged against the guarded condition. Fails *closed*;
   reorder the unconditional creator first if you hit it.
-- An `if:` written as a YAML **boolean** is not a string, so the checker records
-  no condition and reads that creator as unconditional. The two spellings differ:
-  `if: true` always runs, so "unconditional" is the **correct** reading; but
-  `if: false` — the usual way to park a step — never runs and creates no
-  cluster, and yet still exempts every cluster-writing step at or after it,
-  unguarded ones included. That direction fails **open**: a `kind create
-  cluster` parked with `if: false` currently exempts a real `helm upgrade
-  --install` after it. Write the guard as an expression string
-  (`if: ${{ false }}`) if you need the narrowing. `if: true` needs no remedy.
 - Some cluster-mutating verbs are outside the closed v1 set **by decision, not
   because they are harmless**: `kubectl run`, `edit`, `annotate`, `label`,
   `expose`, `cordon`, `uncordon`, `drain`, `taint`, `exec`, and `helm plugin

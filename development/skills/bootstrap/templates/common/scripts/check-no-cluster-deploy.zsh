@@ -164,21 +164,6 @@
 #     stood up. Fails CLOSED, and the shape is rare enough that recording every
 #     creator is not worth the ambiguity of choosing between them; reorder the
 #     unconditional creator first if you hit it.
-#   * An `if:` written as a YAML BOOLEAN is not a string, so the extractor
-#     records NO condition and the creator is read as unconditional. The two
-#     spellings are NOT the same defect:
-#       - `if: true` — the step always runs, so "unconditional" is the CORRECT
-#         reading. Right answer, reached without inspecting the value.
-#       - `if: false` — the usual way to park a step. It never runs and no
-#         cluster is created, yet the creator still exempts every
-#         cluster-writing step at or after it, unguarded ones included. This
-#         one fails OPEN: a `kind create cluster` parked with `if: false`
-#         currently exempts a real `helm upgrade --install` after it. Write the
-#         guard as an expression string (`if: ${{ false }}`) if you need the
-#         narrowing. Tracked for a fix.
-#     A fix must map a YAML `true` to UNCONDITIONAL — not to the condition
-#     string `true` — or it reds the always-run integration job the
-#     guarded-creator clause exists to keep exempt.
 #   * A command reached only through a shell variable or an alias defined
 #     earlier in the same body is not resolved.
 #   * A NESTED command substitution (`$( … $( … ) … )`) is lifted at the first
@@ -986,6 +971,15 @@ for wf in "${workflow_files[@]}"; do
   # call with no `steps`. Both reduce to zero step records, never to an error.
   # A `jobs:` that is a SCALAR parses as YAML but cannot be walked — that is a
   # second fail-closed arm, not a silent skip.
+  #
+  # An `if:` written as a YAML BOOLEAN is not a string, and the two values are
+  # not the same case. `if: false` — the usual way to park a step — never runs,
+  # so it becomes the condition `false`: a parked creator then exempts only a
+  # step parked the same way, never an unguarded deploy after it. `if: true`
+  # always runs, so it stays NO condition (unconditional). Stringifying it
+  # instead would give an always-run creator the condition `true`, and PASS 2's
+  # byte-identical test would red the unguarded deploy of a legitimate
+  # always-run integration job.
   if ! yq -o=json -I=0 '.' "$wf" 2>/dev/null | jq -c '
         (.jobs // {}) | to_entries[]
         | select((.value | type) == "object")
@@ -994,7 +988,9 @@ for wf in "${workflow_files[@]}"; do
         | select((.value | type) == "object")
         | {job: $job, index: .key,
            name: (if (.value.name | type) == "string" then .value.name else null end),
-           cond: (if (.value."if" | type) == "string" then .value."if" else null end),
+           cond: (if (.value."if" | type) == "string" then .value."if"
+                  elif .value."if" == false then "false"
+                  else null end),
            run:  (if (.value.run  | type) == "string" then .value.run  else null end)}
       ' > "$STEPS_JSON" 2>/dev/null; then
     fail "$rel: parsed as YAML but its jobs/steps could not be read"

@@ -210,16 +210,6 @@ A pass means "no cluster-writing command appears literally in a workflow's own
   so a job whose first creator is `if:`-guarded and whose second is
   unconditional is judged against the guarded condition. Fails *closed*;
   reorder the unconditional creator first if you hit it.
-- **An `if:` written as a YAML boolean is read as NO condition**, so that
-  creator counts as unconditional. The two spellings are not the same thing.
-  `if: true` always runs, so unconditional is the **right** reading and the
-  verdict is correct. `if: false` — the usual way to park a step — never runs
-  and creates no cluster, yet still exempts every cluster-writing step at or
-  after it, unguarded ones included. That is the one gap that fails **open**: a
-  `kind create cluster` parked with `if: false` currently exempts a real `helm
-  upgrade --install` after it, so the guarded-creator narrowing described above
-  does *not* apply to it. Write the guard as an expression string
-  (`if: ${{ false }}`) if you need the narrowing; `if: true` needs no remedy.
 - The ephemeral exemption reads `run:` bodies for the same reason, so a cluster
   stood up by `helm/kind-action` does not exempt its job. That direction fails
   **closed** — a false alarm a human sees — which is the safe side of the same
