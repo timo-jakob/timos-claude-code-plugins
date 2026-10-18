@@ -193,10 +193,12 @@ setup() {
   # rewrite and the whole slice-label guarantee rested on one `contains`.
   # #1161 moved the label on: the agents and the review panel shipped, so the
   # shipped-so-far enumeration names them and the future tense keeps only the
-  # two children still open
+  # two children still open. #1162 moved it again (#2550): the bootstrap check
+  # pipeline shipped, so only the fixtures (#1163) stay in the future tense
   contains "$desc" "Shipped so far:"
-  contains "$desc" "and the four agents and the review panel (#1161)"
-  contains "$desc" "The bootstrap check pipeline (#1162) and the self-contained test fixtures (#1163) follow."
+  contains "$desc" "the four agents and the review panel (#1161), and the bootstrap check pipeline (#1162)."
+  contains "$desc" "The self-contained test fixtures (#1163) follow."
+  lacks "$desc" "The bootstrap check pipeline (#1162) and the self-contained test fixtures (#1163) follow."
   # and the #1160-era caveat is retired with the thing it caveated
   lacks "$desc" "Until the agents land the dispatcher routes nothing"
   # every remaining child named, so the manifest cannot silently drop one — the
