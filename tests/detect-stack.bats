@@ -1462,6 +1462,40 @@ _fake_tree() {  # $1.. = ops major dirs; "vN" -> openapi.yaml, "vN:tmpl" -> open
   # the template ships beside the javascript fragments, but only the composition
   # repo renders it (#1899), so no gap-fill may ever write it
   [ "$(jq -r '[.missing_artifacts[] | select(startswith("mfe-contract/"))] | length' <<<"$out")" -eq 0 ]
+  # ...nor its publish workflow, which ships beside it (#1899)
+  [ "$(jq -r '[.missing_artifacts[] | select(. == ".github/workflows/mfe-contract-publish.yml")] | length' <<<"$out")" -eq 0 ]
+}
+
+@test "detect-stack #1899: a composition repo's published mfe-contract/package.json is not a language" {
+  printf 'apiVersion: claude-workspace/v1\n' > .claude-workspace.yaml
+  mkdir -p mfe-contract
+  printf '{ "name": "@acme/mfe-contract", "version": "1.0.0" }\n' > mfe-contract/package.json
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -c '.languages' <<<"$out")" = '[]' ]
+}
+
+@test "detect-stack #1899: a composition repo still detects a javascript marker outside mfe-contract/" {
+  printf 'apiVersion: claude-workspace/v1\n' > .claude-workspace.yaml
+  mkdir -p mfe-contract apps/web
+  printf '{ "name": "@acme/mfe-contract", "version": "1.0.0" }\n' > mfe-contract/package.json
+  printf '{ "name": "web", "version": "0.1.0" }\n' > apps/web/package.json
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -c '.languages' <<<"$out")" = '["javascript"]' ]
+}
+
+@test "detect-stack #1899: a composition repo prunes only the root mfe-contract/, never a nested one" {
+  printf 'apiVersion: claude-workspace/v1\n' > .claude-workspace.yaml
+  mkdir -p apps/web/mfe-contract
+  printf '{ "name": "@acme/mfe-contract", "version": "1.0.0" }\n' > apps/web/mfe-contract/package.json
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -c '.languages' <<<"$out")" = '["javascript"]' ]
+}
+
+@test "detect-stack #1899: outside a composition repo, mfe-contract/package.json is still a javascript marker" {
+  mkdir -p mfe-contract
+  printf '{ "name": "@acme/mfe-contract", "version": "1.0.0" }\n' > mfe-contract/package.json
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -c '.languages' <<<"$out")" = '["javascript"]' ]
 }
 
 @test "detect-stack #1124: a javascript repo is never missing the react-shell overlay" {

@@ -459,3 +459,169 @@ line_of() {
   contains "$section" "*${MFE_HEADING#'### '}* section above"
   contains "$section" "${MFE_SPEC#"$REPO_ROOT/"}"
 }
+
+# --- the publisher step (#1899) -----------------------------------------------
+#
+# The composition repo's opt-in §3m step renders the package and its publish
+# workflow with render.zsh. The workflow's publish step is EXECUTED under bash
+# against a stubbed `npm` that logs every call, so the provenance, skip and
+# missing-token branches are proven by behaviour, not by grep.
+
+JS_TEMPLATES_REL='development/skills/bootstrap/templates/languages/javascript'
+PUBLISH_WF_REL='.github/workflows/mfe-contract-publish.yml'
+
+render_publish() {
+  zsh "$REPO_ROOT/development/skills/bootstrap/scripts/render.zsh" \
+    --templates "$REPO_ROOT/$JS_TEMPLATES_REL" --out "$BATS_TEST_TMPDIR/out" \
+    --project-slug Acme-Corp/composition --default-branch trunk \
+    mfe-contract/index.d.ts mfe-contract/package.json mfe-contract/README.md \
+    "$PUBLISH_WF_REL.tmpl"
+}
+
+publish_step() {
+  yq -r '.jobs.publish.steps[] | select(.name == "Publish the mfe-contract package to npm") | .run' \
+    "$BATS_TEST_TMPDIR/out/$PUBLISH_WF_REL"
+}
+
+# run_publish <repo-private> <token> <view-rc> [<view-output>] — the publish
+# step, executed in a rendered tree with `npm` stubbed: `npm view` prints
+# <view-output> and exits <view-rc>, every call is logged to $NPM_LOG.
+run_publish() {
+  render_publish
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  printf '#!/bin/bash\nprintf "%%s\\n" "$*" >> "%s"\n[ "$1" = view ] && { printf "%s"; exit %s; }\nexit 0\n' \
+    "$BATS_TEST_TMPDIR/npm.log" "${4-}" "$3" > "$BATS_TEST_TMPDIR/bin/npm"
+  chmod +x "$BATS_TEST_TMPDIR/bin/npm"
+  publish_step > "$BATS_TEST_TMPDIR/publish.sh"
+  NPM_LOG="$BATS_TEST_TMPDIR/npm.log"
+  : > "$NPM_LOG"
+  cd "$BATS_TEST_TMPDIR/out"
+  run env -u GITHUB_ACTIONS PATH="$BATS_TEST_TMPDIR/bin:$PATH" REPO_PRIVATE="$1" NODE_AUTH_TOKEN="$2" \
+    bash "$BATS_TEST_TMPDIR/publish.sh"
+}
+
+@test "render.zsh derives {{NPM_SCOPE}} as the lowercased owner and renders exactly the package's three files" {
+  run render_publish
+  [ "$status" -eq 0 ]
+  run jq -r .name "$BATS_TEST_TMPDIR/out/mfe-contract/package.json"
+  [ "$output" = '@acme-corp/mfe-contract' ]
+  [ "$(jq -r .repository.url "$BATS_TEST_TMPDIR/out/mfe-contract/package.json")" = 'git+https://github.com/Acme-Corp/composition.git' ]
+  run grep -rlE '\{\{[A-Z_]+\}\}' "$BATS_TEST_TMPDIR/out"
+  [ "$status" -eq 1 ]
+  local listed
+  listed="$(cd "$BATS_TEST_TMPDIR/out/mfe-contract" && find . -mindepth 1 | sed 's#^\./##' | LC_ALL=C sort | tr '\n' ' ')"
+  [ "$listed" = "README.md index.d.ts package.json " ]
+}
+
+@test "the publish workflow: default-branch push on mfe-contract/** plus dispatch, pinned actions, contents: read" {
+  render_publish
+  local wf="$BATS_TEST_TMPDIR/out/$PUBLISH_WF_REL"
+  [ "$(yq -o=json -I=0 '.on.push.branches' "$wf")" = '["trunk"]' ]
+  [ "$(yq -o=json -I=0 '.on.push.paths' "$wf")" = '["mfe-contract/**"]' ]
+  [ "$(yq -r '.on | has("workflow_dispatch")' "$wf")" = true ]
+  [ "$(yq -o=json -I=0 '.permissions' "$wf")" = '{"contents":"read"}' ]
+  # every action is pinned to a full commit SHA
+  run bash -c "yq -r '.. | select(has(\"uses\")) | .uses' '$wf' | grep -vcE '@[0-9a-f]{40}\$'"
+  [ "$output" = 0 ]
+  [ "$(yq -r '.jobs.publish.steps[] | select(has("with")) | .with."registry-url"' "$wf")" = 'https://registry.npmjs.org' ]
+  [ "$(yq -r '.jobs.publish.steps[] | select(.name | test("Publish")) | .env.NODE_AUTH_TOKEN' "$wf")" = '${{ secrets.NPM_TOKEN }}' ]
+  [ "$(yq -r '.jobs.publish.steps[] | select(.name | test("Publish")) | .env.REPO_PRIVATE' "$wf")" = '${{ github.event.repository.private }}' ]
+  [ "$(yq -r '.jobs.publish.if' "$wf")" = "github.ref == 'refs/heads/trunk'" ]
+  contains "$(publish_step)" "version=\"\$(jq -r '.version' mfe-contract/package.json)\""
+  # none of spec-publish's per-major machinery came across
+  run grep -cE 'matrix|major-v|APIM|apim/' "$wf"
+  [ "$output" = 0 ]
+  run actionlint "$wf"
+  [ "$status" -eq 0 ]
+}
+
+@test "only the publish job holds id-token: write" {
+  render_publish
+  local wf="$BATS_TEST_TMPDIR/out/$PUBLISH_WF_REL"
+  [ "$(yq -r '.jobs.publish.permissions."id-token"' "$wf")" = write ]
+  [ "$(yq -r '[.jobs | to_entries[] | select(.value.permissions."id-token" == "write") | .key] | join(",")' "$wf")" = publish ]
+}
+
+@test "a public repo publishes with --provenance and public access" {
+  # npm view exits 0 with no output when the package exists but the version does not
+  run_publish false tok 0
+  [ "$status" -eq 0 ]
+  contains "$(cat "$NPM_LOG")" 'publish ./mfe-contract --access public --provenance'
+}
+
+@test "a private repo publishes without provenance and emits a notice naming why" {
+  run_publish true tok 1
+  [ "$status" -eq 0 ]
+  contains "$output" '::notice::Publishing @acme-corp/mfe-contract@1.0.0 without provenance: npm requires a public repository'
+  contains "$(cat "$NPM_LOG")" 'publish ./mfe-contract --access public'
+  lacks "$(cat "$NPM_LOG")" '--provenance'
+}
+
+@test "an already-published version exits 0 without publishing, even with no NPM_TOKEN" {
+  run_publish false '' 0 1.0.0
+  [ "$status" -eq 0 ]
+  contains "$output" '@acme-corp/mfe-contract@1.0.0 already published'
+  contains "$(cat "$NPM_LOG")" 'view @acme-corp/mfe-contract@1.0.0 version'
+  lacks "$(cat "$NPM_LOG")" 'publish'
+}
+
+@test "a needed publish with no NPM_TOKEN fails with an error naming it" {
+  run_publish false '' 1
+  [ "$status" -ne 0 ]
+  contains "$output" '::error::NPM_TOKEN is not set'
+  lacks "$(cat "$NPM_LOG")" 'publish'
+}
+
+@test "a package.json with no version fails with a typed error and never publishes" {
+  run_publish false tok 1
+  jq 'del(.version)' mfe-contract/package.json > "$BATS_TEST_TMPDIR/pkg.json"
+  mv "$BATS_TEST_TMPDIR/pkg.json" mfe-contract/package.json
+  : > "$NPM_LOG"
+  run env -u GITHUB_ACTIONS PATH="$BATS_TEST_TMPDIR/bin:$PATH" REPO_PRIVATE=false NODE_AUTH_TOKEN=tok \
+    bash "$BATS_TEST_TMPDIR/publish.sh"
+  [ "$status" -ne 0 ]
+  contains "$output" '::error::mfe-contract/package.json has no version'
+  lacks "$(cat "$NPM_LOG")" 'publish'
+}
+
+@test "bootstrap §3m states the opt-in question, its default, the re-run rule, the render and the manual steps" {
+  local s3m
+  s3m="$(sed -n '/^### 3m\. Composition repos/,/^## Step 3\.5/p' "$REPO_ROOT/development/skills/bootstrap/SKILL.md" | collapse)"
+  contains "$s3m" '**Publish `@<scope>/mfe-contract` — opt-in (#1899).**'
+  contains "$s3m" 'Publish: Publish @<scope>/mfe-contract from this repo? (default: no)'
+  contains "$s3m" 'A non-zero `render.zsh` exit fails the run, quoting its message.'
+  contains "$s3m" 'Record the four files in `files` under step `composition` — `written` when copied, `already_present` when kept, whether or not it matches the render (a kept file is the package'\''s own evolution, never reconciled with the render) — and a failed render as one `failed` entry for `mfe-contract/package.json`.'
+  # a kept publish file that differs is the package evolving, never `skipped`
+  # (a skipped step parks every re-run after a version bump, as #2225 found)
+  lacks "$s3m" '`skipped` when kept'
+  contains "$s3m" '**The `Publish:` line asks only when `mfe-contract/package.json` is absent.** When it exists, the line reads `Publish: already on (mfe-contract/package.json present) — not re-asked` instead, so a re-run never meets a no.'
+  contains "$s3m" 'the answer **defaults to no**: only an explicit yes opts in'
+  contains "$s3m" '**On a re-run, an existing `mfe-contract/package.json` means publishing is already on**: do not ask again'
+  contains "$s3m" 'On a yes, and only after the scaffold exited `0`'
+  contains "$s3m" '.github/workflows/mfe-contract-publish.yml.tmpl'
+  contains "$s3m" '**only where no file exists there**; an existing file is kept, never overwritten. The template'"'"'s `examples/` directory is never rendered.'
+  contains "$s3m" 'Bootstrap never sets or checks the `NPM_TOKEN` secret'
+  contains "$s3m" '**When the package was rendered**, they start with: add the `NPM_TOKEN` repository secret with publish rights, and create (or join) the npm org `<scope>` the package publishes into'
+  contains "$s3m" 'then run *MFE Contract Publish* once from the **Actions** tab'
+  # the publish-only steps end with a full stop; the steps every run needs follow
+  contains "$s3m" 'since that merge'\''s push publishes the package. **On every run, package or not**, the manual steps are: create the GitHub Environments'
+  contains "$s3m" 'do not ask again, and treat it as a yes.'
+  contains "$s3m" 'silence or approving the plan as a whole is a no'
+  contains "$s3m" 'into a scratch directory outside the repository'
+  contains "$s3m" '--out "<scratch>" --project-slug "<owner/repo>" --default-branch "<branch>" \ mfe-contract/index.d.ts mfe-contract/package.json mfe-contract/README.md \ .github/workflows/mfe-contract-publish.yml.tmpl'
+  contains "$s3m" 'copy each of the four rendered files — `mfe-contract/index.d.ts`, `mfe-contract/package.json`, `mfe-contract/README.md` and `.github/workflows/mfe-contract-publish.yml` — to the same path'
+}
+
+@test "the section names the publisher step, npmjs.com, provenance and the workflow" {
+  local section
+  section="$(mfe_section)"
+  contains "$section" '**The publisher step (#1899)** is an opt-in step of bootstrap §3m'
+  contains "$section" '`.github/workflows/mfe-contract-publish.yml`'
+  contains "$section" 'to the **npmjs.com** registry'
+  contains "$section" 'Its publish job alone holds `id-token: write` and publishes with **provenance** from a public repository.'
+  contains "$section" 'runs after the composition scaffold exits `0`: on an explicit yes it renders the package'
+  contains "$section" 'on a default-branch push touching `mfe-contract/**`'
+  contains "$section" 'so a private one publishes without it and says so'
+  contains "$section" 'never offers the package or its workflow to any other repo'
+  lacks "$section" 'the publish workflow are #1899'
+}

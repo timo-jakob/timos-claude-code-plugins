@@ -417,14 +417,20 @@ fi
 # 0, prune the whole tree, and silently detect zero languages. Skipping depth 0
 # means the root is always descended into regardless of its name, while every
 # deeper prune still fires.
+#
+# A composition repo's root `mfe-contract/` is bootstrap §3m's own publish
+# output (#1899), not application code, so it is pruned there too — otherwise
+# its package.json reads as javascript and §3m's language guard stops a re-run.
 detect_lang() {
 	local lang="$1"
 	shift
+	local -a mfe_prune=()
+	[[ -f "$cwd/.claude-workspace.yaml" ]] && mfe_prune=(-path "$cwd/mfe-contract" -prune -o)
 	for marker in "$@"; do
 		while IFS= read -r -d '' _; do
 			printf '%s\n' "$lang"
 			return
-		done < <(find "$cwd" -mindepth 1 \
+		done < <(find "$cwd" -mindepth 1 ${mfe_prune[@]+"${mfe_prune[@]}"} \
 			-path '*/node_modules' -prune -o \
 			-path '*/.git' -prune -o \
 			-path '*/vendor' -prune -o \
@@ -1388,9 +1394,10 @@ collect_from() {
 		# §3j), not a fixed 1:1 artifact — never a gap-fill candidate.
 		[[ "$rel" == src/api/* ]] && continue
 		# The mfe-contract/v1 package (#1123) is published by the org's
-		# composition repo, which renders it (#1899) — never an artifact an
-		# ordinary JavaScript repo is missing.
+		# composition repo, which renders it and its publish workflow (#1899) —
+		# never an artifact an ordinary JavaScript repo is missing.
 		[[ "$rel" == mfe-contract/* ]] && continue
+		[[ "$rel" == .github/workflows/mfe-contract-publish.yml ]] && continue
 		# The React shell overlay (#1124) renders under src/shell/ only via
 		# SKILL §3k.7, and a State D gap-fill only when src/shell/loader.ts is
 		# present — never an artifact an ordinary JavaScript repo is missing.

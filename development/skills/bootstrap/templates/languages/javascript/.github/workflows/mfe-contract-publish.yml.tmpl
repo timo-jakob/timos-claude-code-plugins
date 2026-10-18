@@ -1,0 +1,80 @@
+# MFE Contract Publish — publish @<scope>/mfe-contract to npmjs.com (#1899).
+#
+# Rendered only into the org's composition repo, and only when bootstrap §3m's
+# opt-in publish question was answered yes: one composition repo per org owns
+# the types-only mfe-contract/v1 package every shell and remote builds against
+# (ARCHITECTURE.md, *The `mfe-contract/v1` contract*).
+#
+# The version is mfe-contract/package.json's `version`. Re-running on a version
+# that is already published is a clean no-op that needs no token, so a push
+# touching only the README stays green.
+#
+# Provenance: a contract every shell and remote trusts at build time is a
+# supply-chain target, so the publish job holds `id-token: write` and passes
+# --provenance, which lets a consumer verify the repository and run that built
+# it. npm generates provenance only for a public source repository, so a private
+# one publishes without it and says so.
+#
+# Requires an `NPM_TOKEN` repository secret with publish rights to the npm org
+# the package is scoped to; bootstrap neither sets nor checks it.
+name: MFE Contract Publish
+
+on:
+  push:
+    branches: ["{{DEFAULT_BRANCH}}"]
+    paths: ["mfe-contract/**"]
+  workflow_dispatch:
+
+# Least privilege at workflow scope; only the publish job mints an OIDC token.
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    # A dispatch may pick any branch; only the default branch publishes.
+    if: github.ref == 'refs/heads/{{DEFAULT_BRANCH}}'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Publish the mfe-contract package to npm
+        env:
+          REPO_PRIVATE: ${{ github.event.repository.private }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          pkg="$(jq -r '.name' mfe-contract/package.json)"
+          version="$(jq -r '.version' mfe-contract/package.json)"
+          if [[ -z "$version" || "$version" == "null" ]]; then
+            echo "::error::mfe-contract/package.json has no version"
+            exit 1
+          fi
+          # Idempotent: an already-published version is a clean no-op, and it
+          # needs no token. Compare the output: `npm view` exits 0 with nothing
+          # printed when the package exists but this version does not.
+          published="$(npm view "${pkg}@${version}" version 2>/dev/null || true)"
+          if [[ "$published" == "$version" ]]; then
+            echo "${pkg}@${version} already published — nothing to do."
+            exit 0
+          fi
+          if [[ -z "${NODE_AUTH_TOKEN:-}" ]]; then
+            echo "::error::NPM_TOKEN is not set — add it as a repository secret to publish ${pkg}@${version}"
+            exit 1
+          fi
+          args=(--access public)
+          if [[ "$REPO_PRIVATE" == "false" ]]; then
+            args+=(--provenance)
+          else
+            echo "::notice::Publishing ${pkg}@${version} without provenance: npm requires a public repository"
+          fi
+          echo "Publishing ${pkg}@${version}"
+          npm publish ./mfe-contract "${args[@]}"
