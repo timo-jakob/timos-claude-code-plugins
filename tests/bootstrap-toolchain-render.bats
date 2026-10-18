@@ -1112,6 +1112,21 @@ sole_go_row_common() { # <out>
   run ! grep -rqE 'SOLE_GO-(START|END)' "$1"
 }
 
+# a workflow's job ids, sorted, one per line (an emptied `jobs:` has none)
+jobs_of() { # <file>
+  yq -r '(.jobs // {}) | keys | .[]' "$1" | LC_ALL=C sort
+}
+
+# the job ids a sole-Go render keeps of the mixed row's (#2617): all but the folded
+# jobs, plus `test-and-coverage` when <keep-tac> is true (a Go+Swift noop)
+sole_go_kept_jobs() { # <mixed-file> <keep-tac>
+  {
+    yq -r '(.jobs // {}) | del(.sonarcloud, .sonarqube, .["test-and-coverage"], .["trivy-fs"], .["license-fs"],
+      .semgrep, .["pre-commit"]) | keys | .[]' "$1"
+    [ "$2" = true ] && echo test-and-coverage
+  } | LC_ALL=C sort
+}
+
 @test "toolchain render: #2615 SKILL.md and ARCHITECTURE.md state where a sole-Go repo's Sonar job lives" {
   local joined arch n
   joined="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/development/skills/bootstrap/SKILL.md")"
@@ -1153,12 +1168,13 @@ sole_go_row_common() { # <out>
     "$(printf 'coverage.out\ncoverage.xml')" ]
   # inside its SONARCLOUD markers, so static_analysis none still strips it
   grep -qF '# --- SONARCLOUD-START' "$wf"
-  # the quality workflow and noop lose the Sonar job and nothing else: their jobs are the mixed row's minus it
+  # the quality workflow and noop lose the Sonar job and the other folded jobs (#2617):
+  # their jobs are the mixed row's minus those
   sole_go_render "$BATS_TEST_TMPDIR/mixed" "$TEMPLATES" go "go python" public sonarcloud
   # the job is the mixed row's quality-public.yml sonarcloud job, unchanged except needs
   [ "$(yq -o=json -I0 '.jobs.sonarcloud | del(.needs)' "$wf")" = "$(yq -o=json -I0 '.jobs.sonarcloud | del(.needs)' "$BATS_TEST_TMPDIR/mixed/public/.github/workflows/quality-public.yml")" ]
   for q in quality-public quality-public-noop; do
-    [ "$(yq -r '.jobs | keys | join(",")' "$out/public/.github/workflows/$q.yml")" = "$(yq -r '.jobs | del(.sonarcloud, .sonarqube) | keys | join(",")' "$BATS_TEST_TMPDIR/mixed/public/.github/workflows/$q.yml")" ]
+    [ "$(jobs_of "$out/public/.github/workflows/$q.yml")" = "$(sole_go_kept_jobs "$BATS_TEST_TMPDIR/mixed/public/.github/workflows/$q.yml" false)" ]
   done
   run yamllint -c "$REPO_ROOT/.yamllint" --strict "$wf"
   [ "$status" -eq 0 ] || { echo "$output"; false; }
@@ -1174,9 +1190,9 @@ sole_go_row_common() { # <out>
   sole_go_render "$BATS_TEST_TMPDIR/mixed" "$TEMPLATES" go "go swift python" private sonarqube
   # the job is the mixed row's quality-private.yml sonarqube job, unchanged except needs
   [ "$(yq -o=json -I0 '.jobs.sonarqube | del(.needs)' "$wf")" = "$(yq -o=json -I0 '.jobs.sonarqube | del(.needs)' "$BATS_TEST_TMPDIR/mixed/private/.github/workflows/quality-private.yml")" ]
-  for q in quality-private quality-private-noop; do
-    [ "$(yq -r '.jobs | keys | join(",")' "$out/private/.github/workflows/$q.yml")" = "$(yq -r '.jobs | del(.sonarcloud, .sonarqube) | keys | join(",")' "$BATS_TEST_TMPDIR/mixed/private/.github/workflows/$q.yml")" ]
-  done
+  # Go+Swift: the quality workflow keeps test-and-coverage-swift, the noop its test-and-coverage
+  [ "$(jobs_of "$out/private/.github/workflows/quality-private.yml")" = "$(sole_go_kept_jobs "$BATS_TEST_TMPDIR/mixed/private/.github/workflows/quality-private.yml" false)" ]
+  [ "$(jobs_of "$out/private/.github/workflows/quality-private-noop.yml")" = "$(sole_go_kept_jobs "$BATS_TEST_TMPDIR/mixed/private/.github/workflows/quality-private-noop.yml" true)" ]
   run yamllint -c "$REPO_ROOT/.yamllint" --strict "$wf"
   [ "$status" -eq 0 ] || { echo "$output"; false; }
 }
@@ -1189,9 +1205,9 @@ sole_go_row_common() { # <out>
     sole_go_render "$out" "$TEMPLATES" go go "$vis" none
     sole_go_render "$mixed" "$TEMPLATES" go "go python" "$vis" none
     sole_go_row_common "$out"
-    for f in languages/go/.github/workflows/go-ci.yml "$vis/.github/workflows/quality-$vis.yml" \
-      "$vis/.github/workflows/quality-$vis-noop.yml"; do
-      [ "$(yq -r '.jobs | keys | join(",")' "$out/$f")" = "$(yq -r '.jobs | del(.sonarcloud, .sonarqube) | keys | join(",")' "$mixed/$f")" ]
+    [ "$(jobs_of "$out/languages/go/.github/workflows/go-ci.yml")" = "$(sole_go_kept_jobs "$mixed/languages/go/.github/workflows/go-ci.yml" false)" ]
+    for f in "$vis/.github/workflows/quality-$vis.yml" "$vis/.github/workflows/quality-$vis-noop.yml"; do
+      [ "$(jobs_of "$out/$f")" = "$(sole_go_kept_jobs "$mixed/$f" false)" ]
     done
     f="$out/languages/go/.github/workflows/go-ci.yml"
     [ "$(yq -r '.jobs | keys | join(",")' "$f")" = gate ]
@@ -1224,6 +1240,89 @@ sole_go_row_common() { # <out>
     if [ "$sa" != none ]; then
       [ "$(yq -r ".jobs | has(\"$sa\")" "$BATS_TEST_TMPDIR/new/$vis/.github/workflows/quality-$vis.yml")" = true ]
     fi
+  done
+}
+
+# --- #2617: a sole-Go render skips the folded files and strips the folded jobs ------------
+
+SKIPPED_SEL=development/skills/bootstrap/scripts/sole-go-skipped-templates.zsh
+FOLDED_COMMON=(common/.github/workflows/gitleaks.yml common/.github/workflows/no-cluster-deploy.yml.tmpl
+  common/.github/workflows/docs.yml.tmpl common/.github/workflows/contracts-lint.yml.tmpl
+  common/.github/workflows/contracts-semver.yml.tmpl)
+
+@test "toolchain render: #2617 each row renders exactly the selector's set and the jobs its row keeps" {
+  sole_go_setup
+  local row primary langs vis docker skip t out f
+  # <primary> <languages> <visibility> <docker> <quality jobs> <noop jobs> ("-" = file skipped)
+  for row in "go go public false - -" \
+    "go go private false - -" \
+    "go go public true image,push-and-sign image" \
+    "go go private true image,push-and-sign image" \
+    "go go_swift public false test-and-coverage-swift test-and-coverage" \
+    "go go_swift private true image,push-and-sign,test-and-coverage-swift image,test-and-coverage" \
+    "go go_python public false license-fs,pre-commit,semgrep,sonarcloud,test-and-coverage,trivy-fs license-fs,pre-commit,semgrep,sonarcloud,test-and-coverage,trivy-fs" \
+    "python python private true image,license-fs,pre-commit,push-and-sign,semgrep,sonarqube,test-and-coverage,trivy-fs image,license-fs,pre-commit,semgrep,sonarqube,test-and-coverage,trivy-fs"; do
+    read -r primary langs vis docker qjobs njobs <<< "$row"
+    langs="${langs//_/ }"
+    local sa=sonarcloud
+    [ "$vis" = private ] && sa=sonarqube
+    skip="$(zsh "$REPO_ROOT/$SKIPPED_SEL" --primary "$primary" --languages "$langs" --visibility "$vis" --docker "$docker")"
+    # the candidates: the toolchain's file set plus the five folded common workflows, minus the selector's set
+    local -a render=()
+    while IFS= read -r t; do
+      grep -qxF "$t" <<< "$skip" || render+=("$t")
+    done < <({ zsh "$REPO_ROOT/development/skills/bootstrap/scripts/toolchain-templates.zsh" --visibility "$vis" \
+      --static-analysis "$sa" --vulnerabilities trivy --code-scanning none | grep 'workflows/quality-'
+      printf '%s\n' "${FOLDED_COMMON[@]}"; })
+    out="$BATS_TEST_TMPDIR/r-${row%% *}-${langs// /}-$vis-$docker"
+    mkdir -p "$out"
+    if [ "${#render[@]}" -gt 0 ]; then
+      zsh "$RENDER" --templates "$TEMPLATES" --out "$out" --project-name demo --project-slug acme/demo \
+        --project-key acme_demo --org-key acme --primary "$primary" --languages "$langs" --docker "$docker" \
+        --visibility "$vis" --static-analysis "$sa" --vulnerabilities trivy --code-scanning none \
+        --default-branch main "${render[@]}" >/dev/null
+    fi
+    # sole-Go rows render none of the folded common workflows; the others render all five
+    for t in "${FOLDED_COMMON[@]}"; do
+      f="$out/${t%.tmpl}"
+      if [ "$primary $langs" = "go go" ] || [ "$langs" = "go swift" ]; then
+        [ ! -e "$f" ] || { echo "[$row] rendered $t"; return 1; }
+      else
+        [ -e "$f" ] || { echo "[$row] did not render $t"; return 1; }
+      fi
+    done
+    f="$out/$vis/.github/workflows/quality-$vis.yml"
+    if [ "$qjobs" = - ]; then
+      [ ! -e "$f" ] || { echo "[$row] rendered the quality workflow"; return 1; }
+    else
+      [ "$(jobs_of "$f" | paste -sd, -)" = "$qjobs" ] || { echo "[$row] quality: $(jobs_of "$f" | paste -sd, -)"; return 1; }
+    fi
+    f="$out/$vis/.github/workflows/quality-$vis-noop.yml"
+    if [ "$njobs" = - ]; then
+      [ ! -e "$f" ] || { echo "[$row] rendered the noop"; return 1; }
+    else
+      [ "$(jobs_of "$f" | paste -sd, -)" = "$njobs" ] || { echo "[$row] noop: $(jobs_of "$f" | paste -sd, -)"; return 1; }
+      run yamllint -c "$REPO_ROOT/.yamllint" --strict "$f"
+      [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    fi
+  done
+}
+
+@test "toolchain render: #2617 what a sole-Go repo still renders is never in the selector's set" {
+  sole_go_setup
+  local vis docker langs skip t
+  for vis in public private; do
+    for docker in true false; do
+      for langs in go "go swift"; do
+        skip="$(zsh "$REPO_ROOT/$SKIPPED_SEL" --primary go --languages "$langs" --visibility "$vis" --docker "$docker")"
+        for t in common/scripts/check-no-cluster-deploy.zsh common/.github/scripts/check-contracts-semver.sh \
+          common/.spectral.yaml common/.github/workflows/docs-deploy.yml.tmpl common/.github/workflows/docs-publish.yml.tmpl \
+          common/.github/workflows/spec-publish.yml.tmpl "$GOCI"; do
+          [ -f "$TEMPLATES/$t" ] || { echo "no such template: $t"; return 1; }
+          run ! grep -qxF "$t" <<< "$skip"
+        done
+      done
+    done
   done
 }
 

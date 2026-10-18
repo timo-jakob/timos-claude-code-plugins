@@ -2073,6 +2073,26 @@ if [[ "$openapi_surface" != "true" ]]; then
 	[[ "$ops_newest_n" -lt 0 ]] || held_out+=("contracts/ops/v${ops_newest_n}/openapi.yaml")
 	held_out+=("scripts/check-ops-conformance.zsh" ".github/workflows/ops-conformance.yml")
 fi
+# A sole-Go repo (#2617) no longer renders the workflows its gate replaced, so
+# they are not gaps either: State-D gap-fill renders missing_artifacts blind and
+# would bring every one of them back. The set is sole-go-skipped-templates.zsh's,
+# the one place it is written down, judged by is-sole-go.zsh from the recorded
+# `primary:` and the detected languages; a repo with no recorded primary is not
+# sole-Go. Each template relpath is held out at its deploy path (tree dir and
+# `.tmpl` dropped). existing_artifacts is untouched: a leftover still on disk is
+# reported there, and as a leftover by sole-go-leftovers.zsh.
+if [[ "$iac_only" != "true" && -n "${recorded_primary:-}" ]]; then
+	sg_visibility="$visibility"
+	[[ "$sg_visibility" == "public" || "$sg_visibility" == "private" ]] || sg_visibility="public"
+	if sg_skipped="$(zsh "$script_dir/sole-go-skipped-templates.zsh" --primary "$recorded_primary" \
+		--languages "${langs[*]+"${langs[*]}"}" --visibility "$sg_visibility" --docker "$has_dockerfile" 2>/dev/null)"; then
+		while IFS= read -r sg_rel; do
+			[[ -n "$sg_rel" ]] || continue
+			sg_rel="${sg_rel#*/}"
+			held_out+=("${sg_rel%.tmpl}")
+		done <<<"$sg_skipped"
+	fi
+fi
 artifacts_json="{"
 missing_json="["
 first=1

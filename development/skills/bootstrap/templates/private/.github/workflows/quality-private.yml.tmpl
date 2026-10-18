@@ -55,6 +55,7 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # --- NOT_SOLE_GO-START -------------------------------------------------------
   # Swift has its own macOS job below (the SWIFT block), not a step section
   # here — xcodebuild/xcrun don't exist on Linux runners.
   # --- LINUX_TESTS-START -------------------------------------------------------
@@ -179,6 +180,7 @@ jobs:
             build/reports/jacoco/test/jacocoTestReport.xml
           if-no-files-found: ignore
   # --- LINUX_TESTS-END ---------------------------------------------------------
+  # --- NOT_SOLE_GO-END ---------------------------------------------------------
   # --- SWIFT-START -----------------------------------------------------------
   # Swift tests need a macOS runner (xcodebuild/xcrun are macOS-only). On a
   # self-hosted runner (SonarQube) that means registering a SELF-HOSTED macOS
@@ -316,7 +318,6 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: https://sonarcloud.io
   # --- SONARCLOUD-END --------------------------------------------------------
-  # --- NOT_SOLE_GO-END ---------------------------------------------------------
 
   # --- TRIVY-START -----------------------------------------------------------
   # Trivy filesystem scan — catches vulnerable 3rd-party deps in lockfiles.
@@ -361,6 +362,7 @@ jobs:
           exit-code: "1"
           format: "table"
           trivy-config: trivy.yaml
+  # --- NOT_SOLE_GO-END ---------------------------------------------------------
 
   # --- DOCKER-START ---------------------------------------------------------
   # Container image pipeline — two jobs (#547):
@@ -648,6 +650,7 @@ jobs:
           done
   # --- DOCKER-END -----------------------------------------------------------
 
+  # --- NOT_SOLE_GO-START -------------------------------------------------------
   # Semgrep — two shapes by runner. A self-hosted runner (SonarQube) reuses a
   # semgrep it already has; GitHub-hosted runners (SonarCloud, or no static
   # analyser at all — HOSTED, #2121) run the pinned container image, exactly as
@@ -697,3 +700,4 @@ jobs:
           SKIP: trivy-fs
       # --- TRIVY-END ---------------------------------------------------------
       # --- HOSTED-END --------------------------------------------------------
+  # --- NOT_SOLE_GO-END ---------------------------------------------------------

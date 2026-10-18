@@ -1831,7 +1831,7 @@ Copy from `templates/common/`:
     is deprecated) — safe and opt-in. If declined, surface it as a Step 5 TODO.
 - `.github/workflows/gitleaks.yml` (static copy — secret-scanning CI for **every** repo; defense in depth behind the
   gitleaks pre-commit hook. Note: repos owned by a GitHub Organization need a `GITLEAKS_LICENSE` repo secret — see the
-  workflow comment.)
+  workflow comment.) **Not for a sole-Go repo**, whose gate runs gitleaks (§3b's sole-Go subtraction, #2617).
 - `.github/workflows/template-drift-watch.yml` (render `common/.github/workflows/template-drift-watch.yml.tmpl` —
   substitute `{{CLAUDE_PLUGINS_REPO}}`). Scheduled (monthly) watcher for **every** repo: checks this repo's rendered
   files against the latest plugin templates and opens a tracking issue naming the fixes a re-bootstrap would deliver
@@ -1864,7 +1864,8 @@ Copy from `templates/common/`:
   wedged at `expected`. It therefore
   carries **no `paths:` filter** either — a path-conditional required check sits at `expected` forever on every PR that
   misses the paths. **Not emitted on the
-  §3l IaC path**: an infrastructure repo is the one place a cluster write belongs.
+  §3l IaC path**: an infrastructure repo is the one place a cluster write belongs. On a **sole-Go** repo only the
+  checker renders: its gate runs it, so the workflow is skipped (§3b's sole-Go subtraction, #2617).
   > **The repo-wide exemption reads `primary:` as a GRANT, which §3l's rule does not.** §3l and the `{{PRIMARY}}` table
   > let a recorded primary only *veto* the IaC path, never *grant* it; the checker runs inside a consumer repo with no
   > detector to consult, so it reads the human-approved record as a declaration. The consequence to watch for, judged
@@ -1922,7 +1923,7 @@ and exits 2 on a malformed invocation (fix it and re-run). What it selects:
 
 | Resolved | Renders |
 | --- | --- |
-| every combination | `.github/workflows/quality-<visibility>.yml` + its `-noop` companion — the file names stay keyed on visibility, so an existing repo's workflow never moves |
+| every combination | `.github/workflows/quality-<visibility>.yml` + its `-noop` companion — the file names stay keyed on visibility, so an existing repo's workflow never moves; a **sole-Go** repo drops both unless a Dockerfile or `swift` keeps them (the sole-Go subtraction below) |
 | public | `.github/workflows/scorecard.yml` (OpenSSF Scorecard — weekly supply-chain health check; public-only because the score is publicly visible) |
 | `sonarcloud` | the SonarCloud `sonar-project.properties` (`templates/public/`) |
 | `sonarqube` | the SonarQube `sonar-project.properties` (`templates/private/`), `infra/sonarqube/docker-compose.yml`, `infra/sonarqube/README.md` |
@@ -1936,6 +1937,44 @@ A template's tree (`public/`, `private/`) is where it was first written, not a
 visibility rule: a private repo on SonarCloud renders
 `public/sonar-project.properties.tmpl`. Every file deploys at its path relative
 to its tree.
+
+**The sole-Go subtraction (#2617).** For a **sole-Go** repo (`is-sole-go.zsh`
+exits 0, #2615) the gate in `go-ci.yml` runs every source-only check (#2614), so
+Step 3 renders and copies **none** of the templates this prints — in §3a, §3b,
+§3h and §3i alike:
+
+```bash
+"<skill-base-dir>/scripts/sole-go-skipped-templates.zsh" --primary <primary> \
+  --languages "<languages>" --visibility <public|private> --docker <true|false>
+```
+
+It prints one template relpath per line (exit 0), and nothing for a repo that is
+not sole-Go. Exit 2 is your own malformed call: fix it and re-run. Exit 1 means
+`is-sole-go.zsh` failed: stop and relay its message. For a sole-Go repo it always
+prints `gitleaks.yml`, `no-cluster-deploy.yml`, `docs.yml`, `contracts-lint.yml`
+and `contracts-semver.yml`. It prints both quality files too, unless a Dockerfile
+or `swift` keeps them: a Dockerfile for the Docker lane (`image` and
+`push-and-sign`, the noop `image` only), and `swift` for the
+`test-and-coverage-swift` job and the noop's `test-and-coverage`, which report the
+`test-and-coverage` check #2616 still requires for Go+Swift. Inside the kept
+files, `render.zsh`'s `NOT_SOLE_GO` tags strip the folded jobs (§3c).
+`toolchain-templates.zsh` keeps its contract; subtract this set from what it
+prints. Everything else still renders, `scripts/check-no-cluster-deploy.zsh`,
+`.github/scripts/check-contracts-semver.sh`, `.spectral.yaml`, `docs-deploy.yml`,
+`docs-publish.yml` and `spec-publish.yml` included. A re-run deletes no file
+(#2126 owns removal); Step 5 reports what is left over.
+
+**A sole-Go render stops unless Step 4b will narrow (#2617).** Before Step 3
+renders a sole-Go repo, check that the recorded `gate:` in `.maintenance.yml` is
+absent or `make check` (read as `{{GATE_COMMAND}}`'s row reads it), and that the
+`.pre-commit-config.yaml` this run writes or keeps carries the `id: semgrep` hook
+(bootstrap's own `common/.pre-commit-config.yaml.tmpl` ships it). If either
+fails, stop and render nothing, because the gate would not run the folded checks
+and Step 4b's branch protection would require checks no workflow reports. Name
+the fix: restore `gate: make check`, or add the semgrep hook from that template,
+then re-run. This same run renders `go-ci.yml` and `scripts/go-gate.zsh`, so
+only an older repo can still reach Step 4b's sole-Go fallbacks, and it still
+carries its old workflows.
 
 ### 3c. The quality workflows are composed per tool
 
@@ -1957,7 +1996,9 @@ same toolchain flags (*Block stripping in templates*):
   `ubuntu-latest`.
 
 `license-fs`, `semgrep`, `pre-commit` and `test-and-coverage` render for every
-combination; `image` / `push-and-sign` iff a Dockerfile. The required contexts
+combination except a **sole-Go** repo, where `NOT_SOLE_GO` strips them and
+`trivy-fs` with them (#2617), keeping only a Go+Swift noop's `test-and-coverage`;
+`image` / `push-and-sign` iff a Dockerfile. The required contexts
 these jobs report are exactly `SETUP.md` §4's composed list
 (`{{REQUIRED_CONTEXTS}}`).
 
@@ -2453,6 +2494,9 @@ pages:
   common/scripts/pandoc/manual-header.tex
 ```
 
+On a **sole-Go** repo drop `common/.github/workflows/docs.yml.tmpl` from that
+list: its gate runs the docs build (§3b's sole-Go subtraction, #2617).
+
 - **Per-surface how-to stubs** — additionally render
   `common/docs/how-to/use-the-cli.md.tmpl` / `use-the-rest-api.md.tmpl` /
   `use-the-web-ui.md.tmpl` for **exactly** the detected interfaces (§3g's
@@ -2703,6 +2747,10 @@ The installed set:
   common/contracts/ops/v2/openapi.yaml \
   common/scripts/check-ops-conformance.zsh
 ```
+
+On a **sole-Go** repo drop `contracts-lint.yml.tmpl` and `contracts-semver.yml.tmpl`
+from that list: its gate runs both checks (§3b's sole-Go subtraction, #2617).
+`check-contracts-semver.sh`, `.spectral.yaml` and `spec-publish.yml` still render.
 
 Then render the ops-conformance workflow **only when the repo has a ROOT
 `Dockerfile`** (see the bullet above — omit it, with a Step 5 TODO, otherwise;
@@ -6097,7 +6145,8 @@ outstanding Step 5 item quoting the warning. With a recorded `gate:` other than
 `make check`, or no `.pre-commit-config.yaml` on disk, or one without the
 semgrep hook (the gate runs semgrep only as that hook), the script likewise exits
 0 after `WARN`ing which condition held, having applied the **full** language-app
-set: list it as an outstanding Step 5 item quoting the warning. When its `gate` job fails
+set: list it as an outstanding Step 5 item quoting the warning. A fresh render
+never gets here: §3b's sole-Go render stop comes first. When its `gate` job fails
 the probes the script **refuses** — exit 1, `NOT applying branch protection`,
 no rule written — as the IaC path does: list the unapplied rule and merge
 settings as an outstanding Step 5 item quoting the message.
@@ -6952,6 +7001,22 @@ it also says that **no Approver policy was written** — a human approves each P
 and armed auto-merge then merges it — and, when a `.claude/approver-policy.md`
 from an earlier bootstrap is still on disk, that it was left untouched and no
 longer wires the Approver.
+
+**The report lists a sole-Go repo's leftover folded CI** (#2617). A re-run
+deletes no file, so a repo bootstrapped before §3b's sole-Go subtraction may
+still carry the workflows and jobs its gate now runs. Run, from the repository
+root:
+
+```bash
+"<skill-base-dir>/scripts/sole-go-leftovers.zsh" --repo . --visibility <public|private> \
+  --docker <true|false>
+```
+
+Quote its output verbatim under a **Leftover folded CI (removal: #2126)**
+heading. Omit the heading when the output is empty, as it always is for a repo
+that is not sole-Go. Exit 2 is your own malformed call: fix it and re-run. On
+exit 1, say under that heading that the leftover check could not run, quoting
+its stderr.
 
 > **Key the checklist item on Step 4e's actual outcome — and always point at
 > the blessed finish (the bot PR), never a manual "push and open a PR

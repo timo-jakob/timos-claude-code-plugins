@@ -57,6 +57,7 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # --- NOT_SOLE_GO-START -------------------------------------------------------
   # --- Tests + coverage per language ----------------------------------------
   # The bootstrap skill keeps only the steps matching detected languages.
   # Swift is the exception: it has its own macOS job below (the SWIFT block),
@@ -211,6 +212,7 @@ jobs:
             build/reports/jacoco/test/jacocoTestReport.xml
           if-no-files-found: ignore
   # --- LINUX_TESTS-END ---------------------------------------------------------
+  # --- NOT_SOLE_GO-END ---------------------------------------------------------
   # --- SWIFT-START -----------------------------------------------------------
   # Swift tests need a macOS runner (xcodebuild/xcrun are macOS-only) — free
   # minutes for public repos on GitHub-hosted macOS. This job REPLACES the Linux test-and-coverage
@@ -322,7 +324,6 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: https://sonarcloud.io
   # --- SONARCLOUD-END --------------------------------------------------------
-  # --- NOT_SOLE_GO-END ---------------------------------------------------------
 
   # --- TRIVY-START -----------------------------------------------------------
   # Trivy filesystem scan — catches vulnerable 3rd-party deps in lockfiles.
@@ -397,6 +398,7 @@ jobs:
           exit-code: "1"
           format: "table"
           trivy-config: trivy.yaml
+  # --- NOT_SOLE_GO-END ---------------------------------------------------------
 
   # --- DOCKER-START ---------------------------------------------------------
   # Container image pipeline — two jobs (#547):
@@ -704,6 +706,7 @@ jobs:
           done
   # --- DOCKER-END -----------------------------------------------------------
 
+  # --- NOT_SOLE_GO-START -------------------------------------------------------
   # --- Semgrep (free OSS rules) ---------------------------------------------
   semgrep:
     runs-on: {{RUNNER}}
@@ -737,3 +740,4 @@ jobs:
         env:
           SKIP: trivy-fs
       # --- TRIVY-END ---------------------------------------------------------
+  # --- NOT_SOLE_GO-END ---------------------------------------------------------

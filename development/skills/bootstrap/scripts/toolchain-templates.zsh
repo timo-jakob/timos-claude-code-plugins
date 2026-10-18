@@ -31,6 +31,9 @@
 #                          category's tool blocks stripped
 #
 # Templates under common/ render for every combination and are not listed here.
+# A sole-Go repo renders less than this set: SKILL.md Step 3 subtracts what
+# sole-go-skipped-templates.zsh prints (#2617), which can include both quality
+# files. This script's output is unchanged by it; the subtraction is the caller's.
 # The tree a template lives in (public/, private/) is where it was first written,
 # not a visibility rule: a private repo on sonarcloud renders
 # public/sonar-project.properties.tmpl, and deploys it at the tree-relative path
