@@ -429,7 +429,7 @@ flow. Stop and ask for input wherever marked; do not guess.
    `branch-protection.sh` is **Step 4b's full invocation** — every stack flag
    (`--has-dockerfile`, `--has-ko`, `--has-codeql` true exactly when
    `code_scanning` is `codeql`, `--codeql-languages`), `--iac-only`,
-   `--default-branch` and `--require-signed-commits` with *Step 4b's signing
+   `--sole-go` (off the §3l path), `--default-branch` and `--require-signed-commits` with *Step 4b's signing
    value* — plus
    `--static-analysis <static_analysis>` and
    `--vulnerabilities <vulnerabilities>`, because its PUT replaces the whole
@@ -545,7 +545,10 @@ flow. Stop and ask for input wherever marked; do not guess.
      now" as the primary action.
    - `branch_protection.state == "applied"` but `applied_contexts` doesn't
      include every context the rendered workflows would produce → offer
-     "Reconcile branch-protection contexts (M missing, N stale)."
+     "Reconcile branch-protection contexts (M missing, N stale)." For a
+     sole-Go repo that `branch-protection.sh` narrows the comparison set is
+     the **sole-Go set** (Step 4b states when, #2616), so a folded context still in `applied_contexts`
+     counts as stale and Step 4b's call drops it, never as one to keep.
    - `branch_protection.state == "applied"` but
      `branch_protection.required_signatures == false` AND the original
      bootstrap was invoked with `--signed-commits` (or the user asks for
@@ -1444,8 +1447,8 @@ fails loudly rather than guessing:
 | Derived placeholder | Value |
 | --- | --- |
 | `{{RUNNER}}` / `{{SWIFT_RUNNER}}` | the quality workflows' runner rule, from `--static-analysis`: `self-hosted` / `[self-hosted, macos]` iff `sonarqube`, else `ubuntu-latest` / `macos-latest`. `codeql.yml` keeps its hard-coded `ubuntu-latest` — it renders only on public repos |
-| `{{SAST_GATE}}` | the SAST gate Snyk Code defers to, from `--code-scanning`: CodeQL's `analyze (<lang>)` checks iff `codeql`, else the required `semgrep` check |
-| `{{REQUIRED_CONTEXTS}}` | `SETUP.md` §4's required-check list, one bullet per context, from all three toolchain flags plus `--languages` and `--docker`: `test-and-coverage`, the analyser's job, `trivy-fs` iff `trivy` (Snyk has no CI job), `semgrep`, `license-fs`, `pre-commit`, `no-cluster-deploy`, one `analyze (<lang>)` per CodeQL language iff `codeql`, and `image` iff a Dockerfile (D1 in #1670; a ko repo's `image` comes from `ko-image.yml`, which `SETUP.md` §4's `image` note covers) |
+| `{{SAST_GATE}}` | the SAST gate Snyk Code defers to, from `--code-scanning`: CodeQL's `analyze (<lang>)` checks iff `codeql`, else the required `semgrep` check — on a **sole-Go** render (#2616) the semgrep stage of the required `gate` check instead |
+| `{{REQUIRED_CONTEXTS}}` | `SETUP.md` §4's required-check list, one bullet per context, from all three toolchain flags plus `--languages` and `--docker`: `test-and-coverage`, the analyser's job, `trivy-fs` iff `trivy` (Snyk has no CI job), `semgrep`, `license-fs`, `pre-commit`, `no-cluster-deploy`, one `analyze (<lang>)` per CodeQL language iff `codeql`, and `image` iff a Dockerfile (D1 in #1670; a ko repo's `image` comes from `ko-image.yml`, which `SETUP.md` §4's `image` note covers). For a **sole-Go** render (render.zsh's own sole-Go derivation, #2615) the list is the sole-Go set instead (#2616): `gate`, the analyser's job, the `analyze (<lang>)` legs and `image` on the same conditions, plus `test-and-coverage` when `--languages` includes `swift` (its Swift job reports under that name and the gate runs no Swift) |
 
 Output is byte-identical across sessions for the same inputs.
 
@@ -5877,6 +5880,7 @@ approval):
   --has-ko "<true|false — whether a root .ko.yaml exists (Go ko image path, #875)>" \
   --has-codeql "<true exactly when resolve-tools.zsh's code_scanning is codeql, else false>" \
   --codeql-languages "<CodeQL language list when has-codeql=true — the same mapped IDs as {{CODEQL_LANGUAGES}}, e.g. 'python javascript-typescript'; either form is accepted: space-separated, or comma-separated as {{CODEQL_LANGUAGES}} renders it; the script splits on commas and whitespace>" \
+  --sole-go "<is-sole-go.zsh --primary <primary> --languages '<languages>': exit 0 → true, exit 1 → false, exit 2 → stop and relay its usage error — OMIT on the §3l IaC path>" \
   --iac-only "<the IaC topic on the §3l IaC path — kubernetes for the kubernetes topic marker, opentofu for the opentofu topic marker, exactly one of them firing, with an empty RESOLVED language set (after Q4) and no other `primary:` recorded; kubernetes for a marker-less repo whose Q4 empty-repo confirmation was accepted (§3l); else false. A detected language, or a recorded language / `claude-plugin` primary, settles it `false` whatever the marker says — §3l renders no workflow for the `gate` context to come from>" \
   --default-branch "<DEFAULT_BRANCH>" \
   --require-signed-commits "<Step 4b's signing value — below>"
@@ -5906,7 +5910,21 @@ The script applies a single protection rule that:
   `ko-image.yml` is on disk), `analyze (<lang>)` per language when
   `--has-codeql` is true **and** `codeql.yml` is on disk, and
   `no-cluster-deploy` when both of its halves are on disk (#1670 D1), and a Go
-  repo's `gate` in addition when `go-ci.yml` is on disk (#2122). The toolchain always comes from
+  repo's `gate` in addition when `go-ci.yml` is on disk (#2122). A **sole-Go**
+  repo (`--sole-go true`, #2616) with `go-ci.yml` on disk, a
+  `scripts/go-gate.zsh` that carries #2614's secrets stage (its `gitleaks git`
+  line), a recorded `gate:` in `.maintenance.yml` that is absent or the default
+  `make check` (read as `{{GATE_COMMAND}}`'s row reads it) and a
+  `.pre-commit-config.yaml` on disk carrying the semgrep hook (`id: semgrep`)
+  requires exactly
+  `gate`, the `static_analysis` job unless it is `none`, `image` as above and
+  the `analyze (<lang>)` legs as above: its gate runs the folded checks
+  (`test-and-coverage`, `semgrep`, `pre-commit`, `license-fs`, `trivy-fs`,
+  `no-cluster-deploy`), so none of them is required, and a re-run narrows an
+  existing rule the same way. Otherwise the script keeps the full set. A narrowed
+  Go+Swift repo still requires `test-and-coverage` when a `quality-*.yml` on disk
+  carries the `test-and-coverage-swift` job: that job runs the Swift tests and
+  coverage floor, reports as `test-and-coverage`, and the gate runs no Swift. The toolchain always comes from
   *Resolve the toolchain*'s `key=value` output, never from visibility — the
   script accepts no visibility at all. With
   `--iac-only kubernetes` it requires the `kubernetes-ci.yml` `gate` context **instead of**
@@ -5958,6 +5976,23 @@ the rule **without** any `analyze (<lang>)` context. Watch for it the same way:
 it means CodeQL is **not** a required check. Render `codeql.yml` (§3b) and
 re-run the script, or list it as an outstanding Step 5 item; never report the
 `analyze` contexts as required after that warning.
+
+**A sole-Go repo's fallbacks and refusal (#2616).** With `--sole-go true` and no
+`go-ci.yml` on disk the script exits 0 after `WARN`ing that it is absent,
+having applied the **full** language-app set: list the missing `go-ci.yml`
+as an outstanding Step 5 item quoting the warning. With `go-ci.yml` on disk
+but `scripts/go-gate.zsh` absent or predating #2614 (no `gitleaks git` secrets
+stage), the gate does not yet run the folded checks: the script exits 0 after
+`WARN`ing so, having applied the **full** language-app set — re-run
+`/development:bootstrap` to refresh `scripts/go-gate.zsh`, or list it as an
+outstanding Step 5 item quoting the warning. With a recorded `gate:` other than
+`make check`, or no `.pre-commit-config.yaml` on disk, or one without the
+semgrep hook (the gate runs semgrep only as that hook), the script likewise exits
+0 after `WARN`ing which condition held, having applied the **full** language-app
+set: list it as an outstanding Step 5 item quoting the warning. When its `gate` job fails
+the probes the script **refuses** — exit 1, `NOT applying branch protection`,
+no rule written — as the IaC path does: list the unapplied rule and merge
+settings as an outstanding Step 5 item quoting the message.
 
 **One FATAL refusal, on the §3l IaC path only (#1606).** With `--iac-only kubernetes`
 (or, on the OpenTofu path, `--iac-only opentofu` and `opentofu-ci.yml`)

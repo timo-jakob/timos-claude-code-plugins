@@ -1537,7 +1537,7 @@ EOF
   touch "$W/scripts/check-no-cluster-deploy.zsh"
   cd "$W"
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --static-analysis sonarcloud --vulnerabilities snyk --has-dockerfile false --has-codeql false --default-branch main
+    --static-analysis sonarcloud --vulnerabilities snyk --has-dockerfile false --has-codeql false --sole-go false --default-branch main
   [ "$status" -eq 0 ]
   local contexts
   contexts="$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | join(",")')"
@@ -1552,7 +1552,7 @@ EOF
   touch "$W/scripts/check-no-cluster-deploy.zsh"
   cd "$W"
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --static-analysis sonarqube --vulnerabilities trivy --has-dockerfile false --has-codeql false --default-branch main
+    --static-analysis sonarqube --vulnerabilities trivy --has-dockerfile false --has-codeql false --sole-go false --default-branch main
   [ "$status" -eq 0 ]
   local contexts
   contexts="$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | join(",")')"
@@ -1567,7 +1567,7 @@ EOF
   protection_stubs
   cd "$W"
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --static-analysis sonarcloud --vulnerabilities snyk --has-dockerfile false --has-codeql false --default-branch main
+    --static-analysis sonarcloud --vulnerabilities snyk --has-dockerfile false --has-codeql false --sole-go false --default-branch main
   [ "$status" -eq 0 ]
   local contexts
   contexts="$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | join(",")')"
@@ -1631,7 +1631,7 @@ EOF
   touch "$W/.github/workflows/no-cluster-deploy.yml"
   cd "$W"
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --static-analysis sonarcloud --vulnerabilities snyk --has-dockerfile false --has-codeql false --default-branch main
+    --static-analysis sonarcloud --vulnerabilities snyk --has-dockerfile false --has-codeql false --sole-go false --default-branch main
   [ "$status" -eq 0 ]
   local contexts
   contexts="$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | join(",")')"
@@ -1646,7 +1646,7 @@ EOF
   touch "$W/scripts/check-no-cluster-deploy.zsh"
   cd "$W"
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --static-analysis sonarcloud --vulnerabilities snyk --has-dockerfile false --has-codeql false --default-branch main
+    --static-analysis sonarcloud --vulnerabilities snyk --has-dockerfile false --has-codeql false --sole-go false --default-branch main
   [ "$status" -eq 0 ]
   local contexts
   contexts="$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | join(",")')"
@@ -1664,7 +1664,7 @@ EOF
   touch "$W/scripts/check-no-cluster-deploy.zsh"
   cd "$W"
   CURL_HTTP_STATUS=403 run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --static-analysis sonarcloud --vulnerabilities snyk --has-dockerfile false --has-codeql false --default-branch main
+    --static-analysis sonarcloud --vulnerabilities snyk --has-dockerfile false --has-codeql false --sole-go false --default-branch main
   [ "$status" -eq 0 ]
   # pin the BRANCH first: the script prints its whole check list before the PUT
   # on every path, so a bare needle on $output matches the 200 path too and

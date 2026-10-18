@@ -637,7 +637,7 @@ EOF
   protection_stubs
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
     --static-analysis sonarcloud --vulnerabilities snyk --has-dockerfile false --has-codeql false \
-    --iac-only false --default-branch main
+    --iac-only false --sole-go false --default-branch main
   [ "$status" -eq 0 ]
   local contexts
   contexts="$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | join(",")')"
@@ -689,7 +689,7 @@ EOF
   # the flag must be additive: every existing repo keeps the language-app set
   protection_stubs
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --static-analysis sonarcloud --vulnerabilities snyk --has-dockerfile false --has-codeql false --default-branch main
+    --static-analysis sonarcloud --vulnerabilities snyk --has-dockerfile false --has-codeql false --sole-go false --default-branch main
   [ "$status" -eq 0 ]
   local contexts
   contexts="$(head -1 "$CURL_DATA" | jq -r '.required_status_checks.contexts | join(",")')"

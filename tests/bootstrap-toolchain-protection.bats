@@ -95,7 +95,7 @@ protect_row() {
   [ "$cs" = codeql ] && codeql=true
   (cd "$W" && env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
     --static-analysis "$sa" --vulnerabilities "$v" --has-dockerfile true \
-    --has-codeql "$codeql" --codeql-languages python --default-branch main)
+    --has-codeql "$codeql" --codeql-languages python --sole-go false --default-branch main)
 }
 
 # branch-protection.sh in the fixture repo, with the given flags verbatim.
@@ -134,8 +134,8 @@ protect_in_fixture() {
   local s
   for s in "$PROTECT" "$PREFLIGHT"; do
     run ! grep -nE 'VISIBILITY|visibility[A-Za-z_]*=' "$s"
-    # no gh lookup, no .maintenance.yml read
-    run ! grep -nE 'json[^#]*visibility|isPrivate|\.maintenance\.yml' "$s"
+    # no gh lookup, no visibility read from .maintenance.yml (its `gate:` is read for #2616)
+    run ! grep -nE 'json[^#]*visibility|isPrivate|\.visibility|visibility[^#]*\.maintenance\.yml' "$s"
     # the one `--visibility` arm is the refusal: its next line dies
     [ "$(grep -c -- '--visibility)' "$s")" -eq 1 ]
     grep -A2 -- '--visibility)' "$s" | grep -q 'die "--visibility is no longer accepted'
@@ -188,7 +188,7 @@ protect_in_fixture() {
 # A complete, otherwise-valid language-app invocation, then the given flags.
 protect_valid_plus() {
   (cd "$W" && env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
-    --static-analysis sonarcloud --vulnerabilities snyk --default-branch main "$@")
+    --static-analysis sonarcloud --vulnerabilities snyk --sole-go false --default-branch main "$@")
 }
 
 # One boolean flag refuses every non-boolean value with its typed message, before
@@ -283,7 +283,7 @@ protect_with_tmpdir() {
   chmod +x "$STUB_BIN/mktemp"
   (cd "$W" && env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
     --static-analysis sonarcloud --vulnerabilities snyk --has-dockerfile false \
-    --has-codeql false --default-branch main "$@")
+    --has-codeql false --sole-go false --default-branch main "$@")
 }
 
 @test "#1352: a curl transport failure on the protection PUT is diagnosed and leaves no temp file" {
@@ -368,7 +368,7 @@ protect_with_tmpdir() {
   protection_stubs
   cd "$W"
   run env PATH="$STUB_BIN:$PATH" bash "$PROTECT" --static-analysis sonarcloud \
-    --vulnerabilities snyk --has-dockerfile false --has-codeql false --default-branch main
+    --vulnerabilities snyk --has-dockerfile false --has-codeql false --sole-go false --default-branch main
   [ "$status" -eq 0 ]
   # the use case's row 8: private, python, no Dockerfile
   [ "$(put_contexts)" = "$(printf '%s\n' license-fs pre-commit semgrep sonarcloud test-and-coverage)" ]
@@ -416,7 +416,7 @@ protect_with_tmpdir() {
   protection_stubs
   touch "$W/.github/workflows/codeql.yml"
   run protect_in_fixture --static-analysis sonarcloud --vulnerabilities snyk \
-    --has-dockerfile true --has-codeql true --default-branch main
+    --has-dockerfile true --has-codeql true --sole-go false --default-branch main
   [ "$status" -eq 0 ]
   contains "$output" '--codeql-languages was not provided'
   run ! grep -q '^analyze' <<< "$(put_contexts)"
@@ -428,7 +428,7 @@ protect_with_tmpdir() {
   protection_stubs
   touch "$W/.github/workflows/codeql.yml"
   run protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy \
-    --has-dockerfile true --has-codeql true --codeql-languages "python javascript go" --default-branch main
+    --has-dockerfile true --has-codeql true --codeql-languages "python javascript go" --sole-go false --default-branch main
   [ "$status" -eq 0 ]
   local want
   want="$({ d4_contexts 4; printf '%s\n' "analyze (python)" "analyze (javascript)" "analyze (go)"; } | LC_ALL=C sort)"
@@ -445,7 +445,7 @@ protect_with_tmpdir() {
   for langs in "python javascript" "python,javascript" "python, javascript"; do
     : > "$CURL_DATA"
     run protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy \
-      --has-dockerfile true --has-codeql true --codeql-languages "$langs" --default-branch main
+      --has-dockerfile true --has-codeql true --codeql-languages "$langs" --sole-go false --default-branch main
     [ "$status" -eq 0 ] || { echo "[$langs] exited $status: $output"; return 1; }
     [ "$(put_contexts)" = "$want" ] ||
       { echo "[$langs]: got [$(put_contexts | paste -sd '|' -)] want [$(printf '%s\n' "$want" | paste -sd '|' -)]"; return 1; }
@@ -454,7 +454,7 @@ protect_with_tmpdir() {
   # every comma is a separator, not just the first
   : > "$CURL_DATA"
   run protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy \
-    --has-dockerfile true --has-codeql true --codeql-languages "python,javascript,go" --default-branch main
+    --has-dockerfile true --has-codeql true --codeql-languages "python,javascript,go" --sole-go false --default-branch main
   [ "$(put_contexts)" = "$({ d4_contexts 4; printf '%s\n' "analyze (python)" "analyze (javascript)" "analyze (go)"; } | LC_ALL=C sort)" ]
 }
 
@@ -473,7 +473,7 @@ protect_with_tmpdir() {
   protection_stubs
   # ko without its workflow: no image, and the fail-open is visible
   run protect_in_fixture --static-analysis sonarcloud --vulnerabilities snyk \
-    --has-dockerfile false --has-ko true --has-codeql false --default-branch main
+    --has-dockerfile false --has-ko true --has-codeql false --sole-go false --default-branch main
   [ "$status" -eq 0 ]
   contains "$output" '.ko.yaml was detected but .github/workflows/ko-image.yml is absent'
   run ! grep -qx image <<< "$(put_contexts)"
@@ -481,13 +481,13 @@ protect_with_tmpdir() {
   touch "$W/.github/workflows/ko-image.yml"
   : > "$CURL_DATA"
   run protect_in_fixture --static-analysis sonarcloud --vulnerabilities snyk \
-    --has-dockerfile false --has-ko true --has-codeql false --default-branch main
+    --has-dockerfile false --has-ko true --has-codeql false --sole-go false --default-branch main
   [ "$status" -eq 0 ]
   grep -qx image <<< "$(put_contexts)"
   # both lanes at once: one image context, and the collision is named
   : > "$CURL_DATA"
   run protect_in_fixture --static-analysis sonarcloud --vulnerabilities snyk \
-    --has-dockerfile true --has-ko true --has-codeql false --default-branch main
+    --has-dockerfile true --has-ko true --has-codeql false --sole-go false --default-branch main
   [ "$status" -eq 0 ]
   [ "$(put_contexts | grep -cx image)" -eq 1 ]
   contains "$output" 'Both a Dockerfile and a root .ko.yaml were detected'
@@ -498,7 +498,7 @@ protect_with_tmpdir() {
   local without with half
   # without either workflow: neither context, and no warning (a non-React repo)
   run protect_in_fixture --static-analysis sonarcloud --vulnerabilities snyk \
-    --has-dockerfile false --has-codeql false --default-branch main
+    --has-dockerfile false --has-codeql false --sole-go false --default-branch main
   [ "$status" -eq 0 ]
   without="$(put_contexts)"
   run ! grep -qx 'e2e (playwright)' <<< "$without"
@@ -510,7 +510,7 @@ protect_with_tmpdir() {
     touch "$W/.github/workflows/$half"
     : > "$CURL_DATA"
     run protect_in_fixture --static-analysis sonarcloud --vulnerabilities snyk \
-      --has-dockerfile false --has-codeql false --default-branch main
+      --has-dockerfile false --has-codeql false --sole-go false --default-branch main
     [ "$status" -eq 0 ]
     [ "$(put_contexts)" = "$without" ] || { echo "with only $half: $(put_contexts)"; false; }
     if [ "$half" = webui-quality.yml ]; then
@@ -523,7 +523,7 @@ protect_with_tmpdir() {
   touch "$W/.github/workflows/webui-quality.yml" "$W/.github/workflows/webui-quality-noop.yml"
   : > "$CURL_DATA"
   run protect_in_fixture --static-analysis sonarcloud --vulnerabilities snyk \
-    --has-dockerfile false --has-codeql false --default-branch main
+    --has-dockerfile false --has-codeql false --sole-go false --default-branch main
   [ "$status" -eq 0 ]
   with="$(put_contexts)"
   [ "$with" = "$({ printf '%s\n' "$without"; echo 'e2e (playwright)'; echo 'lighthouse (budgets)'; } | LC_ALL=C sort)" ] \
@@ -536,7 +536,7 @@ protect_with_tmpdir() {
   # the Go language-app set as a ko lane bootstraps it: ko-image.yml on disk
   touch "$W/.github/workflows/ko-image.yml"
   run protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy \
-    --has-dockerfile false --has-ko true --has-codeql false --default-branch main
+    --has-dockerfile false --has-ko true --has-codeql false --sole-go false --default-branch main
   [ "$status" -eq 0 ]
   without="$(put_contexts)"
   # a Go repo bootstrapped before #2122 has no go-ci.yml: nothing would report `gate`
@@ -545,14 +545,14 @@ protect_with_tmpdir() {
   touch "$W/.github/workflows/go-ci.yml"
   : > "$CURL_DATA"
   run protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy \
-    --has-dockerfile false --has-ko true --has-codeql false --default-branch main
+    --has-dockerfile false --has-ko true --has-codeql false --sole-go false --default-branch main
   [ "$status" -eq 0 ]
   [ "$(put_contexts)" = "$without" ]
   cp "$REPO_ROOT/development/skills/bootstrap/templates/languages/go/.github/workflows/go-ci.yml.tmpl" \
     "$W/.github/workflows/go-ci.yml"
   : > "$CURL_DATA"
   run protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy \
-    --has-dockerfile false --has-ko true --has-codeql false --default-branch main
+    --has-dockerfile false --has-ko true --has-codeql false --sole-go false --default-branch main
   [ "$status" -eq 0 ]
   with="$(put_contexts)"
   # in ADDITION: every existing context stays, and `gate` is added exactly once
@@ -560,6 +560,291 @@ protect_with_tmpdir() {
     || { printf 'without:\n%s\nwith:\n%s\n' "$without" "$with"; false; }
   grep -qx test-and-coverage <<< "$with"
   grep -qx image <<< "$with"
+}
+
+# --- #2616: a sole-Go repo requires gate plus the service-backed and publishing contexts ---
+
+GO_CI_TMPL_REL=development/skills/bootstrap/templates/languages/go/.github/workflows/go-ci.yml.tmpl
+
+GO_GATE_TMPL_REL=development/skills/bootstrap/templates/languages/go/scripts/go-gate.zsh.tmpl
+
+stage_go_ci() {
+  cp "$REPO_ROOT/$GO_CI_TMPL_REL" "$W/.github/workflows/go-ci.yml"
+}
+
+# the template's gate script, which carries #2614's secrets stage (its `gitleaks git` line),
+# plus bootstrap's own .pre-commit-config.yaml, whose semgrep hook the gate's pre-commit stage runs
+stage_go_gate() {
+  mkdir -p "$W/scripts"
+  cp "$REPO_ROOT/$GO_GATE_TMPL_REL" "$W/scripts/go-gate.zsh"
+  cp "$REPO_ROOT/development/skills/bootstrap/templates/common/.pre-commit-config.yaml.tmpl" "$W/.pre-commit-config.yaml"
+}
+
+@test "#2616: every sole-Go static_analysis x image provider x CodeQL row requires exactly its sole-Go set" {
+  protection_stubs
+  stage_go_ci
+  stage_go_gate
+  # both #1206 halves on disk: no-cluster-deploy is folded into the gate all the same
+  touch "$W/.github/workflows/no-cluster-deploy.yml"
+  mkdir -p "$W/scripts"
+  touch "$W/scripts/check-no-cluster-deploy.zsh"
+  local sa img cs df ko codeql want
+  for sa in sonarcloud sonarqube none; do
+    for img in none dockerfile ko; do
+      for cs in none codeql; do
+        df=false ko=false codeql=false
+        rm -f "$W/.github/workflows/ko-image.yml" "$W/.github/workflows/codeql.yml"
+        [ "$img" = dockerfile ] && df=true
+        if [ "$img" = ko ]; then ko=true; touch "$W/.github/workflows/ko-image.yml"; fi
+        if [ "$cs" = codeql ]; then codeql=true; touch "$W/.github/workflows/codeql.yml"; fi
+        : > "$CURL_DATA"
+        run protect_in_fixture --static-analysis "$sa" --vulnerabilities trivy --has-dockerfile "$df" \
+          --has-ko "$ko" --has-codeql "$codeql" --codeql-languages go --sole-go true --default-branch main
+        [ "$status" -eq 0 ] || { echo "$sa/$img/$cs exited $status: $output"; return 1; }
+        # the literal oracle from #2128's Design §5
+        want="$({
+          echo gate
+          [ "$sa" = none ] || echo "$sa"
+          [ "$img" = none ] || echo image
+          [ "$cs" = none ] || echo "analyze (go)"
+        } | LC_ALL=C sort)"
+        [ "$(put_contexts)" = "$want" ] ||
+          { echo "$sa/$img/$cs: got [$(put_contexts | paste -sd, -)] want [$(printf '%s\n' "$want" | paste -sd, -)]"; return 1; }
+      done
+    done
+  done
+}
+
+@test "#2616: a narrowed Go+Swift repo keeps test-and-coverage, which its quality workflow's Swift job reports" {
+  protection_stubs
+  stage_go_ci
+  stage_go_gate
+  touch "$W/.github/workflows/ko-image.yml"
+  local vis
+  for vis in public private; do
+    rm -f "$W"/.github/workflows/quality-*.yml
+    printf 'jobs:\n  test-and-coverage-swift:\n    name: test-and-coverage\n' > "$W/.github/workflows/quality-$vis.yml"
+    : > "$CURL_DATA"
+    run protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy --has-dockerfile false \
+      --has-ko true --has-codeql false --sole-go true --default-branch main
+    [ "$status" -eq 0 ] || { echo "$vis exited $status: $output"; return 1; }
+    [ "$(put_contexts)" = "$(printf '%s\n' gate image sonarcloud test-and-coverage | LC_ALL=C sort)" ] ||
+      { echo "$vis: got [$(put_contexts | paste -sd, -)]"; return 1; }
+  done
+  # the keep applies only to a narrowed repo: --sole-go false, and a sole-Go fallback,
+  # keep the full set with the Swift job on disk, semgrep and pre-commit included
+  local full
+  full="$(printf '%s\n' gate image license-fs pre-commit semgrep sonarcloud test-and-coverage trivy-fs | LC_ALL=C sort)"
+  : > "$CURL_DATA"
+  run protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy --has-dockerfile false \
+    --has-ko true --has-codeql false --sole-go false --default-branch main
+  [ "$status" -eq 0 ]
+  [ "$(put_contexts)" = "$full" ] || { echo "sole-go false: got [$(put_contexts | paste -sd, -)]"; return 1; }
+  mv "$W/scripts/go-gate.zsh" "$W/scripts/go-gate.zsh.off"
+  : > "$CURL_DATA"
+  run protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy --has-dockerfile false \
+    --has-ko true --has-codeql false --sole-go true --default-branch main
+  [ "$status" -eq 0 ]
+  [ "$(put_contexts)" = "$full" ] || { echo "fallback: got [$(put_contexts | paste -sd, -)]"; return 1; }
+  mv "$W/scripts/go-gate.zsh.off" "$W/scripts/go-gate.zsh"
+  # a sole-Go quality workflow that names the Swift job only outside a job key keeps the plain sole-Go set
+  printf 'jobs:\n  # test-and-coverage-swift: rendered only with Swift\n  license-fs:\n    needs: [test-and-coverage-swift]\n' \
+    > "$W/.github/workflows/quality-private.yml"
+  : > "$CURL_DATA"
+  run protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy --has-dockerfile false \
+    --has-ko true --has-codeql false --sole-go true --default-branch main
+  [ "$status" -eq 0 ]
+  [ "$(put_contexts)" = "$(printf '%s\n' gate image sonarcloud | LC_ALL=C sort)" ]
+}
+
+@test "#2616: a mixed-Go repo (--sole-go false) with a real gate job requires the full language-app set plus gate" {
+  protection_stubs
+  stage_go_ci
+  # every sole-Go narrowing probe passes on disk, so only --sole-go false keeps the full set
+  stage_go_gate
+  printf 'primary: go\ngate: make check\n' > "$W/.maintenance.yml"
+  touch "$W/.github/workflows/ko-image.yml"
+  run protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy --has-dockerfile false \
+    --has-ko true --has-codeql false --sole-go false --default-branch main
+  [ "$status" -eq 0 ]
+  [ "$(put_contexts)" = "$(printf '%s\n' gate image license-fs pre-commit semgrep sonarcloud test-and-coverage trivy-fs | LC_ALL=C sort)" ]
+  lacks "$output" 'NOT narrowing to the sole-Go set'
+}
+
+@test "#2616: --sole-go true without go-ci.yml requires the full language-app set and warns" {
+  protection_stubs
+  touch "$W/.github/workflows/ko-image.yml"
+  run protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy --has-dockerfile false \
+    --has-ko true --has-codeql false --sole-go true --default-branch main
+  [ "$status" -eq 0 ]
+  contains "$output" '`.github/workflows/go-ci.yml` is absent — NOT narrowing to the sole-Go set'
+  # exactly the --sole-go false set for the same repo
+  local sole
+  sole="$(put_contexts)"
+  : > "$CURL_DATA"
+  run protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy --has-dockerfile false \
+    --has-ko true --has-codeql false --sole-go false --default-branch main
+  [ "$sole" = "$(put_contexts)" ]
+  grep -qx test-and-coverage <<< "$sole"
+}
+
+# the full language-app set plus gate for the go-ci.yml + ko fixture: the --sole-go false oracle
+full_go_set() {
+  printf '%s\n' gate image license-fs pre-commit semgrep sonarcloud test-and-coverage trivy-fs | LC_ALL=C sort
+}
+
+@test "#2616: --sole-go true with a pre-#2614 scripts/go-gate.zsh (no secrets stage) requires the full set and warns" {
+  protection_stubs
+  stage_go_ci
+  touch "$W/.github/workflows/ko-image.yml"
+  # a pre-#2614 gate script: the template with its secrets stage removed
+  mkdir -p "$W/scripts"
+  grep -v '^gitleaks git ' "$REPO_ROOT/$GO_GATE_TMPL_REL" > "$W/scripts/go-gate.zsh"
+  run protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy --has-dockerfile false \
+    --has-ko true --has-codeql false --sole-go true --default-branch main
+  [ "$status" -eq 0 ]
+  contains "$output" '`scripts/go-gate.zsh` is absent or predates #2614 — NOT narrowing to the sole-Go set:'
+  contains "$output" 'Re-run /development:bootstrap to refresh scripts/go-gate.zsh.'
+  [ "$(put_contexts)" = "$(full_go_set)" ]
+}
+
+@test "#2616: --sole-go true with go-ci.yml but no scripts/go-gate.zsh requires the full set and warns" {
+  protection_stubs
+  stage_go_ci
+  touch "$W/.github/workflows/ko-image.yml"
+  run protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy --has-dockerfile false \
+    --has-ko true --has-codeql false --sole-go true --default-branch main
+  [ "$status" -eq 0 ]
+  contains "$output" '`scripts/go-gate.zsh` is absent or predates #2614 — NOT narrowing to the sole-Go set:'
+  contains "$output" 'Re-run /development:bootstrap to refresh scripts/go-gate.zsh.'
+  [ "$(put_contexts)" = "$(full_go_set)" ]
+}
+
+@test "#2616: --sole-go true with a custom recorded gate: command requires the full set and warns" {
+  protection_stubs
+  stage_go_ci
+  stage_go_gate
+  touch "$W/.github/workflows/ko-image.yml"
+  printf 'primary: go\ngate: golangci-lint run\n' > "$W/.maintenance.yml"
+  run protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy --has-dockerfile false \
+    --has-ko true --has-codeql false --sole-go true --default-branch main
+  [ "$status" -eq 0 ]
+  contains "$output" '`.maintenance.yml` records the gate command `golangci-lint run`, not `make check` —'
+  [ "$(put_contexts)" = "$(full_go_set)" ]
+}
+
+@test "#2616: --sole-go true with no .pre-commit-config.yaml requires the full set and warns" {
+  protection_stubs
+  stage_go_ci
+  stage_go_gate
+  rm "$W/.pre-commit-config.yaml"
+  touch "$W/.github/workflows/ko-image.yml"
+  printf 'primary: go\ngate: make check\n' > "$W/.maintenance.yml"
+  run protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy --has-dockerfile false \
+    --has-ko true --has-codeql false --sole-go true --default-branch main
+  [ "$status" -eq 0 ]
+  contains "$output" '`.pre-commit-config.yaml` is absent — NOT narrowing to the sole-Go set:'
+  [ "$(put_contexts)" = "$(full_go_set)" ]
+}
+
+@test "#2616: --sole-go true with a .pre-commit-config.yaml lacking the semgrep hook requires the full set and warns" {
+  protection_stubs
+  stage_go_ci
+  stage_go_gate
+  # a user-owned config with hooks, none of them semgrep
+  printf 'repos:\n  - repo: https://github.com/golangci/golangci-lint\n    hooks:\n      - id: golangci-lint\n' \
+    > "$W/.pre-commit-config.yaml"
+  touch "$W/.github/workflows/ko-image.yml"
+  printf 'primary: go\ngate: make check\n' > "$W/.maintenance.yml"
+  run protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy --has-dockerfile false \
+    --has-ko true --has-codeql false --sole-go true --default-branch main
+  [ "$status" -eq 0 ]
+  contains "$output" '`.pre-commit-config.yaml` carries no semgrep hook — NOT narrowing to the sole-Go'
+  [ "$(put_contexts)" = "$(full_go_set)" ]
+}
+
+@test "#2616: --sole-go true with a go-ci.yml whose gate job fails the probes refuses and writes no rule" {
+  protection_stubs
+  stage_go_gate
+  # a gate job carrying name: — GitHub would report it under that name
+  printf 'on:\n  pull_request:\njobs:\n  gate:\n    name: Gate\n    runs-on: ubuntu-latest\n' > "$W/.github/workflows/go-ci.yml"
+  run --separate-stderr protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy \
+    --has-dockerfile false --has-codeql false --sole-go true --default-branch main
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'NOT applying branch protection'
+  [ ! -s "$CURL_DATA" ]
+  # a workflow with no gate job at all refuses the same way
+  printf 'on:\n  pull_request:\njobs:\n  test:\n    runs-on: ubuntu-latest\n' > "$W/.github/workflows/go-ci.yml"
+  run --separate-stderr protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy \
+    --has-dockerfile false --has-codeql false --sole-go true --default-branch main
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'NOT applying branch protection'
+  [ ! -s "$CURL_DATA" ]
+  # a well-formed gate job behind a trigger that never reports on a pull request
+  printf 'on:\n  push:\njobs:\n  gate:\n    runs-on: ubuntu-latest\n' > "$W/.github/workflows/go-ci.yml"
+  run --separate-stderr protect_in_fixture --static-analysis sonarcloud --vulnerabilities trivy \
+    --has-dockerfile false --has-codeql false --sole-go true --default-branch main
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'NOT applying branch protection'
+  [ ! -s "$CURL_DATA" ]
+}
+
+@test "#2616: a missing or out-of-set --sole-go is refused off the IaC path, and ignored under --iac-only" {
+  protection_stubs
+  local v
+  run --separate-stderr protect_in_fixture --static-analysis sonarcloud --vulnerabilities snyk \
+    --has-dockerfile false --has-codeql false --default-branch main
+  [ "$status" -eq 1 ]
+  contains "$stderr" '--sole-go must be true or false'
+  for v in yes True 1 ""; do
+    run --separate-stderr protect_in_fixture --static-analysis sonarcloud --vulnerabilities snyk \
+      --has-dockerfile false --has-codeql false --sole-go "$v" --default-branch main
+    [ "$status" -eq 1 ] || { echo "--sole-go '$v' exited $status"; return 1; }
+    contains "$stderr" '--sole-go must be true or false'
+  done
+  # a flag with no value is named, never `$2: unbound variable`
+  run --separate-stderr protect_in_fixture --static-analysis sonarcloud --vulnerabilities snyk --sole-go
+  [ "$status" -eq 1 ]
+  contains "$stderr" '--sole-go must be true or false'
+  lacks "$stderr" 'unbound variable'
+  [ ! -s "$CURL_DATA" ]
+  # the IaC path neither validates nor reads it
+  stage_iac_workflow
+  run --separate-stderr protect_in_fixture --has-dockerfile false --has-codeql false \
+    --sole-go bogus --iac-only kubernetes --default-branch main
+  [ "$status" -eq 0 ] || { echo "$stderr"; return 1; }
+  [ "$(put_contexts)" = gate ]
+}
+
+@test "#2616: SKILL.md Step 4b passes --sole-go from is-sole-go.zsh and states the sole-Go set" {
+  local block joined
+  block="$(awk -v s="scripts/branch-protection.sh\" \\\\" 'index($0, s) { on = 1 } on { print } on && !/\\$/ { exit }' "$SKILL")"
+  contains "$block" "--sole-go \"<is-sole-go.zsh --primary <primary> --languages '<languages>': exit 0 → true, exit 1 → false, exit 2 → stop and relay its usage error — OMIT on the §3l IaC path>\""
+  joined="$(tr -s '[:space:]' ' ' < "$SKILL")"
+  contains "$joined" 'A **sole-Go** repo (`--sole-go true`, #2616) with `go-ci.yml` on disk, a `scripts/go-gate.zsh` that carries #2614'"'"'s secrets stage (its `gitleaks git` line), a recorded `gate:` in `.maintenance.yml` that is absent or the default `make check` (read as `{{GATE_COMMAND}}`'"'"'s row reads it) and a `.pre-commit-config.yaml` on disk carrying the semgrep hook (`id: semgrep`) requires exactly `gate`, the `static_analysis` job unless it is `none`, `image` as above and the `analyze (<lang>)` legs as above'
+  contains "$joined" 'existing rule the same way. Otherwise the script keeps the full set.'
+  contains "$joined" 'else the required `semgrep` check — on a **sole-Go** render (#2616) the semgrep stage of the required `gate` check instead |'
+  contains "$joined" 'With `go-ci.yml` on disk but `scripts/go-gate.zsh` absent or predating #2614 (no `gitleaks git` secrets stage), the gate does not yet run the folded checks: the script exits 0 after `WARN`ing so, having applied the **full** language-app set — re-run `/development:bootstrap` to refresh `scripts/go-gate.zsh`, or list it as an outstanding Step 5 item quoting the warning.'
+  contains "$joined" 'With a recorded `gate:` other than `make check`, or no `.pre-commit-config.yaml` on disk, or one without the semgrep hook (the gate runs semgrep only as that hook), the script likewise exits 0 after `WARN`ing which condition held, having applied the **full** language-app set: list it as an outstanding Step 5 item quoting the warning.'
+  contains "$joined" 'With `--sole-go true` and no `go-ci.yml` on disk the script exits 0 after `WARN`ing that it is absent, having applied the **full** language-app set: list the missing `go-ci.yml` as an outstanding Step 5 item quoting the warning.'
+  contains "$joined" 'refuses** — exit 1, `NOT applying branch protection`, no rule written — as the IaC path does: list the unapplied rule and merge settings as an outstanding Step 5 item quoting the message.'
+  contains "$joined" '`--sole-go` (off the §3l path), `--default-branch` and'
+  contains "$joined" 'For a sole-Go repo that `branch-protection.sh` narrows the comparison set is the **sole-Go set** (Step 4b states when, #2616)'
+  contains "$joined" 'For a **sole-Go** render (render.zsh'"'"'s own sole-Go derivation, #2615) the list is the sole-Go set instead (#2616): `gate`, the analyser'"'"'s job, the `analyze (<lang>)` legs and `image` on the same conditions, plus `test-and-coverage` when `--languages` includes `swift` (its Swift job reports under that name and the gate runs no Swift) |'
+  contains "$joined" 'A narrowed Go+Swift repo still requires `test-and-coverage` when a `quality-*.yml` on disk carries the `test-and-coverage-swift` job: that job runs the Swift tests and coverage floor, reports as `test-and-coverage`, and the gate runs no Swift.'
+  contains "$(tr -s '[:space:]' ' ' < "$REPO_ROOT/development/skills/bootstrap/templates/common/SETUP.md.tmpl")" \
+    'A Go repository with Swift keeps `test-and-coverage`: its Swift job reports under that name, and the gate runs no Swift.'
+}
+
+@test "#2616: the consistency agent's §2 and the no-cluster-deploy how-to state the sole-Go exception" {
+  local agent howto
+  agent="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/development/agents/bootstrap-config-consistency.md")"
+  contains "$agent" 'Sole-Go exception (#2616): for a Go repo with no JavaScript, Python or Java (`is-sole-go.zsh` exits 0), `branch-protection.sh` decides at apply time (bootstrap Step 4b) whether to require `gate` instead of the folded contexts — `test-and-coverage`, `semgrep`, `pre-commit`, `license-fs`, `trivy-fs` and `no-cluster-deploy` included.'
+  contains "$agent" 'You need no verdict on that decision: a folded job present in such a repo'"'"'s workflows but absent from `checks` is not a finding when `checks` holds the narrowed set — `gate`, the analyser'"'"'s job, `image` and the `analyze (<lang>)` legs.'
+  contains "$agent" 'On a Go+Swift repo that set also holds `test-and-coverage`, which the `test-and-coverage-swift` job reports: the gate runs no Swift.'
+  howto="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/docs/how-to/keep-app-repos-out-of-the-cluster.md")"
+  contains "$howto" 'so once `branch-protection.sh` narrows its rule it requires `gate` instead of the folded contexts, `no-cluster-deploy` included — even with both halves on disk.'
+  contains "$howto" 'The narrowing applies only when the script can tell the gate runs those stages (bootstrap'"'"'s Step 4b lists the conditions); otherwise the full set, with `no-cluster-deploy`, stays required.'
 }
 
 # --- AC4: rows 1 and 5 are today's defaults, byte for byte as sets ------------------
@@ -816,6 +1101,7 @@ SWEEP_AWK='
   contains "$block" '--vulnerabilities <snyk|trivy|none>'
   contains "$block" '--codeql-languages'
   contains "$block" '--has-ko'
+  contains "$block" '--sole-go <true|false>'
   contains "$block" '--iac-only false'
   # the IaC caller comment names the topic generically (#2425)
   contains "$block" 'pass --iac-only <topic>'

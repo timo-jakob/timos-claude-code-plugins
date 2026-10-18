@@ -481,6 +481,51 @@ setup_parts() { # <vis> <sa> <v> <cs> -> "needle<TAB>0|1" lines
   done
 }
 
+@test "toolchain render: #2616 a sole-Go SETUP.md §4 lists exactly the sole-Go set; non-Go and mixed-Go lists are unchanged" {
+  sole_go_setup
+  local out="$BATS_TEST_TMPDIR/s4" row langs vis sa v cs docker list want
+  # §4's composed bullets: from the status-checks item to the first non-bullet note
+  s4_list() {
+    awk '/Require status checks to pass before merging/{on=1; next}
+      on && /^  - \*\*/{on=0}
+      on && /^  - `[^`]*`$/ { sub(/^  - `/, ""); sub(/`$/, ""); print }' "$1" | LC_ALL=C sort
+  }
+  for row in "go public sonarcloud trivy codeql true" "go private sonarqube trivy none false" \
+    "go public none snyk none false" "go_swift public sonarcloud snyk codeql false"; do
+    read -r langs vis sa v cs docker <<< "$row"
+    rm -rf "$out"
+    zsh "$RENDER" --templates "$TEMPLATES" --out "$out" --project-name demo --project-slug acme/demo \
+      --project-key acme_demo --org-key acme --primary go --languages "${langs//_/ }" --docker "$docker" \
+      --visibility "$vis" --static-analysis "$sa" --vulnerabilities "$v" --code-scanning "$cs" \
+      --security-contact-email "" common/SETUP.md.tmpl >/dev/null
+    list="$(s4_list "$out/common/SETUP.md")"
+    want="$({
+      echo gate
+      # Go+Swift: the Swift job reports as test-and-coverage, and the gate runs no Swift
+      [ "$langs" = go_swift ] && echo test-and-coverage
+      [ "$sa" = none ] || echo "$sa"
+      [ "$cs" = none ] || { echo "analyze (go)"; [ "$langs" = go_swift ] && echo "analyze (swift)"; }
+      [ "$docker" = true ] && echo image
+    } | LC_ALL=C sort)"
+    [ "$list" = "$want" ] || { echo "row [$row] §4: [$list] want [$want]"; return 1; }
+    grep -qF '**Sole-Go (#2616):**' "$out/common/SETUP.md"
+    run ! grep -qF '**`no-cluster-deploy` (§3h)**, listed above' "$out/common/SETUP.md"
+    run ! grep -qE 'SOLE_GO-(START|END)' "$out/common/SETUP.md"
+  done
+  # mixed-Go: the full language-app list, and the no-cluster-deploy note, as before
+  rm -rf "$out"
+  zsh "$RENDER" --templates "$TEMPLATES" --out "$out" --project-name demo --project-slug acme/demo \
+    --project-key acme_demo --org-key acme --primary go --languages "go python" --docker true \
+    --visibility public --static-analysis sonarcloud --vulnerabilities trivy --code-scanning none \
+    --security-contact-email "" common/SETUP.md.tmpl >/dev/null
+  [ "$(s4_list "$out/common/SETUP.md")" = "$(printf '%s\n' test-and-coverage sonarcloud trivy-fs semgrep license-fs pre-commit no-cluster-deploy image | LC_ALL=C sort)" ]
+  grep -qF '**`no-cluster-deploy` (§3h)**, listed above' "$out/common/SETUP.md"
+  run ! grep -qF '**Sole-Go (#2616):**' "$out/common/SETUP.md"
+  # non-Go: rows 1-8 keep their D4 lists (the AC4 test above), and the note
+  grep -qF '**`no-cluster-deploy` (§3h)**, listed above' "$BATS_FILE_TMPDIR/row1/common/SETUP.md"
+  run ! grep -qF '**Sole-Go (#2616):**' "$BATS_FILE_TMPDIR/row1/common/SETUP.md"
+}
+
 @test "toolchain render: AC4 — §5's image scanner and 2b.1's SAST gate follow the tools" {
   local n s sast
   for n in 1 2 3 4 5 6 7 8; do
