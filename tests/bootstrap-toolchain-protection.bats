@@ -183,6 +183,155 @@ protect_in_fixture() {
   [ ! -s "$CURL_DATA" ]
 }
 
+# --- #1352: the boolean flags, valueless flags and the PUT's temp file -----------------
+
+# A complete, otherwise-valid language-app invocation, then the given flags.
+protect_valid_plus() {
+  (cd "$W" && env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
+    --static-analysis sonarcloud --vulnerabilities snyk --default-branch main "$@")
+}
+
+# One boolean flag refuses every non-boolean value with its typed message, before
+# any rule is PUT: case variants, affixes that pin both regex anchors, an empty
+# value and a following flag swallowed as the value.
+assert_boolean_flag_refuses() {
+  local flag="$1" v
+  protection_stubs
+  for v in True TRUE yes 1 truex xfalse "" --default-branch; do
+    run --separate-stderr protect_valid_plus "$flag" "$v"
+    [ "$status" -eq 1 ]
+    contains "$stderr" "$flag must be true or false"
+  done
+  [ ! -s "$CURL_DATA" ]
+  # both literal values still get past validation to the PUT
+  for v in true false; do
+    run --separate-stderr protect_valid_plus "$flag" "$v"
+    lacks "$stderr" "$flag must be true or false"
+  done
+  [ -s "$CURL_DATA" ]
+}
+
+@test "#1352: --has-dockerfile refuses a non-boolean value" {
+  assert_boolean_flag_refuses --has-dockerfile
+}
+
+@test "#1352: --has-ko refuses a non-boolean value" {
+  assert_boolean_flag_refuses --has-ko
+}
+
+@test "#1352: --has-codeql refuses a non-boolean value" {
+  assert_boolean_flag_refuses --has-codeql
+}
+
+@test "#1352: --require-signed-commits refuses a non-boolean value" {
+  assert_boolean_flag_refuses --require-signed-commits
+}
+
+@test "#1352: every value-taking flag given last with no value is named, never '\$2: unbound variable'" {
+  protection_stubs
+  local flag
+  for flag in --has-dockerfile --has-ko --has-codeql --require-signed-commits; do
+    run --separate-stderr protect_valid_plus "$flag"
+    [ "$status" -eq 1 ]
+    contains "$stderr" "$flag must be true or false"
+    lacks "$stderr" 'unbound variable'
+  done
+  run --separate-stderr protect_valid_plus --codeql-languages
+  [ "$status" -eq 1 ]
+  contains "$stderr" '--codeql-languages needs a value'
+  lacks "$stderr" 'unbound variable'
+  run --separate-stderr protect_valid_plus --default-branch
+  [ "$status" -eq 1 ]
+  contains "$stderr" '--default-branch needs a value'
+  lacks "$stderr" 'unbound variable'
+  [ ! -s "$CURL_DATA" ]
+}
+
+# curl answering $1 to the request whose -X verb is $2 (PUT, PATCH or POST): an
+# exit code > 0 is a transport failure (curl's own message on stderr, `000` on
+# stdout); every other request answers 200.
+curl_fails_on() {
+  CURL_FAIL_EXIT="$1" CURL_FAIL_VERB="$2"
+  export CURL_FAIL_EXIT CURL_FAIL_VERB
+  cat > "$STUB_BIN/curl" <<'EOF'
+#!/bin/sh
+prev=""
+verb=""
+for a in "$@"; do
+  [ "$prev" = "-X" ] && verb="$a"
+  prev="$a"
+done
+if [ "$verb" = "$CURL_FAIL_VERB" ]; then
+  echo "curl: (6) Could not resolve host: api.github.com" >&2
+  printf '000'
+  exit "$CURL_FAIL_EXIT"
+fi
+printf '200'
+exit 0
+EOF
+  chmod +x "$STUB_BIN/curl"
+}
+
+# branch-protection.sh with mktemp stubbed to create its file in $PROTECT_TMP, so
+# a leftover can be seen (a TMPDIR override is not portable: some macOS mktemp
+# builds ignore it), then the given flags.
+protect_with_tmpdir() {
+  export PROTECT_TMP
+  # each file it hands out is also logged, so a test can prove one was made
+  printf '#!/bin/sh\nf="$PROTECT_TMP/body.$$"\n: > "$f"\necho "$f" >> "$PROTECT_TMP.log"\necho "$f"\n' \
+    > "$STUB_BIN/mktemp"
+  chmod +x "$STUB_BIN/mktemp"
+  (cd "$W" && env PATH="$STUB_BIN:$PATH" bash "$PROTECT" \
+    --static-analysis sonarcloud --vulnerabilities snyk --has-dockerfile false \
+    --has-codeql false --default-branch main "$@")
+}
+
+@test "#1352: a curl transport failure on the protection PUT is diagnosed and leaves no temp file" {
+  protection_stubs
+  curl_fails_on 6 PUT
+  PROTECT_TMP="$BATS_TEST_TMPDIR/tmp"
+  mkdir -p "$PROTECT_TMP"
+  run --separate-stderr protect_with_tmpdir
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'could not reach the GitHub API (curl exited 6) — branch protection NOT applied'
+  # a body file was made, and it is gone
+  [ -s "$PROTECT_TMP.log" ]
+  [ -z "$(ls -A "$PROTECT_TMP")" ]
+}
+
+@test "#1352: every answer to the protection PUT — 200, 403 or any other — leaves no temp file" {
+  protection_stubs
+  PROTECT_TMP="$BATS_TEST_TMPDIR/tmp"
+  mkdir -p "$PROTECT_TMP"
+  local code
+  for code in 200 403 422; do
+    printf '#!/bin/sh\nprintf %s\n' "$code" > "$STUB_BIN/curl"
+    chmod +x "$STUB_BIN/curl"
+    run --separate-stderr protect_with_tmpdir
+    [ "$status" -eq "$([ "$code" = 422 ] && echo 1 || echo 0)" ]
+    [ -z "$(ls -A "$PROTECT_TMP")" ]
+  done
+  # one body file per run was made, and every one is gone
+  [ "$(wc -l < "$PROTECT_TMP.log")" -eq 3 ]
+  contains "$stderr" 'Branch protection failed (HTTP 422)'
+}
+
+@test "#1352: a curl transport failure after the PUT says protection IS applied and names what is not" {
+  protection_stubs
+  PROTECT_TMP="$BATS_TEST_TMPDIR/tmp"
+  mkdir -p "$PROTECT_TMP"
+  curl_fails_on 7 PATCH
+  run --separate-stderr protect_with_tmpdir
+  [ "$status" -eq 1 ]
+  contains "$output" 'Branch protection applied'
+  contains "$stderr" 'could not reach the GitHub API (curl exited 7) — branch protection IS applied, but the repo merge settings are NOT'
+  curl_fails_on 35 POST
+  run --separate-stderr protect_with_tmpdir --require-signed-commits true
+  [ "$status" -eq 1 ]
+  contains "$stderr" 'could not reach the GitHub API (curl exited 35) — branch protection IS applied, but signed commits are NOT required'
+  [ -z "$(ls -A "$PROTECT_TMP")" ]
+}
+
 # --- AC2: the eight D4 rows, as sets ----------------------------------------------------
 
 @test "#1671 AC2: every D4 row requires exactly its D4 context set (codeql.yml on disk, no #1206 pair)" {
