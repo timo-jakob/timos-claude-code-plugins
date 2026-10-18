@@ -474,6 +474,13 @@ shape() {
   contains "$output" 'warning: policy: policies/conftest/hcl/ declares policies but no conftest verify tests'
   contains "$output" 'gate: policy ok'
   grep -q '^conftest test --all-namespaces --parser hcl2 --policy policies/conftest/hcl -- ' "$CALLS"
+  # The whole file list, not just the prefix (#2552): exactly one conftest test
+  # call, naming every fixture .tf file, compared sorted since discovery order
+  # is the gate's own. A gate that narrowed tf_files would still pass the prefix.
+  run sed -n 's|^conftest test --all-namespaces --parser hcl2 --policy policies/conftest/hcl -- \(.*\) @ .*|\1|p' "$CALLS"
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 1 ]
+  [ "$(printf '%s\n' $output | sort | paste -sd' ' -)" = 'environments/dev/backend.tf environments/dev/main.tf environments/prod/main.tf modules/network/main.tf' ]
   run grep -c '^conftest verify' "$CALLS"
   [ "$output" = "0" ]
   run grep -c 'policies/conftest/plan' "$CALLS"
