@@ -1156,6 +1156,23 @@ consumer's generated client is its own sub-tier (#958, below).
   the generated hook's `@deprecated` JSDoc on the symbol app code calls, so
   `@typescript-eslint/no-deprecated` warns at the component's call site; a
   hand-written wrapper would swallow it.
+- **The shell overlay (#1124).** The SPA shell is the **default** shape of a
+  React repo, scaffolded by bootstrap's §3k.7 from a sibling tree,
+  `development/skills/bootstrap/templates/languages/javascript/react-shell/`:
+  `src/shell/` (`Shell.tsx`, `Chrome.tsx`, `routes.ts`, `navigation.ts`,
+  `import-map.ts`, `loader.ts`, `context.ts`, `auth.ts`, `loader.test.ts`) and
+  `public/importmap.json`. Its **trigger** is §3k.5's overlay applying plus the
+  shell as the default shape — its own droppable Step 2 plan line until the
+  shell-or-remote recommender (#1127) lands. Its **shape marker** is
+  `src/shell/loader.ts`, the file #1127 reads and the one State D's adoption gap
+  keys on. It **renders last**: §3d → §3k → §3k.5 → §3k.6 → §3k.7, sharing no
+  path with an earlier layer, and its only Vite-owned edit is the confirmed
+  `src/main.tsx` wrap of `<App />` in `<Shell capabilities={…}>`. It installs
+  `@<scope>/mfe-contract` first and renders nothing when that fails. The loader
+  implements the shell side of the contract's abort rule, and every host
+  capability reaches a remote through one injection point, `ShellCapabilities`.
+  *Rationale:* a plain SPA is a shell with zero remotes, so one shape covers the
+  small-app case and grows remotes without a rewrite.
 - **Verified statically here, built elsewhere.** `tests/react-templates.bats`
   pins the file set, each variant's kept and added content, the binding's
   re-export and barrel invariants, and the 120-column width, and

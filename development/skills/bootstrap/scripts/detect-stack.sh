@@ -1391,6 +1391,10 @@ collect_from() {
 		# composition repo, which renders it (#1899) — never an artifact an
 		# ordinary JavaScript repo is missing.
 		[[ "$rel" == mfe-contract/* ]] && continue
+		# The React shell overlay (#1124) renders under src/shell/ only via
+		# SKILL §3k.7, and a State D gap-fill only when src/shell/loader.ts is
+		# present — never an artifact an ordinary JavaScript repo is missing.
+		[[ "$rel" == react-shell/* ]] && continue
 		candidate_paths+=("$rel")
 	done < <(find "$dir" -type f 2>/dev/null)
 }

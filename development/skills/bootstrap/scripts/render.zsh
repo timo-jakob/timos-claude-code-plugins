@@ -48,7 +48,8 @@
 #
 # Value flags (source: detect-stack.sh output + the Step 1 questions):
 #   --project-name <s>            {{PROJECT_NAME}}
-#   --project-slug <owner/repo>   {{PROJECT_SLUG}}
+#   --project-slug <owner/repo>   {{PROJECT_SLUG}} (+ derived {{PAGES_URL}} and
+#                                 {{NPM_SCOPE}}, the owner part lowercased, #1899)
 #   --project-key <s>             {{PROJECT_KEY}}
 #   --org-key <s>                 {{ORG_KEY}}
 #   --default-branch <s>          {{DEFAULT_BRANCH}}   (default: main)
@@ -432,6 +433,9 @@ vals[PYTHON_VERSION_COMPACT]="${vals[PYTHON_VERSION]//./}"
 # site URL (mkdocs.yml.tmpl's site_url, #766). owner/repo -> owner.github.io/repo.
 if [[ -n "${vals[PROJECT_SLUG]:-}" ]]; then
 	vals[PAGES_URL]="https://${vals[PROJECT_SLUG]%%/*}.github.io/${vals[PROJECT_SLUG]#*/}/"
+	# {{NPM_SCOPE}} is the owner part, lowercased and nothing else (#1899):
+	# an npm scope is lowercase only, and a GitHub owner needs no other change.
+	vals[NPM_SCOPE]="${${vals[PROJECT_SLUG]%%/*}:l}"
 fi
 
 # The SURFACE_* block keep set (#766): the interfaces csv, normalized to tag
