@@ -121,6 +121,10 @@ orchestrator without it growing a `case` statement (see ARCHITECTURE.md §
 - **`plan[].isolation`** (boolean) — `true` for agents that edit local files (run
   in a worktree); `false` for agents that act on GitHub PRs via `gh`. The
   orchestrator reads this, never matches on agent names.
+- **`plan[].advisory`** (optional boolean, default `false`) — `true` for a
+  read-only reviewer that edits nothing, opens no PR and reports only
+  `actions_requiring_review` entries. It requires `isolation: false`. The
+  orchestrator reads it and never matches on agent names.
 - **`plan[].pre_dispatch_hook`** (optional) — for work that needs an environment
   check before spawn (e.g. a runtime upgrade verifying the target toolchain is
   installed). The orchestrator runs the hook generically.
