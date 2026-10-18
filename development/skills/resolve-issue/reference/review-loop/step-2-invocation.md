@@ -179,6 +179,13 @@ When `start` failed there is no run file: pass only the sink flags from the
 `null`; never pass the string `null`. An epic child that E3 drives passes its
 own child run's `loop_args` (`reference/epic-telemetry.md` step 2).
 
+**Pass the loop's logical start on round 1 (#1976).** Append `--t0 "$T0"` —
+the `T0` step 1 captured before `T` (`core.md`) — to the invocation on round
+1's fresh start only. The loop stamps it as `<work-dir>/.t0`, so the terminal
+record's `ts` and `wall_s` span round 1's panel. Never pass it beside
+`--resume`: a resume adopts `<work-dir>/.t0`, and the loop refuses the pair
+with exit 2.
+
 **Time every round subagent, and pass the times (#2197).** For each round, read
 `date +%s` when you dispatch the panel, decide, risk and fix subagents and again
 when you observe each one's verdict. A step the round dispatched more than once

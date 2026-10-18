@@ -1132,6 +1132,149 @@ TID() { zsh "$REPO_ROOT/development/skills/resolve-issue/scripts/git-tree-id.zsh
   [ "$status" -eq 0 ]
 }
 
+# --- --t0: the conductor-supplied logical start (#1976) ----------------------
+# In step mode round 1's panel runs before the first invocation, so the loop's
+# own clock starts after it. The conductor passes the start it captured.
+
+@test "--t0 on a fresh start that converges in round 1 stamps ts from it and spans the panel (#1976)" {
+  T="$BATS_TEST_TMPDIR/t0-round1.jsonl"
+  local T0; T0="$(( $(date +%s) - 300 ))"
+  printf '[]' > "$F"
+  step --t0 "$T0" --telemetry-file "$T"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "CONVERGED" ]
+  [ "$(grep -c '' "$T")" -eq 1 ]
+  [ "$(jq '.ts' "$T")" -eq "$T0" ]
+  [ "$(jq '.wall_s >= 300' "$T")" = "true" ]
+  [ "$(cat "$WD/.t0")" = "$T0" ]
+}
+
+@test "--t0 written on the fresh start is the ts of a later --resume's record (#1976)" {
+  T="$BATS_TEST_TMPDIR/t0-resume.jsonl"
+  local T0; T0="$(( $(date +%s) - 120 ))"
+  printf '%s' "$CRIT" > "$F"
+  step --t0 "$T0" --telemetry-file "$T"
+  [ "$status" -eq 20 ]
+  [ "$(cat "$WD/.t0")" = "$T0" ]
+  converge_clean --telemetry-file "$T"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '' "$T")" -eq 1 ]
+  [ "$(jq '.ts' "$T")" -eq "$T0" ]
+  [ "$(jq '.wall_s >= 120' "$T")" = "true" ]
+}
+
+@test "--t0 on a fresh start rewrites a previous loop's .t0, which never reaches the record (#1976)" {
+  T="$BATS_TEST_TMPDIR/t0-foreign.jsonl"
+  local T0; T0="$(( $(date +%s) - 60 ))"
+  mkdir -p "$WD"
+  echo "$(( T0 - 5000 ))" > "$WD/.t0"
+  printf '[]' > "$F"
+  step --t0 "$T0" --telemetry-file "$T"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$WD/.t0")" = "$T0" ]
+  [ "$(jq '.ts' "$T")" -eq "$T0" ]
+}
+
+@test "without --t0 the fresh start stamps ts and .t0 from the invocation's own clock (#1976)" {
+  T="$BATS_TEST_TMPDIR/t0-absent.jsonl"
+  local NOW; NOW="$(date +%s)"
+  printf '[]' > "$F"
+  step --telemetry-file "$T"
+  [ "$status" -eq 0 ]
+  local TS; TS="$(jq '.ts' "$T")"
+  [ "$TS" -ge "$NOW" ]
+  [ "$TS" -le "$(( NOW + 5 ))" ]
+  [ "$(cat "$WD/.t0")" = "$TS" ]
+}
+
+@test "a non-numeric --t0 exits 2 before any work and names the value (#1976)" {
+  T="$BATS_TEST_TMPDIR/t0-junk.jsonl"
+  printf '[]' > "$F"
+  step --t0 not-a-number --telemetry-file "$T" --status-file "$BATS_TEST_TMPDIR/st.json"
+  [ "$status" -eq 2 ]
+  contains "$output" '--t0 must be a non-negative integer epoch (got: not-a-number)'
+  [ ! -e "$BATS_TEST_TMPDIR/st.json" ]
+  [ ! -e "$WD/.t0" ]
+  [ ! -e "$T" ]
+}
+
+@test "a 19-digit --t0 exits 2 with the width cap and writes no record (#1976)" {
+  T="$BATS_TEST_TMPDIR/t0-wide.jsonl"
+  printf '[]' > "$F"
+  step --t0 9999999999999999999 --telemetry-file "$T"
+  [ "$status" -eq 2 ]
+  contains "$output" '--t0 is out of range (max 18 digits, got: 9999999999999999999)'
+  [ ! -e "$T" ]
+  [ ! -e "$WD/.t0" ]
+}
+
+@test "--t0 beside --resume is refused and leaves .t0 alone (#1976)" {
+  seed_awaiting
+  local KEPT; KEPT="$(cat "$WD/.t0")"
+  printf '[]' > "$F"
+  step --resume --t0 "$(( KEPT - 900 ))"
+  [ "$status" -eq 2 ]
+  contains "$output" '--t0 is fresh-start only; a --resume adopts <work-dir>/.t0'
+  [ "$(cat "$WD/.t0")" = "$KEPT" ]
+}
+
+@test "--t0 beside --review-cmd is refused as step-mode only (#1976)" {
+  run zsh "$LOOP_REAL" --repo "$R" --base main --work-dir "$WD" \
+    --review-cmd 'true' --fix-cmd 'true' --t0 "$(date +%s)"
+  [ "$status" -eq 2 ]
+  contains "$output" '--t0 is step-mode only'
+}
+
+@test "a future-dated --t0 clamps wall_s to 0 and keeps the record (#1976)" {
+  T="$BATS_TEST_TMPDIR/t0-future.jsonl"
+  printf '[]' > "$F"
+  step --t0 "$(( $(date +%s) + 600 ))" --telemetry-file "$T"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '' "$T")" -eq 1 ]
+  [ "$(jq '.wall_s' "$T")" -eq 0 ]
+}
+
+@test "the --t0 notes stand after each frozen span, and no frozen span names --t0 (#1976)" {
+  local base="$REPO_ROOT/development/skills/resolve-issue/reference"
+  # the text AFTER a span's closing marker (the gap the notes live in)
+  after() { awk -v m="<!-- /moved: $2 -->" 'f; $0 == m { f = 1 }' "$1"; }
+  local core step2 sub
+  core="$(after "$base/review-loop/core.md" round-protocol-head)"
+  step2="$(after "$base/review-loop/step-2-invocation.md" round-protocol-step-2)"
+  sub="$(after "$base/promotion/step-4-sub-loop.md" suggestion-promotion-step-4)"
+  contains "$core" 'step 1 also reads `T0=$(date +%s)` first,
+before the `T` mint, the gate and the panel'
+  contains "$core" 'Later boundaries capture no `T0`.'
+  contains "$core" 'Round 1'"'"'s
+panel runs before the loop'"'"'s first invocation, so the loop'"'"'s own clock would
+start after it'
+  contains "$step2" 'Append `--t0 "$T0"`'
+  contains "$step2" 'to the invocation on round
+1'"'"'s fresh start only'
+  contains "$step2" 'the terminal
+record'"'"'s `ts` and `wall_s` span round 1'"'"'s panel'
+  contains "$step2" 'Never pass it beside
+`--resume`: a resume adopts `<work-dir>/.t0`, and the loop refuses the pair
+with exit 2.'
+  contains "$step2" 'a resume adopts `<work-dir>/.t0`, and the loop refuses the pair'
+  contains "$sub" 'append `--t0 "$T0"` to the sub-loop'"'"'s round-1 fresh-start
+invocation only — never beside `--resume`'
+  contains "$sub" 'The capture is the sub-loop'"'"'s own, never the blocking
+phase'"'"'s `T0`, so its `ts` stays distinct from the blocking phase'"'"'s.'
+  # nothing inside any moved span mentions --t0: the spans stay byte-frozen
+  local spans
+  spans="$(cat "$base"/review-loop/*.md "$base"/promotion/*.md | awk '/^<!-- moved: /{f=1} /^<!-- \/moved: /{f=0} f')"
+  [ -n "$spans" ]
+  run grep -c -- '--t0' <<<"$spans"
+  [ "$output" = "0" ]
+}
+
+@test "--help lists --t0 (#1976)" {
+  run zsh "$LOOP_REAL" --help
+  [ "$status" -eq 0 ]
+  contains "$output" '[--t0 EPOCH]'
+}
+
 # --- suggestion promotion across INVOCATIONS (#994, test case #1021) ---------
 #
 # In step mode each round is its own invocation, so "the overlay is applied every
