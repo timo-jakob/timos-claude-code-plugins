@@ -580,9 +580,9 @@ where they are; read them by naming the old directory, for example
   shared-directory path above moves nothing off-machine: it only redirects the
   append to a directory you choose, which a separate reporting stack may then
   read.
-- `tokens` is deliberately **never estimated** — it stays `null` until the
-  harness gives a real number, because a withheld figure beats a confidently
-  wrong one.
+- `tokens` is deliberately **never estimated** — it is an object holding the
+  real per-model token usage of a run, or `null` when the run measured nothing,
+  because a withheld figure beats a confidently wrong one.
 - Records carry counts, outcomes, durations, issue/PR numbers, run ids, commit
   SHAs and short names — languages, tools, steps, interfaces, the bootstrapped
   `owner/name`, the API URL of an acceptance report — **not** your code, diffs,

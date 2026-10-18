@@ -160,7 +160,7 @@ check() { run bash -c "set -o pipefail; printf '%s\n' '$VALID' | jq -c '$1' | zs
 }
 
 @test "nullable count fields accept null and a count, and reject a string" {
-  for f in issue pr tokens; do
+  for f in issue pr; do
     check ".$f = null"; [ "$status" -eq 0 ]
     check ".$f = 7";    [ "$status" -eq 0 ]
     check ".$f = \"7\""
@@ -184,9 +184,83 @@ check() { run bash -c "set -o pipefail; printf '%s\n' '$VALID' | jq -c '$1' | zs
   check '.issue = -1'
   [ "$status" -eq 1 ]
   contains "$output" "issue must be a non-negative integer or null"
-  check '.tokens = 2.25'
+}
+
+# ------------------------------------------------------- the tokens object (#2720)
+
+# The well-formed object tokens-for-window.zsh prints; `tok` sets it on the record.
+TOK='{"source":"transcript","coverage":"session+subagents","by_model":{"claude-opus-5-5":{"input":2,"cache_write_5m":0,"cache_write_1h":73996,"cache_read":30038,"output":251,"thinking":16}},"total":104287}'
+
+@test "tokens accepts null and a well-formed tokens object, including an empty by_model" {
+  check '.tokens = null'
+  [ "$status" -eq 0 ]
+  check ".tokens = $TOK"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  check '.tokens = {"source":"transcript","coverage":"session+subagents","by_model":{},"total":0}'
+  [ "$status" -eq 0 ]
+}
+
+@test "a numeric or non-object tokens is a violation naming tokens" {
+  check '.tokens = 4096'
   [ "$status" -eq 1 ]
-  contains "$output" "tokens must be a non-negative integer or null"
+  contains "$output" "tokens must be null or an object (got: number)"
+  check '.tokens = "4096"'
+  [ "$status" -eq 1 ]
+  contains "$output" "tokens must be null or an object (got: string)"
+}
+
+@test "a tokens object with a missing or unknown key is a violation" {
+  check ".tokens = ($TOK | del(.source))"
+  [ "$status" -eq 1 ]
+  contains "$output" "tokens is missing key(s): source"
+  check ".tokens = ($TOK | .estimated = true)"
+  [ "$status" -eq 1 ]
+  contains "$output" "tokens has unknown key(s): estimated"
+  check ".tokens = ($TOK | .by_model[\"claude-opus-5-5\"].extra = 1)"
+  [ "$status" -eq 1 ]
+  contains "$output" "tokens.by_model.claude-opus-5-5 must have exactly the keys"
+}
+
+@test "a non-integer or negative tokens count is a violation" {
+  check ".tokens = ($TOK | .by_model[\"claude-opus-5-5\"].output = 2.5)"
+  [ "$status" -eq 1 ]
+  contains "$output" "tokens.by_model.claude-opus-5-5 counts must be non-negative integers"
+  check ".tokens = ($TOK | .by_model[\"claude-opus-5-5\"].input = -1)"
+  [ "$status" -eq 1 ]
+  contains "$output" "tokens.by_model.claude-opus-5-5 counts must be non-negative integers"
+}
+
+@test "a tokens total that adds thinking, or differs from the sum, is a violation" {
+  check ".tokens = ($TOK | .total = 104303)"
+  [ "$status" -eq 1 ]
+  contains "$output" "tokens.total must equal input + cache_write_5m + cache_write_1h + cache_read + output"
+  check ".tokens = ($TOK | .total = 1)"
+  [ "$status" -eq 1 ]
+  contains "$output" "tokens.total must equal"
+  # summed over EVERY model: a second model's 10 tokens count toward total
+  check ".tokens = ($TOK | .by_model[\"claude-sonnet-4-5\"] = {\"input\":1,\"cache_write_5m\":2,\"cache_write_1h\":3,\"cache_read\":0,\"output\":4,\"thinking\":1} | .total = 104297)"
+  [ "$status" -eq 0 ]
+}
+
+@test "ARCHITECTURE.md states the tokens contract this suite proves" {
+  local arch
+  arch="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/ARCHITECTURE.md")"
+  contains "$arch" '`tokens` is `object | null` (#2720).'
+  contains "$arch" '`thinking` is part of `output`, reported and never added again.'
+  contains "$arch" '`TLM_TOKENS_JQ_DEF` in `telemetry-sink-lib.zsh`'
+}
+
+@test "tokens source, coverage and by_model must have their types" {
+  check ".tokens = ($TOK | .source = \"\")"
+  [ "$status" -eq 1 ]
+  contains "$output" "tokens.source must be a non-empty string"
+  check ".tokens = ($TOK | .coverage = 5)"
+  [ "$status" -eq 1 ]
+  contains "$output" "tokens.coverage must be a non-empty string"
+  check ".tokens = ($TOK | .by_model = [])"
+  [ "$status" -eq 1 ]
+  contains "$output" "tokens.by_model must be an object"
 }
 
 @test "required string fields must be non-empty AND actually strings" {

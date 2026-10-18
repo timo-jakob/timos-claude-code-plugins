@@ -55,9 +55,11 @@ change. `ARCHITECTURE.md`'s *telemetry/v1 contract* is the normative statement.
 - **No code, no diffs, no prose.** Records carry counts, outcomes, durations and
   issue/PR numbers. The finding *titles* a review round produced are not in
   them; neither is the content of any file the loop read or wrote.
-- **`tokens` is never estimated.** The field exists and stays `null` until the
-  harness reports a real number. A withheld figure beats a confidently wrong one,
-  and a plausible-looking estimate would quietly become someone's cost model.
+- **`tokens` is never estimated.** The field is an object or `null`: the real
+  per-model token usage a pipeline measured from its session's transcripts, or
+  `null` when it measured nothing. A withheld figure beats a confidently wrong
+  one, and a plausible-looking estimate would quietly become someone's cost
+  model.
 
 That last principle generalises: the stream is **lossy on purpose**. When a run
 cannot honestly measure its own wall time, outcome or counts, the pipeline skips
