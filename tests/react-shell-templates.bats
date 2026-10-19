@@ -256,11 +256,12 @@ STEP_END='### 3k.8. Canvas overlay (a widget canvas on the shell — #1939) '
   section="$(shell_step)"
   ends_with "$section" "$STEP_END"
   contains "$section" 'Run this step after §3k.6 when §3k.5'"'"'s overlay applies'
-  contains "$section" 'React shell overlay (default shape) — reply `remote: page` or `remote: widget` to scaffold a remote instead (#1125)'
-  contains "$section" 'A dropped line skips the step entirely'
+  contains "$section" 'React UI shape: shell (default) — reply `remote: page` or `remote: widget` to scaffold a remote instead (#1127)'
+  contains "$section" 'A dropped line — only the user dropping Q7'"'"'s plan line — skips the step entirely: not an error, no Step 5 item.'
+  contains "$section" 'Exit 3 is not a dropped line and follows its per-reason rules above: no shape to choose; a `shape-marker` repo'"'"'s own State D adoption gap still applies; and `conflicting-markers` is §3k.9'"'"'s refusal, with its Step 5 item.'
   contains "$section" '**Shape marker — `src/shell/loader.ts`.**'
   contains "$section" 'the step is an **adoption gap** only when the marker is present and another shell file is missing'
-  contains "$section" 'A React repo with no `src/shell/loader.ts` is never offered the shell in State D'
+  contains "$section" 'A React repo with no `src/shell/loader.ts` is offered the shell in State D only through Q7'"'"'s recommendation'
 }
 
 @test "shell: §3k.7 installs the contract first and renders nothing on a failed install" {
@@ -273,8 +274,9 @@ STEP_END='### 3k.8. Canvas overlay (a widget canvas on the shell — #1939) '
   contains "$section" 'Snapshot `package.json` and the lockfile, then install the contract package'
   contains "$section" 'its scope being the owner part of the repository slug, lowercased'
   contains "$section" 'Skip the install when `package.json` already lists the package.'
-  contains "$section" 'The item says outright that a plain re-run will not add the shell'
-  contains "$section" 'and that adding it once #1899 has published means running this step'"'"'s install and render by hand.'
+  contains "$section" 'No marker lands, so a plain re-run offers the shell again through Q7'"'"'s plan line;'
+  contains "$section" 'the item says that approving it adds the shell once #1899 has published `@<scope>/mfe-contract`.'
+  lacks "$section" 'a plain re-run will not add the shell'
   contains "$section" 'a non-zero `render.zsh` exit takes the failed install'"'"'s branch above'
   contains "$section" 'and the run carries on. On either failure the `src/main.tsx` edit below is not offered.'
   contains "$section" '**Withhold `src/shell/loader.test.ts`** — drop it from the list — unless §3k.5 ended'

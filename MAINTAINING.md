@@ -452,8 +452,8 @@ to be repeated there. What it does depend on is the `mfe-contract/v1` types: its
 six framework-free modules import `@{{NPM_SCOPE}}/mfe-contract`, and
 `tests/react-shell-templates.bats` type-checks them against the contract's
 `index.d.ts`, so a contract change that breaks the shell reds there. Keep
-`src/shell/loader.ts` as the shape marker — #1127 and State D's adoption gap
-read that path — and keep each `loader.test.ts` case title in step with the
+`src/shell/loader.ts` as the shape marker — `recommend-ui-shape.zsh` (#1127)
+and State D's adoption gap read that path — and keep each `loader.test.ts` case title in step with the
 suite's pinned list.
 
 **The canvas overlay** (#1939, SKILL.md §3k.8) is a sibling tree,
@@ -471,9 +471,16 @@ and keep the four shared specifiers in step across `vite.shared.config.ts`, the
 render after §3k.6 in place of the shell. `tests/react-remote-templates.bats`
 type-checks `router.ts` and `manifest.ts` against the contract and pins each
 `entry.test.ts` case title. Keep `src/remote/entry.tsx` and
-`src/remote/manifest.ts` as the shape markers — #1127 and State D's adoption gap
-read those paths — and keep the widget build's four external specifiers in step
-with §3k.8's import map.
+`src/remote/manifest.ts` as the shape markers — `recommend-ui-shape.zsh` (#1127)
+and State D's adoption gap read those paths — and keep the widget build's four
+external specifiers in step with §3k.8's import map.
+
+**The UI shape recommender** (#1127, `scripts/recommend-ui-shape.zsh`, SKILL.md
+Q7) reads the shell and remote markers above, so a renamed marker changes it
+too. Its exit codes are a contract with §3k.7: 0 shows the shell plan line, 3
+shows none, 2 is a malformed call. Keep its `plan_line` byte-identical to
+§3k.7's plan line, which `tests/recommend-ui-shape.bats` pins; the Q7 row
+carries the question's own wording, pinned separately.
 
 **The MFE conformance check** (#1126, SKILL.md §3k.10) is a sibling tree,
 `languages/javascript/mfe-conformance/`, rendered only for a repo carrying the
