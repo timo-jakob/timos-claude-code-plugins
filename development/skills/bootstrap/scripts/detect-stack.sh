@@ -1398,12 +1398,14 @@ collect_from() {
 		# never an artifact an ordinary JavaScript repo is missing.
 		[[ "$rel" == mfe-contract/* ]] && continue
 		[[ "$rel" == .github/workflows/mfe-contract-publish.yml ]] && continue
-		# The React shell (#1124) and canvas (#1939) overlays render only via
-		# SKILL §3k.7 and §3k.8, and a State D gap-fill only when their marker
-		# (src/shell/loader.ts, src/canvas/canvas.ts) is present — never an
-		# artifact an ordinary JavaScript repo is missing.
+		# The React shell (#1124), canvas (#1939) and remote (#1125) overlays
+		# render only via SKILL §3k.7, §3k.8 and §3k.9, and a State D gap-fill
+		# only when their marker (src/shell/loader.ts, src/canvas/canvas.ts,
+		# src/remote/entry.tsx) is present — never an artifact an ordinary
+		# JavaScript repo is missing.
 		[[ "$rel" == react-shell/* ]] && continue
 		[[ "$rel" == react-canvas/* ]] && continue
+		[[ "$rel" == react-remote/* ]] && continue
 		candidate_paths+=("$rel")
 	done < <(find "$dir" -type f 2>/dev/null)
 }

@@ -5231,10 +5231,12 @@ recommender (#1127) lands, the step is its own Step 2 plan line, and approving t
 plan approves it:
 
 ```text
-React shell overlay (default shape; drop this line if the repo is a remote, #1125)
+React shell overlay (default shape) — reply `remote: page` or `remote: widget` to scaffold a remote instead (#1125)
 ```
 
-A dropped line skips the step entirely — not an error, no Step 5 item.
+A dropped line skips the step entirely — not an error, no Step 5 item. A
+`remote: page` or `remote: widget` reply drops it too, with §3k.8's line, and
+adds §3k.9's instead; §3k.9 also refuses a repo carrying both shape markers.
 
 **Shape marker — `src/shell/loader.ts`.** That file marks a repo as a shell, and
 the recommender's (#1127) *shape already determined by an existing marker* gate
@@ -5242,7 +5244,8 @@ reads it. In State
 D the step is an **adoption gap** only when the marker is present and another
 shell file is missing: offer the missing files in the plan. A React repo with no
 `src/shell/loader.ts` is never offered the shell in State D — without #1127,
-nothing can tell a remote from a deliberately plain app.
+nothing can tell a remote from a deliberately plain app — and a repo carrying the
+remote marker, `src/remote/entry.tsx`, is never offered it at all.
 
 **Install first, render second.** Snapshot `package.json` and the lockfile, then
 install the contract package, its scope being the owner part of the repository
@@ -5340,7 +5343,8 @@ React canvas overlay: add the widget canvas to this shell? (default: no, #1939)
 ```
 
 Anything but an explicit yes skips the step entirely — not an error, no Step 5
-item.
+item. A repo carrying the remote marker, `src/remote/entry.tsx`, is never
+offered it (§3k.9's both-markers refusal).
 
 **Shape marker — `src/canvas/canvas.ts`.** In State D the step is an **adoption
 gap** only when that marker is present and another canvas file is missing: offer
@@ -5437,6 +5441,123 @@ Verification here is **structural** and type-checked
 (`tests/react-canvas-templates.bats`: `canvas.ts`, `store.ts`, `validate.ts` and
 `widgets.ts` pass `tsc --noEmit --strict`); running `src/canvas/canvas.test.ts`
 against a rendered tree is the render-and-build smoke check's job (#1063).
+
+### 3k.9. Remote overlay (a page or widget micro-frontend — #1125)
+
+A **remote** of the MFE composition epic (#1122): the independently deployable
+unit, a React app whose entry module exports `mfe-contract/v1`'s `MfeModule`
+(ARCHITECTURE.md, *The `mfe-contract/v1` contract*) and builds to
+content-hashed assets behind one stable entry path. A **page** remote owns a
+route subtree beneath the `basePath` the shell delegates; a **widget** remote
+owns no route, reads its config and grid size from the context, and is hosted by
+§3k.8's canvas. One repo is one shape.
+
+**Trigger.** Run this step after §3k.6 when §3k.5's overlay applies (its *Does
+the overlay apply?* check) **and** either the user replied `remote: page` or
+`remote: widget` to §3k.7's Step 2 plan line, or — in State D —
+`src/remote/entry.tsx` is on disk and another file of its shape is missing (the
+adoption gap below). That reply is the selection until
+the shell-or-remote recommender (#1127) lands; its recommendation then replaces
+the reply. **Choosing a remote drops the §3k.7 and §3k.8 plan lines** and adds
+this step's, naming the shape:
+
+```text
+React remote overlay: <page|widget> (#1125)
+```
+
+With neither a `remote:` reply nor that adoption gap this step does not run —
+not an error, no Step 5 item.
+
+**Shape markers — `src/remote/entry.tsx` and `src/remote/manifest.ts`.**
+`src/remote/entry.tsx` marks a repo as a remote, and `src/remote/manifest.ts`
+additionally marks the widget shape; #1127's *shape already determined by an
+existing marker* gate reads them. In State D the step is an **adoption gap**
+only when the remote marker is present and another file of its shape is
+missing: offer the missing files in the plan, the shape read from the widget
+marker's presence. A repo with no `src/remote/entry.tsx` is never offered a
+remote in State D, and a repo carrying it is never offered the shell.
+
+**Both markers — refuse.** A repo carrying both `src/shell/loader.ts` and
+`src/remote/entry.tsx` renders neither overlay — not §3k.7's shell, not §3k.8's
+canvas, not this step's remote — and records a Step 5 item naming both files and
+the conflict: one repo is one shape, and only a human can say which file is the
+mistake. Step 2 checks this before any of the three plan lines is shown, and
+refuses a `remote:` reply on a repo carrying `src/shell/loader.ts` the same way.
+
+**Install first, render second.** Snapshot `package.json` and the lockfile, then
+install the contract package exactly as §3k.7 does, its scope being the owner
+part of the repository slug, lowercased (the contract's scope-derivation rule):
+
+```text
+npm i -D @<scope>/mfe-contract
+```
+
+Skip the install when `package.json` already lists the package. **If it fails —
+the package is not published until #1899 — restore both files from the snapshot,
+render nothing, and record a Step 5 item naming `@<scope>/mfe-contract` and the
+publishing story, #1899.** No marker lands, so a plain re-run offers nothing in
+State D; the item says that adding the remote once #1899 has published means
+running this step's install, render and `build:remote` edit by hand.
+
+**Render the chosen shape's set** into a staging directory, then write each file
+under the idempotency rules. A page remote:
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates/languages/javascript/react-remote/page" \
+  --out "<staging-dir>" --project-slug "<owner/repo>" \
+  src/remote/entry.tsx src/remote/router.ts src/remote/entry.test.ts \
+  vite.remote.config.ts
+```
+
+A widget remote:
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates/languages/javascript/react-remote/widget" \
+  --out "<staging-dir>" --project-slug "<owner/repo>" \
+  src/remote/entry.tsx src/remote/manifest.ts src/remote/entry.test.ts \
+  vite.remote.config.ts
+```
+
+`--project-slug` sets `{{NPM_SCOPE}}` and `{{PROJECT_SLUG}}` — the widget
+manifest's `id` is `<owner/repo>` — so no `{{PLACEHOLDER}}` survives; a non-zero
+`render.zsh` exit takes the failed install's branch above — restore both files,
+render nothing, record a Step 5 item — and the run carries on. On either failure
+the `build:remote` edit below is not offered. **Withhold `src/remote/entry.test.ts`** unless `src/test/setup.ts` is on
+disk, exactly as §3k.7 withholds `src/shell/loader.test.ts`, and record a Step 5
+item naming it. Record every file this step writes under the `react_overlay`
+telemetry step key (*Keep the run's facts as you go*).
+
+**Layer ordering — composition, not clobbering.** §3d → §3k → §3k.5 → §3k.6 →
+**this step**; §3k.7 and §3k.8 do not run in a remote. The remote set shares no
+path with an earlier layer, so this step leaves every file §3d, §3k, §3k.5 and
+§3k.6 rendered byte-identical. An on-disk remote file that differs from its
+template takes **idempotency rule 3's diff prompt**, never a blind overwrite.
+
+**The one Vite-owned edit — a §4c-class confirmed edit of `package.json`.** It
+adds a `build:remote` script, `vite build -c vite.remote.config.ts`, which
+builds `src/remote/entry.tsx` to the unhashed `dist/remote.js` the gateway serves
+and every other chunk and asset under `dist/assets/` with a content hash in its
+name. The widget build keeps `react`, `react/jsx-runtime`, `react-dom` and
+`react-dom/client` external, for §3k.8's import map to resolve; the page build
+bundles its own React, since the shell mounts one page remote at a time.
+
+- **Idempotent skip** when `package.json` already has a `build:remote` script.
+- **Confirm before editing**: show the diff and ask; the plan approval alone
+  does not cover it.
+- **Snapshot `package.json` first.** On a failed edit, a decline or no answer,
+  restore the pre-edit snapshot and record a Step 5 TODO naming the
+  `build:remote` script to add by hand.
+
+No other Vite-owned file is written — `vite.config.ts`, `index.html` and
+`src/main.tsx` stay the app's own, so the remote still runs as a standalone dev
+app. The container that serves `dist/` is #1062's.
+
+Verification here is **structural** and type-checked
+(`tests/react-remote-templates.bats`: `router.ts` and `manifest.ts` pass
+`tsc --noEmit --strict`); running `src/remote/entry.test.ts` against a rendered
+tree is the render-and-build smoke check's job (#1063).
 
 ### 3l. Infrastructure-as-code repos (no application language) — #1154
 
@@ -7408,7 +7529,7 @@ kept since the start (*Telemetry — stamp the run's start*) to
   | `api_contracts` | 3i. API contracts machinery |
   | `anti_corruption_adapter` | 3j. Multi-major anti-corruption adapter |
   | `contract_consumer` | 3k. API contract-consumer machinery |
-  | `react_overlay` | 3k.5. React overlay, 3k.7. Shell overlay, and 3k.8. Canvas overlay |
+  | `react_overlay` | 3k.5. React overlay, 3k.7. Shell overlay, 3k.8. Canvas overlay, and 3k.9. Remote overlay |
   | `react_query` | 3k.6. React Query binding |
   | `iac` | 3l. Infrastructure-as-code repos |
   | `composition` | 3m. Composition repos |

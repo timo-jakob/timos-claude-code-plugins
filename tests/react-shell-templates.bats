@@ -256,7 +256,7 @@ STEP_END='### 3k.8. Canvas overlay (a widget canvas on the shell — #1939) '
   section="$(shell_step)"
   ends_with "$section" "$STEP_END"
   contains "$section" 'Run this step after §3k.6 when §3k.5'"'"'s overlay applies'
-  contains "$section" 'React shell overlay (default shape; drop this line if the repo is a remote, #1125)'
+  contains "$section" 'React shell overlay (default shape) — reply `remote: page` or `remote: widget` to scaffold a remote instead (#1125)'
   contains "$section" 'A dropped line skips the step entirely'
   contains "$section" '**Shape marker — `src/shell/loader.ts`.**'
   contains "$section" 'the step is an **adoption gap** only when the marker is present and another shell file is missing'
@@ -280,7 +280,7 @@ STEP_END='### 3k.8. Canvas overlay (a widget canvas on the shell — #1939) '
   contains "$section" '**Withhold `src/shell/loader.test.ts`** — drop it from the list — unless §3k.5 ended'
   contains "$section" 'unless §3k.5 ended with its setup module, `src/test/setup.ts`, on disk, and record a Step 5 item'
   contains "$section" 'Record every file this step writes under the `react_overlay` telemetry step key (*Keep the run'"'"'s facts as you go*). Each file lands'
-  contains "$(cat "$SKILL")" '| `react_overlay` | 3k.5. React overlay, 3k.7. Shell overlay, and 3k.8. Canvas overlay |'
+  contains "$(cat "$SKILL")" '| `react_overlay` | 3k.5. React overlay, 3k.7. Shell overlay, 3k.8. Canvas overlay, and 3k.9. Remote overlay |'
 }
 
 @test "shell: §3k.7's render block lists every shell template and passes --project-slug" {
