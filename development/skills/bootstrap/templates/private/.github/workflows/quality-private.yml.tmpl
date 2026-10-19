@@ -130,11 +130,12 @@ jobs:
           go-version: "stable"
       # -race + per-package coverage (no -coverpkg), matching the #874 gate.
       - run: go test -race ./... -coverprofile=coverage.out -covermode=atomic
-      # Cobertura conversion so the shared diff-cover new-code gate reads it.
+      # Cobertura conversion so the shared diff-cover new-code gate reads it —
+      # the go.mod-pinned tool and diff-cover pin `make test` uses (#2620).
       - if: github.event_name == 'pull_request'
-        run: go run github.com/boumenot/gocover-cobertura@v1.3.0 < coverage.out > coverage.xml
+        run: go tool gocover-cobertura -ignore-gen-files < coverage.out > coverage.xml
       - if: github.event_name == 'pull_request'
-        run: pip install 'diff-cover>=9'
+        run: pip install 'diff-cover==10.2.0'
       - if: github.event_name == 'pull_request'
         env:
           BASE_REF: ${{ github.base_ref }}

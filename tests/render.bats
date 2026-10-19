@@ -908,10 +908,42 @@ EOF
   grep -q 'Test (Go, -race)' "$Q"
   grep -q 'go test -race ./\.\.\. -coverprofile=coverage.out' "$Q"
   grep -q 'Coverage floor — 90% on new code (Go)' "$Q"
-  grep -q 'gocover-cobertura' "$Q"
+  grep -q 'go tool gocover-cobertura -ignore-gen-files < coverage.out > coverage.xml' "$Q"
+  grep -q "pip install 'diff-cover==10.2.0'" "$Q"
+  run ! grep -q 'go run github.com/boumenot/gocover-cobertura' "$Q"
   run ! grep -q 'PYTHON-START' "$Q"
   run ! grep -q 'JAVA-START' "$Q"
   run ! grep -qE '\{\{[A-Z_][A-Z0-9_]*\}\}' "$Q"
+}
+
+@test "render: #2620 private quality workflow for a go + python repo converts coverage with go tool gocover-cobertura" {
+  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" \
+    --project-name svc --project-slug o/svc --project-key o_svc --org-key o \
+    --primary python --languages "python go" --visibility private \
+    --static-analysis sonarqube --vulnerabilities trivy --code-scanning none \
+    private/.github/workflows/quality-private.yml.tmpl
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  Q="$OUT/private/.github/workflows/quality-private.yml"
+  # the Go lane converts with the go.mod-pinned tool, as make test and go-gate.zsh do
+  grep -q 'go tool gocover-cobertura -ignore-gen-files < coverage.out > coverage.xml' "$Q"
+  run ! grep -q 'go run github.com/boumenot/gocover-cobertura' "$Q"
+  # one diff-cover pin per lane: the Go lane's, then the Python lane's (out of scope, unchanged)
+  grep -q "pip install 'diff-cover==10.2.0'" "$Q"
+  grep -q "pip install 'diff-cover>=9'" "$Q"
+}
+
+@test "render: #2620 the quality workflows' Go diff-cover pin is the Makefile's DIFF_COVER_VERSION, and no go run gocover-cobertura remains" {
+  local make="$REAL_TEMPLATES/languages/go/Makefile.tmpl" want f block
+  want="$(sed -n 's/^DIFF_COVER_VERSION := //p' "$make")"
+  [ -n "$want" ]
+  for f in private/.github/workflows/quality-private.yml.tmpl public/.github/workflows/quality-public.yml.tmpl; do
+    block="$(awk '/--- GO-START/{s=1} s{print} /--- GO-END/{s=0}' "$REAL_TEMPLATES/$f")"
+    [ -n "$block" ]
+    [ "$(printf '%s\n' "$block" | grep -c "pip install 'diff-cover==$want'")" -eq 1 ] || { echo "$f"; false; }
+    [ "$(printf '%s\n' "$block" | grep -c 'go tool gocover-cobertura -ignore-gen-files')" -eq 1 ] || { echo "$f"; false; }
+  done
+  run grep -rl 'gocover-cobertura@' "$REAL_TEMPLATES"
+  [ "$status" -eq 1 ] || { echo "$output"; false; }
 }
 
 @test "render: real ko-image.yml.tmpl renders clean with DEFAULT_BRANCH substituted (#875)" {
