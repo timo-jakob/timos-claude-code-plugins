@@ -53,7 +53,10 @@
 #   --project-key <s>             {{PROJECT_KEY}}
 #   --org-key <s>                 {{ORG_KEY}}
 #   --default-branch <s>          {{DEFAULT_BRANCH}}   (default: main)
-#   --languages "<a b c>"         {{LANGUAGES}} + block keep set; may be ""
+#   --languages "<a b c>"         {{LANGUAGES}} + block keep set; may be "".
+#                                 NOT_GO is GO's complement, and like the
+#                                 sole-Go pair below its START/END lines are
+#                                 never emitted (#2869)
 #   --primary <s>                 {{PRIMARY}} (+ the GATE block keep set: kept
 #                                 iff the value is in gate_primaries —
 #                                 `kubernetes`, `opentofu` or `go`, #2122;
@@ -476,6 +479,8 @@ keep_block() {
 	JAVASCRIPT) has_lang javascript ;;
 	PYTHON) has_lang python ;;
 	GO) has_lang go ;;
+	# GO's complement (#2869); like the sole-Go pair, its marker lines are never emitted
+	NOT_GO) ! has_lang go ;;
 	JAVA) has_lang java ;;
 	SWIFT) has_lang swift ;;
 	LINUX_TESTS) has_lang javascript || has_lang python || has_lang go || has_lang java ;;
@@ -516,11 +521,11 @@ keep_block() {
 	esac
 }
 
-# The tags whose marker lines a render never emits, kept or stripped (#2615): a
-# block they wrap renders byte-identically to the same content unwrapped.
+# The tags whose marker lines a render never emits, kept or stripped (#2615,
+# #2869): a block they wrap renders byte-identically to the same content unwrapped.
 is_unmarked_tag() {
 	local tag="${1//-/_}"
-	[[ "$tag" == SOLE_GO || "$tag" == NOT_SOLE_GO ]]
+	[[ "$tag" == SOLE_GO || "$tag" == NOT_SOLE_GO || "$tag" == NOT_GO ]]
 }
 
 # --- rendering ---------------------------------------------------------------
@@ -547,7 +552,7 @@ render_file() {
 			rc=0
 			keep_block "$tag" || rc=$?
 			case $rc in
-			0) # kept blocks retain their markers — except the sole-Go pair's
+			0) # kept blocks retain their markers — except the unmarked tags'
 				is_unmarked_tag "$tag" || out_lines+=("$line") ;;
 			2) die "$rel:$lineno: unknown block tag '$tag' — teach render.zsh its keep-rule first" ;;
 			*) skip_tag="$tag" ;;
@@ -560,7 +565,7 @@ render_file() {
 				[[ "${match[1]}" == "$skip_tag" ]] && skip_tag=""
 				continue
 			fi
-			# kept block's END marker falls through and stays — except the sole-Go pair's
+			# kept block's END marker falls through and stays — except the unmarked tags'
 			is_unmarked_tag "${match[1]}" && continue
 		fi
 		[[ -n "$skip_tag" ]] && continue

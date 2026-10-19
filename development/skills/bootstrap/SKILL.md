@@ -1693,8 +1693,8 @@ and `# --- TAG-END ---` markers (including the surrounding comment lines).
 `render.zsh` strips them mechanically from its flags (this table is the
 keep-rule reference it implements; tag spellings normalize `-` to `_`, so
 the pre-commit template's `CLAUDE-PLUGIN` matches `CLAUDE_PLUGIN`). Kept
-blocks retain their marker lines, except `SOLE_GO`'s and `NOT_SOLE_GO`'s. The script **fails loudly on a tag it
-doesn't know** — when adding a new tag to a template, teach
+blocks retain their marker lines, except `SOLE_GO`'s, `NOT_SOLE_GO`'s and
+`NOT_GO`'s. The script **fails loudly on a tag it doesn't know** — when adding a new tag to a template, teach
 `render.zsh`'s `keep_block` its rule (and `tests/render.bats` the case)
 in the same PR:
 
@@ -1703,6 +1703,7 @@ in the same PR:
 | `JAVASCRIPT` | javascript detected |
 | `PYTHON` | python detected |
 | `GO` | go detected |
+| `NOT_GO` | go not detected (#2869) — wraps the `pre-commit` job's `pre-commit/action` step, which a Go render replaces; its marker lines are never emitted, so a render without Go is byte-identical to one without the tag |
 | `JAVA` | java detected |
 | `LINUX_TESTS` | any of javascript / python / go / java detected (the Linux `test-and-coverage` job — Swift has its own macOS job instead) |
 | `SWIFT` | swift detected (in the quality workflows this is the whole macOS `test-and-coverage-swift` job) |
@@ -2105,6 +2106,22 @@ Both quality workflows include a `pre-commit` job (using
 catches contributors who used `git commit --no-verify` or pushed from a
 machine without pre-commit installed — local hooks are an honour system,
 the CI job makes it enforced.
+
+When Go is detected, the job's GO block sets up the Go that `go.mod` names
+(`actions/setup-go` with `go-version-file: go.mod`) before the hooks run:
+pre-commit builds the golangci-lint hook with the `go` on `PATH`, and a
+golangci-lint built with an older Go than `go.mod` targets refuses the module
+(#2621). The GO block also replaces `pre-commit/action` with its own four
+steps — `pip install pre-commit`, pointing `PRE_COMMIT_HOME` at
+`$RUNNER_TEMP/pre-commit`, an `actions/cache` of `${{ runner.temp }}/pre-commit`,
+and `pre-commit run --show-diff-on-failure --color=always --all-files` — because
+`pre-commit/action` keys its cache on `.pre-commit-config.yaml` alone. The GO
+block's key is
+`pre-commit-go|${{ env.pythonLocation }}|${{ hashFiles('.pre-commit-config.yaml', 'go.mod') }}`,
+and every job starts with `runner.temp` empty, so a `go.mod` Go bump misses the
+cache and rebuilds the hook with the new Go instead of reusing one built with
+the old — even on a self-hosted runner, whose `~/.cache/pre-commit` persists
+between jobs (#2869). A render without Go keeps `pre-commit/action` (`NOT_GO`).
 
 Because this job runs with `--all-files` while local commits only check
 staged files, it is *stricter* than the local hooks: pre-existing files the

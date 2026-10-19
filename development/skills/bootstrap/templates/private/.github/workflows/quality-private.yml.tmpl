@@ -700,7 +700,29 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "{{PYTHON_VERSION}}"
+      # --- GO-START ----------------------------------------------------------
+      # pre-commit builds the golangci-lint hook with the `go` on PATH, and
+      # golangci-lint refuses a module whose go.mod targets a newer Go than it
+      # was built with — so build it with go.mod's Go, not the runner's (#2621).
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+      # pre-commit/action keys its hook cache on .pre-commit-config.yaml alone,
+      # so a go.mod Go bump would restore the hook built with the old Go. These
+      # steps are pre-commit/action's own, with go.mod added to the key (#2869).
+      # The hook home is under runner.temp, which every job starts empty, so a
+      # self-hosted runner's persisting ~/.cache/pre-commit is never reused.
+      - run: python -m pip install pre-commit
+      - run: echo "PRE_COMMIT_HOME=$RUNNER_TEMP/pre-commit" >> "$GITHUB_ENV"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/pre-commit
+          key: pre-commit-go|${{ env.pythonLocation }}|${{ hashFiles('.pre-commit-config.yaml', 'go.mod') }}
+      - run: pre-commit run --show-diff-on-failure --color=always --all-files
+      # --- GO-END ------------------------------------------------------------
+      # --- NOT_GO-START ------------------------------------------------------
       - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
+      # --- NOT_GO-END --------------------------------------------------------
       # --- HOSTED-START ------------------------------------------------------
       # --- TRIVY-START -------------------------------------------------------
         # GitHub-hosted runners carry no trivy binary for the local trivy-fs hook;
