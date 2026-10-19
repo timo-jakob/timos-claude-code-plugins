@@ -456,6 +456,15 @@ six framework-free modules import `@{{NPM_SCOPE}}/mfe-contract`, and
 and State D's adoption gap read that path — and keep each `loader.test.ts` case title in step with the
 suite's pinned list.
 
+The shell's auth module (#1326) is the one shell file with a third-party import,
+`oidc-client-ts`. bats installs nothing, so the suite type-checks `auth.ts`
+against `tests/fixtures/react-shell/oidc-client-ts.d.ts`, a stand-in declaring
+only the members `auth.ts` uses. **When `auth.ts` starts using another
+`oidc-client-ts` member, copy that member's signature into the stand-in from the
+real package's types, narrowing it and never widening it.** A stand-in that drifts
+from the package would let bats pass code the rendered app cannot compile. Keep
+each `auth.test.ts` case title in step with the suite's pinned list too.
+
 **The canvas overlay** (#1939, SKILL.md §3k.8) is a sibling tree,
 `languages/javascript/react-canvas/`, that renders after §3k.7 and reuses the
 shell's loader rather than a copy of it, so a change to the loader's procedure

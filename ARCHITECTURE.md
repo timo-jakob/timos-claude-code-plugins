@@ -1170,9 +1170,9 @@ consumer's generated client is its own sub-tier (#958, below).
   React repo, scaffolded by bootstrap's §3k.7 from a sibling tree,
   `development/skills/bootstrap/templates/languages/javascript/react-shell/`:
   `src/shell/` (`Shell.tsx`, `Chrome.tsx`, `routes.ts`, `navigation.ts`,
-  `import-map.ts`, `loader.ts`, `context.ts`, `auth.ts`, `loader.test.ts`) and
-  `public/importmap.json`. Its **trigger** is §3k.5's overlay applying plus the
-  shell as the default shape — Q7's Step 2 plan line, which the UI shape
+  `import-map.ts`, `loader.ts`, `context.ts`, `auth.ts`, `loader.test.ts`,
+  `auth.test.ts`), `public/importmap.json` and `public/auth-config.json`. Its
+  **trigger** is §3k.5's overlay applying plus the shell as the default shape — Q7's Step 2 plan line, which the UI shape
   recommender (#1127) puts in the plan. Its **shape marker** is
   `src/shell/loader.ts`, the file #1127 reads and the one State D's adoption gap
   keys on. It **renders after §3k.6**: §3d → §3k → §3k.5 → §3k.6 → §3k.7, sharing no
@@ -1183,6 +1183,25 @@ consumer's generated client is its own sub-tier (#958, below).
   capability reaches a remote through one injection point, `ShellCapabilities`.
   *Rationale:* a plain SPA is a shell with zero remotes, so one shape covers the
   small-app case and grows remotes without a rewrite.
+- **The shell's auth module (#1326).** `src/shell/auth.ts` realizes the identity
+  position's browser half and is the page's **only token acquirer**. It is a
+  public client using the authorization-code flow with PKCE through
+  `oidc-client-ts`, which §3k.7 installs. Its user store is in memory, so a
+  reload re-acquires through a top-level redirect that the provider's session
+  answers, and no token is ever restored from storage. The PKCE `code_verifier`
+  and `state` use `sessionStorage` for the round-trip only, and the callback
+  removes them. In-page renewal rotates the refresh token, which stays in
+  memory; automatic silent renew and session monitoring are off and no
+  `silent_redirect_uri` is configured, so no hidden iframe ever runs. Provider
+  settings come from a runtime `/auth-config.json`, fetched once per page load,
+  that carries no secret and is refused while a field is empty. A remote
+  receives only the session's frozen `AuthContext` (`getAccessToken()` plus
+  display-only `claims`); `signOut()` discards the tokens first, so a context
+  already handed out rejects, then sends the top-level page to the provider's
+  end-session endpoint. `src/main.tsx` calls `signIn()` once at page load, the
+  call that completes the callback. *Rationale:* one acquirer per page means one
+  session, one refresh cycle and one sign-out, rather than one of each per
+  remote.
 - **The canvas overlay (#1939).** The widget canvas is an **opt-in** layer on the
   shell, scaffolded by bootstrap's §3k.8 from a sibling tree,
   `development/skills/bootstrap/templates/languages/javascript/react-canvas/`:

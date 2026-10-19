@@ -6,9 +6,10 @@
 # any layer beneath it.
 #
 # This suite pins the file set, the key content, the line width, the layering,
-# §3k.7's wording, and each loader.test.ts case title. The six framework-free
-# modules are TYPE-CHECKED with `tsc --noEmit --strict` against the mfe-contract/v1
-# index.d.ts — tsc is the declared bats dependency tests/mfe-contract.bats pins.
+# §3k.7's wording, and each loader.test.ts and auth.test.ts case title. The six
+# framework-free modules are TYPE-CHECKED with `tsc --noEmit --strict` against the
+# mfe-contract/v1 index.d.ts, and auth.ts (#1326) also against a type-only
+# oidc-client-ts stand-in — tsc is the declared bats dependency tests/mfe-contract.bats pins.
 # Running the Vitest cases against a rendered, installed tree is #1063's job:
 # nothing under bats installs npm packages.
 #
@@ -30,11 +31,13 @@ setup() {
   mkdir -p "$OUT"
 }
 
-# The ten shell templates, each at its deploy relpath, `LC_ALL=C sort` order.
+# The twelve shell templates, each at its deploy relpath, `LC_ALL=C sort` order.
 SHELL_FILES=(
+  public/auth-config.json
   public/importmap.json
   src/shell/Chrome.tsx
   src/shell/Shell.tsx
+  src/shell/auth.test.ts
   src/shell/auth.ts
   src/shell/context.ts
   src/shell/import-map.ts
@@ -44,8 +47,14 @@ SHELL_FILES=(
   src/shell/routes.ts
 )
 
-# The six modules that need no React, so tsc can check them with no install.
+# The six modules that need no React, so tsc can check them with no install —
+# auth.ts against the type-only oidc-client-ts stand-in (#1326).
 FRAMEWORK_FREE=(routes navigation import-map loader context auth)
+OIDC_SHIM_REL=tests/fixtures/react-shell/oidc-client-ts.d.ts
+
+# Claim reads the shell must never make: role, permission or scope claims, which
+# would turn a display-only claim into a client-side authorization input (#1326).
+FORBIDDEN_CLAIMS='\broles\b|\bpermissions?\b|realm_access|resource_access|\b(user|profile|claims|token)\??\.(scopes?|scp)\b'
 
 render_shell() {
   zsh "$RENDER" --templates "$SH" --out "$1" --project-slug Acme-Corp/demo "${SHELL_FILES[@]}"
@@ -57,7 +66,7 @@ collapse() {
 
 # --- the template tree --------------------------------------------------------
 
-@test "shell: the template tree contains exactly the ten blessed files" {
+@test "shell: the template tree contains exactly the twelve blessed files" {
   local listed
   listed="$(cd "$SH" && find . -type f | sed 's#^\./##' | LC_ALL=C sort | tr '\n' ' ')"
   [ "$listed" = "${SHELL_FILES[*]} " ]
@@ -92,11 +101,11 @@ for n, line in enumerate(open(sys.argv[1], encoding="utf-8"), 1):
   render_shell "$OUT"
   local m inc=()
   for m in "${FRAMEWORK_FREE[@]}"; do inc+=("src/shell/$m.ts"); done
-  jq -n --arg dts "$DTS" --args '{compilerOptions: {strict: true, noEmit: true, target: "ES2022",
-      module: "ESNext", moduleResolution: "Bundler", lib: ["ES2022", "DOM"], types: [],
-      verbatimModuleSyntax: true, erasableSyntaxOnly: true,
-      paths: {"@acme-corp/mfe-contract": [$dts]}}, files: $ARGS.positional}' "${inc[@]}" \
-    > "$OUT/tsconfig.json"
+  jq -n --arg dts "$DTS" --arg oidc "$REPO_ROOT/$OIDC_SHIM_REL" --args '{compilerOptions: {strict: true,
+      noEmit: true, target: "ES2022", module: "ESNext", moduleResolution: "Bundler", lib: ["ES2022", "DOM"],
+      types: [], verbatimModuleSyntax: true, erasableSyntaxOnly: true,
+      paths: {"@acme-corp/mfe-contract": [$dts], "oidc-client-ts": [$oidc]}}, files: $ARGS.positional}' \
+    "${inc[@]}" > "$OUT/tsconfig.json"
   run jq -e '.compilerOptions | has("skipLibCheck") | not' "$OUT/tsconfig.json"
   [ "$status" -eq 0 ]
   run tsc -p "$OUT" --noEmit --strict
@@ -106,11 +115,15 @@ for n, line in enumerate(open(sys.argv[1], encoding="utf-8"), 1):
 @test "shell: the type check reds on a module that breaks the contract (non-vacuity)" {
   render_shell "$OUT"
   sed -i.bak 's/kind: "page",/kind: "widget",/' "$OUT/src/shell/context.ts"
-  jq -n --arg dts "$DTS" '{compilerOptions: {strict: true, noEmit: true, target: "ES2022", module: "ESNext",
-      moduleResolution: "Bundler", lib: ["ES2022", "DOM"], types: [],
-      paths: {"@acme-corp/mfe-contract": [$dts]}}, files: ["src/shell/context.ts"]}' > "$OUT/tsconfig.json"
+  grep -q 'kind: "widget",' "$OUT/src/shell/context.ts"
+  jq -n --arg dts "$DTS" --arg oidc "$REPO_ROOT/$OIDC_SHIM_REL" '{compilerOptions: {strict: true, noEmit: true,
+      target: "ES2022", module: "ESNext", moduleResolution: "Bundler", lib: ["ES2022", "DOM"], types: [],
+      paths: {"@acme-corp/mfe-contract": [$dts], "oidc-client-ts": [$oidc]}}, files: ["src/shell/context.ts"]}' \
+    > "$OUT/tsconfig.json"
   run tsc -p "$OUT" --noEmit --strict
   [ "$status" -ne 0 ]
+  contains "$output" "src/shell/context.ts"
+  contains "$output" "error TS2322: Type '\"widget\"' is not assignable to type '\"page\"'."
 }
 
 # --- key content --------------------------------------------------------------
@@ -143,8 +156,108 @@ for n, line in enumerate(open(sys.argv[1], encoding="utf-8"), 1):
   contains "$c" 'export interface ShellCapabilities { auth: AuthContext; flags: FlagContext; theme: ThemeTokens; }'
   contains "$c" 'flags: { isEnabled: () => false, variant: () => undefined }, theme: Object.freeze({}),'
   contains "$c" 'auth: capabilities.auth, flags: capabilities.flags, theme: capabilities.theme, signal, kind: "page", basePath, onNavigate,'
-  contains "$a" 'getAccessToken: () => Promise.reject(new Error("no auth provider")),'
+  contains "$c" 'auth: createAuthContext(),'
+  contains "$a" 'export function createAuthContext(): AuthContext { return pageAuth().context; }'
   contains "$a" 'Object.freeze({ sub: "", displayName: "", tenantId: "" })'
+}
+
+# --- the auth module (#1326) --------------------------------------------------
+
+@test "auth: auth.ts is a public PKCE client holding tokens in memory, with no iframe renew" {
+  local a
+  a="$(collapse < "$SH/src/shell/auth.ts")"
+  contains "$a" 'import { InMemoryWebStorage, UserManager, WebStorageStateStore, type INavigator, type User } from "oidc-client-ts";'
+  contains "$a" 'response_type: "code",'
+  contains "$a" 'redirectTarget: "top",'
+  # tokens in memory; the PKCE code_verifier and state in sessionStorage for the round-trip
+  contains "$a" 'userStore: new WebStorageStateStore({ store: new InMemoryWebStorage() }),'
+  contains "$a" 'stateStore: new WebStorageStateStore({ store: window.sessionStorage }),'
+  contains "$a" 'automaticSilentRenew: false, monitorSession: false,'
+  lacks "$a" 'silent_redirect_uri'
+  lacks "$a" 'localStorage'
+  lacks "$a" 'indexedDB'
+  lacks "$a" 'document.cookie'
+  # renewal rotates the refresh token; without one, or when it is refused, the top-level redirect re-acquires
+  contains "$a" 'const renewed = current.refresh_token === undefined ? null : await users.signinSilent().catch(() => null); if (signedOut) return; if (renewed === null) { session = undefined; await signIn(); return; } hold(renewed);'
+  contains "$a" 'const RENEW_MARGIN_S = 30;'
+  contains "$a" 'if (user === null) await signIn();'
+  contains "$a" 'if (current !== null && left !== undefined && left <= RENEW_MARGIN_S) { renewal ??= renew(current).finally(() => {'
+  # the callback leaves its URL before it is handled, then returns to the starting page and re-matches the router
+  contains "$a" 'if (window.location.pathname === config.redirectPath) {'
+  contains "$a" 'const callback = window.location.href; window.history.replaceState(null, "", "/"); const signedIn = await users.signinRedirectCallback(callback); hold(signedIn); window.history.replaceState(null, "", returnPath(signedIn.state)); window.dispatchEvent(new PopStateEvent("popstate"));'
+  # after a reload: a top-level redirect, no prompt parameter
+  contains "$a" 'await users.signinRedirect({ state: `${pathname}${search}${hash}` });'
+  lacks "$a" 'prompt'
+}
+
+@test "auth: no client secret appears anywhere in the shell tree" {
+  # auth.test.ts names the parameter only to assert the provider never receives one
+  run grep -rniE --exclude=auth.test.ts 'client_?secret' "$SH"
+  [ "$status" -eq 1 ]
+  [ "$(jq -r 'keys_unsorted | map(select(test("secret"; "i"))) | length' "$SH/public/auth-config.json")" = "0" ]
+}
+
+@test "auth: public/auth-config.json ships the four provider fields as empty placeholders" {
+  [ "$(jq -c . "$SH/public/auth-config.json")" = '{"issuer":"","clientId":"","redirectPath":"","scope":""}' ]
+  local a
+  a="$(collapse < "$SH/src/shell/auth.ts")"
+  contains "$a" 'const response = await fetch("/auth-config.json");'
+  contains "$a" 'const CONFIG_FIELDS = ["issuer", "clientId", "redirectPath", "scope"] as const;'
+  contains "$a" 'if (typeof value !== "string" || value === "") throw new Error(`/auth-config.json: ${key} is not set`);'
+  contains "$a" 'manager ??= loadConfig().then('
+}
+
+@test "auth: a remote sees only getAccessToken and frozen claims, and only auth.ts calls the provider" {
+  local a f
+  a="$(collapse < "$SH/src/shell/auth.ts")"
+  contains "$a" 'const context: AuthContext = Object.freeze({ getAccessToken, get claims(): AuthClaims { return claims; }, });'
+  contains "$a" 'return Object.freeze({ sub: profile.sub, displayName: text(profile.name) || text(profile.preferred_username), tenantId: tenantOf(profile.organization), });'
+  contains "$a" 'return keys.length === 1 ? keys[0] : ""; } return text(organization); }'
+  # no other shell source imports the OIDC client or reaches the provider (auth.test.ts drives auth.ts)
+  for f in $(cd "$SH" && find . -type f -name '*.ts*' | sed 's#^\./##'); do
+    [ "$f" = src/shell/auth.ts ] && continue
+    [ "$f" = src/shell/auth.test.ts ] && continue
+    run grep -nE 'oidc-client-ts|UserManager|signinRedirect|signinSilent|signoutRedirect|/auth-config\.json' "$SH/$f"
+    [ "$status" -eq 1 ] || { echo "$f reaches the provider: $output"; false; }
+  done
+}
+
+@test "auth: signOut discards the tokens before it sends the top-level page to the end-session endpoint" {
+  local a
+  a="$(collapse < "$SH/src/shell/auth.ts")"
+  contains "$a" 'const signOut = async (): Promise<void> => { signedOut = true; const idToken = user?.id_token; user = null; claims = NO_CLAIMS;'
+  contains "$a" 'await users.removeUser(); await users.signoutRedirect({ id_token_hint: idToken });'
+  contains "$a" 'if (signedOut) throw new Error("signed out");'
+}
+
+@test "auth: no shell source reads a role, permission or scope claim" {
+  run grep -rnE "$FORBIDDEN_CLAIMS" "$SH"
+  [ "$status" -eq 1 ] || { echo "$output"; false; }
+}
+
+@test "auth: the claim guard fires on each forbidden shape (non-vacuity)" {
+  local line
+  for line in 'if (user.profile.roles) {' 'const p = claims.permissions;' 'token.realm_access' \
+      'x.resource_access' 'if (user.scope.includes("admin"))' 'const s = profile.scopes;' 'token?.scp'; do
+    printf '%s\n' "$line" | grep -qE "$FORBIDDEN_CLAIMS" || { echo "guard missed: $line"; false; }
+  done
+  # the config's own scope field is not a claim read
+  run grep -qE "$FORBIDDEN_CLAIMS" <<< 'scope: config.scope,'
+  [ "$status" -eq 1 ]
+}
+
+@test "auth: the oidc-client-ts stand-in declares only types, and the type check reds without it (non-vacuity)" {
+  local shim="$REPO_ROOT/$OIDC_SHIM_REL"
+  [ -f "$shim" ]
+  run grep -nE '^export (const|function|let|var) ' "$shim"
+  [ "$status" -eq 1 ]
+  render_shell "$OUT"
+  jq -n --arg dts "$DTS" '{compilerOptions: {strict: true, noEmit: true, target: "ES2022", module: "ESNext",
+      moduleResolution: "Bundler", lib: ["ES2022", "DOM"], types: [],
+      paths: {"@acme-corp/mfe-contract": [$dts]}}, files: ["src/shell/auth.ts"]}' > "$OUT/tsconfig.json"
+  run tsc -p "$OUT" --noEmit --strict
+  [ "$status" -ne 0 ]
+  contains "$output" "oidc-client-ts"
 }
 
 @test "shell: import-map.ts fetches /importmap.json once and names an unknown specifier" {
@@ -217,7 +330,7 @@ lower_layer_paths() {
   before="$(cd "$app" && find . -type f -exec shasum {} + | LC_ALL=C sort)"
   render_shell "$app"
   after="$(cd "$app" && find . -type f ! -path './src/shell/*' ! -path './public/importmap.json' \
-    -exec shasum {} + | LC_ALL=C sort)"
+    -not -path './public/auth-config.json' -exec shasum {} + | LC_ALL=C sort)"
   [ "$before" = "$after" ]
   # no shell target shares a path with a lower layer, and none is Vite-owned
   run comm -12 <(printf '%s\n' "${SHELL_FILES[@]}" | LC_ALL=C sort) <(lower_layer_paths | LC_ALL=C sort -u)
@@ -294,7 +407,7 @@ STEP_END='### 3k.8. Canvas overlay (a widget canvas on the shell — #1939) '
   for f in "${SHELL_FILES[@]}"; do contains "$section" " $f"; done
   contains "$section" 'so no `{{PLACEHOLDER}}` survives'
   contains "$section" 'Each file lands at its own relpath — `src/shell/…` and `public/importmap.json` (`{ "imports": {} }`, the local-development map; each environment serves its own `/importmap.json`, #1128).'
-  contains "$section" 'running `src/shell/loader.test.ts` against a rendered tree is the render-and-build smoke check'"'"'s job (#1063).'
+  contains "$section" 'running `src/shell/loader.test.ts` and `src/shell/auth.test.ts` against a rendered tree is the render-and-build smoke check'"'"'s job (#1063).'
   contains "$section" 'An on-disk shell file that differs from its template takes **idempotency rule 3'"'"'s diff prompt**, never a blind overwrite.'
 }
 
@@ -308,9 +421,52 @@ STEP_END='### 3k.8. Canvas overlay (a widget canvas on the shell — #1939) '
   contains "$section" '**Confirm before editing**: show the diff and ask; the plan approval alone does not cover it.'
   contains "$section" '**Snapshot `src/main.tsx` first.**'
   contains "$section" '**Idempotent skip** when `src/main.tsx` already imports `Shell`.'
-  contains "$section" 'restore the pre-edit snapshot and record a Step 5 TODO naming the `<Shell>` wrap to add by hand.'
+  contains "$section" 'restore the pre-edit snapshot and record a Step 5 TODO naming the lines that edit would have added, to add by hand.'
   contains "$section" '**It composes with §3k.6'"'"'s `QueryClientProvider` edit in either order**'
   contains "$section" 'No other Vite-owned file is written — `index.html` included.'
+}
+
+@test "shell: §3k.7 installs oidc-client-ts, withholds auth.test.ts with loader.test.ts, and wires signIn (#1326)" {
+  local section
+  section="$(shell_step)"
+  ends_with "$section" "$STEP_END"
+  contains "$section" 'npm i oidc-client-ts # runtime: src/shell/auth.ts'"'"'s OIDC client (#1326)'
+  contains "$section" '`oidc-client-ts` installs only after the contract package is in place, so a failed contract install never reaches it;'
+  contains "$section" 'never reaches it; it follows the same skip rule, and **if its install fails,'
+  contains "$section" '**if its install fails, restore both files from the snapshot, render nothing, and record a Step 5 item naming `oidc-client-ts`**'
+  contains "$section" '`src/shell/auth.test.ts` needs the same wiring and is withheld, with its own Step 5 item, under the same rule.'
+  contains "$section" '`public/auth-config.json` is the auth module'"'"'s provider config, with the issuer, client id, redirect path and scopes as empty placeholders and no secret field.'
+  contains "$section" 'import { signIn } from "./shell/auth";'
+  contains "$section" 'signIn().catch((error: unknown) => console.error("sign-in failed:", error));'
+  contains "$section" 'Without it, nothing completes the callback.'
+  contains "$section" 'Each environment serves its own `/auth-config.json` behind the gateway (#1128), and the shell refuses to sign in while a field is empty.'
+  contains "$section" 'When this step ends with the template'"'"'s placeholder `public/auth-config.json` on disk, whether it was just written or skipped as identical, record a Step 5 item to set `issuer`, `clientId`, `redirectPath` and `scope` for local development, and to have each environment serve its own `/auth-config.json` behind the gateway (#1128).'
+  contains "$section" 'Record no such item when the user kept their own differing file at idempotency rule 3'"'"'s diff prompt, or when a failed install or render left the file unwritten.'
+  contains "$section" 'The `signIn()` call starts the page'"'"'s sign-in at load (#1326): it completes the provider'"'"'s callback on the redirect path, and otherwise sends the top-level page to the provider.'
+  contains "$section" 'When it imports `Shell` but not `signIn` — a shell bootstrapped before #1326 — offer the `signIn` import and call as their own edit'
+  contains "$section" '`auth.ts` against a type-only `oidc-client-ts` stand-in'
+}
+
+@test "auth: auth.test.ts holds a case for each auth criterion" {
+  local f title
+  f="$SH/src/shell/auth.test.ts"
+  [ -f "$f" ]
+  for title in \
+    'signs in with the authorization-code flow and PKCE as a public client, with no client secret' \
+    'after sign-in and the callback no storage area holds a token' \
+    'the callback removes the PKCE code_verifier and state from sessionStorage' \
+    'the callback returns to the page that started the sign-in' \
+    'after a reload the shell re-acquires by a top-level redirect instead of restoring a token' \
+    'an expiring token is renewed with the refresh token, and the rotated refresh token stays in memory' \
+    'renewal never runs a hidden-iframe silent renew' \
+    'fetches /auth-config.json once per page load and reads issuer, clientId, redirectPath and scope' \
+    'an unset /auth-config.json field rejects getAccessToken instead of redirecting' \
+    'the shipped /auth-config.json placeholder is rejected, never sent to a provider' \
+    'the AuthContext a remote receives exposes only getAccessToken and frozen display-only claims' \
+    'signOut drops the tokens, so a handed-out getAccessToken rejects, then ends the provider session'; do
+    grep -qF -- "it(\"$title\"" "$f" || { echo "missing case: $title"; return 1; }
+  done
+  [ "$(grep -c '^  it("' "$f")" -eq 12 ]
 }
 
 # --- the Vitest cases ---------------------------------------------------------
@@ -349,4 +505,17 @@ STEP_END='### 3k.8. Canvas overlay (a widget canvas on the shell — #1939) '
   contains "$arch" 'It **renders after §3k.6**: §3d → §3k → §3k.5 → §3k.6 → §3k.7'
   contains "$maint" '**The shell overlay** (#1124, SKILL.md §3k.7) is a sibling tree'
   contains "$maint" 'Keep `src/shell/loader.ts` as the shape marker'
+}
+
+@test "auth: ARCHITECTURE.md records the auth module and MAINTAINING.md the stand-in rule" {
+  local arch maint
+  arch="$(collapse < "$ARCH")"
+  maint="$(collapse < "$MAINT")"
+  contains "$arch" '**The shell'"'"'s auth module (#1326).** `src/shell/auth.ts` realizes the identity position'"'"'s browser half and is the page'"'"'s **only token acquirer**.'
+  contains "$arch" 'Its user store is in memory, so a reload re-acquires through a top-level redirect that the provider'"'"'s session answers, and no token is ever restored from storage.'
+  contains "$arch" 'automatic silent renew and session monitoring are off and no `silent_redirect_uri` is configured, so no hidden iframe ever runs.'
+  contains "$arch" '`signOut()` discards the tokens first, so a context already handed out rejects'
+  contains "$arch" '`src/main.tsx` calls `signIn()` once at page load, the call that completes the callback.'
+  contains "$maint" 'the suite type-checks `auth.ts` against `tests/fixtures/react-shell/oidc-client-ts.d.ts`'
+  contains "$maint" 'copy that member'"'"'s signature into the stand-in from the real package'"'"'s types, narrowing it and never widening it.'
 }

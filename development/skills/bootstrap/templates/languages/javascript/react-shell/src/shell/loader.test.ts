@@ -86,7 +86,7 @@ describe("routes, navigation and context", () => {
     expect(seen).toEqual(["/orders/7", "/orders/7"]);
   });
 
-  it("createPageContext carries every PageContext field with the static defaults", async () => {
+  it("createPageContext carries every PageContext field with the static defaults", () => {
     const controller = new AbortController();
     const onNavigate = vi.fn();
     const ctx = createPageContext(defaultCapabilities(), controller.signal, "/orders", onNavigate);
@@ -99,7 +99,9 @@ describe("routes, navigation and context", () => {
     expect(Object.keys(ctx.theme)).toEqual([]);
     expect(Object.isFrozen(ctx.auth.claims)).toBe(true);
     expect(ctx.auth.claims).toEqual({ sub: "", displayName: "", tenantId: "" });
-    await expect(createAuthContext().getAccessToken()).rejects.toThrow("no auth provider");
+    // the page's one session, created without I/O (auth.test.ts covers the flow)
+    expect(ctx.auth).toBe(createAuthContext());
+    expect(fetch).not.toHaveBeenCalled();
     ctx.onNavigate("/billing");
     expect(onNavigate).toHaveBeenCalledWith("/billing");
   });
