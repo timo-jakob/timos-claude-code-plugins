@@ -2209,8 +2209,11 @@ For each detected language, merge in the appropriate config from
     `go get -tool github.com/oasdiff/oasdiff@latest` only when §3i renders
     the contracts machinery. The gate runs them as `go tool <name>`, and
     reaches the checker scripts that call `yq` and `oasdiff` by name through
-    shims, so `go.mod` is their one pin. Skip this when there is no `go.mod`
-    yet, and name the commands in the final report.
+    shims, so `go.mod` is their one pin. `make test` and the quality
+    workflows' Go coverage step run `go tool gocover-cobertura` too, and that
+    step fails with this `go get -tool` command as its fix when the directive
+    is missing (#2864). Skip this when there is no `go.mod` yet, and name the
+    commands in the final report.
 
   **Copy** three more files (no placeholders in the first; render the last
   two):
