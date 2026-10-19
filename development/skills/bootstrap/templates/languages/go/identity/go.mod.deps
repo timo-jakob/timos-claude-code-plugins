@@ -1,19 +1,25 @@
-// Canonical Go identity module requirements (#2861).
+// Canonical Go identity module requirements (#2861, #2862).
 //
-// A go.mod FRAGMENT, not a module file: fold this require line into the same
+// A go.mod FRAGMENT, not a module file: fold these require lines into the same
 // go.mod you folded the ops-api payload's into, then `go mod tidy`. Place the
 // payload's .go files into internal/identity/ FIRST -- tidy removes any
 // requirement no package in the working tree imports, so run against a tree
-// that does not yet contain them and it silently strips this line and exits 0.
+// that does not yet contain them and it silently strips these lines and exits 0.
 //
-// ONE library, deliberately. go-oidc is the blessed Go OIDC validator: issuer
-// discovery, a remote JWKS key set that re-fetches on an unknown key (so a key
-// rotation needs no restart), and a verifier that checks iss, aud and exp with
-// the signing algorithms pinned by configuration. There is no alternative
-// library and no switch between libraries. go-oidc brings go-jose in as its own
-// requirement; tidy writes that line, and nothing in this payload imports it.
+// ONE library per job, deliberately, with no alternative and no switch between
+// libraries:
 //
-// The version is a floor, not a pin -- Renovate/Dependabot move it. Note the /v3
-// import path.
+//   - go-oidc is the blessed Go OIDC validator: issuer discovery, a remote JWKS
+//     key set that re-fetches on an unknown key (so a key rotation needs no
+//     restart), and a verifier that checks iss, aud and exp with the signing
+//     algorithms pinned by configuration. It brings go-jose in as its own
+//     requirement; tidy writes that line, and nothing in this payload imports it.
+//   - golang.org/x/oauth2 (its clientcredentials package) is the blessed
+//     client-credentials token source for service-account calls (s2s.go): a
+//     cached token, refreshed only on expiry.
+//
+// The versions are floors, not pins -- Renovate/Dependabot move them. Note the
+// /v3 import path.
 
 require github.com/coreos/go-oidc/v3 v3.21.0
+require golang.org/x/oauth2 v0.37.0
