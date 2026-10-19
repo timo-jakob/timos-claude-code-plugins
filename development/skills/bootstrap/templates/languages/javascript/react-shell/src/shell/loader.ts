@@ -10,13 +10,17 @@
 //   (d) serialise — the next route's attempt starts only after the previous
 //       one has finished, so a stale remote is never mounted.
 // An import that fails makes no mount attempt: the fallback shows, no unmount.
+// The procedure is slot-agnostic: the canvas (#1939) runs it once per widget slot.
 
-import type { MfeModule, PageContext } from "@{{NPM_SCOPE}}/mfe-contract";
+import type { MfeModule, PageContext, WidgetContext } from "@{{NPM_SCOPE}}/mfe-contract";
 import { resolveSpecifier } from "./import-map";
 import type { ShellRoute } from "./routes";
 
 /** Loads a remote's entry module; its namespace is its MfeModule — named exports, never a default. */
 export type ImportRemote = (url: string) => Promise<MfeModule>;
+
+/** What a remote is mounted with: a route's page context or a canvas slot's widget context. */
+export type RemoteContext = PageContext | WidgetContext;
 
 export const importRemote: ImportRemote = (url) => import(/* @vite-ignore */ url);
 
@@ -39,7 +43,7 @@ function showFallback(outlet: HTMLElement): void {
 export function enterRoute(
   outlet: HTMLElement,
   specifier: string,
-  buildContext: (signal: AbortSignal) => PageContext,
+  buildContext: (signal: AbortSignal) => RemoteContext,
   load: ImportRemote = importRemote,
 ): Attempt {
   const controller = new AbortController();
@@ -91,7 +95,7 @@ export function enterRoute(
 /** Drives one outlet: a route change tears the current attempt down before the next enters. */
 export class RouteLoader {
   private readonly outlet: HTMLElement;
-  private readonly buildContext: (route: ShellRoute, signal: AbortSignal) => PageContext;
+  private readonly buildContext: (route: ShellRoute, signal: AbortSignal) => RemoteContext;
   private readonly load: ImportRemote;
   private current: Attempt | null = null;
   private currentPrefix: string | null = null;
@@ -99,7 +103,7 @@ export class RouteLoader {
 
   constructor(
     outlet: HTMLElement,
-    buildContext: (route: ShellRoute, signal: AbortSignal) => PageContext,
+    buildContext: (route: ShellRoute, signal: AbortSignal) => RemoteContext,
     load: ImportRemote = importRemote,
   ) {
     this.outlet = outlet;

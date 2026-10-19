@@ -456,6 +456,16 @@ six framework-free modules import `@{{NPM_SCOPE}}/mfe-contract`, and
 read that path — and keep each `loader.test.ts` case title in step with the
 suite's pinned list.
 
+**The canvas overlay** (#1939, SKILL.md §3k.8) is a sibling tree,
+`languages/javascript/react-canvas/`, that renders after §3k.7 and reuses the
+shell's loader rather than a copy of it, so a change to the loader's procedure
+or to its slot-agnostic context type reaches the canvas too.
+`tests/react-canvas-templates.bats` type-checks `canvas.ts`, `store.ts`,
+`validate.ts` and `widgets.ts` against the contract and pins each
+`canvas.test.ts` case title. Keep `src/canvas/canvas.ts` as the shape marker,
+and keep the four shared specifiers in step across `vite.shared.config.ts`, the
+`shared/` entries and §3k.8's import map.
+
 `tests/react-templates.bats` checks the load-bearing tokens of each layer
 against that layer's own template, so a forgotten copy usually reds there — but
 it checks tokens, not whole files, so read the diff side by side as well.

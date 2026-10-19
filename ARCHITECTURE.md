@@ -1174,7 +1174,7 @@ consumer's generated client is its own sub-tier (#958, below).
   shell as the default shape — its own droppable Step 2 plan line until the
   shell-or-remote recommender (#1127) lands. Its **shape marker** is
   `src/shell/loader.ts`, the file #1127 reads and the one State D's adoption gap
-  keys on. It **renders last**: §3d → §3k → §3k.5 → §3k.6 → §3k.7, sharing no
+  keys on. It **renders after §3k.6**: §3d → §3k → §3k.5 → §3k.6 → §3k.7, sharing no
   path with an earlier layer, and its only Vite-owned edit is the confirmed
   `src/main.tsx` wrap of `<App />` in `<Shell capabilities={…}>`. It installs
   `@<scope>/mfe-contract` first and renders nothing when that fails. The loader
@@ -1182,6 +1182,25 @@ consumer's generated client is its own sub-tier (#958, below).
   capability reaches a remote through one injection point, `ShellCapabilities`.
   *Rationale:* a plain SPA is a shell with zero remotes, so one shape covers the
   small-app case and grows remotes without a rewrite.
+- **The canvas overlay (#1939).** The widget canvas is an **opt-in** layer on the
+  shell, scaffolded by bootstrap's §3k.8 from a sibling tree,
+  `development/skills/bootstrap/templates/languages/javascript/react-canvas/`:
+  `src/canvas/` (`WidgetCanvas.tsx`, `canvas.ts`, `store.ts`, `validate.ts`,
+  `widgets.ts`, `canvas.test.ts` and four `shared/` entries) and
+  `vite.shared.config.ts`. Its **trigger** is the shell's marker on disk or
+  §3k.7's plan line kept, plus a Step 2 yes/no question that defaults to no; its **shape marker** is
+  `src/canvas/canvas.ts`. It renders after §3k.7 — §3d → §3k → §3k.5 → §3k.6 →
+  §3k.7 → §3k.8 — and each slot runs the shell loader's procedure, whose context
+  type is slot-agnostic. The layout reaches the canvas through an injectable
+  `CanvasStore` on the shell's capabilities, defaulting to localStorage, and a
+  widget's config is validated host-side against a JSON-Schema subset that
+  fails closed. It owns the **shared-dependency import map**: `react`,
+  `react/jsx-runtime`, `react-dom` and `react-dom/client` built by the shell into
+  `public/shared/` and mapped by an inline `<script type="importmap">` — three
+  confirmed edits, to `package.json`, `index.html` and `src/main.tsx`.
+  *Rationale:* shared modules that are the shell's own build assets carry the
+  shell image's version, so concurrently mounted widgets run one React with one
+  pin.
 - **Verified statically here, built elsewhere.** `tests/react-templates.bats`
   pins the file set, each variant's kept and added content, the binding's
   re-export and barrel invariants, and the 120-column width, and
