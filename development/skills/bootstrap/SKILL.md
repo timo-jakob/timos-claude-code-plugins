@@ -5562,6 +5562,88 @@ Verification here is **structural** and type-checked
 `tsc --noEmit --strict`); running `src/remote/entry.test.ts` against a rendered
 tree is the render-and-build smoke check's job (#1063).
 
+### 3k.10. MFE conformance (a remote's contract check — #1126)
+
+The **conformance check** of the MFE composition epic (#1122): a standalone
+checker and a path-conditional workflow that prove a remote conforms to
+`mfe-contract/v1` (ARCHITECTURE.md, *The `mfe-contract/v1` contract*). The
+contract is types-only, so the compiler checks a remote against the contract but
+nothing checks it against the shell's major. This step closes that gap per
+remote repo, the same way `check-ops-conformance.zsh` proves a service's ops
+surface.
+
+**Trigger.** Run this step after §3k.9, and only for a repo carrying the remote
+marker, `src/remote/entry.tsx` — on disk already or rendered by §3k.9 in this
+run. A shell exports nothing to check, so a repo without the marker gets
+nothing, and a repo carrying both markers was already refused by §3k.9. **When
+§3k.9 rendered nothing because `@<scope>/mfe-contract` could not be installed
+(#1899), this step renders nothing either** — no marker landed, and `npm ci`
+could not resolve the package — and records no Step 5 item of its own beyond
+§3k.9's. In State D the step is an **adoption gap** when the remote marker is
+present and a conformance file is missing: offer the missing files in the plan.
+
+**Render the conformance set** into a staging directory, then write each file
+under the idempotency rules:
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates/languages/javascript/mfe-conformance" \
+  --out "<staging-dir>" --default-branch "<branch>" \
+  scripts/check-mfe-conformance.zsh .github/workflows/mfe-conformance.yml.tmpl
+```
+
+**Render the workflow only when `package.json` has a `build:remote` script**
+(§3k.9's confirmed edit was made, or skipped as already present); otherwise
+render only the checker and record a Step 5 TODO naming the `build:remote`
+script, since the workflow runs it.
+`--default-branch` sets `{{DEFAULT_BRANCH}}`, the only placeholder the set
+carries, so no `{{PLACEHOLDER}}` survives; the checker is copied verbatim. A
+non-zero `render.zsh` exit renders nothing, records a Step 5 item, and the run
+carries on. Record every file this step writes under the `react_overlay`
+telemetry step key (*Keep the run's facts as you go*).
+
+- `scripts/check-mfe-conformance.zsh` — the **checker**:
+  `--entry <dist/remote.js> --package <package.json> --shell-major <n>
+  [--base-url <url>] [--timeout <seconds>]`. It evaluates the built entry under
+  node and requires `mount` (2 parameters) and `unmount` (1) — `Function.length`,
+  which a default value or a rest parameter lowers, so an entry must declare
+  `mount(el, ctx)` and `unmount(el)` as plain parameters; it requires the
+  declared `@*/mfe-contract` range to resolve to exactly one major, equal to
+  `--shell-major`; a widget (`src/remote/manifest.ts` beside the package) must
+  also export `manifest`, whose `contractMajor` equals both. With `--base-url`
+  it also fetches `<base-url>/remote.js` and requires 200, a JavaScript content
+  type and a body byte-identical to `--entry`. `--timeout` (default 10) bounds
+  both the entry's evaluation and that fetch, so an entry that never finishes
+  evaluating fails rather than hangs. Exit 0 when the remote conforms,
+  1 when it does not (every failure an `::error::` line naming its check), 2
+  for a usage or tooling error.
+- `.github/workflows/mfe-conformance.yml` — runs on `pull_request` to the
+  default branch for `src/remote/**`, `vite.remote.config.ts`, `package.json`,
+  `package-lock.json`, `Dockerfile`, the checker and itself, plus
+  `workflow_dispatch`, and is **never a required context**. It runs `npm ci`,
+  `npm run build:remote` (§3k.9's script), then the checker with
+  `--shell-major ${{ vars.MFE_SHELL_MAJOR || '1' }}` — a repository variable,
+  defaulting to 1, the contract's only major today.
+
+**The served check — a root `Dockerfile` only.** The workflow builds and starts
+the container and passes `--base-url` **only when the repo has a root
+`Dockerfile`**; without one it runs the static checks alone. Key this on a
+`Dockerfile` at the repo root, not on `has_dockerfile`, exactly as the
+`ops-conformance` workflow does. When the repo has no root `Dockerfile` at
+bootstrap time, record a Step 5 TODO: *wire the served check once the
+static-asset container (#1062) exists* — adding the `Dockerfile` later turns it
+on with no workflow edit.
+
+**Layer ordering — composition, not clobbering.** §3d → §3k → §3k.5 → §3k.6 →
+§3k.9 → **this step**, which shares no path with an earlier layer and edits no
+Vite-owned file. An on-disk conformance file that differs from its template
+takes **idempotency rule 3's diff prompt**, never a blind overwrite.
+
+Verification here is behavioural (`tests/check-mfe-conformance.bats`: real
+`node` against small ES-module fixtures, a stubbed `curl`, and a negative case per
+check); running the workflow against a rendered, built remote is the
+render-and-build smoke check's job (#1063).
+
 ### 3l. Infrastructure-as-code repos (no application language) — #1154
 
 Applies when exactly one of `is_kubernetes` and `is_opentofu` is `true`, **the resolved language set is empty**,
@@ -7532,7 +7614,7 @@ kept since the start (*Telemetry — stamp the run's start*) to
   | `api_contracts` | 3i. API contracts machinery |
   | `anti_corruption_adapter` | 3j. Multi-major anti-corruption adapter |
   | `contract_consumer` | 3k. API contract-consumer machinery |
-  | `react_overlay` | 3k.5. React overlay, 3k.7. Shell overlay, 3k.8. Canvas overlay, and 3k.9. Remote overlay |
+  | `react_overlay` | 3k.5. React overlay, 3k.7. Shell overlay, 3k.8. Canvas overlay, 3k.9. Remote overlay, and 3k.10. MFE conformance |
   | `react_query` | 3k.6. React Query binding |
   | `iac` | 3l. Infrastructure-as-code repos |
   | `composition` | 3m. Composition repos |

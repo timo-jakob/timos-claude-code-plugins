@@ -63,9 +63,10 @@ compatibility boundary between a shell and the remotes it can load.
   change to a declared type** — removing a member, widening a type, adding a
   `kind`. Only an added optional member is minor.
 - A shell and a remote on different majors are incompatible. No build sees
-  both dependency ranges, so for a page the two majors are compared by
-  conformance (#1126) — until that lands, nothing compares them. A gallery
-  refuses a widget whose `contractMajor` it does not implement.
+  both dependency ranges, so each remote's conformance check (#1126,
+  `check-mfe-conformance.zsh`) compares its declared major — and a widget's
+  `contractMajor` — with the shell's, which it takes as an explicit input. A
+  gallery also refuses a widget whose `contractMajor` it does not implement.
 
 ## Examples
 

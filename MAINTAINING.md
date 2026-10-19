@@ -475,6 +475,13 @@ type-checks `router.ts` and `manifest.ts` against the contract and pins each
 read those paths — and keep the widget build's four external specifiers in step
 with §3k.8's import map.
 
+**The MFE conformance check** (#1126, SKILL.md §3k.10) is a sibling tree,
+`languages/javascript/mfe-conformance/`, rendered only for a repo carrying the
+remote marker. `tests/check-mfe-conformance.bats` runs the checker with real
+`node` against small ES-module fixtures and a stubbed `curl`, with a negative
+case per check. Keep the checker's export arities in step with the contract's
+`MfeModule` and its widget marker in step with §3k.9's `src/remote/manifest.ts`.
+
 `tests/react-templates.bats` checks the load-bearing tokens of each layer
 against that layer's own template, so a forgotten copy usually reds there — but
 it checks tokens, not whole files, so read the diff side by side as well.

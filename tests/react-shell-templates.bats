@@ -280,7 +280,7 @@ STEP_END='### 3k.8. Canvas overlay (a widget canvas on the shell — #1939) '
   contains "$section" '**Withhold `src/shell/loader.test.ts`** — drop it from the list — unless §3k.5 ended'
   contains "$section" 'unless §3k.5 ended with its setup module, `src/test/setup.ts`, on disk, and record a Step 5 item'
   contains "$section" 'Record every file this step writes under the `react_overlay` telemetry step key (*Keep the run'"'"'s facts as you go*). Each file lands'
-  contains "$(cat "$SKILL")" '| `react_overlay` | 3k.5. React overlay, 3k.7. Shell overlay, 3k.8. Canvas overlay, and 3k.9. Remote overlay |'
+  contains "$(cat "$SKILL")" '| `react_overlay` | 3k.5. React overlay, 3k.7. Shell overlay, 3k.8. Canvas overlay, 3k.9. Remote overlay, and 3k.10. MFE conformance |'
 }
 
 @test "shell: §3k.7's render block lists every shell template and passes --project-slug" {
