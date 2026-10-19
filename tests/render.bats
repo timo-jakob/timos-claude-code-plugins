@@ -132,6 +132,21 @@ setup() {
   grep -q 'No email channel is configured' "$OUT/s.md"
 }
 
+# The Go coverage step checks gocover-cobertura resolves, and names the fix,
+# before it converts (#2864): check, ::error::, hint, then the conversion.
+assert_go_tool_check() {
+  local q="$1" check err hint conv
+  check="$(grep -n 'go tool -n gocover-cobertura >/dev/null || {' "$q" | cut -d: -f1)"
+  err="$(grep -n 'echo "::error::go tool gocover-cobertura failed (go'"'"'s error above) — if go.mod has no tool directive,' "$q" | cut -d: -f1)"
+  hint="$(grep -n '"run: go get -tool github.com/boumenot/gocover-cobertura@latest"$' "$q" | cut -d: -f1)"
+  conv="$(grep -n 'go tool gocover-cobertura -ignore-gen-files < coverage.out' "$q" | cut -d: -f1)"
+  [ -n "$check" ] && [ -n "$err" ] && [ -n "$hint" ] && [ -n "$conv" ] || { echo "missing: $check/$err/$hint/$conv"; false; }
+  [ "$check" -lt "$err" ] && [ "$hint" -eq $((err + 1)) ] && [ "$hint" -lt "$conv" ] \
+    || { echo "order: $check/$err/$hint/$conv"; false; }
+  grep -qx ' *exit 1' <<< "$(sed -n "$((hint + 1))p" "$q")"
+  grep -qx ' *}' <<< "$(sed -n "$((hint + 2))p" "$q")" && [ "$conv" -eq $((hint + 3)) ]
+}
+
 # --- conditional blocks ---------------------------------------------------------
 
 make_blocky() {
@@ -909,6 +924,7 @@ EOF
   grep -q 'go test -race ./\.\.\. -coverprofile=coverage.out' "$Q"
   grep -q 'Coverage floor — 90% on new code (Go)' "$Q"
   grep -q 'go tool gocover-cobertura -ignore-gen-files < coverage.out > coverage.xml' "$Q"
+  assert_go_tool_check "$Q"
   grep -q "pip install 'diff-cover==10.2.0'" "$Q"
   run ! grep -q 'go run github.com/boumenot/gocover-cobertura' "$Q"
   run ! grep -q 'PYTHON-START' "$Q"
@@ -926,6 +942,7 @@ EOF
   Q="$OUT/private/.github/workflows/quality-private.yml"
   # the Go lane converts with the go.mod-pinned tool, as make test and go-gate.zsh do
   grep -q 'go tool gocover-cobertura -ignore-gen-files < coverage.out > coverage.xml' "$Q"
+  assert_go_tool_check "$Q"
   run ! grep -q 'go run github.com/boumenot/gocover-cobertura' "$Q"
   # one diff-cover pin per lane: the Go lane's, then the Python lane's (out of scope, unchanged)
   grep -q "pip install 'diff-cover==10.2.0'" "$Q"
@@ -942,8 +959,20 @@ EOF
     [ "$(printf '%s\n' "$block" | grep -c "pip install 'diff-cover==$want'")" -eq 1 ] || { echo "$f"; false; }
     [ "$(printf '%s\n' "$block" | grep -c 'go tool gocover-cobertura -ignore-gen-files')" -eq 1 ] || { echo "$f"; false; }
   done
-  run grep -rl 'gocover-cobertura@' "$REAL_TEMPLATES"
-  [ "$status" -eq 1 ] || { echo "$output"; false; }
+  # the #2864 fix hint, once per quality workflow, is the only gocover-cobertura@ a template carries
+  [ "$(grep -rh 'gocover-cobertura@' "$REAL_TEMPLATES" | wc -l)" -eq 2 ]
+  [ "$(grep -rh 'go get -tool github.com/boumenot/gocover-cobertura@latest"$' "$REAL_TEMPLATES" | wc -l)" -eq 2 ]
+}
+
+@test "render: #2864 both GO blocks credit the converter to make test and the diff-cover pin to make setup" {
+  local f block
+  for f in private/.github/workflows/quality-private.yml.tmpl public/.github/workflows/quality-public.yml.tmpl; do
+    block="$(awk '/--- GO-START/{s=1} s{print} /--- GO-END/{s=0}' "$REAL_TEMPLATES/$f" | tr -s ' \n#' ' ')"
+    [ -n "$block" ]
+    printf '%s\n' "$block" | grep -q 'tool `make test` uses, and the diff-cover pin `make setup` installs' \
+      || { echo "$f"; false; }
+    run ! grep -q 'diff-cover pin `make test`' <<<"$block"
+  done
 }
 
 @test "render: real ko-image.yml.tmpl renders clean with DEFAULT_BRANCH substituted (#875)" {

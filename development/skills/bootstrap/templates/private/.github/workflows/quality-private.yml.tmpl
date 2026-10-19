@@ -131,9 +131,17 @@ jobs:
       # -race + per-package coverage (no -coverpkg), matching the #874 gate.
       - run: go test -race ./... -coverprofile=coverage.out -covermode=atomic
       # Cobertura conversion so the shared diff-cover new-code gate reads it —
-      # the go.mod-pinned tool and diff-cover pin `make test` uses (#2620).
+      # the go.mod-pinned tool `make test` uses, and the diff-cover pin
+      # `make setup` installs for the gate (#2620). A go.mod without the tool
+      # directive fails here with the fix, not go's bare "no such tool" (#2864).
       - if: github.event_name == 'pull_request'
-        run: go tool gocover-cobertura -ignore-gen-files < coverage.out > coverage.xml
+        run: |
+          go tool -n gocover-cobertura >/dev/null || {
+            echo "::error::go tool gocover-cobertura failed (go's error above) — if go.mod has no tool directive," \
+              "run: go get -tool github.com/boumenot/gocover-cobertura@latest"
+            exit 1
+          }
+          go tool gocover-cobertura -ignore-gen-files < coverage.out > coverage.xml
       - if: github.event_name == 'pull_request'
         run: pip install 'diff-cover==10.2.0'
       - if: github.event_name == 'pull_request'
