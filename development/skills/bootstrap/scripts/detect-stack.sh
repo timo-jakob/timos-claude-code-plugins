@@ -1402,10 +1402,13 @@ collect_from() {
 		# render only via SKILL §3k.7, §3k.8 and §3k.9, and a State D gap-fill
 		# only when their marker (src/shell/loader.ts, src/canvas/canvas.ts,
 		# src/remote/entry.tsx) is present — never an artifact an ordinary
-		# JavaScript repo is missing.
+		# JavaScript repo is missing. The MFE conformance check (#1126, §3k.10)
+		# renders only for a repo carrying the remote marker; its State D gap is
+		# §3k.10's adoption-gap rule, not this list.
 		[[ "$rel" == react-shell/* ]] && continue
 		[[ "$rel" == react-canvas/* ]] && continue
 		[[ "$rel" == react-remote/* ]] && continue
+		[[ "$rel" == mfe-conformance/* ]] && continue
 		candidate_paths+=("$rel")
 	done < <(find "$dir" -type f 2>/dev/null)
 }

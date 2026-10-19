@@ -1092,9 +1092,10 @@ member is minor.
 
 **What this section does not build.** The shell and remote implementations —
 including the shell side of the abort rule and the widget gallery — are #1124
-and #1125, and runtime and CI conformance enforcement is #1126. Until #1126
-lands, nothing checks a shell or remote against this contract except its own
-compiler.
+and #1125. CI conformance enforcement is #1126: each remote's
+`check-mfe-conformance.zsh` compares its declared major, and a widget's
+`contractMajor`, with the shell's major, which it takes as an explicit input.
+A shell is checked against the contract only by its own compiler.
 
 ### React bootstrap overlay — React composes onto the javascript tier (#957)
 
@@ -1223,6 +1224,22 @@ consumer's generated client is its own sub-tier (#958, below).
   for the canvas's import map, while a page bundles its own. *Rationale:* one
   stable entry path behind immutable, hashed assets lets a team release its slice
   of the UI without coordinating with anyone.
+- **The MFE conformance check (#1126).** A remote's contract check, scaffolded
+  by bootstrap's §3k.10 from a sibling tree,
+  `development/skills/bootstrap/templates/languages/javascript/mfe-conformance/`:
+  `scripts/check-mfe-conformance.zsh` and
+  `.github/workflows/mfe-conformance.yml.tmpl`. Its **trigger** is the remote
+  marker, `src/remote/entry.tsx`; it renders nothing when §3k.9 could not install
+  `@<scope>/mfe-contract`. It renders after §3k.9 — §3d → §3k → §3k.5 → §3k.6 →
+  §3k.9 → §3k.10. The checker evaluates the built `dist/remote.js` under node and
+  requires `mount`/`unmount` with arity 2 and 1, a declared `@*/mfe-contract`
+  range resolving to exactly one major equal to `--shell-major`, a widget's
+  `manifest.contractMajor` equal to both, and — with `--base-url` — the same
+  bytes served at `/remote.js`. The workflow passes
+  `${{ vars.MFE_SHELL_MAJOR || '1' }}`, is path-conditional and never required,
+  and runs the served check only for a root `Dockerfile`. *Rationale:* the shell's
+  major is an explicit input because no build sees both dependency ranges, so
+  the check stays inside the remote repo.
 - **Verified statically here, built elsewhere.** `tests/react-templates.bats`
   pins the file set, each variant's kept and added content, the binding's
   re-export and barrel invariants, and the 120-column width, and

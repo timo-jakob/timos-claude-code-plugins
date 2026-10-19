@@ -278,8 +278,8 @@ typescript_pin_dockerfile() {
   contains "$readme" '**Adding a required member, or narrowing a type**, is a **major** bump'
   contains "$readme" 'So is **any other change to a declared type** — removing a member, widening a type, adding a `kind`. Only an added optional member is minor.'
   contains "$readme" 'A shell and a remote on different majors are incompatible.'
-  contains "$readme" 'No build sees both dependency ranges, so for a page the two majors are compared by conformance (#1126) — until that lands, nothing compares them.'
-  contains "$readme" 'A gallery refuses a widget whose `contractMajor` it does not implement.'
+  contains "$readme" 'No build sees both dependency ranges, so each remote'"'"'s conformance check (#1126, `check-mfe-conformance.zsh`) compares its declared major — and a widget'"'"'s `contractMajor` — with the shell'"'"'s, which it takes as an explicit input.'
+  contains "$readme" 'A gallery also refuses a widget whose `contractMajor` it does not implement.'
 }
 
 @test "README states the three contract rules" {

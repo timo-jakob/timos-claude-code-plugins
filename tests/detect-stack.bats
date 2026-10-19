@@ -1523,6 +1523,14 @@ _fake_tree() {  # $1.. = ops major dirs; "vN" -> openapi.yaml, "vN:tmpl" -> open
   [ "$(jq -r '[.missing_artifacts[] | select(startswith("react-remote/"))] | length' <<<"$out")" -eq 0 ]
 }
 
+@test "detect-stack #1126: a javascript repo is never missing the mfe-conformance check" {
+  printf '{ "name": "x", "version": "0.1.0" }\n' > package.json
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.languages | index("javascript")' <<<"$out")" != "null" ]
+  # §3k.10 renders the check only for a repo carrying src/remote/entry.tsx
+  [ "$(jq -r '[.missing_artifacts[] | select(startswith("mfe-conformance/"))] | length' <<<"$out")" -eq 0 ]
+}
+
 @test "detect-stack #729: tsconfig.json alone also detects javascript (never typescript)" {
   printf '{ "compilerOptions": {} }\n' > tsconfig.json
   out=$(bash "$DETECT" 2>/dev/null); rc=$?
