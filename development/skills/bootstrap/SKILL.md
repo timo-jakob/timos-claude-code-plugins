@@ -5323,6 +5323,121 @@ the six framework-free modules pass `tsc --noEmit --strict`); running
 `src/shell/loader.test.ts` against a rendered tree is the render-and-build smoke
 check's job (#1063).
 
+### 3k.8. Canvas overlay (a widget canvas on the shell — #1939)
+
+The **widget canvas** of the MFE composition epic (#1122): a responsive grid on
+which the user adds, moves, resizes and removes widget instances, each mounted
+through `mfe-contract/v1`'s widget context, with the layout kept through an
+injectable store. It also owns the browser-level import map through which
+concurrently mounted widgets share one React.
+
+**Trigger.** Offer this step only when the shell's marker, `src/shell/loader.ts`,
+is already on disk or §3k.7's plan line is kept. It is **opt-in** — most shells
+host no widgets — so it is its own Step 2 yes/no plan question, defaulting to no:
+
+```text
+React canvas overlay: add the widget canvas to this shell? (default: no, #1939)
+```
+
+Anything but an explicit yes skips the step entirely — not an error, no Step 5
+item.
+
+**Shape marker — `src/canvas/canvas.ts`.** In State D the step is an **adoption
+gap** only when that marker is present and another canvas file is missing: offer
+the missing files in the plan. A shell with no `src/canvas/canvas.ts` is never
+offered the canvas in State D.
+
+**The loader is the shell's.** Each slot runs `src/shell/loader.ts`'s ordered
+procedure, whose context type is slot-agnostic (`RemoteContext`, a page or a
+widget context). A shell rendered before #1939 types it as a page context only,
+so the canvas does not type-check against it: when the on-disk
+`src/shell/loader.ts` differs from the `react-shell/` template, re-render it with
+§3k.7's `render.zsh` command and take **idempotency rule 3's diff prompt** — the
+one shell file this step may change. Settle that prompt before any canvas file
+is written: a declined loader diff writes no canvas file and takes the
+render-failure branch below.
+
+**Render the canvas set** into a staging directory, then write each file under
+the idempotency rules:
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates/languages/javascript/react-canvas" \
+  --out "<staging-dir>" --project-slug "<owner/repo>" \
+  src/canvas/WidgetCanvas.tsx src/canvas/canvas.ts src/canvas/store.ts \
+  src/canvas/validate.ts src/canvas/widgets.ts src/canvas/canvas.test.ts \
+  src/canvas/shared/react.ts src/canvas/shared/react-jsx-runtime.ts \
+  src/canvas/shared/react-dom.ts src/canvas/shared/react-dom-client.ts \
+  vite.shared.config.ts
+```
+
+The component lives in `WidgetCanvas.tsx`, never `Canvas.tsx`: beside the
+`canvas.ts` marker the two names differ only in case, and on a case-insensitive
+filesystem — macOS's default — `./Canvas` would resolve to the marker.
+`--project-slug` sets `{{NPM_SCOPE}}` and `{{PROJECT_SLUG}}` — the store's
+localStorage key is `<owner/repo>:canvas:v1` — so no `{{PLACEHOLDER}}` survives;
+a non-zero `render.zsh` exit — or no `src/shell/loader.ts` on disk after §3k.7 —
+renders nothing, records a Step 5 item, and the run carries on without the edits
+below. **Withhold `src/canvas/canvas.test.ts`**
+unless `src/test/setup.ts` is on disk, exactly as §3k.7 withholds
+`src/shell/loader.test.ts`, and record a Step 5 item naming it. The canvas needs
+no install of its own: the contract package is §3k.7's, and React is the app's.
+Record every file this step writes under the `react_overlay` telemetry step key
+(*Keep the run's facts as you go*).
+
+**Layer ordering — composition, not clobbering.** §3d → §3k → §3k.5 → §3k.6 →
+§3k.7 → **this step**, which shares no path with an earlier layer. It leaves
+every file those layers wrote byte-identical, except the three confirmed edits
+and the `.gitignore` line below, and the `src/shell/loader.ts` update above. An on-disk canvas
+file that differs from its template takes **idempotency rule 3's diff prompt**,
+never a blind overwrite.
+
+**The shared-dependency import map — three §4c-class confirmed edits.**
+`vite.shared.config.ts` builds `react`, `react/jsx-runtime`, `react-dom` and
+`react-dom/client` as ES modules into the gitignored `public/shared/`, so the
+dev server and the production build serve the same `/shared/<name>.js` paths and
+the shared modules' version is the shell image's own — one pin. Append the
+`public/shared/` line to `.gitignore` unless that line is already there; the plan
+approval covers it. Each edit below
+is **confirmed before it is made** (show the diff and ask; the plan approval
+alone does not cover it), and on a failed edit, a decline or no answer the file
+is **restored from its pre-edit snapshot** and a Step 5 TODO names the edit to
+make by hand:
+
+- **`package.json`** — add a `build:shared` script,
+  `vite build -c vite.shared.config.ts`, chained from `predev` and `prebuild`
+  (each added when absent, or run as `npm run build:shared` ahead of the existing
+  command, joined by `&&`). Skipped
+  when `build:shared` already exists.
+- **`index.html`** — insert one inline `<script type="importmap">` before the
+  first `<script type="module">`, mapping `react` → `/shared/react.js`,
+  `react/jsx-runtime` → `/shared/react-jsx-runtime.js`, `react-dom` →
+  `/shared/react-dom.js` and `react-dom/client` → `/shared/react-dom-client.js`.
+  Skipped only when an existing import map already maps all four. When an
+  import map exists but lacks some of them, add the missing entries to that same
+  map instead — still a confirmed edit, and never a second import map.
+- **`src/main.tsx`** — extend the shell's capabilities with the store and render
+  the canvas beside `<App />` inside `<Shell>`:
+
+  ```tsx
+  import { Canvas } from "./canvas/WidgetCanvas";
+  import { withCanvasStore } from "./canvas/store";
+
+  const capabilities = withCanvasStore(defaultCapabilities());
+  // …inside the shell:
+  //   <Shell capabilities={capabilities}><App /><Canvas capabilities={capabilities} /></Shell>
+  ```
+
+  Skipped when `src/main.tsx` already imports `Canvas`. It composes with
+  §3k.6's `QueryClientProvider` edit in either order and goes inside §3k.7's
+  `<Shell>`: when `src/main.tsx` renders no `<Shell>` (that edit declined or
+  failed), this edit is not offered and its Step 5 TODO is recorded.
+
+Verification here is **structural** and type-checked
+(`tests/react-canvas-templates.bats`: `canvas.ts`, `store.ts`, `validate.ts` and
+`widgets.ts` pass `tsc --noEmit --strict`); running `src/canvas/canvas.test.ts`
+against a rendered tree is the render-and-build smoke check's job (#1063).
+
 ### 3l. Infrastructure-as-code repos (no application language) — #1154
 
 Applies when exactly one of `is_kubernetes` and `is_opentofu` is `true`, **the resolved language set is empty**,
@@ -7293,7 +7408,7 @@ kept since the start (*Telemetry — stamp the run's start*) to
   | `api_contracts` | 3i. API contracts machinery |
   | `anti_corruption_adapter` | 3j. Multi-major anti-corruption adapter |
   | `contract_consumer` | 3k. API contract-consumer machinery |
-  | `react_overlay` | 3k.5. React overlay, and 3k.7. Shell overlay |
+  | `react_overlay` | 3k.5. React overlay, 3k.7. Shell overlay, and 3k.8. Canvas overlay |
   | `react_query` | 3k.6. React Query binding |
   | `iac` | 3l. Infrastructure-as-code repos |
   | `composition` | 3m. Composition repos |

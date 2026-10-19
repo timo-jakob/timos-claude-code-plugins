@@ -235,7 +235,7 @@ shell_step() {
   sed -n '/^### 3k\.7\. Shell overlay/,/^### /p' "$SKILL" | tr -s '[:space:]' ' '
 }
 
-STEP_END='### 3l. Infrastructure-as-code repos (no application language) — #1154 '
+STEP_END='### 3k.8. Canvas overlay (a widget canvas on the shell — #1939) '
 
 @test "shell: SKILL.md carries §3k.7 right after §3k.6, before §3l" {
   local section b s l
@@ -280,7 +280,7 @@ STEP_END='### 3l. Infrastructure-as-code repos (no application language) — #11
   contains "$section" '**Withhold `src/shell/loader.test.ts`** — drop it from the list — unless §3k.5 ended'
   contains "$section" 'unless §3k.5 ended with its setup module, `src/test/setup.ts`, on disk, and record a Step 5 item'
   contains "$section" 'Record every file this step writes under the `react_overlay` telemetry step key (*Keep the run'"'"'s facts as you go*). Each file lands'
-  contains "$(cat "$SKILL")" '| `react_overlay` | 3k.5. React overlay, and 3k.7. Shell overlay |'
+  contains "$(cat "$SKILL")" '| `react_overlay` | 3k.5. React overlay, 3k.7. Shell overlay, and 3k.8. Canvas overlay |'
 }
 
 @test "shell: §3k.7's render block lists every shell template and passes --project-slug" {
@@ -344,7 +344,7 @@ STEP_END='### 3l. Infrastructure-as-code repos (no application language) — #11
   contains "$arch" '**The shell overlay (#1124).**'
   contains "$arch" '`development/skills/bootstrap/templates/languages/javascript/react-shell/`'
   contains "$arch" 'Its **shape marker** is `src/shell/loader.ts`'
-  contains "$arch" 'It **renders last**: §3d → §3k → §3k.5 → §3k.6 → §3k.7'
+  contains "$arch" 'It **renders after §3k.6**: §3d → §3k → §3k.5 → §3k.6 → §3k.7'
   contains "$maint" '**The shell overlay** (#1124, SKILL.md §3k.7) is a sibling tree'
   contains "$maint" 'Keep `src/shell/loader.ts` as the shape marker'
 }
