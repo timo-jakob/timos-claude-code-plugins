@@ -1132,7 +1132,7 @@ sole_go_kept_jobs() { # <mixed-file> <keep-tac>
   joined="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/development/skills/bootstrap/SKILL.md")"
   arch="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/ARCHITECTURE.md")"
   local -a needles=(
-    'Kept blocks retain their marker lines, except `SOLE_GO`'"'"'s and `NOT_SOLE_GO`'"'"'s.'
+    'Kept blocks retain their marker lines, except `SOLE_GO`'"'"'s, `NOT_SOLE_GO`'"'"'s and `NOT_GO`'"'"'s.'
     '| `SOLE_GO` | the repo is **sole-Go** — `is-sole-go.zsh --primary <p> --languages "<l>"` exits 0: primary `go` and none of `javascript`, `python` or `java` (Swift does not count)'
     'Wraps `go-ci.yml`'"'"'s Sonar jobs. **Its marker lines are never emitted, kept or stripped** |'
     '| `NOT_SOLE_GO` | its complement (#2615) — wraps the quality workflows'"'"' and noops'"'"' Sonar jobs'
@@ -1384,4 +1384,71 @@ FOLDED_COMMON=(common/.github/workflows/gitleaks.yml common/.github/workflows/no
   [ "$status" -eq 1 ] || { echo "$status $output $stderr"; return 1; }
   contains "$stderr" "refresh-toolchain-files: is-sole-go.zsh failed (exit 3)"
   [ -z "$output" ]
+}
+
+# --- #2621: the pre-commit job builds its Go hooks with go.mod's Go ------------------------
+
+@test "toolchain render: #2621 #2869 a render with Go sets up go.mod's Go and keys the hook cache on go.mod; a non-Go render keeps pre-commit/action" {
+  sole_go_setup
+  local row primary langs vis sa wf uses hooks home
+  hooks='pre-commit run --show-diff-on-failure --color=always --all-files'
+  home='echo "PRE_COMMIT_HOME=$RUNNER_TEMP/pre-commit" >> "$GITHUB_ENV"'
+  for row in "go go_python public sonarcloud" "go go_python private sonarqube" "go go_java private sonarcloud" \
+    "python python_go public sonarcloud" "python python_go private sonarqube" \
+    "python python public sonarcloud" "python python private sonarqube"; do
+    read -r primary langs vis sa <<< "$row"
+    rm -rf "$BATS_TEST_TMPDIR/out"
+    sole_go_render "$BATS_TEST_TMPDIR/out" "$TEMPLATES" "$primary" "${langs//_/ }" "$vis" "$sa"
+    wf="$BATS_TEST_TMPDIR/out/$vis/.github/workflows/quality-$vis.yml"
+    # the job's steps in order: the action with its ref stripped, or the run command
+    uses="$(yq -r '.jobs["pre-commit"].steps[] | (.uses // .run) | sub("@.*"; "")' "$wf" | paste -sd'|' -)"
+    # no NOT_GO marker line is ever emitted
+    run ! grep -q 'NOT_GO-' "$wf"
+    case " ${langs//_/ } " in
+      *" go "*)
+        [ "$uses" = "actions/checkout|actions/setup-python|actions/setup-go|python -m pip install pre-commit|$home|actions/cache|$hooks" ] ||
+          { echo "row [$row]: $uses"; return 1; }
+        [ "$(yq -r '.jobs["pre-commit"].steps[2].with | to_entries | map(.key + "=" + .value) | join(",")' "$wf")" = \
+          go-version-file=go.mod ] || { echo "row [$row]: setup-go"; return 1; }
+        # the cache is SHA-pinned, on pre-commit's home under runner.temp (empty at every job start,
+        # so a self-hosted runner's ~/.cache/pre-commit is never reused), keyed on go.mod as well
+        grep -qxF '      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0' "$wf"
+        [ "$(yq -r '.jobs["pre-commit"].steps[5].with.path' "$wf")" = '${{ runner.temp }}/pre-commit' ] ||
+          { echo "row [$row]: cache path"; return 1; }
+        [ "$(yq -r '.jobs["pre-commit"].steps[5].with.key' "$wf")" = \
+          "pre-commit-go|\${{ env.pythonLocation }}|\${{ hashFiles('.pre-commit-config.yaml', 'go.mod') }}" ] ||
+          { echo "row [$row]: cache key"; return 1; }
+        run ! grep -q 'uses: pre-commit/action' "$wf"
+        # pre-commit's version is pinned nowhere in the workflow (#2614)
+        run ! grep -q 'pre-commit==' "$wf" ;;
+      *)
+        [ "$uses" = "actions/checkout|actions/setup-python|pre-commit/action" ] ||
+          { echo "row [$row]: $uses"; return 1; }
+        run ! grep -q 'actions/cache' "$wf" ;;
+    esac
+    # a hosted runner's trivy-fs SKIP stays on the step that runs the hooks, and only there
+    if [ "$sa" = sonarcloud ]; then
+      [ "$(yq -r '.jobs["pre-commit"].steps[-1].env.SKIP' "$wf")" = trivy-fs ] || { echo "row [$row]"; return 1; }
+    fi
+    [ "$(yq -r '[.jobs["pre-commit"].steps[] | has("env")] | map(select(.)) | length' "$wf")" = \
+      "$([ "$sa" = sonarcloud ] && echo 1 || echo 0)" ] || { echo "row [$row]: env count"; return 1; }
+    if command -v yamllint >/dev/null 2>&1; then
+      run yamllint -c "$REPO_ROOT/.yamllint" --strict "$wf"
+      [ "$status" -eq 0 ] || { echo "row [$row]: $output"; return 1; }
+    fi
+  done
+  # SKILL.md's Pre-commit CI backstop and block table state the steps and why
+  local joined n
+  joined="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/development/skills/bootstrap/SKILL.md")"
+  local -a needles=(
+    'When Go is detected, the job'"'"'s GO block sets up the Go that `go.mod` names (`actions/setup-go` with `go-version-file: go.mod`) before the hooks run:'
+    'golangci-lint built with an older Go than `go.mod` targets refuses the module (#2621).'
+    'The GO block also replaces `pre-commit/action` with its own four steps — `pip install pre-commit`, pointing `PRE_COMMIT_HOME` at `$RUNNER_TEMP/pre-commit`, an `actions/cache` of `${{ runner.temp }}/pre-commit`, and `pre-commit run --show-diff-on-failure --color=always --all-files` — because `pre-commit/action` keys its cache on `.pre-commit-config.yaml` alone.'
+    'The GO block'"'"'s key is `pre-commit-go|${{ env.pythonLocation }}|${{ hashFiles('"'"'.pre-commit-config.yaml'"'"', '"'"'go.mod'"'"') }}`, and every job starts with `runner.temp` empty, so a `go.mod` Go bump misses the cache and rebuilds the hook with the new Go instead of reusing one built with the old — even on a self-hosted runner, whose `~/.cache/pre-commit` persists between jobs (#2869).'
+    'A render without Go keeps `pre-commit/action` (`NOT_GO`).'
+    '| `NOT_GO` | go not detected (#2869) — wraps the `pre-commit` job'"'"'s `pre-commit/action` step, which a Go render replaces; its marker lines are never emitted, so a render without Go is byte-identical to one without the tag |'
+  )
+  for n in "${needles[@]}"; do
+    contains "$joined" "$n" || { echo "missing: $n"; return 1; }
+  done
 }

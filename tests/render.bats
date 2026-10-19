@@ -492,6 +492,21 @@ EOF
   [ "$(cat "$OUT/s")" = "$mixed" ]
 }
 
+@test "render: #2869 NOT_GO is GO's complement, and its marker lines are never emitted" {
+  printf 'a: 1\n  # --- GO-START ---\ngo: yes\n  # --- GO-END ---\n  # --- NOT_GO-START ---\nnogo: yes\n  # --- NOT_GO-END ---\nz: 1\n' > "$T/g.tmpl"
+  local lang
+  for lang in go "go python" "python go"; do
+    run zsh "$SCRIPT" --templates "$T" --out "$OUT" --languages "$lang" g.tmpl
+    [ "$status" -eq 0 ]
+    [ "$(cat "$OUT/g")" = "$(printf 'a: 1\n  # --- GO-START ---\ngo: yes\n  # --- GO-END ---\nz: 1')" ] || { echo "[$lang]"; return 1; }
+  done
+  for lang in python "javascript java" ""; do
+    run zsh "$SCRIPT" --templates "$T" --out "$OUT" --languages "$lang" g.tmpl
+    [ "$status" -eq 0 ]
+    [ "$(cat "$OUT/g")" = "$(printf 'a: 1\nnogo: yes\nz: 1')" ] || { echo "[$lang]"; return 1; }
+  done
+}
+
 @test "render: #2615 a failing is-sole-go.zsh fails the render loudly, writing nothing" {
   local scripts="$BATS_TEST_TMPDIR/scripts"
   mkdir -p "$scripts"
