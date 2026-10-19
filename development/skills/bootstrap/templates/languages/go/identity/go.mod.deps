@@ -1,0 +1,19 @@
+// Canonical Go identity module requirements (#2861).
+//
+// A go.mod FRAGMENT, not a module file: fold this require line into the same
+// go.mod you folded the ops-api payload's into, then `go mod tidy`. Place the
+// payload's .go files into internal/identity/ FIRST -- tidy removes any
+// requirement no package in the working tree imports, so run against a tree
+// that does not yet contain them and it silently strips this line and exits 0.
+//
+// ONE library, deliberately. go-oidc is the blessed Go OIDC validator: issuer
+// discovery, a remote JWKS key set that re-fetches on an unknown key (so a key
+// rotation needs no restart), and a verifier that checks iss, aud and exp with
+// the signing algorithms pinned by configuration. There is no alternative
+// library and no switch between libraries. go-oidc brings go-jose in as its own
+// requirement; tidy writes that line, and nothing in this payload imports it.
+//
+// The version is a floor, not a pin -- Renovate/Dependabot move it. Note the /v3
+// import path.
+
+require github.com/coreos/go-oidc/v3 v3.21.0
