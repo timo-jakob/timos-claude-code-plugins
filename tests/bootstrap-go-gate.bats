@@ -77,7 +77,7 @@ echo "golangci-lint $*" >> "$CALLS"
 case "$1" in
   fmt) printf '%s' "${FMT_DIFF:-}"; exit "${FMT_RC:-0}" ;;
   run) exit "${LINT_RC:-0}" ;;
-  version) echo "golangci-lint has version 2.12.2 built with go1.25"; exit 0 ;;
+  version) echo "golangci-lint has version 2.14.0 built with go1.27.0"; exit 0 ;;
 esac
 exit 0
 EOF
@@ -366,6 +366,18 @@ gate_with() {
     "$GO_TMPL/scripts" "$GO_TMPL/hooks" "$GO_TMPL/.github"
   # CI installs through make setup and pins no version of its own
   run ! grep -qiE 'golangci-lint|diff-cover' "$GO_TMPL/.github/workflows/go-ci.yml.tmpl"
+}
+
+@test "#2872: the Makefile's golangci-lint pin and the pre-commit GO block's golangci-lint rev agree" {
+  local make_pin hook_rev
+  make_pin="$(sed -n 's/^GOLANGCI_LINT_VERSION := //p' "$GO_TMPL/Makefile.tmpl")"
+  # the rev of the golangci-lint repo entry, read inside the GO block only
+  hook_rev="$(awk '/# --- GO-START/ { go = 1 } /# --- GO-END/ { go = 0 }
+    go && /repo: https:\/\/github\.com\/golangci\/golangci-lint$/ { hit = 1; next }
+    go && hit && /^[[:space:]]*rev:/ { print $2; exit }' "$TEMPLATES/common/.pre-commit-config.yaml.tmpl")"
+  [ -n "$make_pin" ] || { echo "Makefile.tmpl defines no GOLANGCI_LINT_VERSION"; false; }
+  [ -n "$hook_rev" ] || { echo "the pre-commit GO block has no golangci-lint rev"; false; }
+  [ "$make_pin" = "$hook_rev" ] || { echo "Makefile pins $make_pin, pre-commit pins $hook_rev"; false; }
 }
 
 @test "#2614: trivy, gitleaks, pre-commit, Spectral and pandoc are each pinned once; oasdiff and yq run through go tool" {
