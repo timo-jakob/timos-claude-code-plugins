@@ -90,7 +90,7 @@ refused() {
   [ "$(jq -c '.child_run_ids' <<<"$output")" = '["resolve-issue-2-bbbb","resolve-issue-1-aaaa"]' ]
 }
 
-# --- each of the ten e1_classification values ---------------------------------
+# --- each of the twelve e1_classification values ------------------------------
 
 # $1 = classification, $2 = state, $3 = the documented outcome
 classifies() {
@@ -182,11 +182,11 @@ e1_table_values() {
   ref="$(sed -n '/e1_classification | enum(\[/,/\]) | not)/p' "$B" | grep -oE '"[a-z_]+"' | tr -d '"' | LC_ALL=C sort)"
   ref_doc="$(e1_table_values "$REPO_ROOT/development/skills/resolve-issue/reference/epic-telemetry.md")"
   arch="$(e1_table_values "$REPO_ROOT/ARCHITECTURE.md")"
-  [ -n "$ref_doc" ] && [ "$(grep -c '' <<<"$ref_doc")" -eq 10 ]
-  [ -n "$arch" ] && [ "$(grep -c '' <<<"$arch")" -eq 10 ]
+  [ -n "$ref_doc" ] && [ "$(grep -c '' <<<"$ref_doc")" -eq 12 ]
+  [ -n "$arch" ] && [ "$(grep -c '' <<<"$arch")" -eq 12 ]
   [ "$ref_doc" = "$ref" ]
   [ "$arch" = "$ref" ]
-  [ "$(tr '\n' ' ' <<<"$ref")" = "backfilled halt_backfill_error halt_backfill_partial halt_backfill_vet halt_near_miss halt_unclassified halt_undecomposed halt_unrealized_slices inline_slices native_children " ]
+  [ "$(tr '\n' ' ' <<<"$ref")" = "backfilled halt_backfill_error halt_backfill_partial halt_backfill_vet halt_depth_exceeded halt_near_miss halt_tree_read_error halt_unclassified halt_undecomposed halt_unrealized_slices inline_slices native_children " ]
   for v in $ref_doc; do
     build "$(halt_state "$v")"
     [ "$status" -eq 0 ] || { printf 'the builder refused %s: %s\n' "$v" "$stderr" >&2; return 1; }
@@ -467,5 +467,58 @@ CLEAN_STOP='{"outcome":"escalated","e1_classification":"native_children",
       "children must be an object of non-negative integers: total, completed_before, resolved_this_run, escalated, parked, queued, clean_stopped, parked_behind_clean_stop"
     refused "$(with ".children.parked_behind_clean_stop = $v" "$CLEAN_STOP")" \
       "children must be an object of non-negative integers"
+  done
+}
+
+# --- #2857: the sub-issue tree -----------------------------------------------
+
+@test "#2857 the optional tree member rides in the payload when given" {
+  build "$(with '.tree = {depth:3, inner_nodes:2, inner_closed_this_run:2}' "$CLOSED")"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '.tree' <<<"$output")" = '{"depth":3,"inner_nodes":2,"inner_closed_this_run":2}' ]
+}
+
+@test "#2857 an absent or null tree leaves the payload without one" {
+  build "$CLOSED"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r 'has("tree")' <<<"$output")" = false ]
+  build "$(with '.tree = null' "$CLOSED")"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r 'has("tree")' <<<"$output")" = false ]
+}
+
+@test "#2857 tree is type-checked: non-negative integers, all three keys" {
+  local v
+  for v in '{depth:-1,inner_nodes:0,inner_closed_this_run:0}' '{depth:1.5,inner_nodes:0,inner_closed_this_run:0}' \
+           '{depth:1,inner_nodes:"2",inner_closed_this_run:0}' '{depth:1,inner_nodes:2}' '[1,2,3]' '"deep"'; do
+    refused "$(with ".tree = $v" "$CLOSED")" \
+      "tree must be null or an object of non-negative integers: depth, inner_nodes, inner_closed_this_run"
+  done
+}
+
+@test "#2857 an unknown tree key is refused" {
+  refused "$(with '.tree = {depth:2, inner_nodes:1, inner_closed_this_run:0, leaves:4}' "$CLOSED")" \
+    "unknown tree key(s): leaves"
+}
+
+@test "#2857 more inner nodes closed than exist is refused; equal is fine" {
+  refused "$(with '.tree = {depth:2, inner_nodes:1, inner_closed_this_run:2}' "$CLOSED")" \
+    "tree.inner_closed_this_run (2) exceeds tree.inner_nodes (1)"
+  build "$(with '.tree = {depth:2, inner_nodes:1, inner_closed_this_run:1}' "$CLOSED")"
+  [ "$status" -eq 0 ]
+}
+
+@test "#2857 halt_depth_exceeded and halt_tree_read_error are parked E1 halts" {
+  classifies halt_depth_exceeded "$(halt_state halt_depth_exceeded)" parked
+  classifies halt_tree_read_error "$(halt_state halt_tree_read_error)" parked
+}
+
+@test "#2857 the new halt values take the halt_* refusals" {
+  local h
+  for h in halt_depth_exceeded halt_tree_read_error; do
+    refused "$(with '.readiness_preflight = {gated:1,needs_refinement:0}' "$(halt_state $h)")" \
+      "a $h halt never reaches E1b, so readiness_preflight must be null"
+    refused "$(with '.child_run_ids = ["resolve-issue-1-aaaa"]' "$(halt_state $h)")" \
+      "a $h halt starts no child run"
   done
 }

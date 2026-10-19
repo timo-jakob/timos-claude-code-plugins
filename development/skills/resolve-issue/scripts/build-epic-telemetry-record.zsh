@@ -18,13 +18,14 @@
 #   { "outcome": "failed" | "escalated" | "parked" | "success",     REQUIRED
 #         the row the skill picked; it must equal the FIRST matching row of the
 #         precedence below, computed here from the facts, or the state is refused
-#     "e1_classification": one of the ten values below,             REQUIRED
+#     "e1_classification": one of the twelve values below,          REQUIRED
 #     "children": { "total", "completed_before", "resolved_this_run",
 #                   "escalated", "parked", "queued",                 REQUIRED
 #                   "clean_stopped", "parked_behind_clean_stop" },
-#         non-negative integers over the invocation's FIRST read of
-#         read-sub-issues.zsh; the five buckets must sum to total. The last
-#         two (#2585, default 0) are SUB-COUNTS kept out of that sum:
+#         non-negative integers over the LEAVES below the target in the
+#         invocation's FIRST read-sub-issues.zsh --tree read (#2857: inner,
+#         undecomposed, read_failed and foreign nodes count nowhere); the five
+#         buckets must sum to total. The last two (#2585, default 0) are SUB-COUNTS kept out of that sum:
 #         clean_stopped — the escalated children in the clean-stop triage's
 #         skip — never exceeds escalated, and
 #         parked_behind_clean_stop — the parked children blocked through a
@@ -39,13 +40,19 @@
 #     "readiness_preflight": { "gated", "needs_refinement" } | null,
 #                                                null when E1b was never reached
 #     "failure_cause": "e4_regression" | "e4_error" | "e5_error" | "error"
-#                      | null }                  why a run that broke after E1b
+#                      | null,                   why a run that broke after E1b
 #                                                broke (default null)
+#     "tree": { "depth", "inner_nodes", "inner_closed_this_run" } | null }
+#         OPTIONAL (#2857): the deepest level the --tree read reached, the
+#         inner nodes below the target, and how many of them this run closed;
+#         non-negative integers, no other key, and inner_closed_this_run never
+#         above inner_nodes. Absent or null leaves it out of the payload.
 #
 # e1_classification (the closed table, ARCHITECTURE.md *Resolve-issue
 # telemetry*): native_children, backfilled, inline_slices, halt_undecomposed,
 # halt_unrealized_slices, halt_near_miss, halt_backfill_vet,
-# halt_backfill_error, halt_backfill_partial, halt_unclassified.
+# halt_backfill_error, halt_backfill_partial, halt_unclassified,
+# halt_depth_exceeded, halt_tree_read_error.
 #
 # Outcome — the FIRST matching row (worst state wins):
 #   1 failed     e4.result is "regression", or failure_cause is set
@@ -140,7 +147,8 @@ norm=$(print -r -- "$state" | jq -c '
   | .e4 = (.e4 | dflt({ran:false, result:null}))
   | .e5_closed = (.e5_closed | dflt(false))
   | .readiness_preflight = (.readiness_preflight | dflt(null))
-  | .failure_cause = (.failure_cause | dflt(null))') || {
+  | .failure_cause = (.failure_cause | dflt(null))
+  | .tree = (.tree | dflt(null))') || {
   print -u2 -- "build-epic-telemetry-record: failed to normalise the state"; exit 1 }
 
 # Two passes: the SHAPE first (types and enums), then — only on a well-formed
@@ -164,7 +172,7 @@ problems=$(print -r -- "$norm" | jq -r '
           or ($s.e1_classification | enum(["native_children","backfilled","inline_slices",
                "halt_undecomposed","halt_unrealized_slices","halt_near_miss",
                "halt_backfill_vet","halt_backfill_error","halt_backfill_partial",
-               "halt_unclassified"]) | not)
+               "halt_unclassified","halt_depth_exceeded","halt_tree_read_error"]) | not)
         then "unknown e1_classification: \($s.e1_classification | tojson)" else empty end ),
       ( if counts($s.children; ["total","completed_before","resolved_this_run","escalated","parked","queued","clean_stopped","parked_behind_clean_stop"]) | not
         then "children must be an object of non-negative integers: total, completed_before, resolved_this_run, escalated, parked, queued, clean_stopped, parked_behind_clean_stop" else empty end ),
@@ -180,7 +188,12 @@ problems=$(print -r -- "$norm" | jq -r '
       ( if $s.readiness_preflight != null and (counts($s.readiness_preflight; ["gated","needs_refinement"]) | not)
         then "readiness_preflight must be null or an object of non-negative integers: gated, needs_refinement" else empty end ),
       ( if ($s.failure_cause == null or ($s.failure_cause | type == "string" and enum(["e4_regression","e4_error","e5_error","error"]))) | not
-        then "failure_cause must be e4_regression | e4_error | e5_error | error | null" else empty end )
+        then "failure_cause must be e4_regression | e4_error | e5_error | error | null" else empty end ),
+      ( if $s.tree != null and (counts($s.tree; ["depth","inner_nodes","inner_closed_this_run"]) | not)
+        then "tree must be null or an object of non-negative integers: depth, inner_nodes, inner_closed_this_run" else empty end ),
+      ( if ($s.tree | type) == "object"
+          and ([$s.tree | keys[] | select(enum(["depth","inner_nodes","inner_closed_this_run"]) | not)] | length > 0)
+        then "unknown tree key(s): \([$s.tree | keys[] | select(enum(["depth","inner_nodes","inner_closed_this_run"]) | not)] | join(", "))" else empty end )
     ] | .[]') || {
   print -u2 -- "build-epic-telemetry-record: failed to validate the state"; exit 1 }
 if [[ -n "$problems" ]]; then
@@ -246,6 +259,8 @@ problems=$(print -r -- "$norm" | jq -r "$derive"'
         then "children.parked_behind_clean_stop (\($c.parked_behind_clean_stop)) exceeds children.parked (\($c.parked))" else empty end ),
       ( if ($c.completed_before + $c.resolved_this_run + $c.escalated + $c.parked + $c.queued) != $c.total
         then "children do not sum to total: completed_before + resolved_this_run + escalated + parked + queued must equal \($c.total)" else empty end ),
+      ( if $s.tree != null and $s.tree.inner_closed_this_run > $s.tree.inner_nodes
+        then "tree.inner_closed_this_run (\($s.tree.inner_closed_this_run)) exceeds tree.inner_nodes (\($s.tree.inner_nodes))" else empty end ),
       ( if $opened > $nruns
         then "split.parallel + split.sequential (\($opened)) exceeds the child runs started (\($nruns))" else empty end ),
       ( ($s | derived) as $d
@@ -282,4 +297,8 @@ print -r -- "$norm" | jq -c '
       readiness_preflight: (if $s.readiness_preflight == null then null
                             else ($s.readiness_preflight | {gated, needs_refinement}) end),
       failure_cause: $s.failure_cause
-    }' || { print -u2 -- "build-epic-telemetry-record: failed to build payload"; exit 1 }
+    }
+  # optional (#2857): present only when the state carried it
+  + (if $s.tree == null then {}
+     else {tree: ($s.tree | {depth, inner_nodes, inner_closed_this_run})} end)' || {
+  print -u2 -- "build-epic-telemetry-record: failed to build payload"; exit 1 }

@@ -1133,13 +1133,20 @@ markdown task list stays as the human-readable view, but it is no longer
 authoritative — exactly as prose dependencies stopped being after #583):
 
 ```bash
-"<skill-base-dir>/scripts/read-sub-issues.zsh" --repo "$REPO" --epic <N>
+"<skill-base-dir>/scripts/read-sub-issues.zsh" --repo "$REPO" --tree <N>
 ```
 
-It emits the native children (number, state) plus **`summary`**
-(`subIssuesSummary { total, completed }`). Work only the **open** children
-(skip closed/merged ones) — this keeps the skill **resumable**: re-running
-continues from wherever a prior run stopped.
+It emits the whole native sub-issue tree; the root node's `total` and
+`completed` are the **`summary`** (`subIssuesSummary`) the table below branches
+on, and its `leaf` nodes below the target, at any depth, are the children every
+later step works. Work only the **open** ones (skip closed/merged ones) — this
+keeps the skill **resumable**: re-running continues from where a run stopped.
+
+**A child may be an epic itself (#2857).** From here on the flow walks a tree of
+any depth: only leaves are gated, built and counted, inner nodes close bottom-up
+and the target last, and the reader's exit 4, exit 5 and any `read_failed` node
+stop the run at E1, before any build. Branch on them first:
+see `reference/epic-tree.md` § E1 — reading the tree
 
 > **The terminal case branches on `summary` — deterministically, no
 > inference.** Markdown parsing could never distinguish "no children were ever
@@ -1282,8 +1289,8 @@ continues from wherever a prior run stopped.
 >    After a live run, **gate on its outcome**: continue
 >    only on exit 0 with every markdown child accounted for in
 >    `added`/`already_present` **and `skipped_cross_repo` empty** — then
->    re-read through the shared reader and take the table's row for the new
->    `summary` (that continuation is what keeps E3's "all children, one
+>    re-read with the same `--tree` read, whose document replaces the first,
+>    and take the table's row for the new `summary` (that continuation is what keeps E3's "all children, one
 >    invocation" true). Otherwise **halt** with a summary comment naming the
 >    unattached children: on exit 5 (partial) or 1 — but **exit 2 is your own
 >    bad invocation**, so fix the command and re-run the live backfill (it is
@@ -1398,7 +1405,11 @@ continues from wherever a prior run stopped.
 Before any ordering or implementation, run the readiness gate over **every open
 child**: spawn `story-readiness` (Task tool, `subagent_type: story-readiness`)
 once per child — they're independent, so launch them in parallel in a single
-message — and collect the verdicts.
+message — and collect the verdicts. **In a tree, a "child" here is every open
+`leaf` of E1's `read-sub-issues.zsh --tree` read, at any depth**: an inner node
+is never passed to `story-readiness`, an `undecomposed` node counts not ready,
+and the halt summary names each by its full path (`#12 → #231 → #251`):
+see `reference/epic-tree.md` § E1b — gate leaves only
 
 - **All `READY`** → proceed to E2. Keep each child's `risk`; it rides along to
   that child's PR when you resolve it.
@@ -1432,7 +1443,9 @@ is as resumable as the rest of the flow.
 
 ### E2. Analyse order + overlap
 
-For each child, determine the files it will touch (the issue body usually names
+For each child — in a tree, each leaf, with an inner node's `blockedBy` edges
+holding back every leaf under it (`reference/epic-tree.md` § E2 — order across
+the tree) — determine the files it will touch (the issue body usually names
 them; confirm with a quick repo scan). Then order by:
 
 - **Dependencies** — if B builds on A, A first (the epic may already imply an
@@ -1471,6 +1484,14 @@ just that child (see the triage below);
 the readiness pre-flight (E1b)
 already proved every child **open at pre-flight** was `READY` before the first
 one starts, so nothing else needs a human mid-run.
+
+**In a tree, only leaves are built** (#2857): an inner node gets no branch, no
+PR and no story run of its own, and every leaf's story run is parented to the
+target epic's run. Before a leaf's own step 0a, run `dependency-precheck.zsh`
+once per open inner node on its path, target excluded — any non-`PROCEED`
+decision parks the leaf as a §0a rejection, naming that ancestor and its open
+blockers:
+see `reference/epic-tree.md` § E3 — build leaves
 
 > **Residue children are not epic work (#1435).** Until #2580 retired the
 > residue terminal (exit 14), a child that ended with residue attached its
@@ -1666,6 +1687,12 @@ If the holistic test surfaces a regression the per-issue runs missed, **file it*
 (and resolve it if it fits) rather than silently marking the epic done — the
 epic stays **open** until that regression is handled. Otherwise the epic's domain
 is verified green: proceed to **E5**.
+
+**In a tree, E4 and E5 run bottom-up (#2857).** Each inner node gets its own E4
+(this same gate) and E5 inside E3, the target last; an open
+`foreign` child keeps its parent open, and a regression at any inner node stops
+the whole run as an E4 regression:
+see `reference/epic-tree.md` § E4 and E5 — bottom-up
 
 ### E5. Close the epic (the step that gets missed)
 
