@@ -949,6 +949,7 @@ wording so behavior stays consistent:
 | **Q4: Languages** | Whenever detected `languages=[]` — with the IaC wording when `is_kubernetes=true` or `is_opentofu=true`. **When both are `true`** (the dual-marker repo) do not ask it: halt, saying a repo with both a Kubernetes and an OpenTofu marker and no language is not yet supported and pointing at [#1394](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1394). A recorded `primary: kubernetes` or `primary: opentofu` does **not** skip it — the record can veto this path but never grant it (§3l; the mixed repo is #1193) | "I couldn't detect any languages from existing files. Which languages will this project use? (swift / javascript / python / go / java — choose one or more)". When `is_kubernetes=true`, offer **"none — this is a GitOps/IaC repo"** as a first-class answer: "This looks like an infrastructure-as-code repo (charts / overlays / Argo CD resources) with no application language. Bootstrap it as one, or will it also hold application code?" When `is_opentofu=true`, offer the same answer with the OpenTofu wording: "This looks like an OpenTofu/Terraform repo (`.tf` modules) with no application language. Bootstrap it as one, or will it also hold application code?" | Selects per-language fragments and CodeQL matrix. **"None" is a valid answer for an IaC repo** — it takes §3l, not a halt: the manifest checks stand on their own, so a language is never a precondition for bootstrapping. **"None" with both markers `false`** asks the **empty-repo confirmation** instead of halting: "There is no chart, kustomization or Argo CD resource here yet. Bootstrap this as an empty GitOps/IaC repository anyway — one required `gate` check, the `make lint` pre-push hook, and `primary: kubernetes`?" Three outcomes: **confirmed** → §3l, and `primary: kubernetes` is written; **declined** → halt: ask the user to add a marker artifact or name a language, and stop; **another `primary:` already recorded** in `.maintenance.yml` → §3l's conflict branch — the confirmation is never granted over a recorded primary. Nothing records the confirmation, so until a marker exists every re-run asks Q4 and the confirmation again (§3l, #1193). The answer resolves the language set the rest of the skill reads — §3l and `{{PRIMARY}}` branch (2) key on the RESOLVED set, so a language named here makes this a language repo however empty detection was. |
 | **Q5: Dockerfile incoming?** | Whenever `has_dockerfile=false` and the user mentioned containers, OR proactively only if Q4 implies an image build | "Will this project ship a Dockerfile / container image? If yes, I'll wire up Snyk container / Trivy image scans now." | Determines whether to keep the `DOCKER` blocks in workflow templates. Default to "no, skip for now" if the user is unsure — they can re-run the skill later when they add a Dockerfile. |
 | **Q6: Security contact email** | Always (no detection signal) | "What email should appear in `SECURITY.md` as a fallback channel for security reports? Leave blank to use GitHub Security Advisories only." | Drives `{{SECURITY_CONTACT_BLOCK}}` substitution in `SECURITY.md`. See substitution rules below. |
+| **Q7: UI shape** | Never as a separate prompt: shown in the Step 2 plan only when `recommend-ui-shape.zsh` exits 0 (§3k.7). Exit 3 shows nothing, and on a `shape-marker` repo the shape step's own State D line stands. | "This React app will be scaffolded as a **shell** (the default: a single-page app that can later host remotes). To scaffold a remote instead, reply `remote: page` for a route-owned page or `remote: widget` for a canvas widget." | Approving the plan unchanged keeps §3k.7 Shell overlay (and §3k.8 as #1939 offers it). `remote: page` or `remote: widget` drops the §3k.7 and §3k.8 lines and adds §3k.9 Remote overlay with that kind. |
 
 ### After the decision tree
 
@@ -5246,26 +5247,46 @@ small-app case.
 
 **Trigger.** Run this step after §3k.6 when §3k.5's overlay applies (its *Does
 the overlay apply?* check, decided once in Step 2). The shell is the **default**
-shape of a React repo; a remote (#1125) is the exception. Until the shell-or-remote
-recommender (#1127) lands, the step is its own Step 2 plan line, and approving the
-plan approves it:
+shape of a React repo; a remote (#1125) is the exception. The shape is Shared
+questions **Q7**, recommended — never asked as a separate prompt — by
+`recommend-ui-shape.zsh`, run while assembling the plan with detect-stack's
+`languages` and §3k.5's verdict (`applies`, `absent` or `skipped`):
 
-```text
-React shell overlay (default shape) — reply `remote: page` or `remote: widget` to scaffold a remote instead (#1125)
+```bash
+"<skill-base-dir>/scripts/recommend-ui-shape.zsh" \
+  --languages "<languages, comma-separated>" --react-overlay <applies|absent|skipped> "<repo>"
 ```
 
-A dropped line skips the step entirely — not an error, no Step 5 item. A
+**Exit 0** puts its `plan_line` in the Step 2 plan, and approving the plan
+approves the shell:
+
+```text
+React UI shape: shell (default) — reply `remote: page` or `remote: widget` to scaffold a remote instead (#1127)
+```
+
+**Exit 3** shows no line. Its `reason` is `no-javascript`, `no-browser-ui` or
+`react-overlay-skipped` when there is no shape to choose; `shape-marker` when the
+shape is already on disk, so that shape step's own State D line stands; and
+`conflicting-markers` for §3k.9's both-markers refusal. **Exit 2** is a
+malformed call: fix it and re-run, never read it as "no UI here".
+
+A dropped line — only the user dropping Q7's plan line — skips the step entirely:
+not an error, no Step 5 item. A
 `remote: page` or `remote: widget` reply drops it too, with §3k.8's line, and
 adds §3k.9's instead; §3k.9 also refuses a repo carrying both shape markers.
+Exit 3 is not a dropped line and follows its per-reason rules above: no shape to
+choose; a `shape-marker` repo's own State D adoption gap still applies; and
+`conflicting-markers` is §3k.9's refusal, with its Step 5 item.
 
 **Shape marker — `src/shell/loader.ts`.** That file marks a repo as a shell, and
 the recommender's (#1127) *shape already determined by an existing marker* gate
 reads it. In State
 D the step is an **adoption gap** only when the marker is present and another
 shell file is missing: offer the missing files in the plan. A React repo with no
-`src/shell/loader.ts` is never offered the shell in State D — without #1127,
-nothing can tell a remote from a deliberately plain app — and a repo carrying the
-remote marker, `src/remote/entry.tsx`, is never offered it at all.
+`src/shell/loader.ts` is offered the shell in State D only through Q7's
+recommendation, the family default, since nothing on disk tells a future remote
+from a shell — and a repo carrying the remote marker, `src/remote/entry.tsx`, is
+never offered it at all.
 
 **Install first, render second.** Snapshot `package.json` and the lockfile, then
 install the contract package, its scope being the owner part of the repository
@@ -5278,9 +5299,9 @@ npm i -D @<scope>/mfe-contract
 Skip the install when `package.json` already lists the package. **If it fails —
 the package is not published until #1899 — restore both files from the snapshot,
 render nothing, and record a Step 5 item naming `@<scope>/mfe-contract` and the
-publishing story, #1899.** The item says outright that a plain re-run will not
-add the shell — no marker lands, so State D never offers it — and that adding it
-once #1899 has published means running this step's install and render by hand.
+publishing story, #1899.** No marker lands, so a plain re-run offers the shell
+again through Q7's plan line; the item says that approving it adds the shell
+once #1899 has published `@<scope>/mfe-contract`.
 
 **Render the shell set** into a staging directory, then write each file under
 the idempotency rules:
@@ -5474,11 +5495,10 @@ owns no route, reads its config and grid size from the context, and is hosted by
 
 **Trigger.** Run this step after §3k.6 when §3k.5's overlay applies (its *Does
 the overlay apply?* check) **and** either the user replied `remote: page` or
-`remote: widget` to §3k.7's Step 2 plan line, or — in State D —
+`remote: widget` to Q7's Step 2 plan line (§3k.7), or — in State D —
 `src/remote/entry.tsx` is on disk and another file of its shape is missing (the
-adoption gap below). That reply is the selection until
-the shell-or-remote recommender (#1127) lands; its recommendation then replaces
-the reply. **Choosing a remote drops the §3k.7 and §3k.8 plan lines** and adds
+adoption gap below). The reply names the remote's kind, page or widget, and that
+kind is the shape this step renders. **Choosing a remote drops the §3k.7 and §3k.8 plan lines** and adds
 this step's, naming the shape:
 
 ```text
@@ -5490,8 +5510,8 @@ not an error, no Step 5 item.
 
 **Shape markers — `src/remote/entry.tsx` and `src/remote/manifest.ts`.**
 `src/remote/entry.tsx` marks a repo as a remote, and `src/remote/manifest.ts`
-additionally marks the widget shape; #1127's *shape already determined by an
-existing marker* gate reads them. In State D the step is an **adoption gap**
+additionally marks the widget shape; `recommend-ui-shape.zsh`'s `shape-marker`
+gate (#1127) reads them. In State D the step is an **adoption gap**
 only when the remote marker is present and another file of its shape is
 missing: offer the missing files in the plan, the shape read from the widget
 marker's presence. A repo with no `src/remote/entry.tsx` is never offered a
@@ -5515,9 +5535,10 @@ npm i -D @<scope>/mfe-contract
 Skip the install when `package.json` already lists the package. **If it fails —
 the package is not published until #1899 — restore both files from the snapshot,
 render nothing, and record a Step 5 item naming `@<scope>/mfe-contract` and the
-publishing story, #1899.** No marker lands, so a plain re-run offers nothing in
-State D; the item says that adding the remote once #1899 has published means
-running this step's install, render and `build:remote` edit by hand.
+publishing story, #1899.** No marker lands, so a plain re-run shows Q7's plan
+line again; the item says that once #1899 has published `@<scope>/mfe-contract`,
+replying `remote: page` or `remote: widget` to it renders the remote, while
+approving that plan unchanged scaffolds the shell instead.
 
 **Render the chosen shape's set** into a staging directory, then write each file
 under the idempotency rules. A page remote:

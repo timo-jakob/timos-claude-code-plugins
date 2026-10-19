@@ -294,13 +294,13 @@ STEP_END='### 3k.10. MFE conformance (a remote'"'"'s contract check — #1126) '
   local section
   section="$(remote_step)"
   ends_with "$section" "$STEP_END"
-  contains "$section" 'Run this step after §3k.6 when §3k.5'"'"'s overlay applies (its *Does the overlay apply?* check) **and** either the user replied `remote: page` or `remote: widget` to §3k.7'"'"'s Step 2 plan line, or — in State D — `src/remote/entry.tsx` is on disk and another file of its shape is missing (the adoption gap below).'
-  contains "$section" 'That reply is the selection until the shell-or-remote recommender (#1127) lands'
+  contains "$section" 'Run this step after §3k.6 when §3k.5'"'"'s overlay applies (its *Does the overlay apply?* check) **and** either the user replied `remote: page` or `remote: widget` to Q7'"'"'s Step 2 plan line (§3k.7), or — in State D — `src/remote/entry.tsx` is on disk and another file of its shape is missing (the adoption gap below).'
+  contains "$section" 'The reply names the remote'"'"'s kind, page or widget, and that kind is the shape this step renders.'
   contains "$section" '**Choosing a remote drops the §3k.7 and §3k.8 plan lines**'
   contains "$section" 'React remote overlay: <page|widget> (#1125)'
   contains "$section" 'With neither a `remote:` reply nor that adoption gap this step does not run'
   contains "$(sed -n '/^### 3k\.7\. Shell overlay/,/^### /p' "$SKILL" | tr -s '[:space:]' ' ')" \
-    'React shell overlay (default shape) — reply `remote: page` or `remote: widget` to scaffold a remote instead (#1125)'
+    'React UI shape: shell (default) — reply `remote: page` or `remote: widget` to scaffold a remote instead (#1127)'
   contains "$(sed -n '/^### 3k\.7\. Shell overlay/,/^### /p' "$SKILL" | tr -s '[:space:]' ' ')" \
     'A `remote: page` or `remote: widget` reply drops it too, with §3k.8'"'"'s line, and adds §3k.9'"'"'s instead; §3k.9 also refuses a repo carrying both shape markers.'
 }
@@ -326,7 +326,10 @@ STEP_END='### 3k.10. MFE conformance (a remote'"'"'s contract check — #1126) '
   contains "$section" 'npm i -D @<scope>/mfe-contract'
   contains "$section" 'Skip the install when `package.json` already lists the package.'
   contains "$section" 'restore both files from the snapshot, render nothing, and record a Step 5 item naming `@<scope>/mfe-contract` and the publishing story, #1899.'
-  contains "$section" 'means running this step'"'"'s install, render and `build:remote` edit by hand.'
+  contains "$section" 'No marker lands, so a plain re-run shows Q7'"'"'s plan line again;'
+  contains "$section" 'the item says that once #1899 has published `@<scope>/mfe-contract`, replying `remote: page` or `remote: widget` to it renders the remote,'
+  contains "$section" 'while approving that plan unchanged scaffolds the shell instead.'
+  lacks "$section" 'a plain re-run offers nothing in State D'
   contains "$section" 'a non-zero `render.zsh` exit takes the failed install'"'"'s branch above — restore both files, render nothing, record a Step 5 item — and the run carries on.'
   contains "$section" 'On either failure the `build:remote` edit below is not offered.'
 }

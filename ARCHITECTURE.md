@@ -1172,8 +1172,8 @@ consumer's generated client is its own sub-tier (#958, below).
   `src/shell/` (`Shell.tsx`, `Chrome.tsx`, `routes.ts`, `navigation.ts`,
   `import-map.ts`, `loader.ts`, `context.ts`, `auth.ts`, `loader.test.ts`) and
   `public/importmap.json`. Its **trigger** is §3k.5's overlay applying plus the
-  shell as the default shape — its own droppable Step 2 plan line until the
-  shell-or-remote recommender (#1127) lands. Its **shape marker** is
+  shell as the default shape — Q7's Step 2 plan line, which the UI shape
+  recommender (#1127) puts in the plan. Its **shape marker** is
   `src/shell/loader.ts`, the file #1127 reads and the one State D's adoption gap
   keys on. It **renders after §3k.6**: §3d → §3k → §3k.5 → §3k.6 → §3k.7, sharing no
   path with an earlier layer, and its only Vite-owned edit is the confirmed
@@ -1202,6 +1202,21 @@ consumer's generated client is its own sub-tier (#958, below).
   *Rationale:* shared modules that are the shell's own build assets carry the
   shell image's version, so concurrently mounted widgets run one React with one
   pin.
+- **The UI shape recommender (#1127).** Which shape a React repo is scaffolded
+  as is Shared questions Q7, recommended by
+  `development/skills/bootstrap/scripts/recommend-ui-shape.zsh --languages <csv>
+  --react-overlay <applies|absent|skipped> <repo_path>`. Browser UI is never
+  asked about: it is §3k.5's verdict, passed in. Its gates, in order:
+  `javascript` absent → `no-javascript`; an `absent` overlay → `no-browser-ui`; a
+  `skipped` one → `react-overlay-skipped`; both shape markers →
+  `conflicting-markers`; one marker → `shape-marker`, naming the shape it marks.
+  **Exit 3** prints those as `{applicable: false, reason, shape, remote_kind,
+  marker}` and shows no plan line. Otherwise **exit 0** recommends the shell
+  with `basis: "default"` and the Step 2 `plan_line`, to which the user may reply
+  `remote: page` or `remote: widget`. **Exit 2** is a usage or precondition error
+  with empty stdout. It never writes a file. *Rationale:* with no marker nothing
+  on disk tells a future remote from a shell, so the recommendation is the
+  family default and says so, instead of guessing.
 - **The remote overlay (#1125).** A remote is the independently deployable
   micro-frontend, scaffolded by bootstrap's §3k.9 from a sibling tree,
   `development/skills/bootstrap/templates/languages/javascript/react-remote/`,
@@ -1209,9 +1224,9 @@ consumer's generated client is its own sub-tier (#958, below).
   `src/remote/router.ts`, `src/remote/entry.test.ts`) and `widget/`
   (`src/remote/entry.tsx`, `src/remote/manifest.ts`, `src/remote/entry.test.ts`),
   each with a `vite.remote.config.ts`. Its **trigger** is §3k.5's overlay
-  applying plus an explicit Step 2 reply, `remote: page` or `remote: widget`,
-  until the shell-or-remote recommender (#1127) lands; choosing a remote drops
-  the shell and canvas plan lines. One repo is one shape: its **shape markers**
+  applying plus an explicit reply to Q7's Step 2 plan line, `remote: page` or
+  `remote: widget` (#1127); choosing a remote drops the shell and canvas plan
+  lines. One repo is one shape: its **shape markers**
   are `src/remote/entry.tsx` and, for a widget, `src/remote/manifest.ts`, and a
   repo carrying both the shell's and the remote's marker renders neither. It
   renders after §3k.6 — §3d → §3k → §3k.5 → §3k.6 → §3k.9 — installs
