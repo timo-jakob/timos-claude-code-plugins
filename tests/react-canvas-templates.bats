@@ -269,15 +269,15 @@ canvas_step() {
   sed -n '/^### 3k\.8\. Canvas overlay/,/^### /p' "$SKILL" | tr -s '[:space:]' ' '
 }
 
-STEP_END='### 3l. Infrastructure-as-code repos (no application language) — #1154 '
+STEP_END='### 3k.9. Remote overlay (a page or widget micro-frontend — #1125) '
 
-@test "canvas: SKILL.md carries §3k.8 right after §3k.7, before §3l" {
+@test "canvas: SKILL.md carries §3k.8 right after §3k.7, before §3k.9" {
   local section s c l
   section="$(canvas_step)"
   ends_with "$section" "$STEP_END"
   s="$(grep -n '^### 3k\.7\. ' "$SKILL" | cut -d: -f1)"
   c="$(grep -n '^### 3k\.8\. ' "$SKILL" | cut -d: -f1)"
-  l="$(grep -n '^### 3l\. ' "$SKILL" | cut -d: -f1)"
+  l="$(grep -n '^### 3k\.9\. ' "$SKILL" | cut -d: -f1)"
   matches "$s" '^[0-9]+$'
   matches "$c" '^[0-9]+$'
   matches "$l" '^[0-9]+$'
@@ -293,6 +293,7 @@ STEP_END='### 3l. Infrastructure-as-code repos (no application language) — #11
   contains "$section" 'It is **opt-in**'
   contains "$section" 'React canvas overlay: add the widget canvas to this shell? (default: no, #1939)'
   contains "$section" 'Anything but an explicit yes skips the step entirely'
+  contains "$section" 'A repo carrying the remote marker, `src/remote/entry.tsx`, is never offered it (§3k.9'"'"'s both-markers refusal).'
   contains "$section" '**Shape marker — `src/canvas/canvas.ts`.**'
   contains "$section" 'the step is an **adoption gap** only when that marker is present and another canvas file is missing'
   contains "$section" 'A shell with no `src/canvas/canvas.ts` is never offered the canvas in State D.'

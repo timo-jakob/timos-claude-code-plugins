@@ -466,6 +466,15 @@ or to its slot-agnostic context type reaches the canvas too.
 and keep the four shared specifiers in step across `vite.shared.config.ts`, the
 `shared/` entries and §3k.8's import map.
 
+**The remote overlay** (#1125, SKILL.md §3k.9) is a sibling tree,
+`languages/javascript/react-remote/`, with a `page/` and a `widget/` subtree that
+render after §3k.6 in place of the shell. `tests/react-remote-templates.bats`
+type-checks `router.ts` and `manifest.ts` against the contract and pins each
+`entry.test.ts` case title. Keep `src/remote/entry.tsx` and
+`src/remote/manifest.ts` as the shape markers — #1127 and State D's adoption gap
+read those paths — and keep the widget build's four external specifiers in step
+with §3k.8's import map.
+
 `tests/react-templates.bats` checks the load-bearing tokens of each layer
 against that layer's own template, so a forgotten copy usually reds there — but
 it checks tokens, not whole files, so read the diff side by side as well.

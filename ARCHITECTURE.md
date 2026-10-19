@@ -1201,6 +1201,28 @@ consumer's generated client is its own sub-tier (#958, below).
   *Rationale:* shared modules that are the shell's own build assets carry the
   shell image's version, so concurrently mounted widgets run one React with one
   pin.
+- **The remote overlay (#1125).** A remote is the independently deployable
+  micro-frontend, scaffolded by bootstrap's §3k.9 from a sibling tree,
+  `development/skills/bootstrap/templates/languages/javascript/react-remote/`,
+  with one subtree per shape: `page/` (`src/remote/entry.tsx`,
+  `src/remote/router.ts`, `src/remote/entry.test.ts`) and `widget/`
+  (`src/remote/entry.tsx`, `src/remote/manifest.ts`, `src/remote/entry.test.ts`),
+  each with a `vite.remote.config.ts`. Its **trigger** is §3k.5's overlay
+  applying plus an explicit Step 2 reply, `remote: page` or `remote: widget`,
+  until the shell-or-remote recommender (#1127) lands; choosing a remote drops
+  the shell and canvas plan lines. One repo is one shape: its **shape markers**
+  are `src/remote/entry.tsx` and, for a widget, `src/remote/manifest.ts`, and a
+  repo carrying both the shell's and the remote's marker renders neither. It
+  renders after §3k.6 — §3d → §3k → §3k.5 → §3k.6 → §3k.9 — installs
+  `@<scope>/mfe-contract` first, and its only Vite-owned edit is a confirmed
+  `build:remote` script in `package.json`. The page's nested router strips the
+  delegated `basePath` and hands any path outside it to the shell's
+  `onNavigate`; the widget narrows its own config and re-renders on a resize
+  without a remount. The build emits the unhashed `dist/remote.js` and
+  content-hashes everything under `dist/assets/`; a widget keeps React external
+  for the canvas's import map, while a page bundles its own. *Rationale:* one
+  stable entry path behind immutable, hashed assets lets a team release its slice
+  of the UI without coordinating with anyone.
 - **Verified statically here, built elsewhere.** `tests/react-templates.bats`
   pins the file set, each variant's kept and added content, the binding's
   re-export and barrel invariants, and the 120-column width, and
