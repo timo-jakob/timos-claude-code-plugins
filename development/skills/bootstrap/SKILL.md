@@ -3357,6 +3357,74 @@ one requires the OTel and Prometheus modules, this one requires `gobreaker`. Fol
 **both** into the module's `go.mod`; taking only the second leaves the ops surface
 without its exporters, and only the first leaves the catalog without its breaker.
 
+**Go identity — in-process OIDC validation (#2861).** Whenever the Go ops-api block
+above **installed** into a service with an HTTP application handler, also install
+the blessed identity payload: issuer-allowlisted
+access-token validation with `coreos/go-oidc/v3`, claim extraction into a
+request-scoped value, and the authorization seam a handler decides from. It realizes
+the identity position (ARCHITECTURE.md, *Identity and authorization*, #1186): the
+service validates and authorizes, a gateway never instead.
+
+*Applicability — gate before you install.* The gate is **the Go ops-api block's own
+outcome, then whether the service has an HTTP application handler**. The first half
+is the resilience payload's reason: the ops-surface carve-out this payload depends
+on is the management port that block serves, and `carveout_test.go` imports that
+block's package. The second half is the payload's shape: it ships only an
+`http.Handler` middleware:
+
+- **The Go ops-api block skipped or deferred** → **skip this too**. A library has
+  no inbound requests to validate, and a deferred ops surface has no management
+  port to carve out.
+- **The Go ops-api block installed, but no `net/http` handler serves application
+  routes** — a gRPC-only service, a message consumer, a worker → **skip this too**.
+- **The Go ops-api block installed and a `net/http` handler serves application
+  routes** → **install** per the render command below.
+
+Whichever applies, a service that serves gRPC also records a Step-5 checklist
+line: validate every gRPC call's bearer token in a gRPC interceptor — #2867, not
+shipped here. Record it as open, never as satisfied. A service with no gRPC
+server records no such line.
+
+Placement follows the ops-api block's rules, with these payload-specific ones:
+
+- **Every file the render command below lists goes into ONE directory of its own,
+  conventionally `internal/identity/` (package `identity`)**, of the module
+  `opsapi.go` went into. The directory must be **empty or hold only an earlier copy
+  of this payload**; anything else there, another `package identity` included, means
+  a fresh directory, recorded in the Step-2 plan. Its `README.md` and
+  `go.mod.deps` share names with the other Go payloads' files, so they go **only**
+  here, never beside `opsapi.go`.
+- **Fix the ONE flagged import** in `carveout_test.go`:
+  `ops "example.com/service/internal/ops"` with a `<-- CHANGE THIS IMPORT` marker,
+  re-pointed exactly as the resilience payload's (the `module` line of the module
+  you placed `opsapi.go` into, plus its directory relative to that module's root).
+  Fix it **before** `go mod tidy`.
+- **Deps** — place the `.go` files first, then fold `go.mod.deps`' single
+  `require` line into the same `go.mod`, then `go mod tidy` from the module
+  directory, under the resilience payload's *Deps* rules unchanged: tidy run first
+  strips the line and exits 0, and a tidy failure is read before it is deferred.
+  Never place the `.go` files without the require.
+- **Record — do not perform — the wiring.** Bootstrap does not edit the entrypoint.
+  Carry Step-5 checklist items instead: (a) set `OIDC_ISSUERS` and `OIDC_AUDIENCE`
+  per environment, each deployed environment listing only its own provider; (b) wrap
+  the **application** handler — never the management server — with
+  `identity.Middleware`; (c) decide each tenant-naming route with
+  `identity.RequireTenant`. The placed `README.md` shows the wiring and the local
+  dev-issuer setup. **Never add a validation-disabling switch or a trusted-header
+  mode to make a local run work**: the README's dev-issuer path is the only one.
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  languages/go/identity/identity.go \
+  languages/go/identity/claims.go \
+  languages/go/identity/middleware.go \
+  languages/go/identity/identity_test.go \
+  languages/go/identity/carveout_test.go \
+  languages/go/identity/go.mod.deps \
+  languages/go/identity/README.md
+```
+
 **Node canonical implementation (#936).** For a Node **service** repo, also install
 the blessed Node realization — a self-contained OTel-SDK + Prometheus-exporter
 module serving all five endpoints on the management port from a single `node:http`
