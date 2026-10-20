@@ -52,7 +52,7 @@ code_of() { [ -f "$1" ] || { echo "missing $1" >&2; return 1; }; flatten "$(cat 
 # an empty haystack would make every `lacks` below pass unconditionally.
 prod_code() {
   local f out=""
-  for f in identity.go claims.go middleware.go; do
+  for f in identity.go claims.go middleware.go s2s.go; do
     out="$out $(code_of "$ID/$f")" || return 1
   done
   [ -n "${out// /}" ] || { echo "prod_code: empty haystack" >&2; return 1; }
@@ -65,6 +65,8 @@ prod_code() {
   [ -f "$ID/middleware.go" ]
   [ -f "$ID/identity_test.go" ]
   [ -f "$ID/carveout_test.go" ]
+  [ -f "$ID/s2s.go" ]
+  [ -f "$ID/s2s_test.go" ]
   [ -f "$ID/go.mod.deps" ]
   [ -f "$ID/README.md" ]
 }
@@ -75,16 +77,17 @@ prod_code() {
 
 @test "go identity files all declare package identity" {
   local f
-  for f in identity.go claims.go middleware.go identity_test.go carveout_test.go; do
+  for f in identity.go claims.go middleware.go identity_test.go carveout_test.go s2s.go s2s_test.go; do
     grep -qE '^package identity$' "$ID/$f"
   done
 }
 
-@test "go identity go.mod.deps pins coreos/go-oidc/v3 as its one require" {
+@test "go identity go.mod.deps pins go-oidc/v3 and golang.org/x/oauth2, one require line each" {
   local deps; deps="$(grep -v '^//' "$ID/go.mod.deps")"
   contains "$deps" 'require github.com/coreos/go-oidc/v3 v3.'
-  # one library: no second require line, and no require block
-  [ "$(printf '%s\n' "$deps" | grep -c '^require ')" -eq 1 ]
+  contains "$deps" 'require golang.org/x/oauth2 v0.'
+  # one library per job: exactly these two require lines, and no require block
+  [ "$(printf '%s\n' "$deps" | grep -c '^require ')" -eq 2 ]
   lacks "$deps" 'require ('
 }
 
@@ -194,7 +197,7 @@ prod_code() {
 
 @test "go identity claims reach a handler only through the context Middleware sets after validation" {
   local mw; mw="$(fn_flat middleware.go 'Middleware(')"
-  contains "$mw" 'claims, err := v.Validate(r.Context(), raw) if err != nil { unauthorized(w, "invalid_token") return } next.ServeHTTP(w, r.WithContext(withClaims(r.Context(), claims)))'
+  contains "$mw" 'claims, err := v.Validate(r.Context(), raw) if err != nil { unauthorized(w, "invalid_token") return } ctx := withCallerToken(withClaims(r.Context(), claims), raw) next.ServeHTTP(w, r.WithContext(ctx))'
   contains "$mw" 'if !ok { unauthorized(w, "") return }'
   # the key is unexported, and withClaims is called nowhere else in production code
   contains "$(code_of "$ID/claims.go")" 'type claimsKey struct{}'
@@ -233,6 +236,7 @@ prod_code() {
   [ -n "$block" ]
   contains "$block" 'The gate is **the Go ops-api block'"'"'s own'
   contains "$block" 'outcome, then whether the service has an HTTP application handler**.'
+  contains "$block" 'the gate to give workers and message consumers that half is #2881:'
   # no net/http application handler skips; only a gRPC server owes the open #2867 line
   contains "$block" '- **The Go ops-api block installed, but no `net/http` handler serves application'
   contains "$block" 'routes** — a gRPC-only service, a message consumer, a worker → **skip this too**.'
@@ -254,8 +258,9 @@ prod_code() {
   contains "$block" '(b) wrap'
   contains "$block" 'the **application** handler — never the management server — with'
   contains "$block" '(c) decide each tenant-naming route with'
+  contains "$block" '(d) send each outbound service call through'
   local f
-  for f in identity.go claims.go middleware.go identity_test.go carveout_test.go go.mod.deps README.md; do
+  for f in identity.go claims.go middleware.go identity_test.go carveout_test.go s2s.go s2s_test.go go.mod.deps README.md; do
     contains "$block" "languages/go/identity/$f"
   done
   # every file in the payload directory is rendered: a new file not added here
@@ -274,11 +279,75 @@ prod_code() {
 @test "go identity README states the placement order and the claims-only and by-port rules" {
   local r; r="$(cat "$ID/README.md")"
   contains "$r" 'or hold only an earlier copy of this payload; anything else there, another `package identity`'
-  contains "$r" 'Fold `go.mod.deps`'"'"' `require` line into that module'"'"'s `go.mod`, **then** `go mod tidy` from the'
+  contains "$r" 'Fold `go.mod.deps`'"'"' `require` lines into that module'"'"'s `go.mod`, **then** `go mod tidy` from the'
   contains "$r" 'The same five paths mounted behind `Middleware` on the application port answer **401** like any'
   contains "$r" '`carveout_test.go` proves both halves against the real ops handler.'
   contains "$r" 'A handler reads the tenant and roles **only** from `ClaimsFrom(ctx)`, which only `Middleware`'
   contains "$r" 'When a request also *names* a tenant, `RequireTenant` compares it for equality and'
   contains "$r" 'rejects a mismatch, and rejects a request naming a tenant when the token carries none.'
   contains "$r" 'on that issuer'"'"'s first token, with `SupportedSigningAlgs` pinned to the issuer'"'"'s configured'
+}
+
+@test "go identity s2s: the caller token is set only by Middleware, read through CallerToken" {
+  local code; code="$(code_of "$ID/s2s.go")"
+  contains "$code" 'type callerTokenKey struct{}'
+  contains "$code" 'func withCallerToken(ctx context.Context, raw string) context.Context {'
+  contains "$code" 'func CallerToken(ctx context.Context) (string, bool) {'
+  # the unexported setter is defined once and called once — by Middleware, after
+  # Validate succeeded (pinned on the middleware body above)
+  [ "$(prod_code | grep -o 'withCallerToken(' | wc -l | tr -d ' ')" -eq 2 ]
+}
+
+@test "go identity s2s: the propagating transport overwrites Authorization and refuses without a token" {
+  local fn; fn="$(fn_flat s2s.go '(t *PropagatingTransport) RoundTrip(')"
+  contains "$fn" 'raw, ok := CallerToken(req.Context()) if !ok {'
+  contains "$fn" 'return nil, ErrNoCallerToken }'
+  contains "$fn" 'out := req.Clone(req.Context()) if redirectedAwayFromOrigin(req) { out.Header.Del("Authorization") } else { out.Header.Set("Authorization", "Bearer "+raw) }'
+  lacks "$fn" 'Header.Get('
+  # a redirect chain that cannot be walked back to the origin fails closed
+  local rd; rd="$(fn_flat s2s.go 'redirectedAwayFromOrigin(req *http.Request) bool {')"
+  contains "$rd" 'for first.Response != nil { if first.Response.Request == nil { return true } first = first.Response.Request }'
+  contains "$rd" 'return first.URL.Host != req.URL.Host || first.URL.Scheme != req.URL.Scheme }'
+  local cl; cl="$(fn_flat s2s.go '(s *ServiceAccount) Client(')"
+  contains "$cl" 'if redirectedAwayFromOrigin(req) { return http.ErrUseLastResponse }'
+}
+
+@test "go identity s2s: service-account tokens are cached per tenant, the tenant requested only when passed" {
+  local code; code="$(code_of "$ID/s2s.go")"
+  contains "$code" 'DefaultTenantScopeTemplate = "organization:{tenant}"'
+  contains "$code" '"golang.org/x/oauth2/clientcredentials"'
+  local tts; tts="$(fn_flat s2s.go '(s *ServiceAccount) TenantTokenSource(')"
+  contains "$tts" 'if tenant == "" || strings.ContainsFunc(tenant, unicode.IsSpace) { return nil, ErrInvalidTenant }'
+  contains "$tts" 'src, ok := s.byTenant[tenant] if !ok {'
+  contains "$tts" 'scope := strings.ReplaceAll(s.cfg.TenantScopeTemplate, "{tenant}", tenant)'
+  local ts; ts="$(fn_flat s2s.go '(s *ServiceAccount) TokenSource(')"
+  contains "$ts" 'if s.tenantless == nil { s.tenantless = s.newSource(nil) }'
+  local ns; ns="$(fn_flat s2s.go '(s *ServiceAccount) newSource(')"
+  contains "$ns" 'ctx := context.WithValue(context.Background(), oauth2.HTTPClient, s.httpClient)'
+  contains "$ns" 'return cc.TokenSource(ctx)'
+  contains "$ns" 'Scopes: append(append([]string{}, s.cfg.Scopes...), extra...),'
+}
+
+@test "go identity s2s tests prove both halves against httptest token and resource servers" {
+  local t; t="$(code_of "$ID/s2s_test.go")"
+  local test
+  for test in TestPropagationForwardsTheValidatedTokenUnchanged TestPropagationWithoutAValidatedTokenSendsNothing \
+    TestPropagationDoesNotModifyTheCallersRequest TestServiceAccountTokenIsCachedAndRefreshedOnExpiry \
+    TestServiceAccountTokensAreIsolatedPerTenant TestServiceAccountScopeTemplateAndTenantValidation \
+    TestNoTokenFollowsARedirectToAnotherHost; do
+    contains "$t" "func $test(t *testing.T) {"
+  done
+  # propagation is driven through the real Middleware, the setter's only caller
+  contains "$t" 'app := Middleware(newTestValidator(t, iss))(http.HandlerFunc('
+  contains "$t" 'want := []string{"organization:acme", "organization:globex", ""}'
+}
+
+@test "go identity README documents that a service-account token carries a tenant only when acting for one" {
+  local r; r="$(cat "$ID/README.md")"
+  contains "$r" '**A service-account token carries a tenant only when the work is genuinely acting for one'
+  contains "$r" 'call requests none. Tokens are cached per exact tenant string, with the tenant-less token in its own'
+  contains "$r" 'An outbound call carries exactly one of two tokens, and neither half ever trusts a header (`s2s.go`).'
+  contains "$r" 'whatever was there. With no validated token in the context it returns `ErrNoCallerToken` and sends'
+  contains "$r" 'downstream service to that `aud` with a Keycloak audience mapper. Where that is unwanted, exchange'
+  lacks "$r" 'queue consumer'
 }

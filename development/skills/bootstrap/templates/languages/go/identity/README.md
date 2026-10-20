@@ -26,11 +26,12 @@ failed discovery is remembered for a 5-second backoff, inside which that issuer'
 fast with 401, and is retried after it, so an issuer outage neither queues requests nor needs a
 restart once the issuer is back.
 
-## The blessed library: `coreos/go-oidc/v3`
+## The blessed libraries: `coreos/go-oidc/v3` and `golang.org/x/oauth2`
 
-One library, no alternative and no switch. It does discovery, the caching and rotating JWKS key
-set, and `iss`/`aud`/`exp` verification with configured algorithms. `go.mod.deps` beside this file
-carries its require line.
+One library per job, no alternative and no switch. go-oidc does discovery, the caching and
+rotating JWKS key set, and `iss`/`aud`/`exp` verification with configured algorithms;
+`golang.org/x/oauth2/clientcredentials` is the service-account token source. `go.mod.deps` beside
+this file carries both require lines.
 
 ## Placement
 
@@ -41,8 +42,8 @@ carries its require line.
 2. In `carveout_test.go`, re-point the one flagged import
    `ops "example.com/service/internal/ops"` (`<-- CHANGE THIS IMPORT`) at your module path plus the
    directory `opsapi.go` landed in.
-3. Fold `go.mod.deps`' `require` line into that module's `go.mod`, **then** `go mod tidy` from the
-   module directory. Tidy before the files are placed strips the line and exits 0.
+3. Fold `go.mod.deps`' `require` lines into that module's `go.mod`, **then** `go mod tidy` from the
+   module directory. Tidy before the files are placed strips the lines and exits 0.
 
 ## Wiring
 
@@ -100,6 +101,55 @@ body field. When a request also *names* a tenant, `RequireTenant` compares it fo
 rejects a mismatch, and rejects a request naming a tenant when the token carries none. Keycloak
 Organizations may emit `organization` as an array of aliases or, with attributes mapped, as an
 object keyed by alias; both are read. An absent or empty claim means the token carries no tenant.
+
+## Service-to-service calls: the caller's token or the service's own
+
+An outbound call carries exactly one of two tokens, and neither half ever trusts a header (`s2s.go`).
+Neither token leaves the host and scheme called: on a redirect to another host or scheme,
+propagation sends no token and `ServiceAccount.Client` returns the 3xx unfollowed.
+
+The receiving service runs this payload too, so it accepts a token only when the token's `aud`
+names that service's own `OIDC_AUDIENCE`. The propagated token carries the audience the caller's
+token was issued with, and a service-account token the audience its client is issued. Add every
+downstream service to that `aud` with a Keycloak audience mapper. Where that is unwanted, exchange
+the token for one scoped to the downstream (RFC 8693 token exchange). Never widen a downstream's
+`OIDC_AUDIENCE` to accept a token issued for another service.
+
+**On behalf of a user — propagate.** A handler calling another service for the user it is serving
+forwards that user's validated token. `Middleware` stores it after validation, `CallerToken(ctx)`
+reads it back, and `PropagatingTransport` sets it as the outbound `Authorization` header, overwriting
+whatever was there. With no validated token in the context it returns `ErrNoCallerToken` and sends
+nothing. Build the outbound request with the inbound request's context:
+
+```go
+orders := &http.Client{Transport: &identity.PropagatingTransport{}, Timeout: 10 * time.Second}
+req, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, ordersURL+"/orders", nil)
+resp, err := orders.Do(req)
+```
+
+**Background and system work — the service account.** A scheduled job or any other work in this
+service that no user asked for uses the service's own client-credentials token:
+
+```go
+sa, err := identity.NewServiceAccount(identity.ServiceAccountConfig{
+    TokenURL:     "https://keycloak.prod.example/realms/platform/protocol/openid-connect/token",
+    ClientID:     "billing-nightly",
+    ClientSecret: secretFromMountedFile, // never from source
+})
+src, err := sa.TenantTokenSource("acme") // acting for tenant acme: requests scope organization:acme
+resp, err := sa.Client(src).Get(billingURL + "/invoices")
+system := sa.TokenSource() // acting for no tenant: requests no organization scope
+```
+
+**A service-account token carries a tenant only when the work is genuinely acting for one
+tenant.** A job that claims a tenant it is not acting for is indistinguishable, downstream, from a
+compromised one. So the tenant is requested per call, through `TenantScopeTemplate` (default
+`organization:{tenant}`, matching the `organization` claim this payload reads), and a tenant-less
+call requests none. Tokens are cached per exact tenant string, with the tenant-less token in its own
+entry, so a token fetched for one tenant is never served to another tenant or to a tenant-less call.
+Each is refreshed only when it expires. A tenant that is empty or contains whitespace is refused with
+`ErrInvalidTenant`, because scopes are space-separated and such a tenant would request scopes nobody
+asked for.
 
 ## Local development: a dev issuer, never a bypass
 
