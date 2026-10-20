@@ -7,11 +7,14 @@
 #   make fmt | lint | test | generate | build | image   developer conveniences, one tool each
 #
 # `check` runs the gate MECHANISM, scripts/go-gate.zsh, through zsh rather than by its executable bit, so a
-# checkout that lost the mode still gates. golangci-lint, diff-cover, trivy, gitleaks and pre-commit are pinned
-# HERE and nowhere else: `make setup` installs exactly these versions locally and in CI, whatever
-# .maintenance.yml declares, since the gate's license and secrets stages run under every declaration. buf,
-# govulncheck, gocover-cobertura, oasdiff and yq are Go tool dependencies pinned in go.mod and run with `go tool`.
-GOLANGCI_LINT_VERSION := v2.12.2
+# checkout that lost the mode still gates. The versions below are what `make setup` installs for the gate,
+# locally and in CI: golangci-lint, diff-cover, trivy, gitleaks and pre-commit, whatever .maintenance.yml declares,
+# since the gate's license and secrets stages run under every declaration. They are not these tools' only pins:
+# .pre-commit-config.yaml pins golangci-lint and gitleaks again as hook `rev:`s, the quality workflow pins
+# diff-cover in its `pip install`, and the workflows run trivy, gitleaks and pre-commit through their own pinned
+# GitHub Actions, so bump every copy of a tool together. buf, govulncheck, gocover-cobertura, oasdiff
+# and yq are Go tool dependencies pinned in go.mod and run with `go tool`.
+GOLANGCI_LINT_VERSION := v2.14.0
 DIFF_COVER_VERSION := 10.2.0
 TRIVY_VERSION := v0.72.0
 GITLEAKS_VERSION := v8.30.1
