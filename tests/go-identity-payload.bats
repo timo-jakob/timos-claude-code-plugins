@@ -353,6 +353,32 @@ prod_code() {
   [ "$(printf '%s\n' "$block" | grep -c 'languages/go/identity/')" -eq "$n" ]
 }
 
+@test "go identity SKILL block offers the payload as a State D adoption gap, neither stamped nor drift-tracked" {
+  local block stamp
+  block="$(awk '/^\*\*Go identity — in-process OIDC validation \(#2861\)\.\*\*/{f=1} f&&/^\*\*Node canonical implementation/{exit} f' "$SKILL")"
+  [ -n "$block" ]
+  contains "$block" '*State D — an adoption gap, never a gap-fill candidate (#2887).* In State D the'
+  # the trigger is the block's own gate: both surfaces, and no placed copy
+  contains "$block" 'payload is an **adoption gap** when this block'"'"'s gate holds — the Go ops-api'
+  contains "$block" '`net/http`, an application `grpc.Server`, or both — and the module holding'
+  contains "$block" '`opsapi.go` has no `package identity` directory at all. Offer it in the'
+  # installed as a fresh bootstrap would, the gRPC render included, never blind at the root
+  contains "$block" 'Step-2 plan and install it as a fresh bootstrap would: the base render command'
+  contains "$block" 'above, plus the gRPC render command when the service runs an application'
+  contains "$block" 'repo root, which is why `detect-stack.sh` never lists it in `missing_artifacts`.'
+  contains "$block" 'A repo that already holds an earlier, partial copy of the payload is not this'
+  # placed, user-owned code: no stamp, no drift tracking, no Step 3.6 row
+  contains "$block" 'adoption gap (follow-up #2892). The payload is placed, user-owned code, so it is neither stamped'
+  contains "$block" '(Step 3.6) nor tracked by `detect-template-drift.zsh`, and Step 3.6'"'"'s table'
+  stamp="$(awk '/^## Step 3\.6: Stamp provenance markers on tracked files/{f=1;next} f&&/^## /{exit} f' "$SKILL")"
+  [ -n "$stamp" ]
+  lacks "$stamp" 'identity'
+  # step 4a's no-drift stop does not end the run before the gap is offered
+  contains "$(cat "$SKILL")" 'pending Go identity adoption gap (the Go identity block'"'"'s State D gap,'
+  # step 3's GitHub-side gap-fill may write the install too
+  contains "$(cat "$SKILL")" 'working-tree write too, as is the install of a pending Go identity adoption gap'
+}
+
 @test "go identity README documents local development against a dev issuer, never a bypass" {
   local r; r="$(cat "$ID/README.md")"
   contains "$r" 'There is **no trusted-header mode and no switch that disables validation**'

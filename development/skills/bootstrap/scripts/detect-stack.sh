@@ -1409,6 +1409,11 @@ collect_from() {
 		[[ "$rel" == react-canvas/* ]] && continue
 		[[ "$rel" == react-remote/* ]] && continue
 		[[ "$rel" == mfe-conformance/* ]] && continue
+		# The Go identity payload (#2861) is a destination-detected payload: the
+		# bootstrap SKILL.md Go identity block places it beside the ops package,
+		# and offers it in State D as that block's adoption gap (#2887) — never a
+		# fixed 1:1 artifact rendered at the repo root.
+		[[ "$rel" == identity/* ]] && continue
 		candidate_paths+=("$rel")
 	done < <(find "$dir" -type f 2>/dev/null)
 }

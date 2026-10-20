@@ -511,7 +511,8 @@ flow. Stop and ask for input wherever marked; do not guess.
    >   overwrite, write and stamp the result (Step 3.6) and
    >   repeat the `branch-protection.sh` call **in this same run**. That refreshed
    >   file is a working-tree write this gap-fill makes (as are the toolchain refresh's
-   >   files and the `approval:` record — see below), and it rides Step 4d/4e as the bot PR —
+   >   files, the `approval:` record and the Go identity adoption gap's install — see below),
+   >   and it rides Step 4d/4e as the bot PR —
    >   the PR's own run reports
    >   `gate`. If the overwrite is declined, or the repeated call refuses again,
    >   take the next bullet — never render a second time;
@@ -581,7 +582,9 @@ flow. Stop and ask for input wherever marked; do not guess.
    `kubernetes-ci.yml` refresh above (or `opentofu-ci.yml`'s), when
    `branch-protection.sh --iac-only <topic>` refuses it. The `approval:` record into an existing `.maintenance.yml` that
    has none (step 4's approval paragraph) is not a gap-fill action but is a
-   working-tree write too, and each of these writes rides Step 4d/4e as the bot PR. If multiple
+   working-tree write too, as is the install of a pending Go identity adoption gap
+   (the Go identity block's State D gap, #2887), offered in the Step 2 plan in whichever of steps 3, 4 and 5
+   this run reaches, and each of these writes rides Step 4d/4e as the bot PR. If multiple
    gaps coexist, present them as a
    checkboxed list so the user can pick a subset.
 
@@ -888,7 +891,10 @@ flow. Stop and ask for input wherever marked; do not guess.
       the Step 2 plan, and on confirmation its `--record` is the delta. So does
       a pending toolchain refresh: when its dry run reported any `refreshed`,
       `conflict` or `ambiguous` row, do not stop — continue to the Step 2 plan,
-      and on confirmation its run without `--dry-run` is the delta.)
+      and on confirmation its run without `--dry-run` is the delta. So does a
+      pending Go identity adoption gap (the Go identity block's State D gap,
+      #2887): do not stop — continue to the Step 2 plan, and on confirmation
+      its install is the delta.)
 
       > **The sha256 is the drift signal — not the version label.** A marker
       > records both the template hash AND the plugin version at render time.
@@ -3449,6 +3455,20 @@ server interceptors into the same `internal/identity/` directory:
   languages/go/identity/interceptor.go \
   languages/go/identity/interceptor_test.go
 ```
+
+*State D — an adoption gap, never a gap-fill candidate (#2887).* In State D the
+payload is an **adoption gap** when this block's gate holds — the Go ops-api
+payload is placed (`opsapi.go`) and the service serves application routes over
+`net/http`, an application `grpc.Server`, or both — and the module holding
+`opsapi.go` has no `package identity` directory at all. Offer it in the
+Step-2 plan and install it as a fresh bootstrap would: the base render command
+above, plus the gRPC render command when the service runs an application
+`grpc.Server`, under this block's placement rules — never rendered blind at the
+repo root, which is why `detect-stack.sh` never lists it in `missing_artifacts`.
+A repo that already holds an earlier, partial copy of the payload is not this
+adoption gap (follow-up #2892). The payload is placed, user-owned code, so it is neither stamped
+(Step 3.6) nor tracked by `detect-template-drift.zsh`, and Step 3.6's table
+carries no identity row.
 
 **Node canonical implementation (#936).** For a Node **service** repo, also install
 the blessed Node realization — a self-contained OTel-SDK + Prometheus-exporter
