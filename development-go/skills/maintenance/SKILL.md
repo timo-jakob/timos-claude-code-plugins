@@ -631,8 +631,9 @@ per-group work agents the orchestrator spawns in Phase 8.
   pinned binary rather than a formatter plus a separate linter. `fmt`
   runs the config's `formatters` section (gofumpt + gci/goimports);
   `run --fix` applies the autofixable lint subset. The version pin lives
-  with the bootstrap templates (`.pre-commit-config.yaml.tmpl`, currently
-  `v2.12.2`) so CI, pre-commit, and local runs agree; the **`formatters`
+  with the bootstrap templates (`GOLANGCI_LINT_VERSION` in `Makefile.tmpl`
+  and the golangci-lint `rev` in `.pre-commit-config.yaml.tmpl`) so CI,
+  pre-commit, and local runs agree; the **`formatters`
   section** of the rendered `.golangci.yml` is Slice F's (#875) to add —
   until it lands, `golangci-lint fmt` still applies standard Go
   formatting, so this slice's fixer is functional, just not yet gofumpt-strict.
