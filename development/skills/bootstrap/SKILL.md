@@ -3358,39 +3358,39 @@ one requires the OTel and Prometheus modules, this one requires `gobreaker`. Fol
 without its exporters, and only the first leaves the catalog without its breaker.
 
 **Go identity — in-process OIDC validation (#2861).** Whenever the Go ops-api block
-above **installed** into a service with an HTTP application handler, also install
-the blessed identity payload: issuer-allowlisted
+above **installed** into a service with an HTTP or gRPC application surface, also
+install the blessed identity payload: issuer-allowlisted
 access-token validation with `coreos/go-oidc/v3`, claim extraction into a
 request-scoped value, and the authorization seam a handler decides from. It realizes
 the identity position (ARCHITECTURE.md, *Identity and authorization*, #1186): the
 service validates and authorizes, a gateway never instead.
 
 *Applicability — gate before you install.* The gate is **the Go ops-api block's own
-outcome, then whether the service has an HTTP application handler**. The first half
-is the resilience payload's reason: the ops-surface carve-out this payload depends
-on is the management port that block serves, and `carveout_test.go` imports that
-block's package. The second half is the payload's shape: it ships an inbound
-`http.Handler` middleware plus the outbound token clients of `s2s.go`, and the
-payload installs whole or not at all, so the gate keys on the inbound half. A
-service without such a handler therefore gets no `ServiceAccount` either; widening
-the gate to give workers and message consumers that half is #2881:
+outcome, then whether the service has an inbound application surface — routes
+served over `net/http` or an application `grpc.Server`**. The first half is the
+resilience payload's reason: the ops-surface carve-out this payload depends on is
+the management port that block serves, and `carveout_test.go` imports that block's
+package. The second half is the payload's shape: it ships the inbound token rule —
+an `http.Handler` middleware, and for gRPC the server interceptors of
+`interceptor.go` — plus the outbound token clients of `s2s.go`, so the gate keys
+on the inbound half. A service with neither surface therefore gets no
+`ServiceAccount` either; widening the gate to give workers and message consumers
+that half is #2881:
 
 - **The Go ops-api block skipped or deferred** → **skip this too**. A library has
   no inbound requests to validate, and a deferred ops surface has no management
   port to carve out.
-- **The Go ops-api block installed, but no `net/http` handler serves application
-  routes** — a gRPC-only service, a message consumer, a worker → **skip this too**.
-- **The Go ops-api block installed and a `net/http` handler serves application
-  routes** → **install** per the render command below.
-
-Whichever applies, a service that serves gRPC also records a Step-5 checklist
-line: validate every gRPC call's bearer token in a gRPC interceptor — #2867, not
-shipped here. Record it as open, never as satisfied. A service with no gRPC
-server records no such line.
+- **The Go ops-api block installed, but the service serves application routes
+  over neither `net/http` nor an application `grpc.Server`** — a message consumer,
+  a worker → **skip this too**.
+- **The Go ops-api block installed and the service serves application routes over
+  `net/http`, an application `grpc.Server`, or both** → **install** per the base
+  render command below, plus the gRPC render command when it runs an application
+  `grpc.Server`.
 
 Placement follows the ops-api block's rules, with these payload-specific ones:
 
-- **Every file the render command below lists goes into ONE directory of its own,
+- **Every file the render commands below list goes into ONE directory of its own,
   conventionally `internal/identity/` (package `identity`)**, of the module
   `opsapi.go` went into. The directory must be **empty or hold only an earlier copy
   of this payload**; anything else there, another `package identity` included, means
@@ -3406,13 +3406,21 @@ Placement follows the ops-api block's rules, with these payload-specific ones:
   lines into the same `go.mod`, then `go mod tidy` from the module
   directory, under the resilience payload's *Deps* rules unchanged: tidy run first
   strips the lines and exits 0, and a tidy failure is read before it is deferred.
-  Never place the `.go` files without the require.
+  Never place the `.go` files without the require. `go.mod.deps` carries **no**
+  `google.golang.org/grpc` require, on purpose: the interceptors are placed only
+  for a service that builds a `grpc.Server`, which already requires grpc, and the
+  Go ops-api payload's `otlpmetricgrpc` exporter brings it into the module graph
+  regardless.
 - **Record — do not perform — the wiring.** Bootstrap does not edit the entrypoint.
   Carry Step-5 checklist items instead: (a) set `OIDC_ISSUERS` and `OIDC_AUDIENCE`
-  per environment, each deployed environment listing only its own provider; (b) wrap
-  the **application** handler — never the management server — with
-  `identity.Middleware`; (c) decide each tenant-naming route with
-  `identity.RequireTenant`; (d) send each outbound service call through
+  per environment, each deployed environment listing only its own provider; (b) by
+  surface: for `net/http`, wrap the **application** handler — never the management
+  server — with `identity.Middleware`; for gRPC, register
+  `grpc.ChainUnaryInterceptor(identity.UnaryServerInterceptor(validator))` and
+  `grpc.ChainStreamInterceptor(identity.StreamServerInterceptor(validator))` on the
+  **application** `grpc.Server`, never on the management server, with no
+  per-method exemption; a service serving both records both; (c) decide each tenant-naming route with
+  `identity.RequireTenant`; (d) send each outbound HTTP service call through
   `identity.PropagatingTransport` or a `ServiceAccount` client, provisioning that
   client and its mounted secret per environment. The placed `README.md` shows the wiring and the local
   dev-issuer setup. **Never add a validation-disabling switch or a trusted-header
@@ -3430,6 +3438,16 @@ Placement follows the ops-api block's rules, with these payload-specific ones:
   languages/go/identity/s2s_test.go \
   languages/go/identity/go.mod.deps \
   languages/go/identity/README.md
+```
+
+Only for a service that runs an application `grpc.Server`, also render the gRPC
+server interceptors into the same `internal/identity/` directory:
+
+```bash
+"<skill-base-dir>/scripts/render.zsh" \
+  --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
+  languages/go/identity/interceptor.go \
+  languages/go/identity/interceptor_test.go
 ```
 
 **Node canonical implementation (#936).** For a Node **service** repo, also install

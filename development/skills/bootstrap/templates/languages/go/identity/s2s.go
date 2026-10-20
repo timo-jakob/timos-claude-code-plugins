@@ -25,17 +25,18 @@ import (
 //     compromised one.
 
 // callerTokenKey is unexported, so only this package can put a caller token in a
-// context: a value under it was set by Middleware after successful validation.
+// context: a value under it was set by Middleware or a gRPC server interceptor
+// after successful validation.
 type callerTokenKey struct{}
 
-// withCallerToken stores the validated inbound token. Only Middleware calls it,
-// and only after Validate succeeded.
+// withCallerToken stores the validated inbound token. Only Middleware and the
+// gRPC server interceptors call it, and only after Validate succeeded.
 func withCallerToken(ctx context.Context, raw string) context.Context {
 	return context.WithValue(ctx, callerTokenKey{}, raw)
 }
 
 // CallerToken returns the inbound caller's validated bearer token, as Middleware
-// stored it for this request.
+// or a gRPC server interceptor stored it for this request.
 func CallerToken(ctx context.Context) (string, bool) {
 	raw, ok := ctx.Value(callerTokenKey{}).(string)
 	return raw, ok && raw != ""
