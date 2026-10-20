@@ -61,10 +61,12 @@ func RequireTenant(ctx context.Context, requested string) error {
 }
 
 // claimsKey is unexported, so only this package can put Claims in a context:
-// a value under it was set by Middleware after successful validation.
+// a value under it was set by Middleware or a gRPC server interceptor after
+// successful validation.
 type claimsKey struct{}
 
-// ClaimsFrom returns the validated claims Middleware stored for this request.
+// ClaimsFrom returns the validated claims Middleware or a gRPC server
+// interceptor stored for this request.
 func ClaimsFrom(ctx context.Context) (Claims, bool) {
 	claims, ok := ctx.Value(claimsKey{}).(Claims)
 	return claims, ok

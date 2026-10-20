@@ -39,9 +39,16 @@ func Middleware(v *Validator) func(http.Handler) http.Handler {
 	}
 }
 
-// bearerToken extracts an RFC 6750 bearer token. The scheme is case-insensitive.
+// bearerToken extracts an RFC 6750 bearer token from the Authorization header.
 func bearerToken(r *http.Request) (string, bool) {
-	scheme, token, ok := strings.Cut(r.Header.Get("Authorization"), " ")
+	return parseBearer(r.Header.Get("Authorization"))
+}
+
+// parseBearer reads a `Bearer <token>` credential. The scheme is
+// case-insensitive. The gRPC interceptors share it, so both surfaces accept
+// exactly the same credentials.
+func parseBearer(credential string) (string, bool) {
+	scheme, token, ok := strings.Cut(credential, " ")
 	if !ok || !strings.EqualFold(scheme, "Bearer") {
 		return "", false
 	}

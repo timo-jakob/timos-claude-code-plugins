@@ -38,7 +38,8 @@ this file carries both require lines.
 1. Copy every file of this payload into **`internal/identity/`** of the module that builds the
    service binary — the same module the ops-api payload went into. The directory must be empty
    or hold only an earlier copy of this payload; anything else there, another `package identity`
-   included, means a fresh directory.
+   included, means a fresh directory. `interceptor.go` and `interceptor_test.go` are placed only
+   for a service that runs an application `grpc.Server`.
 2. In `carveout_test.go`, re-point the one flagged import
    `ops "example.com/service/internal/ops"` (`<-- CHANGE THIS IMPORT`) at your module path plus the
    directory `opsapi.go` landed in.
@@ -77,6 +78,42 @@ go func() { _ = ops.Serve(ctx, ops.DefaultAddr(), opsCfg) }() // management port
 server := &http.Server{Addr: ":8080", Handler: identity.Middleware(validator)(app), ReadHeaderTimeout: 5 * time.Second}
 ```
 
+### gRPC: the same rule as server interceptors
+
+A service that serves its application API over gRPC registers `interceptor.go`'s two interceptors
+on its **application** `grpc.Server`. They read the token from the incoming `authorization`
+metadata and nowhere else, call the same `Validator`, and hand the handler the same claims, so
+`ClaimsFrom`, `HasRole` and `RequireTenant` work unchanged. A missing, malformed or invalid token, or
+more than one `authorization` value, is answered `codes.Unauthenticated` with the message
+`unauthenticated` and never reaches the handler; the cause is not echoed.
+
+```go
+grpcServer := grpc.NewServer(
+    grpc.ChainUnaryInterceptor(identity.UnaryServerInterceptor(validator)),
+    grpc.ChainStreamInterceptor(identity.StreamServerInterceptor(validator)),
+)
+ordersv1.RegisterOrderServiceServer(grpcServer, &orderService{})
+
+func (s *orderService) ListOrders(
+    ctx context.Context, req *ordersv1.ListOrdersRequest,
+) (*ordersv1.ListOrdersResponse, error) {
+    // The request names a tenant: compare it, never trust it.
+    if err := identity.RequireTenant(ctx, req.GetTenant()); err != nil {
+        return nil, status.Error(codes.PermissionDenied, "permission denied")
+    }
+    claims, _ := identity.ClaimsFrom(ctx)
+    if !claims.HasRole("orders-reader") {
+        return nil, status.Error(codes.PermissionDenied, "permission denied")
+    }
+    // ... list claims.Tenant's orders
+}
+```
+
+**There is no per-method exemption.** The interceptors validate every RPC on the application
+`grpc.Server`, a `grpc.health.v1` service registered there included. The management port stays
+HTTP and unvalidated, served by the ops payload, and probes use it; never register the
+interceptors on it, and never carve a method out of the application server instead.
+
 The environment carries the allowlist:
 
 | variable | example |
@@ -96,15 +133,16 @@ other endpoint. `carveout_test.go` proves both halves against the real ops handl
 ## Tenant and roles are claims, never request input
 
 A handler reads the tenant and roles **only** from `ClaimsFrom(ctx)`, which only `Middleware`
-can populate, after validation. No code path reads either from a header, a path parameter or a
-body field. When a request also *names* a tenant, `RequireTenant` compares it for equality and
+and the gRPC server interceptors can populate, after validation. No code path reads either from
+a header, a path parameter or a body field.
+When a request also *names* a tenant, `RequireTenant` compares it for equality and
 rejects a mismatch, and rejects a request naming a tenant when the token carries none. Keycloak
 Organizations may emit `organization` as an array of aliases or, with attributes mapped, as an
 object keyed by alias; both are read. An absent or empty claim means the token carries no tenant.
 
 ## Service-to-service calls: the caller's token or the service's own
 
-An outbound call carries exactly one of two tokens, and neither half ever trusts a header (`s2s.go`).
+An outbound HTTP call carries exactly one of two tokens, and neither half ever trusts a header (`s2s.go`).
 Neither token leaves the host and scheme called: on a redirect to another host or scheme,
 propagation sends no token and `ServiceAccount.Client` returns the 3xx unfollowed.
 
@@ -116,9 +154,10 @@ the token for one scoped to the downstream (RFC 8693 token exchange). Never wide
 `OIDC_AUDIENCE` to accept a token issued for another service.
 
 **On behalf of a user — propagate.** A handler calling another service for the user it is serving
-forwards that user's validated token. `Middleware` stores it after validation, `CallerToken(ctx)`
-reads it back, and `PropagatingTransport` sets it as the outbound `Authorization` header, overwriting
-whatever was there. With no validated token in the context it returns `ErrNoCallerToken` and sends
+forwards that user's validated token. `Middleware` (or a gRPC server interceptor) stores it after
+validation, `CallerToken(ctx)` reads it back, and `PropagatingTransport` sets it as the outbound
+`Authorization` header,
+overwriting whatever was there. With no validated token in the context it returns `ErrNoCallerToken` and sends
 nothing. Build the outbound request with the inbound request's context:
 
 ```go

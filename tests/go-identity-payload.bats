@@ -52,7 +52,7 @@ code_of() { [ -f "$1" ] || { echo "missing $1" >&2; return 1; }; flatten "$(cat 
 # an empty haystack would make every `lacks` below pass unconditionally.
 prod_code() {
   local f out=""
-  for f in identity.go claims.go middleware.go s2s.go; do
+  for f in identity.go claims.go middleware.go s2s.go interceptor.go; do
     out="$out $(code_of "$ID/$f")" || return 1
   done
   [ -n "${out// /}" ] || { echo "prod_code: empty haystack" >&2; return 1; }
@@ -67,6 +67,8 @@ prod_code() {
   [ -f "$ID/carveout_test.go" ]
   [ -f "$ID/s2s.go" ]
   [ -f "$ID/s2s_test.go" ]
+  [ -f "$ID/interceptor.go" ]
+  [ -f "$ID/interceptor_test.go" ]
   [ -f "$ID/go.mod.deps" ]
   [ -f "$ID/README.md" ]
 }
@@ -77,7 +79,8 @@ prod_code() {
 
 @test "go identity files all declare package identity" {
   local f
-  for f in identity.go claims.go middleware.go identity_test.go carveout_test.go s2s.go s2s_test.go; do
+  for f in identity.go claims.go middleware.go identity_test.go carveout_test.go s2s.go s2s_test.go \
+    interceptor.go interceptor_test.go; do
     grep -qE '^package identity$' "$ID/$f"
   done
 }
@@ -166,6 +169,10 @@ prod_code() {
   lacks "$code" 'Header.Values('
   lacks "$code" 'Header['
   lacks "$code" 'FormValue('
+  # the only gRPC metadata read is the incoming authorization key
+  contains "$code" 'metadata.ValueFromIncomingContext(ctx, "authorization")'
+  [ "$(printf '%s' "$code" | grep -o 'FromIncomingContext(' | wc -l | tr -d ' ')" -eq 1 ]
+  lacks "$code" 'metadata.FromIncomingContext('
   lacks "$code" 'os.LookupEnv('
   lacks "$code" 'os.Environ('
   # and the only environment read is the allowlist's own configuration
@@ -199,9 +206,62 @@ prod_code() {
   local mw; mw="$(fn_flat middleware.go 'Middleware(')"
   contains "$mw" 'claims, err := v.Validate(r.Context(), raw) if err != nil { unauthorized(w, "invalid_token") return } ctx := withCallerToken(withClaims(r.Context(), claims), raw) next.ServeHTTP(w, r.WithContext(ctx))'
   contains "$mw" 'if !ok { unauthorized(w, "") return }'
-  # the key is unexported, and withClaims is called nowhere else in production code
+  # the key is unexported, and withClaims is called only by Middleware and by the
+  # gRPC interceptors' authenticate (defined once + two calls)
   contains "$(code_of "$ID/claims.go")" 'type claimsKey struct{}'
-  [ "$(prod_code | grep -o 'withClaims(' | wc -l | tr -d ' ')" -eq 2 ]
+  [ "$(prod_code | grep -o 'withClaims(' | wc -l | tr -d ' ')" -eq 3 ]
+}
+
+@test "go identity HTTP and gRPC share one bearer-scheme parse" {
+  local bt; bt="$(fn_flat middleware.go 'bearerToken(')"
+  contains "$bt" 'return parseBearer(r.Header.Get("Authorization"))'
+  local pb; pb="$(fn_flat middleware.go 'parseBearer(')"
+  contains "$pb" 'scheme, token, ok := strings.Cut(credential, " ") if !ok || !strings.EqualFold(scheme, "Bearer") { return "", false }'
+}
+
+@test "go identity gRPC interceptors read only the single authorization metadata value" {
+  local fn; fn="$(fn_flat interceptor.go 'incomingBearerToken(')"
+  # more than one value is rejected rather than picking one
+  contains "$fn" 'values := metadata.ValueFromIncomingContext(ctx, "authorization") if len(values) != 1 { return "", false } return parseBearer(values[0])'
+}
+
+@test "go identity gRPC interceptors reject with codes.Unauthenticated and set claims only after Validate" {
+  local fn; fn="$(fn_flat interceptor.go 'authenticate(')"
+  # each guard pinned with its body: no token and a failed Validate both answer the
+  # same bare Unauthenticated, and only a passing token reaches the context setters
+  contains "$fn" 'func authenticate(ctx context.Context, v *Validator) (context.Context, error) { raw, ok := incomingBearerToken(ctx) if !ok { return ctx, status.Error(codes.Unauthenticated, "unauthenticated") } claims, err := v.Validate(ctx, raw) if err != nil { return ctx, status.Error(codes.Unauthenticated, "unauthenticated") } return withCallerToken(withClaims(ctx, claims), raw), nil }'
+  # the cause is never echoed: no error text reaches the status
+  lacks "$fn" 'err.Error()'
+  lacks "$fn" 'Errorf('
+  local un; un="$(fn_flat interceptor.go 'UnaryServerInterceptor(')"
+  contains "$un" 'func UnaryServerInterceptor(v *Validator) grpc.UnaryServerInterceptor { return func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) { ctx, err := authenticate(ctx, v) if err != nil { return nil, err } return handler(ctx, req) } }'
+}
+
+@test "go identity gRPC stream interceptor hands the handler a stream whose Context carries the claims" {
+  local st; st="$(fn_flat interceptor.go 'StreamServerInterceptor(')"
+  contains "$st" 'func StreamServerInterceptor(v *Validator) grpc.StreamServerInterceptor { return func(srv any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler) error { ctx, err := authenticate(ss.Context(), v) if err != nil { return err } return handler(srv, &claimsStream{ServerStream: ss, ctx: ctx}) } }'
+  local code; code="$(code_of "$ID/interceptor.go")"
+  contains "$code" 'type claimsStream struct { grpc.ServerStream ctx context.Context }'
+  contains "$code" 'func (s *claimsStream) Context() context.Context { return s.ctx }'
+  # no per-method exemption: the interceptors never consult the method being called
+  lacks "$code" 'FullMethod'
+}
+
+@test "go identity gRPC interceptor tests drive the httptest issuer through incoming metadata" {
+  local t; t="$(code_of "$ID/interceptor_test.go")"
+  contains "$t" 'return metadata.NewIncomingContext(context.Background(), metadata.Pairs(md...))'
+  contains "$t" '"multi-valued": incoming("authorization", "Bearer "+valid, "authorization", "Bearer "+valid),'
+  contains "$t" 'return nil, status.Error(codes.PermissionDenied, "permission denied")'
+  contains "$t" 'if !ok || st.Code() != codes.Unauthenticated || st.Message() != "unauthenticated" {'
+  # no network listener: the interceptors are called directly
+  lacks "$t" 'net.Listen('
+  lacks "$t" 'grpc.NewServer('
+  local test
+  for test in TestUnaryInterceptorPassesValidatedClaimsToTheHandler TestUnaryInterceptorStoresTheCallerToken \
+    TestUnaryInterceptorRejectsMissingAndInvalidTokens TestUnaryHandlerMapsATenantMismatchToPermissionDenied \
+    TestStreamInterceptorWrapsTheStreamWithValidatedClaims TestStreamInterceptorRejectsBeforeTheHandlerRuns; do
+    contains "$t" "func $test(t *testing.T) {"
+  done
 }
 
 @test "go identity tests drive an httptest issuer serving discovery and JWKS, with a rotation" {
@@ -235,17 +295,38 @@ prod_code() {
   block="$(awk '/^\*\*Go identity — in-process OIDC validation \(#2861\)\.\*\*/{f=1} f&&/^\*\*Node canonical implementation/{exit} f' "$SKILL")"
   [ -n "$block" ]
   contains "$block" 'The gate is **the Go ops-api block'"'"'s own'
-  contains "$block" 'outcome, then whether the service has an HTTP application handler**.'
-  contains "$block" 'the gate to give workers and message consumers that half is #2881:'
-  # no net/http application handler skips; only a gRPC server owes the open #2867 line
-  contains "$block" '- **The Go ops-api block installed, but no `net/http` handler serves application'
-  contains "$block" 'routes** — a gRPC-only service, a message consumer, a worker → **skip this too**.'
-  contains "$block" '- **The Go ops-api block installed and a `net/http` handler serves application'
-  contains "$block" 'routes** → **install** per the render command below.'
-  contains "$block" 'Whichever applies, a service that serves gRPC also records a Step-5 checklist'
-  contains "$block" 'line: validate every gRPC call'"'"'s bearer token in a gRPC interceptor — #2867, not'
-  contains "$block" 'server records no such line.'
+  contains "$block" 'outcome, then whether the service has an inbound application surface — routes'
+  contains "$block" 'served over `net/http` or an application `grpc.Server`**.'
+  contains "$block" 'that half is #2881:'
+  contains "$block" 'an `http.Handler` middleware, and for gRPC the server interceptors of'
+  # neither surface skips; either surface installs, the gRPC render only with a grpc.Server
+  contains "$block" '- **The Go ops-api block installed, but the service serves application routes'
+  contains "$block" 'over neither `net/http` nor an application `grpc.Server`** — a message consumer,'
+  contains "$block" 'a worker → **skip this too**.'
+  contains "$block" '- **The Go ops-api block installed and the service serves application routes over'
+  contains "$block" '`net/http`, an application `grpc.Server`, or both** → **install** per the base'
+  contains "$block" 'render command below, plus the gRPC render command when it runs an application'
+  # the gRPC half shipped (#2867): no open interceptor line, and no gRPC-only skip
+  lacks "$block" 'not shipped here'
+  lacks "$block" 'a gRPC-only service'
   lacks "$block" 'exhaustive cases'
+  # the deps note: no grpc require is folded, and why
+  contains "$block" '`go.mod.deps` carries **no**'
+  contains "$block" '`google.golang.org/grpc` require, on purpose: the interceptors are placed only'
+  contains "$block" 'Go ops-api payload'"'"'s `otlpmetricgrpc` exporter brings it into the module graph'
+  # item (b) branches by surface, on the application grpc.Server only
+  contains "$block" 'surface: for `net/http`, wrap the **application** handler — never the management'
+  contains "$block" '`grpc.ChainUnaryInterceptor(identity.UnaryServerInterceptor(validator))` and'
+  contains "$block" '`grpc.ChainStreamInterceptor(identity.StreamServerInterceptor(validator))` on the'
+  contains "$block" '**application** `grpc.Server`, never on the management server, with no'
+  contains "$block" 'per-method exemption; a service serving both records both;'
+  # the second, conditional render command carries exactly the two interceptor files
+  local grpc_render
+  grpc_render="$(printf '%s\n' "$block" | awk '/^Only for a service that runs an application `grpc.Server`, also render the gRPC$/{f=1} f&&/^```$/{n++; if(n==2) exit} f')"
+  [ -n "$grpc_render" ]
+  contains "$grpc_render" 'languages/go/identity/interceptor.go \'
+  contains "$grpc_render" 'languages/go/identity/interceptor_test.go'
+  [ "$(printf '%s\n' "$grpc_render" | grep -c 'languages/go/identity/')" -eq 2 ]
   contains "$block" 'internal/identity/'
   contains "$block" 'Never add a validation-disabling switch or a trusted-header'
   contains "$block" 'must be **empty or hold only an earlier copy'
@@ -255,12 +336,11 @@ prod_code() {
   contains "$block" 'Never place the `.go` files without the require.'
   contains "$block" 'so they go **only**'
   contains "$block" 'Carry Step-5 checklist items instead: (a) set `OIDC_ISSUERS` and `OIDC_AUDIENCE`'
-  contains "$block" '(b) wrap'
-  contains "$block" 'the **application** handler — never the management server — with'
   contains "$block" '(c) decide each tenant-naming route with'
-  contains "$block" '(d) send each outbound service call through'
+  contains "$block" '(d) send each outbound HTTP service call through'
   local f
-  for f in identity.go claims.go middleware.go identity_test.go carveout_test.go s2s.go s2s_test.go go.mod.deps README.md; do
+  for f in identity.go claims.go middleware.go identity_test.go carveout_test.go s2s.go s2s_test.go go.mod.deps README.md \
+    interceptor.go interceptor_test.go; do
     contains "$block" "languages/go/identity/$f"
   done
   # every file in the payload directory is rendered: a new file not added here
@@ -288,14 +368,29 @@ prod_code() {
   contains "$r" 'on that issuer'"'"'s first token, with `SupportedSigningAlgs` pinned to the issuer'"'"'s configured'
 }
 
-@test "go identity s2s: the caller token is set only by Middleware, read through CallerToken" {
+@test "go identity s2s: the caller token is set only by Middleware and the gRPC interceptors, read through CallerToken" {
   local code; code="$(code_of "$ID/s2s.go")"
   contains "$code" 'type callerTokenKey struct{}'
   contains "$code" 'func withCallerToken(ctx context.Context, raw string) context.Context {'
   contains "$code" 'func CallerToken(ctx context.Context) (string, bool) {'
-  # the unexported setter is defined once and called once — by Middleware, after
-  # Validate succeeded (pinned on the middleware body above)
-  [ "$(prod_code | grep -o 'withCallerToken(' | wc -l | tr -d ' ')" -eq 2 ]
+  # the unexported setter is defined once and called twice — by Middleware and by
+  # the interceptors' authenticate, each after Validate succeeded (both pinned above)
+  [ "$(prod_code | grep -o 'withCallerToken(' | wc -l | tr -d ' ')" -eq 3 ]
+}
+
+@test "go identity README shows the gRPC wiring, PermissionDenied in the handler, and no per-method exemption" {
+  local r; r="$(cat "$ID/README.md")"
+  contains "$r" 'a fresh directory. `interceptor.go` and `interceptor_test.go` are placed only'
+  contains "$r" 'A service that serves its application API over gRPC registers `interceptor.go`'"'"'s two interceptors'
+  contains "$r" 'grpcServer := grpc.NewServer('
+  contains "$r" 'grpc.ChainUnaryInterceptor(identity.UnaryServerInterceptor(validator)),'
+  contains "$r" 'grpc.ChainStreamInterceptor(identity.StreamServerInterceptor(validator)),'
+  contains "$r" 'if err := identity.RequireTenant(ctx, req.GetTenant()); err != nil {'
+  contains "$r" 'return nil, status.Error(codes.PermissionDenied, "permission denied")'
+  contains "$r" '**There is no per-method exemption.** The interceptors validate every RPC on the application'
+  contains "$r" '`grpc.Server`, a `grpc.health.v1` service registered there included. The management port stays'
+  contains "$r" 'HTTP and unvalidated, served by the ops payload, and probes use it; never register the'
+  contains "$r" 'and the gRPC server interceptors can populate, after validation.'
 }
 
 @test "go identity s2s: the propagating transport overwrites Authorization and refuses without a token" {
@@ -346,7 +441,7 @@ prod_code() {
   local r; r="$(cat "$ID/README.md")"
   contains "$r" '**A service-account token carries a tenant only when the work is genuinely acting for one'
   contains "$r" 'call requests none. Tokens are cached per exact tenant string, with the tenant-less token in its own'
-  contains "$r" 'An outbound call carries exactly one of two tokens, and neither half ever trusts a header (`s2s.go`).'
+  contains "$r" 'An outbound HTTP call carries exactly one of two tokens, and neither half ever trusts a header (`s2s.go`).'
   contains "$r" 'whatever was there. With no validated token in the context it returns `ErrNoCallerToken` and sends'
   contains "$r" 'downstream service to that `aud` with a Keycloak audience mapper. Where that is unwanted, exchange'
   lacks "$r" 'queue consumer'

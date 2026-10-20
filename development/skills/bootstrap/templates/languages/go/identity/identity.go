@@ -32,7 +32,9 @@
 //
 // The ops surface is outside the token rule only because it is served on the
 // separate MANAGEMENT port by the ops payload (internal/ops). Wrap ONLY the
-// application handler with Middleware -- never the management server.
+// application handler with Middleware, and register the gRPC server
+// interceptors ONLY on the application grpc.Server -- never the management
+// server.
 //
 // PLACEMENT: every file of this payload goes into internal/identity/ (package
 // identity) of the module that builds the service binary, and go.mod.deps is
@@ -167,7 +169,8 @@ func (c Config) validate() error {
 }
 
 // Errors a Validate call can return, for a caller that wants to tell them apart.
-// Middleware answers every one of them with the same 401.
+// Middleware answers every one of them with the same 401, and the gRPC server
+// interceptors with the same codes.Unauthenticated.
 var (
 	ErrNoToken         = errors.New("identity: no bearer token")
 	ErrMalformedToken  = errors.New("identity: malformed token")
