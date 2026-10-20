@@ -10,7 +10,7 @@ export interface ShellCapabilities {
   theme: ThemeTokens;
 }
 
-/** The static defaults: no flag enabled, an empty theme, and the auth stub. */
+/** The static defaults: no flag enabled, an empty theme, and the page's auth session (#1326). */
 export function defaultCapabilities(): ShellCapabilities {
   return {
     auth: createAuthContext(),

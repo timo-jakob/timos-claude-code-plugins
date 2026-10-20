@@ -62,19 +62,23 @@ collapse() {
 tsconfig_for() {
   local out="$1"
   shift
-  jq -n --arg dts "$DTS" --args '{compilerOptions: {strict: true, noEmit: true, target: "ES2022",
+  # the shell's context.ts imports auth.ts, which imports oidc-client-ts (#1326):
+  # map it to the same type-only stand-in tests/react-shell-templates.bats uses
+  jq -n --arg dts "$DTS" --arg oidc "$REPO_ROOT/tests/fixtures/react-shell/oidc-client-ts.d.ts" --args \
+    '{compilerOptions: {strict: true, noEmit: true, target: "ES2022",
       module: "ESNext", moduleResolution: "Bundler", lib: ["ES2022", "DOM"], types: [],
       verbatimModuleSyntax: true, erasableSyntaxOnly: true,
-      paths: {"@acme-corp/mfe-contract": [$dts]}}, files: $ARGS.positional}' "$@" > "$out/tsconfig.json"
+      paths: {"@acme-corp/mfe-contract": [$dts], "oidc-client-ts": [$oidc]}}, files: $ARGS.positional}' \
+    "$@" > "$out/tsconfig.json"
 }
 
 # --- the template tree --------------------------------------------------------
 
-@test "canvas: the template tree contains exactly the eleven blessed files, and react-shell/ keeps its ten" {
+@test "canvas: the template tree contains exactly the eleven blessed files, and react-shell/ keeps its twelve" {
   local listed
   listed="$(cd "$CV" && find . -type f | sed 's#^\./##' | LC_ALL=C sort | tr '\n' ' ')"
   [ "$listed" = "${CANVAS_FILES[*]} " ]
-  [ "$(cd "$SH" && find . -type f | wc -l | tr -d ' ')" -eq 10 ]
+  [ "$(cd "$SH" && find . -type f | wc -l | tr -d ' ')" -eq 12 ]
 }
 
 @test "canvas: the set renders with --project-slug, each file at its relpath, no placeholder left" {

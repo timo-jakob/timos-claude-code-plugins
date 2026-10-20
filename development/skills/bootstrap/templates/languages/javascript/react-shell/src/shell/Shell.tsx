@@ -10,7 +10,7 @@ import { navigate, subscribe } from "./navigation";
 import { matchRoute, routes as defaultRoutes, type ShellRoute } from "./routes";
 
 export interface ShellProps {
-  /** The one injection point for auth, flags and theme (#1326 replaces auth here). */
+  /** The one injection point for auth, flags and theme; auth is the page's session (#1326). */
   capabilities: ShellCapabilities;
   routes?: readonly ShellRoute[];
   /** How a remote's entry module is loaded; tests pass a fake. */

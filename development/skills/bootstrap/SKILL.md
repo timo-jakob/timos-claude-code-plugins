@@ -5387,6 +5387,7 @@ slug, lowercased (the contract's scope-derivation rule):
 
 ```text
 npm i -D @<scope>/mfe-contract
+npm i oidc-client-ts                     # runtime: src/shell/auth.ts's OIDC client (#1326)
 ```
 
 Skip the install when `package.json` already lists the package. **If it fails —
@@ -5394,7 +5395,11 @@ the package is not published until #1899 — restore both files from the snapsho
 render nothing, and record a Step 5 item naming `@<scope>/mfe-contract` and the
 publishing story, #1899.** No marker lands, so a plain re-run offers the shell
 again through Q7's plan line; the item says that approving it adds the shell
-once #1899 has published `@<scope>/mfe-contract`.
+once #1899 has published `@<scope>/mfe-contract`. `oidc-client-ts` installs
+only after the contract package is in place, so a failed contract install never
+reaches it; it follows the same skip rule, and **if its install fails, restore both files from the snapshot,
+render nothing, and record a Step 5 item naming `oidc-client-ts`** — the shell's
+auth module cannot build without it.
 
 **Render the shell set** into a staging directory, then write each file under
 the idempotency rules:
@@ -5406,7 +5411,7 @@ the idempotency rules:
   src/shell/Shell.tsx src/shell/Chrome.tsx src/shell/routes.ts \
   src/shell/navigation.ts src/shell/import-map.ts src/shell/loader.ts \
   src/shell/context.ts src/shell/auth.ts src/shell/loader.test.ts \
-  public/importmap.json
+  src/shell/auth.test.ts public/importmap.json public/auth-config.json
 ```
 
 `--project-slug` sets `{{NPM_SCOPE}}`, the only placeholder the set carries, so
@@ -5415,11 +5420,24 @@ install's branch above — restore both files, render nothing, record a Step 5
 item — and the run carries on. On either failure the `src/main.tsx` edit below
 is not offered. **Withhold `src/shell/loader.test.ts`** — drop it from the list —
 unless §3k.5 ended with its setup module, `src/test/setup.ts`, on disk, and
-record a Step 5 item naming it: the test needs that jsdom wiring. Record every
+record a Step 5 item naming it: the test needs that jsdom wiring.
+`src/shell/auth.test.ts` needs the same wiring and is withheld, with its own Step
+5 item, under the same rule. Record every
 file this step writes under the `react_overlay` telemetry step key (*Keep the
 run's facts as you go*). Each file lands at its own relpath — `src/shell/…` and
 `public/importmap.json` (`{ "imports": {} }`, the local-development map; each
 environment serves its own `/importmap.json`, #1128).
+`public/auth-config.json` is the auth module's provider config, with the
+issuer, client id, redirect path and scopes as empty placeholders and no secret
+field. Each environment serves its own `/auth-config.json` behind the gateway
+(#1128), and the shell refuses to sign in while a field is empty. When this step
+ends with the template's placeholder `public/auth-config.json` on disk, whether
+it was just written or skipped as identical, record a Step 5 item to set
+`issuer`, `clientId`, `redirectPath` and `scope` for local development, and to
+have each environment serve its own `/auth-config.json` behind the gateway
+(#1128). Record no such item when the user kept their own differing file at
+idempotency rule 3's diff prompt, or when a failed install or render left the
+file unwritten.
 
 **Layer ordering — composition, not clobbering.** §3d base javascript → §3k
 contract-consumer → §3k.5 React overlay → §3k.6 React Query binding → **this
@@ -5433,20 +5451,29 @@ wraps `<App />` in the shell, with the capabilities created once at module
 scope:
 
 ```tsx
+import { signIn } from "./shell/auth";
 import { defaultCapabilities } from "./shell/context";
 import { Shell } from "./shell/Shell";
 
 const capabilities = defaultCapabilities();
+signIn().catch((error: unknown) => console.error("sign-in failed:", error));
 // …wrap the rendered tree:
 //   <Shell capabilities={capabilities}><App /></Shell>
 ```
 
-- **Idempotent skip** when `src/main.tsx` already imports `Shell`.
+The `signIn()` call starts the page's sign-in at load (#1326): it completes the
+provider's callback on the redirect path, and otherwise sends the top-level page
+to the provider. Without it, nothing completes the callback.
+
+- **Idempotent skip** when `src/main.tsx` already imports `Shell`. When it
+  imports `Shell` but not `signIn` — a shell bootstrapped before #1326 — offer
+  the `signIn` import and call as their own edit, under the same confirm,
+  snapshot and restore rules below.
 - **Confirm before editing**: show the diff and ask; the plan approval alone
   does not cover it.
 - **Snapshot `src/main.tsx` first.** On a failed edit, a decline, no answer, or
   no `<App />` to wrap, restore the pre-edit snapshot and record a Step 5 TODO
-  naming the `<Shell>` wrap to add by hand.
+  naming the lines that edit would have added, to add by hand.
 - **It composes with §3k.6's `QueryClientProvider` edit in either order**: wrap
   whichever element currently renders `<App />`, so the provider and the shell
   nest without either edit undoing the other.
@@ -5456,8 +5483,9 @@ No other Vite-owned file is written — `index.html` included. The browser-level
 canvas (#1939).
 
 Verification here is **structural** and type-checked (`tests/react-shell-templates.bats`:
-the six framework-free modules pass `tsc --noEmit --strict`); running
-`src/shell/loader.test.ts` against a rendered tree is the render-and-build smoke
+the six framework-free modules pass `tsc --noEmit --strict`, `auth.ts` against a
+type-only `oidc-client-ts` stand-in); running `src/shell/loader.test.ts` and
+`src/shell/auth.test.ts` against a rendered tree is the render-and-build smoke
 check's job (#1063).
 
 ### 3k.8. Canvas overlay (a widget canvas on the shell — #1939)
