@@ -1,6 +1,6 @@
 ---
 name: go-runtime-upgrade
-description: Apply a Go toolchain upgrade triggered by a Dependabot/Renovate PR that raises the Go version (the go.mod `go`/`toolchain` directive or the CI `setup-go` pin). Reads the upstream Go release notes, bumps the go.mod directives and the CI setup-go matrix — NO Dockerfile leg, because the blessed image path is ko, which builds with the CI toolchain (there is no `FROM golang:X`). Attempts local verification, **cascade-upgrades toolchain-sensitive dependencies** that lack `<to_version>`-compatible releases (up to 3 passes), then if the build still fails applies **mechanical code adaptations** licensed by the release notes (up to 2 passes). Records every change in a structured commit body so the PR description enumerates Runtime + cascade + Code Adaptations for clean atomic revert. Escalates only when a required dep has no compatible release OR when remaining failures aren't covered by a documented change (the agent does not speculate). Used by development-go:maintenance.
+description: Apply a Go toolchain upgrade triggered by a Dependabot/Renovate PR that raises the Go version (the go.mod `go`/`toolchain` directive or the CI `setup-go` pin). Reads the upstream Go release notes, bumps the go.mod directives and the CI setup-go matrix — NO Dockerfile leg, because the blessed image path is ko, which builds with the CI toolchain (there is no `FROM golang:X`). Attempts local verification, **cascade-upgrades toolchain-sensitive dependencies** that lack `<to_version>`-compatible releases (up to 3 passes), then if the build still fails applies **mechanical code adaptations** licensed by the release notes (up to 2 passes). Records every change in a structured commit body so the PR description enumerates Runtime + cascade + Code Adaptations for clean atomic revert. When it raises the go directive past the Go the pinned golangci-lint was built with, it also moves both golangci-lint pins (the Makefile's GOLANGCI_LINT_VERSION and the .pre-commit-config.yaml rev) to the lowest v2 release built with a new-enough Go. Escalates only when a required dep has no compatible release, when remaining failures aren't covered by a documented change (the agent does not speculate), OR when no golangci-lint v2 release is built with a new-enough Go yet. Used by development-go:maintenance.
 model: fable
 tools: Read, Edit, Bash, Grep, WebFetch
 ---
@@ -50,6 +50,10 @@ The **only** scenarios where you escalate are:
   package is abandoned). Escalate cleanly with the blocking dep name(s).
 - **A build or test failure isn't covered by a documented change** — you
   do not speculate. Escalate with the failure and what was tried.
+- **No golangci-lint v2 release is built with a Go at least as new as the
+  new `go` directive** (step 3). Change no pin and commit nothing; escalate
+  naming the current golangci-lint pin, the newest release you checked, and
+  that release's built-with Go.
 
 You **do NOT**:
 
@@ -85,7 +89,8 @@ Your prompt contains:
   - `"auto"` → the toolchain is available; run the full cascade.
   - `"skip"` → do NOT attempt toolchain discovery or the cascade. Just
     edit the pins, commit, return with `local_verification: skipped`.
-    CI verifies for real.
+    CI verifies for real. The golangci-lint check (step 3) still runs: it
+    needs no Go toolchain.
 
 ## Procedure
 
@@ -98,6 +103,8 @@ Grep before assuming any file exists:
 grep -nE '^(go|toolchain) ' go.mod 2>/dev/null
 grep -rnE 'go-version|actions/setup-go' .github/workflows/*.yml 2>/dev/null
 grep -nE '^FROM golang:' Dockerfile docker/Dockerfile 2>/dev/null   # cgo exception only
+grep -nE '^GOLANGCI_LINT_VERSION' Makefile 2>/dev/null
+grep -nE -A2 'golangci/golangci-lint' .pre-commit-config.yaml 2>/dev/null   # its `rev:`
 ```
 
 Places the toolchain version can be pinned and drift out of sync:
@@ -121,6 +128,11 @@ Places the toolchain version can be pinned and drift out of sync:
 - **A `FROM golang:` Dockerfile** — only in the cgo exception. Bump it if
   present; the blessed ko repo has none.
 
+The golangci-lint version is pinned in two more places, `GOLANGCI_LINT_VERSION`
+in the Makefile and the golangci-lint `rev` in .pre-commit-config.yaml. They
+are not Go pins, but a `go` directive bump can outgrow them; step 3 decides
+whether they move.
+
 Update every pin that refers to the deployment toolchain so nothing
 drifts. Leave CI *matrix probes* of other versions alone — you bump the
 one runtime the PR targets.
@@ -140,8 +152,46 @@ what licenses any later code adaptation.
 
 ### 3. Swap the pins
 
-Apply the version swap to every touch point found in step 1. Record each
-file changed under **Runtime** in your notes.
+**The golangci-lint pins — settle them before you swap anything.**
+golangci-lint refuses a module whose `go` directive names a newer Go
+(major.minor) than the Go its binary was built with, so a `go` directive bump
+can turn the format and lint gates red. Run this check only when you raise
+the `go` directive, in both `auto` and `skip` modes:
+
+1. **When to move.** Read the Go the currently pinned golangci-lint was built
+   with (when the two pins differ, judge the older one). The pins move only
+   when that Go's major.minor is lower than the new `go` directive's
+   major.minor. Otherwise leave them alone.
+2. **How to tell.** Install the tag into a scratch directory with upstream's
+   install.sh and read the `built with goX.Y.Z` line from `golangci-lint
+   version`. Compare major.minor only. Never use the release tag's go.mod
+   `go` line: it states the Go needed to *build* golangci-lint, not the Go
+   its binary was built with. A tag whose built-with line you could not read,
+   because listing the releases, the download, the install or `version`
+   failed, counts as built with too old a Go; never guess it.
+
+   ```bash
+   SCRATCH="$(mktemp -d)"
+   curl -sSfL -o "$SCRATCH/install.sh" \
+     "https://raw.githubusercontent.com/golangci/golangci-lint/<tag>/install.sh"
+   sh "$SCRATCH/install.sh" -b "$SCRATCH/bin" "<tag>"
+   "$SCRATCH/bin/golangci-lint" version   # … version 2.14.0 built with go1.27.0 …
+   ```
+
+3. **Which release.** Walk the stable golangci-lint **v2** releases newer than
+   the current pin in ascending order and pick the **lowest** whose built-with
+   major.minor is at least the new directive's (the cascade convention of
+   step 5). Never cross to a new golangci-lint major. Set both pins to that
+   release, so they are equal afterwards.
+4. **One pin missing.** Bump the pin that exists and note the missing
+   location in your output; do not add the missing pin, and do not escalate.
+   When neither pin exists, skip this check and note that.
+5. **No qualifying release yet.** Change no pin at all, Go pins included,
+   commit nothing, and escalate (see *Escalation*).
+
+Then apply the version swap to every touch point found in step 1, and the
+golangci-lint release this check picked, if any. Record each file changed
+under **Runtime** in your notes.
 
 ### 4. Verify locally (when `local_verification_mode == "auto"`)
 
@@ -194,6 +244,8 @@ Runtime:
 - go.mod: go 1.23.0 -> 1.24.0
 - go.mod: toolchain go1.23.4 -> go1.24.0
 - .github/workflows/quality-public.yml: setup-go 1.23 -> 1.24
+- Makefile (GOLANGCI_LINT_VERSION): v2.12.2 -> v2.14.0
+- .pre-commit-config.yaml (golangci-lint rev): v2.12.2 -> v2.14.0
 
 Cascade upgrades:
 - golang.org/x/net 0.28.0 -> 0.30.0 (0.28 requires go<1.24 vet; release notes clean)
@@ -224,7 +276,8 @@ Information-rich escalation, not a punt.
       "type": "runtime_upgrade",
       "from_version": "1.23",
       "to_version": "1.24",
-      "pins_updated": ["go.mod (go)", "go.mod (toolchain)", ".github/workflows/quality-public.yml"],
+      "pins_updated": ["go.mod (go)", "go.mod (toolchain)", ".github/workflows/quality-public.yml",
+                       "Makefile (GOLANGCI_LINT_VERSION)", ".pre-commit-config.yaml (golangci-lint rev)"],
       "cascade_upgrades": [ { "package": "golang.org/x/net", "from": "0.28.0", "to": "0.30.0" } ],
       "code_adaptations": [ { "file": "internal/rand/seed.go", "line": 22, "change": "…", "notes_ref": "…" } ],
       "local_verification": "passed | skipped",
