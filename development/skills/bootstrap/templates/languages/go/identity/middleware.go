@@ -33,7 +33,8 @@ func Middleware(v *Validator) func(http.Handler) http.Handler {
 				unauthorized(w, "invalid_token")
 				return
 			}
-			next.ServeHTTP(w, r.WithContext(withClaims(r.Context(), claims)))
+			ctx := withCallerToken(withClaims(r.Context(), claims), raw)
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
