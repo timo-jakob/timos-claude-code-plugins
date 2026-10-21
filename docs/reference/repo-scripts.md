@@ -196,7 +196,7 @@ Every comparison against the base branch needs its history, so CI checks out the
 history (`fetch-depth: 0`). Locally, a missing `origin/<default branch>` fails the gate
 before its first stage and names `git fetch origin`.
 
-### `scripts/check-contracts-lint.zsh`
+### `scripts/check-contracts-lint.zsh` {#scriptscheck-contracts-lintzsh}
 
 Emitted with the Go gate (#2640), as a plugin-owned artifact copied verbatim from
 `templates/common/scripts/check-contracts-lint.zsh`. It is the `contracts lint` stage every
@@ -216,7 +216,7 @@ frozen major. It then runs the Spectral CLI it pins, through `npx`, with the rep
 **Exit codes.** `0` linted; `1` failed, the reason on stderr; `2` an unknown or malformed
 argument; `3` no `contracts/vN/openapi.yaml` to lint, which the gate reports as a skip.
 
-### `scripts/check-docs.zsh`
+### `scripts/check-docs.zsh` {#scriptscheck-docszsh}
 
 Emitted with the Go gate (#2640), as a plugin-owned artifact copied verbatim from
 `templates/common/scripts/check-docs.zsh`. It is the `docs` stage every language gate shares.
