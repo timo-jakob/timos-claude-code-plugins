@@ -1531,6 +1531,17 @@ _fake_tree() {  # $1.. = ops major dirs; "vN" -> openapi.yaml, "vN:tmpl" -> open
   [ "$(jq -r '[.missing_artifacts[] | select(startswith("mfe-conformance/"))] | length' <<<"$out")" -eq 0 ]
 }
 
+@test "detect-stack #2887: a go repo is never missing the identity payload" {
+  printf 'module example.com/svc\n\ngo 1.25\n' > go.mod
+  printf 'package main\n\nfunc main() {}\n' > main.go
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.languages | index("go")' <<<"$out")" != "null" ]
+  # the go tree was collected: its Makefile is a gap, so the check below is not vacuous
+  [ "$(jq -r '.missing_artifacts | index("Makefile")' <<<"$out")" != "null" ]
+  # the Go identity block places the payload as a State D adoption gap, never at the root
+  [ "$(jq -r '[.missing_artifacts[] | select(startswith("identity/"))] | length' <<<"$out")" -eq 0 ]
+}
+
 @test "detect-stack #729: tsconfig.json alone also detects javascript (never typescript)" {
   printf '{ "compilerOptions": {} }\n' > tsconfig.json
   out=$(bash "$DETECT" 2>/dev/null); rc=$?

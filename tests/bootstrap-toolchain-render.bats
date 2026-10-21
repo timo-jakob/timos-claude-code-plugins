@@ -1076,7 +1076,7 @@ bootstrapped_repo() { # <dir> <vis> <sa> <v> <cs>
     'Exit 1 → relay stderr and render nothing more; exit 2 → your own invocation, fix it and re-run.'
     'never re-derived from visibility; then run step 4'"'"'s *toolchain refresh* (#2121) before any `branch-protection.sh` call, unless this run already did.'
     'On an exit 0, run step 4'"'"'s *toolchain refresh* (#2121) first, unless this run already did — a refresh whose dry run reported a `refreshed`, `conflict` or `ambiguous` row is a committable delta, which the no-drift stop below never swallows.'
-    'So does a pending toolchain refresh: when its dry run reported any `refreshed`, `conflict` or `ambiguous` row, do not stop — continue to the Step 2 plan, and on confirmation its run without `--dry-run` is the delta.)'
+    'So does a pending toolchain refresh: when its dry run reported any `refreshed`, `conflict` or `ambiguous` row, do not stop — continue to the Step 2 plan, and on confirmation its run without `--dry-run` is the delta.'
     # Step 4b, 4.5, Step 5
     'the `static_analysis` job unless it is `none` (#2121)'
     'per resolved tool: `sonar-scanner` for either analyser, `snyk` for `snyk`, `trivy` for `trivy` — whatever the visibility or Dockerfile; a `none` category requires nothing, #2121'
