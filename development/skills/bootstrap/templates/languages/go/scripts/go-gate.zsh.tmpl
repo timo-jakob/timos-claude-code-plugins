@@ -15,9 +15,11 @@
 #   8 no cluster deploy  scripts/check-no-cluster-deploy.zsh over .github/workflows/**
 #   9 license            trivy fs --scanners license, whatever tools.vulnerabilities declares
 #  10 pre-commit         every pre-commit hook over every file, but the two stages 6-7 already run
-#  11 contracts lint     only when contracts/ or .spectral.yaml changed: Spectral over the newest major
+#  11 contracts lint     only when contracts/, .spectral.yaml or its checker changed:
+#                        scripts/check-contracts-lint.zsh runs Spectral over the newest major
 #  12 contracts semver   only when contracts/ or its checker changed: the version triangle and bump
-#  13 docs               only when the docs sources changed: mkdocs build --strict, then the manuals
+#  13 docs               only when the docs sources or its checker changed: scripts/check-docs.zsh
+#                        runs mkdocs build --strict, then the manuals
 #
 # A stage whose input is absent, or whose tool .maintenance.yml declares `none` (#2121), prints
 # one `go-gate: skip <stage> — <reason>` line. The gate never skips a stage silently.
@@ -27,8 +29,9 @@
 # fails the gate naming `make setup`. buf, govulncheck, gocover-cobertura, oasdiff and yq run through
 # `go tool`, pinned by go.mod's tool directives: a missing one fails its stage under go's own "no
 # such tool" error, and `go get -tool` adds it. oasdiff and yq reach the checker scripts that call
-# them by name through shims on PATH. Spectral and the pandoc image are pinned below. node, python3,
-# docker and jq are the machine's own; a missing one fails its stage naming the tool.
+# them by name through shims on PATH. Spectral is pinned in check-contracts-lint.zsh and the pandoc
+# image in check-docs.zsh, the two checkers every language gate shares. node, python3, docker and
+# jq are the machine's own; a missing one fails its stage naming the tool.
 #
 # Usage: zsh scripts/go-gate.zsh [-h|--help], from the repository root. It gates the current
 # directory and takes no other argument.
@@ -52,10 +55,6 @@ if (( $# )); then
 	esac
 fi
 
-# the versions of the two tools the gate runs without installing them first
-spectral_cli="@stoplight/spectral-cli@6.15.0"
-pandoc_image="pandoc/extra:3.5"
-
 base="origin/{{DEFAULT_BRANCH}}"
 path=("$PWD/.tools/bin" $path)
 
@@ -77,46 +76,18 @@ declared() {
 		t && $1 == k { print $2; exit }' .maintenance.yml
 }
 
-# a top-level scalar of mkdocs.yml, without a trailing comment or surrounding quotes
-mkdocs_key() {
-	awk -v k="$1:" '$1 == k { v = $0; sub(/^[^:]*:[[:space:]]*/, "", v); sub(/[[:space:]]+#.*$/, "", v)
-		gsub(/^["\047]|["\047]?[[:space:]]*$/, "", v); print v; exit }' mkdocs.yml
+# checker <stage> <script> [arg…]: run a shared checker (#2640) as this gate. Its exit 1 has
+# already printed the FAIL line, so the gate exits 1 with no line of its own; any other status
+# is returned for the stage to map.
+checker() {
+	local stage_name="$1" script="scripts/$2"
+	shift 2
+	[[ -f "$script" ]] || fail "$stage_name — $script is missing; re-run /development:bootstrap"
+	local rc=0
+	zsh "$script" --caller go-gate "$@" || rc=$?
+	(( rc == 1 )) && exit 1
+	return $rc
 }
-
-# --- selector-start (tests/render-contracts-templates.bats runs it beside contracts-lint.yml's)
-# newest_major <family> <file>: the newest strict vN directory of <family> holding <file>, as
-# <family>/vN/<file>; with an empty <file>, the newest vN directory itself. A v3-draft or v2.bak
-# is not a major, and majors compare as integers, so v10 is newer than v9.
-newest_major() {
-	local c n best="" best_n=-1
-	for c in "$1"/v[0-9]*/"$2"(N); do
-		n="${c#"$1"/v}"
-		n="${n%%/*}"
-		[[ "$n" == <-> ]] || continue
-		if (( n > best_n )); then
-			best_n=$n
-			best="$c"
-		fi
-	done
-	print -rn -- "$best"
-}
-# contract_specs: the newest major's openapi.yaml of contracts/ and of contracts/ops/, one a line.
-# A newest vN directory without an openapi.yaml fails, rather than falling back to an older,
-# frozen major that nobody may change.
-contract_specs() {
-	local family spec dir
-	for family in contracts contracts/ops; do
-		spec="$(newest_major "$family" openapi.yaml)"
-		dir="$(newest_major "$family" "")"
-		if [[ -n "$dir" && "$spec" != "${dir}openapi.yaml" ]]; then
-			print -u2 -r -- "go-gate: ${dir} is the newest major of ${family} but has no openapi.yaml —" \
-				"refusing to fall back to an older, frozen major. Commit the spec, or remove the directory."
-			return 1
-		fi
-		[[ -z "$spec" ]] || print -r -- "$spec"
-	done
-}
-# --- selector-end
 
 # scratch for the shims and the manuals, removed however the gate ends
 scratch="$(mktemp -d)" || fail "mktemp"
@@ -249,20 +220,17 @@ else
 fi
 
 # --- 11 contracts lint --------------------------------------------------------------
-if changed contracts .spectral.yaml; then
+if changed contracts .spectral.yaml scripts/check-contracts-lint.zsh; then
 	stage "contracts lint"
-	require node "contracts lint"
-	spec_list="$(contract_specs)" || fail "contracts lint — the newest contract major has no openapi.yaml"
-	specs=(${(f)spec_list})
-	if (( ${#specs} )); then
-		print -r -- "go-gate: linting ${specs[*]}"
-		npx --yes "$spectral_cli" lint --ruleset .spectral.yaml --fail-severity error "${specs[@]}" ||
-			fail "contracts lint — spectral"
-	else
-		skip "contracts lint" "no contracts/vN/openapi.yaml"
-	fi
+	lint_rc=0
+	checker "contracts lint" check-contracts-lint.zsh || lint_rc=$?
+	case $lint_rc in
+	0) ;;
+	3) skip "contracts lint" "no contracts/vN/openapi.yaml" ;;
+	*) fail "contracts lint — scripts/check-contracts-lint.zsh exited $lint_rc" ;;
+	esac
 else
-	skip "contracts lint" "no change under contracts/ or to .spectral.yaml against $base"
+	skip "contracts lint" "no change under contracts/, to .spectral.yaml or to its checker against $base"
 fi
 
 # --- 12 contracts semver ------------------------------------------------------------
@@ -288,60 +256,17 @@ else
 fi
 
 # --- 13 docs ------------------------------------------------------------------------
-docs_paths=(docs mkdocs.yml requirements-docs.txt scripts/docs-nav-to-chapters.zsh scripts/pandoc)
+docs_paths=(docs mkdocs.yml requirements-docs.txt scripts/docs-nav-to-chapters.zsh scripts/pandoc
+	scripts/check-docs.zsh)
 if ! changed "${docs_paths[@]}"; then
-	skip "docs" "no change to the docs sources against $base"
+	skip "docs" "no change to the docs sources or to its checker against $base"
 elif [[ ! -f mkdocs.yml ]]; then
 	skip "docs" "no mkdocs.yml"
 else
 	stage "docs"
-	require python3 "docs"
-	require docker "docs"
-	python3 -m venv .tools/docs-venv &&
-		.tools/docs-venv/bin/pip install --quiet -r requirements-docs.txt ||
-		fail "docs — installing requirements-docs.txt"
-	.tools/docs-venv/bin/mkdocs build --strict --site-dir "$scratch/site" ||
-		fail "docs — mkdocs build --strict"
-	chapter_list="$(zsh scripts/docs-nav-to-chapters.zsh)" || fail "docs — deriving the chapter order"
-	chapters=(${(f)chapter_list})
-	# the manuals' title and author: the site's name and repository, which bootstrap renders into
-	# mkdocs.yml from the same values it renders into docs.yml
-	title="$(mkdocs_key site_name)"
-	author="$(mkdocs_key repo_name)"
-	# the manuals' page setup and layout fixes are docs.yml's, carried over unchanged
-	docker run --rm -v "$PWD:/data" -v "$scratch:/out" -w /data "$pandoc_image" \
-		--pdf-engine=xelatex --toc -V fontsize=11pt \
-		--metadata title="$title" --metadata author="$author" \
-		--lua-filter=scripts/pandoc/break-long-tokens.lua \
-		--include-in-header=scripts/pandoc/manual-header.tex \
-		-o /out/manual.pdf "${chapters[@]}" > "$scratch/pandoc-pdf.log" 2>&1 || {
-		cat "$scratch/pandoc-pdf.log" >&2
-		fail "docs — pandoc manual.pdf"
-	}
-	docker run --rm -v "$PWD:/data" -v "$scratch:/out" -w /data "$pandoc_image" \
-		--toc --metadata title="$title" --metadata author="$author" \
-		-o /out/manual.epub "${chapters[@]}" || fail "docs — pandoc manual.epub"
-	[[ -s "$scratch/manual.pdf" && -s "$scratch/manual.epub" ]] || fail "docs — a manual was not produced"
-	# xelatex drops a character it has no glyph for silently
-	if grep "Missing character" "$scratch/pandoc-pdf.log" >&2; then
-		fail "docs — xelatex dropped the characters above from manual.pdf; add a \\DeclareUnicodeFallback for each to scripts/pandoc/manual-header.tex"
-	fi
-	# The unresolved-reference check is a negative test, so a probe whose only link dangles must
-	# show the warning first: a pandoc image that stops reporting it would leave the check blind.
-	probe_log="$(docker run --rm --entrypoint sh "$pandoc_image" -c \
-		'printf "# Probe\n\nA [dangling](#no-such-anchor) link.\n" > /tmp/probe.md
-		pandoc --pdf-engine=xelatex -o /tmp/probe.pdf /tmp/probe.md' 2>&1)" || {
-		print -u2 -r -- "$probe_log"
-		fail "docs — the pandoc probe container failed; that is infrastructure, not a pandoc change"
-	}
-	if [[ "$probe_log" != *"There were undefined references"* ]]; then
-		print -u2 -r -- "$probe_log"
-		fail "docs — pandoc no longer reports undefined references, so the reference check cannot fail"
-	fi
-	if grep -q "There were undefined references" "$scratch/pandoc-pdf.log"; then
-		grep -B2 -A2 "undefined" "$scratch/pandoc-pdf.log" >&2
-		fail "docs — manual.pdf has unresolved references; they work on the site only. Give the target heading the {#id} it already publishes, or fix the link"
-	fi
+	docs_rc=0
+	checker "docs" check-docs.zsh --out "$scratch" || docs_rc=$?
+	(( docs_rc == 0 )) || fail "docs — scripts/check-docs.zsh exited $docs_rc"
 fi
 
 stage "passed"

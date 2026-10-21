@@ -202,8 +202,9 @@ grep -rhn -E "(python|node|go|java)-version:" development/skills/bootstrap/templ
 # one `gate` job installs every tool its gate script runs by release URL, #1604 —
 # these are NOT `uses:` pins, so Renovate never sees them and Step 2 never covers
 # them). tests/iac-tools.zsh reads its fixture-harness pins from those same lines.
-# The Go Makefile's `_VERSION :=` pins and go-gate.zsh's Spectral and pandoc pins
-# are the same class; its GITLEAKS_VERSION mirrors the gitleaks hook `rev:` (Step 3).
+# The Go Makefile's `_VERSION :=` pins and the shared gate checkers' Spectral pin
+# (check-contracts-lint.zsh) and pandoc pin (check-docs.zsh, #2640) are the same
+# class; its GITLEAKS_VERSION mirrors the gitleaks hook `rev:` (Step 3).
 grep -rhn -E "^\s*[A-Z_]+_VERSION\s*:=?\s+|^(spectral_cli|pandoc_image)=" development/skills/bootstrap/templates/ | sort -u
 
 # …and the two sites that MIRROR the templates' yq pin. Both exist so the bats

@@ -2170,6 +2170,15 @@ For each detected language, merge in the appropriate config from
   through `render.zsh` with `--primary go` and — when `.maintenance.yml` records a `gate:` — that value
   as `--gate-command`, so the workflow, the hook and `.maintenance.yml` carry
   one command (`make check` unless one is recorded):
+  - **Copy** `templates/common/scripts/check-contracts-lint.zsh` →
+    `scripts/check-contracts-lint.zsh` and
+    `templates/common/scripts/check-docs.zsh` → `scripts/check-docs.zsh`
+    (verbatim, no placeholders, `chmod +x`; #2640) — the shared checkers the
+    gate's contracts lint and docs stages call with `--caller go-gate`. They
+    hold the newest-major selector, the Spectral pin and the pandoc image pin,
+    so every language gate lints and builds the same way without a copy of
+    its own. A missing one fails its stage naming
+    `re-run /development:bootstrap`.
   - `templates/languages/go/Makefile.tmpl` → `Makefile` — the one place the
     gate's installed non-Go tools are pinned (golangci-lint, diff-cover,
     trivy, gitleaks and pre-commit, whatever `tools.vulnerabilities`
@@ -2179,12 +2188,15 @@ For each detected language, merge in the appropriate config from
     `scripts/go-gate.zsh`), `hooks` (`git config core.hooksPath hooks`) and
     `setup` (`hooks`, then installs the pinned tools into `.tools/`). A
     `Makefile` already on disk goes to the idempotency reviewer, as on §3l,
-    and so does any of the four files below already on disk. Its prompt
+    and so does any of the four files below or the two checkers above already
+    on disk. Its prompt
     states the Go primary the way §3l's prompt states the IaC topic: the
     reviewer reads its kubernetes-tree rules
-    with the Go row — `iac/` → `languages/go/`, the plugin-owned set →
-    `go-ci.yml`, `scripts/go-gate.zsh`, `hooks/pre-commit` and
-    `hooks/pre-push`, and a `Makefile` merge that appends the `check`,
+    with the Go row — `iac/` → `languages/go/`, or `common/scripts/` for the
+    two checkers, whose markers name it — the plugin-owned set →
+    `go-ci.yml`, `scripts/go-gate.zsh`, `scripts/check-contracts-lint.zsh`,
+    `scripts/check-docs.zsh`, `hooks/pre-commit` and `hooks/pre-push`, and a
+    `Makefile` merge that appends the `check`,
     `hooks` and `setup` targets and the variables they read when absent,
     with `check` running `zsh scripts/go-gate.zsh`.
   - `templates/languages/go/scripts/go-gate.zsh.tmpl` →
@@ -2203,9 +2215,10 @@ For each detected language, merge in the appropriate config from
     pre-commit (`SKIP=gitleaks,trivy-fs pre-commit run --all-files`; skipped
     without `.pre-commit-config.yaml`), contracts lint and contracts semver
     (`contracts-lint.yml`'s Spectral run and `contracts-semver.yml`'s
-    checker, each only when its paths changed against the base branch), and
-    docs (`docs.yml`'s `mkdocs build --strict` and pandoc manuals, only when
-    a docs source changed). Each skipped stage prints a notice. The first
+    checker, each only when its paths or its checker changed against the base
+    branch), and docs (`docs.yml`'s `mkdocs build --strict` and pandoc
+    manuals, only when a docs source or its checker changed). Each skipped
+    stage prints a notice. The first
     failing stage stops the run.
   - `templates/languages/go/hooks/pre-commit.tmpl` → `hooks/pre-commit` and
     `templates/languages/go/hooks/pre-push.tmpl` → `hooks/pre-push` (both
@@ -6395,6 +6408,8 @@ actually rendered in Step 3 — §3a through §3l):
 | `scripts/go-gate.zsh` | `languages/go/scripts/go-gate.zsh.tmpl` (Go primary only) |
 | `hooks/pre-push` | `languages/go/hooks/pre-push.tmpl` (Go primary only) |
 | `hooks/pre-commit` | `languages/go/hooks/pre-commit.tmpl` (Go primary only) |
+| `scripts/check-contracts-lint.zsh` | `common/scripts/check-contracts-lint.zsh` (Go primary only, #2640) |
+| `scripts/check-docs.zsh` | `common/scripts/check-docs.zsh` (Go primary only, #2640) |
 | `.github/workflows/no-cluster-deploy.yml` | `common/.github/workflows/no-cluster-deploy.yml.tmpl` (not on the §3l IaC path) |
 | `scripts/check-no-cluster-deploy.zsh` | `common/scripts/check-no-cluster-deploy.zsh` (not on the §3l IaC path) |
 | `.github/workflows/api-stability.yml` | `common/.github/workflows/api-stability.yml.tmpl` |
