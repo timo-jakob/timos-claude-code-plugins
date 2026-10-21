@@ -141,6 +141,12 @@
 #                                 `[project.scripts]` name (e.g. `aido`) or
 #                                 `python -m <package>`. No default; only needed
 #                                 when rendering tests/acceptance/cli/
+#   --vite-config-file <name>     {{VITE_CONFIG_FILE}} — the Vite config §3k.5
+#                                 found at the root (#1967): vite.config.ts,
+#                                 .mts, .js or .mjs, imported with its extension
+#                                 by the React vitest.config.ts. No default, so a
+#                                 React render that forgot it trips the leftover
+#                                 check; any other value is a usage error (exit 2)
 #   --claude-plugins-repo <o/r>   {{CLAUDE_PLUGINS_REPO}}
 #                                 (default: timo-jakob/timos-claude-code-plugins)
 #   --approver-lang <lang>        {{APPROVER_LANG}} — the resolved Approver
@@ -239,6 +245,12 @@ while (($# > 0)); do
 	--codeql-languages) vals[CODEQL_LANGUAGES]="$2" && shift 2 ;;
 	--acceptance-interfaces) vals[ACCEPTANCE_INTERFACES]="$2" && shift 2 ;;
 	--cli-entry-point) vals[CLI_ENTRY_POINT]="$2" && shift 2 ;;
+	--vite-config-file)
+		# the React vitest import (#1967): one of the four names §3k.5 accepts
+		[[ "${2-}" == vite.config.(ts|mts|js|mjs) ]] ||
+			{ print -u2 -- "render.zsh: --vite-config-file must be vite.config.ts | .mts | .js | .mjs, got: ${2-}" && usage; }
+		vals[VITE_CONFIG_FILE]="$2" && shift 2
+		;;
 	--claude-plugins-repo) vals[CLAUDE_PLUGINS_REPO]="$2" && shift 2 ;;
 	--approver-lang) vals[APPROVER_LANG]="$2" && shift 2 ;;
 	--security-contact-email) security_email="$2" && security_email_set=1 && shift 2 ;;

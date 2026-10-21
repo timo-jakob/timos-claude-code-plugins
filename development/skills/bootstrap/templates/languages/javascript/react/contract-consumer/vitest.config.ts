@@ -1,5 +1,5 @@
 import { configDefaults, defineConfig, mergeConfig } from "vitest/config";
-import viteConfig from "./vite.config";
+import viteConfig from "./{{VITE_CONFIG_FILE}}";
 
 // Vitest config — CONTRACT-CONSUMER + REACT variant (development-react #957).
 // Supersedes the contract-consumer vitest.config.ts in a React app that consumes
