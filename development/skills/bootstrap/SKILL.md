@@ -1490,6 +1490,7 @@ The table below documents where each placeholder's **value** comes from:
 | `{{XCODE_SCHEME}}` | Swift/Xcode only (`language_meta.swift.build_system == "xcode"`) — the scheme `xcodebuild test` runs. Resolve at render time via `xcodebuild -list -json` (take the single shared scheme; if several, ask the user which one carries the tests). Not used on SwiftPM repos — there the `SWIFT_XCODE` block is stripped and `swift test` needs no scheme. |
 | `{{CODEQL_LANGUAGES}}` | comma-separated CodeQL language identifiers — map detected languages: `javascript` → `javascript-typescript`, `python` → `python`, `go` → `go`, `swift` → `swift`, `java` → `java`. Drop the codeql workflow entirely if the only detected language is one CodeQL does not support. |
 | `{{ACCEPTANCE_INTERFACES}}` | comma-joined runtime interfaces from `detect-stack.sh`'s `interfaces` (#242), **minus `library`** — e.g. `cli` or `cli, web-ui`. Rendered inside literal brackets in the template (`interface: [{{ACCEPTANCE_INTERFACES}}]`, the `{{CODEQL_LANGUAGES}}` pattern) → a matrix leg per interface. Pass via `render.zsh --acceptance-interfaces`; **only** when rendering `acceptance.yml` (§3g). No default — omit it and the placeholder trips the leftover check, so the acceptance workflow is never rendered with an empty interface set. |
+| `{{VITE_CONFIG_FILE}}` | React overlay only (§3k.5, #1967) — the file name of the Vite config at the repo root (`vite.config.ts`, `vite.config.mts`, `vite.config.js` or `vite.config.mjs`), which the React `vitest.config.ts` imports with its extension. Pass via `render.zsh --vite-config-file`; no default, so a React render that forgot it trips the leftover check, and any other value is refused. |
 | `{{SECURITY_CONTACT_BLOCK}}` | substitute one of two blocks based on Q6 answer (security contact email). See below. |
 | `{{APPROVER_LANG}}` | the resolved Approver language from Step 3e (`python` / `java` / `swift`) — used by `common/approver-policy-core.md.tmpl` for the `/development-<lang>:approve` and `<lang>-approver` references. Pass via `render.zsh --approver-lang`; only needed when rendering the Approver policy (#241). |
 
@@ -2281,8 +2282,9 @@ For each detected language, merge in the appropriate config from
   top — §3k.5 renders last and keeps every layer beneath it. **When the React
   overlay applies** (§3k.5's *Does the overlay apply?* check), §3d leaves an
   on-disk unmodified create-vite `eslint.config.js` (the fingerprint §3k.5
-  states) or plain React template untouched, without a prompt: §3k.5 owns those
-  files and replaces them itself. When the overlay does not apply they are
+  states) or plain React template untouched, without a prompt — comparing a
+  `vitest.config.ts` with its import line normalised as §3k.5 states (#1967):
+  §3k.5 owns those files and replaces them itself. When the overlay does not apply they are
   ordinary on-disk files and take rule 3 as usual.
 
 ### 3e. Claude Approver artifacts (when `--claude-approver true`)
@@ -4931,7 +4933,11 @@ these holds:
 
 - the root has **no Vite config** — none of `vite.config.ts`, `vite.config.mts`,
   `vite.config.js` or `vite.config.mjs` (the React `vitest.config.ts` imports
-  `./vite.config`, which resolves any of them). That includes a monorepo whose
+  the one found **by its full file name, extension included** — the render
+  below passes it as `--vite-config-file` — because Vite's native config loader
+  refuses an extensionless import, #1967; when more than one is present, pass
+  the one Vite itself loads, first in the order `.js`, `.mjs`, `.ts`, `.mts`).
+  That includes a monorepo whose
   React app lives in a sub-package: the marker matched there, but the overlay's
   root configs have nothing to merge over, so say so in the item rather than
   rendering;
@@ -5045,14 +5051,17 @@ its noop are on disk (with one missing, it warns and requires neither, since the
 PRs that half skips would never report them), and `SETUP.md` §4 names them.
 Merge `react/gitignore` into `.gitignore` the way §3d merges a language
 fragment (see *`.gitignore` merging*), so the app ignores `playwright-report/`,
-`test-results/` and `.lighthouseci/`. Only the two workflows carry a placeholder (`{{DEFAULT_BRANCH}}`); `render.zsh`'s leftover
-check proves every one resolved:
+`test-results/` and `.lighthouseci/`. Two kinds of file carry a placeholder: the
+two workflows (`{{DEFAULT_BRANCH}}`) and the `vitest.config.ts` variant
+(`{{VITE_CONFIG_FILE}}`, the Vite config file name found above, passed as
+`--vite-config-file`); `render.zsh`'s leftover check proves every one resolved:
 
 ```bash
 # §3k machinery present → the consumer+React pair
 "<skill-base-dir>/scripts/render.zsh" \
   --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
   --project-name "<name>" --default-branch "<branch>" \
+  --vite-config-file "<vite.config.ts|.mts|.js|.mjs on disk>" \
   languages/javascript/react/contract-consumer/eslint.config.js \
   languages/javascript/react/contract-consumer/vitest.config.ts \
   languages/javascript/react/src/test/setup.ts \
@@ -5068,6 +5077,7 @@ check proves every one resolved:
 "<skill-base-dir>/scripts/render.zsh" \
   --templates "<skill-base-dir>/templates" --out "<staging-dir>" \
   --project-name "<name>" --default-branch "<branch>" \
+  --vite-config-file "<vite.config.ts|.mts|.js|.mjs on disk>" \
   languages/javascript/react/eslint.config.js \
   languages/javascript/react/vitest.config.ts \
   languages/javascript/react/src/test/setup.ts \
@@ -5095,7 +5105,7 @@ keeps the ACL `no-restricted-imports` block, the `@typescript-eslint/no-deprecat
 block, `./src/test/msw-setup.ts` in `setupFiles` **before** the React setup
 module, and the `src/api/generated/**` coverage exclude — dropping any of them
 would silently disable the MSW wiring #958 depends on. Both `vitest.config.ts`
-variants `mergeConfig` over `./vite.config`, because Vitest gives
+variants `mergeConfig` over the app's Vite config, because Vitest gives
 `vitest.config.ts` priority over `vite.config.ts` and `@vitejs/plugin-react`
 would otherwise not apply under test.
 
@@ -5111,8 +5121,23 @@ known predecessor of the variant being rendered**:
   never overwrites the consumer template — that is the one overwrite that
   would drop the ACL and MSW wiring.
 
-A file already byte-identical to the variant being rendered is idempotency
-rule 2 (skip silently).
+**A React `vitest.config.ts` is compared with its import line normalised
+(#1967).** Wherever the known-predecessor test above or §3d's React-overlay
+skip compares an on-disk `vitest.config.ts` with a React template — the
+variant being rendered, or the plain React template as the consumer+React
+variant's predecessor — first replace the on-disk line
+`import viteConfig from "./vite.config";`, or the same line naming any of the
+four Vite config files, with the line this run renders, then compare byte for
+byte. So a React app bootstrapped **before #1967**,
+whose file still carries the extensionless `import viteConfig from "./vite.config";`,
+is a known predecessor of the same variant and is upgraded **without a rule-3
+prompt**; so is one rendered for a Vite config since renamed (`.js` → `.ts`). Only
+that one line is normalised: any other difference still takes the prompt.
+
+A file already byte-identical to the variant being rendered — raw bytes,
+never normalised, as in the State D adoption-gap test — is idempotency
+rule 2 (skip silently) — a re-run against the same Vite config renders the same
+bytes, so it never rewrites the file.
 
 A React app bootstrapped **before the WebUI gates (#1946)** carries the family's
 earlier `vitest.config.ts` (no `tests/e2e/**` exclude) and `src/test/setup.ts`
