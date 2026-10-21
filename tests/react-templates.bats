@@ -69,14 +69,15 @@ BINDING_FILES=(
   src/test/query-wrapper.tsx
 )
 
-# Render one variant exactly as §3k.5 lists it: "consumer" or "plain".
+# Render one variant exactly as §3k.5 lists it: "consumer" or "plain", for the Vite
+# config file named by $2 (default vite.config.ts, create-vite's own).
 render_variant() {
   local prefix=languages/javascript/react f webui=()
   local cfg="$prefix"
   [ "$1" = consumer ] && cfg="$prefix/contract-consumer"
   for f in "${WEBUI_FILES[@]}"; do webui+=("$prefix/$f"); done
   zsh "$RENDER" --templates "$TEMPLATES" --out "$OUT/$1" \
-    --project-name "Demo" --default-branch "main" \
+    --project-name "Demo" --default-branch "main" --vite-config-file "${2:-vite.config.ts}" \
     "$cfg/eslint.config.js" "$cfg/vitest.config.ts" \
     "$prefix/src/test/setup.ts" "$prefix/src/Greeting.test.tsx" "${webui[@]}"
 }
@@ -132,9 +133,11 @@ has() {
     [ -z "$output" ] || { echo "$v rendered under tests/acceptance: $output"; false; }
     src="$RX"
     [ "$v" = consumer ] && src="$RX/contract-consumer"
-    for f in eslint.config.js vitest.config.ts; do
-      cmp -s "$OUT/$v/${src#"$TEMPLATES"/}/$f" "$src/$f" || { echo "$v: $f differs from source"; false; }
-    done
+    cmp -s "$OUT/$v/${src#"$TEMPLATES"/}/eslint.config.js" "$src/eslint.config.js" ||
+      { echo "$v: eslint.config.js differs from source"; false; }
+    # vitest.config.ts carries the Vite config file name (#1967); nothing else changes
+    diff <(sed 's/{{VITE_CONFIG_FILE}}/vite.config.ts/g' "$src/vitest.config.ts") \
+      "$OUT/$v/${src#"$TEMPLATES"/}/vitest.config.ts" || { echo "$v: vitest.config.ts"; false; }
   done
 }
 
@@ -205,15 +208,42 @@ has() {
   [ -f "$JS/contract-consumer/src/test/msw-setup.ts" ]
 }
 
-@test "react: both vitest variants mergeConfig over ./vite.config, the app config first" {
+@test "react: both vitest variants mergeConfig over the app's Vite config, the app config first" {
   local f
   for f in "$RX/vitest.config.ts" "$RX/contract-consumer/vitest.config.ts"; do
     has "$f" 'import { configDefaults, defineConfig, mergeConfig } from "vitest/config";'
-    has "$f" 'import viteConfig from "./vite.config";'
+    # the import names the Vite config WITH its extension (#1967): the native config
+    # loader refuses the extensionless "./vite.config" the variants carried before
+    has "$f" 'import viteConfig from "./{{VITE_CONFIG_FILE}}";'
+    run grep -qF 'from "./vite.config";' "$f"
+    [ "$status" -eq 1 ]
+    # the import is the variant's only line naming the Vite config as a module, so
+    # §3k.5's import-line normalisation of a known predecessor touches nothing else
+    [ "$(grep -cE '"\./(vite\.config|\{\{VITE_CONFIG_FILE\}\})' "$f")" -eq 1 ]
     # viteConfig is the FIRST argument, so the test block overrides it
     run grep -A1 -xF 'export default mergeConfig(' "$f"
     [ "$status" -eq 0 ]
     ends_with "$output" '  viteConfig,'
+  done
+}
+
+@test "react: each variant renders the import of each of the four Vite configs, byte-identical on a re-run (#1967)" {
+  local v name cfg rendered
+  for v in plain consumer; do
+    cfg=languages/javascript/react
+    [ "$v" = consumer ] && cfg="$cfg/contract-consumer"
+    for name in vite.config.ts vite.config.mts vite.config.js vite.config.mjs; do
+      OUT="$BATS_TEST_TMPDIR/out-$name"
+      run render_variant "$v" "$name"
+      [ "$status" -eq 0 ] || { echo "render $v $name: $output"; false; }
+      rendered="$OUT/$v/$cfg/vitest.config.ts"
+      [ "$(sed -n 2p "$rendered")" = "import viteConfig from \"./$name\";" ] ||
+        { echo "$v $name: $(sed -n 2p "$rendered")"; false; }
+      cp "$rendered" "$BATS_TEST_TMPDIR/first"
+      run render_variant "$v" "$name"
+      [ "$status" -eq 0 ]
+      cmp -s "$rendered" "$BATS_TEST_TMPDIR/first" || { echo "$v $name: re-run differs"; false; }
+    done
   done
 }
 
@@ -296,6 +326,10 @@ STEP_END='### 3k.6. React Query binding (a React repo consuming a spec — #958)
   contains "$section" 'record a Step 5 item naming the `npm create vite` prerequisite'
   contains "$section" 'the root has **no Vite config** — none of `vite.config.ts`, `vite.config.mts`, `vite.config.js` or `vite.config.mjs`'
   contains "$section" 'That includes a monorepo whose React app lives in a sub-package'
+  # the import carries the extension (#1967), so the old "resolves any of them" claim is gone
+  lacks "$section" 'which resolves any of them'
+  contains "$section" 'the one found **by its full file name, extension included** — the render below passes it as `--vite-config-file` — because Vite'"'"'s native config loader refuses an extensionless import, #1967; when more than one is present, pass the one Vite itself loads, first in the order `.js`, `.mjs`, `.ts`, `.mts`'
+  contains "$section" 'the `vitest.config.ts` variant (`{{VITE_CONFIG_FILE}}`, the Vite config file name found above, passed as `--vite-config-file`); `render.zsh`'"'"'s leftover check proves every one resolved'
   contains "$section" 'the Vite config **exports a function**'
   contains "$section" '**Does the overlay apply?** It applies exactly when the marker recipe exits 0 **and** neither skip above holds. Decide it once, in Step 2, **before §3d renders anything**'
   contains "$section" 'and §3k to decide whether it defers its whole config pair to this step. When it does not apply, nothing is deferred and those files are ordinary on-disk files to every step.'
@@ -310,8 +344,8 @@ STEP_END='### 3k.6. React Query binding (a React repo consuming a spec — #958)
   contains "$section" 'which `orval.config.ts` and `src/test/msw-setup.ts` **both** on disk show'
   contains "$section" '| present (`orval.config.ts` and `src/test/msw-setup.ts` exist) | `react/contract-consumer/eslint.config.js` → `eslint.config.js`, `react/contract-consumer/vitest.config.ts` → `vitest.config.ts` |'
   contains "$section" '| absent (§3k skipped, stopped, aborted, or not a consumer) | `react/eslint.config.js` → `eslint.config.js`, `react/vitest.config.ts` → `vitest.config.ts` |'
-  contains "$section" '# §3k machinery present → the consumer+React pair "<skill-base-dir>/scripts/render.zsh" \ --templates "<skill-base-dir>/templates" --out "<staging-dir>" \ --project-name "<name>" --default-branch "<branch>" \ languages/javascript/react/contract-consumer/eslint.config.js \ languages/javascript/react/contract-consumer/vitest.config.ts \ languages/javascript/react/src/test/setup.ts \ languages/javascript/react/src/Greeting.test.tsx'
-  contains "$section" '# §3k machinery absent → the plain React pair "<skill-base-dir>/scripts/render.zsh" \ --templates "<skill-base-dir>/templates" --out "<staging-dir>" \ --project-name "<name>" --default-branch "<branch>" \ languages/javascript/react/eslint.config.js \ languages/javascript/react/vitest.config.ts \ languages/javascript/react/src/test/setup.ts \ languages/javascript/react/src/Greeting.test.tsx'
+  contains "$section" '# §3k machinery present → the consumer+React pair "<skill-base-dir>/scripts/render.zsh" \ --templates "<skill-base-dir>/templates" --out "<staging-dir>" \ --project-name "<name>" --default-branch "<branch>" \ --vite-config-file "<vite.config.ts|.mts|.js|.mjs on disk>" \ languages/javascript/react/contract-consumer/eslint.config.js \ languages/javascript/react/contract-consumer/vitest.config.ts \ languages/javascript/react/src/test/setup.ts \ languages/javascript/react/src/Greeting.test.tsx'
+  contains "$section" '# §3k machinery absent → the plain React pair "<skill-base-dir>/scripts/render.zsh" \ --templates "<skill-base-dir>/templates" --out "<staging-dir>" \ --project-name "<name>" --default-branch "<branch>" \ --vite-config-file "<vite.config.ts|.mts|.js|.mjs on disk>" \ languages/javascript/react/eslint.config.js \ languages/javascript/react/vitest.config.ts \ languages/javascript/react/src/test/setup.ts \ languages/javascript/react/src/Greeting.test.tsx'
 }
 
 @test "react: SKILL.md's React step installs first and renders nothing on a failed install" {
@@ -359,6 +393,14 @@ STEP_END='### 3k.6. React Query binding (a React repo consuming a spec — #958)
   contains "$section" 'for **either** variant: the §3d base template **byte for byte**, or (for `eslint.config.js`) an **unmodified create-vite `eslint.config.js`** as fingerprinted below;'
   contains "$section" 'for the **consumer+React** variant only, additionally: the §3k consumer template or the plain React template, byte for byte.'
   contains "$section" 'The plain React variant never overwrites the consumer template'
+  # #1967: an extensionless-import variant is a known predecessor via one normalised line
+  contains "$section" '**A React `vitest.config.ts` is compared with its import line normalised (#1967).**'
+  contains "$section" 'Wherever the known-predecessor test above or §3d'"'"'s React-overlay skip compares an on-disk `vitest.config.ts` with a React template'
+  contains "$section" 'first replace the on-disk line `import viteConfig from "./vite.config";`, or the same line naming any of the four Vite config files, with the line this run renders, then compare byte for byte.'
+  contains "$section" 'is a known predecessor of the same variant and is upgraded **without a rule-3 prompt**'
+  contains "$section" 'Only that one line is normalised: any other difference still takes the prompt.'
+  contains "$section" 'A file already byte-identical to the variant being rendered — raw bytes, never normalised, as in the State D adoption-gap test — is idempotency rule 2 (skip silently)'
+  contains "$section" 'a re-run against the same Vite config renders the same bytes, so it never rewrites the file.'
   contains "$section" "**idempotency rule 3's diff prompt**"
   contains "$section" 'keep the user'"'"'s file and record a Step 5 item naming the React layers it lacks'
   contains "$section" '**and render neither `src/test/setup.ts` nor the example test**'
@@ -388,7 +430,7 @@ section_between() {
   local d k
   d="$(section_between '^- \*\*JavaScript contract-consumer note' '^### 3e\. ')"
   ends_with "$d" '### 3e. Claude Approver artifacts (when `--claude-approver true`) '
-  contains "$d" '**When the React overlay applies** (§3k.5'"'"'s *Does the overlay apply?* check), §3d leaves an on-disk unmodified create-vite `eslint.config.js` (the fingerprint §3k.5 states) or plain React template untouched, without a prompt'
+  contains "$d" '**When the React overlay applies** (§3k.5'"'"'s *Does the overlay apply?* check), §3d leaves an on-disk unmodified create-vite `eslint.config.js` (the fingerprint §3k.5 states) or plain React template untouched, without a prompt — comparing a `vitest.config.ts` with its import line normalised as §3k.5 states (#1967): §3k.5 owns those files and replaces them itself.'
   contains "$d" 'When the overlay does not apply they are ordinary on-disk files and take rule 3 as usual.'
   k="$(section_between '^### 3k\. ' '^### 3k\.5\. ')"
   ends_with "$k" '### 3k.5. React overlay (a JS/TS repo carrying the React marker — #957) '

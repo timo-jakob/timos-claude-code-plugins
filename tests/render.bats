@@ -1146,6 +1146,34 @@ EOF
   contains "$output" "CLI_ENTRY_POINT"
 }
 
+@test "render: --vite-config-file substitutes each of the four Vite config names (#1967)" {
+  local name
+  printf 'import viteConfig from "./{{VITE_CONFIG_FILE}}";\n' > "$T/v.ts"
+  for name in vite.config.ts vite.config.mts vite.config.js vite.config.mjs; do
+    run zsh "$SCRIPT" --templates "$T" --out "$OUT/$name" --vite-config-file "$name" v.ts
+    [ "$status" -eq 0 ] || { echo "$name: $output"; false; }
+    [ "$(cat "$OUT/$name/v.ts")" = "import viteConfig from \"./$name\";" ]
+  done
+}
+
+@test "render: --vite-config-file refuses any other name with usage (exit 2) (#1967)" {
+  local bad
+  printf 'import viteConfig from "./{{VITE_CONFIG_FILE}}";\n' > "$T/v.ts"
+  for bad in vite.config vite.config.tsx vite.config.cts ./vite.config.ts my.vite.config.ts ""; do
+    run zsh "$SCRIPT" --templates "$T" --out "$OUT" --vite-config-file "$bad" v.ts
+    [ "$status" -eq 2 ] || { echo "'$bad' -> $status: $output"; false; }
+    contains "$output" "--vite-config-file must be vite.config.ts | .mts | .js | .mjs"
+    [ ! -e "$OUT/v.ts" ]
+  done
+}
+
+@test "render: a React vitest variant without --vite-config-file fails the leftover check (#1967)" {
+  run zsh "$SCRIPT" --templates "$REAL_TEMPLATES" --out "$OUT" \
+    languages/javascript/react/vitest.config.ts
+  [ "$status" -eq 1 ]
+  contains "$output" "VITE_CONFIG_FILE"
+}
+
 @test "render: static file without placeholders or blocks passes through unchanged" {
   printf 'plain: file\nno: templating\n' > "$T/static.yml"
   run zsh "$SCRIPT" --templates "$T" --out "$OUT" static.yml
