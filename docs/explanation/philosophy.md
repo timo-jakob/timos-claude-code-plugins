@@ -94,6 +94,12 @@ in writing, is what makes the result consistent and the decision contestable.
   [`tests/identity-position.bats`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/tests/identity-position.bats)
   — each pins its position clause by clause, so a position cannot be softened
   or reversed with the suite still green.
+- [`ARCHITECTURE.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/ARCHITECTURE.md),
+  section *Decision rights — question taxonomy and the Decisions-taken record
+  (#2899)* — the three question kinds that decide whether a question reaches a
+  human, the tie-break between them, and the record a decision taken instead of
+  a question leaves behind; pinned by
+  [`tests/decision-rights-position.bats`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/tests/decision-rights-position.bats).
 
 This is thin. Each position is pinned by its own suite, but the positions live
 as prose sections, and there is no single registry that pairs every position
