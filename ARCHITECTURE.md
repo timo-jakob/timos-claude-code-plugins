@@ -8641,6 +8641,56 @@ Read-only / advisory agents (review, audit, classify) shouldn't run
 in worktrees — they make no changes, so isolation buys nothing. Save
 the worktree creation time.
 
+## Decision rights — question taxonomy and the Decisions-taken record (#2899)
+
+Every component of the family that can put a question to a human — the
+readiness gate, the issue refiner, the resolve-issue and refine-issue
+conductors — sorts each candidate question into one of three kinds before it
+asks. The kind decides whether the question reaches a human at all. This
+section is that contract, stated once; it serves pillar 2,
+[Never asks "how"](docs/explanation/philosophy.md#pillar-2), and the agents and
+skills that apply it link here rather than restate it (epic #2898).
+
+### The three question kinds
+
+| Kind | Covers | Who answers |
+|---|---|---|
+| `intent` | What to build, scope, priority, non-functional targets, personas, risk acceptance (security, cost, data loss), and anything irreversible or outward-facing. | **Asked.** The human answers; in refine-issue only, subject to its auto-accept rules (*Runtime setting: `refine_auto_accept_threshold`*; #2900). |
+| `gap` | Either of two cases. **Silence:** something the work needs on which the architecture positions, the functional or non-functional requirements and the persona registry are silent, and which established practice does not settle. **Contradiction:** any case where those documents contradict each other, whatever established practice says. | **Asked**, under the same auto-accept rules as `intent`, and the question carries a proposed document change that closes the gap, which lands in the story PR (#2901). |
+| `implementation` | Anything the positions plus established practice decide, whether or not the tooling — linters, formatters, tests, review panels, CI — can verify it. | **Never asked.** Claude decides, and records the decision in the *Decisions taken* record below. |
+
+### The tie-break
+
+A question is `implementation` only when it is neither `intent` nor `gap` under
+the definitions above. When in doubt between `implementation` and either other
+kind, it is the other kind; when in doubt between `intent` and `gap`, it is `gap`,
+since its document change keeps the answer from being asked twice.
+
+*Rationale:* the two mistakes do not cost the same. A gap misfiled as
+implementation is decided silently on ground no document covers, and the next
+story meets the same silence; an implementation question misfiled as a gap costs
+one question and leaves the document change that answers it for good.
+
+### The Decisions-taken record
+
+When Claude decides a question instead of asking it, it writes one entry per
+decision to a **Decisions taken** list. Nothing Claude decides in place of a
+question — an auto-accepted answer included — is left out of it. Each entry carries four fields:
+
+| Field | Holds |
+|---|---|
+| question | The question that would otherwise have been asked. |
+| choice | What Claude chose. |
+| evidence | The position, requirement or established practice the choice rests on, cited by its section or file. |
+| how to overrule | What a human does to reverse the choice after the fact. |
+
+The list lives in a fixed section, a `## Decisions taken` heading: in the
+**issue body** when the decision is taken before implementation (refinement,
+the readiness gate), in the **PR body** when it is taken during implementation.
+The section is append-only: a run that decided something adds its entries to the
+existing section and never removes an earlier run's entries; a run that decided
+nothing adds no section and removes none.
+
 ## Maximizing autonomy
 
 The plugins deliberately favor autonomous fixes over speed and token
