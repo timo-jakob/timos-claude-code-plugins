@@ -770,6 +770,20 @@ EOF
   echo "$output" | grep -q -- '^- blockers: 2 (critical: 1, warning: 1) (new: 1, carried: 1), conflicts: 0, suggestions: 0, carried: confirmed 1 / re-raised 1 / unconfirmed 0 of 2$'
 }
 
+@test "a carried entry the risk pass retired renders as 'demoted by risk N' inside the triple, before the total" {
+  cat > "$CL" <<'EOF'
+{"round":2,"summary":{"critical":0,"high":0,"low":1,"blocking":0,"conflicts":0},
+ "blocking":[],"suggestions":[],"conflicts":[],"non_converging":false,
+ "carry_accounting":{"total":3,
+   "confirmed":[{"file":"a.py","dimension":"bugs","title":"a"}],
+   "re_raised":[],"unconfirmed":[],
+   "demoted":[{"file":"b.py","dimension":"bugs","title":"b"},{"file":"c.py","dimension":"bugs","title":"c"}]}}
+EOF
+  run zsh "$S" --changelist "$CL" --round 2 --verdict "awaiting fix"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q -- ', carried: confirmed 1 / re-raised 0 / unconfirmed 0 / demoted by risk 2 of 3$'
+}
+
 # --- #1481: every value flag is guarded ---------------------------------------
 # A bare `$2` under `nounset` aborted a trailing value flag with zsh's raw
 # "parameter not set" and exit 1 — the code this script reserves for bad input

@@ -5238,9 +5238,14 @@ whatever its line, or one the consolidator matched to the carried prior — coun
 as re-raised whether or not a record says so). The status
 JSON's always-present `carry_unconfirmed[]` names those identities — never
 `.blocking` — and an accepted round's changelist is stamped
-`carry_accounting: {total, confirmed[], re_raised[], unconfirmed[]}`, which
+`carry_accounting: {total, confirmed[], re_raised[], unconfirmed[]}`, plus
+`demoted[]` only when the risk pass (#1921) demoted a carried entry's re-raise
+at its identity — such an entry retires rather than being refused as
+unaccounted, and is not carried on — which
 `render-progress-block.zsh` renders as the round line's
-`carried: confirmed N / re-raised M / unconfirmed K of T` (nothing on an
+`carried: confirmed N / re-raised M / unconfirmed K of T`, or
+`carried: confirmed N / re-raised M / unconfirmed K / demoted by risk D of T`
+when `demoted[]` is present (nothing on an
 empty carry; `(no accounting)` on a changelist that predates the stamp).
 The full-round arm is what makes the panels' own "on a full round, report and
 write no findings file" terminal enforceable: zero blockers on `scope_mode: "full"` is

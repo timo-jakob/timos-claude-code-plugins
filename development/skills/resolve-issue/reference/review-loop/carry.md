@@ -82,9 +82,15 @@ the consolidator's own normalisation: file stripped of `./`, dimension
 verbatim, title lower-cased and whitespace-collapsed), counts a carried entry
 as re-raised when the findings file carries a **blocking entry at that
 identity** — same file, dimension and title, whatever its line — or one the
-consolidator matched to the carried prior, stamps `carry_accounting: {total, confirmed[],
-re_raised[], unconfirmed[]}` into the round's changelist (the progress block
-renders it as `carried: confirmed N / re-raised M / unconfirmed K of T`), and
+consolidator matched to the carried prior, retires a carried entry as
+**demoted** when its re-raise sits at that identity but the risk pass demoted
+it below `corner_case_risk_threshold` (a suggestion stamped `demoted: true` —
+the reviewer re-raised it, and the risk pass decided it no longer blocks;
+refusing it instead would loop, since every re-dispatch re-raises it and the
+same assessment demotes it again), stamps `carry_accounting: {total, confirmed[],
+re_raised[], unconfirmed[]}` — plus `demoted[]` when any entry retired that way —
+into the round's changelist (the progress block
+renders it as `carried: confirmed N / re-raised M / unconfirmed K[ / demoted by risk D] of T`), and
 refuses the round as `STALE_FINDINGS` — the **CARRY-UNACCOUNTED** arm, fired
 **before** `verify-<R+1>.json` is written, so `verify-<R>.json` stays the carry
 and the accumulators are untouched — when: no accounting was supplied; the file
