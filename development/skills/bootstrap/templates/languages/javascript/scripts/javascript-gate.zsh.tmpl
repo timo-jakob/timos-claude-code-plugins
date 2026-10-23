@@ -25,6 +25,10 @@
 #  12 contracts semver   only when contracts/ or its checker changed: the version triangle and bump
 #  13 docs               only when the docs sources or its checker changed: scripts/check-docs.zsh
 #                        runs mkdocs build --strict, then the manuals
+#  14 e2e                only with tests/e2e/playwright.config.ts: npm run build, then playwright
+#                        test, the React overlay's browser smoke (#2514)
+#  15 lighthouse         only with lighthouserc.json: lhci autorun against the dist/ stage 14 built,
+#                        with CHROME_PATH set to Playwright's Chromium, so no other Chrome is needed
 #
 # A stage whose input is absent, or whose tool .maintenance.yml does not declare (#2121), prints
 # one `javascript-gate: skip <stage> — <reason>` line. The gate never skips a stage silently.
@@ -35,8 +39,10 @@
 # node_modules/.bin fails its stage naming `npm i -D <package>`. diff-cover, trivy, gitleaks,
 # pre-commit, yq and oasdiff come from `make setup` (.tools/bin), pinned in the Makefile, and a
 # missing one fails the gate naming `make setup`. Spectral is pinned in check-contracts-lint.zsh
-# and the pandoc image in check-docs.zsh, the two checkers every language gate shares. node, npm,
-# python3, docker and jq are the machine's own; a missing one fails its stage naming the tool.
+# and the pandoc image in check-docs.zsh, the two checkers every language gate shares. Playwright's
+# Chromium comes from `make setup` too, and a missing one fails the stage that needs it, never skips
+# it. node, npm, python3, docker and jq are the machine's own; a missing one fails its stage naming
+# the tool.
 #
 # Usage: zsh scripts/javascript-gate.zsh [-h|--help], from the repository root. It gates the
 # current directory and takes no other argument.
@@ -263,6 +269,48 @@ else
 	docs_rc=0
 	checker "docs" check-docs.zsh --out "$scratch" || docs_rc=$?
 	(( docs_rc == 0 )) || fail "docs — scripts/check-docs.zsh exited $docs_rc"
+fi
+
+# chromium <stage>: the Chromium `make setup` installed for Playwright, printed for CHROME_PATH.
+# A missing one fails the stage, locally and in CI alike: §12 allows no other configuration.
+chromium() {
+	local chrome
+	chrome="$(node -e 'process.stdout.write(require("@playwright/test").chromium.executablePath())' 2>/dev/null)"
+	[[ -n "$chrome" && -x "$chrome" ]] || fail "$1 — Chromium is not installed; run make setup"
+	print -r -- "$chrome"
+}
+
+# npm run build once per run: stage 15 serves the dist/ stage 14 built
+built=0
+build() {
+	(( built )) && return 0
+	npm run build || fail "$1 — npm run build"
+	built=1
+}
+
+# --- 14 e2e -------------------------------------------------------------------------
+# webui-quality.yml's `e2e (playwright)` job: the production build's root route in Chromium
+if [[ -f tests/e2e/playwright.config.ts ]]; then
+	stage "e2e"
+	devtool playwright "e2e" @playwright/test
+	chromium "e2e" >/dev/null || exit 1
+	build "e2e"
+	npx --no-install playwright test -c tests/e2e/playwright.config.ts || fail "e2e"
+else
+	skip "e2e" "no tests/e2e/playwright.config.ts"
+fi
+
+# --- 15 lighthouse ------------------------------------------------------------------
+# webui-quality.yml's `lighthouse (budgets)` job: the byte budgets in lighthouserc.json
+if [[ -f lighthouserc.json ]]; then
+	stage "lighthouse"
+	devtool playwright "lighthouse" @playwright/test
+	devtool lhci "lighthouse" @lhci/cli
+	chrome="$(chromium "lighthouse")" || exit 1
+	build "lighthouse"
+	CHROME_PATH="$chrome" npx --no-install lhci autorun || fail "lighthouse"
+else
+	skip "lighthouse" "no lighthouserc.json"
 fi
 
 stage "passed"

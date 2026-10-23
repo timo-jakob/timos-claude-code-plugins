@@ -61,16 +61,29 @@ case "$1" in
   vitest)
     if [ -z "${VITEST_NO_LCOV:-}" ]; then mkdir -p coverage; echo 'TN:' > coverage/lcov.info; fi
     exit "${VITEST_RC:-0}" ;;
+  playwright)
+    [ "${2:-}" = install ] && exit 0
+    exit "${PLAYWRIGHT_RC:-0}" ;;
+  # the browser lhci was handed is logged, so a test can see it is Playwright's
+  lhci)
+    echo "lhci CHROME_PATH=${CHROME_PATH:-}" >> "$CALLS"
+    exit "${LHCI_RC:-0}" ;;
 esac
 exit 0
 EOF
+  # npm run build fails alone under BUILD_RC, so a red build is no red npm ci
   cat > "$STUB/npm" <<'EOF'
 #!/bin/sh
 echo "npm $*" >> "$CALLS"
+[ "$1 ${2:-}" = "run build" ] && exit "${BUILD_RC:-0}"
 exit "${NPM_RC:-0}"
 EOF
+  # asked for Playwright's Chromium, prints $PW_CHROMIUM, as an installed @playwright/test would
   cat > "$STUB/node" <<'EOF'
 #!/bin/sh
+case "$*" in
+  *executablePath*) echo "node chromium" >> "$CALLS"; printf '%s' "${PW_CHROMIUM:-}" ;;
+esac
 exit 0
 EOF
   cat > "$STUB/diff-cover" <<'EOF'
@@ -239,6 +252,27 @@ js_repo() {
   install_modules
 }
 
+# js_repo plus the React overlay's web UI configs, as bootstrap renders them: the real
+# tests/e2e/playwright.config.ts and lighthouserc.json, @playwright/test and @lhci/cli in
+# node_modules/.bin, and the Chromium `make setup` installed, which the node stub reports.
+react_repo() {
+  local b
+  js_repo "${1:-none}"
+  mkdir -p "$R/tests/e2e"
+  cp "$JS_TMPL/react/tests/e2e/playwright.config.ts" "$JS_TMPL/react/tests/e2e/smoke.spec.ts" "$R/tests/e2e/"
+  cp "$JS_TMPL/react/lighthouserc.json" "$R/"
+  commit_all "react overlay"
+  for b in playwright lhci; do
+    printf '#!/bin/sh\nexit 0\n' > "$R/node_modules/.bin/$b"
+    chmod +x "$R/node_modules/.bin/$b"
+  done
+  PW_CHROMIUM="$BATS_TEST_TMPDIR/ms-playwright/chromium-1/chrome"
+  mkdir -p "${PW_CHROMIUM%/*}"
+  printf '#!/bin/sh\nexit 0\n' > "$PW_CHROMIUM"
+  chmod +x "$PW_CHROMIUM"
+  export PW_CHROMIUM
+}
+
 # A contract spec at <dir>/openapi.yaml whose version triangle holds: info.version
 # <version>, servers URL major <major>.
 mkspec() {
@@ -300,7 +334,7 @@ gate_on() {
 # The stage lines (entry, skip and passed) the gate printed, joined by `|`.
 stage_lines() {
   # a checker's own `linting <specs>` line names paths, so it is no stage line
-  grep -E '^javascript-gate: ([a-z -]+$|skip )' <<< "$1" | sed 's/ — .*//' | tr '\n' '|'
+  grep -E '^javascript-gate: ([a-z0-9 -]+$|skip )' <<< "$1" | sed 's/ — .*//' | tr '\n' '|'
 }
 
 # --- rendering and the Makefile -------------------------------------------------
@@ -361,13 +395,13 @@ stage_lines() {
   run grep -nE 'sort -V|v\[0-9\]' "$gate"
   [ "$status" -eq 1 ] || { echo "$output"; false; }
   # the npm-native tools are pinned by package.json and package-lock.json alone
-  run grep -inE '(prettier|eslint|typescript|vitest|coverage-v8)[@=_ -]*v?[0-9]+\.[0-9]' "$make"
+  run grep -inE '(prettier|eslint|typescript|vitest|coverage-v8|playwright|lhci)[@=_ -]*v?[0-9]+\.[0-9]' "$make"
   [ "$status" -eq 1 ] || { echo "$output"; false; }
   # every JavaScript tool in the gate runs through npx --no-install, never bare and never --yes
   run grep -nE '^[^#]*npx( |$)' "$gate"
   [ "$status" -eq 0 ]
   lacks "$(grep -vE 'npx --no-install ' <<< "$output")" 'npx'
-  run grep -nE "^([^#]*[;&|(])?[[:space:]]*(prettier|eslint|tsc|vitest)[[:space:]]" "$gate"
+  run grep -nE "^([^#]*[;&|(])?[[:space:]]*(prettier|eslint|tsc|vitest|playwright|lhci)[[:space:]]" "$gate"
   [ "$status" -eq 1 ] || { echo "$output"; false; }
 }
 
@@ -427,6 +461,7 @@ stage_lines() {
 # --- the gate: stage order and skip notices -------------------------------------
 
 @test "#2513: with every stub green and every path changed, stages 1-13 print in order, then passed" {
+  # a non-React render: stages 14 and 15 (#2514) print their skip notices
   js_repo trivy
   semver_checker
   mkspec contracts/v1 1.0.0 1
@@ -439,7 +474,7 @@ stage_lines() {
   run --separate-stderr gate
   [ "$status" -eq 0 ] || { echo "$output $stderr"; false; }
   [ "$(stage_lines "$output")" = \
-    'javascript-gate: format|javascript-gate: lint|javascript-gate: typecheck|javascript-gate: tests|javascript-gate: coverage floor|javascript-gate: vulnerabilities|javascript-gate: secrets|javascript-gate: no cluster deploy|javascript-gate: license|javascript-gate: pre-commit|javascript-gate: contracts lint|javascript-gate: contracts semver|javascript-gate: docs|javascript-gate: passed|' ] ||
+    'javascript-gate: format|javascript-gate: lint|javascript-gate: typecheck|javascript-gate: tests|javascript-gate: coverage floor|javascript-gate: vulnerabilities|javascript-gate: secrets|javascript-gate: no cluster deploy|javascript-gate: license|javascript-gate: pre-commit|javascript-gate: contracts lint|javascript-gate: contracts semver|javascript-gate: docs|javascript-gate: skip e2e|javascript-gate: skip lighthouse|javascript-gate: passed|' ] ||
     { echo "$output"; false; }
   grep -qx 'npx --no-install prettier --check .' "$CALLS"
   grep -qx 'npx --no-install eslint --max-warnings=0 .' "$CALLS"
@@ -844,4 +879,135 @@ stage_lines() {
   [ "$status" -eq 0 ]
   starts_with "$output" "javascript-gate.zsh — this JavaScript repository's gate MECHANISM (#2513)"
   contains "$output" 'Exit codes: 0 every stage passed'
+}
+
+# --- the gate: the React web UI stages (#2514) ---------------------------------
+# Stage 14 `e2e` runs the commands of webui-quality.yml's `e2e (playwright)` job, and
+# stage 15 `lighthouse` the command of its `lighthouse (budgets)` job, so their
+# verdicts do not move when the gate takes them over.
+
+@test "#2514: a React render with every stub green prints e2e then lighthouse after docs, then passed" {
+  react_repo
+  run --separate-stderr gate
+  [ "$status" -eq 0 ] || { echo "$output $stderr"; false; }
+  ends_with "$(stage_lines "$output")" \
+    '|javascript-gate: skip docs|javascript-gate: e2e|javascript-gate: lighthouse|javascript-gate: passed|'
+  grep -qx 'npx --no-install playwright test -c tests/e2e/playwright.config.ts' "$CALLS"
+  grep -qx 'npx --no-install lhci autorun' "$CALLS"
+  # lhci drives the Chromium make setup installed for Playwright, never another Chrome
+  grep -qx "lhci CHROME_PATH=$PW_CHROMIUM" "$CALLS"
+  # the build comes before the smoke test, and lighthouse reuses its dist/: one build per run
+  [ "$(grep -c '^npm run build$' "$CALLS")" -eq 1 ]
+  [ "$(grep -E '^(npm run build|npx --no-install playwright test)' "$CALLS" | tr '\n' '|')" = \
+    'npm run build|npx --no-install playwright test -c tests/e2e/playwright.config.ts|' ]
+  run ! grep -qE 'WITHOUT' "$CALLS"
+}
+
+@test "#2514: a non-React render prints both skip notices, and Playwright and lhci never run" {
+  js_repo none
+  run --separate-stderr gate
+  [ "$status" -eq 0 ] || { echo "$output $stderr"; false; }
+  contains "$output" $'javascript-gate: skip e2e — no tests/e2e/playwright.config.ts\njavascript-gate: skip lighthouse — no lighthouserc.json\njavascript-gate: passed'
+  run ! grep -qE 'playwright|lhci|^npm run build|^node chromium' "$CALLS"
+}
+
+@test "#2514: with lighthouserc.json alone, lighthouse builds dist/ itself, once" {
+  react_repo
+  git -C "$R" rm -rq tests/e2e
+  commit_all
+  run --separate-stderr gate
+  [ "$status" -eq 0 ] || { echo "$output $stderr"; false; }
+  contains "$output" $'javascript-gate: skip e2e — no tests/e2e/playwright.config.ts\njavascript-gate: lighthouse'
+  [ "$(grep -c '^npm run build$' "$CALLS")" -eq 1 ]
+  grep -qx "lhci CHROME_PATH=$PW_CHROMIUM" "$CALLS"
+}
+
+@test "#2514: a failing smoke spec fails e2e, and lighthouse never starts" {
+  react_repo
+  run --separate-stderr gate_with PLAYWRIGHT_RC=1
+  [ "$status" -eq 1 ]
+  [ "$stderr" = 'javascript-gate: FAIL e2e' ]
+  lacks "$output" 'javascript-gate: lighthouse'
+  run ! grep -q 'lhci' "$CALLS"
+}
+
+@test "#2514: a failing build fails e2e naming npm run build before the smoke test runs" {
+  react_repo
+  run --separate-stderr gate_with BUILD_RC=1
+  [ "$status" -eq 1 ]
+  [ "$stderr" = 'javascript-gate: FAIL e2e — npm run build' ]
+  run ! grep -q 'playwright test' "$CALLS"
+}
+
+@test "#2514: a budget over its limit fails lighthouse" {
+  react_repo
+  run --separate-stderr gate_with LHCI_RC=1
+  [ "$status" -eq 1 ]
+  [ "$stderr" = 'javascript-gate: FAIL lighthouse' ]
+  lacks "$output" 'javascript-gate: passed'
+}
+
+@test "#2514: a missing Chromium fails e2e naming make setup, with CI set and unset, and is never a skip" {
+  react_repo
+  local ci
+  for ci in CI=true CI=; do
+    : > "$CALLS"
+    run --separate-stderr gate_with "$ci" PW_CHROMIUM="$BATS_TEST_TMPDIR/absent/chrome"
+    [ "$status" -eq 1 ] || { echo "$ci: $output"; false; }
+    [ "$stderr" = 'javascript-gate: FAIL e2e — Chromium is not installed; run make setup' ]
+    lacks "$output" 'javascript-gate: skip e2e'
+    run ! grep -qE '^npm run build|playwright test' "$CALLS"
+  done
+  # a node that reports no path at all is the same failure
+  run --separate-stderr gate_with PW_CHROMIUM=
+  [ "$status" -eq 1 ]
+  [ "$stderr" = 'javascript-gate: FAIL e2e — Chromium is not installed; run make setup' ]
+  # lighthouse alone needs the same Chromium, and fails the same way
+  git -C "$R" rm -rq tests/e2e
+  commit_all
+  : > "$CALLS"
+  run --separate-stderr gate_with PW_CHROMIUM="$BATS_TEST_TMPDIR/absent/chrome"
+  [ "$status" -eq 1 ]
+  [ "$stderr" = 'javascript-gate: FAIL lighthouse — Chromium is not installed; run make setup' ]
+  run ! grep -q 'lhci' "$CALLS"
+}
+
+@test "#2514: a missing @lhci/cli or @playwright/test fails its stage naming npm i -D and make setup" {
+  react_repo
+  rm "$R/node_modules/.bin/lhci"
+  run --separate-stderr gate
+  [ "$status" -eq 1 ]
+  [ "$stderr" = 'javascript-gate: FAIL lighthouse — lhci is not installed; add it with npm i -D @lhci/cli, then run make setup' ]
+  rm "$R/node_modules/.bin/playwright"
+  : > "$CALLS"
+  run --separate-stderr gate
+  [ "$status" -eq 1 ]
+  [ "$stderr" = 'javascript-gate: FAIL e2e — playwright is not installed; add it with npm i -D @playwright/test, then run make setup' ]
+  run ! grep -qE '^npm run build|^node chromium' "$CALLS"
+  # lighthouse alone needs @playwright/test too: without it make setup installs no Chromium
+  git -C "$R" rm -rq tests/e2e
+  commit_all
+  run --separate-stderr gate
+  [ "$stderr" = 'javascript-gate: FAIL lighthouse — playwright is not installed; add it with npm i -D @playwright/test, then run make setup' ]
+}
+
+@test "#2514: make setup installs Playwright's Chromium after npm ci only when @playwright/test is installed" {
+  local out="$BATS_TEST_TMPDIR/setup"
+  render_js "$out" >/dev/null
+  git -C "$out" init -q
+  echo '{}' > "$out/package.json"
+  mkdir -p "$out/tests/e2e" "$out/node_modules/.bin"
+  cp "$JS_TMPL/react/tests/e2e/playwright.config.ts" "$out/tests/e2e/"
+  echo '{}' > "$out/lighthouserc.json"
+  printf '#!/bin/sh\n' > "$out/node_modules/.bin/playwright"
+  chmod +x "$out/node_modules/.bin/playwright"
+  run env PATH="$STUB:$PATH" make --no-print-directory -C "$out" setup
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  [ "$(sed -n 1,2p "$CALLS")" = "$(printf 'npm ci\nnpx --no-install playwright install chromium')" ]
+  # both configs present but no @playwright/test: no Chromium install, and setup still finishes
+  rm "$out/node_modules/.bin/playwright"
+  : > "$CALLS"
+  run env PATH="$STUB:$PATH" make --no-print-directory -C "$out" setup
+  [ "$status" -eq 0 ]
+  run ! grep -q 'playwright' "$CALLS"
 }

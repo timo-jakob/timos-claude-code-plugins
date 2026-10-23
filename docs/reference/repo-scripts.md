@@ -210,8 +210,9 @@ root. It takes no arguments except `-h` / `--help`; any other argument exits `2`
 
 **Required tools.** Every JavaScript tool runs as `npx --no-install <tool>`, so the version that
 runs is the one `package-lock.json` installed: Prettier, ESLint, TypeScript, Vitest and
-`@vitest/coverage-v8` are pinned by `package.json` and `package-lock.json` alone, and `make
-setup` installs them with `npm ci`. A tool missing from `node_modules` fails its stage naming
+`@vitest/coverage-v8`, and on a React app `@playwright/test` and `@lhci/cli`, are pinned by
+`package.json` and `package-lock.json` alone, and `make setup` installs them with `npm ci`.
+A tool missing from `node_modules` fails its stage naming
 `npm i -D <package>`. `diff-cover`, `pre-commit`, `trivy`, `gitleaks`, `yq` and `oasdiff` are
 pinned in the Makefile and installed into `.tools/` by `make setup`; a missing one names `make
 setup`. The Makefile's `yq` and `oasdiff` pins equal the ones `no-cluster-deploy.yml` and
@@ -241,10 +242,17 @@ one `javascript-gate: skip <stage> — <reason>` line.
 | 11 | `contracts lint` | [`scripts/check-contracts-lint.zsh`](#scriptscheck-contracts-lintzsh), as for the Go gate | nothing under `contracts/`, no `.spectral.yaml` and not the checker changed |
 | 12 | `contracts semver` | `check-contracts-semver.sh` for `contracts/`, then `contracts/ops`; either failing fails the stage | nothing under `contracts/` and not the checker changed |
 | 13 | `docs` | [`scripts/check-docs.zsh`](#scriptscheck-docszsh), as for the Go gate | no docs source and not the checker changed; no `mkdocs.yml` |
+| 14 | `e2e` | `npm run build`, then `playwright test -c tests/e2e/playwright.config.ts`, the React overlay's browser smoke | no `tests/e2e/playwright.config.ts` |
+| 15 | `lighthouse` | `lhci autorun` against the `dist/` stage 14 built, with `CHROME_PATH` set to Playwright's Chromium; the byte budgets are `lighthouserc.json`'s | no `lighthouserc.json` |
 
 Stages 1 and 4 run the commands today's `quality-<visibility>.yml` JAVASCRIPT block runs, so
 their verdicts do not move. Lint adds `--max-warnings=0`, and typecheck and the coverage floor
-are new strict checks. A missing `origin/<default branch>` fails the gate before its first stage
+are new strict checks. Stages 14 and 15 (#2514) run the commands of the React overlay's
+`webui-quality.yml` jobs, `e2e (playwright)` and `lighthouse (budgets)`, and build `dist/` once
+between them. Both need `@playwright/test` and drive the Chromium `make setup` installs for it,
+so the gate needs no other Chrome. A missing Chromium
+fails the stage, naming `make setup`, and is never a skip, whether `CI` is set or not.
+A missing `origin/<default branch>` fails the gate before its first stage
 and names `git fetch origin`.
 
 ### `scripts/check-contracts-lint.zsh` {#scriptscheck-contracts-lintzsh}
