@@ -1,0 +1,268 @@
+#!/usr/bin/env zsh
+# javascript-gate.zsh — this JavaScript repository's gate MECHANISM (#2513), owned and re-rendered
+# by /development:bootstrap. `make check` runs it; CI's single `gate` job and hooks/pre-push run
+# `make check`, so the gate is one command everywhere (platform contract §12).
+#
+# A preflight runs first when package.json exists: npm is the supported package manager, so a
+# package-lock.json must exist, and node_modules must be at least as new as it. The gate never
+# runs npm ci or npm install; `make setup` does.
+#
+# Stages, cheapest first, and the first failure stops the gate:
+#   1 format             prettier --check . — fails on any diff, never rewrites a file
+#   2 lint               eslint --max-warnings=0 . with the repo's eslint.config.js
+#   3 typecheck          only with tsconfig.json: tsc --build when it declares "references",
+#                        tsc --noEmit otherwise
+#   4 tests              vitest run --coverage, which must leave coverage/lcov.info
+#   5 coverage floor     diff-cover over coverage/lcov.info: 90% of the changed JavaScript lines
+#   6 vulnerabilities    trivy fs (vuln, secret, misconfig) when .maintenance.yml declares trivy
+#   7 secrets            gitleaks over the commits on base..HEAD
+#   8 no cluster deploy  scripts/check-no-cluster-deploy.zsh over .github/workflows/**
+#   9 license            trivy fs --scanners license, whatever tools.vulnerabilities declares
+#  10 pre-commit         every pre-commit hook over every file, but the four stages 1, 2, 6 and 7
+#                        already run
+#  11 contracts lint     only when contracts/, .spectral.yaml or its checker changed:
+#                        scripts/check-contracts-lint.zsh runs Spectral over the newest major
+#  12 contracts semver   only when contracts/ or its checker changed: the version triangle and bump
+#  13 docs               only when the docs sources or its checker changed: scripts/check-docs.zsh
+#                        runs mkdocs build --strict, then the manuals
+#
+# A stage whose input is absent, or whose tool .maintenance.yml does not declare (#2121), prints
+# one `javascript-gate: skip <stage> — <reason>` line. The gate never skips a stage silently.
+#
+# The base ref is origin/{{DEFAULT_BRANCH}} as rendered, never a hard-coded branch. Every
+# JavaScript tool runs as `npx --no-install <tool>`, so the version that runs is the one
+# package-lock.json installed and npx never downloads a copy: a tool missing from
+# node_modules/.bin fails its stage naming `npm i -D <package>`. diff-cover, trivy, gitleaks,
+# pre-commit, yq and oasdiff come from `make setup` (.tools/bin), pinned in the Makefile, and a
+# missing one fails the gate naming `make setup`. Spectral is pinned in check-contracts-lint.zsh
+# and the pandoc image in check-docs.zsh, the two checkers every language gate shares. node, npm,
+# python3, docker and jq are the machine's own; a missing one fails its stage naming the tool.
+#
+# Usage: zsh scripts/javascript-gate.zsh [-h|--help], from the repository root. It gates the
+# current directory and takes no other argument.
+#
+# Exit codes: 0 every stage passed or was skipped with a notice; 1 a stage failed, or a tool it
+# needs is missing; 2 an unknown argument.
+
+emulate -L zsh
+setopt pipefail no_unset
+
+if (( $# )); then
+	case "$1" in
+	-h | --help)
+		awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"
+		exit 0
+		;;
+	*)
+		print -u2 -r -- "javascript-gate: unknown argument: $1"
+		exit 2
+		;;
+	esac
+fi
+
+base="origin/{{DEFAULT_BRANCH}}"
+path=("$PWD/.tools/bin" $path)
+
+stage() { print -r -- "javascript-gate: $1" }
+skip() { print -r -- "javascript-gate: skip $1 — $2" }
+fail() { print -u2 -r -- "javascript-gate: FAIL $1"; exit 1 }
+need() { command -v "$1" >/dev/null 2>&1 || fail "$2 — $1 is not installed; run make setup" }
+# a tool the machine provides, which make setup does not install
+require() { command -v "$1" >/dev/null 2>&1 || fail "$2 — $1 is not installed" }
+# devtool <bin> <stage> <package>: a devDependency npx --no-install runs from node_modules/.bin
+devtool() {
+	[[ -x "node_modules/.bin/$1" ]] ||
+		fail "$2 — $1 is not installed; add it with npm i -D $3, then run make setup"
+}
+# true when a path under one of the given pathspecs changed against the base
+changed() { [[ -n "$(git diff --name-only "$base...HEAD" -- "$@")" ]] }
+
+# tools.<category> from .maintenance.yml's block mapping; empty when absent
+declared() {
+	[[ -f .maintenance.yml ]] || return 0
+	awk -v k="$1:" '/^tools:/ { t = 1; next } t && /^[^[:space:]#]/ { t = 0 }
+		t && $1 == k { print $2; exit }' .maintenance.yml
+}
+
+# checker <stage> <script> [arg…]: run a shared checker (#2640) as this gate. Its exit 1 has
+# already printed the FAIL line, so the gate exits 1 with no line of its own; any other status
+# is returned for the stage to map.
+checker() {
+	local stage_name="$1" script="scripts/$2"
+	shift 2
+	[[ -f "$script" ]] || fail "$stage_name — $script is missing; re-run /development:bootstrap"
+	local rc=0
+	zsh "$script" --caller javascript-gate "$@" || rc=$?
+	(( rc == 1 )) && exit 1
+	return $rc
+}
+
+# scratch for the manuals, removed however the gate ends
+scratch="$(mktemp -d)" || fail "mktemp"
+trap 'rm -rf "$scratch"' EXIT
+
+git rev-parse -q --verify "$base^{commit}" >/dev/null 2>&1 && git merge-base "$base" HEAD >/dev/null 2>&1 ||
+	fail "base branch — $base is not a commit here, or HEAD shares no history with it; run git fetch origin"
+
+# a repository with no package.json yet gives stages 1-5 nothing to check; everything else
+# still runs
+if [[ ! -f package.json ]]; then
+	for s in format lint typecheck tests "coverage floor"; do skip "$s" "no package.json yet"; done
+else
+	# --- preflight ----------------------------------------------------------------------
+	require node "format"
+	require npm "format"
+	if [[ ! -f package-lock.json ]]; then
+		other=""
+		for f in yarn.lock pnpm-lock.yaml; do [[ -f "$f" ]] && other="$f"; done
+		[[ -z "$other" ]] || fail "format — no package-lock.json, but a $other; npm is the supported package manager"
+		fail "format — no package-lock.json; npm is the supported package manager"
+	fi
+	[[ -f node_modules/.package-lock.json && ! package-lock.json -nt node_modules/.package-lock.json ]] ||
+		fail "format — node_modules is missing or older than package-lock.json; run make setup"
+
+	# --- 1 format -----------------------------------------------------------------------
+	stage "format"
+	devtool prettier "format" prettier
+	npx --no-install prettier --check . || fail "format — run make fmt"
+
+	# --- 2 lint -------------------------------------------------------------------------
+	stage "lint"
+	devtool eslint "lint" eslint
+	npx --no-install eslint --max-warnings=0 . || fail "lint"
+
+	# --- 3 typecheck --------------------------------------------------------------------
+	if [[ -f tsconfig.json ]]; then
+		stage "typecheck"
+		devtool tsc "typecheck" typescript
+		# a solution-style config (create-vite's) checks its referenced projects with --build
+		if grep -q '"references"[[:space:]]*:' tsconfig.json; then
+			npx --no-install tsc --build || fail "typecheck"
+		else
+			npx --no-install tsc --noEmit || fail "typecheck"
+		fi
+	else
+		skip "typecheck" "no tsconfig.json"
+	fi
+
+	# --- 4 tests ------------------------------------------------------------------------
+	stage "tests"
+	devtool vitest "tests" vitest
+	# checked here, or vitest would prompt to install the coverage provider
+	[[ -d node_modules/@vitest/coverage-v8 ]] ||
+		fail "tests — @vitest/coverage-v8 is not installed; add it with npm i -D @vitest/coverage-v8, then run make setup"
+	# a report left by an earlier run must not stand in for one this run did not write
+	rm -f coverage/lcov.info
+	npx --no-install vitest run --coverage || fail "tests"
+	[[ -f coverage/lcov.info ]] ||
+		fail 'tests — no coverage/lcov.info; add "lcov" to vitest.config.ts coverage.reporter'
+
+	# --- 5 coverage floor ---------------------------------------------------------------
+	if [[ -z "$(git diff --name-only --diff-filter=d "$base...HEAD" -- \
+		'*.js' '*.jsx' '*.ts' '*.tsx' '*.mjs' '*.cjs')" ]]; then
+		skip "coverage floor" "no JavaScript file changed against $base"
+	else
+		stage "coverage floor"
+		need diff-cover "coverage floor"
+		diff-cover coverage/lcov.info --compare-branch="$base" --fail-under=90 ||
+			fail "coverage floor — changed JavaScript lines are below 90% covered against $base"
+	fi
+fi
+
+# --- 6 vulnerabilities --------------------------------------------------------------
+vulns="$(declared vulnerabilities)"
+case "$vulns" in
+trivy)
+	stage "vulnerabilities"
+	need trivy "vulnerabilities"
+	trivy fs --config trivy.yaml --scanners vuln,secret,misconfig . || fail "vulnerabilities — trivy fs"
+	;;
+none) skip "vulnerabilities" "tools.vulnerabilities is none" ;;
+snyk) skip "vulnerabilities" "tools.vulnerabilities is snyk, which runs outside the gate" ;;
+*) skip "vulnerabilities" ".maintenance.yml declares no tools.vulnerabilities: trivy" ;;
+esac
+
+# --- 7 secrets ----------------------------------------------------------------------
+# every commit this branch adds, whatever tools.vulnerabilities declares
+stage "secrets"
+need gitleaks "secrets"
+gitleaks git --no-banner --redact --log-opts="$base..HEAD" . ||
+	fail "secrets — gitleaks found a secret in a commit on $base..HEAD"
+
+# --- 8 no cluster deploy ------------------------------------------------------------
+# unconditional: the scan is static and cheap, and an application repo never deploys to a cluster
+stage "no cluster deploy"
+[[ -f scripts/check-no-cluster-deploy.zsh ]] ||
+	fail "no cluster deploy — scripts/check-no-cluster-deploy.zsh is missing; re-run /development:bootstrap"
+require jq "no cluster deploy"
+need yq "no cluster deploy"
+zsh scripts/check-no-cluster-deploy.zsh || fail "no cluster deploy — see the checker's message above"
+
+# --- 9 license ----------------------------------------------------------------------
+# whatever tools.vulnerabilities declares: a dependency's license is not a vulnerability
+stage "license"
+need trivy "license"
+trivy fs --config trivy.yaml --scanners license . || fail "license — trivy fs --scanners license"
+
+# --- 10 pre-commit ------------------------------------------------------------------
+# the gitleaks, trivy-fs, eslint and prettier hooks are skipped: stages 1, 2, 6, 7 and 9 already
+# run those checks, and the prettier hook's --write would rewrite files
+if [[ -f .pre-commit-config.yaml ]]; then
+	stage "pre-commit"
+	need pre-commit "pre-commit"
+	SKIP=gitleaks,trivy-fs,eslint,prettier pre-commit run --all-files || fail "pre-commit"
+else
+	skip "pre-commit" "no .pre-commit-config.yaml"
+fi
+
+# --- 11 contracts lint --------------------------------------------------------------
+if changed contracts .spectral.yaml scripts/check-contracts-lint.zsh; then
+	stage "contracts lint"
+	lint_rc=0
+	checker "contracts lint" check-contracts-lint.zsh || lint_rc=$?
+	case $lint_rc in
+	0) ;;
+	3) skip "contracts lint" "no contracts/vN/openapi.yaml" ;;
+	*) fail "contracts lint — scripts/check-contracts-lint.zsh exited $lint_rc" ;;
+	esac
+else
+	skip "contracts lint" "no change under contracts/, to .spectral.yaml or to its checker against $base"
+fi
+
+# --- 12 contracts semver ------------------------------------------------------------
+# Both families run, and both findings files are written even when one fails: a run whose HEAD
+# has no contracts/ops/ still checks the base, which is what rejects retiring a live ops major.
+if changed contracts .github/scripts/check-contracts-semver.sh; then
+	stage "contracts semver"
+	[[ -f .github/scripts/check-contracts-semver.sh ]] ||
+		fail "contracts semver — .github/scripts/check-contracts-semver.sh is missing; re-run /development:bootstrap"
+	require jq "contracts semver"
+	need oasdiff "contracts semver"
+	# a findings file left by an earlier run must not stand in for one this run did not write
+	rm -f contracts-semver-findings.json contracts-ops-semver-findings.json
+	semver_rc=0
+	bash .github/scripts/check-contracts-semver.sh --base-ref "$base" \
+		--output contracts-semver-findings.json || semver_rc=1
+	bash .github/scripts/check-contracts-semver.sh --base-ref "$base" --contracts-dir contracts/ops \
+		--output contracts-ops-semver-findings.json || semver_rc=1
+	(( semver_rc == 0 )) ||
+		fail "contracts semver — see the checker's messages above, and the findings files it wrote"
+else
+	skip "contracts semver" "no change under contracts/ or to its checker against $base"
+fi
+
+# --- 13 docs ------------------------------------------------------------------------
+docs_paths=(docs mkdocs.yml requirements-docs.txt scripts/docs-nav-to-chapters.zsh scripts/pandoc
+	scripts/check-docs.zsh)
+if ! changed "${docs_paths[@]}"; then
+	skip "docs" "no change to the docs sources or to its checker against $base"
+elif [[ ! -f mkdocs.yml ]]; then
+	skip "docs" "no mkdocs.yml"
+else
+	stage "docs"
+	docs_rc=0
+	checker "docs" check-docs.zsh --out "$scratch" || docs_rc=$?
+	(( docs_rc == 0 )) || fail "docs — scripts/check-docs.zsh exited $docs_rc"
+fi
+
+stage "passed"

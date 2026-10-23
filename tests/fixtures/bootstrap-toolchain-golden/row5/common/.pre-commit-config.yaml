@@ -20,6 +20,10 @@ repos:
         # construction, not validation. (#777)
         exclude: ^mkdocs\.yml$
       - id: check-json
+        # TypeScript configs are JSONC (create-vite writes comments into
+        # tsconfig.app.json / tsconfig.node.json), which check-json's strict
+        # parser rejects; tsc itself validates them. (#2914)
+        exclude: ^(.*/)?tsconfig(\..+)?\.json$
       - id: check-added-large-files
         args: ["--maxkb=1024"]
       - id: check-merge-conflict

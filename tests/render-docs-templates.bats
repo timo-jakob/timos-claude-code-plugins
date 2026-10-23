@@ -295,6 +295,14 @@ assert_no_orphan_pages() {
   grep -A6 "ignore: |" "$TEMPLATES/common/.yamllint" | grep -qE "^[[:space:]]+mkdocs\.yml"
 }
 
+@test "shipped pre-commit config exempts JSONC TypeScript configs from check-json (#2914)" {
+  # create-vite's tsconfig.app.json / tsconfig.node.json carry comments, which
+  # check-json's strict parser rejects — the JavaScript gate's stage 10 would
+  # go red on a valid repo without this exclude.
+  grep -A5 "id: check-json" "$TEMPLATES/common/.pre-commit-config.yaml.tmpl" \
+    | grep -qF 'exclude: ^(.*/)?tsconfig(\..+)?\.json$'
+}
+
 @test "shipped configs enforce the zero-warnings policy Renovate-compatibly (#781)" {
   # yamllint runs --strict (warnings fail the hook) and the comments rule
   # accepts Renovate's one-space `sha # vN` pin style as VALID — a two-space

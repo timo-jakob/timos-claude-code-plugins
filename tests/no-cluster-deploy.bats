@@ -1489,26 +1489,30 @@ jobs:
   contains "$output" 'workflow file(s) scanned'
 }
 
-@test "YQ_VERSION is identical across all FOUR lockstep sites (#1206)" {
-  # MAINTAINING.md declares a four-site lockstep and gives the reason: a partial
+@test "YQ_VERSION is identical across all FIVE lockstep sites (#1206, #2513)" {
+  # MAINTAINING.md declares a five-site lockstep and gives the reason: a partial
   # bump makes the suite validate the shipped checker under a different yq than
   # consumers run. Pinning only the two templates against each other misses it.
-  local a b c d
+  local a b c d e
   a="$(yq -r '[.jobs[].steps[]? | select(.env.YQ_VERSION) | .env.YQ_VERSION] | unique | .[]' "$TMPL")"
   b="$(yq -r '[.jobs[].steps[]? | select(.env.YQ_VERSION) | .env.YQ_VERSION] | unique | .[]' \
     "$REPO_ROOT/development/skills/bootstrap/templates/iac/.github/workflows/kubernetes-ci.yml.tmpl")"
   c="$(grep -oE '^ARG YQ_VERSION=(.+)$' "$REPO_ROOT/tests/Dockerfile" | sed 's/^ARG YQ_VERSION=//')"
   d="$(grep -oE 'YQ_VERSION: *[0-9.]+' "$REPO_ROOT/.github/workflows/script-tests.yml" \
     | sed -E 's/YQ_VERSION: *//' | sort -u)"
+  e="$(sed -n 's/^YQ_VERSION := //p' \
+    "$REPO_ROOT/development/skills/bootstrap/templates/languages/javascript/Makefile.tmpl")"
   # each read must have produced something — an unmatched grep would otherwise
   # make the set trivially unanimous
   [ -n "$a" ]
   [ -n "$b" ]
   [ -n "$c" ]
   [ -n "$d" ]
+  [ -n "$e" ]
   [ "$a" = "$b" ]
   [ "$a" = "$c" ]
   [ "$a" = "$d" ]
+  [ "$a" = "$e" ]
 }
 
 
@@ -2619,6 +2623,8 @@ restatement_sites() {
       # wiring and index sites, which carry no restatement of the rules
       development/skills/bootstrap/scripts/*) continue ;;
       development/skills/bootstrap/templates/languages/go/scripts/go-gate.zsh.tmpl) continue ;;
+      development/skills/bootstrap/templates/languages/javascript/scripts/javascript-gate.zsh.tmpl) continue ;;
+      development/skills/bootstrap/templates/languages/javascript/Makefile.tmpl) continue ;;
       development/skills/bootstrap/templates/common/scripts/*) continue ;;  # authoritative
       docs/how-to/index.md|docs/reference/repo-scripts.md|MAINTAINING.md|ARCHITECTURE.md) continue ;;
     esac
@@ -3075,6 +3081,8 @@ guarded_creator_gaps() {
       # wiring and index sites, which carry no restatement of the rules
       development/skills/bootstrap/scripts/*|docs/how-to/index.md|MAINTAINING.md|ARCHITECTURE.md) continue ;;
       development/skills/bootstrap/templates/languages/go/scripts/go-gate.zsh.tmpl) continue ;;
+      development/skills/bootstrap/templates/languages/javascript/scripts/javascript-gate.zsh.tmpl) continue ;;
+      development/skills/bootstrap/templates/languages/javascript/Makefile.tmpl) continue ;;
       docs/reference/repo-scripts.md) continue ;;
       development/skills/bootstrap/templates/common/scripts/*) continue ;;  # the authoritative header
     esac

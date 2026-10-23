@@ -16,7 +16,7 @@ Among others, these helper scripts live in
 ## Scripts bootstrap emits into a target repository
 
 The scripts above are this repository's own. `/development:bootstrap` also writes scripts
-**into the repositories it bootstraps**. This section documents the three gate scripts.
+**into the repositories it bootstraps**. This section documents the four gate scripts.
 
 ### `scripts/k8s-gate.zsh`
 
@@ -195,6 +195,57 @@ prints one `go-gate: skip <stage> — <reason>` line.
 Every comparison against the base branch needs its history, so CI checks out the full
 history (`fetch-depth: 0`). Locally, a missing `origin/<default branch>` fails the gate
 before its first stage and names `git fetch origin`.
+
+### `scripts/javascript-gate.zsh`
+
+The JavaScript and TypeScript gate (#2513), on the model of
+`scripts/go-gate.zsh`. Its source is the bootstrap template
+`templates/languages/javascript/scripts/javascript-gate.zsh.tmpl`, and the template
+`templates/languages/javascript/Makefile.tmpl` gives it a `check` target that runs it. Bootstrap
+does not emit either for a JavaScript primary yet: the wiring, `javascript-ci.yml` and the hooks
+come with #2515.
+
+**Invocation.** Run `make check`, or `zsh scripts/javascript-gate.zsh` from the repository
+root. It takes no arguments except `-h` / `--help`; any other argument exits `2`.
+
+**Required tools.** Every JavaScript tool runs as `npx --no-install <tool>`, so the version that
+runs is the one `package-lock.json` installed: Prettier, ESLint, TypeScript, Vitest and
+`@vitest/coverage-v8` are pinned by `package.json` and `package-lock.json` alone, and `make
+setup` installs them with `npm ci`. A tool missing from `node_modules` fails its stage naming
+`npm i -D <package>`. `diff-cover`, `pre-commit`, `trivy`, `gitleaks`, `yq` and `oasdiff` are
+pinned in the Makefile and installed into `.tools/` by `make setup`; a missing one names `make
+setup`. The Makefile's `yq` and `oasdiff` pins equal the ones `no-cluster-deploy.yml` and
+`contracts-semver.yml` install. `node`, `npm`, `python3`, `docker` and `jq` are the machine's
+own, and a missing one names the tool.
+
+**Preflight.** Before stage 1, when `package.json` exists, the gate fails unless a
+`package-lock.json` exists, since npm is the supported package manager (a `yarn.lock` or
+`pnpm-lock.yaml` is named), and unless `node_modules/.package-lock.json` is at least as new as it,
+naming `make setup`. The gate never runs `npm ci` or `npm install`.
+
+**Stages**, in order. The script stops at the first stage that fails. A stage it skips prints
+one `javascript-gate: skip <stage> — <reason>` line.
+
+| # | Stage | What runs | Skipped when |
+| --- | --- | --- | --- |
+| 1 | `format` | `prettier --check .`; any diff fails, naming `make fmt` | no `package.json` yet |
+| 2 | `lint` | `eslint --max-warnings=0 .`; a single warning fails | no `package.json` yet |
+| 3 | `typecheck` | `tsc --build` when `tsconfig.json` declares `"references"`, `tsc --noEmit` otherwise | no `tsconfig.json`; no `package.json` yet |
+| 4 | `tests` | `vitest run --coverage`, which must leave `coverage/lcov.info` | no `package.json` yet |
+| 5 | `coverage floor` | `diff-cover coverage/lcov.info --fail-under=90` against `origin/<default branch>` | no `*.js`, `*.jsx`, `*.ts`, `*.tsx`, `*.mjs` or `*.cjs` file changed (deletions aside); no `package.json` yet |
+| 6 | `vulnerabilities` | `trivy fs --scanners vuln,secret,misconfig` | `tools.vulnerabilities` is not `trivy`: Snyk runs outside the gate |
+| 7 | `secrets` | `gitleaks git` over `origin/<default branch>..HEAD` | never |
+| 8 | `no cluster deploy` | `scripts/check-no-cluster-deploy.zsh` | never |
+| 9 | `license` | `trivy fs --scanners license`, under every `tools.vulnerabilities` value | never |
+| 10 | `pre-commit` | `SKIP=gitleaks,trivy-fs,eslint,prettier pre-commit run --all-files` | no `.pre-commit-config.yaml` |
+| 11 | `contracts lint` | [`scripts/check-contracts-lint.zsh`](#scriptscheck-contracts-lintzsh), as for the Go gate | nothing under `contracts/`, no `.spectral.yaml` and not the checker changed |
+| 12 | `contracts semver` | `check-contracts-semver.sh` for `contracts/`, then `contracts/ops`; either failing fails the stage | nothing under `contracts/` and not the checker changed |
+| 13 | `docs` | [`scripts/check-docs.zsh`](#scriptscheck-docszsh), as for the Go gate | no docs source and not the checker changed; no `mkdocs.yml` |
+
+Stages 1 and 4 run the commands today's `quality-<visibility>.yml` JAVASCRIPT block runs, so
+their verdicts do not move. Lint adds `--max-warnings=0`, and typecheck and the coverage floor
+are new strict checks. A missing `origin/<default branch>` fails the gate before its first stage
+and names `git fetch origin`.
 
 ### `scripts/check-contracts-lint.zsh` {#scriptscheck-contracts-lintzsh}
 

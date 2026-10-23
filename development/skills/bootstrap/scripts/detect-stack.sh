@@ -1414,6 +1414,10 @@ collect_from() {
 		# and offers it in State D as that block's adoption gap (#2887) — never a
 		# fixed 1:1 artifact rendered at the repo root.
 		[[ "$rel" == identity/* ]] && continue
+		# The JavaScript Makefile and gate ship unwired until #2515 wires them.
+		if [[ "$dir" == */languages/javascript ]]; then
+			[[ "$rel" == Makefile || "$rel" == scripts/javascript-gate.zsh ]] && continue
+		fi
 		candidate_paths+=("$rel")
 	done < <(find "$dir" -type f 2>/dev/null)
 }

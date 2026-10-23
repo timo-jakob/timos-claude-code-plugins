@@ -202,7 +202,7 @@ grep -rhn -E "(python|node|go|java)-version:" development/skills/bootstrap/templ
 # one `gate` job installs every tool its gate script runs by release URL, #1604 —
 # these are NOT `uses:` pins, so Renovate never sees them and Step 2 never covers
 # them). tests/iac-tools.zsh reads its fixture-harness pins from those same lines.
-# The Go Makefile's `_VERSION :=` pins and the shared gate checkers' Spectral pin
+# The Go and JavaScript Makefiles' `_VERSION :=` pins and the shared gate checkers' Spectral pin
 # (check-contracts-lint.zsh) and pandoc pin (check-docs.zsh, #2640) are the same
 # class; its GITLEAKS_VERSION mirrors the gitleaks hook `rev:` (Step 3).
 grep -rhn -E "^\s*[A-Z_]+_VERSION\s*:=?\s+|^(spectral_cli|pandoc_image)=" development/skills/bootstrap/templates/ | sort -u
@@ -210,9 +210,10 @@ grep -rhn -E "^\s*[A-Z_]+_VERSION\s*:=?\s+|^(spectral_cli|pandoc_image)=" develo
 # …and the two sites that MIRROR the templates' yq pin. Both exist so the bats
 # suite exercises the same mikefarah yq the shipped workflows use (their own
 # comments say so), and neither lives under templates/, so the sweep above
-# cannot see them. YQ_VERSION is a FOUR-site lockstep — kubernetes-ci.yml.tmpl,
-# no-cluster-deploy.yml.tmpl (#1206) and these two. Bump all four together or
-# the suite stops testing what ships.
+# cannot see them. YQ_VERSION is a FIVE-site lockstep — kubernetes-ci.yml.tmpl,
+# no-cluster-deploy.yml.tmpl (#1206), the JavaScript gate's
+# templates/languages/javascript/Makefile.tmpl (#2513) and these two. Bump all
+# five together or the suite stops testing what ships.
 grep -rn -E "YQ_VERSION[:=]" tests/Dockerfile .github/workflows/script-tests.yml
 
 # …and a GUARD, not a to-do list: the IaC docs must name NO version literal.
@@ -256,11 +257,14 @@ the pin by hand, move all three.
 The remaining steps below (pre-commit revs, Docker tags, runtime strings, brew
 formulas, and the `*_VERSION:` CLI pins a template downloads by release URL)
 Renovate doesn't see, so those stay manual. The `*_VERSION:` class is worth a deliberate look each pass:
-`YQ_VERSION` is a **four-site lockstep** — `kubernetes-ci.yml.tmpl`,
-`no-cluster-deploy.yml.tmpl` (#1206), `tests/Dockerfile` and
-`.github/workflows/script-tests.yml` — because the bats suite asserts both
-templates' `yq -o=json` behaviour; move all four or the suite validates the
-shipped workflows under a different yq than they ship with.
+`YQ_VERSION` is a **five-site lockstep** — `kubernetes-ci.yml.tmpl`,
+`no-cluster-deploy.yml.tmpl` (#1206), `tests/Dockerfile`,
+`.github/workflows/script-tests.yml` and the JavaScript gate's
+`templates/languages/javascript/Makefile.tmpl` (#2513) — because the bats suite
+asserts both templates' `yq -o=json` behaviour, and the JavaScript gate must run
+the yq the `no-cluster-deploy` check runs in CI; move all five or the suite
+validates the shipped workflows under a different yq than they ship with. Its
+`OASDIFF_VERSION` likewise equals `contracts-semver.yml.tmpl`'s pin.
 
 The IaC toolchain has **no pin outside that sweep** (#1604): `kubernetes-ci.yml.tmpl`'s
 one `gate` job installs all seven tools its gate script runs — helm and kustomize
