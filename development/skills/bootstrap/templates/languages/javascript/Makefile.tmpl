@@ -1,16 +1,18 @@
 # This repository's gate and developer targets, bootstrapped by /development:bootstrap (#2513).
 #
 #   make check   the gate COMMAND — CI and hooks/pre-push run exactly this
-#   make setup   once per clone: wire hooks/, npm ci, then install the pinned gate tools into .tools/
+#   make setup   once per clone: wire hooks/, npm ci, Playwright's Chromium when @playwright/test is
+#                installed, then install the pinned gate tools into .tools/
 #   make hooks   point git at the version-controlled hooks/ directory
 #
 #   make fmt | lint | typecheck | test   developer conveniences, one tool each
 #
 # `check` runs the gate MECHANISM, scripts/javascript-gate.zsh, through zsh rather than by its executable
 # bit, so a checkout that lost the mode still gates. Each gate tool is pinned in exactly one place. The
-# npm-native ones (Prettier, ESLint and its plugins, TypeScript, Vitest, @vitest/coverage-v8) are pinned by
-# package.json's devDependencies and resolved exactly by package-lock.json, which `npm ci` installs; node is
-# pinned by .nvmrc and is the machine's own. Every other gate tool is pinned below and nowhere else in the
+# npm-native ones (Prettier, ESLint and its plugins, TypeScript, Vitest, @vitest/coverage-v8, and on a React
+# app @playwright/test and @lhci/cli) are pinned by package.json's devDependencies and resolved exactly by
+# package-lock.json, which `npm ci` installs; the Chromium the e2e and lighthouse stages drive is the one that
+# installed @playwright/test downloads. node is pinned by .nvmrc and is the machine's own. Every other gate tool is pinned below and nowhere else in the
 # gate: diff-cover, pre-commit, trivy, gitleaks, yq and oasdiff, installed whatever .maintenance.yml declares,
 # since the gate's license and secrets stages run under every declaration. YQ_VERSION equals
 # no-cluster-deploy.yml's pin and OASDIFF_VERSION contracts-semver.yml's, so the gate and CI run the same
@@ -36,6 +38,7 @@ hooks:
 
 setup: hooks
 	@if [ -f package.json ]; then npm ci; fi
+	@if [ -x node_modules/.bin/playwright ]; then npx --no-install playwright install chromium; fi
 	@mkdir -p "$(TOOLS)/bin"
 	@if ! "$(TOOLS)/venv/bin/pip" show diff-cover 2>/dev/null | grep -qx "Version: $(DIFF_COVER_VERSION)"; then \
 		echo "make setup: installing diff-cover $(DIFF_COVER_VERSION)"; \
