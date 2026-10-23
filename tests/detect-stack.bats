@@ -1540,6 +1540,15 @@ _fake_tree() {  # $1.. = ops major dirs; "vN" -> openapi.yaml, "vN:tmpl" -> open
   [ "$(jq -r '[.missing_artifacts[] | select(startswith("mfe-conformance/"))] | length' <<<"$out")" -eq 0 ]
 }
 
+@test "detect-stack #2513: a javascript repo is never missing the unwired Makefile or gate" {
+  printf '{ "name": "x", "version": "0.1.0" }\n' > package.json
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -r '.languages | index("javascript")' <<<"$out")" != "null" ]
+  # #2515 wires the javascript Makefile and gate; until then they are no gap
+  [ "$(jq -r '.missing_artifacts | index("Makefile")' <<<"$out")" = "null" ]
+  [ "$(jq -r '.missing_artifacts | index("scripts/javascript-gate.zsh")' <<<"$out")" = "null" ]
+}
+
 @test "detect-stack #2887: a go repo is never missing the identity payload" {
   printf 'module example.com/svc\n\ngo 1.25\n' > go.mod
   printf 'package main\n\nfunc main() {}\n' > main.go

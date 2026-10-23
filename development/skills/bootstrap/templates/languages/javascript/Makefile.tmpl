@@ -1,0 +1,98 @@
+# This repository's gate and developer targets, bootstrapped by /development:bootstrap (#2513).
+#
+#   make check   the gate COMMAND — CI and hooks/pre-push run exactly this
+#   make setup   once per clone: wire hooks/, npm ci, then install the pinned gate tools into .tools/
+#   make hooks   point git at the version-controlled hooks/ directory
+#
+#   make fmt | lint | typecheck | test   developer conveniences, one tool each
+#
+# `check` runs the gate MECHANISM, scripts/javascript-gate.zsh, through zsh rather than by its executable
+# bit, so a checkout that lost the mode still gates. Each gate tool is pinned in exactly one place. The
+# npm-native ones (Prettier, ESLint and its plugins, TypeScript, Vitest, @vitest/coverage-v8) are pinned by
+# package.json's devDependencies and resolved exactly by package-lock.json, which `npm ci` installs; node is
+# pinned by .nvmrc and is the machine's own. Every other gate tool is pinned below and nowhere else in the
+# gate: diff-cover, pre-commit, trivy, gitleaks, yq and oasdiff, installed whatever .maintenance.yml declares,
+# since the gate's license and secrets stages run under every declaration. YQ_VERSION equals
+# no-cluster-deploy.yml's pin and OASDIFF_VERSION contracts-semver.yml's, so the gate and CI run the same
+# tools; bump each together with its workflow. The hook `rev:` and `additional_dependencies` pins in
+# .pre-commit-config.yaml belong to the hooks.
+DIFF_COVER_VERSION := 10.2.0
+PRE_COMMIT_VERSION := 4.3.0
+TRIVY_VERSION := v0.72.0
+GITLEAKS_VERSION := v8.30.1
+YQ_VERSION := 4.44.3
+OASDIFF_VERSION := 1.11.7
+
+TOOLS := $(CURDIR)/.tools
+export PATH := $(TOOLS)/bin:$(PATH)
+
+.PHONY: check hooks setup fmt lint typecheck test
+
+check:
+	zsh scripts/javascript-gate.zsh
+
+hooks:
+	git config core.hooksPath hooks
+
+setup: hooks
+	@if [ -f package.json ]; then npm ci; fi
+	@mkdir -p "$(TOOLS)/bin"
+	@if ! "$(TOOLS)/venv/bin/pip" show diff-cover 2>/dev/null | grep -qx "Version: $(DIFF_COVER_VERSION)"; then \
+		echo "make setup: installing diff-cover $(DIFF_COVER_VERSION)"; \
+		python3 -m venv "$(TOOLS)/venv" && \
+		"$(TOOLS)/venv/bin/pip" install --quiet "diff-cover==$(DIFF_COVER_VERSION)" && \
+		ln -sf "$(TOOLS)/venv/bin/diff-cover" "$(TOOLS)/bin/diff-cover"; \
+	fi
+	@if ! "$(TOOLS)/venv/bin/pip" show pre-commit 2>/dev/null | grep -qx "Version: $(PRE_COMMIT_VERSION)"; then \
+		echo "make setup: installing pre-commit $(PRE_COMMIT_VERSION)"; \
+		python3 -m venv "$(TOOLS)/venv" && \
+		"$(TOOLS)/venv/bin/pip" install --quiet "pre-commit==$(PRE_COMMIT_VERSION)" && \
+		ln -sf "$(TOOLS)/venv/bin/pre-commit" "$(TOOLS)/bin/pre-commit"; \
+	fi
+	@if ! trivy --version 2>/dev/null | grep -qx "Version: $(TRIVY_VERSION:v%=%)"; then \
+		echo "make setup: installing trivy $(TRIVY_VERSION)"; \
+		curl -sSfL -o "$(TOOLS)/install-trivy.sh" \
+			"https://raw.githubusercontent.com/aquasecurity/trivy/$(TRIVY_VERSION)/contrib/install.sh" && \
+			sh "$(TOOLS)/install-trivy.sh" -b "$(TOOLS)/bin" "$(TRIVY_VERSION)" || exit 1; \
+	fi
+	@if ! gitleaks version 2>/dev/null | grep -qxE "v?$(GITLEAKS_VERSION:v%=%)"; then \
+		echo "make setup: installing gitleaks $(GITLEAKS_VERSION)"; \
+		os="$$(uname -s | tr '[:upper:]' '[:lower:]')"; \
+		case "$$(uname -m)" in x86_64 | amd64) arch=x64 ;; *) arch=arm64 ;; esac; \
+		url="https://github.com/gitleaks/gitleaks/releases/download/$(GITLEAKS_VERSION)"; \
+		curl -sSfL -o "$(TOOLS)/gitleaks.tar.gz" "$$url/gitleaks_$(GITLEAKS_VERSION:v%=%)_$${os}_$${arch}.tar.gz" && \
+			tar -xzf "$(TOOLS)/gitleaks.tar.gz" -C "$(TOOLS)/bin" gitleaks || exit 1; \
+	fi
+	@if ! yq --version 2>/dev/null | grep -q "version v$(YQ_VERSION)$$"; then \
+		echo "make setup: installing yq $(YQ_VERSION)"; \
+		os="$$(uname -s | tr '[:upper:]' '[:lower:]')"; \
+		case "$$(uname -m)" in x86_64 | amd64) arch=amd64 ;; *) arch=arm64 ;; esac; \
+		curl -sSfL -o "$(TOOLS)/bin/yq" \
+			"https://github.com/mikefarah/yq/releases/download/v$(YQ_VERSION)/yq_$${os}_$${arch}" && \
+			chmod +x "$(TOOLS)/bin/yq" || exit 1; \
+	fi
+	@if ! oasdiff --version 2>/dev/null | grep -q "version $(OASDIFF_VERSION)$$"; then \
+		echo "make setup: installing oasdiff $(OASDIFF_VERSION)"; \
+		os="$$(uname -s | tr '[:upper:]' '[:lower:]')"; \
+		case "$$os:$$(uname -m)" in darwin:*) arch=all ;; *:x86_64 | *:amd64) arch=amd64 ;; *) arch=arm64 ;; esac; \
+		url="https://github.com/oasdiff/oasdiff/releases/download/v$(OASDIFF_VERSION)"; \
+		curl -sSfL -o "$(TOOLS)/oasdiff.tar.gz" "$$url/oasdiff_$(OASDIFF_VERSION)_$${os}_$${arch}.tar.gz" && \
+			tar -xzf "$(TOOLS)/oasdiff.tar.gz" -C "$(TOOLS)/bin" oasdiff || exit 1; \
+	fi
+
+fmt:
+	npx --no-install prettier --write .
+	npx --no-install eslint --fix .
+
+lint:
+	npx --no-install eslint --max-warnings=0 .
+
+typecheck:
+	@if grep -q '"references"[[:space:]]*:' tsconfig.json; then \
+		npx --no-install tsc --build; \
+	else \
+		npx --no-install tsc --noEmit; \
+	fi
+
+test:
+	npx --no-install vitest run --coverage

@@ -9,6 +9,10 @@ coverage/
 .nyc_output/
 .env
 .env.local
+# the gate's contract semver findings, which CI uploads for the Approver (#2614)
+contracts-semver-findings.json
+contracts-ops-semver-findings.json
+.tools/
 
 # Review-loop telemetry (git-ignored; #566)
 .claude/telemetry/
