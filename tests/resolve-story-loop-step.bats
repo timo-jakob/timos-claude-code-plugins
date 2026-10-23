@@ -3776,6 +3776,41 @@ carry_record() {  # carry_record <confirmed[]> <re_raised[]> <unconfirmed[]>
   [ ! -e "$WD/verify-3.json" ]
 }
 
+# a work-dir one AWAITING_FIX round deep whose one blocker is a WARNING — the
+# only severity the risk pass may demote — at the identity carry_record names
+seed_awaiting_warning() {
+  printf '%s' '[{"severity":"WARNING","dimension":"bugs","file":"app.py","line":1,"title":"T","description":"d","reviewer":"r"}]' > "$F"
+  step
+  [ "$status" -eq 20 ]
+}
+
+@test "a re-raise the risk pass demoted is evidence: the carried WARNING retires as demoted, not CARRY-UNACCOUNTED" {
+  seed_awaiting_warning
+  export corner_case_risk_threshold=0.05
+  printf '%s' '[{"severity":"WARNING","dimension":"bugs","file":"app.py","line":1,"title":"T","description":"still there","reviewer":"x"}]' > "$F"
+  printf '%s' '[{"file":"app.py","line":1,"dimension":"bugs","title":"T","p":0.01,"p_why":"needs out-of-order events","impact":0.4,"impact_why":"a stale label"}]' > "$BATS_TEST_TMPDIR/risk-2.json"
+  step --resume --status-file "$BATS_TEST_TMPDIR/st.json" --risk "$BATS_TEST_TMPDIR/risk-2.json" \
+    --carry-accounting "$(carry_record '[]' '["x"]' '[]')"
+  [ "$status" -eq 20 ]
+  lacks "$output" 'carry unaccounted'
+  [ "$(jq -c '.round_changelists[1].carry_accounting' "$BATS_TEST_TMPDIR/st.json")" = \
+    '{"total":1,"confirmed":[],"re_raised":[],"unconfirmed":[],"demoted":[{"file":"app.py","dimension":"bugs","title":"T"}]}' ]
+  # retired: nothing blocks, so nothing is carried into round 3
+  [ "$(jq 'length' "$WD/verify-3.json")" -eq 0 ]
+  grep -q -- 'carried: confirmed 0 / re-raised 0 / unconfirmed 0 / demoted by risk 1 of 1' "$WD/progress.md"
+}
+
+@test "a risk-demoted finding at ANOTHER identity is not evidence for the carried entry: still refused" {
+  seed_awaiting_warning
+  export corner_case_risk_threshold=0.05
+  printf '%s' '[{"severity":"WARNING","dimension":"bugs","file":"app.py","line":1,"title":"another defect","description":"d","reviewer":"x"}]' > "$F"
+  printf '%s' '[{"file":"app.py","line":1,"dimension":"bugs","title":"another defect","p":0.01,"p_why":"rare","impact":0.4,"impact_why":"minor"}]' > "$BATS_TEST_TMPDIR/risk-2.json"
+  step --resume --risk "$BATS_TEST_TMPDIR/risk-2.json" --carry-accounting "$(carry_record '[]' '["x"]' '[]')"
+  [ "$status" -eq 2 ]
+  contains "$output" 'carries no blocking entry at that identity'
+  [ ! -e "$WD/verify-3.json" ]
+}
+
 @test "#1583 a confirmation outranks an unevidenced re-raise: the owner confirms X and claims a re-raise nobody filed -> accepted, X retired as confirmed" {
   # The ordered ladder is confirmed > re_raised > unevidenced > unconfirmed.
   # Every other fixture keeps confirmed[] and re_raised[] disjoint, so the

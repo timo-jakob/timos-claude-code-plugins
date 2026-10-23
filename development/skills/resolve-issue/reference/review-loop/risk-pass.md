@@ -153,6 +153,10 @@ resolve-story-loop.zsh … --resume --findings-file <…> \
 - The round's progress block names it. An extension round's line names the
   extension bar and the effective threshold instead of
   `corner_case_risk_threshold`, and the dossier marks such a row the same way.
+- A demoted re-raise of a **carried** blocker retires that carried entry
+  rather than leaving it unaccounted: the carry accounting counts it as
+  `demoted`, the round line shows `demoted by risk D`, and it is not carried
+  into the next round (*Carry accounting*).
 - The PR dossier lists it in its own table, above the waived suggestions.
 - The suggestion-promotion prompt offers it back like any other waived
   suggestion — under `reference/promotion/gate.md`'s own derivation, which keeps a finding's

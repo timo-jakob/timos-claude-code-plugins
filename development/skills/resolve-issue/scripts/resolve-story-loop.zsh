@@ -1630,6 +1630,13 @@ _pft_auto_continue() {   # $1 = round, $2 = this round's changelist
 # is a cross-round MATCHING heuristic, and a fix pass that inserts more than
 # that above the defect would otherwise turn an honest re-raise at the shifted
 # line into an "unevidenced" refusal whose remedy is already satisfied.
+# A re-raise the risk pass demoted (#1921) — a suggestion at the carried
+# identity stamped `demoted: true` — is evidence too, and RETIRES the entry as
+# `demoted`: the reviewer did re-raise it, the risk pass judged it below the
+# floor, and the carry is written from `.blocking`, so it is not carried on.
+# Refusing it instead could never clear: every re-dispatch re-raises the same
+# finding and the same assessment demotes it again. A reviewer's OWN
+# SUGGESTION-level re-raise carries no `demoted` stamp and is still refused.
 #
 # Ordering is the safety property: this runs AFTER consolidation (it needs the
 # matched priors) and BEFORE the changelists append and the `verify-<R+1>.json`
@@ -1651,6 +1658,9 @@ _pft_auto_continue() {   # $1 = round, $2 = this round's changelist
 #     ever reaches `.blocking`.
 # On an accepted round the changelist is stamped with
 #   carry_accounting: {total, confirmed:[id…], re_raised:[id…], unconfirmed:[id…]}
+# plus `demoted:[id…]` only when the risk pass retired a carried entry (absent
+# means none, as the consolidator's `summary.risk_demoted` is absent when no
+# demotion ran)
 # (each id `{file, dimension, title}` as the carry spelled it; `total: 0` with
 # three empty arrays on an empty-carry round, round 1 included) so
 # render-progress-block.zsh reads the triple from the changelist it already
@@ -1734,6 +1744,8 @@ _carry_account() {   # $1 = round; reads $fix_verification, $changelist, $findin
            | (.file | normfile) as $f | ((.dimension // "") | tostring) as $d
            | [$f, $d, (.title | normtitle)],
              (if .non_converging == true then [$f, $d, (.matched_prior.title | normtitle)] else empty end) ]) as $rr_ids
+      | ([ ($c.suggestions // [])[] | select(.demoted == true)
+           | [(.file | normfile), ((.dimension // "") | tostring), (.title | normtitle)] ]) as $demoted_ids
       | ([ $carry[] | ident ]) as $carry_ids
       | ([ $a[] | (ident) as $i | select(any($carry_ids[]; . == $i) | not) | {file, dimension, title} ]) as $unmatched
       | ([ $carry[] | . as $e | (ident) as $i
@@ -1745,6 +1757,7 @@ _carry_account() {   # $1 = round; reads $fix_verification, $changelist, $findin
            | { id: {file: $e.file, dimension: ($e.dimension // ""), title: $e.title},
                outcome: (if ($conf | length) > 0 then "confirmed"
                          elif $in_findings then "re_raised"
+                         elif any($demoted_ids[]; . == $i) then "demoted"
                          elif ($rr | length) > 0 then "unevidenced"
                          else "unconfirmed" end),
                reporters: $unc, claimants: $rr } ]) as $rows
@@ -1752,6 +1765,7 @@ _carry_account() {   # $1 = round; reads $fix_verification, $changelist, $findin
           confirmed: [ $rows[] | select(.outcome == "confirmed") | .id ],
           re_raised: [ $rows[] | select(.outcome == "re_raised") | .id ],
           unconfirmed: [ $rows[] | select(.outcome == "unconfirmed") | .id ],
+          demoted: [ $rows[] | select(.outcome == "demoted") | .id ],
           detail: [ $rows[] | select(.outcome == "unconfirmed") | {id, reporters} ],
           unevidenced: [ $rows[] | select(.outcome == "unevidenced") | {id, claimants} ],
           unmatched: $unmatched }' -n) || {
@@ -1792,7 +1806,8 @@ _carry_account() {   # $1 = round; reads $fix_verification, $changelist, $findin
       print -u2 -- "resolve-story-loop: could not read the carry accounting at round $r"; exit 1 }
     [[ -z "$detail" ]] || \
       refuse_stale_findings "carry unaccounted: round $r $detail — a carried entry retires only on a confirmation or an evidence-bearing re-raise: a re-raise must be in the findings file at its original severity under the carried entry's own file, dimension and title (the accounting alone is not evidence), and an entry nobody confirmed or re-raised needs the panel re-dispatched for it. Fix the accounting; for a re-raise, re-dispatch the panel for that entry so the finding reaches the findings file of this round under the carried file, dimension and title — never edit the findings file by hand — then re-invoke; verify-$(( r + 1 )).json was NOT written and verify-$r.json remains the carry."
-    stamp=$(print -r -- "$acct" | jq -c '{total, confirmed, re_raised, unconfirmed}') || {
+    stamp=$(print -r -- "$acct" | jq -c '{total, confirmed, re_raised, unconfirmed}
+      + (if (.demoted | length) > 0 then {demoted} else {} end)') || {
       print -u2 -- "resolve-story-loop: could not build the carry_accounting stamp at round $r"; exit 1 }
   fi
   # -c, because the changelist is appended VERBATIM to changelists.jsonl as one

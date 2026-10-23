@@ -5,7 +5,8 @@
 # stamps resolve-story-loop.zsh adds after consolidation) in, markdown on
 # stdout. Since #1583 the blockers line also carries the carry accounting the
 # loop stamps as `carry_accounting` — `carried: confirmed N / re-raised M /
-# unconfirmed K of T` on a non-empty carry, nothing on an empty one, and
+# unconfirmed K of T` on a non-empty carry — with ` / demoted by risk D` before
+# ` of T` when the stamp carries a `demoted` array — nothing on an empty one, and
 # `carried: (no accounting)` on a changelist that predates the stamp.
 #
 # Per #969 every round's block carries judgment-grade counts: the severity
@@ -209,7 +210,9 @@ jq -r --arg ts "$(date +%H:%M:%S)" --argjson r "$round" --arg v "$verdict" \
      # single-quoted.
      + (if has("carry_accounting") then
           (if (.carry_accounting.total // 0) > 0 then
-             ", carried: confirmed \(.carry_accounting.confirmed | length) / re-raised \(.carry_accounting.re_raised | length) / unconfirmed \(.carry_accounting.unconfirmed | length) of \(.carry_accounting.total)"
+             ", carried: confirmed \(.carry_accounting.confirmed | length) / re-raised \(.carry_accounting.re_raised | length) / unconfirmed \(.carry_accounting.unconfirmed | length)"
+             + (if (.carry_accounting.demoted // [] | length) > 0 then " / demoted by risk \(.carry_accounting.demoted | length)" else "" end)
+             + " of \(.carry_accounting.total)"
            else "" end)
         else ", carried: (no accounting)" end)),
     (if $fixed != null then
