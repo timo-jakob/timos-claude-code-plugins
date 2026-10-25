@@ -8569,7 +8569,12 @@ confident enough.
   the five scores, in integer thousandths. It never takes an overall figure
   from the refiner. The script marks an answer `auto` when its confidence is
   at or above the threshold. A plain-string, unrecommended, unscored or
-  malformed entry is always `ask`.
+  malformed entry is always `ask`. Each entry also carries a `kind`, the
+  taxonomy of *Decision rights — question taxonomy and the Decisions-taken
+  record* (#2899): an `implementation` question is `auto` at any threshold,
+  with a confidence reported but never compared and computed without
+  `uniqueness`, and is recorded under **Decisions taken** rather than asked
+  (#2900). A missing or unknown `kind` is `gap`.
 - **Scope:** questions only. The human's approval of the exact rewrite before
   the Step 3 write-back is unchanged, and so is the rule that the write-back
   is human-authored. So are the Step 0, Step 1 and Step 5 prompts. Every
@@ -8679,8 +8684,9 @@ one question and leaves the document change that answers it for good.
 ### The Decisions-taken record
 
 When Claude decides a question instead of asking it, it writes one entry per
-decision to a **Decisions taken** list. Nothing Claude decides in place of a
-question — an auto-accepted answer included — is left out of it. Each entry carries four fields:
+decision to a **Decisions taken** list. It records `implementation` answers only:
+an `intent` or `gap` answer auto-accepted under the human-set threshold stays in
+refine-issue's **Answers taken automatically** list. Each entry carries four fields:
 
 | Field | Holds |
 |---|---|

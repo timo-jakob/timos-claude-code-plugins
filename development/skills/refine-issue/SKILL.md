@@ -297,7 +297,9 @@ has a fixed unattended answer:**
 Step 2.5 has no prompt: on `accept` it runs as written, before Step 3. **An exit
 2** from `follow-up-auto-refine.zsh` or `follow-up-origin.zsh` is your own
 malformed input: fix it and re-run once. A second exit 2 stops the mode for
-that follow-up: report it and write nothing, so the label stays.
+that follow-up: report it and write nothing, so the label stays. An exit 2 from
+`split-refiner-questions.zsh` is the refiner's malformed turn: re-spawn the
+refiner for that round once; a second one stops the mode the same way.
 
 1. **Eligibility.** Write `gh issue view <N> --json comments` to a file and read
    the source with `follow-up-auto-refine.zsh origin --comments <file>`; exit 1
@@ -318,8 +320,8 @@ that follow-up: report it and write nothing, so the label stays.
    - `continue` — call the refiner again with the `auto` answers as
      `human_reply`, as Step 2 does when every question is `auto`;
    - `accept` — size the draft (*Step 2 — size the draft before approval*); a
-     draft that stops is parked `deferred`, never split. Otherwise write it back
-     as Steps 2.5 and 3 do, with `provenance.generated_by` set to
+     draft that stops is parked `deferred`, never split. Otherwise add the
+     **Decisions taken** section (Step 2) and write it back as Steps 2.5 and 3 do, with `provenance.generated_by` set to
      `issue-refiner via /development:refine-issue --follow-up (unattended)`. Then Step 4 and
      Step 5: `READY` removes `needs-refinement`; anything else keeps it and
      posts the gate's questions, Step 5's deferred route;
@@ -431,8 +433,9 @@ gh issue view <N> --json number,title,body,state,labels,url,comments
   When a state is present, seed the Step 2 loop with it: its `conversation`
   becomes the refiner's initial `conversation`, and its `open_questions` (plus
   the park `type` and any `decision`/`owner`/`candidate_children`) are context
-  the human is resuming from. Tell the human what the prior run parked on before
-  continuing the loop.
+  the human is resuming from. Write its `decisions`, when present, to a file as
+  `{"auto": <decisions>}`: that file counts as one of this issue's round split files for the Decisions taken section.
+  Tell the human what the prior run parked on before continuing the loop.
 
 ## Step 1 — diagnose (fresh objections)
 
@@ -538,17 +541,27 @@ returned JSON to a file and run:
   --threshold-milli <milli> --turn <turn.json>
 ```
 
-It prints `{threshold, auto, ask}`. The script decides and you do not second-guess
-it. Its confidence is the lowest of the refiner's five criterion scores, and an
-answer is `auto` only when that is at or above the threshold. An exit 2 means
-the turn is not a JSON object with a `questions` array: re-spawn the refiner for
-this round once, and if it fails again, relay the questions to the human as
-they are.
+It prints `{threshold, auto, ask}`, each entry with its `kind` — `intent`, `gap`
+or `implementation`, ARCHITECTURE.md's *Decision rights — question taxonomy and
+the Decisions-taken record* (#2899). The script decides and you do not
+second-guess it. For an `intent` or `gap` question its confidence is the lowest
+of the refiner's five criterion scores, and the answer is `auto` only when that
+is at or above the threshold. An `implementation` question is `auto` at any
+threshold (#2900). An exit 2 means the turn is not a JSON object with a
+`questions` array, or — the one exception to "malformed is asked, never an
+error" — an `implementation` entry has no `recommended_answer` or `rationale`,
+named on stderr. Either way, re-spawn the refiner for this round once, and if it
+fails again, relay the questions to the human as they are. The unattended
+follow-up mode applies its own exit-2 rule instead.
 
-- **`auto`** — answer each one with its `answer`. Add it to the round's human
-  reply as `[auto-accepted @<confidence>] <question> → <answer>`, and tell the
-  human in one line per answer what you took and its weakest criterion. Keep a
-  running list of these answers for the approval step below.
+- **`auto`** — answer each one with its `answer`. For an `intent` or `gap`
+  answer, add it to the round's human reply as
+  `[auto-accepted @<confidence>] <question> → <answer>`, and tell the human in
+  one line per answer what you took and its weakest criterion. Keep a running
+  list of these answers for the approval step below. For an `implementation`
+  answer, add it as `[decided] <question> → <answer>` instead. It is absent from
+  **Answers taken automatically**: it is recorded in the **Decisions taken**
+  section below. Keep this issue's split file of every round for that section.
 - **`ask`** — relay these as before. Show the `recommended_answer` and
   `confidence` next to each one when present, so the human can simply agree.
 
@@ -562,15 +575,25 @@ included) to `conversation` and call the agent again with that reply as
 decision (that is its whole purpose). Then **size the draft** (*Step 2 — size
 the draft before approval*, below), and only a draft that does not stop is
 presented: the **final `proposed_prose` + `proposed_story_spec`**, for the
-human's **explicit approval of the exact rewrite**. Nothing is written until they approve. If they
+human's **explicit approval of the exact rewrite**.
+
+**Add the Decisions taken section before the approval.** Run
+`"<skill-base-dir>/scripts/render-decisions-taken.zsh" --split <split.json>` on
+each of this issue's round split files and add what it prints to `proposed_prose`, leaving out a decision from this
+run's split files that the human overturned before approving (an overturned answer is a human reply, not a decision
+Claude took), so the section sits inside the prose sentinels Step 3 writes, is part of the rewrite the human approves,
+and is covered by `prose_sha256`. The section is append-only: when the current issue body or `proposed_prose` already
+holds a `## Decisions taken` section, put the new entries at its end, under the one heading, and never remove an entry
+an earlier run wrote to the issue body. The follow-up mode's `accept` does the same before Step 3. An exit
+2 is your own malformed call: fix it and re-run once. Nothing is written until they approve. If they
 want changes, feed their reply back for another round.
 
 **Auto-accept never approves the rewrite.** The threshold only answers the
 refiner's questions. The approval of the exact rewrite is always the human's,
 whatever the threshold. The one exception is the unattended follow-up mode
 below, where its `accept` decision stands in for that approval. Present it with a heading **Answers taken
-automatically**, listing each auto-accepted question, the answer, its
-confidence and its weakest criterion. The human can overturn any of them
+automatically**, listing each auto-accepted `intent` or `gap` question, the
+answer, its confidence and its weakest criterion. The human can overturn any of them
 before approving. An overturned answer is a normal human reply: feed it back for
 another round.
 
@@ -724,9 +747,14 @@ route** instead (keep the label, post Step 6's trail, emit `parked` /
 
 Build the parked comment with the script (never hand-roll the marker) and post
 it as the human, exactly like every other refine-issue side effect. The state
-object carries the type, the still-**`open_questions`**, the `conversation`, and
-the type-specific fields. `open_questions` holds **strings**: take each refiner
-question's `question` text, never the scored object. Set Step 7's run variables as you go —
+object carries the type, the still-**`open_questions`**, the `conversation`, the
+type-specific fields, and `decisions`: every `implementation` entry of the
+`auto` arrays of this issue's round split files, the file Step 0 wrote from a
+prior park's `decisions` included, leaving out a decision that the human
+overturned (an overturned answer is a human reply, not a decision Claude took),
+so a resumed run can still record them. `open_questions` holds **strings**:
+take each refiner question's `question` text, never the scored object. Set
+Step 7's run variables as you go —
 `STATE_OUTCOME="parked"` and `PARK_TYPE` to the type you chose:
 
 ```bash
@@ -996,8 +1024,9 @@ Post one durable comment recording **what changed and why**, so the issue is a
 self-contained record: the objections you started from, a short before/after of
 the prose (or a note that the full diff is in the edit history), the re-gate
 verdict, and the resulting label state. When Step 2 auto-accepted any answers,
-the comment also lists them under **Answers taken automatically**, each with its
-confidence and the threshold. A later reader can then tell which parts of the
+the comment also lists its `intent` and `gap` answers under **Answers taken
+automatically**, each with its confidence and the threshold; its
+`implementation` answers are in the body's **Decisions taken** section. A later reader can then tell which parts of the
 story the human stated and which parts the refiner stated for them. This is the
 audit trail a later reader — or `resolve-issue` — relies on.
 
@@ -1198,7 +1227,8 @@ fi
   `scripts/split-refiner-questions.zsh` makes that decision. It never approves
   the rewrite, and it never answers the Step 0, Step 1 or Step 5 prompts; the
   unattended follow-up mode, the only exception, answers them as it lists.
-  Every auto-taken answer is shown at approval and recorded in Step 6's trail.
+  Every auto-taken answer is shown at approval and recorded in Step 6's trail,
+  or, for an `implementation` answer, in the body's **Decisions taken** section.
 - **The label tells the truth.** Remove `needs-refinement` **only** on a `READY`
   re-gate; otherwise it stays.
 - **One canonical hash.** Compute `prose_sha256` with

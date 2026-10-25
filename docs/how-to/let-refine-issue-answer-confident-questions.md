@@ -65,6 +65,20 @@ itself; the refiner does not state an overall figure. A question about product
 intent or priority scores at most `0.5` on uniqueness, so it is asked at any
 threshold above `0.5`.
 
+## Implementation questions are decided, not asked
+
+The refiner also marks each question with a kind: **intent** (what to build,
+scope, priority, risk you accept), **gap** (the architecture positions,
+requirements or personas are silent or contradict each other) or
+**implementation** (the positions and established practice already decide it).
+The threshold applies to intent and gap questions. An implementation question
+is never put to you, whatever the threshold: the skill takes the refiner's
+recommended answer and records it in a **Decisions taken** section of the
+rewrite, with the evidence it rests on and how to overrule it. You see that
+section in the rewrite you approve, and it stays in the issue body. To overrule
+a decision, edit its entry and the story text that rests on it in the issue
+body.
+
 ## What you see
 
 - **During the loop:** each answer taken for you is shown as one line with its
@@ -75,6 +89,7 @@ threshold above `0.5`.
   back to the refiner as your answer, and the loop runs again.
 - **On the issue:** the before/after comment lists the answers that were taken
   automatically, so a later reader can tell which parts of the story you stated.
+  Implementation answers are in the body's **Decisions taken** section instead.
 
 ## What it does not do
 
