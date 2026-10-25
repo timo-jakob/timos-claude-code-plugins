@@ -151,11 +151,11 @@ subsection() {
   [ "$(grep -c '^| ' <<< "$r")" -eq 5 ]
 }
 
-@test "the record is complete: nothing decided in place of a question is left out" {
+@test "the record holds implementation answers; auto-accepted intent and gap answers stay in their own list" {
   local r
   r="$(subsection 'The Decisions-taken record' | collapse)"
   contains "$r" 'When Claude decides a question instead of asking it, it writes one entry per decision to a **Decisions taken** list.'
-  contains "$r" 'Nothing Claude decides in place of a question — an auto-accepted answer included — is left out of it.'
+  contains "$r" 'It records `implementation` answers only: an `intent` or `gap` answer auto-accepted under the human-set threshold stays in refine-issue'"'"'s **Answers taken automatically** list.'
 }
 
 @test "the record lives in a fixed section of the issue body or the PR body" {

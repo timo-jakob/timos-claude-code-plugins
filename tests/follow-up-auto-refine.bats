@@ -333,8 +333,19 @@ _turn()  { printf '%s\n' "{\"questions\":$1,\"resolved_objections\":$2${3-$DRAFT
   contains "$output" 'story-spec `prose_sha256` `abc123`'
   contains "$output" '- Finding: `scripts/a.zsh`:3 (bugs, round 2): unquoted path'
   contains "$output" "- Threshold: 0.9; accept score: 0.91"
-  contains "$output" "| Which shell? → zsh | 0.95 |"
+  contains "$output" "| Which shell? → zsh | gap | 0.95 |"
   contains "$output" "Outcome: accepted: the draft was written back and re-gated."
+}
+
+@test "#2900 note lists each answer's kind, and an implementation answer's confidence scores nothing" {
+  zsh "$F" seed --comments "$D/fu.json" --source "$D/source.json" > "$D/seed.json"
+  printf '%s\n' '[{"question":"Which helper?","kind":"implementation","answer":"jq","confidence":"0.40"},{"question":"Exit code?","kind":"intent","answer":"2","confidence":"0.91"}]' > "$D/answers.json"
+  run -0 zsh "$F" note --seed "$D/seed.json" --answers "$D/answers.json" --threshold-milli 900 --decision accept
+  contains "$output" "| Which helper? → jq | implementation | 0.40 |"
+  contains "$output" "- Threshold: 0.9; accept score: 0.91"
+  contains "$output" "| Exit code? → 2 | intent | 0.91 |"
+  run -0 zsh "$F" note --seed "$D/seed.json" --answers "$D/answers.json" --threshold-milli 900 --decision accept --format json
+  printf '%s' "$output" | jq -e '.confidences == [0.91] and .accept_score == 0.91' >/dev/null
 }
 
 @test "note lists a split child's seam criteria verbatim" {

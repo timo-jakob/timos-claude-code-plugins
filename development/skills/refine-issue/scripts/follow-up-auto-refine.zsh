@@ -70,8 +70,8 @@
 #       json object show it as the number M/1000. D is
 #       accept | ready | park-needs-decision | park-deferred; `ready` is Step 1's
 #       already-READY shortcut, after zero rounds, when nothing is written back.
-#       The accept score is the minimum confidence over the answers, null when
-#       there were none.
+#       The accept score is the minimum confidence over the answers that are
+#       not `implementation` (never compared), null when there were none.
 #
 # Exit codes: 0 success · 1 no record (origin) or refused (eligible) ·
 #             2 invalid input or usage error
@@ -318,12 +318,13 @@ case "$mode" in
     jq -e '.origin.kind | IN("split-child", "parked-finding")' -- "$seed" >/dev/null 2>&1 \
       || _die "note: --seed is not a seed (follow-up-auto-refine.zsh seed output)"
     jq -e 'type == "array" and all(.[]; type == "object" and (.question | type == "string")
-             and (.answer | type == "string") and ((.confidence | tonumber?) != null))' \
+             and (.answer | type == "string")
+             and (.confidence == null or ((.confidence | tonumber?) != null)))' \
       -- "$answers" >/dev/null 2>&1 \
       || _die "note: --answers must be an array of {question, answer, confidence} (split-refiner-questions.zsh auto entries)"
     local summary
     summary="$(jq -cn --slurpfile sd "$seed" --slurpfile a "$answers" --argjson thr "$(( 10#$thr ))" --arg d "$decision" '
-      ($sd[0]) as $s | ($a[0] | map(.confidence | tonumber)) as $c
+      ($sd[0]) as $s | ($a[0] | map(select((.kind // "gap") != "implementation" and .confidence != null) | .confidence | tonumber)) as $c
       | {seed_kind: $s.origin.kind, source_issue: $s.source.number, threshold: ($thr / 1000),
          confidences: $c, accept_score: (if ($c | length) == 0 then null else ($c | min) end),
          decision: $d}')" || _die "note: could not build the summary"
@@ -349,8 +350,8 @@ case "$mode" in
         "- Threshold: \($sum.threshold); accept score: \($sum.accept_score // "none (no question was answered automatically)")",
         "",
         (if ($a[0] | length) == 0 then "No answer was taken automatically."
-         else "| Answer taken automatically | Confidence |", "|---|---|",
-              ($a[0][] | "| \(.question | esc) → \(.answer | esc) | \(.confidence) |") end),
+         else "| Answer taken automatically | Kind | Confidence |", "|---|---|---|",
+              ($a[0][] | "| \(.question | esc) → \(.answer | esc) | \(.kind // "gap") | \(.confidence // "–") |") end),
         "",
         "```json",
         ($sum | tojson),

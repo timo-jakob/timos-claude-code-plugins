@@ -477,6 +477,7 @@ Emit exactly one fenced `json` block and no other prose. Shape:
   ],
   "questions": [
     { "question": "What is the p95 latency target, and measured against which endpoint and payload?",
+      "kind": "intent",
       "recommended_answer": "p95 < 200 ms for POST /jobs at 50 req/s, the load profile tests/load/jobs.js already drives.",
       "criteria": { "repo_consistency": 0.9, "best_practice": 0.8, "evidence": 0.7,
                     "uniqueness": 0.4, "reversibility": 0.9 },
@@ -531,10 +532,22 @@ Rules for the payload:
   `objection` field **must echo the corresponding input `objections[]` string
   verbatim** — the skill correlates by exact string match, so do not paraphrase,
   shorten, or re-punctuate it.
-- **`questions`** — only the genuinely-open gaps this turn. Never re-ask what the
-  reply or the repo already answered. `[]` is **necessary but not sufficient**
+- **`questions`** — only this turn's genuinely-open questions, plus every
+  `implementation` choice your draft makes, emitted once, on the turn the draft
+  first makes it, with a `recommended_answer` and a `rationale` so it is decided
+  and recorded. Never re-emit a choice a `[decided]` line already answers, and
+  never re-ask an `intent` or `gap` question the reply or the repo already
+  answered. `[]` is **necessary but not sufficient**
   for convergence (see `resolved_objections`). Each entry is an object:
   - `question` — the question, worded for the human;
+  - `kind` — `intent`, `gap` or `implementation`, as ARCHITECTURE.md's
+    *Decision rights — question taxonomy and the Decisions-taken record*
+    defines them, tie-break included. An `implementation` question is never
+    put to the human: the conductor takes your `recommended_answer` at any
+    threshold and records it under **Decisions taken**, so it must carry a
+    non-blank `recommended_answer` and `rationale`. An `implementation` entry
+    without them breaks this contract and the conductor re-asks you for the
+    turn. A missing or unknown `kind` is read as `gap`;
   - `recommended_answer` — the answer you would give, worded so it can stand as
     the human's reply; `null` when you have none worth recommending;
   - `criteria` — your score for that answer on each of five criteria, each a
@@ -564,18 +577,26 @@ Rules for the payload:
   - When you are unsure between two scores, give the lower one.
 
   An over-scored answer is written into the issue as though the human had said
-  it. An under-scored one only costs the human a question.
+  it. An under-scored one only costs the human a question. For an
+  `implementation` question the scores are reported, never compared, and
+  `uniqueness` is left out: such a choice almost always has several defensible
+  answers, which is no reason to ask.
 
   **A human turn that begins `[auto-accepted @<confidence>]`** is your own
   recommendation, which the conductor took on the human's behalf. Treat it as the
   human's answer, but never as a waiver: an objection that needs the human's own
   words (the UI/UX and consistency waivers above) is not waived by one.
+
+  **A human turn line that begins `[decided]`** is an `implementation` answer
+  the conductor took and recorded under **Decisions taken**. It, too, is an
+  answer, never a waiver.
 - **`recommendations`** — concrete, adoptable advice (a suggested wording, a
   bounded scope), not vague direction.
 - **`proposed_prose`** — the rewritten issue body as **prose only**. Omit the
   story-spec `<details>` block; the skill renders that from
   `proposed_story_spec`. Emit `null` on an early turn when you don't yet have
-  enough to draft a rewrite.
+  enough to draft a rewrite. Keep an existing `## Decisions taken` section
+  verbatim; the skill adds new entries.
 - **`proposed_story_spec`** — a `story-spec/v1` object per the ARCHITECTURE.md
   *Story-spec contract* (`schema`, `acceptance_criteria`, `scope_boundaries`,
   `risk_classification`, `testable_checks`, `interface_surfaces`, `use_case`,
