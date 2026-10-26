@@ -70,16 +70,23 @@ rather than the recorded verdict is what promotes — is
 nothing here restates it.
 
 **The gate and the panel run concurrently.** Both only *read* the working tree,
-so a round boundary mints one tree identity, starts the full suite in the
+so a round boundary mints one tree identity, starts the test gate in the
 background and dispatches the panel against that same tree, instead of making
-the panel queue behind the suite. Nothing about the gate changes — the whole
-suite still runs on every round that applied a fix, and consolidation still
-waits for it to come back green — so what is saved is the shorter of the two,
+the panel queue behind the suite. Nothing about the gate changes — it still
+runs on every round that applied a fix, and consolidation still waits for it
+to come back green — so what is saved is the shorter of the two,
 per round; §3.5 carries the measured figure. The one cost is that a **red** gate
 discards that round's panel findings, because they describe a tree the fix is
 about to supersede; the round restarts from a fresh mint.
 `/development:resolve-issue` §3.5's round protocol states the ordering and the
 red-gate arm, and nothing here restates them.
+
+**The whole suite runs once per story.** On a plugin repo, every round before
+the closing full sweep runs only the tests the story's changes can affect, and
+falls back to the whole suite whenever that set cannot be trusted. The closing
+sweep and the required CI job run all of it, and no round converges until the
+whole suite is green on its tree, so a test the selection missed costs a round,
+never a merged PR.
 
 **The wait between the two is a turn boundary, not a poll.** Having started the
 gate and dispatched the panel, the driver ends its turn: every reviewer's result
@@ -355,8 +362,8 @@ change is otherwise ready.
 So when an **interactive** run converges with at least one waived suggestion,
 you are shown them — title, `file:line`, dimension — and can **multi-select any
 subset** (including none). What you pick is promoted to blocking and resolved
-through a second pass of the very same loop: review → fix → re-test, the full
-suite every round. Nothing about the bar changes; a regression introduced while
+through a second pass of the very same loop: review → fix → re-test, the same
+gate every round. Nothing about the bar changes; a regression introduced while
 polishing a suggestion is caught exactly like any other blocker.
 
 A few properties worth knowing:

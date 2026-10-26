@@ -2428,7 +2428,7 @@ STUB_EOF
   # `-x` executability guard beside the gate attestation
   [ "$(grep -c '"\$TREE_ID"' "$LOOP_REAL")" -eq 2 ]
   # ...and every mint goes through the helper
-  [ "$(grep -c '_tree_id "\$repo"' "$LOOP_REAL")" -eq 6 ]
+  [ "$(grep -c '_tree_id "\$repo"' "$LOOP_REAL")" -eq 7 ]
 }
 
 @test "#1435 the fix-touched set and the review scope share ONE path rule" {

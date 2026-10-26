@@ -5402,14 +5402,16 @@ no `tree`, pass no `--gate-attest`, and are unchanged.
 **Selected gates for intermediate (delta) rounds (#1973).** Two recorded
 guardrails forbade subsetting the suite: #979 (`run-gate.zsh`: the whole suite
 every round) and #604 (resolve-issue Step 3: the full suite, never a subset).
-Both are **amended for intermediate delta rounds only**, and the rest of the
-guardrail stands. **One rule: a gate's scope is the `scope_mode` of the review
-round it precedes, and only a delta round's gate may be `selected`.** Round 1's
-gate (Step 3), the closing sweep's (the grant beyond the ceiling included), the
-loop's own `--test-cmd`, hook mode, epic verification and CI stay on the full
-suite. On a plugin repo whose `<full gate>` is `run-gate.zsh` alone, the
-session starts the gate before a delta round as `run-gate.zsh
---select-base <base>` (every other stack, and a compound gate, never selects),
+Both were amended — by #1973 for intermediate delta rounds, and by #2926 for round 1
+as well, once the suite had grown well past the size those rules were written for. **The
+whole suite runs once per story, at the closing sweep and in the required
+`script-tests` CI job; every earlier gate selects.** The rest of the guardrail
+stands: the closing sweep's gate (the grant beyond the ceiling included), the
+loop's own `--test-cmd`, hook mode and epic verification stay on the full suite.
+On a plugin repo whose `<full gate>` is `run-gate.zsh` alone, the session
+starts the gate before round 1 (Step 3) and before every delta round as
+`run-gate.zsh --select-base <base>` (every other stack, and a compound gate,
+never selects),
 which runs only the bats files
 `development/skills/resolve-issue/scripts/select-tests.zsh` selects: a pure map
 from the merge-base diff to the bats files that reference a changed path
@@ -5420,7 +5422,12 @@ repo-wide `git ls-files` sweeps, manifest and version checks, and any file whose
 header is `# covers: *`). It falls back to the whole suite on any unmapped
 changed path, on a change to the shared test machinery or shared code
 (`tests/helpers/`, `tests/*.bash`, `development/scripts/`, this file, the
-marketplace manifest), and on an empty or uncomputable diff; a bats guard
+marketplace manifest), and on an empty or uncomputable diff. The marketplace
+manifest has one exception (#2926): every content PR bumps it, so in `--base`
+mode a manifest — it or a `<plugin>/.claude-plugin/plugin.json` — that equals
+its merge-base side once the version fields are deleted maps to the tests of
+`check-manifests.zsh` instead, while any other edit, an unparseable side and an
+added or deleted manifest keep the path-only rule; a bats guard
 asserts every `tests/*.bats` file is mapped or always-run. A selected run
 reports `"scope":"selected"` and its tree as `selected:<hex>`. The loop strips
 the prefix and accepts it as `--gate-attest` **only** on a `--resume` into a
@@ -5431,11 +5438,16 @@ already accepted (remembered in `<work-dir>/.selected-attest`) unless a
 delta round promotes after a selected gate starts its own full gate, whose bare
 tree equals the held hex and whose summary is that proof; the remembered
 identity is the backstop for a session that skipped that gate. **The control
-point is therefore the gate before a
-full-scope round.** open-pr never reads the attestation, but the loop declares
-`CONVERGED` only on a full-scope round, and the
-gate before one is always full — so a selector that misses a dependency costs a
-round (the closing sweep or CI catches it), never a shipped regression.
+point is therefore convergence itself.** open-pr never reads the attestation,
+and the loop declares `CONVERGED` only on a full-scope round. Round 1 is the one
+full-scope round a selected gate precedes, so when a round only a selected gate
+proved would converge, the loop first runs its own `--test-cmd` (the whole
+suite) on that tree, converging only on its green; a red there sends the round
+back to the fix pass as `AWAITING_FIX`, and a selected attestation or summary
+with no `--test-cmd` is refused. `build-dossier.zsh` refuses a `CONVERGED`
+status whose final round's gate record still reads `"scope":"selected"`. So a
+selector that misses a dependency costs a round (round 1's convergence gate,
+the closing sweep or CI catches it), never a shipped regression.
 
 **Per-round gate telemetry (#1973).** Every `run-gate.zsh` summary carries
 `scope` (`full`|`selected`), the run's `wall_s`, and `files` — each bats file

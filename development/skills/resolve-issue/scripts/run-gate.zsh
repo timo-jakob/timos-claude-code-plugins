@@ -13,15 +13,16 @@
 #     (below), so the same full suite finishes in a fraction of the sequential
 #     wall-clock.
 #
-# Quality guardrail (epic #979, amended by #1973 for intermediate DELTA review
-# rounds only): the WHOLE suite runs before every full-scope round — round 1 and
-# the closing sweep, including the grant beyond the ceiling — and in hook mode
-# and CI. Only the gate before a delta round may subset: `--select-base REF`
+# Quality guardrail (epic #979, amended by #1973 for delta review rounds and by
+# #2926 for round 1): the WHOLE suite runs once per story — before the closing
+# sweep, including the grant beyond the ceiling — and in hook mode and CI. The
+# gate before round 1 and before a delta round may subset: `--select-base REF`
 # runs just the bats files select-tests.zsh says the story diff can affect,
 # reports `"scope":"selected"`, and marks its tree `selected:<hex>` so the
 # attestation fails closed into any full-scope round (the review loop accepts a
-# `selected:` attestation only on a --resume into a delta round, and its own
-# --test-cmd is always this script WITHOUT --select-base). Without the flag the
+# `selected:` attestation as a skip only on a --resume into a delta round, runs
+# its own --test-cmd before a round only a selected gate proved can converge,
+# and that --test-cmd is always this script WITHOUT --select-base). Without the
 # speedup is parallelism + never double-running — never subsetting or skipping.
 #
 # Degradation is allowed, silence is not. GNU `parallel` is bats' `--jobs`
@@ -53,7 +54,7 @@
 #     --tap-out FILE    where to tee the TAP stream (default: a mktemp file)
 #     --select-base REF run only the bats files select-tests.zsh selects for the
 #                       diff against merge-base(REF, HEAD) — for the gate before
-#                       an intermediate DELTA review round only (#1973). When the
+#                       round 1 or a delta review round (#1973, #2926). When the
 #                       selector falls back to the whole suite, or fails, the run
 #                       is an ordinary full run and reports "scope":"full".
 #

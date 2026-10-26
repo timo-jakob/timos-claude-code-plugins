@@ -557,7 +557,8 @@ _roster_hits() {
   # the round-6 mint-ordering fix: what the boundary starts, and the order of
   # the tree-writing checks relative to the mint. Unpinned, reverting it
   # re-ships both round-6 blockers with the suite green.
-  contains "$body" 'what it starts is the whole-suite <full gate> alone, not this whole list'
+  # #2926 retired "whole-suite" here: a plugin repo's round-1 gate selects
+  contains "$body" 'what it starts is the <full gate> alone, not this whole list'
   contains "$body" 'run the checks below that write into the tree first'
   contains "$body" "Where the suite itself writes, §3.5's The <full gate> SUITE writes into the tree bullet governs instead and the mint follows the gate"
 }
@@ -686,9 +687,10 @@ _roster_hits() {
   body="$(prose_window "$EXPLAIN" "$ln" 14)"
   # what the cadence IS — without this the page names it and points at §3.5
   # while saying nothing about what happens
-  contains "$body" 'mints one tree identity, starts the full suite in the background and dispatches the panel against that same tree'
+  # #2926: the boundary starts the test gate, which selects on a plugin repo
+  contains "$body" 'mints one tree identity, starts the test gate in the background and dispatches the panel against that same tree'
   # …the guardrail, or a reader takes the overlap for a weakened gate
-  contains "$body" 'the whole suite still runs on every round that applied a fix, and consolidation still waits for it to come back green'
+  contains "$body" 'it still runs on every round that applied a fix, and consolidation still waits for it to come back green'
   # …the cost, which is the half a summary drops first
   contains "$body" 'a red gate discards that round'
   contains "$body" "§3.5's round protocol"

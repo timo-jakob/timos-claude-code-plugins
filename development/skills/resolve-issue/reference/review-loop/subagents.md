@@ -100,6 +100,10 @@ from the status JSON:
   the loop wrote. After an `ok` verdict, take the next round's boundary.
 - **zero** → the closing-sweep promotion (step 3). No fix runs; take the next
   round's boundary as step 3 says.
+- **zero, with a verdict naming a red whole suite (#2926)** → a fix turn, not
+  the zero arm: the conductor fixes it in-session, as the red-suite note in
+  `exit-20-awaiting-fix.md` says, and a no-edit re-run of a flaky red is exempt
+  from the *changed nothing* stop below.
 
 On a **red gate** (the boundary's step 6), dispatch the fix subagent with
 `trigger: gate-red` and `gate_log` naming the gate's recorded output. After an

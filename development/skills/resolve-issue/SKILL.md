@@ -664,19 +664,20 @@ gates **consolidating and committing**, not dispatching the panel: from §3.5's
 round boundary on, this gate runs while that round's reviewer panel is already
 working — *The round boundary is concurrent* (§3.5), which states the ordering.
 Round 1's boundary therefore **begins here**, and what it starts is the
-**whole-suite `<full gate>` alone**, not this whole list: run the checks below
-that **write** into the tree first — `pre-commit` with fixing hooks, any C4
-revisit, the docs build — then mint `T` (the round boundary's step 1) and start the
-suite. Where the *suite itself* writes, §3.5's *The `<full gate>` SUITE writes
+**`<full gate>` alone**, not this whole list (selecting on a plugin repo, #2926,
+below): run the checks below that **write** into the tree first — `pre-commit`
+with fixing hooks, any C4 revisit, the docs build — then mint `T` (the round
+boundary's step 1) and start the suite. Where the *suite itself* writes, §3.5's *The `<full gate>` SUITE writes
 into the tree* bullet governs instead and the mint follows the gate. Detect what
 applies and run it — the boundary's own procedure, including the mint command,
 the launch properties and the four `--gate-attest` rules, is on-demand reading:
 see `reference/review-loop/core.md` § The round protocol
 
 - pre-commit hooks (`pre-commit run --all-files`, or the staged subset),
-- tests for the stack — the **whole suite**, never a subset (#604, below). The
-  blessed gate command for this repo's type — what to capture, any degraded mode
-  it must relay to the user — is the profile's:
+- tests for the stack — the **whole suite**, never a subset, unless a plugin
+  repo's gate selects (#604 and #2926, below). The blessed gate command for
+  this repo's type — what to capture, any degraded mode it must relay to the
+  user — is the profile's:
   profile: `development-<repo_type>:resolve-profile` § Gate
   **If you reached this step without having run §1b at all, run its `detect` +
   load NOW** and use whatever that yields — the floor below applies only if that
@@ -746,11 +747,12 @@ see `reference/review-loop/core.md` § The round protocol
 **Run the full suite — unit *and* integration — not a unit-only subset (#604).**
 A subset (e.g. `pytest tests/unit`) can pass while the change breaks integration
 tests whose fixtures exercise it, unseen until CI / the Approver has spent CI
-minutes on the bot PR. **#1973 amends this for intermediate (delta) review
-rounds only:** a plugin repo's gate before a *delta* round runs
-`run-gate.zsh --select-base <base>`; round 1's gate (this one), the closing
-sweep, hook mode and CI stay on the whole suite — `reference/review-loop/delta-rounds.md`,
-*Selected gates for delta rounds (#1973)*. Anywhere else, run everything.
+minutes on the bot PR. **On a plugin repo the whole suite runs once per story
+(#1973, #2926):** the gate before round 1 (this one) and before every delta
+round runs `run-gate.zsh --select-base <base>`; the closing sweep, the loop's
+own `--test-cmd`, hook mode and CI stay on the whole suite, and the loop runs the
+whole suite itself before a round proved only by a selected gate can converge
+(`reference/review-loop/delta-rounds.md`, *Selected gates for delta rounds (#1973)*).
 
 **When a `story-spec/v1` block was consumed (#577), its `acceptance_criteria` and
 `testable_checks` are the concrete bar this gate must clear** — treat them as the

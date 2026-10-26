@@ -252,6 +252,15 @@
    is how the two statements of it came to disagree once already.
 <!-- /moved: round-protocol-steps-3-4 -->
 
+**An `AWAITING_FIX` with no blockers can name a red suite (#2926), and that one
+IS a fix turn.** The loop's whole-suite run before converging exits here on a
+red, queuing the closing sweep in `.closing-sweep` (`delta-rounds.md`, item 1).
+So zero blocking on a full-scope round is this case, and it takes precedence
+over step 3's zero-blocker test and `subagents.md`'s zero arm: apply the fix
+(a flake's is a no-edit re-run), and never re-pass the held `--gate-attest`. It
+is §3's red-gate fix, not a fix pass: its scope is the failing test's cause,
+which the fix pass's *and no others* limit does not bound.
+
 **Parked follow-ups carry their origin (#2581).** The parking step above files
 the follow-up and writes the `- parked:` note; it also posts one origin comment
 on the filed issue, which the fix brief (`reference/review-loop/briefs/fix.md`)

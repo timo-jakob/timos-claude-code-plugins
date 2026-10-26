@@ -330,6 +330,84 @@ mk_git_fixture() {
   echo "$output" | jq -e '.changed | index("development/skills/x/scripts/loop.zsh") and index("development/skills/x/scripts/moved.zsh")'
 }
 
+# ---- --base: a version-only manifest bump (#2926) --------------------------------
+
+# Versioned manifests, the manifest checker and the one test that names it — no
+# test names the plugin manifest, so only a version-only bump maps it; then the
+# git fixture.
+mk_manifest_fixture() {
+  mkdir -p "$FX/development-claude-plugin/skills/review/scripts" "$FX/development-go/.claude-plugin"
+  touch "$FX/development-claude-plugin/skills/review/scripts/check-manifests.zsh"
+  printf '%s\n' '{"name":"m","plugins":[{"name":"development-go","source":"./development-go","version":"1.0.0"}]}' \
+    > "$FX/.claude-plugin/marketplace.json"
+  printf '%s\n' '{"name":"development-go","version":"1.0.0","description":"go"}' \
+    > "$FX/development-go/.claude-plugin/plugin.json"
+  printf '%s\n' 'setup() { CM="$REPO_ROOT/development-claude-plugin/skills/review/scripts/check-manifests.zsh"; }' \
+    > "$FX/tests/cm.bats"
+  mk_git_fixture
+}
+
+@test "--base: a version-only bump of both manifests selects the manifest checker's tests, not the full suite" {
+  mk_manifest_fixture
+  printf '%s\n' '{"name":"m","plugins":[{"name":"development-go","source":"./development-go","version":"1.1.0"}]}' \
+    > "$FX/.claude-plugin/marketplace.json"
+  printf '%s\n' '{"name":"development-go","version":"1.1.0","description":"go"}' \
+    > "$FX/development-go/.claude-plugin/plugin.json"
+  run --separate-stderr zsh "$S" --repo "$FX" --tests-dir tests --base base
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e --argjson a "$ALWAYS" \
+    '.selection == "selected" and .reason == null
+     and .changed == [".claude-plugin/marketplace.json","development-go/.claude-plugin/plugin.json"]
+     and .files == (($a + ["tests/cm.bats"]) | sort)'
+}
+
+@test "--base: a non-version edit to an unnamed plugin manifest forces the FULL suite" {
+  mk_manifest_fixture
+  printf '%s\n' '{"name":"development-go","version":"1.0.0","description":"golang"}' \
+    > "$FX/development-go/.claude-plugin/plugin.json"
+  run --separate-stderr zsh "$S" --repo "$FX" --tests-dir tests --base base
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.selection == "full" and .reason == "an unmapped path changed: development-go/.claude-plugin/plugin.json"'
+}
+
+@test "--base: a non-version edit to the marketplace manifest still forces the FULL suite" {
+  mk_manifest_fixture
+  printf '%s\n' '{"name":"m","plugins":[{"name":"development-go","source":"./elsewhere","version":"1.1.0"}]}' \
+    > "$FX/.claude-plugin/marketplace.json"
+  run --separate-stderr zsh "$S" --repo "$FX" --tests-dir tests --base base
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.selection == "full" and .reason == "a shared path changed: .claude-plugin/marketplace.json"'
+}
+
+@test "--base: a manifest whose sides do not parse forces the FULL suite, even when both sides fail alike" {
+  mk_manifest_fixture
+  printf '%s\n' 'not json' > "$FX/.claude-plugin/marketplace.json"
+  git -C "$FX" commit -qam "broken base side"
+  git -C "$FX" branch -f base
+  printf '%s\n' 'still not json' > "$FX/.claude-plugin/marketplace.json"
+  run --separate-stderr zsh "$S" --repo "$FX" --tests-dir tests --base base
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.selection == "full" and .reason == "a shared path changed: .claude-plugin/marketplace.json"'
+}
+
+@test "--base: an ADDED plugin manifest keeps today's path-only handling, so unmapped it forces the FULL suite" {
+  mk_manifest_fixture
+  mkdir -p "$FX/development-java/.claude-plugin"
+  printf '%s\n' '{"name":"development-java","version":"1.0.0"}' > "$FX/development-java/.claude-plugin/plugin.json"
+  run --separate-stderr zsh "$S" --repo "$FX" --tests-dir tests --base base
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.selection == "full" and .reason == "an unmapped path changed: development-java/.claude-plugin/plugin.json"'
+}
+
+@test "--changed: a manifest is judged by path alone, so the marketplace manifest forces the FULL suite" {
+  mk_manifest_fixture
+  printf '%s\n' '{"name":"m","plugins":[{"name":"development-go","source":"./development-go","version":"1.1.0"}]}' \
+    > "$FX/.claude-plugin/marketplace.json"
+  sel .claude-plugin/marketplace.json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.selection == "full" and .reason == "a shared path changed: .claude-plugin/marketplace.json"'
+}
+
 @test "fail-safe: a --repo below the top level of its work tree returns the FULL suite" {
   mk_git_fixture
   mkdir -p "$FX/sub/tests"

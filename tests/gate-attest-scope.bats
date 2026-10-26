@@ -116,10 +116,13 @@ round2_clean() {
   round1_then_fix
   confirm_carry 2
   printf '[]' > "$F"
-  step --resume --carry-accounting "$ACCT" --test-cmd 'false' --gate-attest "selected:$(tid)"
+  step --resume --carry-accounting "$ACCT" --test-cmd "$GATE_CMD" --gate-attest "selected:$(tid)"
   [ "$status" -eq 20 ]
   contains "$stderr" "skipping the duplicate --test-cmd run"
   grep -q 'skipped the duplicate selected-gate run' "$WD/progress.md"
+  # a zero-blocker DELTA round promotes the sweep; the convergence gate never runs
+  [ ! -e "$BATS_TEST_TMPDIR/gate-ran" ]
+  lacks "$stderr" "running --test-cmd (the whole suite) before it can converge"
 }
 
 @test "a selected attestation into the closing full sweep is refused: --test-cmd RUNS" {
@@ -131,6 +134,17 @@ round2_clean() {
   [ "$status" -eq 1 ]
   [ "$(jq -r '.status' "$ST")" = "ERROR" ]
   contains "$stderr" "only a full gate can attest a full-scope round"
+}
+
+@test "#2926 a selected attestation into a clean closing sweep runs the whole suite once, then converges" {
+  round1_then_fix
+  round2_clean
+  printf '[]' > "$F"
+  step --resume --test-cmd "$GATE_CMD" --gate-attest "selected:$(tid)"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.status' "$ST")" = "CONVERGED" ]
+  [ "$(wc -l < "$BATS_TEST_TMPDIR/gate-ran")" -eq 1 ]
+  lacks "$stderr" "only a SELECTED gate proved this tree"
 }
 
 @test "control: a BARE attestation into the closing sweep still skips (#981 unchanged)" {
@@ -262,7 +276,7 @@ selected_then_promoted() {
 
 @test "#2197 a summary with no jobs records jobs:null, never a guess" {
   jq -c 'del(.jobs)' "$SUMMARY" > "$BATS_TEST_TMPDIR/nojobs.json"
-  round1_then_fix --gate-summary "$BATS_TEST_TMPDIR/nojobs.json"
+  round1_then_fix --test-cmd false --gate-summary "$BATS_TEST_TMPDIR/nojobs.json"
   jq -e '.history[0].gate.jobs == null and .history[0].gate.wall_s == 40.25' "$ST"
 }
 
@@ -276,7 +290,7 @@ selected_then_promoted() {
 }
 
 @test "round 1 takes its record from the Step 3 gate's --gate-summary" {
-  round1_then_fix --gate-summary "$SUMMARY"
+  round1_then_fix --test-cmd false --gate-summary "$SUMMARY"
   jq -e '.history[0].gate.attested == true and .history[0].gate.wall_s == 40.25' "$ST"
 }
 
@@ -339,6 +353,121 @@ selected_then_promoted() {
   step
   [ "$status" -eq 20 ]
   jq -e '.history[0].gate == null' "$ST"
+}
+
+# ---- round 1 selects; convergence needs the whole suite (#2926) ------------------
+# Round 1 is a full round, so zero blockers there is CONVERGED — the ending that
+# opens the PR. Its gate now selects, so the loop runs the whole suite first.
+
+# a clean round 1 whose Step 3 gate selected: the attestation and the summary
+round1_clean_selected() {
+  printf '[]' > "$F"
+  step --gate-attest "selected:$(tid)" --gate-summary "$SUMMARY" "$@"
+}
+
+@test "#2926 a clean round 1 proved only by a selected gate runs the whole suite, then converges on it" {
+  round1_clean_selected --test-cmd "$GATE_CMD"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.status' "$ST")" = "CONVERGED" ]
+  [ -s "$BATS_TEST_TMPDIR/gate-ran" ]
+  contains "$stderr" "only a SELECTED gate proved this tree"
+  # the round's recorded gate is the full run, so the dossier's check passes
+  jq -e '.history[0].gate.scope == "full" and .history[0].gate.attested == false' "$ST"
+  grep -q 'the whole suite ran green before convergence' "$WD/progress.md"
+}
+
+@test "#2926 a selected-only round 1 never converges: a red whole suite awaits a fix instead" {
+  round1_clean_selected --test-cmd 'false'
+  [ "$status" -eq 20 ]
+  [ "$(jq -r '.status' "$ST")" = "AWAITING_FIX" ]
+  jq -e '.history[0].gate.scope == "selected"' "$ST"
+  contains "$stderr" "the selected gate missed a failing test"
+  grep -q 'the whole suite is red on a tree only a selected gate proved' "$WD/progress.md"
+  # the boundary after the fix is the closing full sweep
+  [ "$(cat "$WD/.closing-sweep")" = "2" ]
+}
+
+@test "#2926 a no-edit re-run of a flaky red resumes into the closing sweep, never the empty-delta refusal" {
+  round1_clean_selected --test-cmd 'false'
+  [ "$status" -eq 20 ]
+  # the tree is unchanged: the red was a flake, and the fix is a re-run
+  printf '[]' > "$F"
+  step --resume --test-cmd "$GATE_CMD"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.status' "$ST")" = "CONVERGED" ]
+  [ -s "$BATS_TEST_TMPDIR/gate-ran" ]
+  run ! grep -qF -- 'delta against the previous round is EMPTY' <<< "$stderr"
+}
+
+@test "#2926 the red whole suite on the last budgeted round exhausts the budget, never converges" {
+  round1_clean_selected --test-cmd 'false' --max-rounds 1
+  [ "$status" -eq 13 ]
+  [ "$(jq -r '.status' "$ST")" = "BUDGET_EXHAUSTED" ]
+  [ ! -e "$WD/.closing-sweep" ]
+}
+
+@test "#2926 a BARE re-pass of round 1's selected id into the queued closing sweep still runs the gate" {
+  local held; held="$(tid)"
+  round1_clean_selected --test-cmd 'false'
+  [ "$status" -eq 20 ]
+  [ "$(tid)" = "$held" ]            # the tree did not move: the bare id MATCHES
+  local red="$BATS_TEST_TMPDIR/red-gate.sh"
+  printf '#!/usr/bin/env bash\necho ran >> "$BATS_TEST_TMPDIR/gate-ran"\nexit 1\n' > "$red"
+  chmod +x "$red"
+  printf '[]' > "$F"
+  step --resume --test-cmd "$red" --gate-attest "$held"
+  [ -s "$BATS_TEST_TMPDIR/gate-ran" ]
+  [ "$status" -eq 1 ]
+  [ "$(jq -r '.status' "$ST")" = "ERROR" ]
+}
+
+@test "#2926 a selected SUMMARY alone counts, so a bare attestation cannot drop the prefix past the guard" {
+  printf '[]' > "$F"
+  step --gate-attest "$(tid)" --gate-summary "$SUMMARY" --test-cmd 'false'
+  [ "$status" -eq 20 ]
+  [ "$(jq -r '.status' "$ST")" = "AWAITING_FIX" ]
+}
+
+@test "#2926 the selected: prefix alone counts on round 1: no summary, and a red whole suite awaits a fix" {
+  printf '[]' > "$F"
+  step --gate-attest "selected:$(tid)" --test-cmd 'false'
+  [ "$status" -eq 20 ]
+  [ "$(jq -r '.status' "$ST")" = "AWAITING_FIX" ]
+}
+
+@test "#2926 control: a clean round 1 with no sign of a selected gate converges without running --test-cmd" {
+  # every other stack, and a full Step 3 gate: unchanged
+  printf '[]' > "$F"
+  step --gate-attest "$(tid)" --test-cmd 'false'
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.status' "$ST")" = "CONVERGED" ]
+  [ ! -e "$BATS_TEST_TMPDIR/gate-ran" ]
+}
+
+@test "#2926 a round with blockers never runs the convergence gate" {
+  printf '%s' "$CRIT" > "$F"
+  step --gate-attest "selected:$(tid)" --gate-summary "$SUMMARY" --test-cmd "$GATE_CMD"
+  [ "$status" -eq 20 ]
+  [ ! -e "$BATS_TEST_TMPDIR/gate-ran" ]
+}
+
+@test "#2926 a selected attestation or summary without --test-cmd is refused up front (exit 2)" {
+  printf '[]' > "$F"
+  step --gate-attest "selected:$(tid)"
+  [ "$status" -eq 2 ]
+  contains "$stderr" "needs --test-cmd"
+  step --gate-summary "$SUMMARY"
+  [ "$status" -eq 2 ]
+  contains "$stderr" "needs --test-cmd"
+  [ ! -e "$ST" ]
+}
+
+@test "#2926 a BARE copy of the remembered selected id without --test-cmd is refused up front too" {
+  local held; selected_then_promoted
+  printf '[]' > "$F"
+  step --resume --gate-attest "$held"
+  [ "$status" -eq 2 ]
+  contains "$stderr" "needs --test-cmd"
 }
 
 # ---- the loop never selects ---------------------------------------------------------
@@ -501,28 +630,79 @@ selected_section() {
     'keep the prefix and never rebuild the value from `T`' \
     'the *No fix pass ran since the last boundary* bullet' \
     'the boundary'"'"'s steps 2, 5 and 7' \
+    'whose bare `"$T"` attest value becomes the gate'"'"'s reported `selected:` value' \
+    'the loop exits `AWAITING_FIX` with no blockers and a verdict naming the red' \
+    '(on the last budgeted round, `BUDGET_EXHAUSTED` instead)' \
+    'the boundary after its fix starts the **full** gate, not item 2'"'"'s selected one' \
+    'give it the tool'"'"'s largest timeout' \
+    'that queues the closing sweep in `<work-dir>/.closing-sweep`, so the boundary after its fix starts the **full** gate' \
+    'A no-edit re-run of a flaky red is a legitimate fix there.' \
+    'round 1'"'"'s gate selected. With no blockers, that consolidating invocation runs the whole suite inside it, so give it the tool'"'"'s largest timeout' \
+    'a signal exit (129/130/137/143) there is no verdict, so re-issue the same invocation' \
+    'the loop runs `--test-cmd` first, and refuses a selected attestation or summary that comes without one (exit 2)' \
     'Pass it only when this boundary started a gate.' \
-    'A boundary that skipped the gate (a zero-blocker promotion held on a full run'"'"'s attestation, the findings-file recovery re-invokes) omits it'; do
+    'A boundary that skipped the gate (a zero-blocker promotion held on a full run'"'"'s attestation, the findings-file recovery re-invokes) omits it' \
+    '**The whole suite runs once per story**: at the closing sweep, and in the required `script-tests` CI job' \
+    '§3'"'"'s gate **starts `<full gate>` with `--select-base <base>` appended** (#2926)' \
+    'the loop runs `--test-cmd` — the whole suite — on that tree first, and only its green converges the round' \
+    'A red there is not an `ERROR`' \
+    'passing the whole reported `selected:` value as `--gate-attest` and the summary as `--gate-summary`' \
+    '**A selected gate can never stand in for the full one before a round that may open a PR (#2926)**' \
+    'it refuses a `CONVERGED` status whose final round'"'"'s gate record still reads `"scope":"selected"`' \
+    'when they are equal it maps the file to the tests of `check-manifests.zsh`' \
+    'The closing sweep'"'"'s gate is the full one; round 1'"'"'s and every delta round'"'"'s are `selected`:' \
+    'The loop accepts a `selected:` attestation as a skip **only on a `--resume` into a delta round**; into the closing sweep it runs `--test-cmd`.'; do
     grep -qF -- "$needle" <<< "$s" || { echo "review-loop.md lost: $needle"; return 1; }
   done
 }
 
-@test "resolve-issue SKILL.md: the #604 amendment keeps round 1, the sweep, hook mode and CI full" {
+@test "resolve-issue SKILL.md: the #604 amendment selects round 1, keeps the sweep, hook mode and CI full" {
   local s; s="$(flat < "$REPO_ROOT/development/skills/resolve-issue/SKILL.md")"
-  grep -qF -- '**#1973 amends this for intermediate (delta) review rounds only:**' <<< "$s"
-  grep -qF -- 'round 1'"'"'s gate (this one), the closing sweep, hook mode and CI stay on the whole suite' <<< "$s"
+  grep -qF -- '**On a plugin repo the whole suite runs once per story (#1973, #2926):**' <<< "$s"
+  grep -qF -- 'the gate before round 1 (this one) and before every delta round runs `run-gate.zsh --select-base <base>`' <<< "$s"
+  grep -qF -- 'the closing sweep, the loop'"'"'s own `--test-cmd`, hook mode and CI stay on the whole suite' <<< "$s"
+  grep -qF -- 'the loop runs the whole suite itself before a round proved only by a selected gate can converge' <<< "$s"
+  grep -qF -- 'what it starts is the **`<full gate>` alone**, not this whole list (selecting on a plugin repo, #2926, below)' <<< "$s"
+  grep -qF -- 'the **whole suite**, never a subset, unless a plugin repo'"'"'s gate selects (#604 and #2926, below)' <<< "$s"
+  # the retired rule is gone
+  run ! grep -qF -- 'round 1'"'"'s gate (this one), the closing sweep, hook mode and CI stay on the whole suite' <<< "$s"
 }
 
-@test "claude-plugin resolve-profile: the amended whole-suite rule names every full-suite gate" {
+@test "#2926 exit-20 shard: an AWAITING_FIX with no blockers can name a red suite, outside the moved block" {
+  local f="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop/exit-20-awaiting-fix.md" s
+  s="$(awk '/^<!-- \/moved: round-protocol-steps-3-4 -->$/ { on = 1; next } on { print }' "$f" | flat)"
+  grep -qF -- '**An `AWAITING_FIX` with no blockers can name a red suite (#2926), and that one IS a fix turn.**' <<< "$s"
+  grep -qF -- 'red, queuing the closing sweep in `.closing-sweep` (`delta-rounds.md`, item 1)' <<< "$s"
+  grep -qF -- 'So zero blocking on a full-scope round is this case, and it takes precedence over step 3'"'"'s zero-blocker test' <<< "$s"
+  grep -qF -- 'apply the fix (a flake'"'"'s is a no-edit re-run), and never re-pass the held `--gate-attest`' <<< "$s"
+  run ! grep -qF -- 'writing no `.closing-sweep` marker' <<< "$s"
+  grep -qF -- 'its scope is the failing test'"'"'s cause, which the fix pass'"'"'s *and no others* limit does not bound' <<< "$s"
+}
+
+@test "#2926 ARCHITECTURE.md: the #604 position runs the whole suite once per story and guards convergence" {
+  local s; s="$(flat < "$REPO_ROOT/ARCHITECTURE.md")"
+  grep -qF -- '**The whole suite runs once per story, at the closing sweep and in the required `script-tests` CI job; every earlier gate selects.**' <<< "$s"
+  grep -qF -- 'starts the gate before round 1 (Step 3) and before every delta round as `run-gate.zsh --select-base <base>`' <<< "$s"
+  grep -qF -- '**The control point is therefore convergence itself.**' <<< "$s"
+  grep -qF -- 'the loop first runs its own `--test-cmd` (the whole suite) on that tree, converging only on its green' <<< "$s"
+  grep -qF -- '`build-dossier.zsh` refuses a `CONVERGED` status whose final round'"'"'s gate record still reads `"scope":"selected"`' <<< "$s"
+  grep -qF -- 'maps to the tests of `check-manifests.zsh` instead, while any other edit, an unparseable side and an added or deleted manifest keep the path-only rule' <<< "$s"
+  # the retired control point is gone
+  run ! grep -qF -- 'Both are **amended for intermediate delta rounds only**' <<< "$s"
+}
+
+@test "claude-plugin resolve-profile: the amended whole-suite rule selects round 1 and names every full-suite gate" {
   local s; s="$(flat < "$REPO_ROOT/development-claude-plugin/skills/resolve-profile/SKILL.md")"
-  grep -qF -- 'amended for intermediate (delta) review rounds only (#1973)' <<< "$s"
-  grep -qF -- 'which the loop accepts as an attestation only into a delta round' <<< "$s"
-  grep -qF -- 'the closing sweep (the grant beyond the ceiling included), the loop'"'"'s own `--test-cmd`, hook mode, §E4 and CI stay on the whole suite' <<< "$s"
+  grep -qF -- '**The whole suite runs once per story (#1973, #2926)**' <<< "$s"
+  grep -qF -- 'The gate before **round 1** and before every **delta** round adds `--select-base <base>`' <<< "$s"
+  grep -qF -- 'which the loop accepts as a skip only into a delta round, and never as the proof a round converges on' <<< "$s"
+  grep -qF -- 'The closing sweep (the grant beyond the ceiling included), the loop'"'"'s own `--test-cmd`, hook mode, §E4 and CI stay on the whole suite' <<< "$s"
 }
 
-@test "run-gate.zsh's header states the #979 amendment for delta rounds only" {
+@test "run-gate.zsh's header states the #979 amendment: once per story, round 1 and delta rounds select" {
   local s; s="$(flat < "$REPO_ROOT/development/skills/resolve-issue/scripts/run-gate.zsh")"
-  grep -qF -- 'amended by #1973 for intermediate DELTA review # rounds only' <<< "$s"
+  grep -qF -- 'amended by #1973 for delta review rounds and by # #2926 for round 1): the WHOLE suite runs once per story' <<< "$s"
+  grep -qF -- 'runs # its own --test-cmd before a round only a selected gate proved can converge' <<< "$s"
 }
 
 @test "CI: script-tests.yml passes no selection flag or env var to the bats run" {
