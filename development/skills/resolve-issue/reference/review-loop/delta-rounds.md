@@ -7,14 +7,18 @@ The byte-frozen span says the loop's `--resume` gate is "the **full** suite
 (unit **and** integration), never a subset (#604)", and the boundary's step 2
 starts "the same `<full gate>` command §3 runs". **The first stays true**: the
 loop's own `--test-cmd` is always the full `run-gate.zsh`, in every round, and
-hook mode never selects. What #1973 amends, for **intermediate (delta) review
-rounds only**, is the gate *the session* starts at a delta round's boundary —
-the #979 and #604 guardrails, both. **This section governs wherever the text
+hook mode never selects. What #1973 amended for delta rounds, and #2926 for
+round 1 too, is the gate *the session* starts at a round's boundary — the #979
+and #604 guardrails, both. **The whole suite runs once per story**: at the
+closing sweep, and in the required `script-tests` CI job; every earlier round's
+gate selects. **This section governs wherever the text
 above names the gate a boundary starts or the attestation it holds and
 disagrees with it**: the round protocol's opening paragraph (its whole-suite
 sentence), the boundary's steps 2, 5 and 7, the *No fix pass ran since the last
 boundary* bullet, the invariant paragraph's cadence recovery, and step 3's
-`AWAITING_FIX` hand-off, which names the full gate.
+`AWAITING_FIX` hand-off, which names the full gate — and the round-1 example in
+`step-2-invocation.md`, whose bare `"$T"` attest value becomes the gate's
+reported `selected:` value (item 1).
 
 **Only one gate shape can select: a plugin repo whose `<full gate>` is
 `run-gate.zsh` alone** — step 5's first arm. `--select-base` is a `run-gate.zsh`
@@ -23,10 +27,31 @@ flag and nothing else's. Every other stack, a **compound** `<full gate>`
 writes into the tree start their `<full gate>` unchanged before every round, as
 the text above says; nothing in this section applies to them.
 
-**One rule: a gate's scope is the `scope_mode` of the round it precedes.** Only
-a delta round's gate is `selected`:
+**One rule: a gate's scope is the `scope_mode` of the round it precedes — with
+round 1 the one exception.** The closing sweep's gate is the full one; round 1's
+and every delta round's are `selected`:
 
-1. **Round 1** — §3's gate, the full `run-gate.zsh`. Never selected.
+1. **Round 1** — §3's gate **starts `<full gate>` with `--select-base <base>`
+   appended** (#2926), exactly as a delta round's does (item 2): round 1 reviews
+   at full scope, but its gate selects. That makes round 1 the one full-scope
+   round a selected gate can precede, so a zero-blocker round 1 does not
+   converge on it: the loop runs `--test-cmd` — the whole suite — on that tree
+   first, and only its green converges the round. A red there is not an
+   `ERROR`: the selection missed a failing test, so the loop exits
+   `AWAITING_FIX` with no blockers and a verdict naming the red (on the last
+   budgeted round, `BUDGET_EXHAUSTED` instead). That exit is a fix turn
+   (`exit-20-awaiting-fix.md`, #2926) that queues the closing sweep in
+   `<work-dir>/.closing-sweep`, so the boundary after its fix starts the
+   **full** gate, not item 2's selected one — the selection that missed the test
+   would miss it again — consolidating with that gate's own bare `tree` and
+   summary. A no-edit re-run of a flaky red is a legitimate fix there.
+   Consolidate round 1 as step 5 says for a selected run, passing the whole
+   reported `selected:` value as `--gate-attest` and the summary as
+   `--gate-summary`: those are how the loop knows round 1's gate selected. With
+   no blockers, that consolidating invocation runs the whole suite inside it, so
+   give it the tool's largest timeout, as the gate's own foreground call takes;
+   a signal exit (129/130/137/143) there is no verdict, so re-issue the same
+   invocation.
 2. **A boundary into a delta round** — any round ≥ 2 that is **not** the closing
    sweep, including rounds a human grant bought and possible-false-trip
    continuations — **starts `<full gate>` with `--select-base <base>` appended**
@@ -67,9 +92,14 @@ Compare the hex after the `selected:` prefix with `T`: equal and green is step
 `--gate-attest`; a different hex is step 7's drift. A `--select-base` run whose
 summary says `"scope":"full"` means the selector fell back — it ran the whole
 suite, and its bare `tree` is an ordinary full attestation. The loop accepts a
-`selected:` attestation **only on a `--resume` into a delta round**; into a
-full-scope round it runs `--test-cmd`, so a selected gate can never stand in for
-the full one before a round that may open a PR.
+`selected:` attestation as a skip **only on a `--resume` into a delta round**;
+into the closing sweep it runs `--test-cmd`. **A selected gate can never stand
+in for the full one before a round that may open a PR (#2926)**: whenever a
+round would converge on a tree only a selected gate proved — round 1, or any
+round whose attestation or summary was selected — the loop runs `--test-cmd`
+first, and refuses a selected attestation or summary that comes without one
+(exit 2). `build-dossier.zsh` is the backstop: it refuses a `CONVERGED` status
+whose final round's gate record still reads `"scope":"selected"`.
 
 **`--gate-summary` — the gate's timings, and item 3's proof of a full run.** It is one more flag
 on step 2's invocation template (which sits in the byte-frozen span): save the
@@ -87,11 +117,20 @@ gate is item 3's — proving a full run lifts the loop's selected-run backstop.
 
 **Why this is safe.** A selector that misses a dependency lets a regression
 surface one round late — at the closing sweep's full gate, as an ordinary red
-that step 6 fixes — never in a PR: the round that can open one (`CONVERGED`)
-is a full-scope round, and the gate
-before it is full. (The loop's own refusal of a selected attestation into the
+that step 6 fixes, or at round 1's convergence gate (item 1) — never in a PR:
+the round that can open one (`CONVERGED`) is a full-scope round, and the whole
+suite is green on its tree before it converges. (The loop's own refusal of a
+selected attestation into the
 sweep is the backstop for a session that skipped item 3's gate; its red there
 exits `ERROR`, which is why item 3 starts the gate rather than relying on it.)
+
+**Version-only manifest bumps (#2926).** Every content PR bumps
+`.claude-plugin/marketplace.json`, and as a shared path it sent nearly every
+selection back to the whole suite. In `--base` mode `select-tests.zsh` now
+compares a changed `marketplace.json` or `<plugin>/.claude-plugin/plugin.json`
+with its merge-base side, version fields deleted on both; when they are equal it
+maps the file to the tests of `check-manifests.zsh`. Any other edit, a side that
+does not parse, and an added or deleted manifest keep today's handling.
 
 ### The delta-round test bar — fix-pass hunks (#2011)
 

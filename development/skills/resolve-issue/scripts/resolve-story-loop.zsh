@@ -78,7 +78,9 @@
 #        full story diff — scope-findings is never handed --prior-tree, or a
 #        fix-verification finding in a file untouched since the last round would
 #        be silently dropped) -> consolidate
-#     -> no blockers on a FULL round   => CONVERGED
+#     -> no blockers on a FULL round   => CONVERGED (a round proved only by a
+#        SELECTED gate first runs --test-cmd, the whole suite; red =>
+#        AWAITING_FIX, or BUDGET_EXHAUSTED on the last round — #2926)
 #     -> no blockers on a DELTA round  => promote the next round to the closing
 #        full sweep (no fix pass runs; step mode exits AWAITING_FIX with
 #        final_changelist.summary.blocking == 0). A round whose panel saw an
@@ -386,7 +388,9 @@
 #                 (blockers-only slice). Expected to leave the tree buildable.
 #   --test-cmd    the repo gate. Hook mode: re-run after each fix. Step mode:
 #                 run at --resume start (see above). Nonzero aborts the loop as
-#                 an operational error (exit 1), never a verdict.
+#                 an operational error (exit 1), never a verdict. Also run
+#                 before a round proved only by a selected gate converges
+#                 (#2926), where red is a verdict: AWAITING_FIX/BUDGET_EXHAUSTED.
 #   --gate-attest gate attestation (#981), step mode + --resume only. The tree
 #                 identity (git-tree-id.zsh, e.g. run-gate.zsh's `tree` field)
 #                 the driving session ALREADY gated green for the round it is
@@ -397,7 +401,10 @@
 #                 Fail-closed: a mismatch, an empty/absent value, or an
 #                 uncomputable current identity runs --test-cmd as before. The
 #                 gate itself never weakens — this removes only a byte-identical
-#                 duplicate. Ignored without --test-cmd or without --resume.
+#                 duplicate. Ignored without --test-cmd or without --resume,
+#                 except a `selected:` one (#2926): read on round 1 too, and
+#                 refused (exit 2) without --test-cmd, as is a "scope":
+#                 "selected" --gate-summary.
 #                 SCOPE RULE (#1973): a gate's scope is the scope_mode of the
 #                 round it precedes. A `selected:<id>` attestation (a
 #                 run-gate.zsh --select-base run) is accepted ONLY on a --resume
@@ -463,7 +470,9 @@
 #                                  so an old record or caller reading 14 still
 #                                  means only that.)
 #   20  AWAITING_FIX              (step mode only: blockers remain, budget
-#                                  left — fix in-session, then --resume)
+#                                  left — fix in-session, then --resume; or
+#                                  none, but the convergence guard's whole
+#                                  suite is red, #2926)
 #   10  ESCALATE_AMBIGUOUS        (dispatch could not pick a panel — #560 —
 #                                  pre-loop or at any round's re-dispatch, #912)
 #   11  ESCALATE_CONFLICT         (a surviving reviewer conflict)
@@ -1980,6 +1989,19 @@ fi
 if (( ! step_mode )) && [[ -n "$findings_tree" ]]; then
   print -u2 -- "resolve-story-loop: --findings-tree is a step-mode flag (it attests ONE round's panel) — hook mode runs every round in one invocation and uses the per-round dispatch stamp instead"; exit 2
 fi
+# A selected gate (#2926) proves only the files it ran, so a full round it
+# precedes converges only once the loop has run the whole suite — --test-cmd.
+# Without one that round could only converge on the selected proof, so a
+# selected attestation — the prefix, or on a --resume a bare copy of the
+# remembered selected id — or a selected --gate-summary, is refused up front.
+if (( step_mode )) && [[ -z "$test_cmd" ]] \
+   && { [[ "$gate_attest" == selected:* ]] \
+        || { (( resume )) && [[ -n "$gate_attest" && -n "$work_dir" && -s "$work_dir/.selected-attest" \
+                && "$gate_attest" == "${$(<"$work_dir/.selected-attest")//[[:space:]]/}" ]]; } \
+        || { [[ -n "$gate_summary" && -f "$gate_summary" && -r "$gate_summary" ]] \
+             && jq -e '.scope == "selected"' -- "$gate_summary" >/dev/null 2>&1; }; }; then
+  print -u2 -- "resolve-story-loop: a selected gate (--gate-attest selected:… or a \"scope\":\"selected\" --gate-summary) needs --test-cmd — the loop must be able to run the whole suite before a full round converges (#2926)"; exit 2
+fi
 if (( ! step_mode )); then
   [[ -n "$review_cmd" ]] || {
     print -u2 -- "resolve-story-loop: --review-cmd is required (or use --findings-file / --no-review)"; exit 2 }
@@ -2624,6 +2646,23 @@ if (( ! gate_ran )) && [[ -n "$gate_summary" ]]; then
     print -u2 -- "resolve-story-loop: --gate-summary is not a readable file ($gate_summary) — round ${gate_round}'s history[].gate stays null (#1973)"
   fi
 fi
+# Did only a SELECTED gate prove this round's tree (#2926)? Round 1's gate
+# selects too, and the loop runs no gate before round 1, so a full round 1 with
+# zero blockers would otherwise converge on a selected proof — as would a
+# --resume round whose selected attestation skipped the loop's gate. Any sign
+# of a selected gate counts — the prefix, the remembered selected id, or a
+# "scope":"selected" summary — unless the loop's own full gate ran here. The
+# round then converges only after the whole suite runs (the convergence guard
+# below). Hook mode never selects.
+local gate_selected_only=0 selected_gate_red=0
+if (( step_mode && ! gate_ran )); then
+  if [[ "${attest_label:-}" == selected-gate || "$gate_attest" == selected:* ]]; then
+    gate_selected_only=1
+  elif [[ -n "$gate_summary" && -f "$gate_summary" && -r "$gate_summary" ]] \
+       && jq -e '.scope == "selected"' -- "$gate_summary" >/dev/null 2>&1; then
+    gate_selected_only=1
+  fi
+fi
 
 # --- dispatch: which panel, on what scope (typed escalation on failure) -----
 local plan="" rc=0
@@ -2913,8 +2952,10 @@ while (( round <= effective_max )); do
       # "or stop" is deliberately NOT offered here. The previous round found
       # nothing, but a zero-blocker round is either a full sweep (which would
       # have ended the run as CONVERGED, so it cannot be the round before this
-      # one) or a DELTA round — and no run may end on a delta round, which is
-      # the whole point of the closing sweep. So reaching this branch means the
+      # one — a #2926 whole-suite red there queues the closing sweep instead,
+      # whether or not its fix moves the tree) or a DELTA round — and no run
+      # may end on a delta round, which is the whole point of the closing
+      # sweep. So reaching this branch means the
       # sweep the previous round earned is not queued: either the tree really
       # has not moved and the fix pass has not happened yet, or the run's
       # `.closing-sweep` marker was lost after that round was recorded.
@@ -3402,6 +3443,34 @@ while (( round <= effective_max )); do
   # treatment; that is a follow-up, not this story's scope.)
   adj_dropped=$(jq '.summary.adjudicated_dropped // 0' -- "$changelist") || {
     print -u2 -- "resolve-story-loop: could not read summary.adjudicated_dropped at round $round"; exit 1 }
+  # The convergence guard (#2926): a full round with zero blockers is
+  # CONVERGED, and CONVERGED opens the PR, so the whole suite must be green on
+  # this tree first. When only a selected gate proved it, run --test-cmd — the
+  # FULL gate — here, before the history line, so a green run's record is this
+  # round's gate. A red one is not an ERROR: the selection missed a failing
+  # test, which is a fix like any other, so the round awaits it (below) instead
+  # of converging.
+  if (( gate_selected_only && blocking == 0 )) && [[ "$scope_mode" == "full" ]]; then
+    print -u2 -- "resolve-story-loop: round $round found no blockers, but only a SELECTED gate proved this tree — running --test-cmd (the whole suite) before it can converge (#2926)"
+    if _run_test_cmd "$round"; then
+      rm -f -- "$work_dir/.selected-attest" 2>/dev/null
+      { print -r -- "**Gate (round $round):** the whole suite ran green before convergence — the round's gate had only selected (#2926)" \
+          >> "$work_dir/progress.md" ; } 2>/dev/null || true
+    else
+      selected_gate_red=1
+      print -u2 -- "resolve-story-loop: --test-cmd red on round $round's tree — the selected gate missed a failing test; the round does not converge (#2926)"
+      # remember the selected id, so a bare re-pass of it into the queued
+      # closing sweep runs the full gate (the backstop above, #1973)
+      local red_tree="${gate_attest#selected:}"
+      if [[ -z "$red_tree" ]]; then
+        red_tree=$(_tree_id "$repo" 2>/dev/null) || red_tree=""
+      fi
+      if [[ -n "$red_tree" ]]; then
+        print -r -- "$red_tree" 2>/dev/null >| "$work_dir/.selected-attest" || \
+          print -u2 -- "resolve-story-loop: could not record the selected attestation in $work_dir/.selected-attest — a bare re-pass of it into the closing sweep would not be caught (#1973)"
+      fi
+    fi
+  fi
   # the gate that preceded this round (#1973): its record, or null. A record
   # that is not a JSON object reads as null, so it can never cost the history
   # line — the same reason adjudicated_dropped is checked above.
@@ -3495,7 +3564,22 @@ while (( round <= effective_max )); do
   skip_fix=0
   pft_continued_round=0
   if (( blocking == 0 )); then
-    if [[ "$scope_mode" == "full" ]]; then
+    if [[ "$scope_mode" == "full" ]] && (( selected_gate_red )); then
+      # #2926: the whole suite is red on a tree only a selected gate proved —
+      # the fix pass makes it green, and the next round reviews that fix; with
+      # no round left to review it, the budget is spent. The next round is the
+      # closing full sweep — a full gate and a full-scope panel — so a no-edit
+      # re-run of a flaky red, which leaves the tree unmoved, converges there
+      # instead of reaching the empty-delta refusal. No marker on the last
+      # round: there it would sit past the ceiling, and the next --resume would
+      # adopt it as a one-round grant, turning BUDGET_EXHAUSTED into a round
+      # nobody granted.
+      if (( round == effective_max )); then loop_status="BUDGET_EXHAUSTED"
+      else
+        _promote_closing_sweep "$round" || exit 1
+        loop_status="AWAITING_FIX"
+      fi
+    elif [[ "$scope_mode" == "full" ]]; then
       loop_status="CONVERGED"
     else
       _promote_closing_sweep "$round" || exit 1
@@ -3538,6 +3622,8 @@ while (( round <= effective_max )); do
     AWAITING_FIX)
       if (( skip_fix )); then
         verdict="no blockers in the delta — round $closing_sweep_round is the closing full sweep; apply no fix, just --resume"
+      elif (( selected_gate_red )); then
+        verdict="no blockers, but the whole suite is red on a tree only a selected gate proved (#2926) — make the gate green in-session, then --resume"
       elif (( pft_continued_round )); then
         verdict="every non-convergence match is a possible false trip and none has continued before — auto-continued once, no grant consumed (#1498); apply blockers in-session, then --resume"
       else

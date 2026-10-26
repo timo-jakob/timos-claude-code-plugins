@@ -2,11 +2,12 @@
 # select-tests.zsh — which bats files can a change affect? (#1973)
 #
 # Why: run-gate.zsh runs the whole bats suite, and the review loop ran it before
-# EVERY round. #1973 amends the #979 and #604 guardrails for intermediate
-# (delta) review rounds only: the gate before a delta round may run just the
-# files the story diff can affect. Round 1, the closing sweep, hook mode and CI
-# stay on the full suite — this script only answers the question, and
-# run-gate.zsh --select-base is its one caller.
+# EVERY round. #1973 amended the #979 and #604 guardrails for delta review
+# rounds, and #2926 for round 1 too: the whole suite runs once per story, at the
+# closing sweep and in CI, and every earlier round's gate may run just the
+# files the story diff can affect. Hook mode stays on the full suite — this
+# script only answers the question, and run-gate.zsh --select-base is its one
+# caller.
 #
 # The map is DERIVED, never hand-maintained, so it cannot rot silently:
 #   * static extraction — every repo path a bats file spells out (from the
@@ -38,7 +39,11 @@
 #     header names it or a parent) — a new file no test names included;
 #   * a change touches the shared test machinery or the family's shared code:
 #     `<tests-dir>/helpers/`, `<tests-dir>/*.bash`, `development/scripts/`,
-#     `ARCHITECTURE.md` or `.claude-plugin/marketplace.json`;
+#     `ARCHITECTURE.md` or `.claude-plugin/marketplace.json` — except, in
+#     --base mode, a version-only bump of a manifest (#2926): a
+#     marketplace.json or `<plugin>/.claude-plugin/plugin.json` equal to its
+#     merge-base side once the version fields are deleted maps to the tests of
+#     check-manifests.zsh instead;
 #   * the diff is empty, or cannot be computed (a bad --base, no git, a --repo
 #     that is not the top level of its work tree).
 # A changed bats file is always selected itself.
@@ -209,7 +214,7 @@ emit() {  # $1 selection, $2 reason ("" = null), then the file list
 
 # --- the changed paths --------------------------------------------------------
 local -a changed=()
-local changed_json='[]' diff_why=""
+local changed_json='[]' diff_why="" mb=""
 if [[ -n "$changed_file" ]]; then
   changed=( ${(f)"$(<"$changed_file")"} )
 else
@@ -219,7 +224,7 @@ else
   # failed diff is never masked by a successful ls-files. --no-renames lists a
   # rename as the old path AND the new one, so a test that names the old path
   # is still selected.
-  local mb="" top="" d="" u=""
+  local top="" d="" u=""
   if ! top="$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" || [[ "${top:A}" != "$repo" ]]; then
     diff_why="--repo is not the top level of a git work tree"
   elif ! mb="$(git -C "$repo" merge-base "$base" HEAD 2>/dev/null)" || [[ -z "$mb" ]]; then
@@ -239,12 +244,12 @@ changed_json="$(jq -cn --args '$ARGS.positional' -- "${changed[@]}")" || exit 1
 
 # --- select --------------------------------------------------------------------
 typeset -A picked=()
-local c p hit
-for c in "${changed[@]}"; do
-  case "$c" in
-  "$tests_rel"/helpers/*|"$tests_rel"/[^/]##.bash|development/scripts/*|ARCHITECTURE.md|.claude-plugin/marketplace.json)
-    emit full "a shared path changed: $c" "${bats_files[@]}" ;;
-  esac
+local c hit
+# Pick the tests one changed path selects into `picked`; set `hit` when the path
+# is MAPPED (a bats file itself, an exact extracted reference, or a `# covers:`
+# path or parent), since only a mapped path escapes the unmapped fallback.
+_map_path() {  # $1 = repo-relative path
+  local c="$1" p f
   hit=0
   if [[ "$c" == "$tests_rel"/[^/]##.bats ]]; then
     hit=1
@@ -272,7 +277,43 @@ for c in "${changed[@]}"; do
     fi
     [[ "$p" == */* ]] && p="${p%/*}" || p=""
   done
-  (( hit )) || emit full "an unmapped path changed: $c" "${bats_files[@]}"
+}
+# A version-only manifest bump (#2926). Every content PR bumps the marketplace
+# manifest, so as a shared path it forced the whole suite on almost every round.
+# In --base mode a changed manifest whose two sides are equal once their version
+# fields are deleted maps to the tests of check-manifests.zsh, which judges a
+# bump, instead. Any other edit, a side that does not parse, and an added or
+# deleted manifest keep today's path-only handling; --changed mode has no
+# merge-base, so it always does.
+local manifest_checker="development-claude-plugin/skills/review/scripts/check-manifests.zsh"
+_version_only() {  # $1 = repo-relative path; true only for a version-only bump
+  local c="$1" filt="" old="" new=""
+  [[ -n "$mb" ]] || return 1
+  case "$c" in
+  .claude-plugin/marketplace.json)     filt='del(.plugins[]?.version)' ;;
+  [^/]##/.claude-plugin/plugin.json) filt='del(.version)' ;;
+  *) return 1 ;;
+  esac
+  [[ -f "$repo/$c" ]] || return 1
+  old="$(git -C "$repo" show "$mb:$c" 2>/dev/null | jq -cS "$filt" 2>/dev/null)" || return 1
+  new="$(jq -cS "$filt" -- "$repo/$c" 2>/dev/null)" || return 1
+  [[ -n "$old" && "$old" == "$new" ]]
+}
+local vo=0
+for c in "${changed[@]}"; do
+  vo=0
+  if _version_only "$c"; then
+    _map_path "$manifest_checker"
+    vo=$hit
+  fi
+  if (( ! vo )); then
+    case "$c" in
+    "$tests_rel"/helpers/*|"$tests_rel"/[^/]##.bash|development/scripts/*|ARCHITECTURE.md|.claude-plugin/marketplace.json)
+      emit full "a shared path changed: $c" "${bats_files[@]}" ;;
+    esac
+  fi
+  _map_path "$c"
+  (( hit || vo )) || emit full "an unmapped path changed: $c" "${bats_files[@]}"
 done
 for f in "${(k)always[@]}"; do picked[$f]=1; done
 

@@ -1044,6 +1044,38 @@ EOF
   echo "$stderr" | grep -q 'still carries 2 open blocker(s)'
 }
 
+@test "#2926 backstop: a CONVERGED status whose final round's gate only selected is refused" {
+  # a PR opens only on a whole-suite green on the final tree: a selected-only
+  # attestation that reached CONVERGED must not become a dossier
+  jq '.history = [{round:1, gate:{scope:"full", attested:true}}, {round:2, gate:{scope:"selected", attested:true}}]' \
+    "$ST" > "$ST.x"
+  mv "$ST.x" "$ST"
+  run --separate-stderr zsh "$S" --status "$ST"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  echo "$stderr" | grep -q "final round's gate only SELECTED tests"
+}
+
+@test "#2926 backstop: a CONVERGED promotion status whose final gate only selected is refused too" {
+  local PST="$BATS_TEST_TMPDIR/promo-status.json" SEL="$BATS_TEST_TMPDIR/promoted.json"
+  jq '.history = [{round:1, gate:{scope:"selected", attested:true}}]' "$ST" > "$PST"
+  printf '[{"file":"app.py","line":9,"dimension":"code_quality","title":"rename var"}]' > "$SEL"
+  run --separate-stderr zsh "$S" --status "$ST" --promotion-status "$PST" --promoted "$SEL"
+  [ "$status" -eq 1 ]
+  echo "$stderr" | grep -q -- "--promotion-status ended CONVERGED, but its final round's gate only SELECTED"
+}
+
+@test "#2926 control: a full final gate, a selected EARLIER round, or no gate record still renders" {
+  local h
+  for h in '[{round:1, gate:{scope:"selected", attested:true}}, {round:2, gate:{scope:"full", attested:false}}]' \
+           '[{round:1, gate:null}]' '[]'; do
+    jq ".history = $h" "$ST" > "$BATS_TEST_TMPDIR/s.json"
+    run zsh "$S" --status "$BATS_TEST_TMPDIR/s.json"
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q '^## Review dossier'
+  done
+}
+
 @test "every emitted dossier reports open 0 in every dimension, single-phase and merged" {
   # The epic's invariant (#2599): the dossier never reports open > 0 on a PR the
   # loop opened. The key stays in the hidden block because the Approver

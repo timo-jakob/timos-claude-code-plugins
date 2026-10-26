@@ -149,6 +149,27 @@ _refuse_non_converged() {  # $1 = compact status JSON, $2 = flag label
 }
 _refuse_non_converged "$status_json" "--status"
 
+# --- ...and its final round's tree was proved by the WHOLE suite (#2926) ------
+# Every round's gate may select now; only the whole suite on the final tree may
+# open a PR. The loop runs it before a selected-only round converges, and its
+# green run becomes that round's history[].gate, so a CONVERGED status whose last
+# round's gate still reads "scope":"selected" was never proved and is refused.
+# A status with no history, or a final round with no gate record (every stack
+# that is not run-gate.zsh), carries no selected claim and passes.
+_refuse_selected_final_gate() {  # $1 = compact status JSON, $2 = flag label
+  local st="" scope=""
+  st=$(print -r -- "$1" | jq -r '.status // ""' 2>/dev/null) || st=""
+  [[ "$st" == CONVERGED ]] || return 0
+  scope=$(print -r -- "$1" | jq -r '((.history // []) | if type == "array" then (last // {}) else {} end
+                                     | (.gate? // {}) | if type == "object" then (.scope // "") else "" end)' \
+          2>/dev/null) || scope=""
+  if [[ "$scope" == selected ]]; then
+    print -r -u2 -- "build-dossier: $2 ended CONVERGED, but its final round's gate only SELECTED tests — a PR opens only on a whole-suite green on the final tree (#2926). Re-run the loop: it runs the whole suite before a selected-only round converges."
+    exit 1
+  fi
+}
+_refuse_selected_final_gate "$status_json" "--status"
+
 # The promotion operand's narrower cousin: NON-ENDINGS only. See the call site
 # below for why the escalating endings deliberately stay renderable here.
 _refuse_non_ending_promotion() {  # $1 = compact promotion status JSON
@@ -174,6 +195,7 @@ if [[ -n "$promotion_status_file" ]]; then
   # intermediate round, i.e. the most-written value here — would render "exited
   # **AWAITING_FIX**", a status no run ends on.
   _refuse_non_ending_promotion "$promotion_status_json"
+  _refuse_selected_final_gate "$promotion_status_json" "--promotion-status"
   # the SELECTION file, same element-shape discipline as consolidate-findings'
   # --promote: `["a title"]` or `[113]` pass a bare `type == "array"` test and
   # then abort deep inside the main jq, blaming the wrong input.
