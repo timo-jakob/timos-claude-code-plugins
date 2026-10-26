@@ -2,9 +2,13 @@
 # resolve-story-loop.zsh — the local, pre-push review loop's state machine
 # (epic #557, issue #562). Ties the review panel (#560 dispatch) and the
 # consolidator (#561) into an autonomous implement→review→fix loop with a hard
-# round budget. Runs entirely in the worktree: nothing is pushed and no PR is
-# opened until this exits CONVERGED (0), the only review-loop ending that opens a
-# PR — no ESCALATE_* / BUDGET_EXHAUSTED exit ever opens one. The residue terminal
+# round budget. No PR is opened until this exits CONVERGED (0), the only
+# review-loop ending that opens a PR — no ESCALATE_* / BUDGET_EXHAUSTED exit ever
+# opens one; the only earlier pushes are wip checkpoint commits to the feature
+# branch, with no PR (#2920): with --checkpoint, every round this invocation
+# consolidates on a green gate is committed as `wip(resolve-issue #<N>): round
+# <k>` and pushed by checkpoint.zsh, so a session killed mid-run can --resume
+# from it. A wip commit carries no `[skip ci]`. The residue terminal
 # CONVERGED_WITH_RESIDUE (exit 14, #1435) is retired by #2580: the loop never
 # emits it, and exit 14 is never reused.
 #
@@ -441,7 +445,8 @@
 #       [--issue N] [--telemetry-file PATH] [--telemetry-dir DIR] \
 #       [--parent-run-id ID] [--gate-attest TREE_ID] [--gate-summary FILE] \
 #       [--findings-tree TREE_ID] [--carry-accounting FILE] [--promote FILE] \
-#       [--risk FILE] [--step-timings FILE] [--t0 EPOCH]                # step mode
+#       [--risk FILE] [--step-timings FILE] [--t0 EPOCH] \
+#       [--checkpoint attended|unattended]                              # step mode
 #   resolve-story-loop.zsh --repo PATH [--base REF] \
 #       --review-cmd CMD --fix-cmd CMD [--test-cmd CMD] \
 #       [--promote FILE] ...                                      # hook mode
@@ -520,7 +525,7 @@ local repo="" base="origin/main" review_cmd="" fix_cmd="" test_cmd="" findings_f
 local max_rounds=$MAX_REVIEW_ROUNDS status_file="" work_dir="" no_review=0
 local issue="" telemetry_file="" resume=0 gate_attest="" findings_tree="" promote=""
 local carry_accounting="" parent_run_id="" telemetry_dir="" risk="" gate_summary=""
-local step_timings="" t0_given=""
+local step_timings="" t0_given="" checkpoint_mode=""
 
 # A value flag with no value, or one whose value is the NEXT FLAG, is a caller
 # mistake — and both are silent disasters here. Under `nounset` a dangling
@@ -625,6 +630,9 @@ while [[ $# -gt 0 ]]; do
   --telemetry-dir) _need_val "$1" $# "${2:-}"
     [[ "$2" == "null" ]] || telemetry_dir="$2"; shift 2 ;;
   --parent-run-id) _need_val "$1" $# "${2:-}"; parent_run_id="$2"; shift 2 ;;
+  # --checkpoint (#2920): the session mode the run resolved; with it, every round
+  # this invocation consolidates is checkpointed (checkpoint.zsh write)
+  --checkpoint) _need_val "$1" $# "${2:-}"; checkpoint_mode="$2"; shift 2 ;;
   --no-review) no_review=1; shift ;;
   --resume) resume=1; shift ;;
   -h|--help)
@@ -648,6 +656,8 @@ while [[ $# -gt 0 ]]; do
     print -r -- "                             # before round 1's panel (#1976); refused beside --resume"
     print -r -- "  [--work-dir DIR] [--status-file PATH] [--telemetry-file PATH] [--telemetry-dir DIR]"
     print -r -- "  [--parent-run-id ID]       # the resolve-issue run this loop runs under (#1226)"
+    print -r -- "  [--checkpoint MODE]        # attended|unattended: commit + push each consolidated round as a"
+    print -r -- "                             # wip checkpoint (#2920); needs --issue"
     print -r -- "  [--no-review]   # fast path; mutually exclusive with --promote, --carry-accounting and --risk"
     exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
@@ -662,6 +672,9 @@ local t0=$(date +%s)   # for the telemetry wall-clock (#566)
 # `local NAME` whose name already exists in the environment PRINTS `NAME=value`
 # on stdout, ahead of the status JSON.
 closing_sweep_granted=0
+# set once this invocation has consolidated a round (#2920): emit_and_exit
+# checkpoints only then, never on a refusal, an ERROR or a pre-round exit
+round_consolidated=0
 # the round number of the closing full sweep, 0 until a zero-blocker delta round
 # promotes one (or a --resume adopts one from <work-dir>/.closing-sweep)
 closing_sweep_round=0
@@ -764,6 +777,14 @@ fi
 # terminal-exit time, and lose the whole record behind `|| true`.
 [[ -z "$issue" || ${#issue} -le 18 ]] || {
   print -u2 -- "resolve-story-loop: --issue is out of range (max 18 digits, got: $issue)"; exit 2 }
+
+# --checkpoint (#2920) names the marker's session mode and keys the durable
+# directory by issue, so it needs --issue. Under --no-review it checkpoints
+# nothing, since no round is consolidated.
+[[ -z "$checkpoint_mode" || "$checkpoint_mode" == attended || "$checkpoint_mode" == unattended ]] || {
+  print -u2 -- "resolve-story-loop: --checkpoint must be attended or unattended (got: $checkpoint_mode)"; exit 2 }
+[[ -n "$checkpoint_mode" && -z "$issue" ]] && {
+  print -u2 -- "resolve-story-loop: --checkpoint needs --issue — the checkpoint lives in the issue's durable directory"; exit 2 }
 
 # --t0 (#1976) becomes the record's `--ts`, so it carries the same two guards as
 # --issue for the same reason: a value the emitter rejects at terminal-exit time
@@ -1018,6 +1039,27 @@ emit_and_exit() {
       fi
     }
     rm -f -- "$tmp_status" "$tmp_payload" 2>/dev/null || true
+  fi
+
+  # the round's checkpoint (#2920) — last, after the status file and the
+  # telemetry ledger, so the kept state holds both. Only a round this
+  # invocation consolidated, which it does only on a green gate; a red gate
+  # ends ERROR before consolidating and checkpoints nothing. The marker's
+  # ceiling is the caller's --max-rounds: a grant lives in the work-dir's
+  # sidecar, which the kept state carries. Hook mode consolidates several rounds per invocation and so
+  # checkpoints only its last. Never fatal: a failed checkpoint leaves the
+  # previous marker standing and costs only the recovery point.
+  if [[ -n "$checkpoint_mode" ]] && (( round_consolidated )); then
+    case "$st" in
+      AWAITING_FIX|CONVERGED|ESCALATE_CONFLICT|ESCALATE_NO_CONVERGENCE|BUDGET_EXHAUSTED)
+        local -a cp_args=(write --repo-dir "$repo" --issue "$issue" --round "$rounds"
+          --mode "$checkpoint_mode" --ceiling "$max_rounds" --work-dir "$work_dir")
+        [[ -n "$status_file" ]] && cp_args+=(--status-file "$status_file")
+        [[ -n "$parent_run_id" ]] && cp_args+=(--run-id "$parent_run_id")
+        zsh "${self_dir}/checkpoint.zsh" "${cp_args[@]}" >/dev/null || \
+          print -u2 -- "resolve-story-loop: could not checkpoint round $rounds — the previous checkpoint stands (#2920)"
+        ;;
+    esac
   fi
   exit "$code"
 }
@@ -3510,6 +3552,7 @@ while (( round <= effective_max )); do
        fi ;;
   esac
   append_progress_round "$changelist" "$round" "$verdict" "$prev_changelist" "$pft_continued_round"
+  round_consolidated=1
   # STEP MODE's half of the fix-touched capture (#1435) — the SNAPSHOT. The fix
   # pass happens BETWEEN invocations, where this script never observes it, so the
   # pair is split: stamp the pre-fix identity here, diff against it at --resume

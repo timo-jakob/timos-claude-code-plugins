@@ -169,9 +169,12 @@ and note both for the run's record. An exit 2 is your own malformed call: fix it
 **Then, on `--resume` (#2579)** — `story-telemetry.zsh args` reported
 `resume: true` — check the kept clean stop before anything else:
 `"<skill-base-dir>/scripts/clean-stop.zsh" read --repo-dir <worktree> --issue <N>
---mode <mode>`. Exit 4 (mode `unattended`) and exit 3 (no marker) refuse the
-resume: relay the stderr line, emit the run's record as `failed`, and stop. On
-exit 0, run the dependency precheck below as usual; on `PROCEED`, check out the
+--mode <mode>`. Exit 4 (mode `unattended`) refuses the resume: relay the stderr
+line, emit the run's record as `failed`, and stop. Exit 3 (no clean stop) falls
+to the run's checkpoint (#2920), which takes its own procedure:
+see `reference/checkpoint.md` § Resuming from a checkpoint (#2920)
+On exit 0, note `resumed_from: clean_stop`, run the dependency precheck below
+as usual; on `PROCEED`, check out the
 marker's `branch` from `origin` and run §1b (detect the repo type and load its
 profile), but skip §0b, §1, §2 and §3 (the stopped run passed the readiness
 gate, so record `gate_verdict: READY`). Then enter the interactive extension
@@ -180,10 +183,8 @@ with the marker (`reference/interactive/extension.md`).
 **Without `--resume`**, an unattended run always runs
 `"<skill-base-dir>/scripts/clean-stop.zsh" clear --repo-dir <worktree> --issue
 <N>` before round 1, whether or not a marker exists, so it never adopts a
-stopped run's work-dir, status file or grant ledger. An attended run runs
-`clean-stop.zsh read --repo-dir <worktree> --issue <N> --mode attended` instead,
-and only on its exit 0 says once that a kept clean stop exists. It then starts
-fresh in its scratch work-dir and leaves the kept one alone.
+stopped run's work-dir, status file or grant ledger. An attended run moves any
+kept state aside instead, deleting nothing.
 
 Dependencies are enforced from **GitHub-native `blockedBy` relationships** —
 the single source of truth (#583); prose declares nothing. Before anything
@@ -349,7 +350,9 @@ Per `/development:git-branch-naming` — `<type>/<N>-<slug>`, with `type` from
 the issue's type label if it has one; else from the title's Conventional-Commit
 prefix (`fix(...)` → `fix`, `feat(...)` → `feat`, …); else inferred from the
 change (`fix` / `feat` / `docs` / `chore` / `refactor`). Always pull the latest
-main, then branch from it — never stack; the script does both, and stops on exit 3:
+main, then branch from it — never stack; the script does both, and stops on exit 3.
+Without `--resume`, read first how a run's kept state and branch are handled:
+see `reference/checkpoint.md` § A fresh run on kept state (#2920)
 
 ```bash
 "<skill-base-dir>/../../scripts/git/branch-off-fresh-main.zsh" "<type>/<N>-<slug>"
@@ -762,10 +765,16 @@ body.
 ### 3.5 Review loop — local, pre-push (do NOT skip unless `--no-review`)
 
 Once §3's gate is **under way**, run the **local review loop** before
-committing or pushing anything, so a PR is only opened on code a reviewer panel
-has already converged on (no CI minutes spent on unconverged work). *Under way*,
+committing or pushing anything but checkpoints, so a PR is only opened on code
+a reviewer panel has already converged on (no CI minutes spent on unconverged
+work). *Under way*,
 not *green*: the round boundary starts the gate and the panel together (below),
-and it is **consolidation** — never the panel — that waits for green. Drive
+and it is **consolidation** — never the panel — that waits for green.
+**No PR until the loop exits `CONVERGED`; the only earlier pushes are wip
+checkpoint commits to the feature branch, with no PR, and none carries
+`[skip ci]`** (#2920). Round 0 is §3's first green gate:
+see `reference/checkpoint.md` § Checkpoints — the recoverable round (#2920)
+Drive
 `development/skills/resolve-issue/scripts/resolve-story-loop.zsh` — the
 state machine (constants `MAX_REVIEW_ROUNDS=5`, `BLOCKING_SEVERITIES=(CRITICAL
 WARNING)`) — in **step mode** (#971): one invocation per round, with every
@@ -824,12 +833,13 @@ child run's `loop_args` — the run E3 started for it, never the epic run's
 explicit `--work-dir` and `--status-file` (paths you remember)**: the work-dir
 is the loop's resumable state and the status file its verdict — the interactive
 extension below re-invokes the loop with `--resume` on the *same* work-dir, and
-a defaulted `mktemp` dir is unrecoverable after the run exits. **In mode
-`unattended` they are the durable pair** (#2579): `clean-stop.zsh dir --repo-dir
+a defaulted `mktemp` dir is unrecoverable after the run exits. **In every
+session mode they are the durable pair** (#2579, #2920): `clean-stop.zsh dir --repo-dir
 <worktree> --issue <N>` prints `work_dir` and `status_file` under
 `$HOME/.claude/resolve-issue/<repo-slug>/<N>/`, outside every checkout, so a
-clean stop (`reference/escalation.md`) leaves state a later attended `--resume`
-can find. Create the work-dir before round 1.
+clean stop (`reference/escalation.md`) or a checkpoint leaves state a later
+attended `--resume` can find. Create the work-dir before round 1, and pass
+`--checkpoint <mode>` on every blocking-loop invocation.
 
 The loop consolidates each round (`consolidate-findings.zsh`, §#561) and exits
 with a status JSON + code:
@@ -929,7 +939,9 @@ authoritative statement of the tiers themselves.
 Use the `/development:commit` conventions: a Conventional Commits subject,
 `Closes #N` in the body, and the family's `Co-Authored-By` trailer. One commit
 unless the change is genuinely multi-part. Let pre-commit run (never
-`--no-verify`).
+`--no-verify`). A run that pushed checkpoints commits on top of its wip commits,
+never rewriting them, and clears its durable folder once its record is emitted:
+see `reference/checkpoint.md` § The final commit and the PR (#2920)
 
 ### 6. Open the bot-authored PR
 

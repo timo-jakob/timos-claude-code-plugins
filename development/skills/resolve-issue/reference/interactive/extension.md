@@ -25,9 +25,9 @@ marker's `work_dir` as `--work-dir` and its `status_file` as `--status-file`, so
 the loop continues from the marker's `last_round`. The run's record passes that
 `work_dir` as `--loop-work-dir`: `read` already set the stopped run's id ledger
 aside, so the record lists only this run's loops. The grants, guidance and
-stop are exactly as below. When the resumed run opens its PR, run
-`clean-stop.zsh clear --repo-dir <worktree> --issue <N>`; any other ending keeps
-the durable directory.
+stop are exactly as below. When the resumed run has opened its PR and §7 has
+emitted its record, run `clean-stop.zsh clear --repo-dir <worktree> --issue
+<N>`; any other ending keeps the durable directory.
 
 <!-- moved: interactive-extension -->
 **Interactive extension (human present, `BUDGET_EXHAUSTED` /

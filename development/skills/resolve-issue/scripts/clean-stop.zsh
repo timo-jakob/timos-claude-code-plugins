@@ -13,6 +13,8 @@
 #     status.json        the loop's --status-file
 #     clean-stop.json    the marker, written at the clean stop
 #     stopped-run-ids    the stopped run's review-loop id ledger, set aside by read
+#     checkpoint.json    checkpoint.zsh's marker (#2920), which a clean stop
+#                        supersedes: write deletes it, with its kept states
 #
 # <repo-slug> is the user-level telemetry sink's own slug (telemetry-sink-lib.zsh
 # tlm_repo_slug of tlm_derive_repo), so every worktree and clone of one repo
@@ -29,7 +31,8 @@
 #       failing conditions are build-escalation.zsh's convergence verdict, plus
 #       `cap` with --cap-reached (record-grant.zsh exit 3: no headroom under the
 #       automatic cap). A passing verdict without --cap-reached was a grant, not
-#       a stop, and is refused.
+#       a stop, and is refused. A written marker supersedes a checkpoint
+#       (#2920): checkpoint.json and its kept states are deleted.
 #   clean-stop.zsh read  --repo-dir DIR --issue N --mode attended|unattended
 #       The `--resume` check: print the marker when the session is attended and
 #       a well-formed marker exists. Refused in mode unattended (exit 4) and when
@@ -39,6 +42,9 @@
 #       ids in its own record, so the resumed run's ledger starts empty and its
 #       record never claims them again. This happens at read, not write,
 #       because the stopped run emits its record after the marker is written.
+#       When a checkpoint marker is kept beside it anyway, read says so on
+#       stderr and deletes it: the clean stop is the later, deliberate terminal
+#       and carries strictly more state (#2920).
 #   clean-stop.zsh clear --repo-dir DIR --issue N
 #       Remove issue N's durable directory (a resumed run that opened its PR, or
 #       an unattended run starting fresh). Absent is not an error.
@@ -118,6 +124,7 @@ slug=$(tlm_repo_slug "$(tlm_derive_repo "$repo_dir")") || slug=""
 base="$HOME/.claude/resolve-issue/$slug/$issue"
 local wd="$base/work-dir" sf="$base/status.json" marker="$base/clean-stop.json"
 local ledger="$base/work-dir/.telemetry-run-ids" stopped_ids="$base/stopped-run-ids"
+local checkpoint="$base/checkpoint.json"
 
 case "$cmd" in
 dir)
@@ -154,6 +161,10 @@ write)
   local tmp="$marker.tmp.$$"
   { print -r -- "$doc" > "$tmp" && mv -f -- "$tmp" "$marker" } 2>/dev/null || {
     rm -f -- "$tmp"; print -u2 -- "clean-stop: could not write the marker: $marker"; exit 1 }
+  # the clean stop supersedes the run's checkpoint (#2920), so the two markers
+  # never coexist
+  rm -rf -- "$checkpoint" "$base"/checkpoint-r*(N/) || {
+    print -u2 -- "clean-stop: could not delete the superseded checkpoint in $base"; exit 1 }
   print -r -- "$doc"
   ;;
 
@@ -169,6 +180,11 @@ read)
              and (.branch | type == "string") and (.convergence_failures | type == "array"))' \
     "$marker" >/dev/null 2>&1 || {
     print -u2 -- "clean-stop: the marker is malformed: $marker"; exit 1 }
+  if [[ -e "$checkpoint" ]]; then
+    print -u2 -- "clean-stop: a checkpoint is also kept for issue #$issue — resuming from the clean stop, which supersedes it; the checkpoint is deleted"
+    rm -rf -- "$checkpoint" "$base"/checkpoint-r*(N/) || {
+      print -u2 -- "clean-stop: could not delete the superseded checkpoint in $base"; exit 1 }
+  fi
   if [[ -e "$ledger" ]]; then
     { cat -- "$ledger" >> "$stopped_ids" && rm -f -- "$ledger" } 2>/dev/null || {
       print -u2 -- "clean-stop: could not set the stopped run's review-loop id ledger aside: $ledger"; exit 1 }

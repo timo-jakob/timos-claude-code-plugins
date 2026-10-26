@@ -38,7 +38,7 @@ setup() {
   # made deliberately in two places rather than silently in one. This is the only
   # copy outside the helper, and it is what makes the "roster changed" case below
   # a real assertion rather than a tautology.
-  EXPECTED_REFS=(review-loop.md residue.md promotion.md escalation.md interactive.md sequential.md telemetry.md epic-telemetry.md epic-tree.md)
+  EXPECTED_REFS=(review-loop.md residue.md promotion.md escalation.md interactive.md checkpoint.md sequential.md telemetry.md epic-telemetry.md epic-tree.md)
   # #2055 split review-loop.md into shards under reference/review-loop/; the
   # shard roster is transcribed once here for the same reason, in the index's
   # read order.
@@ -103,6 +103,7 @@ _synth() {
     "$base/reference/escalation.md" \
     "$base/reference/interactive.md" \
     "${interactive_paths[@]}" \
+    "$base/reference/checkpoint.md" \
     "$base/reference/sequential.md" \
     "$base/reference/telemetry.md" \
     "$base/reference/epic-telemetry.md" \
@@ -236,7 +237,7 @@ _synth() {
   for s in "${EXPECTED_RESIDUE_SHARDS[@]}"; do residue_bodies+="body of $s"$'\n\n'; done
   for s in "${EXPECTED_PROMOTION_SHARDS[@]}"; do promotion_bodies+="body of $s"$'\n\n'; done
   for s in "${EXPECTED_INTERACTIVE_SHARDS[@]}"; do interactive_bodies+="body of $s"$'\n\n'; done
-  want="$(printf 'conductor\n\nbody of review-loop.md\n\n%sbody of residue.md\n\n%sbody of promotion.md\n\n%sbody of escalation.md\n\nbody of interactive.md\n\n%sbody of sequential.md\n\nbody of telemetry.md\n\nbody of epic-telemetry.md\n\nbody of epic-tree.md\n' "$shard_bodies" "$residue_bodies" "$promotion_bodies" "$interactive_bodies")"
+  want="$(printf 'conductor\n\nbody of review-loop.md\n\n%sbody of residue.md\n\n%sbody of promotion.md\n\n%sbody of escalation.md\n\nbody of interactive.md\n\n%sbody of checkpoint.md\n\nbody of sequential.md\n\nbody of telemetry.md\n\nbody of epic-telemetry.md\n\nbody of epic-tree.md\n' "$shard_bodies" "$residue_bodies" "$promotion_bodies" "$interactive_bodies")"
   [ "$(cat "$out")" = "$want" ]
 }
 

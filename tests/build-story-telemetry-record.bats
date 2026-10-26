@@ -43,7 +43,7 @@ FAILED='{"outcome":"failed","dependency_precheck":"PROCEED","gate_verdict":"READ
   [ "$(jq -c '.fallbacks_fired' <<<"$output")" = '["user_docs"]' ]
   # exactly the documented keys — an envelope key (pr, issue, ts, wall_s) here
   # would give a consumer two places to read one fact
-  [ "$(jq -c 'keys' <<<"$output")" = '["clean_stop","convergence_failures","dependency_precheck","escalation_status","fallbacks_fired","gate_verdict","mode","review_loop_run_ids","risk","session_mode","session_mode_source","story_spec_present"]' ]
+  [ "$(jq -c 'keys' <<<"$output")" = '["clean_stop","convergence_failures","dependency_precheck","escalation_status","fallbacks_fired","gate_verdict","mode","resumed_from","review_loop_run_ids","risk","session_mode","session_mode_source","story_spec_present"]' ]
   build "$SUCCESS" --print-outcome
   [ "$status" -eq 0 ]
   [ "$output" = "success" ]
@@ -464,5 +464,32 @@ clean_state() {  # $1 = escalation_status, $2 = convergence_failures JSON, $3 = 
   for f in too-few-rounds trend stuck critical cap; do
     build "$(clean_state BUDGET_EXHAUSTED "[\"$f\"]")"
     [ "$f: $status" = "$f: 0" ]
+  done
+}
+
+# --- resumed_from (#2920) -------------------------------------------------------
+
+@test "#2920 resumed_from records checkpoint, clean_stop or null, and null when absent" {
+  build "$SUCCESS"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '.resumed_from' <<<"$output")" = 'null' ]
+  build "$(jq -c '.resumed_from = null' <<<"$SUCCESS")"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '.resumed_from' <<<"$output")" = 'null' ]
+  local r
+  for r in checkpoint clean_stop; do
+    build "$(jq -c --arg r "$r" '.resumed_from = $r' <<<"$SUCCESS")"
+    [ "$r: $status" = "$r: 0" ]
+    [ "$(jq -r '.resumed_from' <<<"$output")" = "$r" ]
+  done
+}
+
+@test "#2920 resumed_from outside its enum, or not a string, is refused" {
+  local bad
+  for bad in '"session"' 'true' '1' '"Checkpoint"'; do
+    build "$(jq -c --argjson b "$bad" '.resumed_from = $b' <<<"$SUCCESS")"
+    [ "$bad: $status" = "$bad: 1" ]
+    [ -z "$output" ]
+    contains "$stderr" "resumed_from must be checkpoint | clean_stop | null"
   done
 }
