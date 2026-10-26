@@ -179,6 +179,13 @@ When `start` failed there is no run file: pass only the sink flags from the
 `null`; never pass the string `null`. An epic child that E3 drives passes its
 own child run's `loop_args` (`reference/epic-telemetry.md` step 2).
 
+**Every blocking-loop invocation carries `--checkpoint <mode>` (#2920).** The
+template above predates checkpoints too: append the session mode §0a resolved,
+round 1 and every `--resume` alike, so each round the loop consolidates on a
+green gate is pushed as a wip checkpoint (`reference/checkpoint.md`). Never pass
+it to the promotion sub-loop. It needs `--issue`, which the template already
+carries.
+
 **Pass the loop's logical start on round 1 (#1976).** Append `--t0 "$T0"` —
 the `T0` step 1 captured before `T` (`core.md`) — to the invocation on round
 1's fresh start only. The loop stamps it as `<work-dir>/.t0`, so the terminal

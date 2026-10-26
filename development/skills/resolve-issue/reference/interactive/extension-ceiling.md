@@ -6,7 +6,9 @@ invocation in step 5 (`reference/interactive/extension-grant.md`) predates
 story-mode telemetry and sits in a byte-frozen span, so this is recorded here:
 append the run's `loop_args` (Step 0, `reference/telemetry.md`) to it, so the
 post-grant record is parented to the same resolve-issue run and lands in the
-same sink as the escalation it follows.
+same sink as the escalation it follows. On the blocking loop it carries
+`--checkpoint <mode>` too (#2920), so a granted round is checkpointed like any
+other.
 
 **The granted ceiling is written to the work-dir, not remembered (#1576).** Step
 5 (`reference/interactive/extension-grant.md`) says "ceiling raised by 3", and

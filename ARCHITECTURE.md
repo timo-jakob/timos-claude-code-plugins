@@ -4759,10 +4759,12 @@ are the auto-continued clear false trips (a subset of `blocking`,
 ## Review-loop state machine (#562)
 
 `resolve-story-loop.zsh` ties the gate (#559), the diff-scoped panel (#560), and
-the consolidator (#561) into an autonomous implement→review→fix loop that runs
-**entirely in the worktree** — nothing is pushed and no PR is opened until it
-exits `CONVERGED` (0). **`CONVERGED` is the only review-loop ending that opens a
-PR**; no escalation has ever opened one. The residue terminal #1435 added beside
+the consolidator (#561) into an autonomous implement→review→fix loop. **No PR
+is opened until it exits `CONVERGED` (0); the only earlier pushes are wip
+checkpoint commits to the feature branch, with no PR** (#2920). A wip commit
+carries no `[skip ci]`, so a repo whose CI runs on every push runs it on those
+too. **`CONVERGED` is the only review-loop ending that opens a PR**; no
+escalation has ever opened one. The residue terminal #1435 added beside
 it (exit 14) is retired by #2580 — see *The residue terminal — retired* below.
 It sits in
 `/development:resolve-issue` between validate
@@ -6630,10 +6632,13 @@ repeated sink flag, an empty issue reference, or more than one issue reference.
 A leading `~` in a sink path is expanded first, since a slash command's
 arguments reach the shell unexpanded. `--no-review` is the
 skill's own review-loop switch, handed back as `no_review: true`. `--resume`
-(#2579) is handed back as `resume: true`: an attended run continues an
-unattended clean stop from its last round, through the interactive extension.
-`clean-stop.zsh read` refuses it in mode `unattended` (exit 4) and when no
-marker is kept (exit 3).
+(#2579) is handed back as `resume: true`: an attended run continues a kept
+clean stop from its last round, through the interactive extension, or else
+(#2920) the run's last checkpoint. `clean-stop.zsh read` refuses it in mode
+`unattended` (exit 4); with no clean stop kept (exit 3) the run reads the
+checkpoint instead, and `checkpoint.zsh read` refuses in mode `unattended`
+(exit 4), with no checkpoint either (exit 3), and when the remote branch head is
+not the checkpoint's SHA (exit 5).
 
 **The clean stop (#2579).** An unattended run that exits `BUDGET_EXHAUSTED` or
 `ESCALATE_NO_CONVERGENCE` and is not granted rounds automatically (#2576: the
@@ -6652,6 +6657,32 @@ read` moves the work-dir's `.telemetry-run-ids` ledger aside to `stopped-run-ids
 in the durable directory, so a resumed run's record never lists the stopped
 run's review-loop ids again. A resumed run that opens its PR removes the durable
 directory.
+
+**Checkpoints (#2920).** A run killed from outside — the usage limit, a closed
+terminal, a crash — never reaches the clean stop, so every single-issue run,
+attended or unattended, keeps its loop work-dir and status file in that same
+durable directory and checkpoints as it goes. `checkpoint.zsh write` commits
+the worktree as `wip(resolve-issue #<N>): implementation` at the first green
+gate (round 0) and as `wip(resolve-issue #<N>): round <k>` after every round
+`resolve-story-loop.zsh --checkpoint <mode>` consolidates on a green gate. It
+pushes the commit as the Maintenance App, then keeps the round's loop state
+beside the marker, then renames the `checkpoint/v1` marker, `checkpoint.json`,
+into place. So a kill leaves either the old marker or a new one whose SHA is on
+the remote. The marker records `{issue, branch, sha, last_round, ceiling,
+grants, work_dir, status_file, state_dir, run_id, session_mode}`. A checkpoint
+is never fatal: a failed push leaves the previous marker standing. On
+`--resume` with no clean stop kept, `checkpoint.zsh read` refuses when the
+remote head is not the marker's SHA. Otherwise it restores the kept state,
+dropping any half-finished later round. The run then skips §0b–§3 and starts
+the loop fresh at round 1 from `last_round: 0`, or with the loop's `--resume` at
+round k+1. A clean stop supersedes a checkpoint: writing one deletes
+`checkpoint.json`, and when both are found `clean-stop.zsh read` resumes the
+clean stop, says so and deletes the checkpoint. A fresh attended run that finds
+either marker moves the durable directory to `<N>.superseded-<UTC stamp>/`,
+deleting nothing. Its first checkpoint push then uses
+`--force-with-lease=<branch>:<marker SHA>`. A run that opens its PR commits on
+top of its wip commits, never rewriting a pushed one, and clears the durable
+directory; squash auto-merge folds them into one commit on `main`.
 
 **Mechanics — `story-telemetry.zsh`, three deterministic steps.**
 
@@ -6717,6 +6748,7 @@ record's `run_id`, as it always was.
 | `session_mode_source` | `env` (the `resolve_session` setting decided) \| `inferred` (the run's own inference did) \| `null`. The two are a pair: both `null` or both set, and the builder refuses one without the other |
 | `clean_stop` | `true` only for the unattended clean stop (#2579); `false` on every other ending, today's escalation terminal included. The builder refuses `true` unless the run is `escalated`, in session mode `unattended`, on `BUDGET_EXHAUSTED` or `ESCALATE_NO_CONVERGENCE` |
 | `convergence_failures` | the clean stop's failing conditions, drawn from `too-few-rounds`, `trend`, `stuck`, `critical`, `cap`; non-empty exactly when `clean_stop` is `true`, else `[]` |
+| `resumed_from` | `checkpoint` \| `clean_stop` \| `null` (#2920) — the kept state a `--resume` continued; `null` on a run that was not resumed, so a record from before the key reads the same |
 
 The builder's state carries a fine-grained ending — `pr-opened`, `gate-parked`,
 `precheck-parked`, `escalated`, `failed` — plus the facts above and `pr`, and

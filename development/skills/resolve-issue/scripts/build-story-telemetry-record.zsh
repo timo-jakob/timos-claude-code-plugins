@@ -36,7 +36,10 @@
 #     "session_mode_source": "env" | "inferred" | null,     resolve-session.zsh)
 #     "clean_stop": bool,               (#2579) the unattended clean stop
 #     "convergence_failures": ["too-few-rounds" | "trend" | "stuck"
-#                              | "critical" | "cap", …] }
+#                              | "critical" | "cap", …],
+#     "resumed_from": "checkpoint" | "clean_stop" | null }  (#2920: the kept
+#                                       state a --resume continued; null on a
+#                                       run that was not resumed)
 # Absent optional keys read as null / false / []. The two session keys are a
 # pair: both null, or both set — one without the other is refused.
 # `clean_stop: true` is accepted only on an `escalated` run in session mode
@@ -186,6 +189,8 @@ problems=$(print -r -- "$state" | jq -r '
       ( if ((($s.convergence_failures | dflt([])) | type) != "array")
           or ([ ($s.convergence_failures | dflt([]))[] | select((type != "string") or (enum(["too-few-rounds","trend","stuck","critical","cap"]) | not)) ] | length > 0)
         then "convergence_failures must be an array drawn from too-few-rounds | trend | stuck | critical | cap" else empty end ),
+      ( if ($s.resumed_from == null or ($s.resumed_from | type == "string" and enum(["checkpoint","clean_stop"]))) | not
+        then "resumed_from must be checkpoint | clean_stop | null" else empty end ),
       ( if $s.clean_stop == true and ($o != "escalated" or $s.session_mode != "unattended"
              or (($es | type) != "string") or ($es | enum(["BUDGET_EXHAUSTED","ESCALATE_NO_CONVERGENCE"]) | not))
         then "clean_stop needs an escalated, unattended run whose escalation_status is BUDGET_EXHAUSTED or ESCALATE_NO_CONVERGENCE" else empty end ),
@@ -258,5 +263,6 @@ print -r -- "$state" | jq -c '
       session_mode: $s.session_mode,
       session_mode_source: $s.session_mode_source,
       clean_stop: ($s.clean_stop | dflt(false)),
-      convergence_failures: ($s.convergence_failures | dflt([]))
+      convergence_failures: ($s.convergence_failures | dflt([])),
+      resumed_from: $s.resumed_from
     }' || { print -u2 -- "build-story-telemetry-record: failed to build payload"; exit 1 }

@@ -146,3 +146,5 @@ recorded here: an escalation is one of the run's endings. Emit its single
 comment is an ending too, and emits `failed`. The procedure is
 `reference/telemetry.md` step 4. It is never fatal, and an epic child that E3
 drives emits from its own child run (`reference/epic-telemetry.md` step 2).
+Then run `checkpoint.zsh clear --repo-dir <worktree> --issue <N>` (#2920), so a
+later `--resume` never re-runs an escalation that already ended.

@@ -357,14 +357,14 @@ flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
   local skill ext
   skill="$(flat "$REPO_ROOT/development/skills/resolve-issue/SKILL.md")"
   ext="$(flat "$REPO_ROOT/development/skills/resolve-issue/reference/interactive/extension.md")"
-  contains "$skill" 'Exit 4 (mode `unattended`) and exit 3 (no marker) refuse the resume: relay the stderr line, emit the run'"'"'s record as `failed`, and stop.'
-  contains "$skill" 'On exit 0, run the dependency precheck below as usual; on `PROCEED`, check out the marker'"'"'s `branch` from `origin`'
+  contains "$skill" 'Exit 4 (mode `unattended`) refuses the resume: relay the stderr line, emit the run'"'"'s record as `failed`, and stop.'
+  contains "$skill" 'On exit 0, note `resumed_from: clean_stop`, run the dependency precheck below as usual; on `PROCEED`, check out the marker'"'"'s `branch` from `origin`'
   contains "$skill" 'on `PROCEED`, check out the marker'"'"'s `branch` from `origin` and run §1b (detect the repo type and load its profile), but skip §0b, §1, §2 and §3 (the stopped run passed the readiness gate, so record `gate_verdict: READY`).'
   contains "$skill" 'Then enter the interactive extension with the marker (`reference/interactive/extension.md`).'
-  contains "$skill" '**In mode `unattended` they are the durable pair** (#2579)'
+  contains "$skill" '**In every session mode they are the durable pair** (#2579, #2920)'
   contains "$skill" '[--telemetry-dir DIR] [--no-review] [--resume]`) and stop.'
   contains "$ext" 'Every resume invocation of the loop passes the marker'"'"'s `work_dir` as `--work-dir` and its `status_file` as `--status-file`, so the loop continues from the marker'"'"'s `last_round`.'
-  contains "$ext" 'When the resumed run opens its PR, run `clean-stop.zsh clear --repo-dir <worktree> --issue <N>`; any other ending keeps the durable directory.'
+  contains "$ext" 'When the resumed run has opened its PR and §7 has emitted its record, run `clean-stop.zsh clear --repo-dir <worktree> --issue <N>`; any other ending keeps the durable directory.'
 }
 
 @test "#2579 AC5 ARCHITECTURE.md names --resume, clean_stop and convergence_failures in the invocation line and the telemetry contract" {
@@ -383,8 +383,7 @@ flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
   esc="$(flat "$REPO_ROOT/development/skills/resolve-issue/reference/escalation.md")"
   ext="$(flat "$REPO_ROOT/development/skills/resolve-issue/reference/interactive/extension.md")"
   contains "$skill" '**Without `--resume`**, an unattended run always runs `"<skill-base-dir>/scripts/clean-stop.zsh" clear --repo-dir <worktree> --issue <N>` before round 1, whether or not a marker exists, so it never adopts a stopped run'"'"'s work-dir, status file or grant ledger.'
-  contains "$skill" 'An attended run runs `clean-stop.zsh read --repo-dir <worktree> --issue <N> --mode attended` instead, and only on its exit 0 says once that a kept clean stop exists.'
-  contains "$skill" 'It then starts fresh in its scratch work-dir and leaves the kept one alone.'
+  contains "$skill" 'An attended run moves any kept state aside instead, deleting nothing.'
   contains "$esc" 'Write the marker beside the durable work-dir the run has been using (`clean-stop.zsh dir`, §3.5):'
   contains "$esc" 'An exit 2 is your own call: a passing verdict without `--cap-reached` was a grant, not a stop.'
   contains "$esc" 'Build the comment with the clean-stop format, then post it and add `needs-human-decision` as the terminal'"'"'s step 3 does:'
@@ -400,7 +399,7 @@ flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
   arch="$(flat "$REPO_ROOT/ARCHITECTURE.md")"
   contains "$skill" 'check the kept clean stop before anything else: `"<skill-base-dir>/scripts/clean-stop.zsh" read --repo-dir <worktree> --issue <N> --mode <mode>`.'
   contains "$skill" '`clean-stop.zsh dir --repo-dir <worktree> --issue <N>` prints `work_dir` and `status_file` under `$HOME/.claude/resolve-issue/<repo-slug>/<N>/`, outside every checkout'
-  contains "$skill" 'can find. Create the work-dir before round 1.'
+  contains "$skill" 'can find. Create the work-dir before round 1, and pass `--checkpoint <mode>` on every blocking-loop invocation.'
   contains "$esc" 'An unattended `BUDGET_EXHAUSTED` / `ESCALATE_NO_CONVERGENCE` that the automatic grant does not converge takes the clean stop below instead of the terminal.'
   contains "$esc" '1. Push the branch as the bot and create no PR object, exactly as the terminal'"'"'s step 1.'
   grep -qxF '   "<skill-base-dir>/scripts/clean-stop.zsh" write --repo-dir <worktree> \' "$escf"

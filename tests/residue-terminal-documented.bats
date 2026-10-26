@@ -194,7 +194,7 @@ _invariant_in_awaiting_fix_branch() {
 
 @test "#2580 AC1 the loop's header and exit table state the retirement" {
   local t; t="$(flat "$SCRIPTS/resolve-story-loop.zsh")"
-  grep -q 'opened until this exits CONVERGED (0), the only review-loop ending that opens a # PR' <<< "$t"
+  grep -q 'No PR is opened until this exits CONVERGED (0), the only # review-loop ending that opens a PR' <<< "$t"
   grep -qE '^#   14  retired by #2580' "$SCRIPTS/resolve-story-loop.zsh"
   # ...and nothing can emit it: no status, no code, no predicate, no next_ref row
   run ! grep -q 'loop_status="CONVERGED_WITH_RESIDUE"' "$SCRIPTS/resolve-story-loop.zsh"
