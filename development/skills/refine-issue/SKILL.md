@@ -366,8 +366,9 @@ Each default does two things:
    <choice>`.
 2. **Records one Decisions-taken entry**, with the question, the choice and the
    evidence from the table below. Append it as `{"kind": "implementation",
-   "question": …, "answer": <choice>, "rationale": <evidence>}` to the `auto`
-   array of `<scratch>/conductor-defaults.json`, created as `{"auto": []}`. At
+   "question": …, "answer": <choice>, "rationale": <evidence>, "overrule": <how
+   to overrule>}` to the `auto` array of `/tmp/conductor-defaults.json`, created
+   as `{"auto": []}`; Step 0 deletes it with the parked state. At
    a Step 3 write-back that file counts as one of this issue's round split files
    for the Decisions taken section, but it is never part of a parked state's
    `decisions`. When the run ends with no write-back after the default — Step
@@ -380,7 +381,7 @@ Each default does two things:
 | Default | Question | Choice | Evidence | How to overrule |
 |---|---|---|---|---|
 | Step 0 | Refine an issue that is not marked `needs-refinement`? | Refined it without the label. | Nothing is written without Step 2's approval of the exact rewrite. | Restore the body from the issue's edit history. |
-| Step 1 | Clear `needs-refinement` on a story the gate now passes? | Cleared it through Step 5's `READY` branch. | Step 5 removes the label only on a `READY` verdict. | Re-add the label, or re-run this skill to refine it anyway. |
+| Step 1 | Clear `needs-refinement` on a story the gate now passes? | Cleared it through Step 5's `READY` branch. | Step 5 removes the label only on a `READY` verdict. | Re-add the label. |
 | Step 5 | Loop again after a re-gate that still rejects? | Looped back to Step 2 with the gate's remaining reasons as objections. | The label stays, and the human can stop from inside the loop. | Stop the loop; the label stays as the resume signal. |
 
 ## Step 0 — fetch, and check the precondition
@@ -412,7 +413,7 @@ gh issue view <N> --json number,title,body,state,labels,url,comments
   echo "carry into Step 7: T0=$T0 REPO_ROOT=$REPO_ROOT"
   # A stale parked-state from a PREVIOUS epic-walk child would otherwise be read
   # as this child's, giving its record the wrong park_type.
-  rm -f /tmp/parked-state.json /tmp/parked-comment.md /tmp/parked.json
+  rm -f /tmp/parked-state.json /tmp/parked-comment.md /tmp/parked.json /tmp/conductor-defaults.json
   ```
 
   `T0` is **per-run, not per-session**: `wall_s` and `ts` are measures of *one*
@@ -526,8 +527,7 @@ pre-flight decides, and only its clear block removes it.
 
 If it already returns `READY`, the story now passes: **clear the label through
 Step 5 without asking** — no loop needed — and take the default with its notice
-(*Defaults taken instead of asking*, above). A human who wants it refined anyway
-re-runs this skill: with the label gone, Step 0 now proceeds. That
+(*Defaults taken instead of asking*, above). That
 shortcut is still a run: set `PARK_TYPE=""; ROUNDS=0; RAISED=0; RESOLVED=0` —
 measured zeros, assigned deliberately, so a no-op never reads as a hard-won
 convergence — then run **Step 5's `READY` branch**, which assigns

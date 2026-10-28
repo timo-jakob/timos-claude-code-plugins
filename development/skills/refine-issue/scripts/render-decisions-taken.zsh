@@ -48,6 +48,6 @@ jq -r '
       ($d[] | "- **question:** \(.question | line)",
               "  **choice:** \(.answer | line)",
               "  **evidence:** \(.rationale | line)",
-              "  **how to overrule:** edit this entry and the story text that rests on it in the issue body.")
+              "  **how to overrule:** \(.overrule // "edit this entry and the story text that rests on it in the issue body." | line)")
     end
 ' "$split"

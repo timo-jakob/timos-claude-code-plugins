@@ -37,7 +37,7 @@ before it ships, and a row whose text moved is updated here.
 | RS-07 | reference/promotion/gate.md | `` `AskUserQuestion` turns, and each `bash` invocation `` | intent | human-owned: as above |
 | RS-08 | reference/interactive/extension.md | `` Show all of it *before* the `AskUserQuestion` `` · `` **Offer the choice** with `AskUserQuestion` `` | intent | human-owned: more rounds cost tokens and accept risk; out of scope by design |
 | RS-09 | SKILL.md | `without asking, in every session mode` · `RS-09 — the parked follow-up default (#2903)` | implementation | **default:** run `/development:refine-issue <n> --follow-up` for each parked follow-up in every session mode, as an unattended run already did |
-| RS-10 | SKILL.md | `ask the human to fix the` · `halt and ask rather than proceeding` · `has no human to ask, so "ask the human to` | gap | human-owned: an epic body's mistyped or near-miss child lines need the author's reading |
+| RS-10 | SKILL.md | `ask the human to fix the` · `halt and ask rather than proceeding` · `→ **halt** and ask for` · `has no human to ask, so "ask the human to` | gap | human-owned: an epic body's mistyped or near-miss child lines need the author's reading |
 | RS-11 | reference/checkpoint.md | `so ask the human before you discard them` | intent | human-owned: discarding a half-finished round's uncommitted changes loses data |
 | RS-12 | reference/checkpoint.md | `ask the human whether to delete it` | intent | human-owned: deleting an old run's local branch cannot be undone from this run |
 

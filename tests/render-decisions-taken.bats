@@ -61,6 +61,12 @@ auto() {
   contains "$output" '  **choice:** jq, not awk'
 }
 
+@test "an entry that carries its own overrule renders it instead of the generic one" {
+  jq -nc --argjson m "$(auto implementation 'Refine?' 'yes' 'r')" '{auto: [$m + {overrule: "Re-add the label."}]}' > "$SPLIT"
+  run -0 zsh "$R" --split "$SPLIT"
+  contains "$output" '  **how to overrule:** Re-add the label.'
+}
+
 @test "an unknown flag, a missing flag, an absent file or a split without an auto array is exit 2" {
   run -2 --separate-stderr zsh "$R" --bogus
   contains "$stderr" "usage: render-decisions-taken.zsh --split <file>"

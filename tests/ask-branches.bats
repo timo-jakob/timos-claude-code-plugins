@@ -21,6 +21,12 @@ setup() {
 
 flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
 
+# num:window per line: that line joined with the next, emphasis stripped, so a
+# phrase wrapped across a line break or split by ** still matches.
+windows() {
+  awk '{ gsub(/\*/, ""); sub(/^[ \t]+/, "") } NR > 1 { print NR - 1 ":" prev " " $0 } { prev = $0 } END { if (NR) print NR ":" prev }' "$1"
+}
+
 # One TSV line per anchor: id, file, anchor, kind, outcome. A row is a table
 # line starting `| RS-` or `| RF-`; its anchors cell holds code spans joined by
 # " · ", a span with a backtick inside written with double backticks.
@@ -56,10 +62,10 @@ unanchored() {
       num="${line%%:*}"; text="${line#*:}"; found=0
       while IFS=$'\t' read -r _ af anchor _ _; do
         [ "$af" = "$f" ] || continue
-        case "$text" in *"$anchor"*) found=1; break ;; esac
+        case "$text" in *"${anchor//\*/}"*) found=1; break ;; esac
       done <<< "$tsv"
       [ "$found" -eq 1 ] || printf '%s:%s:%s\n' "$f" "$num" "$text"
-    done < <(grep -n -i -E "$ASK_RE" "$dir/$f" || true)
+    done < <(windows "$dir/$f" | grep -i -E "$ASK_RE" || true)
   done < <(scanned "$dir")
 }
 
@@ -139,6 +145,10 @@ stale() {
   printf '%s\n' '| RS-02 | SKILL.md | then ask once | intent | human-owned: x |' >> "$d/reference/ask-branches.md"
   run rows "$d/reference/ask-branches.md"
   contains "$output" $'RS-02\tSKILL.md\tUNQUOTED:then ask once'
+  printf '%s\n' 'Then **halt** and ask.' '' 'Then ask for native' 'sub-issues.' > "$d/SKILL.md"
+  run unanchored "$d" "$d/reference/ask-branches.md"
+  contains "$output" 'SKILL.md:1:Then halt and ask.'
+  contains "$output" 'SKILL.md:3:Then ask for native sub-issues.'
 }
 
 # --- the four implementation defaults --------------------------------------------
@@ -153,6 +163,8 @@ stale() {
   contains "$r" 'there is no PR body, so the same entry goes in the run'
   run -1 grep -qF 'Decision taken (not asked)' <<< "$t"
   run -1 grep -qF 'attended run ask once' <<< "$t"
+  run -1 grep -qF 'asks once, listing the follow-ups' "$REPO_ROOT/docs/how-to/let-refine-issue-answer-confident-questions.md"
+  run -1 grep -qF 'after one question on an attended run' "$REPO_ROOT/ARCHITECTURE.md"
   run -1 grep -qF 'auto-refinement recommended' <<< "$t"
 }
 
@@ -161,12 +173,14 @@ stale() {
   contains "$t" 'Otherwise, if the label is **absent**, **proceed without asking**, and take the default with its notice (*Defaults taken instead of asking*, above)'
   run -1 grep -qF 'refine it anyway?' <<< "$t"
   run -1 grep -qiF 'warn and confirm' <<< "$t"
+  contains "$(flat "$REPO_ROOT/docs/explanation/workflow-refine-issue.md")" 'If the `needs-refinement` label is missing it refines anyway, and says so.'
 }
 
 @test "RF-03: refine-issue clears the label of an already-READY story without asking" {
   local t; t="$(flat "$REFINE/SKILL.md")"
   contains "$t" 'If it already returns `READY`, the story now passes: **clear the label through Step 5 without asking** — no loop needed — and take the default with its notice'
-  contains "$t" 'A human who wants it refined anyway re-runs this skill: with the label gone, Step 0 now proceeds.'
+  run -1 grep -qF 're-run' <<< "$(grep -F '| Step 1 |' "$REFINE/SKILL.md")"
+  contains "$(flat "$REPO_ROOT/docs/explanation/workflow-refine-issue.md")" 'If the story is already READY, the skill clears the label and says so.'
   run -1 grep -qF 'offer to just clear the label' <<< "$t"
   run -1 grep -qF 'ask whether they want to refine anyway' <<< "$t"
   run -1 grep -qF 'human declined' <<< "$t"
@@ -178,6 +192,7 @@ stale() {
   contains "$t" 'The unattended follow-up mode never loops back: it takes the stop below, its deferred route.'
   contains "$t" '**A stop the human takes in that loop before its next Step 3 write-back is a recorded ending, but NOT Step 2'
   run -1 grep -qF 'Offer another loop (back to Step 2) or to stop here' <<< "$t"
+  contains "$(flat "$REPO_ROOT/docs/explanation/workflow-refine-issue.md")" 'On NEEDS_REFINEMENT it keeps the label and loops back to step 2; you can still stop there as `deferred`.'
 }
 
 @test "refine-issue's defaults print one line and record one Decisions-taken entry, in the body or a comment" {
@@ -189,6 +204,8 @@ stale() {
   contains "$t" 'The body is never edited only to record a default.'
   contains "$t" 'drop it from the file, so nothing records it twice.'
   contains "$t" '| Step 5 | Loop again after a re-gate that still rejects? |'
+  contains "$t" 'Append it as `{"kind": "implementation", "question": …, "answer": <choice>, "rationale": <evidence>, "overrule": <how to overrule>}` to the `auto` array of `/tmp/conductor-defaults.json`, created as `{"auto": []}`; Step 0 deletes it with the parked state.'
+  contains "$(flat "$REPO_ROOT/docs/how-to/let-refine-issue-answer-confident-questions.md")" 'Three questions are no longer asked at all, whatever the threshold: whether to refine an issue that is not marked `needs-refinement`, whether to clear the label of a story that already passes, and whether to loop again after a failed re-gate. The skill takes the safe answer to each, prints one line, and records it under **Decisions taken**: in the body when it writes one, else as a one-line comment.'
 }
 
 @test "refine-issue's defaults table, its READY shortcut and its guardrail say the threshold decides none of them" {

@@ -113,8 +113,8 @@ Each one links back to the story it came from. That story was already refined,
 so `/development:resolve-issue` refines these follow-ups for you, with
 `/development:refine-issue <issue> --follow-up`, before it finishes:
 
-- **When it runs.** On an unattended run, without asking. On a run you are
-  driving, it asks once, listing the follow-ups, and recommends refining them.
+- **When it runs.** Without asking, on every run, and the run records it under
+  **Decisions taken**.
 - **What it uses.** The source story's text and story spec, and the slice the
   follow-up covers: the split child's criteria, or the parked finding. It uses
   the same threshold as above to answer the refiner's questions.

@@ -23,7 +23,7 @@ before it ships, and a row whose text moved is updated here.
 |---|---|---|---|---|
 | RF-01 | SKILL.md | `ask for native sub-issues, or for the list` · `halt and ask rather than` · `ask for native sub-issues or for the list` | gap | human-owned: only the author knows which issues an epic body's near-miss or mistyped lines meant as its children |
 | RF-02 | SKILL.md | `## Defaults taken instead of asking (#2903)` · `if the label is **absent**, **proceed` | implementation | **default:** proceed without the label, with a notice; nothing is written without the approval of the exact rewrite |
-| RF-03 | SKILL.md | `Step 5 without asking** — no loop needed` | implementation | **default:** clear the label through Step 5's `READY` branch; a human who wants it refined anyway re-runs the skill, and RF-02 then proceeds |
+| RF-03 | SKILL.md | `Step 5 without asking** — no loop needed` | implementation | **default:** clear the label through Step 5's `READY` branch |
 | RF-04 | SKILL.md | `relay these as before` | intent / gap | human-owned: the refiner's own questions, governed by the auto-accept threshold and #2898's refiner children |
 | RF-05 | SKILL.md | `explicit approval of the exact rewrite` | intent | human-owned: auto-accept never approves a rewrite (#2898) |
 | RF-06 | SKILL.md | `show no children and ask once` · `` then ask once (`AskUserQuestion`) `` | intent | human-owned: a split restructures the backlog |
