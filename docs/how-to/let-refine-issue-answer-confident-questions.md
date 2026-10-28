@@ -93,10 +93,13 @@ body.
 
 ## What it does not do
 
-It never approves the rewrite for you. It never answers the other prompts
-either: whether to refine an issue that is not marked `needs-refinement`,
-whether to just clear the label, or whether to loop again after a failed
-re-gate.
+It never approves the rewrite for you. The threshold decides nothing else
+either. Three questions are no longer asked at all, whatever the threshold:
+whether to refine an issue that is not marked `needs-refinement`, whether to
+clear the label of a story that already passes, and whether to loop again after
+a failed re-gate. The skill takes the safe answer to each, prints one line, and
+records it under **Decisions taken**: in the body when it writes one, else as a
+one-line comment.
 
 Scores come from the model and are not calibrated measurements. Start with
 the default `1` or a high value, and lower it once you trust what gets

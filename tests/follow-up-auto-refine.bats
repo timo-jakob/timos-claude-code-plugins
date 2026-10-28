@@ -500,13 +500,12 @@ _turn()  { printf '%s\n' "{\"questions\":$1,\"resolved_objections\":$2${3-$DRAFT
   local t; t="$(flat "$REPO_ROOT/development/skills/resolve-issue/SKILL.md")"
   grep -qF '**First, refine the run' <<< "$t"
   grep -qF 'invoke `/development:refine-issue <issue> --follow-up` for each issue it prints' <<< "$t"
-  grep -qF 'On an attended run ask once, listing them, with auto-refinement recommended' <<< "$t"
   grep -qF '**A follow-up that parks never stops this run or its epic walk**' <<< "$t"
   grep -qF 'run `follow-up-origin.zsh parked-issues --progress <work-dir>/progress.md`; exit 1 means nothing was parked.' <<< "$t"
   grep -qF 'Once per run, before the record, at every ending after a review loop ran, escalations included — the §6 PR, #2579' <<< "$t"
   grep -qF 's clean stop and an escalation terminal, where a parked blocker' <<< "$t"
   grep -qF 'usually ends (`ESCALATE_NO_CONVERGENCE`)' <<< "$t"
-  grep -qF 'On an unattended run (`resolve-session.zsh`, #2575) do it without asking.' <<< "$t"
+  grep -qF 'Do it without asking, in every session mode (`resolve-session.zsh`, #2575)' <<< "$t"
 }
 
 @test "ARCHITECTURE.md and the how-to state the mode and the auto_refinement key" {

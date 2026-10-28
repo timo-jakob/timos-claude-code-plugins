@@ -243,7 +243,7 @@ this is the guided pass that clears them.
    reported (named as a self-reference that was not migrated — necessarily a
    **tracker** line, since a mistyped child ref halts the walk at step 1)
    — and, separately, any that ended in a **failure**
-   state: *skipped (human declined)*, *label-removal failed*, *parked (comment
+   state: *label-removal failed*, *parked (comment
    build failed)*, or *parked (resume state not saved)* when the comment built
    but did not post. Never fold a failure into "no work to do": a failed child
    reading as a benign zero is how it gets forgotten. **A ready child's line also notes its expected
@@ -350,6 +350,39 @@ refiner for that round once; a second one stops the mode the same way.
 else.** **A park never stops the caller**: report it and return, so the calling
 run, its epic walk and the next follow-up go on.
 
+## Defaults taken instead of asking (#2903)
+
+Three of this skill's flow questions have one safe, reversible answer. Under
+ARCHITECTURE.md's *Decision rights — question taxonomy and the Decisions-taken
+record* (#2899) they are `implementation`, so you take the answer instead of
+asking: Step 0's missing-label precondition, Step 1's `READY` shortcut and Step
+5's still-rejected re-gate. `reference/ask-branches.md` inventories every ask
+branch this skill has, with its kind; every `intent` or `gap` branch stays with
+the human. The unattended follow-up mode keeps its own fixed answers.
+
+Each default does two things:
+
+1. **Prints one line** in your terminal output: `Decision taken (not asked):
+   <choice>`.
+2. **Records one Decisions-taken entry**, with the question, the choice and the
+   evidence from the table below. Append it as `{"kind": "implementation",
+   "question": …, "answer": <choice>, "rationale": <evidence>}` to the `auto`
+   array of `<scratch>/conductor-defaults.json`, created as `{"auto": []}`. At
+   a Step 3 write-back that file counts as one of this issue's round split files
+   for the Decisions taken section, but it is never part of a parked state's
+   `decisions`. When the run ends with no write-back after the default — Step
+   1's shortcut, a parked exit or a stop — post each pending entry as a
+   one-line issue comment instead: `Decisions taken: <question> → <choice>
+   (evidence: <evidence>; to overrule: <how to overrule>)`. The body is never
+   edited only to record a default. Once an entry is in the body or a comment,
+   drop it from the file, so nothing records it twice.
+
+| Default | Question | Choice | Evidence | How to overrule |
+|---|---|---|---|---|
+| Step 0 | Refine an issue that is not marked `needs-refinement`? | Refined it without the label. | Nothing is written without Step 2's approval of the exact rewrite. | Restore the body from the issue's edit history. |
+| Step 1 | Clear `needs-refinement` on a story the gate now passes? | Cleared it through Step 5's `READY` branch. | Step 5 removes the label only on a `READY` verdict. | Re-add the label, or re-run this skill to refine it anyway. |
+| Step 5 | Loop again after a re-gate that still rejects? | Looped back to Step 2 with the gate's remaining reasons as objections. | The label stays, and the human can stop from inside the loop. | Stop the loop; the label stays as the resume signal. |
+
 ## Step 0 — fetch, and check the precondition
 
 ```bash
@@ -409,10 +442,10 @@ gh issue view <N> --json number,title,body,state,labels,url,comments
   resolve-issue's pre-flight remains the backstop.
 - **Precondition — the `needs-refinement` label.** This skill is for stories the
   gate sent back. A live size objection satisfies it: resolve-issue sent the
-  story here, so do not ask. Otherwise, if the label is **absent**, **warn and
-  confirm** before proceeding ("this issue isn't marked `needs-refinement`;
-  refine it anyway?") — you can refine a story that was never formally gated,
-  but the human should choose that deliberately. If they decline, stop.
+  story here, so do not ask. Otherwise, if the label is **absent**, **proceed
+  without asking**, and take the default with its notice (*Defaults taken instead
+  of asking*, above): you can refine a story that was never formally gated, and
+  nothing is written without Step 2's approval of the exact rewrite.
 - Read the issue's **prior gate comment(s)** in the thread — the refinement
   questions the gate already posted are the objections you start from.
 - **Resume a parked session if one exists (#578).** A prior run may have taken a
@@ -491,8 +524,10 @@ exit 5 leaves the original's labels as they were. A rewrite that narrows the
 story instead, or any typed parked exit, leaves it on: resolve-issue's next
 pre-flight decides, and only its clear block removes it.
 
-If it already returns `READY`, tell the human the story now passes and offer to
-just clear the label (Step 5) — no loop needed. **If they accept**, that
+If it already returns `READY`, the story now passes: **clear the label through
+Step 5 without asking** — no loop needed — and take the default with its notice
+(*Defaults taken instead of asking*, above). A human who wants it refined anyway
+re-runs this skill: with the label gone, Step 0 now proceeds. That
 shortcut is still a run: set `PARK_TYPE=""; ROUNDS=0; RAISED=0; RESOLVED=0` —
 measured zeros, assigned deliberately, so a no-op never reads as a hard-won
 convergence — then run **Step 5's `READY` branch**, which assigns
@@ -501,13 +536,7 @@ record. Never set `STATE_OUTCOME="refined-ready"` here: it would claim `success`
 for a story whose label the removal may have failed to clear. Then **skip Step
 6** — nothing changed, so there is no before/after trail to post — and stop
 after Step 7, which emits **at most** one record (none if Step 5's label
-removal failed and the label is still set). **If
-they decline**, ask whether they want to refine anyway: if **yes**, continue to
-Step 2 and this **is** a run (Step 5 decides its outcome); if they decline **and
-stop**, nothing happened — no label change, no refinement — so emit **no**
-record; it was not a run. (In an epic walk that ends **this child**, not the
-walk: note it in the epic summary as *skipped — human declined* and continue to
-the next child.)
+removal failed and the label is still set).
 
 ## Step 2 — the refinement loop (human present)
 
@@ -998,9 +1027,13 @@ they can add or fix it and, optionally, re-run refine-issue to reference it.
 
 - **`NEEDS_REFINEMENT`** → **keep the label** and report the remaining reasons to
   the human. Do not remove it on a story the gate still rejects — the label is
-  the honest signal. Offer another loop (back to Step 2) or to stop here.
+  the honest signal. **Loop back to Step 2 without asking**, with the gate's
+  remaining reasons as the objections, and take the default with its notice
+  (*Defaults taken instead of asking*, above). The unattended follow-up mode
+  never loops back: it takes the stop below, its deferred route.
 
-  **If they stop here, it is a recorded ending, but NOT Step 2's parked exit.**
+  **A stop the human takes in that loop before its next Step 3 write-back is a
+  recorded ending, but NOT Step 2's parked exit.**
   Do **not** run `build-parked-comment.zsh` here: its comment states outright
   that "no `story-spec` block was written (the prose isn't finalized)", which is
   **false** on this path — Step 3 already wrote the approved prose and stamped
@@ -1159,9 +1192,8 @@ fi
     stop on a still-rejected story.
 
   **Anything else emits no record at all.** Two shapes: (a) it was **not a
-  run** — a non-`OPEN` issue, a declined `needs-refinement` precondition, or a
-  declined shortcut clear **that ends the session at Step 1** (a decline that
-  continues into Step 2 *is* a run); (b) it was a run that reached **no decided
+  run** — a non-`OPEN` issue, or a follow-up the unattended mode stops at Step 0
+  for want of `needs-refinement`; (b) it was a run that reached **no decided
   outcome** — Step 5's twice-failed label removal, or a run whose stamps, counts
   or park type were never measured. Both are a **skipped** record, not a third
   `outcome` value: never coerce them to `parked`.
@@ -1227,7 +1259,9 @@ fi
   `scripts/split-refiner-questions.zsh` makes that decision. It never approves
   the rewrite, and it never answers the Step 0, Step 1 or Step 5 prompts; the
   unattended follow-up mode, the only exception, answers them as it lists.
-  Every auto-taken answer is shown at approval and recorded in Step 6's trail,
+  An attended run asks none of the three either: they are the conductor's
+  defaults (*Defaults taken instead of asking*), which the threshold never
+  decides. Every auto-taken answer is shown at approval and recorded in Step 6's trail,
   or, for an `implementation` answer, in the body's **Decisions taken** section.
 - **The label tells the truth.** Remove `needs-refinement` **only** on a `READY`
   re-gate; otherwise it stays.

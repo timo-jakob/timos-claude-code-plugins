@@ -56,8 +56,9 @@ resolve_issue_files() {
 
   # ONE roster, in declared order — review-loop first because it is the branch
   # every run takes, then the terminals, then the interactive procedures, then
-  # the run's checkpoints (#2920), then the run's own telemetry (#1226), which
-  # every ending reaches last, then the
+  # the run's checkpoints (#2920), then the parked follow-up default every
+  # ending after a review loop reads (#2903), then the run's own telemetry
+  # (#1226), which every ending reaches last, then the
   # epic tree walk's procedure (#2857), which only an epic run reads. This
   # same array is both what the tripwire compares against AND what is emitted, so
   # there is no second transcription for a maintainer to update in isolation.
@@ -67,7 +68,7 @@ resolve_issue_files() {
   # looking" failure this derivation exists to prevent, restored one indirection
   # later.)
   local -a ordered
-  ordered=(review-loop.md residue.md promotion.md escalation.md interactive.md checkpoint.md sequential.md telemetry.md epic-telemetry.md epic-tree.md)
+  ordered=(review-loop.md residue.md promotion.md escalation.md interactive.md checkpoint.md ask-branches.md sequential.md telemetry.md epic-telemetry.md epic-tree.md)
 
   # #2055 split review-loop.md into shards under reference/review-loop/ and left
   # the old path as an INDEX. The shards are members too — a sweep over the

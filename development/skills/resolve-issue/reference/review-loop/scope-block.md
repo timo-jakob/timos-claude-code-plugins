@@ -181,7 +181,7 @@ wherever an excerpt comes back empty:
    descriptor's tree or base is wrong, so **no** per-entry verdict below is
    meaningful: report it and stop. This is the only root check the rule needs —
    judge by it, never by how many entries came back one way.
-2. **Then, per entry**, ask whether the path exists at `<base>`
+2. **Then, per entry**, check whether the path exists at `<base>`
    (`git -C "<worktree_root>" cat-file -e "<base>:<path>"`):
    - **absent at `<base>` too** — the file is in **neither** tree, the ordinary
      shape of one **this story created** and a later fix pass deleted (*A fix
