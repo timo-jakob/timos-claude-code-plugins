@@ -59,8 +59,9 @@ entry — question: refine the parked follow-ups now?; choice: §7 runs
 `/development:refine-issue <n> --follow-up` for each issue it names; evidence:
 the follow-up mode refines only from the source story and parks what it cannot
 settle (#2588); how to overrule: restore a follow-up's body from its edit
-history and re-add `needs-refinement`. An exit 1 adds no section.
+history and re-add `needs-refinement`. An exit 1 or 2 adds no section.
 
 **On every other ending** — #2579's clean stop and an escalation terminal —
-there is no PR body, so the same entry goes in the run's report. Either way the
+there is no PR body, so the same entry goes in the run's report, as it does
+whenever §7 refines follow-ups an open PR's body does not hold. Either way the
 decision is recorded once: §7 adds nothing to a PR whose body already holds it.

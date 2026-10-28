@@ -160,7 +160,7 @@ stale() {
   contains "$r" '**Print one line** when §7 starts the refinements: `Decision taken (not asked): auto-refining the parked follow-ups #A, #B`.'
   contains "$r" '**Record the follow-up default in the body (#2903).** In §6, run §7'"'"'s `follow-up-origin.zsh parked-issues` read before open-pr opens the PR.'
   contains "$r" 'how to overrule: restore a follow-up'
-  contains "$r" 'there is no PR body, so the same entry goes in the run'
+  contains "$r" 'there is no PR body, so the same entry goes in the run'"'"'s report, as it does whenever §7 refines follow-ups an open PR'"'"'s body does not hold.'
   run -1 grep -qF 'Decision taken (not asked)' <<< "$t"
   run -1 grep -qF 'attended run ask once' <<< "$t"
   run -1 grep -qF 'asks once, listing the follow-ups' "$REPO_ROOT/docs/how-to/let-refine-issue-answer-confident-questions.md"
@@ -219,7 +219,7 @@ stale() {
 @test "resolve-issue reads the parked follow-ups before open-pr, so the PR body carries the decision" {
   local r; r="$(flat "$RESOLVE/reference/ask-branches.md")"
   contains "$r" 'read before open-pr opens the PR. When it prints any issue, the body carries a `## Decisions taken` section'
-  contains "$r" 'An exit 1 adds no section.'
+  contains "$r" 'An exit 1 or 2 adds no section.'
   contains "$(flat "$RESOLVE/SKILL.md")" '**Before open-pr (#2903):** see `reference/ask-branches.md` §'
 }
 
