@@ -597,14 +597,17 @@ human approves it as part of the rewrite, and Step 3 writes it back unchanged.
 
 - **`auto`** — answer each one with its `answer`. For an `intent` or `gap`
   answer, add it to the round's human reply as
-  `[auto-accepted @<confidence>] <question> → <answer>`, and tell the human in
+  `[auto-accepted @<confidence>] <question> → <answer>` — a `gap` one followed
+  by `(Record in <target> under "<section>")` from the turn's
+  `proposed_doc_change`, so the refiner's next turn reads it — and tell the human in
   one line per answer what you took and its weakest criterion. Keep a running
   list of these answers for the approval step below. For an `implementation`
   answer, add it as `[decided] <question> → <answer>` instead. It is absent from
   **Answers taken automatically**: it is recorded in the **Decisions taken**
   section below. Keep this issue's split file of every round for that section.
-- **`ask`** — relay these as before. Show the `recommended_answer` and
-  `confidence` next to each one when present, so the human can simply agree.
+- **`ask`** — relay these as before. Show the `recommended_answer`,
+  `confidence` and, on a `gap`, the turn's `proposed_doc_change` next to each one
+  when present, so the human can simply agree.
 
 When every question is `auto`, do not wait for the human: call the agent again
 straight away with the auto-accepted answers as `human_reply`.

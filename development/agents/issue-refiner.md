@@ -601,7 +601,9 @@ Rules for the payload:
   It goes in **both** the prose's acceptance criteria (`proposed_prose`) and
   `proposed_story_spec.acceptance_criteria`, so it is part of the rewrite the
   human approves and `prose_sha256` covers it; the document change itself lands
-  with the story's PR, never during refinement. When the human answered
+  with the story's PR, never during refinement. Take `target` and `section` from
+  the `proposed_doc_change` the conductor relayed with that question in
+  `conversation`, never a fresh choice. When the human answered
   differently from your recommendation, rewrite `wording` to state their answer
   in their own words — never paste the raw reply. You rebuild the block every
   turn, so carry the criterion forward, or replace it when a later answer
