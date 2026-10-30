@@ -298,8 +298,9 @@ Step 2.5 has no prompt: on `accept` it runs as written, before Step 3. **An exit
 2** from `follow-up-auto-refine.zsh` or `follow-up-origin.zsh` is your own
 malformed input: fix it and re-run once. A second exit 2 stops the mode for
 that follow-up: report it and write nothing, so the label stays. An exit 2 from
-`split-refiner-questions.zsh` is the refiner's malformed turn: re-spawn the
-refiner for that round once; a second one stops the mode the same way.
+`split-refiner-questions.zsh` is the refiner's malformed turn, a broken
+`kind: gap` `proposed_doc_change` (#2901) included: re-spawn the refiner for
+that round once; a second one stops the mode the same way.
 
 1. **Eligibility.** Write `gh issue view <N> --json comments` to a file and read
    the source with `follow-up-auto-refine.zsh origin --comments <file>`; exit 1
@@ -577,11 +578,22 @@ second-guess it. For an `intent` or `gap` question its confidence is the lowest
 of the refiner's five criterion scores, and the answer is `auto` only when that
 is at or above the threshold. An `implementation` question is `auto` at any
 threshold (#2900). An exit 2 means the turn is not a JSON object with a
-`questions` array, or — the one exception to "malformed is asked, never an
-error" — an `implementation` entry has no `recommended_answer` or `rationale`,
-named on stderr. Either way, re-spawn the refiner for this round once, and if it
-fails again, relay the questions to the human as they are. The unattended
-follow-up mode applies its own exit-2 rule instead.
+`questions` array, or the refiner broke its contract in one of the two
+exceptions to "malformed is asked, never an error", each named on stderr: an
+`implementation` entry has no `recommended_answer` or `rationale`; or — the
+second exception (#2901) — an entry whose own `kind` is `gap` has no
+`proposed_doc_change`, a null or blank `target`, `section` or `wording`, or a
+`target` that is absolute or contains `..`. An entry routed as `gap` only
+because its `kind` is missing or unknown is exempt. Either way, re-spawn the
+refiner for this round once, and if it fails again, relay the questions to the
+human as they are. The unattended follow-up mode applies its own exit-2 rule
+instead.
+
+**An answered gap's acceptance criterion is the refiner's.** From the turn after
+a `gap` question is answered, the refiner's drafts carry one
+`Record in <target> under "<section>": <wording>` criterion per answered gap,
+in both the prose and the block. The conductor neither adds nor edits it: the
+human approves it as part of the rewrite, and Step 3 writes it back unchanged.
 
 - **`auto`** — answer each one with its `answer`. For an `intent` or `gap`
   answer, add it to the round's human reply as

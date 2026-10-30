@@ -37,6 +37,18 @@
 # or blank `recommended_answer` or `rationale` breaks the refiner's contract,
 # so the script exits 2 and names the entry on stderr.
 #
+# PROPOSED_DOC_CHANGE (#2901): a gap question exists because a document is
+# silent, so a `gap` entry carries the change that would close it —
+#   "proposed_doc_change": { "target": "<repo-relative path>",
+#                            "section": "<heading>", "wording": "<text>" }.
+# The second exception to "malformed is asked, never an error": an entry whose
+# INPUT `kind` is literally "gap" breaks the refiner's contract when
+# proposed_doc_change is missing or not an object, when any of its three fields
+# is null or blank, or when `target` is absolute or has a `..` segment. The
+# script exits 2 and names the entry on stderr. The check reads the raw `kind`,
+# before the tie-break, so an entry routed as gap for a missing or unknown kind
+# is exempt; it judges the path's shape only, never whether the file exists.
+#
 # Usage:  split-refiner-questions.zsh --threshold-milli <0..1000> --turn <file>
 #         (<file> holds the refiner's whole JSON turn)
 # Output: one JSON object on stdout:
@@ -46,8 +58,9 @@
 #   confidence is a "0.00"-style string, or null when unscored; weakest lists
 #   the criteria scored at the minimum ([] when unscored).
 # Exit:   0 split; 2 usage error, a turn that is not a JSON object whose
-#         `questions` is an array, or an `implementation` entry with no
-#         recommended_answer or rationale.
+#         `questions` is an array, an `implementation` entry with no
+#         recommended_answer or rationale, or a `kind: gap` entry whose
+#         proposed_doc_change is missing or malformed.
 
 emulate -L zsh
 setopt no_unset
@@ -77,20 +90,38 @@ local defs='
   def kindof: if type == "object" and ((.kind // null) | IN("intent", "gap", "implementation"))
               then .kind else "gap" end;'
 
-# An implementation entry without a recommendation or a rationale is the
-# refiner breaking its contract: name every one, then exit 2.
+# An implementation entry without a recommendation or a rationale, and an
+# explicit gap entry without a well-formed proposed_doc_change, are the refiner
+# breaking its contract: name every one, then exit 2.
 local violations
 violations="$(jq -r "$defs"'
+  # NB: no apostrophes in this program — it is single-quoted.
+  def doc_change_problems:
+    if type != "object" then ["proposed_doc_change is missing"]
+    else . as $d
+      | [("target", "section", "wording") as $f
+         | select(($d[$f] // null) | nonblank | not) | "\($f) is blank"]
+        + (if ($d.target // null) | nonblank | not then []
+           elif ($d.target | startswith("/")) then ["target is absolute"]
+           elif ($d.target | split("/") | any(. == "..")) then ["target has a .. segment"]
+           else [] end)
+    end;
   .questions | to_entries[]
-  | select((.value | kindof) == "implementation")
   | .value as $q
-  | [if ($q.recommended_answer // null) | nonblank then empty else "recommended_answer" end,
-     if ($q.rationale // null) | nonblank then empty else "rationale" end] as $missing
-  | select($missing | length > 0)
-  | "questions[\(.key)] (\($q.question // "" | tostring)): implementation entry has no \($missing | join(" or "))"
+  | "questions[\(.key)] (\(if ($q | type) == "object" then $q.question // "" else $q end | tostring))" as $at
+  | if ($q | kindof) == "implementation" then
+      [if ($q.recommended_answer // null) | nonblank then empty else "recommended_answer" end,
+       if ($q.rationale // null) | nonblank then empty else "rationale" end] as $missing
+      | select($missing | length > 0)
+      | "\($at): implementation entry has no \($missing | join(" or "))"
+    elif ($q | type) == "object" and ($q.kind // null) == "gap" then
+      ($q.proposed_doc_change // null | doc_change_problems) as $p
+      | select($p | length > 0)
+      | "\($at): gap entry has a bad proposed_doc_change: \($p | join(", "))"
+    else empty end
 ' "$turn")" || { print -r -u2 -- "split-refiner-questions: could not read the questions in $turn"; exit 2 }
 if [[ -n "$violations" ]]; then
-  print -r -u2 -- "split-refiner-questions: the refiner broke its contract (#2900):"
+  print -r -u2 -- "split-refiner-questions: the refiner broke its contract (#2900, #2901):"
   print -r -u2 -- "$violations"
   exit 2
 fi

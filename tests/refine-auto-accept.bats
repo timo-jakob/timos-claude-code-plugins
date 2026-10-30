@@ -202,9 +202,12 @@ split() {
 
 # --- the question kind (#2900) --------------------------------------------------
 
-# kq <kind> <answer-or-null> <score> [<uniqueness-score>] — q with a `kind`
+# kq <kind> <answer-or-null> <score> [<uniqueness-score>] — q with a `kind`; a
+# `gap` entry also carries the well-formed proposed_doc_change #2901 requires
 kq() {
-  q "$2" "$3" "${4:-$3}" | jq -c --arg k "$1" '. + {kind: $k}'
+  q "$2" "$3" "${4:-$3}" | jq -c --arg k "$1" '. + {kind: $k}
+    | if $k == "gap" then . + {proposed_doc_change: {target: "ARCHITECTURE.md",
+        section: "Datastores", wording: "Uploaded files live in S3."}} else . end'
 }
 
 @test "#2900 at threshold 1, an implementation answer is auto, its confidence ignoring uniqueness" {
@@ -271,8 +274,8 @@ kq() {
 @test "#2900 SKILL.md states the exit-2 exception, the [decided] relay and the append-only Decisions taken section" {
   local s
   s="$(tr -s '[:space:]' ' ' < "$SKILL")"
-  contains "$s" 'the one exception to "malformed is asked, never an error" — an `implementation` entry has no `recommended_answer` or `rationale`'
-  contains "$s" 'An exit 2 from `split-refiner-questions.zsh` is the refiner'"'"'s malformed turn: re-spawn the refiner for that round once; a second one stops the mode the same way.'
+  contains "$s" 'the refiner broke its contract in one of the two exceptions to "malformed is asked, never an error", each named on stderr: an `implementation` entry has no `recommended_answer` or `rationale`;'
+  contains "$s" 'An exit 2 from `split-refiner-questions.zsh` is the refiner'"'"'s malformed turn,'
   contains "$s" 'For an `implementation` answer, add it as `[decided] <question> → <answer>` instead. It is absent from **Answers taken automatically**'
   contains "$s" 'scripts/render-decisions-taken.zsh" --split <split.json>'
   contains "$s" 'so the section sits inside the prose sentinels Step 3 writes, is part of the rewrite the human approves, and is covered by `prose_sha256`.'
@@ -291,6 +294,105 @@ kq() {
   contains "$s" 'the comment also lists its `intent` and `gap` answers under **Answers taken automatically**, each with its confidence and the threshold; its `implementation` answers are in the body'"'"'s **Decisions taken** section.'
   contains "$s" 'Either way, re-spawn the refiner for this round once, and if it fails again, relay the questions to the human as they are.'
   contains "$s" 'listing each auto-accepted `intent` or `gap` question, the answer, its confidence and its weakest criterion.'
+}
+
+# --- a gap carries the document change that closes it (#2901) -----------------
+
+@test "#2901 a gap entry with a complete proposed_doc_change routes by the five-score minimum as today" {
+  split 900 "[$(kq gap '"S3"' 0.9), $(kq gap '"S3"' 0.9 0.8)]"
+  [ "$status" -eq 0 ]
+  assert_eq "$(jq -c '[.auto[] | [.kind, .confidence]]' <<<"$output")" '[["gap","0.90"]]' "auto entries"
+  assert_eq "$(jq -c '[.ask[] | [.kind, .confidence, .weakest, .reason]]' <<<"$output")" \
+    '[["gap","0.80",["uniqueness"],"below-threshold"]]' "ask entries"
+}
+
+# gap_split <jq-filter applied to a valid gap entry> — run the split at threshold 0
+gap_split() {
+  jq -nc --argjson qs "[$(kq intent '"a"' 1), $(kq gap '"S3"' 1 | jq -c "$1")]" '{issue: 1, questions: $qs}' > "$TURN"
+  run -2 --separate-stderr zsh "$SPLIT" --threshold-milli 0 --turn "$TURN"
+  [ -z "$output" ]
+}
+
+@test "#2901 a gap entry with no proposed_doc_change, or one that is not an object, is exit 2 naming it" {
+  gap_split 'del(.proposed_doc_change)'
+  contains "$stderr" 'questions[1] (Q?): gap entry has a bad proposed_doc_change: proposed_doc_change is missing'
+  gap_split '.proposed_doc_change = "ARCHITECTURE.md"'
+  contains "$stderr" 'questions[1] (Q?): gap entry has a bad proposed_doc_change: proposed_doc_change is missing'
+}
+
+@test "#2901 a null or blank target, section or wording is exit 2 naming each field" {
+  gap_split '.proposed_doc_change.section = "  "'
+  contains "$stderr" 'questions[1] (Q?): gap entry has a bad proposed_doc_change: section is blank'
+  gap_split '.proposed_doc_change.wording = null'
+  contains "$stderr" 'gap entry has a bad proposed_doc_change: wording is blank'
+  gap_split 'del(.proposed_doc_change.target)'
+  contains "$stderr" 'gap entry has a bad proposed_doc_change: target is blank'
+}
+
+@test "#2901 an absolute target or one with a .. segment is exit 2 naming it" {
+  gap_split '.proposed_doc_change.target = "/etc/ARCHITECTURE.md"'
+  contains "$stderr" 'questions[1] (Q?): gap entry has a bad proposed_doc_change: target is absolute'
+  gap_split '.proposed_doc_change.target = "docs/../ARCHITECTURE.md"'
+  contains "$stderr" 'gap entry has a bad proposed_doc_change: target has a .. segment'
+}
+
+@test "#2901 a target that only contains dots in a name is not a .. segment" {
+  split 0 "[$(kq gap '"S3"' 1 | jq -c '.proposed_doc_change.target = "docs/req..v2/x.md"')]"
+  [ "$status" -eq 0 ]
+  assert_eq "$(jq -c '[.auto[].kind]' <<<"$output")" '["gap"]' "auto kinds"
+}
+
+@test "#2901 an entry routed as gap for a missing or unknown kind needs no proposed_doc_change" {
+  split 0 "[$(q '"a"' 1), $(kq bogus '"b"' 1)]"
+  [ "$status" -eq 0 ]
+  assert_eq "$(jq -c '[.auto[].kind]' <<<"$output")" '["gap","gap"]' "auto kinds"
+}
+
+@test "#2901 the agent requires proposed_doc_change on a gap and the Record-in criterion" {
+  local a
+  a="$(tr -s '[:space:]' ' ' < "$AGENT")"
+  contains "$a" '`proposed_doc_change` — **required on every `kind: gap` question** (#2901)'
+  contains "$a" '`target` — the file the change goes in, as a **repo-relative** path: never absolute, never with a `..` segment.'
+  contains "$a" '`section` — the heading the change goes under;'
+  contains "$a" '`wording` — the text you propose, written to stand in that document.'
+  contains "$a" 'A `kind: gap` entry without it, or with a blank field or a target of the wrong shape, breaks this contract'
+  contains "$a" 'From the turn after a `gap` question is answered — by the human, or by a human turn that begins `[auto-accepted @<confidence>]` — every draft you emit carries one acceptance criterion per answered gap, in exactly this form:'
+  contains "$a" '`Record in <target> under "<section>": <wording>`'
+  contains "$a" 'It goes in **both** the prose'"'"'s acceptance criteria (`proposed_prose`) and `proposed_story_spec.acceptance_criteria`'
+  contains "$a" 'rewrite `wording` to state their answer in their own words — never paste the raw reply.'
+  contains "$a" 'carry the criterion forward, or replace it when a later answer changes it; never emit it twice.'
+  contains "$a" 'The conductor neither adds nor edits this criterion'
+}
+
+@test "#2901 the agent's JSON example carries a gap question with a proposed_doc_change" {
+  local ex
+  # the output payload's example is the json fence that holds proposed_story_spec
+  ex="$(awk '/^```json$/ {f = 1; b = ""; next}
+             /^```$/ && f {f = 0; if (b ~ /"proposed_story_spec"/) printf "%s", b; next}
+             f {b = b $0 "\n"}' "$AGENT")"
+  assert_eq "$(jq -c '[.questions[] | select(.kind == "gap") | .proposed_doc_change | keys]' <<<"$ex")" \
+    '[["section","target","wording"]]' "gap example doc change"
+}
+
+@test "#2901 SKILL.md states the second exception and the conductor's hands-off rule" {
+  local s
+  s="$(tr -s '[:space:]' ' ' < "$SKILL")"
+  contains "$s" 'or — the second exception (#2901) — an entry whose own `kind` is `gap` has no `proposed_doc_change`, a null or blank `target`, `section` or `wording`, or a `target` that is absolute or contains `..`. An entry routed as `gap` only because its `kind` is missing or unknown is exempt.'
+  contains "$s" 'in both the prose and the block. The conductor neither adds nor edits it:'
+  contains "$s" 'Step 3 writes it back unchanged.'
+  contains "$s" '`Record in <target> under "<section>": <wording>`'
+  contains "$s" 'a broken `kind: gap` `proposed_doc_change` (#2901) included: re-spawn the refiner for that round once; a second one stops the mode the same way.'
+}
+
+@test "#2901 the script header documents the second exception" {
+  local h
+  h="$(sed -n '/^emulate/q;p' "$SPLIT" | tr -s '[:space:]#' ' ')"
+  contains "$h" 'The second exception to "malformed is asked, never an error": an entry whose INPUT `kind` is literally "gap" breaks the refiner'"'"'s contract'
+  contains "$h" 'an entry routed as gap for a missing or unknown kind is exempt'
+}
+
+@test "#2901 ARCHITECTURE.md's auto-accept setting names proposed_doc_change on a gap" {
+  contains "$(tr -s '[:space:]' ' ' < "$REPO_ROOT/ARCHITECTURE.md")" 'An entry whose own `kind` is `gap` also carries `proposed_doc_change` (`target`, a repo-relative path; `section`; `wording`), the document change that would close the gap; one missing or malformed is the refiner breaking its contract, exit 2 (#2901).'
 }
 
 @test "#2900 ARCHITECTURE.md's auto-accept setting routes kind" {

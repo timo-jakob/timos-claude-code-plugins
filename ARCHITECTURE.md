@@ -8618,7 +8618,10 @@ confident enough.
   record* (#2899): an `implementation` question is `auto` at any threshold,
   with a confidence reported but never compared and computed without
   `uniqueness`, and is recorded under **Decisions taken** rather than asked
-  (#2900). A missing or unknown `kind` is `gap`.
+  (#2900). A missing or unknown `kind` is `gap`. An entry whose own `kind` is
+  `gap` also carries `proposed_doc_change` (`target`, a repo-relative path;
+  `section`; `wording`), the document change that would close the gap; one
+  missing or malformed is the refiner breaking its contract, exit 2 (#2901).
 - **Scope:** questions only. The human's approval of the exact rewrite before
   the Step 3 write-back is unchanged, and so is the rule that the write-back
   is human-authored. So are the Step 0, Step 1 and Step 5 prompts. Every

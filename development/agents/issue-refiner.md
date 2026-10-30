@@ -481,7 +481,15 @@ Emit exactly one fenced `json` block and no other prose. Shape:
       "recommended_answer": "p95 < 200 ms for POST /jobs at 50 req/s, the load profile tests/load/jobs.js already drives.",
       "criteria": { "repo_consistency": 0.9, "best_practice": 0.8, "evidence": 0.7,
                     "uniqueness": 0.4, "reversibility": 0.9 },
-      "rationale": "tests/load/jobs.js drives 50 req/s at POST /jobs; the 200 ms figure is a common default, not a stated product target, so another target is credible." }
+      "rationale": "tests/load/jobs.js drives 50 req/s at POST /jobs; the 200 ms figure is a common default, not a stated product target, so another target is credible." },
+    { "question": "ARCHITECTURE.md says nothing about retried job creation. Does a POST /jobs retried with the same job_ref create a second job?",
+      "kind": "gap",
+      "recommended_answer": "No: a retry with the same job_ref creates no second job and returns the first job's 201.",
+      "criteria": { "repo_consistency": 0.8, "best_practice": 0.9, "evidence": 0.6,
+                    "uniqueness": 0.5, "reversibility": 0.4 },
+      "rationale": "The jobs table already has a unique job_ref index; whether a retry should fail or replay is a product call, and a shipped answer is costly to change.",
+      "proposed_doc_change": { "target": "ARCHITECTURE.md", "section": "Job intake",
+                               "wording": "A POST /jobs retried with the same job_ref creates no second job; the retry returns the first job's 201." } }
   ],
   "recommendations": [
     "State the target as 'p95 < 200 ms for POST /jobs at 50 req/s', so it becomes a load-test assertion.",
@@ -564,7 +572,41 @@ Rules for the payload:
       a formality;
     - `"reversibility"` — a wrong answer would be cheap to notice and undo later;
   - `rationale` — one or two sentences naming the evidence behind the scores and
-    the weakest criterion's reason.
+    the weakest criterion's reason;
+  - `proposed_doc_change` — **required on every `kind: gap` question** (#2901),
+    and omitted on the other kinds. A gap exists because a position, a
+    requirement or the persona registry is silent or contradicts itself, and an
+    answer that lives only in this issue is asked again by the next story. So
+    name the change that would close the gap, as an object of three non-blank
+    strings:
+    - `target` — the file the change goes in, as a **repo-relative** path: never
+      absolute, never with a `..` segment. Usually `ARCHITECTURE.md`,
+      `docs/personas.md` or the repo's requirements document wherever it lives;
+      when the repo has none, propose a new page under `docs/`. It is not a fixed
+      list, because repos place their requirements docs differently;
+    - `section` — the heading the change goes under;
+    - `wording` — the text you propose, written to stand in that document.
+
+    A `kind: gap` entry without it, or with a blank field or a target of the
+    wrong shape, breaks this contract, and the conductor re-asks you for the
+    turn.
+
+  **An answered gap becomes an acceptance criterion.** From the turn after a
+  `gap` question is answered — by the human, or by a human turn that begins
+  `[auto-accepted @<confidence>]` — every draft you emit carries one acceptance
+  criterion per answered gap, in exactly this form:
+
+  `Record in <target> under "<section>": <wording>`
+
+  It goes in **both** the prose's acceptance criteria (`proposed_prose`) and
+  `proposed_story_spec.acceptance_criteria`, so it is part of the rewrite the
+  human approves and `prose_sha256` covers it; the document change itself lands
+  with the story's PR, never during refinement. When the human answered
+  differently from your recommendation, rewrite `wording` to state their answer
+  in their own words — never paste the raw reply. You rebuild the block every
+  turn, so carry the criterion forward, or replace it when a later answer
+  changes it; never emit it twice. The conductor neither adds nor edits this
+  criterion: it is yours alone.
 
   **Why the scores exist:** the conductor may take your `recommended_answer`
   without asking the human, when the **lowest** of the five scores is at or
