@@ -368,9 +368,9 @@ Each default does two things:
    evidence from the table below. Append it as `{"kind": "implementation",
    "question": …, "answer": <choice>, "rationale": <evidence>, "overrule": <how
    to overrule>}` to the `auto` array of `/tmp/conductor-defaults.json`, created
-   as `{"auto": []}`; Step 0 deletes it with the parked state. At
-   a Step 3 write-back that file counts as one of this issue's round split files
-   for the Decisions taken section, but it is never part of a parked state's
+   as `{"auto": []}`; Step 0 deletes it with the parked state. When Step 2
+   renders the Decisions taken section before the approval, that file counts as
+   one of this issue's round split files, but it is never part of a parked state's
    `decisions`. When the run ends with no write-back after the default — Step
    1's shortcut, a parked exit or a stop — post each pending entry as a
    one-line issue comment instead: `Decisions taken: <question> → <choice>
@@ -613,7 +613,8 @@ run's split files that the human overturned before approving (an overturned answ
 Claude took), so the section sits inside the prose sentinels Step 3 writes, is part of the rewrite the human approves,
 and is covered by `prose_sha256`. The section is append-only: when the current issue body or `proposed_prose` already
 holds a `## Decisions taken` section, put the new entries at its end, under the one heading, and never remove an entry
-an earlier run wrote to the issue body. The follow-up mode's `accept` does the same before Step 3. An exit
+an earlier run wrote to the issue body. An entry the section already holds, such as a first pass's after a Step 5
+loop-back, is not added again. The follow-up mode's `accept` does the same before Step 3. An exit
 2 is your own malformed call: fix it and re-run once. Nothing is written until they approve. If they
 want changes, feed their reply back for another round.
 

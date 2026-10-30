@@ -198,7 +198,7 @@ stale() {
 @test "refine-issue's defaults print one line and record one Decisions-taken entry, in the body or a comment" {
   local t; t="$(flat "$REFINE/SKILL.md")"
   contains "$t" '1. **Prints one line** in your terminal output: `Decision taken (not asked): <choice>`.'
-  contains "$t" 'At a Step 3 write-back that file counts as one of this issue'
+  contains "$t" 'When Step 2 renders the Decisions taken section before the approval, that file counts as one of this issue'
   contains "$t" 'but it is never part of a parked state'
   contains "$t" 'post each pending entry as a one-line issue comment instead'
   contains "$t" 'The body is never edited only to record a default.'

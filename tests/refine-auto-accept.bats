@@ -280,7 +280,7 @@ kq() {
   contains "$s" 'For an `intent` or `gap` question its confidence is the lowest of the refiner'"'"'s five criterion scores, and the answer is `auto` only when that is at or above the threshold.'
   contains "$s" 'An `implementation` question is `auto` at any threshold (#2900).'
   contains "$s" 'or, for an `implementation` answer, in the body'"'"'s **Decisions taken** section.'
-  contains "$s" 'never remove an entry an earlier run wrote to the issue body. The follow-up mode'"'"'s `accept` does the same before Step 3.'
+  contains "$s" 'never remove an entry an earlier run wrote to the issue body. An entry the section already holds, such as a first pass'"'"'s after a Step 5 loop-back, is not added again. The follow-up mode'"'"'s `accept` does the same before Step 3.'
   contains "$s" 'Otherwise add the **Decisions taken** section (Step 2) and write it back as Steps 2.5 and 3 do'
   contains "$s" 'Keep this issue'"'"'s split file of every round for that section.'
   contains "$s" 'Write its `decisions`, when present, to a file as `{"auto": <decisions>}`: that file counts as one of this issue'"'"'s round split files for the Decisions taken section.'
