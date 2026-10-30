@@ -293,8 +293,26 @@ that would unblock it.
 
 Judge substance, not formatting: a well-written prose story with no `## Acceptance`
 header can still be `READY`; a checklist of vague bullets is not. When a check
-is genuinely borderline, lean toward `NEEDS_REFINEMENT` — a cheap clarifying
-question now beats a wrong PR later, which is the entire point of this gate.
+is genuinely borderline **on an `intent` or `gap` item** — the question
+taxonomy of ARCHITECTURE.md's *Decision rights — question taxonomy and the
+Decisions-taken record* (#2899) — lean toward `NEEDS_REFINEMENT`: a cheap
+clarifying question now beats a wrong PR later, which is the entire point of
+this gate.
+
+**An unpinned `implementation` choice passes every check (#2902).** Which
+helper, file, library, flag name or CIDR the builder uses — anything the
+repo's positions, requirements and external interfaces leave open — is the
+builder's to decide and record under **Decisions taken**, not the story's to
+pin. Such a choice is never borderline: it fails no check and never produces a
+`refinement_questions` entry.
+
+**A criterion that pins implementation is an advisory, never a failure.** When
+an acceptance criterion fixes an implementation detail that no position,
+requirement or external interface requires — a specific CIDR, an exact-set
+check on internal config — record it in `advisories` as
+`implementation-pinned` ("criterion N pins implementation; consider stating the
+observable behaviour") and judge the checks as if the criterion stated that
+behaviour.
 
 ## Risk classification
 
@@ -385,13 +403,15 @@ Rules for the payload:
   able to fill an advisory field (no `personas` registry, a `none`-surface story
   with no `test_cases`) is **not** a gap — emit `[]`/`null` for it and judge the
   story on the applicable checks alone.
-- `advisories` is a list of **non-blocking** notes (#668) — today, persona
+- `advisories` is a list of **non-blocking** notes (#668) — persona
   reference problems (unknown id, stale registry, no registry) found when
   validating a story-spec block's `personas` against the target repo's
-  `personas/v1` registry. Each entry is `{ "kind": "persona-unknown" |
-  "persona-registry-stale" | "persona-registry-missing", "message": "…" }`, the
-  `message` naming the id and, where relevant, pointing the human at
-  `/development:define-personas`. **Advisories never change the verdict** — a
+  `personas/v1` registry, and acceptance criteria that pin implementation
+  (#2902). Each entry is `{ "kind": "persona-unknown" |
+  "persona-registry-stale" | "persona-registry-missing" |
+  "implementation-pinned", "message": "…" }`, the `message` naming the id and,
+  where relevant, pointing the human at `/development:define-personas` — or,
+  for `implementation-pinned`, naming the criterion. **Advisories never change the verdict** — a
   `READY` story with advisories is still `READY`. Empty (`[]`) when there is
   nothing to note (the common case, including every persona-less story).
 - Never invent a reason to fail a well-specified story, and never wave through a
