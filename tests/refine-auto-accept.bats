@@ -362,6 +362,7 @@ gap_split() {
   contains "$a" 'rewrite `wording` to state their answer in their own words — never paste the raw reply.'
   contains "$a" 'carry the criterion forward, or replace it when a later answer changes it; never emit it twice.'
   contains "$a" 'The conductor neither adds nor edits this criterion'
+  contains "$a" 'Take `target` and `section` from the `proposed_doc_change` the conductor relayed with that question in `conversation`, never a fresh choice.'
 }
 
 @test "#2901 the agent's JSON example carries a gap question with a proposed_doc_change" {
@@ -381,6 +382,8 @@ gap_split() {
   contains "$s" 'in both the prose and the block. The conductor neither adds nor edits it:'
   contains "$s" 'Step 3 writes it back unchanged.'
   contains "$s" '`Record in <target> under "<section>": <wording>`'
+  contains "$s" '`[auto-accepted @<confidence>] <question> → <answer>` — a `gap` one followed by `(Record in <target> under "<section>")` from the turn'"'"'s `proposed_doc_change`, so the refiner'"'"'s next turn reads it'
+  contains "$s" 'Show the `recommended_answer`, `confidence` and, on a `gap`, the turn'"'"'s `proposed_doc_change` next to each one when present, so the human can simply agree.'
   contains "$s" 'a broken `kind: gap` `proposed_doc_change` (#2901) included: re-spawn the refiner for that round once; a second one stops the mode the same way.'
 }
 
