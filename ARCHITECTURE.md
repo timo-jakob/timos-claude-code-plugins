@@ -7857,8 +7857,8 @@ unattended from the source's context.
 
 The reader of that record. A pipeline-filed follow-up arrives `needs-refinement`,
 but its source story was refined well enough to build, so `resolve-issue` runs
-`/development:refine-issue <issue> --follow-up` on each one before its record:
-without asking on an unattended run, and after one question on an attended run.
+`/development:refine-issue <issue> --follow-up` on each one before its record,
+without asking, in every session mode (#2903).
 Every decision is `development/skills/refine-issue/scripts/follow-up-auto-refine.zsh`'s,
 a script with no GitHub calls.
 

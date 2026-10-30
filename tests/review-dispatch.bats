@@ -3079,8 +3079,10 @@ EOF
   [ "$status" -eq 1 ]
   [ -z "$output" ]
   echo "$stderr" | grep -q 'could not resolve the repository root'
-  # git's own cause is relayed — this is what separates it from the discovery form
-  echo "$stderr" | grep -q 'not a git repository'
+  # git's own cause is relayed — this is what separates it from the discovery form.
+  # git 2.56 rewords the broken-gitfile fatal as `gitfile does not point to a
+  # valid repository: <path>`; older gits say `not a git repository: <path>`.
+  echo "$stderr" | grep -Eq 'not a git repository: |gitfile does not point to a valid repository: '
 }
 
 @test "detect: #1587 the no-repository fallback survives a non-English locale" {

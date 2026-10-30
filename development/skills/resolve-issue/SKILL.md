@@ -989,6 +989,8 @@ changes nothing. An issue with no origin comment (filed before #2581), or an
 exit 2 from `set-pr`, is named in the Summary and left as it is — never post a
 second origin comment.
 
+**Before open-pr (#2903):** see `reference/ask-branches.md` § RS-09 — the parked follow-up default (#2903)
+
 When the promotion **prompt was presented**, **name in the Summary** both
 counts — **how many suggestions the human picked, and how many the sub-loop
 actually cleared**; whenever the selection was **non-empty**, add step 4's
@@ -1108,12 +1110,10 @@ see `reference/telemetry.md` § Story telemetry (#1226)
 record, at every ending after a review loop ran, escalations included — the §6
 PR, #2579's clean stop and an escalation terminal, where a parked blocker's run
 usually ends (`ESCALATE_NO_CONVERGENCE`): run `follow-up-origin.zsh parked-issues --progress
-<work-dir>/progress.md`; exit 1 means nothing was parked. Then invoke
-`/development:refine-issue <issue> --follow-up` for each issue it prints. On an
-unattended run (`resolve-session.zsh`, #2575) do it without asking. On an
-attended run ask once, listing them, with auto-refinement recommended and
-"leave them `needs-refinement`" as the other option. **A follow-up that parks
-never stops this run or its epic walk**: name it in the report and go on.
+<work-dir>/progress.md`; exit 1 means nothing was parked. Then invoke `/development:refine-issue <issue> --follow-up`
+for each issue it prints. Do it without asking, in every session mode (`resolve-session.zsh`, #2575), and record it:
+see `reference/ask-branches.md` § RS-09 — the parked follow-up default (#2903)
+**A follow-up that parks never stops this run or its epic walk**: name it in the report and go on.
 
 ## Epic flow
 

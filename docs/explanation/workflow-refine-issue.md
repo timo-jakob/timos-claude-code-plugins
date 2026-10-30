@@ -18,11 +18,11 @@ re-gate](diagrams/refine-issue.svg)
    declares child issues as a task list. An epic is walked child by child — see [Epics](#refine-epics) below.
    Everything else continues here.
 2. **Step 0 — fetch and check preconditions.** The skill reads the issue and stops if it is closed. If the
-   `needs-refinement` label is missing it asks whether to refine anyway. If an earlier run *parked* this issue, the
+   `needs-refinement` label is missing it refines anyway, and says so. If an earlier run *parked* this issue, the
    saved conversation and open questions are restored, and you are told what the last run stopped on.
 3. **Step 1 — diagnose.** The `story-readiness` agent judges the story afresh, because the gate comment on the issue
    may be stale. Its questions become this session's **objections** — the list every later turn works through. If the
-   story is already READY, the skill offers to simply clear the label.
+   story is already READY, the skill clears the label and says so.
 4. **Step 2 — one refiner turn.** The conductor hands `issue-refiner` the issue, the objections, the conversation so
    far and your latest reply. The agent returns:
    - for every objection, a plain-language *why it is not ready yet*;
@@ -72,7 +72,7 @@ and you curate them rather than write them from scratch.
    Persona advisories — an unknown persona, a stale or missing registry — are relayed to you but never change the
    verdict.
 4. **Step 5 — the label.** On READY the skill removes `needs-refinement` and checks that it is really gone. On
-   NEEDS_REFINEMENT it keeps the label and offers another loop, or stopping here as `deferred`.
+   NEEDS_REFINEMENT it keeps the label and loops back to step 2; you can still stop there as `deferred`.
 5. **Step 6 — the before/after comment.** One durable comment records the starting objections, a before/after of the
    prose, the re-gate verdict and the label state, and every answer that was taken automatically with its confidence.
 6. **Step 7 — telemetry.** Exactly one record per run, with the outcome `refined-ready` or `parked`. It also records
@@ -107,7 +107,7 @@ that failed. The epic's own body is never refined, and re-running the skill on t
 
 | Actor | Does |
 | --- | --- |
-| You | Start the run, answer the questions put to you, approve the exact rewrite, choose to park or loop again |
+| You | Start the run, answer the questions put to you, approve the exact rewrite, choose to park or stop |
 | `refine-issue` (conductor) | Every GitHub read and write, the question split, the write-back, the label, the comments |
 | `story-readiness` | Diagnoses the story at step 1 and re-gates it at step 4 |
 | `issue-refiner` | Drafts each turn: explanations, scored questions, the prose and the story spec |
