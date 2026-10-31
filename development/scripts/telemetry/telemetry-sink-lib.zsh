@@ -32,6 +32,10 @@ zmodload zsh/system 2>/dev/null || {
   return 3 }
 
 typeset -gr TELEMETRY_LOCK_TIMEOUT_S=10
+# How often a waiter retries the lock (#2949). Without -i, zsystem flock -t
+# retries once a second, and waiters started together retry on the same tick,
+# so only one acquires per second and 16 concurrent writers outlast the timeout.
+typeset -gr TELEMETRY_LOCK_INTERVAL_S=0.05
 
 # TLM_TOKENS_JQ_DEF — a jq definition, prepended to a jq program. `tokens_problem`
 # takes a non-null `tokens` value and yields nothing when it is well-formed, else
@@ -224,7 +228,7 @@ tlm_locked_append() {
   err=$({ : >> "$sink" } 2>&1) || { print -r -- "${err:-cannot create $sink}"; return 1 }
   # Taken in THIS shell (never inside a substitution, whose subshell would close
   # the descriptor — and release the lock — the moment it returned).
-  zsystem flock -t $TELEMETRY_LOCK_TIMEOUT_S -f lock_fd "$sink" 2>/dev/null
+  zsystem flock -t $TELEMETRY_LOCK_TIMEOUT_S -i $TELEMETRY_LOCK_INTERVAL_S -f lock_fd "$sink" 2>/dev/null
   rc=$?
   if (( rc == 2 )); then
     print -r -- "timed out after ${TELEMETRY_LOCK_TIMEOUT_S}s waiting for the lock on $sink"

@@ -710,6 +710,19 @@ _clone_with_remote() {  # $1 = directory name
   [ "$(jq -c -s '[.[].issue] | sort' "$DEFAULT_SINK")" = "$(jq -c -n '[range(1; 17)]')" ]
 }
 
+@test "the sink lock is retried at a sub-second interval, so concurrent waiters do not starve (#2949)" {
+  # Without -i, zsystem flock -t retries once a second, and waiters started
+  # together retry on the same tick: one acquires per second, so 16 concurrent
+  # emitters outlast the 10 s timeout. The interval is read from the sourced
+  # lib, and the call is read from the function as zsh parsed it.
+  run zsh -c 'source "$1" || exit 9
+    [[ $TELEMETRY_LOCK_INTERVAL_S == <->.<-> ]] || { print -r -- "not a decimal: $TELEMETRY_LOCK_INTERVAL_S"; exit 1 }
+    (( TELEMETRY_LOCK_INTERVAL_S > 0 && TELEMETRY_LOCK_INTERVAL_S < 1 )) || { print -r -- "out of range: $TELEMETRY_LOCK_INTERVAL_S"; exit 1 }
+    functions tlm_locked_append' _ "$REPO_ROOT/development/scripts/telemetry/telemetry-sink-lib.zsh"
+  [ "$status" -eq 0 ]
+  contains "$output" 'zsystem flock -t $TELEMETRY_LOCK_TIMEOUT_S -i $TELEMETRY_LOCK_INTERVAL_S -f lock_fd "$sink"'
+}
+
 # -------------------------------------------- cross-repo sink (--telemetry-dir)
 #
 # Cross-repo mode (#1006) exists so many repos can emit into ONE directory that a
