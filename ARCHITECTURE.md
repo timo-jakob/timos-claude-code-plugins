@@ -8209,6 +8209,133 @@ tests and feature can never drift apart.
 - **Proportionality.** A **no-surface** story (`interface_surfaces: []`,
   `test_cases: []`) spins out nothing.
 
+## Readiness stamp contract (`readiness-stamp/v1`)
+
+The `story-readiness` gate is one subagent per story, and on an epic every run
+used to gate every open leaf again, even when nothing had changed (epic #2953).
+`readiness-stamp/v1` records the gate's verdict on the issue together with a
+fingerprint of everything the verdict depends on. A later run reuses the verdict
+while the fingerprint still matches, and spends a gate agent only on a miss.
+`development/skills/resolve-issue/scripts/readiness-stamp.zsh` (#2954) is the
+contract's one implementation: `key` computes the fingerprint, `check` decides
+hit or miss for a set of issues, and `write` records a verdict. The decision is
+deterministic. The agent judges only misses.
+
+### Where the stamp lives
+
+One **comment per issue**, edited in place. It is a comment and not part of the
+body, so writing the stamp never changes the key it records:
+
+````markdown
+<!-- readiness-stamp/v1 key=<sha256> gate=<gate_version> at=<ISO date> -->
+<details>
+<summary>readiness verdict: READY (readiness-stamp/v1)</summary>
+
+```json
+{ "issue": 2954, "verdict": "READY", "risk": "elevated", "surface": [], "…": "…",
+  "size": { "verdict": "pass", "triggers": [], "files": 6, "plugins": 1,
+            "inventory": ["development/skills/resolve-issue/scripts/readiness-stamp.zsh", "…"] } }
+```
+
+</details>
+````
+
+The `json` block holds the verdict JSON exactly as `story-readiness` returns it,
+`size.inventory` included. Downstream steps need the whole verdict (`risk`,
+`surface`, the proposed `story_spec`, the declared inventory), so a hit hands it
+back as if the gate had just returned it. `write` refuses a verdict file that
+lacks `verdict`, `size.verdict`, `size.triggers` or `size.inventory`.
+
+### The key and `gate_version`
+
+`key` is sha256 over the compact, key-sorted JSON document
+`{gate_version, title, body, blocked_by, labels}`:
+
+- **`title` and `body`** are normalized: CRLF becomes LF, trailing whitespace is
+  stripped from each line, and trailing blank lines are dropped. A cosmetic
+  re-save does not invalidate a stamp.
+- **`blocked_by`** is the sorted list of the issue's own native `blockedBy`
+  edges. A same-repo blocker is a bare number, and a foreign one is
+  `owner/name#N`. Only the issue's own edges count. Graph-wide acyclicity is not
+  part of any key: the consumer checks it over the whole edge set on every run,
+  so an edge change elsewhere invalidates nothing here.
+- **`labels`** are the sorted label names minus `needs-refinement` and `blocked`.
+  Those two are the gate's and the precheck's own outputs, never its inputs.
+
+`updatedAt` is not an input, because any comment or label bumps it. Neither is the
+personas registry: its findings are advisories that never move the verdict
+(#668).
+
+**`gate_version`** is sha256 of the contents of `story-readiness.md` followed by
+`size-check.zsh`, both from `readiness-stamp.zsh`'s own plugin. The script
+resolves them from its own path (`agents/story-readiness.md` and
+`skills/refine-issue/scripts/size-check.zsh` under the plugin root) and never
+hashes another installed copy. It is deliberately not the plugin version, which
+bumps on almost every PR and would invalidate every stamp. A change to the gate's
+instructions or to the size check invalidates them all, and that is the point.
+
+### Hit or miss
+
+`check --repo R (--epic N | --issue N)` reads every target with **one batched
+GraphQL query** (up to 100 targets per query, and each issue's comments paged
+past 100). With `--epic`, the targets are the open, same-repo `leaf` nodes below
+`N` in `read-sub-issues.zsh --tree`. It prints
+`{"gate_version": G, "hits": [{"issue", "verdict"}], "misses": [{"issue", "reason"}]}`.
+A target is a hit only when every condition holds. The first one that fails, in
+this order, is its one `reason`:
+
+| `reason` | Fails when |
+|---|---|
+| `no_stamp` | no comment carries a `readiness-stamp/v1` marker |
+| `untrusted_author` | stamps exist, but none by a trusted author |
+| `malformed` | the newest trusted stamp's marker or verdict does not parse, or the verdict carries no `size.inventory` |
+| `gate_changed` | the stamp's `gate` differs from the current `gate_version` |
+| `key_changed` | the stamp's `key` differs from the recomputed key |
+| `inventory_drift` | the size re-check (below) disagrees with the cached size result |
+
+- **Only trusted stamps count.** A stamp carries `risk`, and `risk` reaches the
+  Approver, so a drive-by comment must not be able to forge `risk: low`. A stamp
+  is trusted when its `authorAssociation` is `OWNER`, `MEMBER` or `COLLABORATOR`,
+  or when its author is the repository owner's Maintenance App: a GraphQL `Bot`
+  whose login is `claude-maintenance-<owner>`. A user account cannot be a `Bot`,
+  so a look-alike login is not trusted. When several trusted stamps exist, the
+  newest by creation time is the stamp, and every other comment is ignored.
+- **Cache the judgment, re-run the cheap deterministic part.** A stamp's size
+  re-check compares results rather than requiring a pass. `check` re-runs
+  `size-check.zsh` on the cached `size.inventory`. The stamp stays a hit only
+  while the fresh `verdict` and `triggers` equal the cached `size.verdict` and
+  `size.triggers`. A mismatch, or a size check that exits 2 or 3, is an
+  `inventory_drift` miss. So an unchanged size-stopped story keeps its cached
+  NEEDS_REFINEMENT verdict without a fresh gate.
+- **No existence test.** A stamp hit never depends on whether the inventory's
+  paths exist. A declared inventory lists the files a story will create as well
+  as those it edits, and the gate's verdict is a function of the inventory alone.
+  So the only repo-drift re-check is the size comparison, which makes no
+  existence test.
+- **An epic body edit does not invalidate its children.** A child's readiness is
+  its own spec. A newly added child is a new miss, and a removed one leaves an
+  orphaned stamp that nothing reads.
+
+### Writing
+
+`write --repo R --issue N --verdict-file F` computes the key **at write time**,
+from the issue as it is now. It edits the newest trusted stamp comment in place,
+or creates one when none exists, and deletes any older trusted stamp, so one
+write never leaves two. An untrusted stamp is never edited or deleted. It prints
+`{"issue", "key", "gate_version", "action": "edited"|"created", "comment_id"}`.
+
+### Failing toward gating
+
+- **Never a weaker gate.** A hit returns exactly the verdict a gate produced on
+  identical inputs with the same gate version. Anything else is a miss.
+- **A stamp problem is never an error.** Exit codes are 0 ok, 2 usage (an
+  unreadable or invalid `--verdict-file` included), and 3 runtime: a gh, GraphQL
+  or jq failure, a missing issue, or an unreadable sub-issue tree. An
+  unreadable, malformed, untrusted or foreign-version stamp, and a failed size
+  re-check, are misses with exit 0. A caller seeing exit 3 gates every target.
+- **Forcing a fresh gate needs no flag.** Deleting the stamp comment is the
+  documented way.
+
 ## Persona registry contract (`personas/v1`, #665)
 
 A **persona registry** is a target repo's answer to *"who actually uses this
