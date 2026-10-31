@@ -36,6 +36,12 @@ typeset -gr TELEMETRY_LOCK_TIMEOUT_S=10
 # retries once a second, and waiters started together retry on the same tick,
 # so only one acquires per second and 16 concurrent writers outlast the timeout.
 typeset -gr TELEMETRY_LOCK_INTERVAL_S=0.05
+# zsystem flock learnt -i (and a fractional -t) in zsh 5.9; an older zsh rejects
+# the option outright, which would fail every append. Decided once, here: an
+# older zsh keeps the pre-#2949 call and its 1 s retry.
+autoload -Uz is-at-least
+if is-at-least 5.9; then typeset -gri TLM_LOCK_HAS_INTERVAL=1
+else typeset -gri TLM_LOCK_HAS_INTERVAL=0; fi
 
 # TLM_TOKENS_JQ_DEF — a jq definition, prepended to a jq program. `tokens_problem`
 # takes a non-null `tokens` value and yields nothing when it is well-formed, else
@@ -228,7 +234,11 @@ tlm_locked_append() {
   err=$({ : >> "$sink" } 2>&1) || { print -r -- "${err:-cannot create $sink}"; return 1 }
   # Taken in THIS shell (never inside a substitution, whose subshell would close
   # the descriptor — and release the lock — the moment it returned).
-  zsystem flock -t $TELEMETRY_LOCK_TIMEOUT_S -i $TELEMETRY_LOCK_INTERVAL_S -f lock_fd "$sink" 2>/dev/null
+  if (( TLM_LOCK_HAS_INTERVAL )); then
+    zsystem flock -t $TELEMETRY_LOCK_TIMEOUT_S -i $TELEMETRY_LOCK_INTERVAL_S -f lock_fd "$sink" 2>/dev/null
+  else
+    zsystem flock -t $TELEMETRY_LOCK_TIMEOUT_S -f lock_fd "$sink" 2>/dev/null
+  fi
   rc=$?
   if (( rc == 2 )); then
     print -r -- "timed out after ${TELEMETRY_LOCK_TIMEOUT_S}s waiting for the lock on $sink"
