@@ -232,7 +232,8 @@ this is the guided pass that clears them.
      refine".
 
 2. **Walk each child in turn** through the **single-issue flow** (Steps 0–7) —
-   reuse it as written, one child fully before the next. A child either reaches
+   reuse it as written, one child fully before the next, Step 1's stamp reuse and
+   Step 4's stamp included (#2956). A child either reaches
    `READY` (its label cleared, Step 5) or takes a **typed parked exit** (Step 2's,
    or Step 5's `deferred` stop);
    a parked child does not halt the walk — record it and continue to the next.
@@ -474,7 +475,20 @@ gh issue view <N> --json number,title,body,state,labels,url,comments
 
 ## Step 1 — diagnose (fresh objections)
 
-Spawn **`story-readiness`** (Task tool, `subagent_type: story-readiness`) on the
+**First, reuse a still-valid readiness stamp (#2956).** From the repository root:
+
+```bash
+"<skill-base-dir>/scripts/readiness-stamp-step.zsh" diagnose --repo "$REPO" --issue <N>
+```
+
+- **`"hit": true`** → its `verdict` is the diagnosis, exactly as if
+  `story-readiness` had just returned it: spawn no gate. Everything below
+  applies to it unchanged, `RISK` and `SIZE_PREFLIGHT` included, and so does
+  the `READY` shortcut.
+- **`"hit": false`**, or any nonzero exit → spawn the gate as below. A miss,
+  a failed check included, never stops the session.
+
+Otherwise spawn **`story-readiness`** (Task tool, `subagent_type: story-readiness`) on the
 repo + issue to get a **current** verdict — the thread's comment may be stale
 against the latest body. Take its `refinement_questions` as the authoritative
 **objections** for this session, and **record the verdict's `risk`** into Step 7's
@@ -985,6 +999,25 @@ Spawn **`story-readiness`** again on the freshly-edited issue, and re-record
 authoritative — and, because a `story-spec` block now exists, its validation also
 checks the block against the prose (it will pass: you just stamped the hash over
 this exact prose).
+
+**Stamp the re-gate verdict (#2956)**, `READY` and `NEEDS_REFINEMENT` alike, so
+the next resolve-issue run reuses it. Read the key **before** spawning the
+re-gate, after Step 3's edit; write the verdict JSON exactly as returned to a
+file; then, right after the verdict returns and before Step 5, from the
+repository root:
+
+```bash
+K="$("<skill-base-dir>/../resolve-issue/scripts/readiness-stamp.zsh" key --repo "$REPO" --issue <N>)" || K=""
+# … spawn the re-gate, write its verdict to <verdict.json> …
+"<skill-base-dir>/scripts/readiness-stamp-step.zsh" stamp --repo "$REPO" --issue <N> \
+  --verdict-file <verdict.json> --expect-key "$K"
+```
+
+The stamp's key is the edited body's, the body the next run reads. A loop-back
+to Step 2 stamps again at its next Step 4, in place, so a deferred park in
+Step 5 leaves the newest re-gate's stamp. When nothing is stamped, the script
+prints one line on stderr: relay it to the human as is and go on to Step 5. A
+stamp never changes the verdict, the label handling or Step 7's outcome.
 
 **Relay the verdict's `advisories` to the human (#668).** The re-gate may return
 non-blocking `advisories` — e.g. a `story-spec` `personas` reference to a persona
