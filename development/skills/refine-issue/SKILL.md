@@ -231,15 +231,84 @@ this is the guided pass that clears them.
      force-fit it into a branch above, and never conclude "no children to
      refine".
 
-2. **Walk each child in turn** through the **single-issue flow** (Steps 0–7) —
-   reuse it as written, one child fully before the next. A child either reaches
-   `READY` (its label cleared, Step 5) or takes a **typed parked exit** (Step 2's,
-   or Step 5's `deferred` stop);
-   a parked child does not halt the walk — record it and continue to the next.
+2. **Walk the children in two phases (#2904)** — draft every child first, then
+   ask **one** approval for the batch. The walk reuses the **single-issue flow**
+   (Steps 0–7) as written, except that the approval of the exact rewrite moves
+   out of each child's Step 2 into the batch. A parked child does not halt the
+   walk — record it and continue to the next.
+
+   **Per-child state.** At walk start, remove `/tmp/refine-issue-epic-<E>/` (as
+   Step 0 clears `/tmp/parked-state.json`) and recreate it empty. Each child
+   keeps one state file there, `/tmp/refine-issue-epic-<E>/<N>.json`, which you
+   rewrite with `jq` after every round. It holds the child's Step 7 run
+   variables (`t0`, `repo_root`, `rounds`, `raised`, `resolved`, `risk`,
+   `size_preflight`, `state_outcome`, `park_type`, `paused_s`), its
+   `conversation`, its `auto_accepted` answers (each `{question, answer,
+   confidence, weakest}`), its `proposed_prose` and `proposed_story_spec`, the
+   issue's current block as `old_block` (`null` when it has none), its
+   `expected_docs_pages`, `rewrite_path` (a file holding its full rewrite),
+   `draft_ready_at` and its `phase`. Step 7 re-states the child's literals from
+   that file in the same invocation as the fence.
+
+   **Phase A — draft each child, in sub-issue order.** Run Steps 0, 1 and 2 as
+   written: the refiner's questions, the size check with its File / Revise /
+   Park choice, and the typed parked exit. A child that ends in phase A finishes
+   there, Step 7 included, and never enters a batch: the READY shortcut (cleared
+   through Step 5's `READY` branch), a typed park, and a filed split. A child
+   whose draft converges and passes the size check is **not** presented for
+   approval: add its Decisions taken section to the draft as Step 2 says, write
+   its rewrite to `rewrite_path`, set `phase` to `pending` and `draft_ready_at`
+   to `$(date +%s)`, and go on to the next child.
+
+   **Phase B — one approval for the batch.** Once every child of this pass has
+   ended or is pending, render the batch:
+
+   ```bash
+   "<skill-base-dir>/scripts/batch-approval.zsh" summary --dir /tmp/refine-issue-epic-<E>
+   ```
+
+   It prints one entry per pending child: the intent changes (the draft's
+   `acceptance_criteria` and `scope_boundaries.in`/`out` diffed against the
+   current block), the test cases and the ids Step 2.5 will create, edit or
+   close, the side effects, the **Answers taken automatically**, the expected
+   docs pages and the path of the full rewrite. It names no `blockedBy` edge,
+   because refine-issue creates none. Exit 1 is a malformed state file: fix it
+   with `jq` and re-run. Exit 2 is your own malformed call: fix it and re-run.
+   Show it, then ask once (`AskUserQuestion`): **Approve all**, or name the
+   children to **revisit** (with their reply), to **skip**, or whose
+   auto-accepted answer they **overturn**. An overturned answer makes its child
+   a revisit, with the overturn as its `human_reply`. Split the answer with:
+
+   ```bash
+   "<skill-base-dir>/scripts/batch-approval.zsh" partition --dir /tmp/refine-issue-epic-<E> \
+     [--revisit "<n …>"] [--skip "<n …>"]
+   ```
+
+   It prints `{approve, revisit, skip}`. Exit 2 means a number that is not a
+   pending child, or one named in both lists: ask again with the pending
+   numbers. Then, for every pending child, add the batch wait to its paused
+   time: `paused_s += now - draft_ready_at`. The batch wait is not refinement
+   work, so it never counts toward a child's `wall_s`.
+
+   - **approve** — one child at a time, in sub-issue order, run Steps 2.5, 3,
+     4, 5, 6 and 7 for it. Its batch approval is the approval of its exact
+     rewrite.
+   - **skip** — the child ends as *skipped (human declined)*: nothing is
+     written, its label stays, and Step 7 emits no record, since it reached no
+     decided outcome.
+   - **revisit** — the child re-enters Step 2 with the human's reply as
+     `human_reply`, and its `phase` goes back to drafting.
+
+   **The batch loop-back rule.** A child whose re-gate is still
+   `NEEDS_REFINEMENT` loops back to Step 2 (Step 5) like a revisit child. The
+   loop-back children and the revisit children redraft, and once each has a new
+   sized draft (or has parked) they form the **next batch**, which gets one
+   approval again. Batches repeat until no child is pending.
 
 3. **Post an epic-level summary** on the epic issue: for each child, whether it is
    now **ready** (label cleared) or **still parked** (with the park type), plus
-   any that had no work to do, plus any `skipped_self_ref` line a backfill
+   any that had no work to do, plus any the human skipped in a batch
+   (*skipped (human declined)*), plus any `skipped_self_ref` line a backfill
    reported (named as a self-reference that was not migrated — necessarily a
    **tracker** line, since a mistyped child ref halts the walk at step 1)
    — and, separately, any that ended in a **failure**
@@ -409,6 +478,9 @@ gh issue view <N> --json number,title,body,state,labels,url,comments
   STATE_OUTCOME=""; PARK_TYPE=""; RISK=""; ROUNDS=""; RAISED=""; RESOLVED=""
   SIZE_PREFLIGHT=""   # optional, never guarded — Step 7's size_preflight (#2589)
   AUTO_REFINEMENT=""  # optional, never guarded — --follow-up only (#2588)
+  # The time this run spent waiting on an epic walk's batch approval (#2904),
+  # which Step 7 subtracts from wall_s. A measured zero on a single-issue run.
+  PAUSED_S=0
   # Print the two stamps: Step 7 needs their LITERAL values many tool calls
   # later, and a shell variable does not survive that gap.
   echo "carry into Step 7: T0=$T0 REPO_ROOT=$REPO_ROOT"
@@ -633,6 +705,11 @@ loop-back, is not added again. The follow-up mode's `accept` does the same befor
 2 is your own malformed call: fix it and re-run once. Nothing is written until they approve. If they
 want changes, feed their reply back for another round.
 
+**In an epic walk the approval is the batch's (#2904).** A child's sized draft
+is not presented here: it becomes **pending approval**, and the Epic walk's
+phase B asks one approval for every pending child at once. The batch summary
+carries the same **Answers taken automatically** this step would show.
+
 **Auto-accept never approves the rewrite.** The threshold only answers the
 refiner's questions. The approval of the exact rewrite is always the human's,
 whatever the threshold. The one exception is the unattended follow-up mode
@@ -649,7 +726,7 @@ unset makes it skip the record entirely rather than report a fabricated zero:
 A shell variable does **not** survive between Bash tool calls, and this loop
 spans many of them across human turns. Step 7's fence reads Step 0's `T0` and
 `REPO_ROOT` plus the run variables `STATE_OUTCOME`, `PARK_TYPE`, `RISK`,
-`ROUNDS`, `RAISED`, `RESOLVED` and `SIZE_PREFLIGHT`, and its guard reads them
+`ROUNDS`, `RAISED`, `RESOLVED`, `SIZE_PREFLIGHT` and `PAUSED_S`, and its guard reads them
 *before* the `jq` does, so substituting literals into the `--arg` lines
 alone still leaves the guard seeing unset values and skipping the record. So:
 carry every one of them in your own notes as you go (Step 0 prints its two), and
@@ -1046,7 +1123,9 @@ they can add or fix it and, optionally, re-run refine-issue to reference it.
   the honest signal. **Loop back to Step 2 without asking**, with the gate's
   remaining reasons as the objections, and take the default with its notice
   (*Defaults taken instead of asking*, above). The unattended follow-up mode
-  never loops back: it takes the stop below, its deferred route.
+  never loops back: it takes the stop below, its deferred route. In an epic
+  walk the looped-back child redrafts and joins the **next batch** (the Epic
+  walk's batch loop-back rule), rather than being presented on its own.
 
   **A stop the human takes in that loop before its next Step 3 write-back is a
   recorded ending, but NOT Step 2's parked exit.**
@@ -1124,10 +1203,13 @@ from a well-formed park whose type was lost, and an out-of-enum one is a
 fabricated value the payload builder deliberately does not police.
 
 **Re-assign them all before running this block.** `T0`, `REPO_ROOT`,
-`STATE_OUTCOME`, `PARK_TYPE`, `RISK`, `ROUNDS`, `RAISED`, `RESOLVED` and
-`SIZE_PREFLIGHT` must all be
+`STATE_OUTCOME`, `PARK_TYPE`, `RISK`, `ROUNDS`, `RAISED`, `RESOLVED`,
+`SIZE_PREFLIGHT` and `PAUSED_S` must all be
 re-stated as literals **in the same Bash invocation as the fence**, on the lines
-above the guard (Step 2's rule). In the unattended follow-up mode
+above the guard (Step 2's rule). In an epic walk they come from the child's
+state file (the Epic walk's *Per-child state*), and `PAUSED_S` is its
+`paused_s`: the batch wait, which `WALL_S` excludes. Everywhere else it is
+Step 0's measured `0`, and the guard requires it to be digits. In the unattended follow-up mode
 `AUTO_REFINEMENT` is one more, re-stated the same way. Values assigned in an earlier tool call are
 gone, and the guard would then skip the record for a run that was measured
 perfectly well. This holds on **every** path here — including Step 1's
@@ -1153,12 +1235,14 @@ PARK_RE='^(needs-decision|split-recommended|deferred)$'
 if [[ ! "${T0:-}" =~ $T0_RE || -z "${REPO_ROOT:-}" || ! -d "${REPO_ROOT:-/nonexistent}" \
    || -z "${STATE_OUTCOME:-}" || ! "${ROUNDS:-}" =~ ^[0-9]+$ \
    || ! "${RAISED:-}" =~ ^[0-9]+$ || ! "${RESOLVED:-}" =~ ^[0-9]+$ \
+   || ! "${PAUSED_S:-}" =~ ^[0-9]+$ \
    || ( "${STATE_OUTCOME:-}" == "parked" && ! "${PARK_TYPE:-}" =~ $PARK_RE ) ]]; then
-  echo "telemetry not recorded for this run (a Step 0 stamp, the run outcome, a run count, or a park's type is missing) — the run itself is unaffected"
+  echo "telemetry not recorded for this run (a Step 0 stamp, the run outcome, a run count, the paused time, or a park's type is missing) — the run itself is unaffected"
 else
   # 10# so a leading-zero stamp can't be read as a bad octal literal, matching
-  # the emitter's own normalization.
-  WALL_S=$(( $(date +%s) - 10#$T0 ))
+  # the emitter's own normalization. PAUSED_S is an epic walk's batch wait
+  # (#2904), never refinement work; 0 everywhere else.
+  WALL_S=$(( $(date +%s) - 10#$T0 - 10#$PAUSED_S ))
   (( WALL_S >= 0 )) || WALL_S=0     # a backwards clock (NTP) would be rejected
 
   # Allocate independently, so a partial success is still cleaned up.

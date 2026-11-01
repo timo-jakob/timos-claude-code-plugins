@@ -183,7 +183,9 @@ stale() {
   contains "$(flat "$REPO_ROOT/docs/explanation/workflow-refine-issue.md")" 'If the story is already READY, the skill clears the label and says so.'
   run -1 grep -qF 'offer to just clear the label' <<< "$t"
   run -1 grep -qF 'ask whether they want to refine anyway' <<< "$t"
-  run -1 grep -qF 'human declined' <<< "$t"
+  # Scoped to Step 1, the READY shortcut this guards: #2904's batch skip ends a
+  # child as *skipped (human declined)* in the Epic walk, which is not this ask.
+  run -1 grep -qF 'human declined' <<< "$(sed -n '/^## Step 1 /,/^## Step 2 /p' "$REFINE/SKILL.md")"
 }
 
 @test "RF-09: refine-issue loops back to Step 2 on a still-rejected re-gate without asking" {

@@ -723,7 +723,7 @@ skill_step0() {
   assert_contains "$code" '"$BUILDER" --state "$STATE" > "$PAYLOAD"'
   # wall_s must be DERIVED, never stamped: `WALL_S=$(date +%s)` would emit an
   # absolute epoch as the duration on every record, and validate.
-  assert_contains "$code" 'WALL_S=$(( $(date +%s) - 10#$T0 ))'
+  assert_contains "$code" 'WALL_S=$(( $(date +%s) - 10#$T0 - 10#$PAUSED_S ))'
   assert_contains "$code" '(( WALL_S >= 0 )) || WALL_S=0'
   # BOTH cleanup sites: the bare needle also matches the mktemp-failure arm
   # (`rm -f … 2>/dev/null`), so deleting the post-emission cleanup — the one
@@ -829,7 +829,7 @@ skill_step0() {
   # run is then skipped and the entire stream dies behind the one-line advisory
   # with the suite green. Equality also pins the `||` separators, the parked
   # pairing's `&&`, and the `-z "${REPO_ROOT:-}"` conjunct no needle covered.
-  assert_eq "$cond" 'if [[ ! "${T0:-}" =~ $T0_RE || -z "${REPO_ROOT:-}" || ! -d "${REPO_ROOT:-/nonexistent}" || -z "${STATE_OUTCOME:-}" || ! "${ROUNDS:-}" =~ ^[0-9]+$ || ! "${RAISED:-}" =~ ^[0-9]+$ || ! "${RESOLVED:-}" =~ ^[0-9]+$ || ( "${STATE_OUTCOME:-}" == "parked" && ! "${PARK_TYPE:-}" =~ $PARK_RE ) ]]; then ' "Step 7 guard condition"
+  assert_eq "$cond" 'if [[ ! "${T0:-}" =~ $T0_RE || -z "${REPO_ROOT:-}" || ! -d "${REPO_ROOT:-/nonexistent}" || -z "${STATE_OUTCOME:-}" || ! "${ROUNDS:-}" =~ ^[0-9]+$ || ! "${RAISED:-}" =~ ^[0-9]+$ || ! "${RESOLVED:-}" =~ ^[0-9]+$ || ! "${PAUSED_S:-}" =~ ^[0-9]+$ || ( "${STATE_OUTCOME:-}" == "parked" && ! "${PARK_TYPE:-}" =~ $PARK_RE ) ]]; then ' "Step 7 guard condition"
   # RISK must NEVER be guarded: it is null by contract whenever Step 1 produced
   # no verdict, so ANY spelling of a RISK guard suppresses good records. Scope
   # this to the guard's own condition — RISK legitimately appears later in the

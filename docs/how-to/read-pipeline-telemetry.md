@@ -172,6 +172,9 @@ Normative: `ARCHITECTURE.md`, *The suggestion-promotion enrichment*.
 | `risk_classification` | string or `null` | the risk classification the refined story carries |
 | `size_preflight` | object or absent | `verdict` and `triggers` of the last readiness size check, and `children_filed` by a refinement-time split |
 
+In an epic walk, a child's `wall_s` leaves out the time its draft waited for
+the batch's one approval, so it measures only that child's refinement work.
+
 Normative: `ARCHITECTURE.md`, *Refine-issue telemetry*.
 
 ### resolve-issue, story mode
