@@ -710,6 +710,50 @@ _clone_with_remote() {  # $1 = directory name
   [ "$(jq -c -s '[.[].issue] | sort' "$DEFAULT_SINK")" = "$(jq -c -n '[range(1; 17)]')" ]
 }
 
+@test "the sink lock is retried at a sub-second interval, so concurrent waiters do not starve (#2949)" {
+  # Without -i, zsystem flock -t retries once a second, and waiters started
+  # together retry on the same tick: one acquires per second, so 16 concurrent
+  # emitters outlast the 10 s timeout. The interval is read from the sourced
+  # lib, and the call is read from the function as zsh parsed it.
+  run zsh -c 'source "$1" || exit 9
+    [[ $TELEMETRY_LOCK_INTERVAL_S == <->.<-> ]] || { print -r -- "not a decimal: $TELEMETRY_LOCK_INTERVAL_S"; exit 1 }
+    (( TELEMETRY_LOCK_INTERVAL_S > 0 && TELEMETRY_LOCK_INTERVAL_S < 1 )) || { print -r -- "out of range: $TELEMETRY_LOCK_INTERVAL_S"; exit 1 }
+    functions tlm_locked_append' _ "$REPO_ROOT/development/scripts/telemetry/telemetry-sink-lib.zsh"
+  [ "$status" -eq 0 ]
+  contains "$output" 'zsystem flock -t $TELEMETRY_LOCK_TIMEOUT_S -i $TELEMETRY_LOCK_INTERVAL_S -f lock_fd "$sink"'
+}
+
+@test "zsh 5.9+ takes the sink lock with the sub-second retry interval (#2949)" {
+  # A zsystem wrapper on the ZDOTDIR seam records the flock call's arguments
+  # and hands it to the real builtin, so the append still really happens.
+  local zd="$BATS_TEST_TMPDIR/zd" log="$BATS_TEST_TMPDIR/flock.log"
+  mkdir -p "$zd"
+  printf 'zsystem() { [[ $1 == flock && $2 != -u ]] && print -r -- "$*" >> %q; builtin zsystem "$@" }\n' "$log" > "$zd/.zshenv"
+  run zsh -c 'autoload -Uz is-at-least; is-at-least 5.9'
+  [ "$status" -eq 0 ] || skip "this zsh predates 5.9"
+  run --separate-stderr env ZDOTDIR="$zd" zsh "$S" --repo-dir "$RD" --pipeline p --outcome success --wall-s 1
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$DEFAULT_SINK")" -eq 1 ]
+  [ "$(cat "$log")" = "flock -t 10 -i 0.05 -f lock_fd $DEFAULT_SINK" ]
+}
+
+@test "a zsh older than 5.9 takes the sink lock without -i and still appends (#2949)" {
+  # zsystem flock learnt -i in zsh 5.9; an older one rejects it and every
+  # append would fail. is-at-least is shadowed on the ZDOTDIR seam to say "old"
+  # (a defined function survives the lib's autoload), and the same recording
+  # zsystem wrapper shows the call falls back to the pre-#2949 1 s retry.
+  local zd="$BATS_TEST_TMPDIR/zd" log="$BATS_TEST_TMPDIR/flock.log"
+  mkdir -p "$zd"
+  {
+    printf 'is-at-least() { return 1 }\n'
+    printf 'zsystem() { [[ $1 == flock && $2 != -u ]] && print -r -- "$*" >> %q; builtin zsystem "$@" }\n' "$log"
+  } > "$zd/.zshenv"
+  run --separate-stderr env ZDOTDIR="$zd" zsh "$S" --repo-dir "$RD" --pipeline p --outcome success --wall-s 1
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$DEFAULT_SINK")" -eq 1 ]
+  [ "$(cat "$log")" = "flock -t 10 -f lock_fd $DEFAULT_SINK" ]
+}
+
 # -------------------------------------------- cross-repo sink (--telemetry-dir)
 #
 # Cross-repo mode (#1006) exists so many repos can emit into ONE directory that a
