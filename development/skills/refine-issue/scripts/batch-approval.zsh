@@ -85,7 +85,7 @@ for f in "${files[@]}"; do
   [[ "$(jq -r '.phase' "$f")" == pending ]] || continue
   jq -e '
     (.proposed_story_spec | type == "object")
-    and ((.old_block | type) as $t | $t == "object" or $t == "null")
+    and has("old_block") and ((.old_block | type) as $t | $t == "object" or $t == "null")
     and (.auto_accepted | type == "array")
     and (.expected_docs_pages | type == "array")
     and (.rewrite_path | type == "string")

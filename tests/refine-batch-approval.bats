@@ -100,6 +100,19 @@ fresh() {
   contains "$output" 'malformed pending state file'
 }
 
+@test "a pending state file missing any one field it reads, or with the wrong type, exits 1" {
+  local field
+  for field in proposed_story_spec old_block auto_accepted expected_docs_pages rewrite_path; do
+    pending 7
+    jq "del(.$field)" "$D/7.json" > "$D/x" && mv "$D/x" "$D/7.json"
+    run -1 zsh "$S" partition --dir "$D"
+    contains "$output" 'malformed pending state file'
+    pending 7
+    jq ".$field = true" "$D/7.json" > "$D/x" && mv "$D/x" "$D/7.json"
+    run -1 zsh "$S" partition --dir "$D"
+  done
+}
+
 @test "the summary carries the AC and scope diff, the test-case plan and the auto-accepted answers" {
   pending 12
   run -0 zsh "$S" summary --dir "$D"
@@ -141,6 +154,11 @@ fresh() {
   contains "$t" 'batch-approval.zsh" summary --dir /tmp/refine-issue-epic-<E>'
   contains "$t" 'batch-approval.zsh" partition --dir /tmp/refine-issue-epic-<E>'
   contains "$t" 'never enters a batch: the READY shortcut'
+  contains "$t" 're-read the issue'"'"'s current block into `old_block`, write its rewrite to `rewrite_path`, set `phase` to `pending` and `draft_ready_at` to `$(date +%s)`, and go on to the next child.'
+  contains "$t" '`park_type`, `paused_s`), its `conversation`'
+  contains "$t" '`draft_ready_at` and its `phase`: `pending` while its draft awaits a batch, and set to its outcome (`approved`, `skipped` or `drafting`) as soon as `partition` places it, so no child is in two batches.'
+  contains "$t" 'A looped-back child already written back takes Step 5'"'"'s stop instead.'
+  contains "$t" 'the child'"'"'s `/tmp/refine-issue-epic-<E>/<N>.defaults.json`'
   contains "$t" 'run Steps 2.5, 3, 4, 5, 6 and 7 for it. Its batch approval is the approval of its exact rewrite.'
   contains "$t" 'the child ends as *skipped (human declined)*'
   # phase A comes before phase B in the walk
@@ -165,7 +183,7 @@ fresh() {
   contains "$step0" 'PAUSED_S=0'
   contains "$step7" 'WALL_S=$(( $(date +%s) - 10#$T0 - 10#$PAUSED_S ))'
   contains "$step7" '|| ! "${PAUSED_S:-}" =~ ^[0-9]+$'
-  contains "$(flat "$SKILL")" 'add the batch wait to its paused time: `paused_s += now - draft_ready_at`.'
+  contains "$(flat "$SKILL")" 'When a child'"'"'s own work resumes — its Steps 2.5 to 7, or its redraft — add the wait to its paused time: `paused_s += now - draft_ready_at`.'
 }
 
 @test "the auto-accept guardrail is unchanged: a batch never lets auto-accept approve a rewrite" {

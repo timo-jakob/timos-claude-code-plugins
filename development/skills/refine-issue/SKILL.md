@@ -247,8 +247,10 @@ this is the guided pass that clears them.
    confidence, weakest}`), its `proposed_prose` and `proposed_story_spec`, the
    issue's current block as `old_block` (`null` when it has none), its
    `expected_docs_pages`, `rewrite_path` (a file holding its full rewrite),
-   `draft_ready_at` and its `phase`. Step 7 re-states the child's literals from
-   that file in the same invocation as the fence.
+   `draft_ready_at` and its `phase`: `pending` while its draft awaits a batch,
+   and set to its outcome (`approved`, `skipped` or `drafting`) as soon as
+   `partition` places it, so no child is in two batches. Step 7 re-states the
+   child's literals from that file in the same invocation as the fence.
 
    **Phase A — draft each child, in sub-issue order.** Run Steps 0, 1 and 2 as
    written: the refiner's questions, the size check with its File / Revise /
@@ -256,9 +258,10 @@ this is the guided pass that clears them.
    there, Step 7 included, and never enters a batch: the READY shortcut (cleared
    through Step 5's `READY` branch), a typed park, and a filed split. A child
    whose draft converges and passes the size check is **not** presented for
-   approval: add its Decisions taken section to the draft as Step 2 says, write
-   its rewrite to `rewrite_path`, set `phase` to `pending` and `draft_ready_at`
-   to `$(date +%s)`, and go on to the next child.
+   approval: add its Decisions taken section to the draft as Step 2 says, re-read
+   the issue's current block into `old_block`, write its rewrite to
+   `rewrite_path`, set `phase` to `pending` and `draft_ready_at` to
+   `$(date +%s)`, and go on to the next child.
 
    **Phase B — one approval for the batch.** Once every child of this pass has
    ended or is pending, render the batch:
@@ -286,24 +289,26 @@ this is the guided pass that clears them.
 
    It prints `{approve, revisit, skip}`. Exit 2 means a number that is not a
    pending child, or one named in both lists: ask again with the pending
-   numbers. Then, for every pending child, add the batch wait to its paused
-   time: `paused_s += now - draft_ready_at`. The batch wait is not refinement
-   work, so it never counts toward a child's `wall_s`.
+   numbers. When a child's own work resumes — its Steps 2.5 to 7, or its
+   redraft — add the wait to its paused time: `paused_s += now - draft_ready_at`.
+   The batch wait is not refinement work, so it never counts toward a child's
+   `wall_s`.
 
    - **approve** — one child at a time, in sub-issue order, run Steps 2.5, 3,
      4, 5, 6 and 7 for it. Its batch approval is the approval of its exact
      rewrite.
    - **skip** — the child ends as *skipped (human declined)*: nothing is
      written, its label stays, and Step 7 emits no record, since it reached no
-     decided outcome.
+     decided outcome. A looped-back child already written back takes Step 5's
+     stop instead.
    - **revisit** — the child re-enters Step 2 with the human's reply as
      `human_reply`, and its `phase` goes back to drafting.
 
    **The batch loop-back rule.** A child whose re-gate is still
    `NEEDS_REFINEMENT` loops back to Step 2 (Step 5) like a revisit child. The
    loop-back children and the revisit children redraft, and once each has a new
-   sized draft (or has parked) they form the **next batch**, which gets one
-   approval again. Batches repeat until no child is pending.
+   sized draft, pending as in phase A (or has parked), they form the **next
+   batch**, which gets one approval again. Batches repeat until no child is pending.
 
 3. **Post an epic-level summary** on the epic issue: for each child, whether it is
    now **ready** (label cleared) or **still parked** (with the park type), plus
@@ -437,7 +442,8 @@ Each default does two things:
 2. **Records one Decisions-taken entry**, with the question, the choice and the
    evidence from the table below. Append it as `{"kind": "implementation",
    "question": …, "answer": <choice>, "rationale": <evidence>, "overrule": <how
-   to overrule>}` to the `auto` array of `/tmp/conductor-defaults.json`, created
+   to overrule>}` to the `auto` array of `/tmp/conductor-defaults.json` (in an
+   epic walk, the child's `/tmp/refine-issue-epic-<E>/<N>.defaults.json`), created
    as `{"auto": []}`; Step 0 deletes it with the parked state. When Step 2
    renders the Decisions taken section before the approval, that file counts as
    one of this issue's round split files, but it is never part of a parked state's
