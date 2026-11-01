@@ -1062,9 +1062,9 @@ fail_tap() {
   jq -e '.flaky==[]' <<< "$output"
 }
 
-@test "#2962 a bats exit of 129/130/143/137 is never re-run, whatever it failed" {
+@test "#2962 a bats exit above 128 is never re-run, whatever it failed" {
   local code
-  for code in 129 130 143 137; do
+  for code in 129 130 143 137 141; do
     rm -f "$BATS_TEST_TMPDIR/solo-calls"
     fail_tap a.bats
     run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4 STUB_EXIT="$code"
@@ -1097,6 +1097,26 @@ fail_tap() {
   [ "$status" -eq 1 ]
   [ "$(solo_calls)" -eq 0 ]
   contains "$stderr" "a failing test names no bats file — no solo re-run"
+}
+
+@test "#2962 a failing test naming a missing bats file is not re-run, even beside an existing one" {
+  fail_tap a.bats
+  printf 'not ok 3 ghost\n# (in test file /nope/ghost.bats, line 2)\n' >> "$TAPFIX"
+  sed -i.bak '1s/.*/1..3/' "$TAPFIX"
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4 STUB_EXIT=1
+  [ "$status" -eq 1 ]
+  [ "$(solo_calls)" -eq 0 ]
+  jq -e '.flaky==[]' <<< "$output"
+  contains "$stderr" "a failing test names no bats file — no solo re-run"
+}
+
+@test "#2962 a TAP plan larger than the tests reported is not re-run and stays red" {
+  fail_tap a.bats
+  sed -i.bak '1s/.*/1..3/' "$TAPFIX"
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4 STUB_EXIT=1
+  [ "$status" -eq 1 ]
+  [ "$(solo_calls)" -eq 0 ]
+  jq -e '.flaky==[] and .tree==""' <<< "$output"
 }
 
 @test "#2962 a sequential run is not re-run" {

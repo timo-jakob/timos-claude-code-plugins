@@ -106,13 +106,15 @@
 # at most 5 distinct files hold the failing tests. A file is read from the
 # `in test file <path>, line N` comment bats prints under each `not ok`. Each
 # re-run is `bats <file>` with no `--jobs`, under the same `nice`, LC_ALL and
-# environment. Any file still failing is red: the gate exits with that re-run's
+# environment, its TAP mirrored to stderr behind a `run-gate solo: ` prefix so
+# gate-eta.zsh does not count it. Any file still failing is red: the gate exits with that re-run's
 # status and `not_ok` counts the re-runs' failures. Every file passing is green:
 # `flaky` names them and stderr says
 #   run-gate: flaky under load (passed on solo re-run): <file>, <file>
 # No re-run happens when more than 5 files fail, when a failing test names no
-# file, when the run was not parallel, or when bats exited 129/130/143/137 (a
-# signal or a kill — no verdict). A real bug fails both times and stays red, and
+# file, when the run was not parallel, when the TAP plan line `1..N` is missing
+# or N differs from the tests counted, or when bats exited above 128 (a signal
+# or a kill — no verdict). A real bug fails both times and stays red, and
 # no sleep or timeout is added.
 #
 # GNU parallel specifically: bats' `--jobs` backend requires GNU parallel. A
@@ -358,13 +360,16 @@ total=$(( ok + not_ok ))
 
 # --- solo re-run of the failing files, once (#2962) ---------------------------
 # Only a parallel run that finished red with attributable `not ok` lines, in at
-# most 5 files, and that no signal cut short. Each `not ok` must be followed by
-# bats' `in test file <path>, line N` comment; one that names no existing file
-# leaves the failure unattributable, so nothing is re-run (fail closed).
+# most 5 files, that no signal cut short and whose TAP plan equals `total` (a
+# shortfall is a failure no re-run can explain). Each `not ok` must be followed
+# by bats' `in test file <path>, line N` comment; one that names no existing
+# file leaves the failure unattributable, so nothing is re-run (fail closed).
 local -a flaky=()
 local -i max_rerun_files=5
-if [[ "$mode" == "parallel" ]] && (( rc != 0 && not_ok > 0 )) \
-   && [[ "$rc" != (129|130|143|137) ]]; then
+local plan
+plan=$(grep -m1 -E '^1\.\.[0-9]+' "$tap_out" 2>/dev/null); plan=${${plan#1..}%%[^0-9]*}
+if [[ "$mode" == "parallel" && -n "$plan" ]] \
+   && (( rc != 0 && rc <= 128 && not_ok > 0 && plan == total )); then
   local -a fail_files=()
   local tline pending=0 unattributed=0
   while IFS= read -r tline; do
@@ -396,7 +401,7 @@ if [[ "$mode" == "parallel" ]] && (( rc != 0 && not_ok > 0 )) \
       print -u2 -- "run-gate: solo re-run of ${f} (#2962)"
       : >| "$solo_tap"; : >| "$rc_file"
       { nice -n 10 "$bats_bin" "$f"; print -r -- $? >| "$rc_file" } \
-        | tee "$solo_tap" >&2 &
+        | tee "$solo_tap" | sed 's/^/run-gate solo: /' >&2 &
       wait
       solo_rc="$(<"$rc_file")"
       [[ "$solo_rc" == <-> ]] || solo_rc=1
