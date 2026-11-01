@@ -8286,9 +8286,9 @@ this order, is its one `reason`:
 
 | `reason` | Fails when |
 |---|---|
-| `no_stamp` | no comment carries a `readiness-stamp/v1` marker |
+| `no_stamp` | no comment's first line is a `readiness-stamp/v1` marker |
 | `untrusted_author` | stamps exist, but none by a trusted author |
-| `malformed` | the newest trusted stamp's marker or verdict does not parse, or the verdict carries no `size.inventory` |
+| `malformed` | the newest trusted stamp's verdict does not parse, or carries no `size.inventory` |
 | `gate_changed` | the stamp's `gate` differs from the current `gate_version` |
 | `key_changed` | the stamp's `key` differs from the recomputed key |
 | `inventory_drift` | the size re-check (below) disagrees with the cached size result |
@@ -8326,8 +8326,8 @@ write never leaves two. An untrusted stamp is never edited or deleted. It prints
 
 ### Failing toward gating
 
-- **Never a weaker gate.** A hit returns exactly the verdict a gate produced on
-  identical inputs with the same gate version. Anything else is a miss.
+- **Never a weaker gate.** A hit returns exactly the verdict a gate produced for
+  the same key. Anything else is a miss.
 - **A stamp problem is never an error.** Exit codes are 0 ok, 2 usage (an
   unreadable or invalid `--verdict-file` included), and 3 runtime: a gh, GraphQL
   or jq failure, a missing issue, or an unreadable sub-issue tree. An

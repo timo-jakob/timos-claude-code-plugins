@@ -33,10 +33,10 @@
 #       --issue N targets N; --epic N targets the open same-repo leaves below N
 #       in read-sub-issues.zsh --tree. A target is a hit only when all hold, and
 #       each failure is one reason, judged in this order:
-#         no_stamp          no comment carries a readiness-stamp/v1 marker
+#         no_stamp          no comment's first line is a readiness-stamp/v1 marker
 #         untrusted_author  stamps exist, but none by a trusted author
-#         malformed         the newest trusted stamp's marker or verdict does not
-#                           parse, or the verdict carries no size.inventory
+#         malformed         the newest trusted stamp's verdict does not parse, or
+#                           carries no size.inventory
 #         gate_changed      the stamp's gate differs from the current gate_version
 #         key_changed       the stamp's key differs from the recomputed key
 #         inventory_drift   size-check.zsh re-run on verdict.size.inventory gives
@@ -224,11 +224,12 @@ _key_of() {
 }
 
 # The stamp comments of one issue node (stdin) as a JSON array, oldest first:
-# {id, created, trusted, body}.
+# {id, created, trusted, body}. A stamp is a comment whose first line is a full
+# marker, so a comment that merely quotes one is never edited or deleted.
 _stamps_of() {
-  jq -c --arg owner "$owner" '
+  jq -c --arg owner "$owner" --arg re "$marker_re" '
     [.comments.nodes[]
-     | select((.body // "") | split("\n") | any(sub("\r$"; "") | startswith("<!-- readiness-stamp/v1")))
+     | select((.body // "") | split("\n")[0] | sub("\r$"; "") | test($re))
      | { id: .databaseId, created: .createdAt, body: .body,
          trusted: ((.authorAssociation // "" | IN("OWNER", "MEMBER", "COLLABORATOR"))
                    or ((.author.__typename // "") == "Bot"
@@ -241,10 +242,8 @@ _stamps_of() {
 _parse_stamp() {
   jq -Rsce --arg re "$marker_re" '
     (split("\n") | map(sub("\r$"; ""))) as $lines
-    | ([$lines | to_entries[] | select(.value | test($re))] | first
-       // error("no marker")) as $m
-    | ($m.value | [match($re).captures[].string]) as $c
-    | ([$lines | to_entries[] | select(.key > $m.key and .value == "```json")] | first
+    | ($lines[0] | [match($re).captures[].string]) as $c
+    | ([$lines | to_entries[] | select(.key > 0 and .value == "```json")] | first
        // error("no json fence")).key as $open
     | ([$lines | to_entries[] | select(.key > $open and .value == "```")] | first
        // error("unclosed fence")).key as $close

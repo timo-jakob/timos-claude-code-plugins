@@ -142,6 +142,12 @@ miss_reason() { echo "$output" | jq -r '.misses[0].reason // "HIT"'; }
   [ "$KEY" = "$base" ]
 }
 
+@test "key: equals sha256 of the documented key-sorted document" {
+  mk_issue 7 "T" "B" '["enhancement","blocked"]' '[[3],[4,"other/repo"]]'
+  key_of 7
+  [ "$KEY" = "$(jq -cnS --arg g "$(gate_now)" '{gate_version:$g,title:"T",body:"B",blocked_by:[3,"other/repo#4"],labels:["enhancement"]}' | shasum -a 256 | awk '{print $1}')" ]
+}
+
 @test "key: a gate_version change (the agent file) changes the key" {
   mk_issue 7 "T" "B" '[]' '[]'; key_of 7; base="$KEY"
   echo "one more rule" >> "$PLUG/agents/story-readiness.md"
@@ -232,13 +238,13 @@ miss_reason() { echo "$output" | jq -r '.misses[0].reason // "HIT"'; }
   [ "$(miss_reason)" = malformed ]
 }
 
-@test "check: an unparseable verdict or marker is malformed" {
+@test "check: an unparseable verdict is malformed, a broken marker is no stamp" {
   stamped OWNER User timo '{"verdict": READY'
   check7
   [ "$(miss_reason)" = malformed ]
   stamped OWNER User timo "$PASS_VERDICT" "not-a-key"
   check7
-  [ "$(miss_reason)" = malformed ]
+  [ "$(miss_reason)" = no_stamp ]
 }
 
 @test "check: a stamp from another gate version is gate_changed" {
@@ -310,13 +316,16 @@ miss_reason() { echo "$output" | jq -r '.misses[0].reason // "HIT"'; }
         subIssues:{nodes:($k|map({number:.[0],state:.[1],repository:{nameWithOwner:(.[2] // "owner/repo")}}))}}}}}' \
       > "$FIX/tree-$1.json"
   }
-  tree 10 OPEN 3 '[[11,"OPEN"],[12,"CLOSED"],[13,"OPEN","other/repo"]]'
+  tree 10 OPEN 4 '[[11,"OPEN"],[12,"CLOSED"],[13,"OPEN","other/repo"],[14,"OPEN"]]'
   tree 11 OPEN 0 '[]'
   tree 12 CLOSED 0 '[]'
+  tree 14 OPEN 1 '[[15,"OPEN"]]'
+  tree 15 OPEN 0 '[]'
   mk_issue 11 "T" "B" '[]' '[]'
+  mk_issue 15 "T" "B" '[]' '[]'
   run_s check --repo owner/repo --epic 10
   [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq -c '[.misses[] | [.issue, .reason]]')" = '[[11,"no_stamp"]]' ]
+  [ "$(echo "$output" | jq -c '[.misses[] | [.issue, .reason]] | sort')" = '[[11,"no_stamp"],[15,"no_stamp"]]' ]
   [ "$(grep -c '^batch$' "$FIX/calls.log")" -eq 1 ]
 }
 
@@ -368,7 +377,8 @@ miss_reason() { echo "$output" | jq -r '.misses[0].reason // "HIT"'; }
   mk_issue 7 "T" "B" '[]' '[]'
   b="$(stamp_body "$(printf 'a%.0s' $(seq 64))" "$(gate_now)" "$PASS_VERDICT")"
   mk_issue 7 "T" "B" '[]' '[]' \
-    "[$(comment 1 2026-10-01T00:00:00Z OWNER User timo "$b"),$(comment 2 2026-10-02T00:00:00Z MEMBER User m "$b"),$(comment 3 2026-10-03T00:00:00Z NONE User x "$b")]"
+    "[$(comment 1 2026-10-01T00:00:00Z OWNER User timo "$b"),$(comment 2 2026-10-02T00:00:00Z MEMBER User m "$b"),$(comment 3 2026-10-03T00:00:00Z NONE User x "$b"),$(comment 4 2026-10-04T00:00:00Z OWNER User timo "quoting:
+$b")]"
   echo "$PASS_VERDICT" > "$FIX/v.json"
   run_s write --repo owner/repo --issue 7 --verdict-file "$FIX/v.json"
   [ "$status" -eq 0 ]
@@ -376,6 +386,7 @@ miss_reason() { echo "$output" | jq -r '.misses[0].reason // "HIT"'; }
   contains "$log" "-X PATCH repos/owner/repo/issues/comments/2"
   contains "$log" "-X DELETE repos/owner/repo/issues/comments/1"
   lacks "$log" "comments/3"
+  lacks "$log" "comments/4"
   lacks "$log" "POST"
 }
 
@@ -427,6 +438,14 @@ miss_reason() { echo "$output" | jq -r '.misses[0].reason // "HIT"'; }
   run env GH_BIN="$STUB" FIX="$FIX" GH_FAIL=1 bash -c 'cd "$1" && zsh "$2" check --repo owner/repo --issue 7 2>/dev/null' _ "$WORK" "$S"
   [ "$status" -eq 3 ]
   [ -z "$output" ]
+}
+
+@test "exit 3: missing gate files" {
+  mk_issue 7 "T" "B" '[]' '[]'
+  rm "$PLUG/agents/story-readiness.md"
+  run_s key --repo owner/repo --issue 7
+  [ "$status" -eq 3 ]
+  contains "$output" "gate files not found"
 }
 
 @test "exit 3: an issue the batch does not return" {
