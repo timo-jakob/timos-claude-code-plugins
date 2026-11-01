@@ -183,7 +183,7 @@ fresh() {
   contains "$step0" 'PAUSED_S=0'
   contains "$step7" 'WALL_S=$(( $(date +%s) - 10#$T0 - 10#$PAUSED_S ))'
   contains "$step7" '|| ! "${PAUSED_S:-}" =~ ^[0-9]+$'
-  contains "$(flat "$SKILL")" 'When a child'"'"'s own work resumes — its Steps 2.5 to 7, or its redraft — add the wait to its paused time: `paused_s += now - draft_ready_at`.'
+  contains "$(flat "$SKILL")" 'When a child'"'"'s own work resumes — its Steps 2.5 to 7, or its redraft — add the wait to its paused time once: `paused_s += now - draft_ready_at`, then set `draft_ready_at` to null, so a loop-back redraft, which follows work that never paused, adds nothing.'
 }
 
 @test "the auto-accept guardrail is unchanged: a batch never lets auto-accept approve a rewrite" {

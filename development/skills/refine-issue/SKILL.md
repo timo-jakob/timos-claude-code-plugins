@@ -290,7 +290,9 @@ this is the guided pass that clears them.
    It prints `{approve, revisit, skip}`. Exit 2 means a number that is not a
    pending child, or one named in both lists: ask again with the pending
    numbers. When a child's own work resumes — its Steps 2.5 to 7, or its
-   redraft — add the wait to its paused time: `paused_s += now - draft_ready_at`.
+   redraft — add the wait to its paused time once: `paused_s += now -
+   draft_ready_at`, then set `draft_ready_at` to null, so a loop-back redraft,
+   which follows work that never paused, adds nothing.
    The batch wait is not refinement work, so it never counts toward a child's
    `wall_s`.
 
