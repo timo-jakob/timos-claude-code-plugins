@@ -8214,7 +8214,7 @@ tests and feature can never drift apart.
 The `story-readiness` gate is one subagent per story, and on an epic every run
 used to gate every open leaf again, even when nothing had changed (epic #2953).
 `readiness-stamp/v1` records the gate's verdict on the issue together with a
-fingerprint of everything the verdict depends on. A later run reuses the verdict
+fingerprint of a declared set of its inputs. A later run reuses the verdict
 while the fingerprint still matches, and spends a gate agent only on a miss.
 `development/skills/resolve-issue/scripts/readiness-stamp.zsh` (#2954) is the
 contract's one implementation: `key` computes the fingerprint, `check` decides
@@ -8309,7 +8309,7 @@ this order, is its one `reason`:
   NEEDS_REFINEMENT verdict without a fresh gate.
 - **No existence test.** A stamp hit never depends on whether the inventory's
   paths exist. A declared inventory lists the files a story will create as well
-  as those it edits, and the gate's verdict is a function of the inventory alone.
+  as those it edits, so a path that does not exist yet is no sign of drift.
   So the only repo-drift re-check is the size comparison, which makes no
   existence test.
 - **An epic body edit does not invalidate its children.** A child's readiness is
@@ -8324,10 +8324,30 @@ or creates one when none exists, and deletes any older trusted stamp, so one
 write never leaves two. An untrusted stamp is never edited or deleted. It prints
 `{"issue", "key", "gate_version", "action": "edited"|"created", "comment_id"}`.
 
+**`--expect-key K` guards against an edit during the gate run.** It is opt-in. The
+caller reads `K` with `key` before it spawns the gate and passes it to `write`.
+`write` still computes the key at write time. When that key differs from `K`,
+the issue changed while the gate ran, and the verdict belongs to a spec the
+stamp would not describe. `write` then creates, edits and deletes nothing, exits
+0 and prints
+`{"issue", "key", "expected_key", "gate_version", "action": "skipped_stale"}`.
+No stamp is written, so the next `check` misses and gates fresh. Without
+`--expect-key`, `write` stamps the verdict under whatever key it computes.
+
 ### Failing toward gating
 
-- **Never a weaker gate.** A hit returns exactly the verdict a gate produced for
-  the same key. Anything else is a miss.
+- **A hit is only as fresh as its key.** A hit returns exactly the verdict a
+  gate produced for the same key and the same `gate_version`. Anything else is a
+  miss. The key covers only its declared input set: the title, the body, the
+  issue's own `blockedBy`, its labels minus `needs-refinement` and `blocked`, and
+  `gate_version`. The gate also reads two inputs that are deliberately **not** key
+  inputs: the repo code a story references, and the state of its linked issues,
+  such as whether a linked test-case issue is still open and labelled
+  `test-case`. A change to either moves no key, and a hit never re-checks them.
+  A caller that needs them judged fresh treats the hit as a miss. After fixing a
+  `NEEDS_REFINEMENT` whose cause was one of them, for example by reopening a
+  linked test-case issue, delete the stamp comment, or the old stop keeps
+  returning as a hit.
 - **A stamp problem is never an error.** Exit codes are 0 ok, 2 usage (an
   unreadable or invalid `--verdict-file` included), and 3 runtime: a gh, GraphQL
   or jq failure, a missing issue, or an unreadable sub-issue tree. An

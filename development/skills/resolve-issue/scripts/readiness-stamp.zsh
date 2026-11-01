@@ -5,8 +5,8 @@
 #
 # Why: the `story-readiness` gate is one subagent per story and nothing
 # remembered its verdict, so an epic re-run gated every leaf again even when
-# nothing changed. The verdict is a function of a small, known input set; when
-# none of those inputs changed, a recorded verdict answers instead. This script
+# nothing changed. The key covers a small, declared input set; when none of
+# those inputs changed, a recorded verdict answers instead. This script
 # is the deterministic half: it decides hit or miss, and the skills spawn the
 # gate for misses only. The contract is ARCHITECTURE.md's "Readiness stamp
 # contract (`readiness-stamp/v1`)"; this header states only the mechanics.
@@ -16,6 +16,7 @@
 #   readiness-stamp.zsh key   --repo OWNER/NAME --issue N
 #   readiness-stamp.zsh check --repo OWNER/NAME (--epic N | --issue N)
 #   readiness-stamp.zsh write --repo OWNER/NAME --issue N --verdict-file F
+#                             [--expect-key K]
 #
 # key   prints the key: sha256 over the compact, key-sorted JSON document
 #         {gate_version, title, body, blocked_by, labels}
@@ -54,6 +55,14 @@
 #       deletes any older trusted stamp so one write never leaves two. Prints
 #         {"issue": N, "key": K, "gate_version": G,
 #          "action": "edited"|"created", "comment_id": ID}
+#       --expect-key K is the opt-in race guard: K is the key the caller read
+#       (from `key`) before it ran the gate. When the key computed at write time
+#       differs from K, the issue changed while the gate ran, so write creates,
+#       edits and deletes nothing, exits 0 and prints
+#         {"issue": N, "key": K', "expected_key": K, "gate_version": G,
+#          "action": "skipped_stale"}
+#       and the next check misses and gates fresh. Without --expect-key, write
+#       stamps whatever key it computes.
 #
 # gate_version is sha256 of the contents of this plugin's
 # agents/story-readiness.md followed by skills/refine-issue/scripts/size-check.zsh,
@@ -99,21 +108,22 @@ local mode="$1"; shift
 case "$mode" in
   key|check|write) ;;
   -h|--help)
-    print -u2 -r -- "usage: readiness-stamp.zsh key --repo R --issue N | check --repo R (--epic N | --issue N) | write --repo R --issue N --verdict-file F"
+    print -u2 -r -- "usage: readiness-stamp.zsh key --repo R --issue N | check --repo R (--epic N | --issue N) | write --repo R --issue N --verdict-file F [--expect-key K]"
     exit 0 ;;
   *) _usage "unknown mode: $mode (expected key, check or write)" ;;
 esac
 
-local repo="" issue="" epic="" verdict_file=""
+local repo="" issue="" epic="" verdict_file="" expect_key=""
 while (( $# > 0 )); do
   case "$1" in
-    --repo|--issue|--epic|--verdict-file)
+    --repo|--issue|--epic|--verdict-file|--expect-key)
       (( $# >= 2 )) && [[ -n "$2" && "$2" != --* ]] || _usage "$1 needs a value"
       case "$1" in
         --repo) repo="$2" ;;
         --issue) issue="$2" ;;
         --epic) epic="$2" ;;
         --verdict-file) verdict_file="$2" ;;
+        --expect-key) expect_key="$2" ;;
       esac
       shift 2 ;;
     *) _usage "unknown arg: $1" ;;
@@ -136,8 +146,12 @@ esac
 [[ -z "$epic" || "$epic" == <-> ]] || _usage "--epic must be numeric: $epic"
 if [[ "$mode" == write ]]; then
   [[ -n "$verdict_file" ]] || _usage "--verdict-file F is required"
+  [[ -z "$expect_key" || "$expect_key" =~ '^[0-9a-f]{64}$' ]] \
+    || _usage "--expect-key must be a 64-character lowercase hex key: $expect_key"
 elif [[ -n "$verdict_file" ]]; then
   _usage "--verdict-file is only valid with write"
+elif [[ -n "$expect_key" ]]; then
+  _usage "--expect-key is only valid with write"
 fi
 
 command -v jq >/dev/null 2>&1 || _fail "jq not found on PATH"
@@ -340,6 +354,11 @@ case "$mode" in
     node=$(_read_issues "$issue") || exit 3
     node=$(jq -c '.[0]' <<<"$node") || _fail "jq failed"
     key=$(_key_of <<<"$node") || _fail "could not compute the key of #$issue"
+    if [[ -n "$expect_key" && "$key" != "$expect_key" ]]; then
+      jq -cn --argjson n "$issue" --arg k "$key" --arg e "$expect_key" --arg g "$gate_version" \
+        '{issue: $n, key: $k, expected_key: $e, gate_version: $g, action: "skipped_stale"}'
+      exit 0
+    fi
     stamps=$(_stamps_of <<<"$node") || _fail "jq failed on #$issue"
     at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     body=$(jq -rn --arg k "$key" --arg g "$gate_version" --arg at "$at" --argjson v "$verdict" '

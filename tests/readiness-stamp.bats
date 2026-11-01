@@ -399,6 +399,29 @@ $b")]"
   lacks "$(cat "$FIX/calls.log")" "501"
 }
 
+@test "write --expect-key: a matching key stamps as usual" {
+  mk_issue 7 "T" "B" '[]' '[]'
+  key_of 7
+  echo "$PASS_VERDICT" > "$FIX/v.json"
+  run_s write --repo owner/repo --issue 7 --verdict-file "$FIX/v.json" --expect-key "$KEY"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c '[.action, .comment_id, .key]')" = "[\"created\",999,\"$KEY\"]" ]
+  contains "$(cat "$FIX/calls.log")" "-X POST repos/owner/repo/issues/7/comments"
+}
+
+@test "write --expect-key: a changed key writes, edits and deletes nothing" {
+  stamped OWNER User timo "$PASS_VERDICT" "$(printf 'a%.0s' $(seq 64))"
+  key_of 7; fresh="$KEY"
+  stale="$(printf 'b%.0s' $(seq 64))"
+  rm -f "$FIX/calls.log"
+  echo "$PASS_VERDICT" > "$FIX/v.json"
+  run_s write --repo owner/repo --issue 7 --verdict-file "$FIX/v.json" --expect-key "$stale"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c '[.action, .key, .expected_key]')" = "[\"skipped_stale\",\"$fresh\",\"$stale\"]" ]
+  # the issue read is the only gh call: no POST, PATCH or DELETE
+  [ "$(grep -cv '^batch$' "$FIX/calls.log")" -eq 0 ]
+}
+
 # ---- exit codes -------------------------------------------------------------
 
 @test "exit 2: usage errors" {
@@ -413,6 +436,10 @@ $b")]"
   run_s check --repo owner/repo --issue; [ "$status" -eq 2 ]; contains "$output" "--issue needs a value"
   run_s write --repo owner/repo --issue 7; [ "$status" -eq 2 ]; contains "$output" "--verdict-file F is required"
   run_s key --repo owner/repo --issue 7 --verdict-file x; [ "$status" -eq 2 ]; contains "$output" "only valid with write"
+  run_s check --repo owner/repo --issue 7 --expect-key "$(printf 'a%.0s' $(seq 64))"; [ "$status" -eq 2 ]
+  contains "$output" "--expect-key is only valid with write"
+  run_s write --repo owner/repo --issue 7 --verdict-file x --expect-key abc; [ "$status" -eq 2 ]
+  contains "$output" "--expect-key must be a 64-character lowercase hex key"
 }
 
 @test "exit 0: --help prints the usage and reads nothing" {
@@ -473,6 +500,30 @@ $b")]"
   grep -qF -- '- **No existence test.** A stamp hit never depends on whether the inventory'"'"'s' "$arch"
   grep -qF 'So the only repo-drift re-check is the size comparison, which makes no' "$arch"
   grep -qF 'or when its author is the repository owner'"'"'s Maintenance App: a GraphQL `Bot`' "$arch"
+}
+
+@test "prose: ARCHITECTURE.md names the key's input set and the inputs a hit never re-checks" {
+  local arch="$REPO_ROOT/ARCHITECTURE.md"
+  grep -qF -- '- **A hit is only as fresh as its key.** A hit returns exactly the verdict a' "$arch"
+  grep -qF 'gate produced for the same key and the same `gate_version`. Anything else is a' "$arch"
+  grep -qF 'miss. The key covers only its declared input set: the title, the body, the' "$arch"
+  grep -qF '`gate_version`. The gate also reads two inputs that are deliberately **not** key' "$arch"
+  grep -qF 'inputs: the repo code a story references, and the state of its linked issues,' "$arch"
+  grep -qF '`test-case`. A change to either moves no key, and a hit never re-checks them.' "$arch"
+  grep -qF 'linked test-case issue, delete the stamp comment, or the old stop keeps' "$arch"
+  lacks "$(cat "$arch")" 'Never a weaker gate'
+  lacks "$(cat "$arch")" 'function of the inventory alone'
+}
+
+@test "prose: --expect-key is documented in ARCHITECTURE.md and the script header" {
+  local arch="$REPO_ROOT/ARCHITECTURE.md"
+  local hdr="$REPO_ROOT/development/skills/resolve-issue/scripts/readiness-stamp.zsh"
+  grep -qF '**`--expect-key K` guards against an edit during the gate run.** It is opt-in. The' "$arch"
+  grep -qF '`write` still computes the key at write time. When that key differs from `K`,' "$arch"
+  grep -qF '`{"issue", "key", "expected_key", "gate_version", "action": "skipped_stale"}`.' "$arch"
+  grep -qF '#       --expect-key K is the opt-in race guard: K is the key the caller read' "$hdr"
+  grep -qF '#       differs from K, the issue changed while the gate ran, so write creates,' "$hdr"
+  grep -qF '#       edits and deletes nothing, exits 0 and prints' "$hdr"
 }
 
 @test "exit 0: every stamp problem is a miss, never a nonzero exit" {
