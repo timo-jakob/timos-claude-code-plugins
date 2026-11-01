@@ -86,6 +86,27 @@ hit_doc() {
   grep -qx "write --repo o/r --issue 7 --verdict-file $VF --expect-key k2" "$LOG"
 }
 
+@test "#2956 stamp: an edit of an existing stamp counts as stamped" {
+  WRITE_OUT='{"issue":7,"key":"k2","gate_version":"g","action":"edited","comment_id":1}' \
+    step stamp --repo o/r --issue 7 --verdict-file "$VF" --expect-key k2
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"stamped":true,"action":"edited","reason":null}' ]
+}
+
+@test "#2956 the default STAMP_BIN is the resolve-issue sibling readiness-stamp.zsh" {
+  local plug="$BATS_TEST_TMPDIR/plug/development/skills"
+  mkdir -p "$plug/refine-issue/scripts" "$plug/resolve-issue/scripts"
+  cp "$P" "$plug/refine-issue/scripts/"
+  cp "$STUB" "$plug/resolve-issue/scripts/readiness-stamp.zsh"
+  WRITE_OUT='{"issue":7,"key":"k2","gate_version":"g","action":"created","comment_id":1}' \
+    run --separate-stderr env -u STAMP_BIN LOG="$LOG" \
+    zsh "$plug/refine-issue/scripts/readiness-stamp-step.zsh" stamp --repo o/r --issue 7 \
+    --verdict-file "$VF" --expect-key k2
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"stamped":true,"action":"created","reason":null}' ]
+  grep -qx "write --repo o/r --issue 7 --verdict-file $VF --expect-key k2" "$LOG"
+}
+
 @test "#2956 stamp: an issue edited while the re-gate ran is skipped_stale, not stamped" {
   WRITE_OUT='{"issue":7,"key":"k3","expected_key":"k2","gate_version":"g","action":"skipped_stale"}' \
     step stamp --repo o/r --issue 7 --verdict-file "$VF" --expect-key k2
@@ -108,6 +129,7 @@ hit_doc() {
   [ "$(jq -r '.stamped' <<<"$output")" = false ]
   [ ! -e "$LOG" ]
   [ "$(printf '%s\n' "$stderr" | wc -l | tr -d ' ')" = 1 ]
+  contains "$stderr" 'readiness stamp not written for #7 (no key was read before the re-gate)'
 }
 
 @test "#2956 usage errors exit 2" {
@@ -135,14 +157,28 @@ hit_doc() {
 }
 
 @test "#2956 AC2 SKILL.md orders the stamp after Step 3's body edit and before Step 5" {
-  local edit stamp step5 key regate
+  local edit stamp step5 key regate spawn
   edit=$(grep -n 'gh issue edit <N> --body-file <new-body.md>' "$SKILL" | head -1 | cut -d: -f1)
   key=$(grep -n 'readiness-stamp.zsh" key --repo "$REPO" --issue <N>' "$SKILL" | head -1 | cut -d: -f1)
+  spawn=$(grep -n '^Then spawn \*\*`story-readiness`\*\* again on the freshly-edited issue' "$SKILL" | cut -d: -f1)
   stamp=$(grep -n 'readiness-stamp-step.zsh" stamp --repo' "$SKILL" | head -1 | cut -d: -f1)
   step5=$(grep -n '^## Step 5 — resolve the label' "$SKILL" | cut -d: -f1)
   regate=$(grep -n '^## Step 4 — re-gate' "$SKILL" | cut -d: -f1)
-  [ -n "$edit" ] && [ -n "$key" ] && [ -n "$stamp" ] && [ -n "$step5" ] && [ -n "$regate" ]
-  [ "$edit" -lt "$regate" ] && [ "$regate" -lt "$key" ] && [ "$key" -lt "$stamp" ] && [ "$stamp" -lt "$step5" ]
+  # one assertion per line: bats ignores a failure inside an && list
+  [ -n "$edit" ]
+  [ -n "$key" ]
+  [ -n "$spawn" ]
+  [ -n "$stamp" ]
+  [ -n "$step5" ]
+  [ -n "$regate" ]
+  [ "$edit" -lt "$regate" ]
+  [ "$regate" -lt "$key" ]
+  [ "$key" -lt "$spawn" ]
+  [ "$spawn" -lt "$stamp" ]
+  [ "$stamp" -lt "$step5" ]
+  # the key reaches the stamp through a file, since the stamp runs in a later shell
+  grep -qF '> <key.txt> || : > <key.txt>' "$SKILL"
+  grep -qF -- '--verdict-file <verdict.json> --expect-key "$(cat <key.txt>)"' "$SKILL"
 }
 
 @test "#2956 AC1 SKILL.md consults the stamp before spawning the Step 1 gate" {
@@ -150,8 +186,11 @@ hit_doc() {
   s1=$(grep -n '^## Step 1 — diagnose' "$SKILL" | cut -d: -f1)
   diag=$(grep -n 'readiness-stamp-step.zsh" diagnose --repo' "$SKILL" | head -1 | cut -d: -f1)
   spawn=$(grep -n '^Otherwise spawn \*\*`story-readiness`\*\*' "$SKILL" | cut -d: -f1)
-  [ -n "$s1" ] && [ -n "$diag" ] && [ -n "$spawn" ]
-  [ "$s1" -lt "$diag" ] && [ "$diag" -lt "$spawn" ]
+  [ -n "$s1" ]
+  [ -n "$diag" ]
+  [ -n "$spawn" ]
+  [ "$s1" -lt "$diag" ]
+  [ "$diag" -lt "$spawn" ]
 }
 
 @test "#2956 the wiring's rules and the docs are pinned" {
@@ -161,10 +200,15 @@ hit_doc() {
     '- **`"hit": true`** → its `verdict` is the diagnosis, exactly as if' \
     '- **`"hit": false`**, or any nonzero exit → spawn the gate as below. A miss,' \
     'a failed check included, never stops the session.' \
-    '**Stamp the re-gate verdict (#2956)**, `READY` and `NEEDS_REFINEMENT` alike, so' \
+    '`story-readiness` had just returned it: spawn no gate. Everything below' \
+    'applies to it unchanged, `RISK` and `SIZE_PREFLIGHT` included, and so does' \
+    '**First, after Step 3'"'"'s edit, save the issue'"'"'s key to a file (#2956).** It is' \
+    'the race guard for the stamp below, and a file, not a shell variable, because' \
+    '**Stamp the re-gate verdict**, `READY` and `NEEDS_REFINEMENT` alike, so the next' \
+    'reuse it as written, one child fully before the next, Step 1'"'"'s stamp reuse and' \
     'to Step 2 stamps again at its next Step 4, in place, so a deferred park in' \
-    'prints one line on stderr: relay it to the human as is and go on to Step 5. A' \
-    'stamp never changes the verdict, the label handling or Step 7'"'"'s outcome.' \
+    'failure, the script prints one line on stderr: relay it to the human as is and' \
+    'go on to Step 5. A stamp never changes the verdict, the label handling or' \
     'Step 4'"'"'s stamp included (#2956). A child either reaches'; do
     grep -qF -- "$n" "$SKILL" || { echo "missing from SKILL.md: $n" >&2; return 1; }
   done
