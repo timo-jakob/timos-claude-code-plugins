@@ -5450,8 +5450,12 @@ selector that misses a dependency costs a round (round 1's convergence gate,
 the closing sweep or CI catches it), never a shipped regression.
 
 **Per-round gate telemetry (#1973).** Every `run-gate.zsh` summary carries
-`scope` (`full`|`selected`), the run's `wall_s`, and `files` — each bats file
-the run ran with its time from bats' JUnit report. Each round's
+`scope` (`full`|`selected`), the run's `wall_s`, `files` — each bats file
+the run ran with its time from bats' JUnit report — and `flaky` — the bats files that failed only under load and passed
+their one solo re-run, always present and `[]` when nothing was re-run or a
+re-run failed again (#2962). A parallel run that fails in at most 5 files
+re-runs each of them once, alone and in sequence, before its verdict; any file
+still failing is red with that re-run's status. Each round's
 `history.jsonl` line carries `gate: {scope, attested, wall_s, slowest, jobs}`
 (the 10 slowest files, and the summary's job share — `null` when the summary
 carries none, #2197) for the gate that **preceded** that round — from the loop's own

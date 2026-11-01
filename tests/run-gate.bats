@@ -40,6 +40,18 @@ setup() {
 #!/usr/bin/env bash
 # the signal the gate forwards to its suite (#1848)
 trap 'echo TERM > "$BATS_TEST_TMPDIR/stub-sig"; exit 143' TERM
+# a solo re-run (#2962): one file, no --jobs. Recorded apart from the parallel
+# run's call; it fails when its file's basename is in STUB_SOLO_FAIL.
+if [[ $# -eq 1 && "$1" == *.bats ]]; then
+  echo "$1" >> "$BATS_TEST_TMPDIR/solo-calls"
+  [[ -n "${STUB_SOLO_SLEEP:-}" ]] && { echo $$ > "$BATS_TEST_TMPDIR/solo-pid"; sleep "$STUB_SOLO_SLEEP" & wait; }
+  if [[ " ${STUB_SOLO_FAIL:-} " == *" $(basename "$1") "* ]]; then
+    printf '1..2\nok 1 solo\nnot ok 2 solo\n# (in test file %s, line 3)\n' "$1"
+    exit "${STUB_SOLO_EXIT:-1}"
+  fi
+  printf '1..2\nok 1 solo\nok 2 solo\n'
+  exit 0
+fi
 echo "call" >> "$CALLS"
 printf '%s\n' "$*" > "$ARGV"
 # what the suite saw while it ran: its niceness, and the slot registry
@@ -309,8 +321,8 @@ EOF
   echo "$output" | jq -e '.mode=="parallel" and .jobs==6'
   grep -q -- '--jobs 6' "$ARGV"
   # the machine summary's key set is pinned — #1973 added scope, wall_s and
-  # files, and the shared budget adds nothing of its own
-  echo "$output" | jq -e 'keys == (["exit","files","jobs","mode","not_ok","ok","scope","tap","total","tree","wall_s"])'
+  # files, #2962 flaky, and the shared budget adds nothing of its own
+  echo "$output" | jq -e 'keys == (["exit","files","flaky","jobs","mode","not_ok","ok","scope","tap","total","tree","wall_s"])'
   # a lone gate prints no sharing note
   run ! grep -q 'other live gate' <<< "$stderr"
 }
@@ -972,6 +984,134 @@ assert_start_line() {
 @test "#2196 stdout stays one JSON object with its keys unchanged" {
   run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4 STUB_EXIT=0
   [ "$(jq -s 'length' <<< "$output")" -eq 1 ]
-  jq -e '[keys_unsorted[]] == ["mode","jobs","scope","ok","not_ok","total","exit","wall_s","tap","tree","files"]' <<< "$output"
+  jq -e '[keys_unsorted[]] == ["mode","jobs","scope","ok","not_ok","total","exit","wall_s","tap","tree","files","flaky"]' <<< "$output"
   run ! grep -q '^run-gate:' <<< "$output"
+}
+
+# ---- solo re-run of failing files, once (#2962) -----------------------------
+
+solo_calls() { [ -f "$BATS_TEST_TMPDIR/solo-calls" ] && wc -l < "$BATS_TEST_TMPDIR/solo-calls" | tr -d ' ' || echo 0; }
+
+# A parallel TAP whose failing tests sit in the named files ($@, basenames under
+# $TESTS_DIR), one `not ok` each, attributed the way bats attributes them.
+fail_tap() {
+  local n=1 b
+  { printf '1..%d\n' "$(( $# + 1 ))"; printf 'ok %d fine\n' "$n"
+    for b in "$@"; do
+      n=$((n + 1)); : > "$TESTS_DIR/$b"
+      printf 'not ok %d broke\n# (in test file %s, line 4)\n#   `false'"'"' failed\n' "$n" "$TESTS_DIR/$b"
+    done; } > "$TAPFIX"
+}
+
+@test "#2962 a file that fails only under load passes its solo re-run: green, flaky names it, stderr says so" {
+  fail_tap a.bats
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4 STUB_EXIT=1
+  [ "$status" -eq 0 ]
+  [ "$(solo_calls)" -eq 1 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/solo-calls")" = "$TESTS_DIR/a.bats" ]
+  jq -e --arg f "$TESTS_DIR/a.bats" '.exit==0 and .not_ok==0 and .ok==.total and .flaky==[$f]' <<< "$output"
+  contains "$stderr" "run-gate: flaky under load (passed on solo re-run): $TESTS_DIR/a.bats"
+}
+
+@test "#2962 a file that fails its solo re-run too stays red with that re-run's status, flaky empty" {
+  fail_tap a.bats
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4 STUB_EXIT=1 STUB_SOLO_FAIL=a.bats STUB_SOLO_EXIT=9
+  [ "$status" -eq 9 ]
+  [ "$(solo_calls)" -eq 1 ]
+  jq -e '.exit==9 and .not_ok==1 and .flaky==[] and .tree==""' <<< "$output"
+  run ! grep -q 'flaky under load' <<< "$stderr"
+}
+
+@test "#2962 one of two files fails again: red, both re-run, in sequence, flaky empty" {
+  fail_tap a.bats b.bats
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4 STUB_EXIT=1 STUB_SOLO_FAIL=b.bats
+  [ "$status" -eq 1 ]
+  printf '%s\n%s\n' "$TESTS_DIR/a.bats" "$TESTS_DIR/b.bats" | diff - "$BATS_TEST_TMPDIR/solo-calls"
+  jq -e '.not_ok==1 and .flaky==[]' <<< "$output"
+}
+
+@test "#2962 five failing files are all re-run; six are not re-run at all and stay red" {
+  fail_tap a.bats b.bats c.bats d.bats e.bats
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4 STUB_EXIT=1
+  [ "$status" -eq 0 ]
+  [ "$(solo_calls)" -eq 5 ]
+  jq -e '.flaky|length==5' <<< "$output"
+
+  rm -f "$BATS_TEST_TMPDIR/solo-calls"
+  fail_tap a.bats b.bats c.bats d.bats e.bats f.bats
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4 STUB_EXIT=1
+  [ "$status" -eq 1 ]
+  [ "$(solo_calls)" -eq 0 ]
+  jq -e '.not_ok==6 and .flaky==[]' <<< "$output"
+  contains "$stderr" "6 files failed (> 5) — no solo re-run"
+}
+
+@test "#2962 two failing tests in one file re-run that file once" {
+  : > "$TESTS_DIR/a.bats"
+  printf '1..2\nnot ok 1 x\n# (in test file %s, line 2)\nnot ok 2 y\n# (from function `h'"'"' in file %s, line 1,\n#  in test file %s, line 5)\n' \
+    "$TESTS_DIR/a.bats" "$TESTS_DIR/a.bats" "$TESTS_DIR/a.bats" > "$TAPFIX"
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4 STUB_EXIT=1
+  [ "$status" -eq 0 ]
+  [ "$(solo_calls)" -eq 1 ]
+}
+
+@test "#2962 a green parallel run reports flaky [] and makes no solo invocation" {
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4 STUB_EXIT=0
+  [ "$status" -eq 0 ]
+  [ "$(solo_calls)" -eq 0 ]
+  jq -e '.flaky==[]' <<< "$output"
+}
+
+@test "#2962 a bats exit of 129/130/143/137 is never re-run, whatever it failed" {
+  local code
+  for code in 129 130 143 137; do
+    rm -f "$BATS_TEST_TMPDIR/solo-calls"
+    fail_tap a.bats
+    run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4 STUB_EXIT="$code"
+    [ "$status" -eq "$code" ]
+    [ "$(solo_calls)" -eq 0 ]
+    jq -e '.flaky==[]' <<< "$output"
+  done
+}
+
+@test "#2962 a signal during the solo re-run exits 143 at once, no verdict" {
+  fail_tap a.bats
+  env -u GATE_NPROC -u GATE_PARALLEL_BIN \
+    GATE_BATS_BIN="$STUB" CALLS="$CALLS" ARGV="$ARGV" TAPFIX="$TAPFIX" \
+    GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4 STUB_EXIT=1 STUB_SOLO_SLEEP=60 \
+    zsh "$S" --tests-dir "$TESTS_DIR" > "$BATS_TEST_TMPDIR/out" 2>/dev/null 3>&- &
+  local gate_pid=$! i rc=0
+  for i in $(seq 1 100); do [ -s "$BATS_TEST_TMPDIR/solo-pid" ] && break; sleep 0.1; done
+  [ -s "$BATS_TEST_TMPDIR/solo-pid" ]
+  SECONDS=0
+  kill -TERM "$gate_pid"
+  wait "$gate_pid" || rc=$?
+  [ "$rc" -eq 143 ]
+  [ "$SECONDS" -lt 30 ]
+  [ ! -s "$BATS_TEST_TMPDIR/out" ]    # no summary: not a verdict
+}
+
+@test "#2962 a failing test that names no bats file is not re-run" {
+  printf '1..1\nnot ok 1 x\n' > "$TAPFIX"
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4 STUB_EXIT=1
+  [ "$status" -eq 1 ]
+  [ "$(solo_calls)" -eq 0 ]
+  contains "$stderr" "a failing test names no bats file — no solo re-run"
+}
+
+@test "#2962 a sequential run is not re-run" {
+  fail_tap a.bats
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=1 STUB_EXIT=1
+  [ "$status" -eq 1 ]
+  [ "$(solo_calls)" -eq 0 ]
+  jq -e '.flaky==[]' <<< "$output"
+}
+
+@test "#2962 the header documents the re-run rule and the flaky field" {
+  grep -qF 'Solo re-run of failing files (#2962). A parallel run that fails re-runs each' "$S"
+  grep -qF '`flaky` (#2962) is always present: the bats files that failed only under' "$S"
+}
+
+@test "#2962 ARCHITECTURE.md lists the flaky field in the run-gate summary shape" {
+  grep -qF 'and `flaky` — the bats files that failed only under load and passed' "$REPO_ROOT/ARCHITECTURE.md"
 }
