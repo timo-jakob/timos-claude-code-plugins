@@ -62,7 +62,8 @@
 #   stdout — ONE JSON summary object (machine-readable), e.g.
 #     {"mode":"parallel","jobs":10,"scope":"full","ok":1220,"not_ok":0,
 #      "total":1220,"exit":0,"wall_s":212.407,"tap":"/tmp/run-gate.XXXX.tap",
-#      "tree":"<40-hex or empty>","files":[{"file":"tests/a.bats","wall_s":3.1}]}
+#      "tree":"<40-hex or empty>","files":[{"file":"tests/a.bats","wall_s":3.1}],
+#      "flaky":[]}
 #     mode is one of: "parallel" | "sequential" | "sequential-degraded".
 #     scope is "full" (the whole --tests-dir) or "selected" (a subset, #1973).
 #     wall_s is the whole run's wall-clock seconds; `files` lists every bats
@@ -78,6 +79,9 @@
 #     gate before a full-scope round. It is a plain field; NEVER
 #     read it as the pass/fail signal — `exit` is the gate verdict, `tree` only
 #     says which tree was gated.
+#     `flaky` (#2962) is always present: the bats files that failed only under
+#     load and passed on their solo re-run (below) — `[]` when nothing was
+#     re-run, or when a re-run failed again.
 #   stderr — the live TAP stream, a human count line, and (degraded) the warning.
 #     Two lines on it are a contract a reader of the captured stderr relies on
 #     (gate-eta.zsh, #2196): one unconditional start line, printed before the
@@ -96,6 +100,24 @@
 #   A run that reports ZERO tests is FORCED to a non-zero exit — a gate that ran
 #   no tests must never read green (an empty/wrong --tests-dir is a red gate, not
 #   a pass): if bats exited 0 but total==0, run-gate exits 1 with a loud error.
+#
+# Solo re-run of failing files (#2962). A parallel run that fails re-runs each
+# failing bats file once, alone and in sequence, before it gives a verdict, when
+# at most 5 distinct files hold the failing tests. A file is read from the
+# `in test file <path>, line N` comment bats prints under each `not ok`. Each
+# re-run is `bats <file>` with no `--jobs`, under the same `nice`, LC_ALL and
+# environment, its TAP mirrored to stderr behind a `run-gate solo: ` prefix,
+# which gate-eta.zsh does not count. The main run's TAP has already met its
+# plan, so gate-eta.zsh reads the whole re-run phase as finished until the
+# count line follows it. Any file still failing is red: the gate exits with that re-run's
+# status and `not_ok` counts the re-runs' failures. Every file passing is green:
+# `flaky` names them and stderr says
+#   run-gate: flaky under load (passed on solo re-run): <file>, <file>
+# No re-run happens when more than 5 files fail, when a failing test names no
+# file, when the run was not parallel, when the TAP plan line `1..N` is missing
+# or N differs from the tests counted, or when bats exited above 128 (a signal
+# or a kill — no verdict). A real bug fails both times and stays red, and
+# no sleep or timeout is added.
 #
 # GNU parallel specifically: bats' `--jobs` backend requires GNU parallel. A
 # non-GNU `parallel` (e.g. Homebrew moreutils, which conflicts with the GNU
@@ -153,9 +175,9 @@ command -v "$bats_bin" >/dev/null 2>&1 \
 # Set BEFORE the slot exists, so no window leaves a slot behind. zsh defers a
 # trap until a FOREGROUND child exits, so the suite runs as a background job the
 # script `wait`s on (below) — that is what lets a signal act immediately.
-local slot="" slot_tmp="" rc_file="" junit_dir=""
+local slot="" slot_tmp="" rc_file="" junit_dir="" solo_tap=""
 cleanup() {
-  local f; for f in "$slot" "$slot_tmp" "$rc_file"; do [[ -n "$f" ]] && rm -f -- "$f" 2>/dev/null; done
+  local f; for f in "$slot" "$slot_tmp" "$rc_file" "$solo_tap"; do [[ -n "$f" ]] && rm -f -- "$f" 2>/dev/null; done
   [[ -n "$junit_dir" ]] && rm -rf -- "$junit_dir" 2>/dev/null
   return 0
 }
@@ -338,6 +360,71 @@ ok=$(grep -c '^ok ' "$tap_out" 2>/dev/null); ok=${ok:-0}
 not_ok=$(grep -c '^not ok ' "$tap_out" 2>/dev/null); not_ok=${not_ok:-0}
 total=$(( ok + not_ok ))
 
+# --- solo re-run of the failing files, once (#2962) ---------------------------
+# Only a parallel run that finished red with attributable `not ok` lines, in at
+# most 5 files, that no signal cut short and whose TAP plan equals `total` (a
+# shortfall is a failure no re-run can explain). Each `not ok` must be followed
+# by bats' `in test file <path>, line N` comment; one that names no existing
+# file leaves the failure unattributable, so nothing is re-run (fail closed).
+local -a flaky=()
+local -i max_rerun_files=5
+local plan
+plan=$(grep -m1 -E '^1\.\.[0-9]+' "$tap_out" 2>/dev/null); plan=${${plan#1..}%%[^0-9]*}
+if [[ "$mode" == "parallel" && -n "$plan" ]] \
+   && (( rc != 0 && rc <= 128 && not_ok > 0 && plan == total )); then
+  local -a fail_files=()
+  local tline pending=0 unattributed=0
+  while IFS= read -r tline; do
+    if [[ "$tline" == "not ok "* || "$tline" == "ok "* ]]; then
+      (( pending )) && unattributed=1
+      pending=0
+      [[ "$tline" == "not ok "* ]] && pending=1
+    elif (( pending )) && [[ "$tline" =~ 'in test file (.+), line [0-9]+' ]]; then
+      if [[ -f "$match[1]" ]]; then
+        (( ${fail_files[(Ie)$match[1]]} )) || fail_files+=("$match[1]")
+      else
+        unattributed=1
+      fi
+      pending=0
+    fi
+  done < "$tap_out"
+  (( pending )) && unattributed=1
+  if (( unattributed )); then
+    print -u2 -- "run-gate: a failing test names no bats file — no solo re-run (#2962)"
+  elif (( ${#fail_files} > max_rerun_files )); then
+    print -u2 -- "run-gate: ${#fail_files} files failed (> ${max_rerun_files}) — no solo re-run (#2962)"
+  elif (( ${#fail_files} )) \
+       && ! solo_tap="$(mktemp "${TMPDIR:-/tmp}/run-gate-solo.XXXXXX" 2>/dev/null)"; then
+    solo_tap=""   # never fatal: the run stays red, as without the re-run
+    print -u2 -- "run-gate: could not create a solo re-run temp file — no solo re-run (#2962)"
+  elif (( ${#fail_files} )); then
+    local f solo_rc solo_not_ok rerun_not_ok=0 rerun_rc=0
+    for f in "${fail_files[@]}"; do
+      print -u2 -- "run-gate: solo re-run of ${f} (#2962)"
+      : >| "$solo_tap"; : >| "$rc_file"
+      { nice -n 10 "$bats_bin" "$f"; print -r -- $? >| "$rc_file" } \
+        | tee "$solo_tap" | sed 's/^/run-gate solo: /' >&2 &
+      wait
+      solo_rc="$(<"$rc_file")"
+      [[ "$solo_rc" == <-> ]] || solo_rc=1
+      solo_not_ok=$(grep -c '^not ok ' "$solo_tap" 2>/dev/null); solo_not_ok=${solo_not_ok:-0}
+      if (( solo_rc != 0 )); then
+        (( rerun_rc == 0 )) && rerun_rc=$solo_rc
+        (( solo_not_ok == 0 )) && solo_not_ok=1   # a red re-run is never 0 failures
+        (( rerun_not_ok += solo_not_ok ))
+      fi
+    done
+    if (( rerun_rc == 0 )); then
+      flaky=("${fail_files[@]}")
+      rc=0; not_ok=0; ok=$total
+      print -u2 -- "run-gate: flaky under load (passed on solo re-run): ${(j:, :)flaky}"
+    else
+      rc=$rerun_rc; not_ok=$rerun_not_ok; ok=$(( total - not_ok ))
+      (( ok < 0 )) && ok=0
+    fi
+  fi
+fi
+
 # A gate that ran ZERO tests must never read green — an empty or wrong
 # --tests-dir is a red gate, not a pass (the elevated false-green class this
 # helper exists to prevent). Force a non-zero exit and say why, loudly.
@@ -399,7 +486,13 @@ if [[ -n "$junit_dir" && -r "$junit_dir/report.xml" ]]; then
     files_json+="${files_json:+,}{\"file\":\"${fname}\",\"wall_s\":${ftime}}"
   done
 fi
-printf '{"mode":"%s","jobs":%d,"scope":"%s","ok":%d,"not_ok":%d,"total":%d,"exit":%d,"wall_s":%s,"tap":"%s","tree":"%s","files":[%s]}\n' \
-  "$mode" "$jobs" "$scope" "$ok" "$not_ok" "$total" "$rc" "$wall_s" "$tap_json" "$tree" "$files_json"
+# `flaky` (#2962): always present, `[]` when nothing passed on a solo re-run.
+local flaky_json="" fl
+for fl in "${flaky[@]}"; do
+  fl="${fl//\\/\\\\}"; fl="${fl//\"/\\\"}"
+  flaky_json+="${flaky_json:+,}\"${fl}\""
+done
+printf '{"mode":"%s","jobs":%d,"scope":"%s","ok":%d,"not_ok":%d,"total":%d,"exit":%d,"wall_s":%s,"tap":"%s","tree":"%s","files":[%s],"flaky":[%s]}\n' \
+  "$mode" "$jobs" "$scope" "$ok" "$not_ok" "$total" "$rc" "$wall_s" "$tap_json" "$tree" "$files_json" "$flaky_json"
 
 exit $rc
