@@ -522,3 +522,47 @@ CLEAN_STOP='{"outcome":"escalated","e1_classification":"native_children",
       "a $h halt starts no child run"
   done
 }
+
+# --- #2955: the readiness-verdict cache at E1b ---------------------------------
+
+@test "#2955 AC6 the optional readiness_cache rides in the payload when given" {
+  build "$(with '.readiness_cache = {hits:1, misses:1, miss_reasons:{key_changed:1}}' "$CLOSED")"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '.readiness_cache' <<<"$output")" = '{"hits":1,"misses":1,"miss_reasons":{"key_changed":1}}' ]
+  build "$(with '.readiness_cache = {hits:2, misses:0, miss_reasons:{}}' "$CLOSED")"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '.readiness_cache' <<<"$output")" = '{"hits":2,"misses":0,"miss_reasons":{}}' ]
+}
+
+@test "#2955 an absent or null readiness_cache leaves the payload without one" {
+  build "$CLOSED"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r 'has("readiness_cache")' <<<"$output")" = false ]
+  build "$(with '.readiness_cache = null' "$CLOSED")"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r 'has("readiness_cache")' <<<"$output")" = false ]
+}
+
+@test "#2955 readiness_cache is type-checked" {
+  local v
+  for v in '{hits:-1,misses:0,miss_reasons:{}}' '{hits:1,misses:0}' '{hits:0,misses:1,miss_reasons:[1]}' \
+           '{hits:0,misses:1,miss_reasons:{no_stamp:0}}' '{hits:0,misses:1,miss_reasons:{no_stamp:"1"}}' '"cached"'; do
+    refused "$(with ".readiness_cache = $v" "$CLOSED")" \
+      "readiness_cache must be null or {hits, misses, miss_reasons} of non-negative integers, miss_reasons a reason-to-positive-count object"
+  done
+}
+
+@test "#2955 readiness_cache contradicting E1b is refused" {
+  refused "$(with '.readiness_cache = {hits:1, misses:0, miss_reasons:{}}' "$(halt_state halt_undecomposed)")" \
+    "readiness_cache needs readiness_preflight: both come from E1b"
+  refused "$(with '.readiness_cache = {hits:2, misses:1, miss_reasons:{no_stamp:1}}' "$CLOSED")" \
+    "readiness_cache.hits + misses exceeds readiness_preflight.gated"
+  refused "$(with '.readiness_cache = {hits:0, misses:2, miss_reasons:{no_stamp:1}}' "$CLOSED")" \
+    "readiness_cache.miss_reasons do not sum to misses"
+}
+
+@test "#2955 a cached NEEDS_REFINEMENT counts in gated: an all-cached E1b halt builds" {
+  build "$(with '.readiness_cache = {hits:10, misses:0, miss_reasons:{}}' "$E1B_HALT")"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '.readiness_preflight' <<<"$output")" = '{"gated":10,"needs_refinement":6}' ]
+}

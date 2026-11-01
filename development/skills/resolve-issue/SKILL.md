@@ -305,10 +305,10 @@ see `reference/interactive/remediation.md` § Interactive remediation — offer 
 
 ### 0b. Readiness gate — is the story ready to build? (do NOT skip)
 
-Before branching, spawn the **`story-readiness`** agent (Task tool,
-`subagent_type: story-readiness`), passing it the repo (`owner/name`) and the
-issue number. It returns a verdict JSON — a pure judgment, **no** GitHub writes;
-**this skill** does any posting.
+Before branching, and only on a readiness-stamp miss, spawn the **`story-readiness`** agent (Task tool,
+`subagent_type: story-readiness`), passing it the repo (`owner/name`) and the issue number. It returns a verdict
+JSON — a pure judgment, **no** GitHub writes; **this skill** does any posting, stamping fresh verdicts first (#2955):
+see `reference/readiness-cache.md` § Step 0b — gate only a stamp miss
 
 ```json
 { "issue": 123, "verdict": "NEEDS_REFINEMENT", "risk": "normal",
@@ -596,7 +596,7 @@ record, after the human's answer on a stop, never before:
 
 ```bash
 B="<skill-base-dir>/scripts/build-story-preflight-telemetry-record.zsh"
-"$B" --state <scratch>/size-verdict.json [--override human] > <scratch>/size-payload.json
+"$B" --state <scratch>/size-verdict.json [--override human] [--readiness-cache <scratch>/readiness-plan.json] > <scratch>/size-payload.json
 outcome="$("$B" --state <scratch>/size-verdict.json [--override human] --print-outcome)"
 "<skill-base-dir>/../../scripts/telemetry/emit-telemetry.zsh" --pipeline story-preflight \
   --outcome "$outcome" --ts <the noted time> --wall-s <now − the noted time> --repo-dir . --issue <N> \
@@ -604,7 +604,7 @@ outcome="$("$B" --state <scratch>/size-verdict.json [--override human] --print-o
 ```
 
 `loop_args` are the run's — Step 0's, or for an E3 child the child run E3
-started (#1227). Telemetry is never fatal: a
+started (#1227); `--readiness-cache` is §0b's plan (#2955). Telemetry is never fatal: a
 failure costs the record, never the run. **The stop branch has three terminals**:
 
 - **(a) The human overrides.** Interactive only (mode `attended`, §0a's
@@ -1417,9 +1417,9 @@ see `reference/epic-tree.md` § E1 — reading the tree
 ### E1b. Readiness pre-flight — gate ALL children before building anything
 
 Before any ordering or implementation, run the readiness gate over **every open
-child**: spawn `story-readiness` (Task tool, `subagent_type: story-readiness`)
-once per child — they're independent, so launch them in parallel in a single
-message — and collect the verdicts. **In a tree, a "child" here is every open
+child whose readiness stamp misses** (#2955): spawn `story-readiness` (Task tool,
+`subagent_type: story-readiness`) once per stamp-missing child — launch them in parallel in a single
+message — and take each hit's cached verdict instead. **In a tree, a "child" here is every open
 `leaf` of E1's `read-sub-issues.zsh --tree` read, at any depth**: an inner node
 is never passed to `story-readiness`, an `undecomposed` node counts not ready,
 and the halt summary names each by its full path (`#12 → #231 → #251`):

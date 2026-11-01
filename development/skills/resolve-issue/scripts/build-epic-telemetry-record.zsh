@@ -38,7 +38,16 @@
 #                                                (default {ran:false,result:null})
 #     "e5_closed": bool,                         (default false)
 #     "readiness_preflight": { "gated", "needs_refinement" } | null,
-#                                                null when E1b was never reached
+#                                                null when E1b was never reached;
+#                                                gated counts every child E1b
+#                                                judged, a cached verdict included
+#     "readiness_cache": { "hits", "misses", "miss_reasons": {reason: count} }
+#                        | null,                 OPTIONAL (#2955): E1b's
+#                                                readiness-cache-plan.zsh counts;
+#                                                needs readiness_preflight, its
+#                                                hits + misses never above gated,
+#                                                its miss_reasons summing to misses.
+#                                                Absent or null leaves it out
 #     "failure_cause": "e4_regression" | "e4_error" | "e5_error" | "error"
 #                      | null,                   why a run that broke after E1b
 #                                                broke (default null)
@@ -148,7 +157,8 @@ norm=$(print -r -- "$state" | jq -c '
   | .e5_closed = (.e5_closed | dflt(false))
   | .readiness_preflight = (.readiness_preflight | dflt(null))
   | .failure_cause = (.failure_cause | dflt(null))
-  | .tree = (.tree | dflt(null))') || {
+  | .tree = (.tree | dflt(null))
+  | .readiness_cache = (.readiness_cache | dflt(null))') || {
   print -u2 -- "build-epic-telemetry-record: failed to normalise the state"; exit 1 }
 
 # Two passes: the SHAPE first (types and enums), then — only on a well-formed
@@ -189,6 +199,11 @@ problems=$(print -r -- "$norm" | jq -r '
         then "readiness_preflight must be null or an object of non-negative integers: gated, needs_refinement" else empty end ),
       ( if ($s.failure_cause == null or ($s.failure_cause | type == "string" and enum(["e4_regression","e4_error","e5_error","error"]))) | not
         then "failure_cause must be e4_regression | e4_error | e5_error | error | null" else empty end ),
+      ( if $s.readiness_cache != null
+          and ((counts($s.readiness_cache; ["hits","misses"]) | not)
+               or ($s.readiness_cache.miss_reasons | type) != "object"
+               or ([$s.readiness_cache.miss_reasons[] | select((count and . > 0) | not)] | length > 0))
+        then "readiness_cache must be null or {hits, misses, miss_reasons} of non-negative integers, miss_reasons a reason-to-positive-count object" else empty end ),
       ( if $s.tree != null and (counts($s.tree; ["depth","inner_nodes","inner_closed_this_run"]) | not)
         then "tree must be null or an object of non-negative integers: depth, inner_nodes, inner_closed_this_run" else empty end ),
       ( if ($s.tree | type) == "object"
@@ -243,6 +258,14 @@ problems=$(print -r -- "$norm" | jq -r "$derive"'
         then "an E1b halt (needs_refinement > 0) builds nothing: no resolved child, no E4" else empty end ),
       ( if $s.readiness_preflight != null and $s.readiness_preflight.needs_refinement > $s.readiness_preflight.gated
         then "readiness_preflight.needs_refinement exceeds gated" else empty end ),
+      ( if $s.readiness_cache != null and $s.readiness_preflight == null
+        then "readiness_cache needs readiness_preflight: both come from E1b" else empty end ),
+      ( if $s.readiness_cache != null and $s.readiness_preflight != null
+          and ($s.readiness_cache.hits + $s.readiness_cache.misses) > $s.readiness_preflight.gated
+        then "readiness_cache.hits + misses exceeds readiness_preflight.gated" else empty end ),
+      ( if $s.readiness_cache != null
+          and ([$s.readiness_cache.miss_reasons[]] | add // 0) != $s.readiness_cache.misses
+        then "readiness_cache.miss_reasons do not sum to misses" else empty end ),
       ( if ($s.e4.ran | not) and $s.e4.result != null
         then "e4.ran is false, so e4.result must be null" else empty end ),
       ( if $s.e4.ran and $s.e4.result == null
@@ -300,5 +323,8 @@ print -r -- "$norm" | jq -c '
     }
   # optional (#2857): present only when the state carried it
   + (if $s.tree == null then {}
-     else {tree: ($s.tree | {depth, inner_nodes, inner_closed_this_run})} end)' || {
+     else {tree: ($s.tree | {depth, inner_nodes, inner_closed_this_run})} end)
+  # optional (#2955): present only when the state carried it
+  + (if $s.readiness_cache == null then {}
+     else {readiness_cache: ($s.readiness_cache | {hits, misses, miss_reasons})} end)' || {
   print -u2 -- "build-epic-telemetry-record: failed to build payload"; exit 1 }
