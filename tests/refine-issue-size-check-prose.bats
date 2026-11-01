@@ -71,7 +71,8 @@ section() {
 
 @test "story-readiness reports an additive size object and keeps checks at five keys" {
   grep -qF -- '- `size` (#2589) is always present, and **additive**: `checks` keeps exactly' "$GATE"
-  grep -qF '"size": { "verdict": "pass", "triggers": [], "files": 6, "plugins": 1 },' "$GATE"
+  grep -qF '"size": { "verdict": "pass", "triggers": [], "files": 6, "plugins": 1,' "$GATE"
+  grep -qF '"inventory": ["src/jobs/api.py",' "$GATE"
   # the example's checks object still holds exactly the five keys
   local checks
   checks="$(sed -n '/^```json$/,/^```$/p' "$GATE" | sed -n '/"checks": {/,/}/p')"

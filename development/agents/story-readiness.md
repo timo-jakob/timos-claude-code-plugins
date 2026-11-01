@@ -332,7 +332,9 @@ Emit exactly one fenced `json` block and no other trailing prose. Shape:
     "Give a concrete use_case: which actor, what goal, and representative request data (not foo/bar)?"
   ],
   "summary": "Scope and acceptance are fine, but a REST story with no outside-in test cases fails check 5.",
-  "size": { "verdict": "pass", "triggers": [], "files": 6, "plugins": 1 },
+  "size": { "verdict": "pass", "triggers": [], "files": 6, "plugins": 1,
+            "inventory": ["src/jobs/api.py", "src/jobs/models.py", "tests/test_jobs_api.py",
+                          "docs/how-to/use-the-rest-api.md", "openapi.yaml", "CHANGELOG.md"] },
   "story_spec": null,
   "advisories": []
 }
@@ -364,6 +366,11 @@ Rules for the payload:
   counts the size check reported (`0` and `0` when `skipped`). Copy them from
   the size check's output; never compute them yourself.
   `/development:refine-issue` reads this object into its telemetry.
+  `size` also holds `inventory`: the exact `files` array you passed to
+  `size-check.zsh`, in the order you wrote it, and `[]` when you could not name
+  a single concrete path. Copy it from the inventory file you sized; never
+  re-derive it. `readiness-stamp.zsh` re-runs the size check on this list to
+  decide whether a cached verdict still holds.
 - `story_spec` is the **proposed** `story-spec/v1` block (#574) — the machine
   summary of the story as you understand it, per the ARCHITECTURE.md *Story-spec
   contract* (`schema`, `acceptance_criteria`, `scope_boundaries`,
