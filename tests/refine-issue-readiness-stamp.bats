@@ -205,6 +205,11 @@ hit_doc() {
     '**First, after Step 3'"'"'s edit, save the issue'"'"'s key to a file (#2956).** It is' \
     'the race guard for the stamp below, and a file, not a shell variable, because' \
     '**Stamp the re-gate verdict**, `READY` and `NEEDS_REFINEMENT` alike, so the next' \
+    'resolve-issue run reuses it: write the verdict JSON exactly as returned to' \
+    '`<verdict.json>`, then, right after the verdict returns and before Step 5:' \
+    'The stamp'"'"'s key is the edited body'"'"'s, the body the next run reads. A loop-back' \
+    'Step 5 leaves the newest re-gate'"'"'s stamp. When the stamp was not written for a' \
+    'Step 7'"'"'s outcome.' \
     'reuse it as written, one child fully before the next, Step 1'"'"'s stamp reuse and' \
     'to Step 2 stamps again at its next Step 4, in place, so a deferred park in' \
     'failure, the script prints one line on stderr: relay it to the human as is and' \
