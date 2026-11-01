@@ -113,6 +113,8 @@ hit_doc() {
   [ "$status" -eq 0 ]
   [ "$(jq -r '.stamped' <<<"$output")" = false ]
   [ "$(jq -r '.action' <<<"$output")" = skipped_stale ]
+  [ "$(jq -r '.reason' <<<"$output")" = 'the issue changed while the re-gate ran' ]
+  [ -z "$stderr" ]
 }
 
 @test "#2956 AC2 stamp: a failed write is one stderr line and exit 0" {
