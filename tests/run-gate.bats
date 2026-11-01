@@ -1099,6 +1099,15 @@ fail_tap() {
   contains "$stderr" "a failing test names no bats file — no solo re-run"
 }
 
+@test "#2962 a failing test that names no bats file, followed by an attributed one, is not re-run" {
+  : > "$TESTS_DIR/a.bats"
+  printf '1..2\nnot ok 1 x\nnot ok 2 y\n# (in test file %s, line 3)\n' "$TESTS_DIR/a.bats" > "$TAPFIX"
+  run_gate GATE_PARALLEL_BIN="$PAR_GNU" GATE_NPROC=4 STUB_EXIT=1
+  [ "$status" -eq 1 ]
+  [ "$(solo_calls)" -eq 0 ]
+  contains "$stderr" "a failing test names no bats file — no solo re-run"
+}
+
 @test "#2962 a failing test naming a missing bats file is not re-run, even beside an existing one" {
   fail_tap a.bats
   printf 'not ok 3 ghost\n# (in test file /nope/ghost.bats, line 2)\n' >> "$TAPFIX"

@@ -106,8 +106,10 @@
 # at most 5 distinct files hold the failing tests. A file is read from the
 # `in test file <path>, line N` comment bats prints under each `not ok`. Each
 # re-run is `bats <file>` with no `--jobs`, under the same `nice`, LC_ALL and
-# environment, its TAP mirrored to stderr behind a `run-gate solo: ` prefix so
-# gate-eta.zsh does not count it. Any file still failing is red: the gate exits with that re-run's
+# environment, its TAP mirrored to stderr behind a `run-gate solo: ` prefix,
+# which gate-eta.zsh does not count. The main run's TAP has already met its
+# plan, so gate-eta.zsh reads the whole re-run phase as finished until the
+# count line follows it. Any file still failing is red: the gate exits with that re-run's
 # status and `not_ok` counts the re-runs' failures. Every file passing is green:
 # `flaky` names them and stderr says
 #   run-gate: flaky under load (passed on solo re-run): <file>, <file>
