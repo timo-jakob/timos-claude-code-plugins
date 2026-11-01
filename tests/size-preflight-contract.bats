@@ -465,6 +465,38 @@ e3_paragraph() {
   [ "$output" = success ]
 }
 
+@test "#2955 AC6 --readiness-cache adds step 0b's plan's readiness_cache to the payload" {
+  local C="$BATS_TEST_TMPDIR/plan.json"
+  printf '{"verdict":"pass","triggers":[],"files":3,"plugins":1}' > "$V"
+  printf '{"fallback":false,"dispatch":[7],"hits":[],"readiness_cache":{"hits":0,"misses":1,"miss_reasons":{"key_changed":1}}}' > "$C"
+  run --separate-stderr zsh "$B" --state "$V" --readiness-cache "$C"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"verdict":"pass","triggers":[],"files":3,"plugins":1,"override_by":null,"readiness_cache":{"hits":0,"misses":1,"miss_reasons":{"key_changed":1}}}' ]
+  printf '{"readiness_cache":{"hits":1,"misses":0,"miss_reasons":{}}}' > "$C"
+  run --separate-stderr zsh "$B" --state "$V" --readiness-cache "$C" --print-outcome
+  [ "$status" -eq 0 ]
+  [ "$output" = success ]
+}
+
+@test "#2955 a readiness-cache file that is not one plan carrying a readiness_cache object is refused" {
+  local C="$BATS_TEST_TMPDIR/plan.json" bad
+  printf '{"verdict":"pass","triggers":[],"files":3,"plugins":1}' > "$V"
+  for bad in '{"readiness_cache":{"hits":0,"misses":2,"miss_reasons":{"no_stamp":1}}}' \
+             '{"readiness_cache":{"hits":0,"misses":1,"miss_reasons":{"no_stamp":0}}}' \
+             '{"readiness_cache":{"hits":-1,"misses":0,"miss_reasons":{}}}' '{"readiness_cache":{"hits":1,"misses":0}}' \
+             '{"hits":1,"misses":0,"miss_reasons":{}}' '' '{"readiness_cache":{"hits":1,"misses":0,"miss_reasons":{}}} {}'; do
+    printf '%s' "$bad" > "$C"
+    run --separate-stderr zsh "$B" --state "$V" --readiness-cache "$C"
+    [ "$status" -eq 1 ]
+    [ -z "$output" ]
+    contains "$stderr" "not a plan carrying a readiness_cache object"
+  done
+  run --separate-stderr zsh "$B" --state "$V" --readiness-cache "$BATS_TEST_TMPDIR/absent.json"
+  [ "$status" -eq 2 ]
+  run --separate-stderr zsh "$B" --state "$V" --readiness-cache
+  [ "$status" -eq 2 ]
+}
+
 @test "the builder reads its state from stdin, by default and as --state -" {
   local stop='{"verdict":"stop","triggers":["files"],"files":21,"plugins":1}'
   local want='{"verdict":"stop","triggers":["files"],"files":21,"plugins":1,"override_by":null}'

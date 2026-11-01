@@ -6928,7 +6928,8 @@ that broke after work began.
 | `child_run_ids` | the `run_id` of every child run started this invocation, in start order, escalated and parked ones included; de-duplicated |
 | `e4` | `{ran, result}` of the last E4 this invocation ran, an inner node's included: `ran` is true only when it reached a verdict; `result` is that verdict, `"green"` \| `"regression"`, and `null` exactly when `ran` is false. A regression here is what the per-child gates could not see |
 | `e5_closed` | the target epic was closed; an inner node's close counts only in `tree.inner_closed_this_run` |
-| `readiness_preflight` | `{gated, needs_refinement}` from E1b; `null` when the run never reached E1b (every E1 halt, and the rows that go straight to E4/E5) |
+| `readiness_preflight` | `{gated, needs_refinement}` from E1b: the children it judged, whether gated fresh, answered by a cached readiness stamp (#2955) or decided by a dependency cycle, and how many of them are `NEEDS_REFINEMENT`; `null` when the run never reached E1b (every E1 halt, and the rows that go straight to E4/E5) |
+| `readiness_cache` | optional (#2955), present only when the state carries it: `{hits, misses, miss_reasons}` from E1b's `readiness-cache-plan.zsh` — the children a cached verdict answered, the children gated fresh, and the misses counted by reason (`readiness-stamp.zsh check`'s reasons, plus the planner's `check_failed`, `not_checked`, `acyclicity_unverified` and `dependencies_recheck`). The builder refuses it without `readiness_preflight`, `hits + misses > gated`, and `miss_reasons` that do not sum to `misses` |
 | `failure_cause` | `e4_regression` \| `e4_error` (E4 reached no verdict) \| `e5_error` (the close failed) \| `error` (another error in the epic flow's own steps after E1b, never a child's own failed run) \| `null` — the run's final break only |
 | `tree` | optional (#2857), present only when the state carries it: `{depth, inner_nodes, inner_closed_this_run}` — the deepest level the first `--tree` read lists, the inner nodes below the target, and how many of them this run closed bottom-up. Non-negative integers; the builder refuses any other key and `inner_closed_this_run > inner_nodes` |
 
@@ -6965,6 +6966,7 @@ reported at once:
 | `e5_closed: true` with `e4.result` other than `"green"`, or with `escalated + parked + queued > 0` | E5 closes only after a green E4, over finished work |
 | a `halt_*` classification with `resolved_this_run > 0`, `e4.ran: true`, a non-zero `split`, a non-empty `child_run_ids`, a non-null `readiness_preflight`, or a `failure_cause` | an E1 halt builds nothing and is always `parked` |
 | `readiness_preflight.needs_refinement > 0` with `resolved_this_run > 0` or `e4.ran: true`; or `needs_refinement > gated` | an E1b halt builds nothing |
+| `readiness_cache` without `readiness_preflight`; `readiness_cache.hits + misses > gated`; `miss_reasons` not summing to `misses` | the cache counts split the children E1b judged |
 | `e4.ran: false` with a non-null `e4.result`, or `e4.ran: true` with a null one | `result` is null exactly when E4 reached no verdict |
 | `failure_cause: "e4_regression"` without `e4.result: "regression"`; `"e4_error"` with `e4.ran: true`; `"e5_error"` with `e5_closed: true` | the cause must match what E4 and E5 recorded |
 | children counts not summing to `total`; `split.parallel + split.sequential` above the number of `child_run_ids` | every open child is in one bucket, and every opened PR had a run |
@@ -7354,6 +7356,7 @@ as an override:
 | `files` | the inventory's distinct file count |
 | `plugins` | the number of distinct owning plugins |
 | `override_by` | `"human"` on `overridden`, else `null` |
+| `readiness_cache` | optional (#2955): step 0b's `{hits, misses, miss_reasons}` from `readiness-cache-plan.zsh`, passed with `--readiness-cache` — whether the story's readiness verdict came from its stamp or from a fresh gate, and why it missed. Absent when 0b's planner failed. The builder refuses an object whose `miss_reasons` do not sum to `misses` |
 
 In the Single-issue flow the record is parented to the run (`parent_run_id`)
 and sent to the run's sink — for an E3 child, the child run E3 started (#1227),
