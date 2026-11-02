@@ -294,10 +294,13 @@ that would unblock it.
 Judge substance, not formatting: a well-written prose story with no `## Acceptance`
 header can still be `READY`; a checklist of vague bullets is not.
 
-**What is required, not how it is built (#2902).** Before you treat anything as
-open, sort it by the question taxonomy of ARCHITECTURE.md, *Decision rights —
-question taxonomy and the Decisions-taken record* (#2899): `intent`, `gap` or
-`implementation`, with that section's tie-break when you are unsure.
+**What is required, not how it is built (#2902).** Sort what the story leaves
+open about the change itself — what to build and how — by the question taxonomy
+of ARCHITECTURE.md, *Decision rights — question taxonomy and the
+Decisions-taken record* (#2899): `intent`, `gap` or `implementation`, with that
+section's tie-break when you are unsure. The questions checks 2–5 prescribe are
+not sorted by it: they still go in `refinement_questions` exactly as those
+checks state.
 
 - **The borderline tie-break applies only to `intent` and `gap`.** When a check
   is genuinely borderline because of an `intent` or `gap` question, lean toward
@@ -378,8 +381,9 @@ Rules for the payload:
   where `story_spec` is `null`. When you emit a `story_spec`, its
   `interface_surfaces` must match this `surface`.
 - `refinement_questions` is a list of concrete, answerable questions — one per
-  gap you found, each an `intent` or `gap` question (a missing surface test
-  case is a `gap`), never an implementation choice (#2902). Empty (`[]`) when `verdict` is `READY`.
+  gap you found: a check's prescribed question, or an `intent` or `gap`
+  question about the change; never an unpinned implementation choice (#2902).
+  Empty (`[]`) when `verdict` is `READY`.
 - `risk` is always present (`low` | `normal` | `elevated`), independent of the
   verdict.
 - `summary` is one sentence a human can read at a glance.
