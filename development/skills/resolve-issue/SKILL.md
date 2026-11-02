@@ -958,8 +958,7 @@ then `GH_TOKEN="$(cat "$TOKEN_FILE")" gh pr merge <n> --auto --squash
 --delete-branch`. The PR body follows the template (Type / Summary /
 Test plan — include the Step 3 evidence) and carries `Closes #N`. When the review
 loop ran and reached `CONVERGED` (§3.5) — the only PR-opening terminal
-since #2580 — append the
-**Review dossier** via
+since #2580 — append the **Review dossier** via
 `build-dossier.zsh` on the kept status JSON (#563) — appending its output
 **once**, whether or not the suggestion-promotion phase also ran. Two hidden
 blocks in one body would leave the Approver reading only the first. (Once-only
@@ -984,12 +983,13 @@ opens its PR has no open blocker left to disclose.
 (`<skill-base-dir>/scripts/`). Exit 1 means no finding was parked: nothing to do.
 For each issue it prints, read the issue's comments, take the one holding the
 `<!-- follow-up-origin/v1 -->` marker, and pipe its body through
-`follow-up-origin.zsh set-pr --pr <N>`; edit the comment only when the output differs from it, so a re-run
-changes nothing. An issue with no origin comment (filed before #2581), or an
-exit 2 from `set-pr`, is named in the Summary and left as it is — never post a
-second origin comment.
+`follow-up-origin.zsh set-pr --pr <N>`; edit the comment only when the output
+differs from it, so a re-run changes nothing. An issue with no origin comment
+(filed before #2581), or an exit 2 from `set-pr`, is named in the Summary and
+left as it is — never post a second origin comment.
 
 **Before open-pr (#2903):** see `reference/ask-branches.md` § RS-09 — the parked follow-up default (#2903)
+**When the fallback review panel engaged (#2909):** see `reference/ask-branches.md` § RS-06a — the fallback review panel default (#2909)
 
 When the promotion **prompt was presented**, **name in the Summary** both
 counts — **how many suggestions the human picked, and how many the sub-loop

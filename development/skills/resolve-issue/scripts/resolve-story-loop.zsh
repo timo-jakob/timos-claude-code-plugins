@@ -347,10 +347,14 @@
 #                 fallback panel is engaged, else the empty string; it then
 #                 comes with REVIEW_SKILL=development-claude-plugin:review and
 #                 REVIEW_TOPIC_SKILLS='[]'. A FULL round over a non-empty diff
-#                 whose hook wrote no findings file engages it: the loop
+#                 whose hook wrote no findings file engages it — unless the
+#                 round carries entries or the repo-type panel is
+#                 development-claude-plugin:review itself: the loop
 #                 records a --work-dir marker, re-plans with `--fallback` and
 #                 re-runs the hook once in that round; every later round,
-#                 --resume included, runs it once already in fallback mode),
+#                 --resume included, runs it once already in fallback mode.
+#                 A fresh run clears the marker; a fallback re-run that wrote
+#                 nothing drops it before the STALE_FINDINGS refusal),
 #                 $REVIEW_TOPIC_SKILLS (#1072 — the plan's
 #                 topic_review_skills as a JSON array, `[]` when no topic panel
 #                 joins; every one of them reviews the same scope, and the hook
@@ -2769,6 +2773,13 @@ _run_review_hook() {
 # mode never writes it (the round-panel brief routes there).
 local fallback_marker="$work_dir/.fallback-engaged" fallback_engaged=0
 local hook_review_skill="" hook_topic_skills="" hook_review_mode="" fallback_note=""
+# A FRESH run never inherits an engagement: only a --resume continues the run
+# whose rounds engaged it. A per-issue --work-dir is reused across runs, so a
+# stale marker would otherwise put round 1 straight into fallback mode.
+if (( resume_round == 0 )); then
+  rm -f -- "$fallback_marker" || {
+    print -u2 -- "resolve-story-loop: could not clear a previous run's fallback marker $fallback_marker"; exit 1 }
+fi
 while (( round <= effective_max )); do
   # --- this round's working-tree identity (#1434) ---------------------------
   # Computed BEFORE anything else in the round, so it is exactly the tree the
@@ -3287,22 +3298,39 @@ while (( round <= effective_max )); do
     # same round — record it, re-plan with --fallback, clear the sink and the
     # carry sidecar, and re-run the hook once. The EMPTY-STORY-DIFF arm keeps
     # its precedence: an empty scope never engages anything.
-    if [[ ! -s "$findings_path" && "$scope_mode" == "full" ]] \
-       && (( ! round_scope_empty && ! fallback_engaged )); then
+    # Three more conditions keep the takeover honest: the repo-type panel is
+    # not development-claude-plugin:review itself (a fallback never follows a
+    # fallback), and the round carries nothing — the fallback's dimensions
+    # cannot own the repo-type panel's carried entries, so a carried round's
+    # NOT APPLICABLE stays the human-owned stop.
+    if [[ ! -s "$findings_path" && "$scope_mode" == "full" \
+          && "$review_skill" != "development-claude-plugin:review" ]] \
+       && (( ! round_scope_empty && ! fallback_engaged )) \
+       && [[ "$carry_by_dim" == '{}' ]]; then
       print -r -- "$round" > "$fallback_marker" || {
         print -u2 -- "resolve-story-loop: could not record the fallback engagement at $fallback_marker"; exit 1 }
       fallback_engaged=1
       print -u2 -- "resolve-story-loop: $review_skill reported NOT APPLICABLE on round $round's non-empty full diff — the fallback panel development-claude-plugin:review reviews it, for this round and every later one (#2909)"
       plan_args+=( --fallback )
       rp=$("$DISPATCH" "${plan_args[@]}"); rc=$?
-      (( rc == 0 )) || {
-        print -u2 -- "resolve-story-loop: fallback dispatch plan failed at round $round (rc=$rc)"; exit 1 }
+      if (( rc == 3 )); then
+        emit_ambiguous "$rp" "$(( round - 1 ))" "$repo_type" "$review_skill"
+      elif (( rc != 0 )); then
+        print -u2 -- "resolve-story-loop: fallback dispatch plan failed at round $round (rc=$rc)"; exit 1
+      fi
       rm -f -- "$findings_path" "$findings_path.carry.json" || {
         print -u2 -- "resolve-story-loop: could not clear the round $round findings sink before the fallback re-run"; exit 1 }
       step_t0=$(date +%s 2>/dev/null) || step_t0=""
       _run_review_hook
       [[ "$step_t0" == <-> && "$hook_panel_s" == <-> ]] && \
         hook_panel_s=$(( hook_panel_s + $(date +%s 2>/dev/null || print -r -- "$step_t0") - step_t0 ))
+      # a fallback that reviewed nothing was never engaged: drop the marker, so
+      # no later reader records a fallback review that did not happen (the
+      # refusal below still names the fallback, from fallback_engaged)
+      if [[ ! -s "$findings_path" ]]; then
+        rm -f -- "$fallback_marker" || \
+          print -u2 -- "resolve-story-loop: could not drop the fallback marker $fallback_marker after an empty fallback round"
+      fi
     fi
   fi
   # The `[]` default is a DELTA-round convenience, never a full-round one

@@ -207,16 +207,88 @@ fallback_review() {
   [ "${lines[1]}" = "1|fallback|development-claude-plugin:review|full|[]" ]
 }
 
-@test "#2909 hook mode: a resumed run whose work-dir records the engagement runs the fallback from its first hook call" {
-  # an engaged marker left by an earlier invocation is read on every round,
-  # so a --resume never drops back to the repo-type panel
-  mkdir -p "$BATS_TEST_TMPDIR/wd"
-  echo 1 > "$BATS_TEST_TMPDIR/wd/.fallback-engaged"
-  loop --review-cmd "$(fallback_review)" --fix-cmd 'true'
+@test "#2909 hook mode: --resume keeps the engagement; a fresh run on the same work-dir drops it" {
+  # round 1 engages the fallback and finds a blocker; the one-round budget ends
+  # the first invocation there
+  loop --max-rounds 1 --review-cmd "$(fallback_review 'printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"')" --fix-cmd 'echo "print(2)" > "$REVIEW_REPO/fixed.py"'
+  [ "$status" -eq 13 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/wd/.fallback-engaged")" = "1" ]
+  : > "$BATS_TEST_TMPDIR/hook.log"
+  # the resumed invocation's first hook call is already in fallback mode
+  loop --resume --max-rounds 3 --review-cmd "$(fallback_review)" --fix-cmd 'true'
   [ "$status" -eq 0 ]
   run cat "$BATS_TEST_TMPDIR/hook.log"
-  [ "${lines[0]}" = "1|fallback|development-claude-plugin:review|full|[]" ]
+  # (round 2 runs once, as the resumed run's closing sweep)
+  [ "${lines[0]}" = "2|fallback|development-claude-plugin:review|full|[]" ]
   [ "${#lines[@]}" -eq 1 ]
+  # a fresh run on the reused work-dir starts on the repo-type panel again
+  rm -rf "$BATS_TEST_TMPDIR/wd2"; mkdir -p "$BATS_TEST_TMPDIR/wd2"
+  echo 1 > "$BATS_TEST_TMPDIR/wd2/.fallback-engaged"
+  : > "$BATS_TEST_TMPDIR/hook.log"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$BATS_TEST_TMPDIR/wd2" \
+    --review-cmd "$(fallback_review)" --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  run cat "$BATS_TEST_TMPDIR/hook.log"
+  [ "${lines[0]}" = "1||development-python:review|full|[]" ]
+  [ "${lines[1]}" = "1|fallback|development-claude-plugin:review|full|[]" ]
+}
+
+@test "#2909 hook mode: a delta round never engages; the closing sweep can, and a later empty fallback is refused with no third call" {
+  # repo-type panel: a blocker on round 1, silent after that. Round 2 (delta)
+  # consumes the silence as []; round 3 (the closing sweep) engages.
+  loop --review-cmd 'printf "%s|%s|%s|%s|%s\n" "$REVIEW_ROUND" "$REVIEW_MODE" "$REVIEW_SKILL" "$REVIEW_SCOPE_MODE" "$REVIEW_TOPIC_SKILLS" >> "'"$BATS_TEST_TMPDIR"'/hook.log"; if [ "$REVIEW_MODE" = fallback ]; then printf "[]" > "$REVIEW_FINDINGS"; elif [ "$REVIEW_ROUND" = 1 ]; then printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"; fi' \
+       --fix-cmd 'echo "print(2)" > "$REVIEW_REPO/fixed.py"'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "CONVERGED" ]
+  run cat "$BATS_TEST_TMPDIR/hook.log"
+  [ "${lines[0]}" = "1||development-python:review|full|[]" ]
+  [ "${lines[1]}" = "2||development-python:review|delta|[]" ]
+  [ "${lines[2]}" = "3||development-python:review|full|[]" ]
+  [ "${lines[3]}" = "3|fallback|development-claude-plugin:review|full|[]" ]
+  [ "${#lines[@]}" -eq 4 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/wd/.fallback-engaged")" = "3" ]
+}
+
+@test "#2909 hook mode: an engaged fallback that writes nothing on a later full round is refused, never re-engaged" {
+  loop --review-cmd "$(fallback_review 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"; elif [ "$REVIEW_ROUND" = 2 ]; then printf "[]" > "$REVIEW_FINDINGS"; fi')" \
+       --fix-cmd 'echo "print(2)" > "$REVIEW_REPO/fixed.py"'
+  [ "$status" -eq 2 ]
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "STALE_FINDINGS" ]
+  contains "$output" "round 3 is a FULL round and --review-cmd produced no findings"
+  contains "$output" "wrote no findings either"
+  run cat "$BATS_TEST_TMPDIR/hook.log"
+  [ "${lines[3]}" = "3|fallback|development-claude-plugin:review|full|[]" ]
+  [ "${#lines[@]}" -eq 4 ]
+}
+
+@test "#2909 hook mode: a claude-plugin repo never engages its own panel as a fallback" {
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":[],"is_claude_plugin":true}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$BATS_TEST_TMPDIR/wd" \
+    --review-cmd "$(fallback_review)" --fix-cmd 'true'
+  [ "$status" -eq 2 ]
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "STALE_FINDINGS" ]
+  lacks "$output" "wrote no findings either"
+  [ ! -e "$BATS_TEST_TMPDIR/wd/.fallback-engaged" ]
+  run cat "$BATS_TEST_TMPDIR/hook.log"
+  [ "${#lines[@]}" -eq 1 ]
+}
+
+@test "#2909 hook mode: the fallback re-run drops the repo-type panel's topic panels" {
+  rm -f "$R/app.py"; echo "x" > "$R/app.js"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["javascript"],"is_react":true}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$BATS_TEST_TMPDIR/wd" \
+    --review-cmd "$(fallback_review)" --fix-cmd 'true'
+  [ "$status" -eq 0 ]
+  run cat "$BATS_TEST_TMPDIR/hook.log"
+  [ "${lines[0]}" = '1||development-javascript:review|full|["development-react:review"]' ]
+  [ "${lines[1]}" = "1|fallback|development-claude-plugin:review|full|[]" ]
+}
+
+@test "#2909 hook mode: an empty fallback round leaves no engagement marker behind" {
+  loop --review-cmd "$(fallback_review 'true')" --fix-cmd 'true'
+  [ "$status" -eq 2 ]
+  [ ! -e "$BATS_TEST_TMPDIR/wd/.fallback-engaged" ]
 }
 
 @test "#2909 hook mode: an empty story diff never engages the fallback" {

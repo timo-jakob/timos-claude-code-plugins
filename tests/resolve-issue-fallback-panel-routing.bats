@@ -13,6 +13,7 @@ bats_require_minimum_version 1.5.0
 load assertions
 
 setup() {
+  export HOME="$BATS_TEST_TMPDIR/home"  # #1972: suites naming a telemetry-writing script isolate HOME
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   REF="$REPO_ROOT/development/skills/resolve-issue/reference"
   BRIEF="$REF/review-loop/briefs/panel.md"
@@ -27,7 +28,9 @@ setup() {
   contains "$t" '**Route a full-round NOT APPLICABLE to the fallback panel (#2909).** When the plan'"'"'s `review_skill` panel reports NOT APPLICABLE on a full round whose story diff is not empty, dispatch the fallback panel in the same round:'
   contains "$t" 're-plan with step 1'"'"'s flags plus `--fallback`, and dispatch that descriptor'"'"'s `review_skill`, `development-claude-plugin:review`'
   contains "$t" 'Its descriptor carries `review_mode: "fallback"`, which puts that skill into its fallback mode, and no topic panels.'
-  contains "$t" 'If the fallback reviewed something, go on to steps 3–5; the verdict is `ok`, and the marker records that the fallback is engaged.'
+  contains "$t" 'If the fallback reviewed something — it did not itself report NOT APPLICABLE — record the engagement with `printf '"'"'%s\n'"'"' <round> > <work_dir>/.fallback-engaged` and go on to steps 3–5; the verdict is `ok`, and the marker records that the fallback is engaged.'
+  contains "$t" 'The fallback reviews the whole round alone: drop every topic panel'"'"'s findings from this round, and join only the fallback'"'"'s in step 4.'
+  contains "$t" 'Three rounds never engage it, and their NOT APPLICABLE stays the stop below: a round whose repo-type panel is `development-claude-plugin:review` itself, a carried round (the fallback'"'"'s dimensions cannot own the repo-type panel'"'"'s carried entries), and a delta round.'
 }
 
 @test "the panel brief keeps the fallback engaged for the rest of the run (#2909)" {
@@ -40,6 +43,9 @@ setup() {
   local t; t="$(flat "$BRIEF")"
   contains "$t" 'Return `not_applicable` / `not-applicable` only when the fallback is NOT APPLICABLE or unavailable.'
   contains "$t" 'an unresolvable fallback `review_skill` is never `render-failed`.'
+  contains "$t" 'It is unavailable when its `SKILL.md` is not in the plugin cache because `development-claude-plugin` is not installed;'
+  contains "$t" 'On the round it engages, return to the conductor, beside the verdict, one line naming the repo-type panel and the fallback.'
+  contains "$t" 'Return to the conductor only that the verdict was written, plus, on the round the fallback engages, the one line naming both panels (#2909).'
   contains "$t" '| on a full round, the fallback panel is NOT APPLICABLE or unavailable, after the repo-type panel reported NOT APPLICABLE | `not_applicable` / `not-applicable` |'
   lacks "$t" '| the language panel reported NOT APPLICABLE on a full round |'
 }
@@ -70,6 +76,10 @@ setup() {
   contains "$t" '## RS-06a — the fallback review panel default (#2909)'
   contains "$t" '**Print one line** when the fallback engages, attended or unattended, naming both panels'
   contains "$t" 'how to overrule: request changes on the PR, or re-run deliberately with `--no-review`.'
+  contains "$t" '`Decision taken (not asked): <repo-type review_skill> is NOT APPLICABLE on this diff, so development-claude-plugin:review reviews it in fallback mode`'
+  contains "$t" '**Record it in the body (#2909).** When `<work-dir>/.fallback-engaged` exists as §6 opens the PR, the body'"'"'s `## Decisions taken` section'
+  # and §6 reaches the procedure
+  contains "$(cat "$REPO_ROOT/development/skills/resolve-issue/SKILL.md")" '**When the fallback review panel engaged (#2909):** see `reference/ask-branches.md` § RS-06a — the fallback review panel default (#2909)'
 }
 
 @test "the note after the exit-2 frozen span states the routing and which panels report NOT APPLICABLE on a non-empty diff (#2909)" {
@@ -79,6 +89,7 @@ setup() {
   contains "$after" 'Today the `kubernetes` and `javascript` panels report NOT APPLICABLE on a non-empty diff'
   contains "$after" '- **step mode** — the panel brief re-plans with `review-dispatch.zsh plan --fallback`'
   contains "$after" '- **hook mode** — `resolve-story-loop.zsh` sees a `--review-cmd` that wrote no findings file'
+  contains "$after" 'Step 2'"'"'s arm, its autonomous stop and its three interactive options, applies only when the fallback is NOT APPLICABLE or unavailable (`development-claude-plugin` not installed), or on a round that never engages it'
 }
 
 @test "the exit-2 round-protocol-recover frozen span is byte-unchanged (#2909)" {
@@ -95,6 +106,13 @@ setup() {
   contains "$t" '**The fallback review panel (#2909).**'
   contains "$t" '`plan --fallback` plans it: the round'"'"'s normal descriptor with `review_skill` `"development-claude-plugin:review"`, `review_mode` `"fallback"`, `fallback_for` naming the repo-type `review_skill` it stands in for, and `topic_review_skills` `[]`'
   contains "$t" 'Hook mode exports `$REVIEW_MODE` beside `$REVIEW_SCOPE_MODE`'
+  contains "$t" 'records the engagement in `<work-dir>/.fallback-engaged` once the fallback has reviewed something, and plans every later round of the run with `--fallback`, `--resume` included; a fresh run never inherits the marker.'
   contains "$t" '**Fallback unavailable** — `development-claude-plugin` not installed'
   contains "$t" 'never the `render-failed` FAILED arm.'
+}
+
+@test "the user-facing review-loop explanation describes the fallback panel (#2909)" {
+  local t; t="$(flat "$REPO_ROOT/docs/explanation/review-loop.md")"
+  contains "$t" 'goes to the **fallback panel** first (#2909): `/development-claude-plugin:review` in its fallback mode reviews the shell, bats and Markdown files in the same round'
+  contains "$t" 'Only when the fallback cannot review the diff either, or `development-claude-plugin` is not installed, is it a decision for you'
 }

@@ -46,14 +46,19 @@ modes* names.
    **Route a full-round NOT APPLICABLE to the fallback panel (#2909).** When
    the plan's `review_skill` panel reports NOT APPLICABLE on a full round
    whose story diff is not empty, dispatch the fallback panel in the same
-   round: write the round number to `<work_dir>/.fallback-engaged` with
-   `printf '%s\n' <round> > <work_dir>/.fallback-engaged`, re-plan with step
-   1's flags plus `--fallback`, and dispatch that descriptor's `review_skill`,
-   `development-claude-plugin:review`, as this step says. Its descriptor
-   carries `review_mode: "fallback"`, which puts that skill into its fallback
-   mode, and no topic panels. If the fallback reviewed something, go on to
-   steps 3–5; the verdict is `ok`, and the marker records that the fallback is
-   engaged. Once engaged, the fallback stays for the rest of the run: every
+   round: re-plan with step 1's flags plus `--fallback`, and dispatch that
+   descriptor's `review_skill`, `development-claude-plugin:review`, as this
+   step says. Its descriptor carries `review_mode: "fallback"`, which puts that
+   skill into its fallback mode, and no topic panels. The fallback reviews the
+   whole round alone: drop every topic panel's findings from this round, and
+   join only the fallback's in step 4. Three rounds never engage it, and their
+   NOT APPLICABLE stays the stop below: a round whose repo-type panel is
+   `development-claude-plugin:review` itself, a carried round (the fallback's
+   dimensions cannot own the repo-type panel's carried entries), and a delta
+   round. If the fallback reviewed something — it did not itself report NOT
+   APPLICABLE — record the engagement with `printf '%s\n' <round> >
+   <work_dir>/.fallback-engaged` and go on to steps 3–5; the verdict is `ok`,
+   and the marker records that the fallback is engaged. Once engaged, the fallback stays for the rest of the run: every
    later round plans with `--fallback` and dispatches only the fallback, and a
    fallback is never followed by another fallback. On the round it engages,
    return to the conductor, beside the verdict, one line naming the repo-type
@@ -90,7 +95,8 @@ modes* names.
 5. **Write a `panel` verdict** with `round-handoff.zsh write-verdict --work-dir
    <work_dir>`: on success, `ok` with the aggregate's path and length and the two
    carry files (both `null` on round 1 or an empty carry). Return to the
-   conductor only that the verdict was written.
+   conductor only that the verdict was written, plus, on the round the
+   fallback engages, the one line naming both panels (#2909).
 
 **Recover inside the dispatch before returning a non-`ok` verdict.** Three
 arms are yours, not the conductor's:

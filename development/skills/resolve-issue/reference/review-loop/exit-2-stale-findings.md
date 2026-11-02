@@ -203,8 +203,10 @@ same round, and it stays engaged for the rest of the run:
 
 Step 2's arm, its autonomous stop and its three interactive options, applies
 only when the fallback is NOT APPLICABLE or unavailable
-(`development-claude-plugin` not installed). Engaging the fallback asks nothing:
-see `reference/ask-branches.md` § RS-06a — the fallback review panel default (#2909).
+(`development-claude-plugin` not installed), or on a round that never engages
+it (a carried round, or a repo whose own panel is the fallback). Engaging the
+fallback asks nothing; for the default and its record,
+see `reference/ask-branches.md` § RS-06a — the fallback review panel default (#2909)
 
 **An empty story diff is refused on a written `[]` too (#1485).** Step 1's
 `"full"` plan branch says that the loop refuses a full round with an empty

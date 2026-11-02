@@ -4547,9 +4547,12 @@ unchanged, with neither added key. The loop engages it when the repo-type
 panel reports NOT APPLICABLE on a full round over a non-empty story diff — in
 step mode the panel brief, in hook mode `resolve-story-loop.zsh` on a
 `--review-cmd` that wrote no findings file — records the engagement in
-`<work-dir>/.fallback-engaged`, and plans every later round of the run with
-`--fallback`, `--resume` included; a fallback is never followed by another
-fallback. Hook mode exports `$REVIEW_MODE` beside `$REVIEW_SCOPE_MODE`:
+`<work-dir>/.fallback-engaged` once the fallback has reviewed something, and
+plans every later round of the run with `--fallback`, `--resume` included; a
+fresh run never inherits the marker. A fallback is never followed by another
+fallback, so a repo whose own panel is `development-claude-plugin:review`
+never engages it, and neither does a carried round, whose entries the
+fallback's dimensions cannot own. Hook mode exports `$REVIEW_MODE` beside `$REVIEW_SCOPE_MODE`:
 `fallback` once engaged, with `REVIEW_SKILL=development-claude-plugin:review`
 and `REVIEW_TOPIC_SKILLS='[]'`, and the empty string before, so a caller's
 environment never engages it. **Fallback unavailable** — `development-claude-plugin`
