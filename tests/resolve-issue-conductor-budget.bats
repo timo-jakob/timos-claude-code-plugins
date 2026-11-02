@@ -380,9 +380,12 @@ _unreached_reference_files() {
   #
   # TWENTY-FIVE since #2955: the new reference/readiness-cache.md declares THREE
   # `##` sections — step 0b's stamp check, E1b's, and stamping a fresh verdict.
+  #
+  # TWENTY-SIX since #2909: reference/ask-branches.md gains RS-06a's fallback
+  # review panel default.
   local n
   n="$(_ref_headings | grep -c .)"
-  [ "$n" -eq 25 ]
+  [ "$n" -eq 26 ]
 }
 
 # --- pointers resolve -------------------------------------------------------
@@ -436,9 +439,11 @@ _unreached_reference_files() {
   # and 16 until §0a (twice), §3.5 and §5 pointed at reference/checkpoint.md (#2920),
   # and 20 until §6 and §7 pointed at reference/ask-branches.md (#2903),
   # and 22 until §0b and reference/epic-tree.md's E1b pointed at
-  # reference/readiness-cache.md (#2955).
-  if [ "$rows" -ne 24 ]; then
-    printf 'the skill carries %s pointer(s), expected 24.\n' "$rows" >&2
+  # reference/readiness-cache.md (#2955),
+  # and 24 until §6 and the exit-2 note pointed at RS-06a in
+  # reference/ask-branches.md (#2909).
+  if [ "$rows" -ne 26 ]; then
+    printf 'the skill carries %s pointer(s), expected 26.\n' "$rows" >&2
     printf 'A pointer was added or removed — update this count in the same PR,\n' >&2
     printf 'and check the step that gained or lost one still reaches its procedure.\n' >&2
     _all_pointers >&2

@@ -343,7 +343,22 @@
 # Hooks (run via the shell, with these env vars exported):
 #   --review-cmd  must write this round's aggregate findings JSON (issue #558
 #                 schema) to $REVIEW_FINDINGS. Also sees $REVIEW_ROUND,
-#                 $REVIEW_SKILL, $REVIEW_TOPIC_SKILLS (#1072 — the plan's
+#                 $REVIEW_SKILL, $REVIEW_MODE (#2909 — "fallback" once the
+#                 fallback panel is engaged, else the empty string; it then
+#                 comes with REVIEW_SKILL=development-claude-plugin:review and
+#                 REVIEW_TOPIC_SKILLS='[]'. A FULL round over a non-empty diff
+#                 whose hook wrote no findings file engages it — unless the
+#                 round carries entries or the repo-type panel is
+#                 development-claude-plugin:review itself: the loop
+#                 re-plans with `--fallback`, re-runs the hook once in that
+#                 round and, once that re-run wrote findings, records a
+#                 --work-dir marker; every later round, --resume included,
+#                 runs it once already in fallback mode. A fresh hook-mode
+#                 run clears the marker. The status JSON's review_skill and
+#                 topic_review_skills keep naming the repo-type plan even
+#                 then; the marker <work-dir>/.fallback-engaged is the record
+#                 of the engagement),
+#                 $REVIEW_TOPIC_SKILLS (#1072 — the plan's
 #                 topic_review_skills as a JSON array, `[]` when no topic panel
 #                 joins; every one of them reviews the same scope, and the hook
 #                 merges their arrays into the one $REVIEW_FINDINGS and their
@@ -701,7 +716,8 @@ pft_continues=0
 # plain assignment, not `local`: see the note above.
 carry_unconfirmed_json='[]'
 # The dispatch plan's `topic_review_skills` (#1072) — the topic panels that join
-# the language panel each round. `[]` until the plan is read, and on every exit
+# the language panel each round (the repo-type plan's, even once the fallback
+# panel engages, #2909 — <work-dir>/.fallback-engaged records that). `[]` until the plan is read, and on every exit
 # that precedes it (--no-review, a refused input, an exit-3 escalation), so the
 # status JSON always carries the field for the same reason as the four above.
 # A plain assignment, not `local`: see the note above.
@@ -2733,6 +2749,43 @@ local is_final=0 is_closing_sweep=0 is_empty_delta=0 empty_delta_note=""
 local round_scope_empty=0 round_findings_empty=0 rc_empty=0
 local skip_fix=0 pft_continued_round=0 adj_tmp=""
 local -a consolidate_args=() plan_args=()
+# One --review-cmd run (#2909: called a second time, in the same round, when the
+# fallback panel engages). Reads the round's locals by zsh's dynamic scope.
+# REVIEW_MODE is exported EMPTY until the fallback engages, so a value left in
+# the caller's environment never puts the panel into fallback mode.
+_run_review_hook() {
+  hook_review_skill="$review_skill" hook_topic_skills="$topic_review_skills" hook_review_mode=""
+  if (( fallback_engaged )); then
+    hook_review_skill="development-claude-plugin:review" hook_topic_skills='[]' hook_review_mode="fallback"
+  fi
+  ( export REVIEW_ROUND="$round" REVIEW_FINDINGS="$findings_path" \
+           REVIEW_SKILL="$hook_review_skill" REVIEW_TOPIC_SKILLS="$hook_topic_skills" \
+           REVIEW_MODE="$hook_review_mode" \
+           REVIEW_SCOPE_FILE="$scope_file" \
+           REVIEW_REPO="$repo" REVIEW_BASE="$base" REVIEW_SCOPE_MODE="$scope_mode" \
+           REVIEW_FIX_VERIFICATION="$fix_verification" \
+           REVIEW_FIX_VERIFICATION_BY_DIMENSION="$carry_by_dim" \
+           REVIEW_SKIPPABLE_DIMENSIONS="$skippable_json" \
+           REVIEW_ADJUDICATED="$adjudicated_file"; eval "$review_cmd" ) || {
+    print -u2 -- "resolve-story-loop: --review-cmd failed at round $round"; exit 1 }
+}
+# The fallback review panel (#2909), hook mode only. A full round over a
+# non-empty story diff whose --review-cmd wrote no findings file is the hook
+# seam's only sign that the repo-type panel was NOT APPLICABLE; the loop then
+# engages development-claude-plugin:review's fallback mode for the rest of the
+# run. The engagement is a --work-dir marker, so it survives --resume. In step
+# mode the round-panel brief owns the marker: it clears it on round 1 and
+# writes it before the loop's first invocation, so the loop neither reads nor
+# clears it there.
+local fallback_marker="$work_dir/.fallback-engaged" fallback_engaged=0
+local hook_review_skill="" hook_topic_skills="" hook_review_mode="" fallback_note=""
+# A FRESH run never inherits an engagement: only a --resume continues the run
+# whose rounds engaged it. A per-issue --work-dir is reused across runs, so a
+# stale marker would otherwise put round 1 straight into fallback mode.
+if (( resume_round == 0 && ! step_mode )); then
+  rm -f -- "$fallback_marker" || {
+    print -u2 -- "resolve-story-loop: could not clear a previous run's fallback marker $fallback_marker"; exit 1 }
+fi
 while (( round <= effective_max )); do
   # --- this round's working-tree identity (#1434) ---------------------------
   # Computed BEFORE anything else in the round, so it is exactly the tree the
@@ -2810,6 +2863,11 @@ while (( round <= effective_max )); do
 
   # per-round dispatch: the round's well-known findings path AND a fresh scope
   plan_args=( plan --repo "$repo" --base "$base" --round "$round" )
+  # once engaged (#2909), every later round plans the fallback panel — delta
+  # rounds and the closing sweep alike, including after --resume
+  fallback_engaged=0
+  (( ! step_mode )) && [[ -f "$fallback_marker" ]] && fallback_engaged=1
+  (( fallback_engaged )) && plan_args+=( --fallback )
   [[ -n "$prior_tree" ]] && plan_args+=( --prior-tree "$prior_tree" )
   (( is_final )) && plan_args+=( --final )
   [[ -n "$fix_verification" ]] && plan_args+=( --fix-verification "$fix_verification" )
@@ -3237,17 +3295,50 @@ while (( round <= effective_max )); do
         print -u2 -- "resolve-story-loop: could not split the fix-verification carry $fix_verification by dimension at round $round"; exit 1 }
     fi
     step_t0=$(date +%s 2>/dev/null) || step_t0=""
-    ( export REVIEW_ROUND="$round" REVIEW_FINDINGS="$findings_path" \
-             REVIEW_SKILL="$review_skill" REVIEW_TOPIC_SKILLS="$topic_review_skills" \
-             REVIEW_SCOPE_FILE="$scope_file" \
-             REVIEW_REPO="$repo" REVIEW_BASE="$base" REVIEW_SCOPE_MODE="$scope_mode" \
-             REVIEW_FIX_VERIFICATION="$fix_verification" \
-             REVIEW_FIX_VERIFICATION_BY_DIMENSION="$carry_by_dim" \
-             REVIEW_SKIPPABLE_DIMENSIONS="$skippable_json" \
-             REVIEW_ADJUDICATED="$adjudicated_file"; eval "$review_cmd" ) || {
-      print -u2 -- "resolve-story-loop: --review-cmd failed at round $round"; exit 1 }
+    _run_review_hook
     hook_panel_s=""
     [[ "$step_t0" == <-> ]] && hook_panel_s=$(( $(date +%s 2>/dev/null || print -r -- "$step_t0") - step_t0 ))
+    # --- engage the fallback panel (#2909) ---------------------------------
+    # A FULL round over a non-empty story diff whose hook wrote no findings
+    # file: the repo-type panel was NOT APPLICABLE. Engage the fallback in the
+    # same round — re-plan with --fallback, clear the sink and the carry
+    # sidecar, re-run the hook once, and record it once that re-run wrote
+    # findings. The EMPTY-STORY-DIFF arm keeps
+    # its precedence: an empty scope never engages anything.
+    # Three more conditions keep the takeover honest: the repo-type panel is
+    # not development-claude-plugin:review itself (a fallback never follows a
+    # fallback), and the round carries nothing — the fallback's dimensions
+    # cannot own the repo-type panel's carried entries, so a carried round's
+    # NOT APPLICABLE stays the human-owned stop.
+    if [[ ! -s "$findings_path" && "$scope_mode" == "full" \
+          && "$review_skill" != "development-claude-plugin:review" ]] \
+       && (( ! round_scope_empty && ! fallback_engaged )) \
+       && [[ "$carry_by_dim" == '{}' ]]; then
+      fallback_engaged=1
+      plan_args+=( --fallback )
+      rp=$("$DISPATCH" "${plan_args[@]}"); rc=$?
+      if (( rc == 3 )); then
+        emit_ambiguous "$rp" "$(( round - 1 ))" "$repo_type" "$review_skill"
+      elif (( rc != 0 )); then
+        print -u2 -- "resolve-story-loop: fallback dispatch plan failed at round $round (rc=$rc)"; exit 1
+      fi
+      rm -f -- "$findings_path" "$findings_path.carry.json" || {
+        print -u2 -- "resolve-story-loop: could not clear the round $round findings sink before the fallback re-run"; exit 1 }
+      step_t0=$(date +%s 2>/dev/null) || step_t0=""
+      _run_review_hook
+      [[ "$step_t0" == <-> && "$hook_panel_s" == <-> ]] && \
+        hook_panel_s=$(( hook_panel_s + $(date +%s 2>/dev/null || print -r -- "$step_t0") - step_t0 ))
+      # recorded only once the fallback reviewed something, so no failure path
+      # leaves a false engagement (the refusal below still names the fallback,
+      # from fallback_engaged)
+      if [[ -s "$findings_path" ]]; then
+        print -r -- "$round" > "$fallback_marker" || {
+          print -u2 -- "resolve-story-loop: could not record the fallback engagement at $fallback_marker"; exit 1 }
+        # RS-06a's notice (reference/ask-branches.md), word for word, printed
+        # only once the fallback has reviewed something
+        print -u2 -- "Decision taken (not asked): $review_skill is NOT APPLICABLE on this diff, so development-claude-plugin:review reviews it in fallback mode"
+      fi
+    fi
   fi
   # The `[]` default is a DELTA-round convenience, never a full-round one
   # (#1434). On a full round zero blockers IS the CONVERGED condition, so
@@ -3275,7 +3366,9 @@ while (( round <= effective_max )); do
       if (( step_mode )); then
         refuse_stale_findings "round $round is a FULL round and --findings-file is missing or empty ($findings_file) — a full round with zero blockers is the CONVERGED condition, so an absent aggregate is refused rather than read as a clean review. If the panel reported the round failed or not applicable, act on that (see §3.5 step 2); otherwise run the panel and write its aggregate to its OWN path (findings-round-${round}.json), never the dispatch sink $findings_path."
       fi
-      refuse_stale_findings "round $round is a FULL round and --review-cmd produced no findings at \$REVIEW_FINDINGS ($findings_path) — a full round with zero blockers is the CONVERGED condition, so an absent aggregate is refused rather than read as a clean review. A panel that found nothing must still write []."
+      fallback_note=""
+      (( fallback_engaged )) && fallback_note=" The fallback panel development-claude-plugin:review (\$REVIEW_MODE=fallback, #2909) wrote no findings either: it is NOT APPLICABLE or unavailable, so the run stops here."
+      refuse_stale_findings "round $round is a FULL round and --review-cmd produced no findings at \$REVIEW_FINDINGS ($findings_path) — a full round with zero blockers is the CONVERGED condition, so an absent aggregate is refused rather than read as a clean review. A panel that found nothing must still write [].$fallback_note"
     fi
     print -r -- '[]' > "$findings_path" || {
       print -u2 -- "resolve-story-loop: could not initialise the round $round findings sink $findings_path"; exit 1 }

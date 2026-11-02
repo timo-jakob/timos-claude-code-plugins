@@ -180,6 +180,35 @@ takes the autonomous arm and never prompts.
    dispatch `findings_path`) needs no digest tool and always applies.
 <!-- /moved: round-protocol-recover -->
 
+**A full round's NOT APPLICABLE goes to the fallback panel first (#2909).**
+Step 2's NOT APPLICABLE arm above predates the fallback panel and sits inside
+the byte-frozen span, so the routing is recorded here. Today the `kubernetes`
+and `javascript` panels report NOT APPLICABLE on a non-empty diff (a `.bats`-only
+or docs-only story, say); the other repo-type panels report it only when the
+story diff itself is empty, which the EMPTY-STORY-DIFF arm below keeps. On a
+full round over a non-empty diff, a repo-type NOT APPLICABLE engages the
+fallback panel, `development-claude-plugin:review` in fallback mode, in the
+same round, and it stays engaged for the rest of the run:
+
+- **step mode** — the panel brief re-plans with `review-dispatch.zsh plan
+  --fallback`, dispatches the fallback, records the engagement in
+  `<work-dir>/.fallback-engaged`, and returns `ok` when the fallback reviewed
+  something (*Panel subagent brief*);
+- **hook mode** — `resolve-story-loop.zsh` sees a `--review-cmd` that wrote no
+  findings file on such a round, re-plans with `--fallback`, re-runs the hook
+  once with `REVIEW_MODE=fallback`,
+  `REVIEW_SKILL=development-claude-plugin:review` and `REVIEW_TOPIC_SKILLS='[]'`,
+  and records the same marker once that re-run wrote a findings file.
+  A re-run that writes no findings file either is refused as `STALE_FINDINGS`
+  as before, and the refusal says the fallback wrote no findings.
+
+Step 2's arm, its autonomous stop and its three interactive options, applies
+only when the fallback is NOT APPLICABLE or unavailable
+(`development-claude-plugin` not installed), or on a round that never engages
+it (a carried round, or a repo whose own panel is the fallback). Engaging the
+fallback asks nothing; for the default and its record,
+see `reference/ask-branches.md` § RS-06a — the fallback review panel default (#2909)
+
 **An empty story diff is refused on a written `[]` too (#1485).** Step 1's
 `"full"` plan branch says that the loop refuses a full round with an empty
 scope. Step 2's `STALE_FINDINGS` list states only the no-findings-file half of
