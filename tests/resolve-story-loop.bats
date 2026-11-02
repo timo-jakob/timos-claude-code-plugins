@@ -339,6 +339,15 @@ fallback_review() {
   contains "$output" "could not record the fallback engagement"
 }
 
+@test "#2909 hook mode: a previous run's marker that cannot be cleared is exit 1" {
+  # a directory at the marker path makes the fresh run's rm -f fail
+  mkdir -p "$BATS_TEST_TMPDIR/wd/.fallback-engaged"
+  loop --review-cmd "$(fallback_review)" --fix-cmd 'true'
+  [ "$status" -eq 1 ]
+  contains "$output" "could not clear a previous run's fallback marker"
+  [ ! -e "$BATS_TEST_TMPDIR/hook.log" ]
+}
+
 @test "#2909 the --review-cmd header lists \$REVIEW_MODE" {
   run grep -c 'REVIEW_MODE (#2909' "$LOOP_REAL"
   [ "$output" -ge 1 ]

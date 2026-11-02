@@ -60,15 +60,17 @@ both panels — `Decision taken (not asked): <repo-type review_skill> is NOT
 APPLICABLE on this diff, so development-claude-plugin:review reviews it in
 fallback mode` — and continue the loop.
 
-**Record it in the body (#2909).** When `<work-dir>/.fallback-engaged` exists
-as §6 opens the PR, the body's `## Decisions taken` section (ARCHITECTURE.md,
+**Record it in the body (#2909).** When this run's review loop ran (not a
+`--no-review` run, whose status is SKIPPED) and `<work-dir>/.fallback-engaged`
+exists as §6 opens the PR, the body's `## Decisions taken` section (ARCHITECTURE.md,
 *Decision rights*) holds one entry — question: the repo-type panel was NOT
 APPLICABLE, so who reviews the diff?; choice: the fallback panel,
 `development-claude-plugin:review` in fallback mode, from round
 `<the marker's round>` on; evidence: it reviews every file it covers with full
 carry accounting, and the PR still goes through the Approver; how to overrule:
 request changes on the PR, or re-run deliberately with `--no-review`. On an
-ending with no PR body, the entry goes in the run's report.
+ending with no PR body, the entry goes in the run's report. A `--no-review` run
+never records it.
 
 ## RS-09 — the parked follow-up default (#2903)
 

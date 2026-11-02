@@ -4549,8 +4549,8 @@ step mode the panel brief, in hook mode `resolve-story-loop.zsh` on a
 `--review-cmd` that wrote no findings file — records the engagement in
 `<work-dir>/.fallback-engaged` once the fallback has reviewed something, and
 plans every later round of the run with `--fallback`, `--resume` included; a
-fresh run never inherits the marker — hook mode's loop and step mode's panel
-brief, on round 1, clear it. A fallback is never followed by another
+fresh run's round 1 never inherits the marker — hook mode's loop and step
+mode's panel brief clear it there. A fallback is never followed by another
 fallback, so a repo whose own panel is `development-claude-plugin:review`
 never engages it, and neither does a carried round, whose entries the
 fallback's dimensions cannot own. Hook mode exports `$REVIEW_MODE` beside `$REVIEW_SCOPE_MODE`:
@@ -4561,7 +4561,8 @@ not installed, so the fallback `review_skill` cannot be resolved — is treated
 exactly like the fallback reporting NOT APPLICABLE: the `not_applicable` /
 `not-applicable` verdict and its human-owned arm, never the `render-failed`
 FAILED arm. Which reviewer runs is an `implementation` decision, recorded in
-the PR's *Decisions taken* (`reference/ask-branches.md`, RS-06a).
+the PR's *Decisions taken* only by a run whose review loop ran, never by a
+`--no-review` run (`reference/ask-branches.md`, RS-06a).
 
 **An unsupported or ambiguous repo type is a typed escalation, not a crash.**
 `plan` prints a JSON error object (`{"error":"unsupported_repo_type", …}` or

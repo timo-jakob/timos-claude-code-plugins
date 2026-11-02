@@ -78,7 +78,8 @@ setup() {
   contains "$t" '**Print one line** when the fallback engages, attended or unattended, naming both panels'
   contains "$t" 'how to overrule: request changes on the PR, or re-run deliberately with `--no-review`.'
   contains "$t" '`Decision taken (not asked): <repo-type review_skill> is NOT APPLICABLE on this diff, so development-claude-plugin:review reviews it in fallback mode`'
-  contains "$t" '**Record it in the body (#2909).** When `<work-dir>/.fallback-engaged` exists as §6 opens the PR, the body'"'"'s `## Decisions taken` section'
+  contains "$t" '**Record it in the body (#2909).** When this run'"'"'s review loop ran (not a `--no-review` run, whose status is SKIPPED) and `<work-dir>/.fallback-engaged` exists as §6 opens the PR, the body'"'"'s `## Decisions taken` section'
+  contains "$t" 'On an ending with no PR body, the entry goes in the run'"'"'s report. A `--no-review` run never records it.'
   contains "$t" 'choice: the fallback panel, `development-claude-plugin:review` in fallback mode, from round `<the marker'"'"'s round>` on;'
   contains "$t" 'On an ending with no PR body, the entry goes in the run'"'"'s report.'
   # and §6 reaches the procedure
@@ -110,7 +111,8 @@ setup() {
   contains "$t" '**The fallback review panel (#2909).**'
   contains "$t" '`plan --fallback` plans it: the round'"'"'s normal descriptor with `review_skill` `"development-claude-plugin:review"`, `review_mode` `"fallback"`, `fallback_for` naming the repo-type `review_skill` it stands in for, and `topic_review_skills` `[]`'
   contains "$t" 'Hook mode exports `$REVIEW_MODE` beside `$REVIEW_SCOPE_MODE`'
-  contains "$t" 'records the engagement in `<work-dir>/.fallback-engaged` once the fallback has reviewed something, and plans every later round of the run with `--fallback`, `--resume` included; a fresh run never inherits the marker — hook mode'"'"'s loop and step mode'"'"'s panel brief, on round 1, clear it.'
+  contains "$t" 'records the engagement in `<work-dir>/.fallback-engaged` once the fallback has reviewed something, and plans every later round of the run with `--fallback`, `--resume` included; a fresh run'"'"'s round 1 never inherits the marker — hook mode'"'"'s loop and step mode'"'"'s panel brief clear it there.'
+  contains "$t" 'recorded in the PR'"'"'s *Decisions taken* only by a run whose review loop ran, never by a `--no-review` run'
   contains "$t" '**Fallback unavailable** — `development-claude-plugin` not installed'
   contains "$t" 'never the `render-failed` FAILED arm.'
 }
