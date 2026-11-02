@@ -227,5 +227,6 @@ fresh() {
 
 @test "every step that assigns a Step 7 run variable writes it into the child's state file, in either phase" {
   local s; s="$(flat "$SKILL")"
-  contains "$s" 'Every step that assigns one of those run variables — Step 1'"'"'s verdict and its already-`READY` shortcut, Step 2'"'"'s typed park or filed split, Step 4'"'"'s re-gate and Step 5'"'"'s ending, in phase A or phase B alike — also writes it into that state file in the same invocation, so Step 7 finds every ending'"'"'s values there.'
+  contains "$s" 'Every step that assigns one of those run variables — Step 0'"'"'s `t0`, `repo_root` and `paused_s`, Step 1'"'"'s verdict and its already-`READY` shortcut, Step 2'"'"'s typed park or filed split, Step 4'"'"'s re-gate and Step 5'"'"'s ending, in phase A or phase B alike — also writes it into that state file in the same invocation, so Step 7 finds every ending'"'"'s values there.'
+  contains "$s" 'Step 7 re-states the child'"'"'s literals from that file in the same invocation as the fence.'
 }
