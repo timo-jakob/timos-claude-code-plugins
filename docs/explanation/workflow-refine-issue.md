@@ -20,9 +20,10 @@ re-gate](diagrams/refine-issue.svg)
 2. **Step 0 — fetch and check preconditions.** The skill reads the issue and stops if it is closed. If the
    `needs-refinement` label is missing it refines anyway, and says so. If an earlier run *parked* this issue, the
    saved conversation and open questions are restored, and you are told what the last run stopped on.
-3. **Step 1 — diagnose.** The `story-readiness` agent judges the story afresh, because the gate comment on the issue
-   may be stale. Its questions become this session's **objections** — the list every later turn works through. If the
-   story is already READY, the skill clears the label and says so.
+3. **Step 1 — diagnose.** When the story carries a readiness stamp whose inputs have not changed, the skill reuses
+   that still-valid verdict and spawns no gate. Otherwise the `story-readiness` agent judges the story afresh, because
+   the gate comment on the issue may be stale. Its questions become this session's **objections** — the list every
+   later turn works through. If the story is already READY, the skill clears the label and says so.
 4. **Step 2 — one refiner turn.** The conductor hands `issue-refiner` the issue, the objections, the conversation so
    far and your latest reply. The agent returns:
    - for every objection, a plain-language *why it is not ready yet*;
@@ -70,7 +71,8 @@ and you curate them rather than write them from scratch.
    `gh` login and replaces any earlier block.
 3. **Step 4 — re-gate.** `story-readiness` judges the rewritten story, now also checking the block against the prose.
    Persona advisories — an unknown persona, a stale or missing registry — are relayed to you but never change the
-   verdict.
+   verdict. The skill then stamps the verdict on the issue, so the next resolve run reuses it instead of gating the
+   story again. If the stamp cannot be written, you are told in one line and nothing else changes.
 4. **Step 5 — the label.** On READY the skill removes `needs-refinement` and checks that it is really gone. On
    NEEDS_REFINEMENT it keeps the label and loops back to step 2; you can still stop there as `deferred`.
 5. **Step 6 — the before/after comment.** One durable comment records the starting objections, a before/after of the
