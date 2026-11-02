@@ -160,6 +160,7 @@ fresh() {
   contains "$t" 'A looped-back child already written back takes Step 5'"'"'s stop instead.'
   contains "$t" 'the child'"'"'s `/tmp/refine-issue-epic-<E>/<N>.defaults.json`'
   contains "$t" 'run Steps 2.5, 3, 4, 5, 6 and 7 for it. Its batch approval is the approval of its exact rewrite.'
+  contains "$t" 'Steps 4 and 5 write what they decide (`risk`, `state_outcome`, `park_type`) into its state file `f` with `jq … "$f" > "$f.tmp" && mv "$f.tmp" "$f"` before Step 7 reads it.'
   contains "$t" 'the child ends as *skipped (human declined)*'
   # phase A comes before phase B in the walk
   local a b

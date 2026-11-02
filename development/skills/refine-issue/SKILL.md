@@ -300,7 +300,9 @@ this is the guided pass that clears them.
 
    - **approve** — one child at a time, in sub-issue order, run Steps 2.5, 3,
      4, 5, 6 and 7 for it. Its batch approval is the approval of its exact
-     rewrite.
+     rewrite. Steps 4 and 5 write what they decide (`risk`, `state_outcome`,
+     `park_type`) into its state file `f` with `jq … "$f" > "$f.tmp" && mv
+     "$f.tmp" "$f"` before Step 7 reads it.
    - **skip** — the child ends as *skipped (human declined)*: nothing is
      written, its label stays, and Step 7 emits no record, since it reached no
      decided outcome. A looped-back child already written back takes Step 5's
