@@ -277,7 +277,9 @@ this is the guided pass that clears them.
    `rewrite_path`, set `phase` to `pending`, and go on to the next child.
 
    **Phase B — one approval for the batch.** Once every child of this pass has
-   ended or is pending, render the batch:
+   ended or is pending, render the batch. When no child is pending — every one
+   ended in phase A — skip phase B, ask nothing, and go to step 3's epic-level
+   summary. Otherwise render it:
 
    ```bash
    "<skill-base-dir>/scripts/batch-approval.zsh" summary --dir /tmp/refine-issue-epic-<E>
@@ -324,7 +326,9 @@ this is the guided pass that clears them.
    batch**, which gets one approval again. Batches repeat until every child has
    ended — written back, skipped or parked — so none is pending or waiting to
    redraft: a revisit child (`drafting`) or a looped-back child keeps the walk
-   going, and the next phase A redrafts it.
+   going, and the next phase A redrafts it. A redraft re-enters at Step 2 and
+   keeps its state file: it never re-runs Step 0 or Step 1, so its `t0`,
+   `rounds`, `raised` and `resolved` carry on across batches.
 
 3. **Post an epic-level summary** on the epic issue: for each child, whether it is
    now **ready** (label cleared) or **still parked** (with the park type), plus

@@ -230,3 +230,37 @@ fresh() {
   contains "$s" 'Every step that assigns one of those run variables — Step 0'"'"'s `t0`, `repo_root` and `paused_s`, Step 1'"'"'s verdict and its already-`READY` shortcut, Step 2'"'"'s typed park or filed split, Step 4'"'"'s re-gate and Step 5'"'"'s ending, in phase A or phase B alike — also writes it into that state file in the same invocation, so Step 7 finds every ending'"'"'s values there.'
   contains "$s" 'Step 7 re-states the child'"'"'s literals from that file in the same invocation as the fence.'
 }
+
+@test "phase B is skipped, asking nothing, when no child is pending" {
+  local s; s="$(flat "$SKILL")"
+  contains "$s" 'When no child is pending — every one ended in phase A — skip phase B, ask nothing, and go to step 3'"'"'s epic-level summary.'
+}
+
+@test "a repeated --revisit or --skip adds to its list, never replaces it" {
+  pending 12; fresh 9; fresh 20; fresh 30
+  run -0 zsh "$S" partition --dir "$D" --revisit 12 --revisit 20 --skip 9 --skip "#30"
+  [ "$output" = '{"approve":[],"revisit":[12,20],"skip":[9,30]}' ]
+}
+
+@test "partition exits 2 on an unreadable --dir, and 1 on a valid-JSON state file without a string phase" {
+  run -2 zsh "$S" partition --dir "$BATS_TEST_TMPDIR/no-such-dir"
+  contains "$output" 'missing or unreadable'
+  printf '%s\n' '{"phase": 3}' > "$D/7.json"
+  run -1 zsh "$S" partition --dir "$D"
+  contains "$output" 'not one JSON object with a string phase'
+  printf '%s\n' '{"rewrite_path": "/tmp/r.md"}' > "$D/7.json"
+  run -1 zsh "$S" summary --dir "$D"
+  contains "$output" "$D/7.json"
+}
+
+@test "a redraft re-enters at Step 2 and keeps its state, never re-running Step 0 or Step 1" {
+  local s; s="$(flat "$SKILL")"
+  contains "$s" 'A redraft re-enters at Step 2 and keeps its state file: it never re-runs Step 0 or Step 1, so its `t0`, `rounds`, `raised` and `resolved` carry on across batches.'
+}
+
+@test "the user docs describe the epic walk's two phases and its one batch approval" {
+  local d; d="$(flat "$REPO_ROOT/docs/explanation/workflow-refine-issue.md")"
+  contains "$d" 'walks them in two phases. First it drafts every child in turn'
+  contains "$d" 'Then it shows you every finished draft at once and asks one approval for the batch'
+  lacks "$d" 'one child fully before the next'
+}

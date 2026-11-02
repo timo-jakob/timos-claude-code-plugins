@@ -31,7 +31,8 @@
 #           edge: refine-issue creates none.
 # partition prints {"approve": [..], "revisit": [..], "skip": [..]}: every
 #           pending child is in exactly one list; the ones not named go to
-#           approve.
+#           approve. A repeated --revisit or --skip adds to its list, never
+#           replaces it, so a child named once is never approved by mistake.
 #
 # Exit: 0 rendered / partitioned (a summary with no pending child prints
 #       nothing); 1 a state file in <D> that is not one JSON object with a
@@ -61,10 +62,10 @@ while (( $# > 0 )); do
     --dir) (( $# >= 2 )) || { usage; exit 2 }; dir="$2"; shift 2 ;;
     --revisit)
       [[ "$mode" == partition ]] || { usage; exit 2 }
-      (( $# >= 2 )) || { usage; exit 2 }; revisit_raw="$2"; shift 2 ;;
+      (( $# >= 2 )) || { usage; exit 2 }; revisit_raw="$revisit_raw $2"; shift 2 ;;
     --skip)
       [[ "$mode" == partition ]] || { usage; exit 2 }
-      (( $# >= 2 )) || { usage; exit 2 }; skip_raw="$2"; shift 2 ;;
+      (( $# >= 2 )) || { usage; exit 2 }; skip_raw="$skip_raw $2"; shift 2 ;;
     *) usage; exit 2 ;;
   esac
 done
