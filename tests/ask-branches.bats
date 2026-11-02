@@ -28,11 +28,12 @@ windows() {
 }
 
 # One TSV line per anchor: id, file, anchor, kind, outcome. A row is a table
-# line starting `| RS-` or `| RF-`; its anchors cell holds code spans joined by
+# line starting `| RS-` or `| RF-`, its number optionally suffixed with one
+# lowercase letter for a split branch (RS-06a, #2909); its anchors cell holds code spans joined by
 # " · ", a span with a backtick inside written with double backticks.
 rows() {
   awk -F ' [|] ' '
-    /^\| R[SF]-[0-9]+ \|/ {
+    /^\| R[SF]-[0-9]+[a-z]? \|/ {
       id = $1; sub(/^\| /, "", id)
       out = $5; sub(/ \|$/, "", out)
       n = split($3, a, " · ")
@@ -97,11 +98,11 @@ stale() {
   [ -z "$bad" ] || { printf '%s\n' "$bad" >&2; return 1; }
 }
 
-@test "exactly RS-09, RF-02, RF-03 and RF-09 are implementation rows" {
+@test "exactly RS-06a, RS-09, RF-02, RF-03 and RF-09 are implementation rows" {
   local ids
   ids="$( { rows "$RESOLVE/reference/ask-branches.md"; rows "$REFINE/reference/ask-branches.md"; } \
     | awk -F '\t' '$4 == "implementation" { print $1 }' | sort -u | tr '\n' ' ')"
-  [ "$ids" = "RF-02 RF-03 RF-09 RS-09 " ]
+  [ "$ids" = "RF-02 RF-03 RF-09 RS-06a RS-09 " ]
 }
 
 # --- both directions of the anchor guard ----------------------------------------
@@ -232,4 +233,12 @@ stale() {
     contains "$t" '`tests/ask-branches.bats` holds the two directions: every line of the skill that matches its ask pattern carries one of its file'"'"'s anchors, and every anchor still occurs in its file.'
   done
   contains "$(flat "$RESOLVE/reference/ask-branches.md")" 'An `intent` or `gap` branch stays with the human, and its autonomous / interactive split is the one its own file states, and `scripts/resolve-session.zsh` decides which arm a run takes.'
+}
+
+@test "a split branch id (RS-06a, #2909) is parsed as a row, so its anchors are guarded" {
+  local ids
+  ids="$(rows "$RESOLVE/reference/ask-branches.md" | awk -F '\t' '{ print $1 }' | sort -u | tr '\n' ' ')"
+  contains "$ids" "RS-06a "
+  contains "$ids" "RS-06b "
+  lacks "$ids" "RS-06 "
 }

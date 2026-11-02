@@ -4536,6 +4536,29 @@ entry is the one thing the split must never let through; a missing flag or a
 PATH not ending in `.json` is exit 2. The panel hands each reviewer only the
 path its own dimension maps to (*Review finding schema* above).
 
+**The fallback review panel (#2909).** `development-claude-plugin:review` has a
+fallback mode (#2908): with `review_mode: "fallback"` in its descriptor, or
+`$REVIEW_MODE=fallback` in hook mode, it reviews the shell, bats and Markdown
+files of any repo. `plan --fallback` plans it: the round's normal descriptor
+with `review_skill` `"development-claude-plugin:review"`, `review_mode`
+`"fallback"`, `fallback_for` naming the repo-type `review_skill` it stands in
+for, and `topic_review_skills` `[]`; without `--fallback` the descriptor is
+unchanged, with neither added key. The loop engages it when the repo-type
+panel reports NOT APPLICABLE on a full round over a non-empty story diff — in
+step mode the panel brief, in hook mode `resolve-story-loop.zsh` on a
+`--review-cmd` that wrote no findings file — records the engagement in
+`<work-dir>/.fallback-engaged`, and plans every later round of the run with
+`--fallback`, `--resume` included; a fallback is never followed by another
+fallback. Hook mode exports `$REVIEW_MODE` beside `$REVIEW_SCOPE_MODE`:
+`fallback` once engaged, with `REVIEW_SKILL=development-claude-plugin:review`
+and `REVIEW_TOPIC_SKILLS='[]'`, and the empty string before, so a caller's
+environment never engages it. **Fallback unavailable** — `development-claude-plugin`
+not installed, so the fallback `review_skill` cannot be resolved — is treated
+exactly like the fallback reporting NOT APPLICABLE: the `not_applicable` /
+`not-applicable` verdict and its human-owned arm, never the `render-failed`
+FAILED arm. Which reviewer runs is an `implementation` decision, recorded in
+the PR's *Decisions taken* (`reference/ask-branches.md`, RS-06a).
+
 **An unsupported or ambiguous repo type is a typed escalation, not a crash.**
 `plan` prints a JSON error object (`{"error":"unsupported_repo_type", …}` or
 `{"error":"ambiguous_repo_type", …}`) and exits `3`; the orchestrator surfaces
