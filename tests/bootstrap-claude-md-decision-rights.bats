@@ -55,12 +55,16 @@ Before you put a question to the human, sort it:
   non-functional targets, and any risk acceptance (security, cost, data loss)
   or step that is irreversible or outward-facing.
 - **Ask** about **gaps** — something the work needs on which this repo's
-  architecture and requirements are silent, or where they contradict each
-  other — and propose the document change that would close it.
-- **Decide** implementation choices yourself, within this repo's architecture
-  and requirements, and let the toolchain (linters, tests, review, CI) verify
-  them. Do not ask about them; list each decision you took in the PR body
-  under a **Decisions taken** heading, so a reviewer can overrule it there.
+  architecture and requirements are silent and established practice does not
+  settle, or where those documents contradict each other — and propose the
+  document change that would close it.
+- **Decide** implementation choices yourself — anything this repo's
+  architecture and requirements, plus established practice, settle — and let
+  the toolchain (linters, tests, review, CI) verify them. Do not ask about
+  them; record each one in a `## Decisions taken` section of the PR body (of
+  the issue body when you decide before implementation): the question, your
+  choice, the evidence it rests on, and how to overrule it. Add entries there;
+  never remove earlier ones.
 
 When in doubt whether a question is an implementation choice, ask it. The
 principle behind this rule is
@@ -137,6 +141,16 @@ EOF
   printf '# Ours\n\n~~~\n## Who decides what\n~~~\n' > "$F"
   run zsh "$GAP" check --claude-md "$F"
   [ "$status" -eq 1 ]
+}
+
+@test "check: a heading after a closed fence is present (#2905)" {
+  local fence
+  for fence in '```' '~~~'; do
+    printf '# Ours\n\n%s\necho hi\n%s\n\n## Who decides what\n' "$fence" "$fence" > "$F"
+    run zsh "$GAP" check --claude-md "$F"
+    [ "$status" -eq 0 ]
+    [ "$output" = "present" ]
+  done
 }
 
 @test "check: no CLAUDE.md is not this gap, exit 3 (#2905)" {
@@ -318,5 +332,5 @@ EOF
   contains "$flat" "the Go identity adoption gap's install and the decision-rights rule's adoption gap — see below),"
   contains "$flat" "and of a pending decision-rights rule (\`CLAUDE.md\`'s State D gap, #2905), each offered in the Step 2 plan"
   # step 5a: the no-drift stop does not end a run with this gap pending
-  contains "$flat" "and so does a pending decision-rights rule (\`CLAUDE.md\`'s State D gap, #2905, whose check runs before this stop is decided): do not stop — continue to the Step 2 plan, and on confirmation its install is the delta.)"
+  contains "$flat" "and so does a pending decision-rights rule (\`CLAUDE.md\`'s State D gap, #2905 — run its check, defined at *State D — the decision-rights rule's adoption gap* in §3a's \`CLAUDE.md\` bullet, before this stop is decided): do not stop — continue to the Step 2 plan, and on confirmation its install is the delta.)"
 }

@@ -896,7 +896,9 @@ flow. Stop and ask for input wherever marked; do not guess.
       and on confirmation its run without `--dry-run` is the delta. So does a
       pending Go identity adoption gap (the Go identity block's State D gap,
       #2887), and so does a pending decision-rights rule (`CLAUDE.md`'s State D
-      gap, #2905, whose check runs before this stop is decided): do not stop —
+      gap, #2905 — run its check, defined at *State D — the decision-rights
+      rule's adoption gap* in §3a's `CLAUDE.md` bullet, before this stop is
+      decided): do not stop —
       continue to the Step 2 plan, and on confirmation its install is the
       delta.)
 
