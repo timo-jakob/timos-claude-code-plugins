@@ -212,11 +212,11 @@ hit_doc() {
     'The stamp'"'"'s key is the edited body'"'"'s, the body the next run reads. A loop-back' \
     'Step 5 leaves the newest re-gate'"'"'s stamp. When the stamp was not written for a' \
     'Step 7'"'"'s outcome.' \
-    'reuse it as written, one child fully before the next, Step 1'"'"'s stamp reuse and' \
+    '(Steps 0–7) as written, Step 1'"'"'s stamp reuse and Step 4'"'"'s stamp included' \
     'to Step 2 stamps again at its next Step 4, in place, so a deferred park in' \
     'failure, the script prints one line on stderr: relay it to the human as is and' \
     'go on to Step 5. A stamp never changes the verdict, the label handling or' \
-    'Step 4'"'"'s stamp included (#2956). A child either reaches'; do
+    '(#2956), except that the approval of the exact rewrite moves'; do
     grep -qF -- "$n" "$SKILL" || { echo "missing from SKILL.md: $n" >&2; return 1; }
   done
   grep -qF 'that still-valid verdict and spawns no gate.' "$DOC"

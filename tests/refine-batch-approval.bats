@@ -160,7 +160,9 @@ fresh() {
   contains "$t" 'A looped-back child already written back takes Step 5'"'"'s stop instead.'
   contains "$t" 'the child'"'"'s `/tmp/refine-issue-epic-<E>/<N>.defaults.json`'
   contains "$t" 'run Steps 2.5, 3, 4, 5, 6 and 7 for it. Its batch approval is the approval of its exact rewrite.'
-  contains "$t" 'Steps 4 and 5 write what they decide (`risk`, `state_outcome`, `park_type`) into its state file `f` with `jq … "$f" > "$f.tmp" && mv "$f.tmp" "$f"` before Step 7 reads it.'
+  contains "$t" 'Step 5 writes what it decides (`state_outcome`, `park_type`) into its state file `f` with `jq … "$f" > "$f.tmp" && mv "$f.tmp" "$f"` before Step 7 reads it; `risk` (Step 1) and `size_preflight` (Step 2'"'"'s size check) are already there from phase A, and Step 4 decides neither.'
+  lacks "$t" 'Steps 4 and 5 write what they decide'
+  contains "$t" '**In an epic walk (#2904)**, whichever branch below sets `STATE_OUTCOME` and `PARK_TYPE` also writes both into the child'"'"'s state file `/tmp/refine-issue-epic-<E>/<N>.json`, in the same invocation, since its Step 7 re-states the child'"'"'s literals from that file.'
   contains "$t" 'the child ends as *skipped (human declined)*'
   # phase A comes before phase B in the walk
   local a b

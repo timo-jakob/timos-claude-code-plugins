@@ -301,9 +301,10 @@ this is the guided pass that clears them.
 
    - **approve** — one child at a time, in sub-issue order, run Steps 2.5, 3,
      4, 5, 6 and 7 for it. Its batch approval is the approval of its exact
-     rewrite. Steps 4 and 5 write what they decide (`risk`, `state_outcome`,
-     `park_type`) into its state file `f` with `jq … "$f" > "$f.tmp" && mv
-     "$f.tmp" "$f"` before Step 7 reads it.
+     rewrite. Step 5 writes what it decides (`state_outcome`, `park_type`)
+     into its state file `f` with `jq … "$f" > "$f.tmp" && mv "$f.tmp" "$f"`
+     before Step 7 reads it; `risk` (Step 1) and `size_preflight` (Step 2's
+     size check) are already there from phase A, and Step 4 decides neither.
    - **skip** — the child ends as *skipped (human declined)*: nothing is
      written, its label stays, and Step 7 emits no record, since it reached no
      decided outcome. A looped-back child already written back takes Step 5's
@@ -1126,6 +1127,11 @@ persona, route the human to **`/development:define-personas`** (as in Step 2) so
 they can add or fix it and, optionally, re-run refine-issue to reference it.
 
 ## Step 5 — resolve the label, honestly
+
+**In an epic walk (#2904)**, whichever branch below sets `STATE_OUTCOME` and
+`PARK_TYPE` also writes both into the child's state file
+`/tmp/refine-issue-epic-<E>/<N>.json`, in the same invocation, since its Step 7
+re-states the child's literals from that file.
 
 - **`READY`** → remove the label; the story is buildable. Step 7 defines
   `refined-ready` as "the run ends with `needs-refinement` **removed**", so set
