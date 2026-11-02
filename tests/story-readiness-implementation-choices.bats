@@ -3,8 +3,8 @@
 # story-readiness judges what is required, not how it is built (#2902, epic
 # #2898). The gate's borderline tie-break ("lean toward NEEDS_REFINEMENT") is
 # scoped to `intent` and `gap` questions of the decision-rights taxonomy
-# (ARCHITECTURE.md, #2899); an unpinned implementation choice passes every
-# check and yields no refinement question; and an acceptance criterion that
+# (ARCHITECTURE.md, #2899); an unpinned implementation choice fails no check
+# and yields no refinement question; and an acceptance criterion that
 # pins an implementation detail is an `implementation-pinned` advisory, never a
 # failure. These pins are prose pins: the agent is a model, so the suite holds
 # the rule's text in place, sentence by sentence.
@@ -45,12 +45,12 @@ rule_block() {
   lacks "$FLAT" 'When a check is genuinely borderline, lean toward `NEEDS_REFINEMENT`'
 }
 
-@test "an unpinned implementation choice passes every check and asks nothing (#2902)" {
-  contains "$FLAT" '**An unpinned `implementation` choice passes every check.** A story that leaves open only how to build it — which helper to reuse, which CIDR to pick, how to name an internal function — is not under-specified: the builder decides it and records it under *Decisions taken*. It never fails a check and never produces a `refinement_questions` entry.'
+@test "an unpinned implementation choice fails no check and asks nothing (#2902)" {
+  contains "$FLAT" '**An unpinned `implementation` choice fails no check.** A story that leaves open only how to build it — which helper to reuse, which CIDR to pick, how to name an internal function — is not under-specified: the builder decides it and records it under *Decisions taken*. It never fails a check and never produces a `refinement_questions` entry. The `use_case` and the happy, corner and error `test_cases` a surface-touching story must carry are never such a choice: they describe observable behaviour, not implementation, so they stay required.'
 }
 
 @test "refinement_questions carries intent and gap questions only (#2902)" {
-  contains "$FLAT" '- `refinement_questions` is a list of concrete, answerable questions — one per gap you found, each an `intent` or `gap` question, never an implementation choice (#2902). Empty (`[]`) when `verdict` is `READY`.'
+  contains "$FLAT" '- `refinement_questions` is a list of concrete, answerable questions — one per gap you found, each an `intent` or `gap` question (a missing surface test case is a `gap`), never an implementation choice (#2902). Empty (`[]`) when `verdict` is `READY`.'
 }
 
 @test "an implementation-pinning criterion is an advisory, never a failure (#2902)" {
@@ -68,6 +68,8 @@ rule_block() {
 
 @test "advisories still never change the verdict (#2902)" {
   contains "$FLAT" '**Advisories never change the verdict** — a `READY` story with advisories is still `READY`.'
+  contains "$FLAT" 'Empty (`[]`) when there is nothing to note, the common case; a persona-less story raises no persona advisory.'
+  lacks "$FLAT" 'including every persona-less story).'
 }
 
 @test "the rule sits before the risk classification, inside the checks section (#2902)" {

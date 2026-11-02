@@ -303,11 +303,14 @@ question taxonomy and the Decisions-taken record* (#2899): `intent`, `gap` or
   is genuinely borderline because of an `intent` or `gap` question, lean toward
   `NEEDS_REFINEMENT` — a cheap clarifying question now beats a wrong PR later,
   which is the entire point of this gate.
-- **An unpinned `implementation` choice passes every check.** A story that
+- **An unpinned `implementation` choice fails no check.** A story that
   leaves open only how to build it — which helper to reuse, which CIDR to pick,
   how to name an internal function — is not under-specified: the builder
   decides it and records it under *Decisions taken*. It never fails a check and
-  never produces a `refinement_questions` entry.
+  never produces a `refinement_questions` entry. The `use_case` and the happy,
+  corner and error `test_cases` a surface-touching story must carry are never
+  such a choice: they describe observable behaviour, not implementation, so
+  they stay required.
 - **An acceptance criterion that pins an implementation detail is an advisory,
   never a failure.** When a criterion fixes a detail that no architecture
   position, requirement or external interface requires (a specific CIDR, an
@@ -375,8 +378,8 @@ Rules for the payload:
   where `story_spec` is `null`. When you emit a `story_spec`, its
   `interface_surfaces` must match this `surface`.
 - `refinement_questions` is a list of concrete, answerable questions — one per
-  gap you found, each an `intent` or `gap` question, never an implementation
-  choice (#2902). Empty (`[]`) when `verdict` is `READY`.
+  gap you found, each an `intent` or `gap` question (a missing surface test
+  case is a `gap`), never an implementation choice (#2902). Empty (`[]`) when `verdict` is `READY`.
 - `risk` is always present (`low` | `normal` | `elevated`), independent of the
   verdict.
 - `summary` is one sentence a human can read at a glance.
@@ -425,7 +428,7 @@ Rules for the payload:
   `message` reads `criterion <N> pins implementation; consider stating the
   observable behaviour`, with `<N>` the criterion's 1-based number in the
   story. **Advisories never change the verdict** — a `READY` story with
-  advisories is still `READY`. Empty (`[]`) when there is nothing to note (the
-  common case, including every persona-less story).
+  advisories is still `READY`. Empty (`[]`) when there is nothing to note, the
+  common case; a persona-less story raises no persona advisory.
 - Never invent a reason to fail a well-specified story, and never wave through a
   vague one — reliability of this judgment is what makes the loop trustworthy.
