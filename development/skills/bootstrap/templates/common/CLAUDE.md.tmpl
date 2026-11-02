@@ -79,3 +79,22 @@ the above — or changes what talks to what — updates `docs/architecture/` in 
 that trails it. The maintenance pipeline compares the declared containers
 against the code and flags drift, so a stale diagram is a defect it will
 surface.
+
+## Who decides what
+
+Before you put a question to the human, sort it:
+
+- **Ask** about **intent** — what to build, its scope and priority, its
+  non-functional targets, and any risk acceptance (security, cost, data loss)
+  or step that is irreversible or outward-facing.
+- **Ask** about **gaps** — something the work needs on which this repo's
+  architecture and requirements are silent, or where they contradict each
+  other — and propose the document change that would close it.
+- **Decide** implementation choices yourself, within this repo's architecture
+  and requirements, and let the toolchain (linters, tests, review, CI) verify
+  them. Do not ask about them; list each decision you took in the PR body
+  under a **Decisions taken** heading, so a reviewer can overrule it there.
+
+When in doubt whether a question is an implementation choice, ask it. The
+principle behind this rule is
+[Never asks "how"](https://timo-jakob.github.io/timos-claude-code-plugins/explanation/philosophy/#pillar-2)
