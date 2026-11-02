@@ -254,9 +254,10 @@ this is the guided pass that clears them.
    a string, from the moment its state file is created: `drafting` while it
    drafts or must redraft (a child created in phase A, a revisit, and an
    approved child whose re-gate loops it back), `pending` as above, `skipped`
-   once skipped, and `ended` once it is written back, parked or split, so a
-   walk is finished exactly when no child is `drafting`, `pending` or
-   `approved`. Its `paused_s`
+   once skipped, and `ended` at every other ending, in phase A or phase B
+   alike: the READY shortcut, a write-back, a typed park, a filed split, or a
+   stop such as a failed label removal. So a walk is finished exactly when no
+   child is `drafting`, `pending` or `approved`. Its `paused_s`
    (Step 0's `0`) holds its waits on others, which are not refinement work and
    never count toward its `wall_s`: whenever its work stops to wait — it becomes
    pending, or it loops back (it redrafts only in the next phase A) — set

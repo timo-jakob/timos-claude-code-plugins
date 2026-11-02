@@ -49,7 +49,7 @@ fresh() {
 
 @test "partition with no names approves every pending child, in number order" {
   pending 12; fresh 9
-  printf '%s\n' '{"phase": "parked"}' > "$D/15.json"
+  printf '%s\n' '{"phase": "ended"}' > "$D/15.json"
   run -0 zsh "$S" partition --dir "$D"
   [ "$output" = '{"approve":[9,12],"revisit":[],"skip":[]}' ]
 }
@@ -68,7 +68,7 @@ fresh() {
 
 @test "partition refuses a number that is not a pending child with exit 2" {
   pending 12
-  printf '%s\n' '{"phase": "parked"}' > "$D/15.json"
+  printf '%s\n' '{"phase": "ended"}' > "$D/15.json"
   run -2 zsh "$S" partition --dir "$D" --skip 15
   contains "$output" '#15 is not a pending child'
   run -2 zsh "$S" partition --dir "$D" --revisit 99
@@ -141,7 +141,7 @@ fresh() {
 }
 
 @test "a summary with no pending child prints nothing" {
-  printf '%s\n' '{"phase": "parked"}' > "$D/15.json"
+  printf '%s\n' '{"phase": "ended"}' > "$D/15.json"
   run -0 zsh "$S" summary --dir "$D"
   [ -z "$output" ]
 }
@@ -278,7 +278,7 @@ fresh() {
 
 @test "a child's phase is always a string, through its whole lifecycle, and a loop-back returns it to drafting" {
   local s; s="$(flat "$SKILL")"
-  contains "$s" 'Its `phase` is always a string, from the moment its state file is created: `drafting` while it drafts or must redraft (a child created in phase A, a revisit, and an approved child whose re-gate loops it back), `pending` as above, `skipped` once skipped, and `ended` once it is written back, parked or split, so a walk is finished exactly when no child is `drafting`, `pending` or `approved`.'
+  contains "$s" 'Its `phase` is always a string, from the moment its state file is created: `drafting` while it drafts or must redraft (a child created in phase A, a revisit, and an approved child whose re-gate loops it back), `pending` as above, `skipped` once skipped, and `ended` at every other ending, in phase A or phase B alike: the READY shortcut, a write-back, a typed park, a filed split, or a stop such as a failed label removal. So a walk is finished exactly when no child is `drafting`, `pending` or `approved`.'
   contains "$s" '`NEEDS_REFINEMENT` loops back to Step 2 (Step 5) like a revisit child, and its `phase` goes back to `drafting`.'
 }
 
@@ -290,7 +290,9 @@ fresh() {
   run -0 zsh "$S" partition --dir "$D"
   [ "$output" = '{"approve":[12],"revisit":[],"skip":[]}' ]
   run -0 zsh "$S" summary --dir "$D"
-  contains "$output" '12'
+  contains "$output" '#12'
+  lacks "$output" '#9'
+  lacks "$output" '#15'
 }
 
 @test "a state file holding two JSON objects is malformed (exit 1)" {
