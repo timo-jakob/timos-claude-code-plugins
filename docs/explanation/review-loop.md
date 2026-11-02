@@ -297,10 +297,16 @@ The second is a **full** round with nothing to review: the story diff itself is
 empty, or — on a Kubernetes repo — it touches nothing that deploys. The panel
 reports that and writes no findings, and the loop refuses the round rather than
 reading "no findings" as "no problems", which on a full round would converge the
-run. An empty story diff means going back and implementing; a diff that simply
-touches no manifests is a decision for you: skip the review deliberately and
-ship, review the diff yourself and record the review as waived, or stop without
-opening a PR.
+run. An empty story diff means going back and implementing. A non-empty diff the
+repository type's panel cannot review — a `.bats`-only change on a Kubernetes
+repo, a docs-only change on a JavaScript repo — goes to the **fallback panel**
+first (#2909): `/development-claude-plugin:review` in its fallback mode reviews
+the shell, bats and Markdown files in the same round, and keeps reviewing the
+rest of the run. The run asks nothing, prints one line naming both panels, and
+records the choice under the PR's *Decisions taken*. Only when the fallback
+cannot review the diff either, or `development-claude-plugin` is not installed,
+is it a decision for you: skip the review deliberately and ship, review the
+diff yourself and record the review as waived, or stop without opening a PR.
 
 ## When a human is driving: the interactive extension
 

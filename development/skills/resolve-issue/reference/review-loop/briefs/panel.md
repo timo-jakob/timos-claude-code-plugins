@@ -21,7 +21,10 @@ modes* names.
    <work_dir>/adjudicated.json`. On round 1, add `--self-check
    <worktree_root>/.review/self-check.json` when that file exists. Step
    1's round-1 "no flags beyond the round" predates #2014 and does not override
-   that. Round step 1
+   that. On round 1, first `rm -f <work_dir>/.fallback-engaged`, which an
+   earlier run may have left: round 1 never inherits an engagement. While
+   `<work_dir>/.fallback-engaged` exists, add `--fallback` on every round
+   (#2909, below). Round step 1
    governs when to add `--final`, the
    plan's exit codes, and the `worktree_root` check. **On a carried round, split
    the carry by owner (#2010):** run `review-dispatch.zsh split-carry
@@ -42,6 +45,34 @@ modes* names.
    all in one message, whatever that skill's Step 1 says: a background dispatch
    returns before the reviewer replies (ARCHITECTURE.md, *Subagent dispatch
    mechanism*).
+   **Route a full-round NOT APPLICABLE to the fallback panel (#2909).** When
+   the plan's `review_skill` panel reports NOT APPLICABLE on a full round
+   whose story diff is not empty, dispatch the fallback panel in the same
+   round: re-plan with step 1's flags plus `--fallback`, and dispatch that
+   descriptor's `review_skill`, `development-claude-plugin:review`, as this
+   step says. Its descriptor carries `review_mode: "fallback"`, which puts that
+   skill into its fallback mode, and no topic panels. The fallback reviews the
+   whole round alone: drop every topic panel's findings from this round, and
+   join only the fallback's in step 4. Three rounds never engage it, and their
+   NOT APPLICABLE stays the stop below: a round whose repo-type panel is
+   `development-claude-plugin:review` itself, a carried round (the fallback's
+   dimensions cannot own the repo-type panel's carried entries), and a delta
+   round. If the fallback reviewed something — it did not itself report NOT
+   APPLICABLE — record the engagement with `printf '%s\n' <round> >
+   <work_dir>/.fallback-engaged` and go on to steps 3–5; the verdict is `ok`,
+   and the marker records that the fallback is engaged. Once engaged, the fallback stays for the rest of the run: every
+   later round plans with `--fallback` and dispatches only the fallback, and a
+   fallback is never followed by another fallback. That is intended, not a gap:
+   a later round stays on the fallback even for files a fix pass adds that the
+   repo-type panel could review, and the Approver still reviews the whole PR.
+   On the round it engages,
+   return to the conductor, beside the verdict, one line naming the repo-type
+   panel and the fallback. Return `not_applicable` / `not-applicable` only
+   when the fallback is NOT APPLICABLE or unavailable, or when the repo-type
+   panel's NOT APPLICABLE falls on a round that never engages the fallback. It is unavailable when
+   its `SKILL.md` is not in the plugin cache because `development-claude-plugin`
+   is not installed; an unresolvable fallback `review_skill` is never
+   `render-failed`.
 3. **On a carried round, settle the carry before writing anything.** Check that
    every carried entry was accounted for by its owning dimension's reviewer —
    judged by the per-entry lines, whose checksum is that the reviewers' TOTALs
@@ -70,7 +101,8 @@ modes* names.
 5. **Write a `panel` verdict** with `round-handoff.zsh write-verdict --work-dir
    <work_dir>`: on success, `ok` with the aggregate's path and length and the two
    carry files (both `null` on round 1 or an empty carry). Return to the
-   conductor only that the verdict was written.
+   conductor only that the verdict was written, plus, on the round the
+   fallback engages, the one line naming both panels (#2909).
 
 **Recover inside the dispatch before returning a non-`ok` verdict.** Three
 arms are yours, not the conductor's:
@@ -129,7 +161,7 @@ non-`ok` verdict instead, and write no findings file:
 | `worktree_root` is not the implementation worktree | `failed` / `wrong-worktree-root` |
 | a `[DELETED by this story]` excerpt came back empty | `failed` / `empty-excerpt` |
 | a full round whose story diff is empty | `not_applicable` / `story-diff-empty` |
-| the language panel reported NOT APPLICABLE on a full round | `not_applicable` / `not-applicable` |
+| the repo-type panel reported NOT APPLICABLE, and the fallback panel is NOT APPLICABLE or unavailable or the round never engages it | `not_applicable` / `not-applicable` |
 | you have no `Agent` tool | `failed` / `no-agent-tool` |
 
 **Planned** is the review skill's own Step 1 table, read for this round (#2008).

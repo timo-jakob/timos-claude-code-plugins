@@ -4259,7 +4259,7 @@ accepted-and-ignored.
 
 **`plan --repo PATH [--base REF] [--round N] [--findings-path PATH] [--final]
 [--prior-tree TREE_ID] [--fix-verification PATH] [--adjudicated PATH]
-[--self-check PATH]`** emits the
+[--self-check PATH] [--fallback]`** emits the
 dispatch descriptor. `--findings-path` overrides where the panel is told to write
 its aggregate, defaulting to `<worktree_root>/.review/findings-round-<N>.json` —
 **absolute, and the same for every spelling of `--repo`**, because `--repo` is
@@ -4348,7 +4348,8 @@ cannot mint a second artifact path for the same round:
   `fix_verification_path` / `adjudicated_path` — this script never reads either
   file, so one descriptor value carries everything a round's panel needs.
   `--self-check` (#2014) is echoed through the same way as `self_check_path`,
-  the descriptor's **last** key, `null` when absent and never read: the path of
+  the descriptor's **last** key (under `--fallback`, `fallback_for` and
+  `review_mode` follow it), `null` when absent and never read: the path of
   the claude-plugin writer's pre-review self-check file (*Pre-review self-check*,
   below). The panel brief passes it on round 1 only, and only when that file
   exists, so from round 2 on, and on every repo type whose profile writes no
@@ -4535,6 +4536,34 @@ with no dimension, or one whose dimension is not spelled
 entry is the one thing the split must never let through; a missing flag or a
 PATH not ending in `.json` is exit 2. The panel hands each reviewer only the
 path its own dimension maps to (*Review finding schema* above).
+
+**The fallback review panel (#2909).** `development-claude-plugin:review` has a
+fallback mode (#2908): with `review_mode: "fallback"` in its descriptor, or
+`$REVIEW_MODE=fallback` in hook mode, it reviews the shell, bats and Markdown
+files of any repo. `plan --fallback` plans it: the round's normal descriptor
+with `review_skill` `"development-claude-plugin:review"`, `review_mode`
+`"fallback"`, `fallback_for` naming the repo-type `review_skill` it stands in
+for, and `topic_review_skills` `[]`; without `--fallback` the descriptor is
+unchanged, with neither added key. The loop engages it when the repo-type
+panel reports NOT APPLICABLE on a full round over a non-empty story diff — in
+step mode the panel brief, in hook mode `resolve-story-loop.zsh` on a
+`--review-cmd` that wrote no findings file — records the engagement in
+`<work-dir>/.fallback-engaged` once the fallback has reviewed something, and
+plans every later round of the run with `--fallback`, `--resume` included; a
+fresh run's round 1 never inherits the marker — hook mode's loop and step
+mode's panel brief clear it there. A fallback is never followed by another
+fallback, so a repo whose own panel is `development-claude-plugin:review`
+never engages it, and neither does a carried round, whose entries the
+fallback's dimensions cannot own. Hook mode exports `$REVIEW_MODE` beside `$REVIEW_SCOPE_MODE`:
+`fallback` once engaged, with `REVIEW_SKILL=development-claude-plugin:review`
+and `REVIEW_TOPIC_SKILLS='[]'`, and the empty string before, so a caller's
+environment never engages it. **Fallback unavailable** — `development-claude-plugin`
+not installed, so the fallback `review_skill` cannot be resolved — is treated
+exactly like the fallback reporting NOT APPLICABLE: the `not_applicable` /
+`not-applicable` verdict and its human-owned arm, never the `render-failed`
+FAILED arm. Which reviewer runs is an `implementation` decision, recorded in
+the PR's *Decisions taken* only by a run whose review loop ran, never by a
+`--no-review` run (`reference/ask-branches.md`, RS-06a).
 
 **An unsupported or ambiguous repo type is a typed escalation, not a crash.**
 `plan` prints a JSON error object (`{"error":"unsupported_repo_type", …}` or

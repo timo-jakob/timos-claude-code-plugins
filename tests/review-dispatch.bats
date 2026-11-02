@@ -3576,3 +3576,62 @@ tplan() {  # $1 = topic table ; $2 = detect json ; rest = extra flags
   [ "$(echo "$output" | jq -r .repo_type)" = "javascript" ]
   [ "$(echo "$output" | jq -c .topic_review_skills)" = "[]" ]
 }
+
+# ---- #2909: plan --fallback (the fallback review panel) --------------------
+
+@test "#2909 plan --fallback plans development-claude-plugin:review in fallback mode for the repo-type panel" {
+  echo "x" > "$R/app.js"
+  run --separate-stderr env -u REVIEW_TOPIC_TABLE DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["javascript"],"is_react":true}' \
+    zsh "$S" plan --repo "$R" --base main --fallback
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "javascript" ]
+  [ "$(echo "$output" | jq -r .review_skill)" = "development-claude-plugin:review" ]
+  [ "$(echo "$output" | jq -r .review_mode)" = "fallback" ]
+  [ "$(echo "$output" | jq -r .fallback_for)" = "development-javascript:review" ]
+  # the react topic panel fires without --fallback; the fallback runs alone
+  [ "$(echo "$output" | jq -c .topic_review_skills)" = "[]" ]
+  [ "$(echo "$output" | jq -c .changed_files)" = '["app.js"]' ]
+}
+
+@test "#2909 plan --fallback is the normal descriptor plus the fallback fields, nothing else changed" {
+  echo "x" > "$R/app.js"
+  local normal fb
+  run --separate-stderr env -u REVIEW_TOPIC_TABLE DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["javascript"],"is_react":true}' zsh "$S" plan --repo "$R" --base main
+  [ "$status" -eq 0 ]
+  normal="$output"
+  run --separate-stderr env -u REVIEW_TOPIC_TABLE DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["javascript"],"is_react":true}' zsh "$S" plan --repo "$R" --base main --fallback
+  [ "$status" -eq 0 ]
+  fb="$output"
+  [ "$(jq -c 'del(.review_skill, .topic_review_skills)' <<<"$normal")" = \
+    "$(jq -c 'del(.review_skill, .topic_review_skills, .review_mode, .fallback_for)' <<<"$fb")" ]
+}
+
+@test "#2909 plan without --fallback is unchanged: no review_mode, no fallback_for" {
+  echo "print(1)" > "$R/app.py"
+  plan '{"languages":["python"]}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .review_skill)" = "development-python:review" ]
+  [ "$(echo "$output" | jq 'has("review_mode") or has("fallback_for")')" = "false" ]
+}
+
+@test "#2909 plan --fallback composes with a delta round's flags" {
+  echo "print(1)" > "$R/app.py"
+  local t1
+  t1=$(zsh "$REPO_ROOT/development/skills/resolve-issue/scripts/git-tree-id.zsh" "$R")
+  echo "print(2)" > "$R/app.py"
+  plan '{"languages":["python"]}' --round 2 --prior-tree "$t1" --fallback
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .scope_mode)" = "delta" ]
+  [ "$(echo "$output" | jq -r .review_mode)" = "fallback" ]
+  [ "$(echo "$output" | jq -r .fallback_for)" = "development-python:review" ]
+}
+
+@test "#2909 plan --fallback appends fallback_for and review_mode after self_check_path" {
+  echo "print(1)" > "$R/app.py"
+  plan '{"languages":["python"]}' --fallback
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c '[keys_unsorted[-3:][]]')" = '["self_check_path","fallback_for","review_mode"]' ]
+}

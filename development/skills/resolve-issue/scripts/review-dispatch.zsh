@@ -54,7 +54,7 @@
 #
 #   plan --repo PATH [--base REF] [--round N] [--findings-path PATH]
 #        [--final] [--prior-tree TREE_ID] [--fix-verification PATH]
-#        [--adjudicated PATH] [--self-check PATH]
+#        [--adjudicated PATH] [--self-check PATH] [--fallback]
 #       Emit the dispatch descriptor JSON on stdout:
 #         { repo_type, review_skill, topic_review_skills[], round, base,
 #           findings_path, changed_files[], worktree_root, original_root, scope_abs[],
@@ -130,6 +130,15 @@
 #       same way (null when absent), never read: the claude-plugin writer's
 #       round-1 self-check waiver file, which the panel brief passes on round 1
 #       only, and only when the file exists.
+#       --fallback (#2909) plans the FALLBACK review panel for a round whose
+#       repo-type panel reported NOT APPLICABLE on a non-empty full-round diff:
+#       the descriptor is the round's normal one with review_skill
+#       "development-claude-plugin:review", two added keys — review_mode
+#       "fallback" and fallback_for, the repo-type review_skill it stands in
+#       for — and topic_review_skills `[]`. Without --fallback the descriptor is
+#       unchanged: neither key is present. Whether the fallback skill is
+#       installed is the caller's to resolve; an unresolvable one is "fallback
+#       unavailable", never a render failure.
 #       `--max-rounds` is deliberately NOT a flag here: finality is the
 #       loop's rule, and duplicating the ceiling would mean two places to change.
 #       repo_type ∈ {swift, python, java, go, javascript, claude-plugin, kubernetes};
@@ -1080,7 +1089,7 @@ cmd_plan() {
   # indistinguishable from "flag omitted" once assigned, and would be waved
   # through, which is precisely the shape the check exists to catch.
   local final=0 prior_tree="" prior_tree_given=0 fix_verification="" adjudicated=""
-  local self_check=""
+  local self_check="" fallback=0
   while [[ $# -gt 0 ]]; do
     # `need_value` BEFORE the assignment (#1177): this script runs under
     # `setopt nounset`, so a value-taking flag in last position made `"$2"` a raw
@@ -1120,6 +1129,8 @@ cmd_plan() {
     # --final is a BOOLEAN — the loop's "this is the closing full sweep" signal.
     # No value, so it never goes through need_value.
     --final) final=1; shift ;;
+    # #2909: plan the fallback panel (claude-plugin's fallback mode). Boolean.
+    --fallback) fallback=1; shift ;;
     --prior-tree) need_value "plan" "$@"; prior_tree="$2"; prior_tree_given=1; shift 2 ;;
     # Echoed through, never read here: the loop writes both files and the
     # reviewers consume them. Keeping them in the descriptor is what lets one
@@ -1338,6 +1349,7 @@ cmd_plan() {
     --arg fixver "$fix_verification" \
     --arg adjud "$adjudicated" \
     --arg selfchk "$self_check" \
+    --argjson fallback "$fallback" \
     '{repo_type:$repo_type, review_skill:$review_skill,
       topic_review_skills:$topics, round:$round, base:$base,
       findings_path:$findings_path, changed_files:$changed,
@@ -1352,7 +1364,13 @@ cmd_plan() {
       skippable_dimensions:$skippable,
       fix_verification_path:(if $fixver=="" then null else $fixver end),
       adjudicated_path:(if $adjud=="" then null else $adjud end),
-      self_check_path:(if $selfchk=="" then null else $selfchk end)}' || {
+      self_check_path:(if $selfchk=="" then null else $selfchk end)}
+     | if $fallback == 1 then
+         .fallback_for = .review_skill
+         | .review_skill = "development-claude-plugin:review"
+         | .review_mode = "fallback"
+         | .topic_review_skills = []
+       else . end' || {
     print -u2 -- "plan: could not emit the dispatch descriptor"; exit 1
   }
 }

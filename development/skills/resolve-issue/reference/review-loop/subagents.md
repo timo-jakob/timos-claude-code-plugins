@@ -89,7 +89,10 @@ brief*), the conductor runs step-mode `resolve-story-loop.zsh` itself, exactly a
 says, passing the verdict's `aggregate_findings_file` as `--findings-file` and,
 when it is non-null, its `carry_accounting_file` as `--carry-accounting`. It
 opens neither file. It narrates the round from the verdict's `findings_count`,
-the status JSON and the progress block the loop appended. A non-`ok` panel
+the status JSON and the progress block the loop appended. When an `ok` panel
+verdict comes with the line naming both panels, the fallback engaged this
+round (#2909): print that line first, as `reference/ask-branches.md` § RS-06a
+says. A non-`ok` panel
 verdict takes *Verdict recovery arms (#1937)* below.
 
 **When the fix subagent runs.** On exit 20, read `final_changelist.summary.blocking`
@@ -214,7 +217,7 @@ outcome/cause pair is off this table is report-and-stop.
 | `wrong-worktree-root` | `failed` | report-and-stop: the panel brief has already re-planned against the implementation worktree |
 | `empty-excerpt` | `failed` | report-and-stop: the panel brief has already applied *An empty excerpt is not always a stop*, and a fresh panel "fails the same way" |
 | `no-agent-tool` | `failed` | report-and-stop |
-| `not-applicable` | `not_applicable` | the **NOT APPLICABLE on a full round** arm: autonomous, stop with no commit and no PR; interactive, its three options, none taken without an explicit choice. Never coerced to `[]`, and the panel is not re-run |
+| `not-applicable` | `not_applicable` | fires only when the fallback panel is NOT APPLICABLE or unavailable, or on a round that never engages it (#2909): the panel brief has already routed the repo-type panel's NOT APPLICABLE to the fallback wherever the round engages it. Then the **NOT APPLICABLE on a full round** arm: autonomous, stop with no commit and no PR; interactive, its three options, none taken without an explicit choice. Never coerced to `[]`, and the panel is not re-run |
 | `story-diff-empty` | `not_applicable` | the **empty story diff** shape: go back to **§2 (Implement)** and take the boundary again, or, if the story needs no code change, say so and stop. The three NOT APPLICABLE options are never offered, and, per the #1485 note, neither the re-invoke arm nor the panel re-run arm is taken |
 
 Whether a human is present is §0a's determination, read from
