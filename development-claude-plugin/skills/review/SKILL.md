@@ -98,6 +98,9 @@ write no findings file.
 
 ## Step 1: Plan the round, then run its script and launch its agents in parallel
 
+In fallback mode (see *Fallback mode* below), the round plans that section's table instead of this one and runs
+no `check-manifests.zsh`.
+
 The panel has six dimensions: five reviewer agents and one script. **This table is the round's plan** — a
 reviewer runs this round exactly when its **Runs** cell holds. Read `scope_mode` from the round's dispatch
 descriptor (in hook mode, `$REVIEW_SCOPE_MODE`), and the split-carry map as the carry preamble above says; a
@@ -203,6 +206,38 @@ Analyze all plugin content in scope following your instructions. Report every fi
 
 Then, after the prose, emit those same findings once more as a single fenced `json` block — a JSON array of finding objects — per the Review finding schema in ARCHITECTURE.md. Each object has exactly: severity (the CRITICAL|WARNING|SUGGESTION tag from the prose), dimension ("{DIMENSION}"), file, line (integer, or null when file-level), title, description, suggested_fix (may be ""), reviewer ("{AGENT NAME}"), round ({ROUND}). Emit [] if you found nothing.
 ```
+
+## Fallback mode — shell, bats and Markdown in any repo (#2908)
+
+**The panel is in fallback mode when the dispatch descriptor's `review_mode` is `"fallback"`, or, in hook mode,
+when `$REVIEW_MODE` is `fallback`.** `$REVIEW_MODE` is the hook-mode counterpart of `review_mode`, as
+`$REVIEW_SCOPE_MODE` is of `scope_mode`. An unset or empty `$REVIEW_MODE`, any other value, or a descriptor
+without `review_mode: "fallback"` leaves the panel in its normal mode, with Step 1's table unchanged. Fallback
+mode lets resolve-issue review a shell, bats or Markdown diff in a repo whose own panel reports NOT APPLICABLE,
+so it is not limited to a plugin repo. In fallback mode, this table replaces Step 1's table as the round's plan:
+
+| Reviewer | Dimension | In-scope files |
+| --------------------------------- | -------------- | -------------- |
+| claude-plugin-script-reviewer | script_quality | `*.sh`, `*.zsh`, `*.bash`, and extensionless files with a sh, bash or zsh shebang |
+| claude-plugin-test-reviewer | tests | `*.bats` |
+| claude-plugin-prose-logic | prose_logic | `*.md` |
+
+The claude-plugin-test-reviewer's `Review scope:` line also lists the round's in-scope script files (the
+script_quality row's types) as coverage context, so it can judge whether a changed script has bats coverage, and
+it is dispatched whenever the round has an in-scope script or `*.bats` file.
+
+Each reviewer's `{the review scope}` is its own filtered list: its in-scope files from the round's scope,
+which need not be plugin content. Its prompt's `Analyze all plugin content in scope` line reads
+`Analyze all content in scope`, since the fallback reviews any repo. A reviewer with an empty list is not
+dispatched unless the split-carry map holds its dimension, in which case it runs to account for its carried
+entries (*Carry-driven dispatch*). The plugin-only dimensions are never planned in fallback mode: no `contract`
+agent, no `manifest_bump` agent, and no `check-manifests.zsh` run. **A full round
+whose non-empty scope holds no in-scope file is NOT APPLICABLE**: report it to the caller, naming the out-of-scope
+files, and write no findings file, because a `[]` there would be the loop's CONVERGED condition over a change no
+reviewer read. A delta round and every carried round follow the rules above and in Step 1 unchanged: the
+delta-round `[]`, the carry triple, split-carry ownership and the carry accounting file. Steps 2–4 then cover only
+the dimensions that ran: no script stdout or `--carry-out` file is read or concatenated, and the Metrics line
+names no Manifests.
 
 ## Step 2: Collect Results
 
