@@ -222,9 +222,13 @@ so it is not limited to a plugin repo. In fallback mode, this table replaces Ste
 | claude-plugin-test-reviewer | tests | `*.bats` |
 | claude-plugin-prose-logic | prose_logic | `*.md` |
 
-Each reviewer's `{the review scope}` is its own filtered list: only its in-scope files from the round's scope,
+The claude-plugin-test-reviewer's `Review scope:` line also lists the round's in-scope script files (the
+script_quality row's types) as coverage context, so it can judge whether a changed script has bats coverage, and
+it is dispatched whenever the round has an in-scope script or `*.bats` file.
+
+Each reviewer's `{the review scope}` is its own filtered list: its in-scope files from the round's scope,
 which need not be plugin content. Its prompt's `Analyze all plugin content in scope` line reads
-`Analyze all content in scope`, since the fallback reviews any repo. A reviewer with none in scope is not
+`Analyze all content in scope`, since the fallback reviews any repo. A reviewer with an empty list is not
 dispatched unless the split-carry map holds its dimension, in which case it runs to account for its carried
 entries (*Carry-driven dispatch*). The plugin-only dimensions are never planned in fallback mode: no `contract`
 agent, no `manifest_bump` agent, and no `check-manifests.zsh` run. **A full round

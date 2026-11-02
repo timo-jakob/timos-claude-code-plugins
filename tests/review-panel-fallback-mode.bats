@@ -40,11 +40,15 @@ setup() {
 }
 
 @test "each fallback reviewer's review scope is its own filtered list, and its prompt drops \"plugin\"" {
-  contains "$FLAT" 'Each reviewer'"'"'s `{the review scope}` is its own filtered list: only its in-scope files from the round'"'"'s scope, which need not be plugin content. Its prompt'"'"'s `Analyze all plugin content in scope` line reads `Analyze all content in scope`, since the fallback reviews any repo.'
+  contains "$FLAT" 'Each reviewer'"'"'s `{the review scope}` is its own filtered list: its in-scope files from the round'"'"'s scope, which need not be plugin content. Its prompt'"'"'s `Analyze all plugin content in scope` line reads `Analyze all content in scope`, since the fallback reviews any repo.'
 }
 
-@test "a fallback reviewer with none in scope still runs when the split-carry map holds its dimension" {
-  contains "$FLAT" 'A reviewer with none in scope is not dispatched unless the split-carry map holds its dimension, in which case it runs to account for its carried entries (*Carry-driven dispatch*).'
+@test "the fallback test reviewer also sees the round's script files as coverage context" {
+  contains "$FLAT" 'The claude-plugin-test-reviewer'"'"'s `Review scope:` line also lists the round'"'"'s in-scope script files (the script_quality row'"'"'s types) as coverage context, so it can judge whether a changed script has bats coverage, and it is dispatched whenever the round has an in-scope script or `*.bats` file.'
+}
+
+@test "a fallback reviewer with an empty list still runs when the split-carry map holds its dimension" {
+  contains "$FLAT" 'A reviewer with an empty list is not dispatched unless the split-carry map holds its dimension, in which case it runs to account for its carried entries (*Carry-driven dispatch*).'
 }
 
 @test "the plugin-only dimensions are never planned in fallback mode" {
