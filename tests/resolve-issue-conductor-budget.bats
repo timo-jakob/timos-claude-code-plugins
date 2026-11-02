@@ -377,9 +377,12 @@ _unreached_reference_files() {
   #
   # TWENTY-TWO since #2903: the new reference/ask-branches.md declares TWO `##`
   # sections — *The inventory* and RS-09's parked follow-up default.
+  #
+  # TWENTY-FIVE since #2955: the new reference/readiness-cache.md declares THREE
+  # `##` sections — step 0b's stamp check, E1b's, and stamping a fresh verdict.
   local n
   n="$(_ref_headings | grep -c .)"
-  [ "$n" -eq 22 ]
+  [ "$n" -eq 25 ]
 }
 
 # --- pointers resolve -------------------------------------------------------
@@ -431,9 +434,11 @@ _unreached_reference_files() {
   # and 11 until the Epic flow pointed at its own telemetry procedure (#1227),
   # and 12 until E1, E1b, E3 and E4 each pointed at reference/epic-tree.md (#2857),
   # and 16 until §0a (twice), §3.5 and §5 pointed at reference/checkpoint.md (#2920),
-  # and 20 until §6 and §7 pointed at reference/ask-branches.md (#2903).
-  if [ "$rows" -ne 22 ]; then
-    printf 'the skill carries %s pointer(s), expected 22.\n' "$rows" >&2
+  # and 20 until §6 and §7 pointed at reference/ask-branches.md (#2903),
+  # and 22 until §0b and reference/epic-tree.md's E1b pointed at
+  # reference/readiness-cache.md (#2955).
+  if [ "$rows" -ne 24 ]; then
+    printf 'the skill carries %s pointer(s), expected 24.\n' "$rows" >&2
     printf 'A pointer was added or removed — update this count in the same PR,\n' >&2
     printf 'and check the step that gained or lost one still reaches its procedure.\n' >&2
     _all_pointers >&2

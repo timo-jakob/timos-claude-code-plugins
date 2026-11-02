@@ -511,7 +511,8 @@ flow. Stop and ask for input wherever marked; do not guess.
    >   overwrite, write and stamp the result (Step 3.6) and
    >   repeat the `branch-protection.sh` call **in this same run**. That refreshed
    >   file is a working-tree write this gap-fill makes (as are the toolchain refresh's
-   >   files, the `approval:` record and the Go identity adoption gap's install — see below),
+   >   files, the `approval:` record, the Go identity adoption gap's install and the
+   >   decision-rights rule's adoption gap — see below),
    >   and it rides Step 4d/4e as the bot PR —
    >   the PR's own run reports
    >   `gate`. If the overwrite is declined, or the repeated call refuses again,
@@ -583,7 +584,8 @@ flow. Stop and ask for input wherever marked; do not guess.
    `branch-protection.sh --iac-only <topic>` refuses it. The `approval:` record into an existing `.maintenance.yml` that
    has none (step 4's approval paragraph) is not a gap-fill action but is a
    working-tree write too, as is the install of a pending Go identity adoption gap
-   (the Go identity block's State D gap, #2887), offered in the Step 2 plan in whichever of steps 3, 4 and 5
+   (the Go identity block's State D gap, #2887) and of a pending decision-rights
+   rule (`CLAUDE.md`'s State D gap, #2905), each offered in the Step 2 plan in whichever of steps 3, 4 and 5
    this run reaches, and each of these writes rides Step 4d/4e as the bot PR. If multiple
    gaps coexist, present them as a
    checkboxed list so the user can pick a subset.
@@ -893,8 +895,12 @@ flow. Stop and ask for input wherever marked; do not guess.
       `conflict` or `ambiguous` row, do not stop — continue to the Step 2 plan,
       and on confirmation its run without `--dry-run` is the delta. So does a
       pending Go identity adoption gap (the Go identity block's State D gap,
-      #2887): do not stop — continue to the Step 2 plan, and on confirmation
-      its install is the delta.)
+      #2887), and so does a pending decision-rights rule (`CLAUDE.md`'s State D
+      gap, #2905 — run its check, defined at *State D — the decision-rights
+      rule's adoption gap* in §3a's `CLAUDE.md` bullet, before this stop is
+      decided): do not stop —
+      continue to the Step 2 plan, and on confirmation its install is the
+      delta.)
 
       > **The sha256 is the drift signal — not the version label.** A marker
       > records both the template hash AND the plugin version at render time.
@@ -1898,6 +1904,30 @@ Copy from `templates/common/`:
 - `CONTRIBUTING.md`
 - `SETUP.md` (manual steps the user must do after bootstrap)
 - `CLAUDE.md` (shift-left agent guidance — append a section if one already exists)
+
+  *State D — the decision-rights rule's adoption gap (#2905).* The template's
+  `## Who decides what` section is the decision-rights rule: it tells every
+  session in the repo, not only `/development:refine-issue` and
+  `/development:resolve-issue` runs, which questions go to the human and which
+  it decides itself. `CLAUDE.md` is a scaffold file, never stamped, so the drift
+  detector cannot see a repo bootstrapped before the section existed. **Run the
+  check in every State D run, before any of steps 3, 4 and 5 ends the run** —
+  step 5a's no-drift stop included, since an older repo with no other gap is
+  this gap's usual case:
+  `"<skill-base-dir>/scripts/claude-md-decision-rights.zsh" check --claude-md "<repo-path>/CLAUDE.md"`,
+  with the absolute path. Exit 0 means the rule is present and there is nothing
+  to do; exit 1 is the **adoption gap** — report it in the Step 2 plan as
+  "`CLAUDE.md` lacks the decision-rights rule" and, on confirmation, run the
+  same script's `apply --claude-md "<repo-path>/CLAUDE.md" --template
+  "<skill-base-dir>/templates/common/CLAUDE.md.tmpl"`. It appends the
+  template's section and leaves every existing byte of the file unchanged, so a
+  customised `CLAUDE.md` keeps its customisations. Exit 3 (no `CLAUDE.md`) is
+  not this gap: the missing-file gap-fill renders the whole template, rule
+  included. Exit 2 is your own malformed call, a `--template` path that does
+  not exist included: fix it and re-run. An `apply` exit 4 means the shipped
+  template lost its section or holds an unrendered placeholder, and an exit 5
+  that the file or the template could not be read or written: report either as
+  an outstanding Step 5 item and install nothing.
 - `.gitignore` (merge language fragments from `templates/languages/<lang>/gitignore` — see `.gitignore` merging
   below)
 - `.editorconfig` (cross-editor whitespace + encoding settings)

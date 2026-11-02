@@ -22,7 +22,10 @@ Nothing is branched or built until the story has passed three checks.
    build: testable acceptance criteria, bounded scope, declared dependencies, and — for a story that touches an
    interface — a use case and test cases. On NEEDS_REFINEMENT the run labels the issue `needs-refinement`, posts the
    gate's questions as a comment and stops without branching; [refine-issue](workflow-refine-issue.md) is the way back.
-   On READY the gate's risk classification is carried forward to the PR and the Approver.
+   On READY the gate's risk classification is carried forward to the PR and the Approver. The gate's verdict is
+   stamped on the issue as a comment, and it is reused while the gate's inputs are unchanged: the title, the body,
+   the issue's own *blocked by* links, its labels, and the gate's own instructions. A re-run over an unchanged story
+   spends no gate agent. Deleting the stamp comment forces a fresh gate.
 
 ## From branch to merge {#resolve-from-branch-to-merge}
 
@@ -86,7 +89,9 @@ budgets, promotion, what you see while it runs — is in [The local review loop]
 1. **E1 — enumerate the children** from the epic's native sub-issues. An epic that only lists its children in a task
    list is vetted before it is converted; the skill never closes an epic without proof its work merged.
 2. **E1b — readiness pre-flight.** `story-readiness` judges every open child, in parallel. If any child is not ready,
-   nothing is built: the unready children are labelled and the epic gets a halt summary.
+   nothing is built: the unready children are labelled and the epic gets a halt summary. As in step 0b, a child whose
+   inputs are unchanged keeps its stamped verdict, so a re-run over an unchanged epic spends no gate agent. Whether
+   the children's *blocked by* links form a cycle is checked afresh on every run, never taken from a stamp.
 3. **E2 — order and overlap.** Children are ordered by their dependencies, by the files they would touch, and by PRs
    already in flight. Children that bump the same plugin's version always collide on that line, so they serialise.
 4. **E3 — resolve.** Children that are provably disjoint run in parallel, each in its own worktree. Everything else

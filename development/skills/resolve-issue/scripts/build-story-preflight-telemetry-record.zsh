@@ -25,12 +25,20 @@
 # the two facts must stay distinguishable. Silence, a timeout or an absent human
 # is never an override — the caller simply does not pass the flag.
 #
+# --readiness-cache FILE (#2955) is step 0b's readiness-cache-plan.zsh output;
+# its readiness_cache object joins the payload: { "hits", "misses",
+# "miss_reasons": {reason: count} }, non-negative counts, every reason count
+# positive, the reasons summing to misses. Without it the payload carries no
+# readiness_cache key.
+#
 # Payload:
 #   { "verdict": "pass" | "stop" | "overridden", "triggers": [...],
-#     "files": N, "plugins": N, "override_by": "human" | null }
+#     "files": N, "plugins": N, "override_by": "human" | null,
+#     "readiness_cache": {...} }               (only with --readiness-cache)
 #
 # Usage:
-#   build-story-preflight-telemetry-record.zsh --state FILE [--override human] [--print-outcome]
+#   build-story-preflight-telemetry-record.zsh --state FILE [--override human]
+#                                              [--readiness-cache FILE] [--print-outcome]
 #   … | build-story-preflight-telemetry-record.zsh [--state -] [--override human]
 #
 #     --print-outcome  print the envelope `outcome` instead of the payload:
@@ -39,22 +47,26 @@
 # Exit codes:
 #   0  ok
 #   2  usage — an unknown/dangling flag, an --override other than `human`, a
-#      --state operand that is missing or unreadable, no --state with stdin on
-#      a terminal
+#      --state or --readiness-cache operand that is missing or unreadable, no
+#      --state with stdin on a terminal
 #   1  the payload cannot be built — jq is missing, or the state is not exactly
 #      one JSON document, has the wrong shape, contradicts its own triggers, or
-#      overrides a pass
+#      overrides a pass; or the --readiness-cache file is not one such object
 
 emulate -L zsh
 set -euo pipefail
 
-local state_file="-" override="" print_outcome=0
+local state_file="-" override="" print_outcome=0 cache_file=""
 while (( $# > 0 )); do
   case "$1" in
-    --state|--override)
+    --state|--override|--readiness-cache)
       (( $# >= 2 )) && [[ -n "$2" && "$2" != --* ]] \
         || { print -u2 "build-story-preflight-telemetry-record.zsh: $1 needs a value"; exit 2; }
-      if [[ "$1" == --state ]]; then state_file="$2"; else override="$2"; fi
+      case "$1" in
+        --state) state_file="$2" ;;
+        --override) override="$2" ;;
+        *) cache_file="$2" ;;
+      esac
       shift 2 ;;
     --print-outcome) print_outcome=1; shift ;;
     *) print -u2 "build-story-preflight-telemetry-record.zsh: unknown arg: $1"; exit 2 ;;
@@ -68,6 +80,10 @@ if [[ "$state_file" != - ]]; then
     || { print -u2 "build-story-preflight-telemetry-record.zsh: state file missing or unreadable: $state_file"; exit 2; }
 else
   [[ ! -t 0 ]] || { print -u2 "build-story-preflight-telemetry-record.zsh: no --state and stdin is a terminal"; exit 2; }
+fi
+if [[ -n "$cache_file" ]]; then
+  [[ -f "$cache_file" && -r "$cache_file" ]] \
+    || { print -u2 "build-story-preflight-telemetry-record.zsh: readiness-cache file missing or unreadable: $cache_file"; exit 2; }
 fi
 command -v jq >/dev/null 2>&1 \
   || { print -u2 "build-story-preflight-telemetry-record.zsh: jq not found on PATH"; exit 1; }
@@ -99,6 +115,25 @@ payload="$(print -r -- "$v" | jq -ces --arg ov "$override" "$program" 2>/dev/nul
     "$(print -r -- "$v" | jq -ces --arg ov "$override" "$program" 2>&1 >/dev/null)"
   exit 1
 }
+
+if [[ -n "$cache_file" ]]; then
+  local cache
+  cache="$(jq -ces '
+    def count: type == "number" and . >= 0 and . == floor;
+    if length != 1 or (.[0] | type) != "object" then error("not one plan")
+    else .[0].readiness_cache end
+    | if type == "object"
+       and (.hits | count) and (.misses | count)
+       and (.miss_reasons | type) == "object"
+       and all(.miss_reasons[]; count and . > 0)
+       and ([.miss_reasons[]] | add // 0) == .misses
+    then {hits, misses, miss_reasons}
+    else error("not a readiness_cache object") end' "$cache_file" 2>/dev/null)" || {
+    print -u2 "build-story-preflight-telemetry-record.zsh: the readiness-cache file is not a plan carrying a readiness_cache object: {hits, misses, miss_reasons} summing to misses"
+    exit 1
+  }
+  payload="$(print -r -- "$payload" | jq -c --argjson c "$cache" '. + {readiness_cache: $c}')"
+fi
 
 if (( print_outcome )); then
   print -r -- "$payload" | jq -r 'if .verdict == "stop" then "parked" else "success" end'

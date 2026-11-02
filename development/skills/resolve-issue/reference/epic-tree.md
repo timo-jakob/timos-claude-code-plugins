@@ -65,6 +65,9 @@ full path.
 parallel batch. An inner node is **never** passed to `story-readiness`, and E1b
 never gives an inner node `needs-refinement`: its body describes work its
 sub-issues already carry, so gating it would re-ask questions a split settled.
+Only the leaves whose readiness stamp misses are gated, and every fresh
+verdict is stamped; a hit answers here exactly as a fresh verdict does (#2955):
+see `reference/readiness-cache.md` § E1b — gate only the stamp misses
 
 - **An inner node counts READY** when every open leaf under it is READY. An
   inner node with sub-issues but none open counts READY.
