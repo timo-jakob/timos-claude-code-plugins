@@ -39,8 +39,12 @@ setup() {
   contains "$step1" 'In fallback mode (see *Fallback mode* below), the round plans that section'"'"'s table instead of this one and runs no `check-manifests.zsh`.'
 }
 
-@test "each fallback reviewer's Review scope names only its own in-scope files" {
-  contains "$FLAT" 'Each reviewer'"'"'s `Review scope:` line names only its own in-scope files from the round'"'"'s scope, which need not be plugin content; a reviewer with none in scope is not dispatched.'
+@test "each fallback reviewer's review scope is its own filtered list, and its prompt drops \"plugin\"" {
+  contains "$FLAT" 'Each reviewer'"'"'s `{the review scope}` is its own filtered list: only its in-scope files from the round'"'"'s scope, which need not be plugin content. Its prompt'"'"'s `Analyze all plugin content in scope` line reads `Analyze all content in scope`, since the fallback reviews any repo.'
+}
+
+@test "a fallback reviewer with none in scope still runs when the split-carry map holds its dimension" {
+  contains "$FLAT" 'A reviewer with none in scope is not dispatched unless the split-carry map holds its dimension, in which case it runs to account for its carried entries (*Carry-driven dispatch*).'
 }
 
 @test "the plugin-only dimensions are never planned in fallback mode" {

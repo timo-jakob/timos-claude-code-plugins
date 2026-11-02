@@ -222,9 +222,12 @@ so it is not limited to a plugin repo. In fallback mode, this table replaces Ste
 | claude-plugin-test-reviewer | tests | `*.bats` |
 | claude-plugin-prose-logic | prose_logic | `*.md` |
 
-Each reviewer's `Review scope:` line names only its own in-scope files from the round's scope, which need not be
-plugin content; a reviewer with none in scope is not dispatched. The plugin-only dimensions are never planned in
-fallback mode: no `contract` agent, no `manifest_bump` agent, and no `check-manifests.zsh` run. **A full round
+Each reviewer's `{the review scope}` is its own filtered list: only its in-scope files from the round's scope,
+which need not be plugin content. Its prompt's `Analyze all plugin content in scope` line reads
+`Analyze all content in scope`, since the fallback reviews any repo. A reviewer with none in scope is not
+dispatched unless the split-carry map holds its dimension, in which case it runs to account for its carried
+entries (*Carry-driven dispatch*). The plugin-only dimensions are never planned in fallback mode: no `contract`
+agent, no `manifest_bump` agent, and no `check-manifests.zsh` run. **A full round
 whose non-empty scope holds no in-scope file is NOT APPLICABLE**: report it to the caller, naming the out-of-scope
 files, and write no findings file, because a `[]` there would be the loop's CONVERGED condition over a change no
 reviewer read. A delta round and every carried round follow the rules above and in Step 1 unchanged: the
