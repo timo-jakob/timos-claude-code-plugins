@@ -302,10 +302,14 @@ section's tie-break when you are unsure. The questions checks 2–5 prescribe ar
 not sorted by it: they still go in `refinement_questions` exactly as those
 checks state.
 
-- **The borderline tie-break applies only to `intent` and `gap`.** When a check
-  is genuinely borderline because of an `intent` or `gap` question, lean toward
-  `NEEDS_REFINEMENT` — a cheap clarifying question now beats a wrong PR later,
-  which is the entire point of this gate.
+- **The borderline tie-break applies only to `intent` and `gap`.** An open
+  `intent` or `gap` question about the change is never waived: it fails the
+  check it bears on, or check 1 (`acceptance_testable`) when it bears on none,
+  because what done means is not settled until it is answered. It yields one
+  `refinement_questions` entry, and a `gap` question's entry proposes the
+  document change that would close it. When you are unsure whether such a
+  question is open, lean toward `NEEDS_REFINEMENT` — a cheap clarifying
+  question now beats a wrong PR later, which is the entire point of this gate.
 - **An unpinned `implementation` choice fails no check.** A story that
   leaves open only how to build it — which helper to reuse, which CIDR to pick,
   how to name an internal function — is not under-specified: the builder
@@ -381,9 +385,9 @@ Rules for the payload:
   where `story_spec` is `null`. When you emit a `story_spec`, its
   `interface_surfaces` must match this `surface`.
 - `refinement_questions` is a list of concrete, answerable questions — one per
-  gap you found: a check's prescribed question, or an `intent` or `gap`
-  question about the change; never an unpinned implementation choice (#2902).
-  Empty (`[]`) when `verdict` is `READY`.
+  gap you found: a check's prescribed question, or an open `intent` or `gap`
+  question about the change, which always fails a check; never an unpinned
+  implementation choice (#2902). Empty (`[]`) when `verdict` is `READY`.
 - `risk` is always present (`low` | `normal` | `elevated`), independent of the
   verdict.
 - `summary` is one sentence a human can read at a glance.

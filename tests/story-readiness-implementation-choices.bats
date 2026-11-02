@@ -3,7 +3,7 @@
 # story-readiness judges what is required, not how it is built (#2902, epic
 # #2898). The gate's borderline tie-break ("lean toward NEEDS_REFINEMENT") is
 # scoped to `intent` and `gap` questions of the decision-rights taxonomy
-# (ARCHITECTURE.md, #2899); an unpinned implementation choice fails no check
+# (ARCHITECTURE.md, #2899), and an open one always fails a check; an unpinned implementation choice fails no check
 # and yields no refinement question; and an acceptance criterion that
 # pins an implementation detail is an `implementation-pinned` advisory, never a
 # failure. These pins are prose pins: the agent is a model, so the suite holds
@@ -37,7 +37,12 @@ rule_block() {
 }
 
 @test "the borderline tie-break is scoped to intent and gap (#2902)" {
-  contains "$FLAT" '**The borderline tie-break applies only to `intent` and `gap`.** When a check is genuinely borderline because of an `intent` or `gap` question, lean toward `NEEDS_REFINEMENT` — a cheap clarifying question now beats a wrong PR later, which is the entire point of this gate.'
+  contains "$FLAT" '**The borderline tie-break applies only to `intent` and `gap`.** An open `intent` or `gap` question about the change is never waived: it fails the check it bears on, or check 1 (`acceptance_testable`) when it bears on none, because what done means is not settled until it is answered. It yields one `refinement_questions` entry, and a `gap` question'"'"'s entry proposes the document change that would close it. When you are unsure whether such a question is open, lean toward `NEEDS_REFINEMENT` — a cheap clarifying question now beats a wrong PR later, which is the entire point of this gate.'
+}
+
+@test "the superseded check-borderline lean is gone (#2902)" {
+  # the round-4 wording left an open intent or gap question bearing on no check with no outcome
+  lacks "$FLAT" 'When a check is genuinely borderline because of an `intent` or `gap` question'
 }
 
 @test "the unscoped tie-break is gone (#2902)" {
@@ -50,7 +55,7 @@ rule_block() {
 }
 
 @test "refinement_questions carries the checks' questions and intent and gap questions, never an implementation choice (#2902)" {
-  contains "$FLAT" '- `refinement_questions` is a list of concrete, answerable questions — one per gap you found: a check'"'"'s prescribed question, or an `intent` or `gap` question about the change; never an unpinned implementation choice (#2902). Empty (`[]`) when `verdict` is `READY`.'
+  contains "$FLAT" '- `refinement_questions` is a list of concrete, answerable questions — one per gap you found: a check'"'"'s prescribed question, or an open `intent` or `gap` question about the change, which always fails a check; never an unpinned implementation choice (#2902). Empty (`[]`) when `verdict` is `READY`.'
 }
 
 @test "an implementation-pinning criterion is an advisory, never a failure (#2902)" {
