@@ -37,7 +37,7 @@ rule_block() {
 }
 
 @test "the borderline tie-break is scoped to intent and gap (#2902)" {
-  contains "$FLAT" '**The borderline tie-break applies only to `intent` and `gap`.** An open `intent` or `gap` question about the change is never waived: it fails the check it bears on, or check 1 (`acceptance_testable`) when it bears on none, because what done means is not settled until it is answered. It yields one `refinement_questions` entry, and a `gap` question'"'"'s entry proposes the document change that would close it. When you are unsure whether such a question is open, lean toward `NEEDS_REFINEMENT` — a cheap clarifying question now beats a wrong PR later, which is the entire point of this gate.'
+  contains "$FLAT" '**The borderline tie-break applies only to `intent` and `gap`.** An open `intent` or `gap` question about the change is never waived: it fails check 1 (`acceptance_testable`), check 2 (`scope_bounded`) or check 4 (`no_contradictions`), whichever it bears on, and check 1 when it bears on none of them, because what done means is not settled until it is answered; it never fails check 3 or check 5, whose conditions stay exactly as those checks state. It yields one `refinement_questions` entry, and a `gap` question'"'"'s entry proposes the document change that would close it. When you are unsure whether such a question is open, lean toward `NEEDS_REFINEMENT` — a cheap clarifying question now beats a wrong PR later, which is the entire point of this gate.'
 }
 
 @test "the superseded check-borderline lean is gone (#2902)" {
@@ -95,8 +95,14 @@ rule_block() {
   local block
   block="$(rule_block)"
   [ -n "$block" ]
-  lacks "$block" 'check 3'
-  lacks "$block" 'check 5'
-  lacks "$block" 'dependencies_resolved'
-  lacks "$block" 'outside_in_testable'
+  # the rule names checks 3 and 5 only to exclude them, never as a check it fails
+  contains "$block" 'it never fails check 3 or check 5, whose conditions stay exactly as those checks state.'
+  # outside that one exclusion, checks 3 and 5 are never named
+  local rest="${block//it never fails check 3 or check 5, whose conditions stay exactly as those checks state./}"
+  lacks "$rest" 'check 3'
+  lacks "$rest" 'check 5'
+  lacks "$rest" 'dependencies_resolved'
+  lacks "$rest" 'outside_in_testable'
+  # the closed list of checks an open intent or gap question may fail
+  contains "$block" 'it fails check 1 (`acceptance_testable`), check 2 (`scope_bounded`) or check 4 (`no_contradictions`), whichever it bears on'
 }
