@@ -303,9 +303,12 @@ not sorted by it: they still go in `refinement_questions` exactly as those
 checks state.
 
 - **The borderline tie-break applies only to `intent` and `gap`.** An open
-  `intent` or `gap` question about the change is never waived: it fails the
-  check it bears on, or check 1 (`acceptance_testable`) when it bears on none,
-  because what done means is not settled until it is answered. It yields one
+  `intent` or `gap` question about the change is never waived: it fails
+  check 1 (`acceptance_testable`), check 2 (`scope_bounded`) or check 4
+  (`no_contradictions`), whichever it bears on, and check 1 when it bears on
+  none of them, because what done means is not settled until it is answered;
+  it never fails check 3 or check 5, whose conditions stay exactly as those
+  checks state. It yields one
   `refinement_questions` entry, and a `gap` question's entry proposes the
   document change that would close it. When you are unsure whether such a
   question is open, lean toward `NEEDS_REFINEMENT` — a cheap clarifying
