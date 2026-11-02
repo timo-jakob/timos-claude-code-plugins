@@ -301,10 +301,10 @@ this is the guided pass that clears them.
 
    - **approve** — one child at a time, in sub-issue order, run Steps 2.5, 3,
      4, 5, 6 and 7 for it. Its batch approval is the approval of its exact
-     rewrite. Step 5 writes what it decides (`state_outcome`, `park_type`)
-     into its state file `f` with `jq … "$f" > "$f.tmp" && mv "$f.tmp" "$f"`
-     before Step 7 reads it; `risk` (Step 1) and `size_preflight` (Step 2's
-     size check) are already there from phase A, and Step 4 decides neither.
+     rewrite. Steps 4 and 5 write what they decide into its state file `f`
+     with `jq … "$f" > "$f.tmp" && mv "$f.tmp" "$f"` before Step 7 reads it:
+     Step 4 the re-gate's `size_preflight`, Step 5 `state_outcome` and
+     `park_type`. `risk` stays Step 1's, already there from phase A.
    - **skip** — the child ends as *skipped (human declined)*: nothing is
      written, its label stays, and Step 7 emits no record, since it reached no
      decided outcome. A looped-back child already written back takes Step 5's
@@ -1097,7 +1097,9 @@ the stamp runs in a later shell. From the repository root:
 ```
 
 Then spawn **`story-readiness`** again on the freshly-edited issue, and re-record
-`SIZE_PREFLIGHT` from its `size` object (Step 1). Its verdict is now
+`SIZE_PREFLIGHT` from its `size` object (Step 1). In an epic walk (#2904), also
+write it as `size_preflight` into the child's state file
+`/tmp/refine-issue-epic-<E>/<N>.json`. Its verdict is now
 authoritative — and, because a `story-spec` block now exists, its validation also
 checks the block against the prose (it will pass: you just stamped the hash over
 this exact prose).
