@@ -204,6 +204,28 @@ Analyze all plugin content in scope following your instructions. Report every fi
 Then, after the prose, emit those same findings once more as a single fenced `json` block — a JSON array of finding objects — per the Review finding schema in ARCHITECTURE.md. Each object has exactly: severity (the CRITICAL|WARNING|SUGGESTION tag from the prose), dimension ("{DIMENSION}"), file, line (integer, or null when file-level), title, description, suggested_fix (may be ""), reviewer ("{AGENT NAME}"), round ({ROUND}). Emit [] if you found nothing.
 ```
 
+## Fallback mode — shell, bats and Markdown in any repo (#2908)
+
+**The panel is in fallback mode when the dispatch descriptor's `review_mode` is `"fallback"`, or, in hook mode,
+when `$REVIEW_MODE` is `fallback`.** `$REVIEW_MODE` is the hook-mode counterpart of `review_mode`, as
+`$REVIEW_SCOPE_MODE` is of `scope_mode`. An unset or empty `$REVIEW_MODE`, any other value, or a descriptor
+without `review_mode: "fallback"` leaves the panel in its normal mode, with Step 1's table unchanged. Fallback
+mode lets resolve-issue review a shell, bats or Markdown diff in a repo whose own panel reports NOT APPLICABLE,
+so it is not limited to a plugin repo. In fallback mode, this table replaces Step 1's table as the round's plan:
+
+| Reviewer | Dimension | In-scope files |
+| --------------------------------- | -------------- | -------------- |
+| claude-plugin-script-reviewer | script_quality | `*.sh`, `*.zsh`, `*.bash`, and extensionless files with a sh, bash or zsh shebang |
+| claude-plugin-test-reviewer | tests | `*.bats` |
+| claude-plugin-prose-logic | prose_logic | `*.md` |
+
+Each reviewer reviews only its own in-scope files. The plugin-only dimensions are never planned in fallback
+mode: no `contract` agent, no `manifest_bump` agent, and no `check-manifests.zsh` run. **A full round whose
+non-empty scope holds no in-scope file is NOT APPLICABLE**: report it to the caller, naming the out-of-scope
+files, and write no findings file, because a `[]` there would be the loop's CONVERGED condition over a change no
+reviewer read. A delta round and every carried round follow the rules above and in Step 1 unchanged: the
+delta-round `[]`, the carry triple, split-carry ownership and the carry accounting file.
+
 ## Step 2: Collect Results
 
 Wait for every agent you launched to complete. Read each agent's output, and the script's stdout and
