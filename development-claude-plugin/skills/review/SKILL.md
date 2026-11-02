@@ -98,6 +98,9 @@ write no findings file.
 
 ## Step 1: Plan the round, then run its script and launch its agents in parallel
 
+In fallback mode (see *Fallback mode* below), the round plans that section's table instead of this one and runs
+no `check-manifests.zsh`.
+
 The panel has six dimensions: five reviewer agents and one script. **This table is the round's plan** — a
 reviewer runs this round exactly when its **Runs** cell holds. Read `scope_mode` from the round's dispatch
 descriptor (in hook mode, `$REVIEW_SCOPE_MODE`), and the split-carry map as the carry preamble above says; a
@@ -219,12 +222,15 @@ so it is not limited to a plugin repo. In fallback mode, this table replaces Ste
 | claude-plugin-test-reviewer | tests | `*.bats` |
 | claude-plugin-prose-logic | prose_logic | `*.md` |
 
-Each reviewer reviews only its own in-scope files. The plugin-only dimensions are never planned in fallback
-mode: no `contract` agent, no `manifest_bump` agent, and no `check-manifests.zsh` run. **A full round whose
-non-empty scope holds no in-scope file is NOT APPLICABLE**: report it to the caller, naming the out-of-scope
+Each reviewer's `Review scope:` line names only its own in-scope files from the round's scope, which need not be
+plugin content; a reviewer with none in scope is not dispatched. The plugin-only dimensions are never planned in
+fallback mode: no `contract` agent, no `manifest_bump` agent, and no `check-manifests.zsh` run. **A full round
+whose non-empty scope holds no in-scope file is NOT APPLICABLE**: report it to the caller, naming the out-of-scope
 files, and write no findings file, because a `[]` there would be the loop's CONVERGED condition over a change no
 reviewer read. A delta round and every carried round follow the rules above and in Step 1 unchanged: the
-delta-round `[]`, the carry triple, split-carry ownership and the carry accounting file.
+delta-round `[]`, the carry triple, split-carry ownership and the carry accounting file. Steps 2–4 then cover only
+the dimensions that ran: no script stdout or `--carry-out` file is read or concatenated, and the Metrics line
+names no Manifests.
 
 ## Step 2: Collect Results
 

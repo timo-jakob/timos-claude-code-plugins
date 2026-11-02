@@ -33,8 +33,19 @@ setup() {
   contains "$rows" 'claude-plugin-prose-logic=prose_logic=`*.md`'
 }
 
+@test "Step 1 opens by deferring to the fallback table, before its own table and script" {
+  local step1
+  step1="$(sed -n '/^## Step 1:/,/^| Reviewer /p' "$SKILL" | tr '\n' ' ' | tr -s ' ')"
+  contains "$step1" 'In fallback mode (see *Fallback mode* below), the round plans that section'"'"'s table instead of this one and runs no `check-manifests.zsh`.'
+}
+
+@test "each fallback reviewer's Review scope names only its own in-scope files" {
+  contains "$FLAT" 'Each reviewer'"'"'s `Review scope:` line names only its own in-scope files from the round'"'"'s scope, which need not be plugin content; a reviewer with none in scope is not dispatched.'
+}
+
 @test "the plugin-only dimensions are never planned in fallback mode" {
   contains "$FLAT" 'The plugin-only dimensions are never planned in fallback mode: no `contract` agent, no `manifest_bump` agent, and no `check-manifests.zsh` run.'
+  contains "$FLAT" 'Steps 2–4 then cover only the dimensions that ran: no script stdout or `--carry-out` file is read or concatenated, and the Metrics line names no Manifests.'
   # and the fallback table itself names none of them
   run grep -E '^\|.*(contract|manifest_bump|check-manifests)' <<<"$SECTION"
   [ "$status" -eq 1 ]
