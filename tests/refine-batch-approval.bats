@@ -171,7 +171,7 @@ fresh() {
 @test "SKILL.md states the batch loop-back rule, from the walk and from Step 5" {
   local t; t="$(flat "$SKILL")"
   contains "$t" '**The batch loop-back rule.** A child whose re-gate is still `NEEDS_REFINEMENT` loops back to Step 2 (Step 5) like a revisit child.'
-  contains "$t" 'they form the **next batch**, which gets one approval again. Batches repeat until no child is pending.'
+  contains "$t" 'they form the **next batch**, which gets one approval again. Batches repeat until every child has ended — written back, skipped or parked — so none is pending or waiting to redraft: a revisit child (`drafting`) or a looped-back child keeps the walk going, and the next phase A redrafts it.'
   contains "$t" 'In an epic walk the looped-back child redrafts and joins the **next batch**'
   contains "$t" '**In an epic walk the approval is the batch'"'"'s (#2904).**'
 }

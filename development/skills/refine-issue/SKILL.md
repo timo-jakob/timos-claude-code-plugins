@@ -312,7 +312,10 @@ this is the guided pass that clears them.
    `NEEDS_REFINEMENT` loops back to Step 2 (Step 5) like a revisit child. The
    loop-back children and the revisit children redraft, and once each has a new
    sized draft, pending as in phase A (or has parked), they form the **next
-   batch**, which gets one approval again. Batches repeat until no child is pending.
+   batch**, which gets one approval again. Batches repeat until every child has
+   ended — written back, skipped or parked — so none is pending or waiting to
+   redraft: a revisit child (`drafting`) or a looped-back child keeps the walk
+   going, and the next phase A redrafts it.
 
 3. **Post an epic-level summary** on the epic issue: for each child, whether it is
    now **ready** (label cleared) or **still parked** (with the park type), plus
