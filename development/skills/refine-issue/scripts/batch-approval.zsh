@@ -16,7 +16,7 @@
 #   expected_docs_pages  array of strings
 #   rewrite_path         string — where the child's full rewrite is kept
 # Every other field of the state file (the Step 7 run variables, the
-# conversation, draft_ready_at, …) belongs to the conductor and is not read.
+# conversation, waiting_since, …) belongs to the conductor and is not read.
 #
 # Usage:
 #   batch-approval.zsh summary   --dir <D>

@@ -5,7 +5,7 @@
 # the batch of children that reached a sized draft (phase B).
 # scripts/batch-approval.zsh renders the batch (`summary`) and splits the
 # human's answer (`partition`); SKILL.md states the two-phase order, the batch
-# loop-back rule and the PAUSED_S that keeps the batch wait out of wall_s.
+# loop-back rule and the PAUSED_S that keeps waits on others out of wall_s.
 #
 # Anchored by content, never by line number (#1189).
 
@@ -38,7 +38,7 @@ pending() {
    "confidence": "0.85", "weakest": ["uniqueness"]}],
  "expected_docs_pages": ["docs/how-to/use-the-cli.md"],
  "rewrite_path": "/tmp/refine-issue-epic-1/rewrite.md",
- "draft_ready_at": 1793500000}
+ "waiting_since": 1793500000}
 EOF
 }
 
@@ -154,9 +154,9 @@ fresh() {
   contains "$t" 'batch-approval.zsh" summary --dir /tmp/refine-issue-epic-<E>'
   contains "$t" 'batch-approval.zsh" partition --dir /tmp/refine-issue-epic-<E>'
   contains "$t" 'never enters a batch: the READY shortcut'
-  contains "$t" 're-read the issue'"'"'s current block into `old_block`, write its rewrite to `rewrite_path`, set `phase` to `pending` and `draft_ready_at` to `$(date +%s)`, and go on to the next child.'
+  contains "$t" 're-read the issue'"'"'s current block into `old_block`, write its rewrite to `rewrite_path`, set `phase` to `pending`, and go on to the next child.'
   contains "$t" '`park_type`, `paused_s`), its `conversation`'
-  contains "$t" '`draft_ready_at` and its `phase`: `pending` while its draft awaits a batch, and set to its outcome (`approved`, `skipped` or `drafting`) as soon as `partition` places it, so no child is in two batches.'
+  contains "$t" '`waiting_since` and its `phase`: `pending` while its draft awaits a batch, and set to its outcome (`approved`, `skipped` or `drafting`) as soon as `partition` places it, so no child is in two batches.'
   contains "$t" 'A looped-back child already written back takes Step 5'"'"'s stop instead.'
   contains "$t" 'the child'"'"'s `/tmp/refine-issue-epic-<E>/<N>.defaults.json`'
   contains "$t" 'run Steps 2.5, 3, 4, 5, 6 and 7 for it. Its batch approval is the approval of its exact rewrite.'
@@ -183,7 +183,7 @@ fresh() {
   contains "$step0" 'PAUSED_S=0'
   contains "$step7" 'WALL_S=$(( $(date +%s) - 10#$T0 - 10#$PAUSED_S ))'
   contains "$step7" '|| ! "${PAUSED_S:-}" =~ ^[0-9]+$'
-  contains "$(flat "$SKILL")" 'When a child'"'"'s own work resumes — its Steps 2.5 to 7, or its redraft — add the wait to its paused time once: `paused_s += now - draft_ready_at`, then set `draft_ready_at` to null, so a loop-back redraft, which follows work that never paused, adds nothing.'
+  contains "$(flat "$SKILL")" 'whenever its work stops to wait — it becomes pending, or it loops back (it redrafts only in the next phase A) — set `waiting_since` to `$(date +%s)`; whenever its own work resumes (its Steps 2.5 to 7, or its redraft), first run `jq --argjson now "$(date +%s)" '"'"'.paused_s += ($now - .waiting_since) | .waiting_since = null'"'"'` on its state file.'
 }
 
 @test "the auto-accept guardrail is unchanged: a batch never lets auto-accept approve a rewrite" {
@@ -202,13 +202,12 @@ fresh() {
   contains "$t" 'Exit 1 is a malformed state file: fix it with `jq` and re-run.'
   contains "$t" 'An overturned answer makes its child a revisit, with the overturn as its `human_reply`.'
   contains "$t" 'It prints `{approve, revisit, skip}`.'
-  contains "$t" 'The batch wait is not refinement work, so it never counts toward a child'"'"'s `wall_s`.'
   contains "$t" '**revisit** — the child re-enters Step 2 with the human'"'"'s reply as `human_reply`, and its `phase` goes back to drafting.'
 }
 
 @test "Step 7 sources PAUSED_S from the child state in an epic walk and from Step 0 elsewhere" {
   local step7; step7="$(sed -n '/^## Step 7 /,/^## Guardrails/p' "$SKILL" | tr '\n' ' ' | tr -s ' ')"
-  contains "$step7" '`PAUSED_S` is its `paused_s`: the batch wait, which `WALL_S` excludes.'
+  contains "$step7" '`PAUSED_S` is its `paused_s`: its waits on others, which `WALL_S` excludes.'
   contains "$step7" 'Everywhere else it is Step 0'"'"'s measured `0`, and the guard requires it to be digits.'
 }
 

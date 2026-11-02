@@ -6589,9 +6589,9 @@ emission time), and `--wall-s`, which is **required** and always a number here
 rather than the old nullable field; `repo` is derived from `--repo-dir`.
 One record is emitted per **single-issue flow**, so an epic walk emits one per
 child (each with its own stamps), with no parent record and `parent_run_id:
-null`. A batched epic walk (#2904) subtracts the time a child waited on its
-batch's one approval: `wall_s` is `now - ts - paused_s`, where `paused_s` is that
-wait and a measured `0` on a single-issue run, so the batch wait is never
+null`. A batched epic walk (#2904) subtracts the time a child waited on others
+(its batch's one approval, other children's work): `wall_s` is `now - ts - paused_s`, where `paused_s` is that
+wait and a measured `0` on a single-issue run, so that wait is never
 counted as refinement work. The run's ending narrows onto the cross-pipeline `outcome` enum —
 `refined-ready` → `success`, `parked` → `parked` — via the builder's
 `--print-outcome`, so the mapping lives in tested code rather than in the

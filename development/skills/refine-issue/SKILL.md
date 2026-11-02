@@ -247,9 +247,16 @@ this is the guided pass that clears them.
    confidence, weakest}`), its `proposed_prose` and `proposed_story_spec`, the
    issue's current block as `old_block` (`null` when it has none), its
    `expected_docs_pages`, `rewrite_path` (a file holding its full rewrite),
-   `draft_ready_at` and its `phase`: `pending` while its draft awaits a batch,
+   `waiting_since` and its `phase`: `pending` while its draft awaits a batch,
    and set to its outcome (`approved`, `skipped` or `drafting`) as soon as
-   `partition` places it, so no child is in two batches. Step 7 re-states the
+   `partition` places it, so no child is in two batches. Its `paused_s`
+   (Step 0's `0`) holds its waits on others, which are not refinement work and
+   never count toward its `wall_s`: whenever its work stops to wait — it becomes
+   pending, or it loops back (it redrafts only in the next phase A) — set
+   `waiting_since` to `$(date +%s)`; whenever its own work resumes (its Steps
+   2.5 to 7, or its redraft), first run
+   `jq --argjson now "$(date +%s)" '.paused_s += ($now - .waiting_since) | .waiting_since = null'`
+   on its state file. Step 7 re-states the
    child's literals from that file in the same invocation as the fence.
 
    **Phase A — draft each child, in sub-issue order.** Run Steps 0, 1 and 2 as
@@ -260,8 +267,7 @@ this is the guided pass that clears them.
    whose draft converges and passes the size check is **not** presented for
    approval: add its Decisions taken section to the draft as Step 2 says, re-read
    the issue's current block into `old_block`, write its rewrite to
-   `rewrite_path`, set `phase` to `pending` and `draft_ready_at` to
-   `$(date +%s)`, and go on to the next child.
+   `rewrite_path`, set `phase` to `pending`, and go on to the next child.
 
    **Phase B — one approval for the batch.** Once every child of this pass has
    ended or is pending, render the batch:
@@ -289,12 +295,7 @@ this is the guided pass that clears them.
 
    It prints `{approve, revisit, skip}`. Exit 2 means a number that is not a
    pending child, or one named in both lists: ask again with the pending
-   numbers. When a child's own work resumes — its Steps 2.5 to 7, or its
-   redraft — add the wait to its paused time once: `paused_s += now -
-   draft_ready_at`, then set `draft_ready_at` to null, so a loop-back redraft,
-   which follows work that never paused, adds nothing.
-   The batch wait is not refinement work, so it never counts toward a child's
-   `wall_s`.
+   numbers.
 
    - **approve** — one child at a time, in sub-issue order, run Steps 2.5, 3,
      4, 5, 6 and 7 for it. Its batch approval is the approval of its exact
@@ -1216,7 +1217,7 @@ fabricated value the payload builder deliberately does not police.
 re-stated as literals **in the same Bash invocation as the fence**, on the lines
 above the guard (Step 2's rule). In an epic walk they come from the child's
 state file (the Epic walk's *Per-child state*), and `PAUSED_S` is its
-`paused_s`: the batch wait, which `WALL_S` excludes. Everywhere else it is
+`paused_s`: its waits on others, which `WALL_S` excludes. Everywhere else it is
 Step 0's measured `0`, and the guard requires it to be digits. In the unattended follow-up mode
 `AUTO_REFINEMENT` is one more, re-stated the same way. Values assigned in an earlier tool call are
 gone, and the guard would then skip the record for a run that was measured
@@ -1248,7 +1249,7 @@ if [[ ! "${T0:-}" =~ $T0_RE || -z "${REPO_ROOT:-}" || ! -d "${REPO_ROOT:-/nonexi
   echo "telemetry not recorded for this run (a Step 0 stamp, the run outcome, a run count, the paused time, or a park's type is missing) — the run itself is unaffected"
 else
   # 10# so a leading-zero stamp can't be read as a bad octal literal, matching
-  # the emitter's own normalization. PAUSED_S is an epic walk's batch wait
+  # the emitter's own normalization. PAUSED_S is an epic walk's waits on others
   # (#2904), never refinement work; 0 everywhere else.
   WALL_S=$(( $(date +%s) - 10#$T0 - 10#$PAUSED_S ))
   (( WALL_S >= 0 )) || WALL_S=0     # a backwards clock (NTP) would be rejected
