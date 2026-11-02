@@ -254,9 +254,10 @@ this is the guided pass that clears them.
    never count toward its `wall_s`: whenever its work stops to wait — it becomes
    pending, or it loops back (it redrafts only in the next phase A) — set
    `waiting_since` to `$(date +%s)`; whenever its own work resumes (its Steps
-   2.5 to 7, or its redraft), first run
-   `jq --argjson now "$(date +%s)" '.paused_s += ($now - .waiting_since) | .waiting_since = null'`
-   on its state file. Step 7 re-states the
+   2.5 to 7, or its redraft), first write the wait into its state file `f`
+   (`/tmp/refine-issue-epic-<E>/<N>.json`) with
+   `jq --argjson now "$(date +%s)" '.paused_s += ($now - .waiting_since) | .waiting_since = null' "$f" > "$f.tmp" && mv "$f.tmp" "$f"`.
+   Step 7 re-states the
    child's literals from that file in the same invocation as the fence.
 
    **Phase A — draft each child, in sub-issue order.** Run Steps 0, 1 and 2 as

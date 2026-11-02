@@ -183,7 +183,7 @@ fresh() {
   contains "$step0" 'PAUSED_S=0'
   contains "$step7" 'WALL_S=$(( $(date +%s) - 10#$T0 - 10#$PAUSED_S ))'
   contains "$step7" '|| ! "${PAUSED_S:-}" =~ ^[0-9]+$'
-  contains "$(flat "$SKILL")" 'whenever its work stops to wait — it becomes pending, or it loops back (it redrafts only in the next phase A) — set `waiting_since` to `$(date +%s)`; whenever its own work resumes (its Steps 2.5 to 7, or its redraft), first run `jq --argjson now "$(date +%s)" '"'"'.paused_s += ($now - .waiting_since) | .waiting_since = null'"'"'` on its state file.'
+  contains "$(flat "$SKILL")" 'whenever its work stops to wait — it becomes pending, or it loops back (it redrafts only in the next phase A) — set `waiting_since` to `$(date +%s)`; whenever its own work resumes (its Steps 2.5 to 7, or its redraft), first write the wait into its state file `f` (`/tmp/refine-issue-epic-<E>/<N>.json`) with `jq --argjson now "$(date +%s)" '"'"'.paused_s += ($now - .waiting_since) | .waiting_since = null'"'"' "$f" > "$f.tmp" && mv "$f.tmp" "$f"`.'
 }
 
 @test "the auto-accept guardrail is unchanged: a batch never lets auto-accept approve a rewrite" {
