@@ -224,3 +224,8 @@ fresh() {
   run -2 zsh "$S" partition --dir "$D" --revisit "12 x"
   contains "$output" "not an issue number: 'x'"
 }
+
+@test "every step that assigns a Step 7 run variable writes it into the child's state file, in either phase" {
+  local s; s="$(flat "$SKILL")"
+  contains "$s" 'Every step that assigns one of those run variables — Step 1'"'"'s verdict and its already-`READY` shortcut, Step 2'"'"'s typed park or filed split, Step 4'"'"'s re-gate and Step 5'"'"'s ending, in phase A or phase B alike — also writes it into that state file in the same invocation, so Step 7 finds every ending'"'"'s values there.'
+}

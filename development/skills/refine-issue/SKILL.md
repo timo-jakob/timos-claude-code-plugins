@@ -258,7 +258,11 @@ this is the guided pass that clears them.
    2.5 to 7, or its redraft), first write the wait into its state file `f`
    (`/tmp/refine-issue-epic-<E>/<N>.json`) with
    `jq --argjson now "$(date +%s)" '.paused_s += ($now - .waiting_since) | .waiting_since = null' "$f" > "$f.tmp" && mv "$f.tmp" "$f"`.
-   Step 7 re-states the
+   Every step that assigns one of those run variables — Step 1's verdict and
+   its already-`READY` shortcut, Step 2's typed park or filed split, Step 4's
+   re-gate and Step 5's ending, in phase A or phase B alike — also writes it
+   into that state file in the same invocation, so Step 7 finds every ending's
+   values there. Step 7 re-states the
    child's literals from that file in the same invocation as the fence.
 
    **Phase A — draft each child, in sub-issue order.** Run Steps 0, 1 and 2 as
