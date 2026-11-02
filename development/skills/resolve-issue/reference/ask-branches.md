@@ -31,7 +31,7 @@ before it ships, and a row whose text moved is updated here.
 | RS-04 | reference/interactive/remediation.md | `ask for native sub-issues or a` · `Anything else you cannot classify` | gap | human-owned: a near-miss rung or an unclassifiable blocker has no document that settles it |
 | RS-04 | SKILL.md | `anything else → ask the human` | gap | human-owned: as above |
 | RS-05 | SKILL.md | `` one `AskUserQuestion` naming `` | intent | human-owned: overriding the size pre-flight is risk acceptance, and only that explicit answer overrides (#2589) |
-| RS-06a | reference/review-loop/briefs/panel.md | `Route a full-round NOT APPLICABLE to the fallback panel (#2909)` | implementation | **default:** run the fallback panel — the repo-type panel's NOT APPLICABLE on a full round dispatches `development-claude-plugin:review` in fallback mode in the same round, so nothing ships unreviewed |
+| RS-06a | reference/review-loop/briefs/panel.md | `Route a full-round NOT APPLICABLE to the fallback panel (#2909)` | implementation | **default:** run the fallback panel — the repo-type panel's NOT APPLICABLE on a full round dispatches `development-claude-plugin:review` in fallback mode in the same round, so every file it covers is reviewed |
 | RS-06a | reference/review-loop/subagents.md | `fires only when the fallback panel is NOT APPLICABLE or unavailable` | implementation | **default:** as above |
 | RS-06b | reference/review-loop/exit-2-stale-findings.md | `put it to the human as three options` | intent | human-owned: the fallback is NOT APPLICABLE or unavailable, so waiving or replacing panel review is risk acceptance |
 | RS-06b | reference/review-loop/subagents.md | `interactive, its three options, none taken without an explicit choice` | intent | human-owned: as above |
@@ -58,7 +58,11 @@ fallback is NOT APPLICABLE or unavailable.
 **Print one line** when the fallback engages, attended or unattended, naming
 both panels — `Decision taken (not asked): <repo-type review_skill> is NOT
 APPLICABLE on this diff, so development-claude-plugin:review reviews it in
-fallback mode` — and continue the loop.
+fallback mode` — and continue the loop. Who prints it depends on the wiring:
+in step mode the conductor prints it on the round the fallback engages, from
+the line the panel subagent returns beside its `ok` verdict
+(`reference/review-loop/briefs/panel.md`, step 5); in hook mode
+`resolve-story-loop.zsh` prints it on stderr as it engages the fallback.
 
 **Record it in the body (#2909).** When this run's review loop ran (not a
 `--no-review` run, whose status is SKIPPED) and `<work-dir>/.fallback-engaged`
@@ -67,7 +71,8 @@ exists as §6 opens the PR, the body's `## Decisions taken` section (ARCHITECTUR
 APPLICABLE, so who reviews the diff?; choice: the fallback panel,
 `development-claude-plugin:review` in fallback mode, from round
 `<the marker's round>` on; evidence: it reviews every file it covers with full
-carry accounting, and the PR still goes through the Approver; how to overrule:
+carry accounting, and the PR still goes through the Approver (ARCHITECTURE.md,
+*The fallback review panel (#2909)*); how to overrule:
 request changes on the PR, or re-run deliberately with `--no-review`. On an
 ending with no PR body, the entry goes in the run's report. A `--no-review` run
 never records it.

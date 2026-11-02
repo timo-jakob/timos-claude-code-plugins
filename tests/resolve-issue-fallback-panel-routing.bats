@@ -38,6 +38,7 @@ setup() {
   contains "$t" 'On round 1, first `rm -f <work_dir>/.fallback-engaged`, which an earlier run may have left: round 1 never inherits an engagement.'
   contains "$t" 'While `<work_dir>/.fallback-engaged` exists, add `--fallback` on every round (#2909, below).'
   contains "$t" 'Once engaged, the fallback stays for the rest of the run: every later round plans with `--fallback` and dispatches only the fallback, and a fallback is never followed by another fallback.'
+  contains "$t" 'That is intended, not a gap: a later round stays on the fallback even for files a fix pass adds that the repo-type panel could review, and the Approver still reviews the whole PR.'
 }
 
 @test "the panel brief returns not-applicable only when the fallback is NOT APPLICABLE or unavailable (#2909)" {
@@ -78,10 +79,14 @@ setup() {
   contains "$t" '**Print one line** when the fallback engages, attended or unattended, naming both panels'
   contains "$t" 'how to overrule: request changes on the PR, or re-run deliberately with `--no-review`.'
   contains "$t" '`Decision taken (not asked): <repo-type review_skill> is NOT APPLICABLE on this diff, so development-claude-plugin:review reviews it in fallback mode`'
+  contains "$t" 'holds one entry — question: the repo-type panel was NOT APPLICABLE, so who reviews the diff?; choice: the fallback panel, `development-claude-plugin:review` in fallback mode, from round `<the marker'"'"'s round>` on;'
+  contains "$t" 'evidence: it reviews every file it covers with full carry accounting, and the PR still goes through the Approver (ARCHITECTURE.md, *The fallback review panel (#2909)*);'
   contains "$t" '**Record it in the body (#2909).** When this run'"'"'s review loop ran (not a `--no-review` run, whose status is SKIPPED) and `<work-dir>/.fallback-engaged` exists as §6 opens the PR, the body'"'"'s `## Decisions taken` section'
   contains "$t" 'On an ending with no PR body, the entry goes in the run'"'"'s report. A `--no-review` run never records it.'
   contains "$t" 'choice: the fallback panel, `development-claude-plugin:review` in fallback mode, from round `<the marker'"'"'s round>` on;'
   contains "$t" 'On an ending with no PR body, the entry goes in the run'"'"'s report.'
+  contains "$t" 'Who prints it depends on the wiring: in step mode the conductor prints it on the round the fallback engages, from the line the panel subagent returns beside its `ok` verdict (`reference/review-loop/briefs/panel.md`, step 5); in hook mode `resolve-story-loop.zsh` prints it on stderr as it engages the fallback.'
+  contains "$(flat "$SUB")" 'When an `ok` panel verdict comes with the line naming both panels, the fallback engaged this round (#2909): print that line first, as `reference/ask-branches.md` § RS-06a says.'
   # and §6 reaches the procedure
   contains "$(cat "$REPO_ROOT/development/skills/resolve-issue/SKILL.md")" '**When the fallback review panel engaged (#2909):** see `reference/ask-branches.md` § RS-06a — the fallback review panel default (#2909)'
 }

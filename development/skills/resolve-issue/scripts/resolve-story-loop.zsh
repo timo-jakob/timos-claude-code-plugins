@@ -354,7 +354,10 @@
 #                 round and, once that re-run wrote findings, records a
 #                 --work-dir marker; every later round, --resume included,
 #                 runs it once already in fallback mode. A fresh hook-mode
-#                 run clears the marker),
+#                 run clears the marker. The status JSON's review_skill and
+#                 topic_review_skills keep naming the repo-type plan even
+#                 then; the marker <work-dir>/.fallback-engaged is the record
+#                 of the engagement),
 #                 $REVIEW_TOPIC_SKILLS (#1072 — the plan's
 #                 topic_review_skills as a JSON array, `[]` when no topic panel
 #                 joins; every one of them reviews the same scope, and the hook
@@ -713,7 +716,8 @@ pft_continues=0
 # plain assignment, not `local`: see the note above.
 carry_unconfirmed_json='[]'
 # The dispatch plan's `topic_review_skills` (#1072) — the topic panels that join
-# the language panel each round. `[]` until the plan is read, and on every exit
+# the language panel each round (the repo-type plan's, even once the fallback
+# panel engages, #2909 — <work-dir>/.fallback-engaged records that). `[]` until the plan is read, and on every exit
 # that precedes it (--no-review, a refused input, an exit-3 escalation), so the
 # status JSON always carries the field for the same reason as the four above.
 # A plain assignment, not `local`: see the note above.
@@ -3311,7 +3315,6 @@ while (( round <= effective_max )); do
        && (( ! round_scope_empty && ! fallback_engaged )) \
        && [[ "$carry_by_dim" == '{}' ]]; then
       fallback_engaged=1
-      print -u2 -- "resolve-story-loop: $review_skill reported NOT APPLICABLE on round $round's non-empty full diff — the fallback panel development-claude-plugin:review reviews it, for this round and every later one (#2909)"
       plan_args+=( --fallback )
       rp=$("$DISPATCH" "${plan_args[@]}"); rc=$?
       if (( rc == 3 )); then
@@ -3331,6 +3334,9 @@ while (( round <= effective_max )); do
       if [[ -s "$findings_path" ]]; then
         print -r -- "$round" > "$fallback_marker" || {
           print -u2 -- "resolve-story-loop: could not record the fallback engagement at $fallback_marker"; exit 1 }
+        # RS-06a's notice (reference/ask-branches.md), word for word, printed
+        # only once the fallback has reviewed something
+        print -u2 -- "Decision taken (not asked): $review_skill is NOT APPLICABLE on this diff, so development-claude-plugin:review reviews it in fallback mode"
       fi
     fi
   fi

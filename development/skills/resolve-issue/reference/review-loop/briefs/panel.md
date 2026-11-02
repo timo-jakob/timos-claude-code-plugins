@@ -62,7 +62,10 @@ modes* names.
    <work_dir>/.fallback-engaged` and go on to steps 3–5; the verdict is `ok`,
    and the marker records that the fallback is engaged. Once engaged, the fallback stays for the rest of the run: every
    later round plans with `--fallback` and dispatches only the fallback, and a
-   fallback is never followed by another fallback. On the round it engages,
+   fallback is never followed by another fallback. That is intended, not a gap:
+   a later round stays on the fallback even for files a fix pass adds that the
+   repo-type panel could review, and the Approver still reviews the whole PR.
+   On the round it engages,
    return to the conductor, beside the verdict, one line naming the repo-type
    panel and the fallback. Return `not_applicable` / `not-applicable` only
    when the fallback is NOT APPLICABLE or unavailable, or when the repo-type

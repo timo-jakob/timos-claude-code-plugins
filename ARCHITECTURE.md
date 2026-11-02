@@ -4259,7 +4259,7 @@ accepted-and-ignored.
 
 **`plan --repo PATH [--base REF] [--round N] [--findings-path PATH] [--final]
 [--prior-tree TREE_ID] [--fix-verification PATH] [--adjudicated PATH]
-[--self-check PATH]`** emits the
+[--self-check PATH] [--fallback]`** emits the
 dispatch descriptor. `--findings-path` overrides where the panel is told to write
 its aggregate, defaulting to `<worktree_root>/.review/findings-round-<N>.json` —
 **absolute, and the same for every spelling of `--repo`**, because `--repo` is
@@ -4348,7 +4348,8 @@ cannot mint a second artifact path for the same round:
   `fix_verification_path` / `adjudicated_path` — this script never reads either
   file, so one descriptor value carries everything a round's panel needs.
   `--self-check` (#2014) is echoed through the same way as `self_check_path`,
-  the descriptor's **last** key, `null` when absent and never read: the path of
+  the descriptor's **last** key (under `--fallback`, `fallback_for` and
+  `review_mode` follow it), `null` when absent and never read: the path of
   the claude-plugin writer's pre-review self-check file (*Pre-review self-check*,
   below). The panel brief passes it on round 1 only, and only when that file
   exists, so from round 2 on, and on every repo type whose profile writes no

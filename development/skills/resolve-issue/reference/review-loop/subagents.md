@@ -89,7 +89,10 @@ brief*), the conductor runs step-mode `resolve-story-loop.zsh` itself, exactly a
 says, passing the verdict's `aggregate_findings_file` as `--findings-file` and,
 when it is non-null, its `carry_accounting_file` as `--carry-accounting`. It
 opens neither file. It narrates the round from the verdict's `findings_count`,
-the status JSON and the progress block the loop appended. A non-`ok` panel
+the status JSON and the progress block the loop appended. When an `ok` panel
+verdict comes with the line naming both panels, the fallback engaged this
+round (#2909): print that line first, as `reference/ask-branches.md` § RS-06a
+says. A non-`ok` panel
 verdict takes *Verdict recovery arms (#1937)* below.
 
 **When the fix subagent runs.** On exit 20, read `final_changelist.summary.blocking`

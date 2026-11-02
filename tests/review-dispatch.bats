@@ -3628,3 +3628,10 @@ tplan() {  # $1 = topic table ; $2 = detect json ; rest = extra flags
   [ "$(echo "$output" | jq -r .review_mode)" = "fallback" ]
   [ "$(echo "$output" | jq -r .fallback_for)" = "development-python:review" ]
 }
+
+@test "#2909 plan --fallback appends fallback_for and review_mode after self_check_path" {
+  echo "print(1)" > "$R/app.py"
+  plan '{"languages":["python"]}' --fallback
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c '[keys_unsorted[-3:][]]')" = '["self_check_path","fallback_for","review_mode"]' ]
+}
