@@ -35,6 +35,7 @@ setup() {
 
 @test "the panel brief keeps the fallback engaged for the rest of the run (#2909)" {
   local t; t="$(flat "$BRIEF")"
+  contains "$t" 'On round 1, first `rm -f <work_dir>/.fallback-engaged`, which an earlier run may have left: round 1 never inherits an engagement.'
   contains "$t" 'While `<work_dir>/.fallback-engaged` exists, add `--fallback` on every round (#2909, below).'
   contains "$t" 'Once engaged, the fallback stays for the rest of the run: every later round plans with `--fallback` and dispatches only the fallback, and a fallback is never followed by another fallback.'
 }
@@ -109,7 +110,7 @@ setup() {
   contains "$t" '**The fallback review panel (#2909).**'
   contains "$t" '`plan --fallback` plans it: the round'"'"'s normal descriptor with `review_skill` `"development-claude-plugin:review"`, `review_mode` `"fallback"`, `fallback_for` naming the repo-type `review_skill` it stands in for, and `topic_review_skills` `[]`'
   contains "$t" 'Hook mode exports `$REVIEW_MODE` beside `$REVIEW_SCOPE_MODE`'
-  contains "$t" 'records the engagement in `<work-dir>/.fallback-engaged` once the fallback has reviewed something, and plans every later round of the run with `--fallback`, `--resume` included; a fresh hook-mode run clears the marker.'
+  contains "$t" 'records the engagement in `<work-dir>/.fallback-engaged` once the fallback has reviewed something, and plans every later round of the run with `--fallback`, `--resume` included; a fresh run never inherits the marker — hook mode'"'"'s loop and step mode'"'"'s panel brief, on round 1, clear it.'
   contains "$t" '**Fallback unavailable** — `development-claude-plugin` not installed'
   contains "$t" 'never the `render-failed` FAILED arm.'
 }

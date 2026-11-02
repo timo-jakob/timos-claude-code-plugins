@@ -2770,8 +2770,9 @@ _run_review_hook() {
 # seam's only sign that the repo-type panel was NOT APPLICABLE; the loop then
 # engages development-claude-plugin:review's fallback mode for the rest of the
 # run. The engagement is a --work-dir marker, so it survives --resume. In step
-# mode the round-panel brief owns the marker: it writes it before the loop's
-# first invocation, so the loop neither reads nor clears it there.
+# mode the round-panel brief owns the marker: it clears it on round 1 and
+# writes it before the loop's first invocation, so the loop neither reads nor
+# clears it there.
 local fallback_marker="$work_dir/.fallback-engaged" fallback_engaged=0
 local hook_review_skill="" hook_topic_skills="" hook_review_mode="" fallback_note=""
 # A FRESH run never inherits an engagement: only a --resume continues the run

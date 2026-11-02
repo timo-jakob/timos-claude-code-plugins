@@ -21,8 +21,10 @@ modes* names.
    <work_dir>/adjudicated.json`. On round 1, add `--self-check
    <worktree_root>/.review/self-check.json` when that file exists. Step
    1's round-1 "no flags beyond the round" predates #2014 and does not override
-   that. While `<work_dir>/.fallback-engaged` exists, add `--fallback` on every
-   round (#2909, below). Round step 1
+   that. On round 1, first `rm -f <work_dir>/.fallback-engaged`, which an
+   earlier run may have left: round 1 never inherits an engagement. While
+   `<work_dir>/.fallback-engaged` exists, add `--fallback` on every round
+   (#2909, below). Round step 1
    governs when to add `--final`, the
    plan's exit codes, and the `worktree_root` check. **On a carried round, split
    the carry by owner (#2010):** run `review-dispatch.zsh split-carry

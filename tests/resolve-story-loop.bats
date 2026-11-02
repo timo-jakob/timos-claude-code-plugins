@@ -311,6 +311,8 @@ fallback_review() {
   lacks "$output" "wrote no findings either"
   [ ! -e "$BATS_TEST_TMPDIR/wd/.fallback-engaged" ]
   lacks "$(cat "$BATS_TEST_TMPDIR/hook.log")" "|fallback|"
+  run cat "$BATS_TEST_TMPDIR/hook.log"
+  [ "${lines[1]}" = "2||development-python:review|full|[]" ]
 }
 
 @test "#2909 hook mode: a failed fallback re-plan exits 1 before the re-run and records nothing" {
