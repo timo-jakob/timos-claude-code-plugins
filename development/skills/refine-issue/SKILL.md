@@ -250,7 +250,13 @@ this is the guided pass that clears them.
    `expected_docs_pages`, `rewrite_path` (a file holding its full rewrite),
    `waiting_since` and its `phase`: `pending` while its draft awaits a batch,
    and set to its outcome (`approved`, `skipped` or `drafting`) as soon as
-   `partition` places it, so no child is in two batches. Its `paused_s`
+   `partition` places it, so no child is in two batches. Its `phase` is always
+   a string, from the moment its state file is created: `drafting` while it
+   drafts or must redraft (a child created in phase A, a revisit, and an
+   approved child whose re-gate loops it back), `pending` as above, `skipped`
+   once skipped, and `ended` once it is written back, parked or split, so a
+   walk is finished exactly when no child is `drafting`, `pending` or
+   `approved`. Its `paused_s`
    (Step 0's `0`) holds its waits on others, which are not refinement work and
    never count toward its `wall_s`: whenever its work stops to wait — it becomes
    pending, or it loops back (it redrafts only in the next phase A) — set
@@ -322,7 +328,8 @@ this is the guided pass that clears them.
      `human_reply`, and its `phase` goes back to drafting.
 
    **The batch loop-back rule.** A child whose re-gate is still
-   `NEEDS_REFINEMENT` loops back to Step 2 (Step 5) like a revisit child. The
+   `NEEDS_REFINEMENT` loops back to Step 2 (Step 5) like a revisit child, and
+   its `phase` goes back to `drafting`. The
    loop-back children and the revisit children redraft, and once each has a new
    sized draft, pending as in phase A (or has parked), they form the **next
    batch**, which gets one approval again. Batches repeat until every child has

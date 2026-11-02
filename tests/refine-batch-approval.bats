@@ -176,7 +176,7 @@ fresh() {
 
 @test "SKILL.md states the batch loop-back rule, from the walk and from Step 5" {
   local t; t="$(flat "$SKILL")"
-  contains "$t" '**The batch loop-back rule.** A child whose re-gate is still `NEEDS_REFINEMENT` loops back to Step 2 (Step 5) like a revisit child.'
+  contains "$t" '**The batch loop-back rule.** A child whose re-gate is still `NEEDS_REFINEMENT` loops back to Step 2 (Step 5) like a revisit child, and its `phase` goes back to `drafting`.'
   contains "$t" 'they form the **next batch**, which gets one approval again. Batches repeat until every child has ended — written back, skipped or parked — so none is pending or waiting to redraft: a revisit child (`drafting`) or a looped-back child keeps the walk going, and the next phase A redrafts it.'
   contains "$t" 'In an epic walk the looped-back child redrafts and joins the **next batch**'
   contains "$t" '**In an epic walk the approval is the batch'"'"'s (#2904).**'
@@ -274,4 +274,27 @@ fresh() {
   local s; s="$(flat "$SKILL")"
   contains "$s" 'Exit 2 means a number that is not a pending child, or one named in both lists: ask again with the pending numbers.'
   contains "$s" 'An exit 2 your own call caused (a missing `--dir`, an unknown flag) is fixed and re-run without asking. Exit 1 is a malformed state file: fix it with `jq` and re-run.'
+}
+
+@test "a child's phase is always a string, through its whole lifecycle, and a loop-back returns it to drafting" {
+  local s; s="$(flat "$SKILL")"
+  contains "$s" 'Its `phase` is always a string, from the moment its state file is created: `drafting` while it drafts or must redraft (a child created in phase A, a revisit, and an approved child whose re-gate loops it back), `pending` as above, `skipped` once skipped, and `ended` once it is written back, parked or split, so a walk is finished exactly when no child is `drafting`, `pending` or `approved`.'
+  contains "$s" '`NEEDS_REFINEMENT` loops back to Step 2 (Step 5) like a revisit child, and its `phase` goes back to `drafting`.'
+}
+
+@test "partition and summary read only <N>.json, ignoring a child's other files and non-pending phases" {
+  pending 12
+  printf '%s\n' '{"phase": "drafting"}' > "$D/9.json"
+  printf '%s\n' '{"phase": "ended"}' > "$D/15.json"
+  printf 'not json\n' > "$D/12.defaults.json"
+  run -0 zsh "$S" partition --dir "$D"
+  [ "$output" = '{"approve":[12],"revisit":[],"skip":[]}' ]
+  run -0 zsh "$S" summary --dir "$D"
+  contains "$output" '12'
+}
+
+@test "a state file holding two JSON objects is malformed (exit 1)" {
+  printf '%s\n%s\n' '{"phase": "ended"}' '{"phase": "ended"}' > "$D/7.json"
+  run -1 zsh "$S" partition --dir "$D"
+  contains "$output" 'not one JSON object with a string phase'
 }
