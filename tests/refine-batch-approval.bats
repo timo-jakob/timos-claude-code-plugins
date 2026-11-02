@@ -169,7 +169,9 @@ fresh() {
   local a b
   a="$(grep -n 'Phase A — draft each child' "$SKILL" | cut -d: -f1)"
   b="$(grep -n 'Phase B — one approval for the batch' "$SKILL" | cut -d: -f1)"
-  [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ]
+  [ -n "$a" ]
+  [ -n "$b" ]
+  [ "$a" -lt "$b" ]
 }
 
 @test "SKILL.md states the batch loop-back rule, from the walk and from Step 5" {
@@ -262,5 +264,14 @@ fresh() {
   local d; d="$(flat "$REPO_ROOT/docs/explanation/workflow-refine-issue.md")"
   contains "$d" 'walks them in two phases. First it drafts every child in turn'
   contains "$d" 'Then it shows you every finished draft at once and asks one approval for the batch'
+  contains "$d" 'approve all, or name the children to revisit, to skip, or whose automatic answer you overturn.'
+  contains "$d" 'Revisited children, and any child the readiness gate still sends back after its rewrite, redraft and come back as the next batch.'
+  contains "$d" 'which children are now ready, which were skipped, which are still parked and why, and any that failed.'
   lacks "$d" 'one child fully before the next'
+}
+
+@test "partition's exits: a bad answer is asked again, the conductor's own bad call and a malformed state file are fixed and re-run" {
+  local s; s="$(flat "$SKILL")"
+  contains "$s" 'Exit 2 means a number that is not a pending child, or one named in both lists: ask again with the pending numbers.'
+  contains "$s" 'An exit 2 your own call caused (a missing `--dir`, an unknown flag) is fixed and re-run without asking. Exit 1 is a malformed state file: fix it with `jq` and re-run.'
 }

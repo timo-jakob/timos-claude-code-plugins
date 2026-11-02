@@ -304,7 +304,9 @@ this is the guided pass that clears them.
 
    It prints `{approve, revisit, skip}`. Exit 2 means a number that is not a
    pending child, or one named in both lists: ask again with the pending
-   numbers.
+   numbers. An exit 2 your own call caused (a missing `--dir`, an unknown flag)
+   is fixed and re-run without asking. Exit 1 is a malformed state file: fix it
+   with `jq` and re-run.
 
    - **approve** — one child at a time, in sub-issue order, run Steps 2.5, 3,
      4, 5, 6 and 7 for it. Its batch approval is the approval of its exact

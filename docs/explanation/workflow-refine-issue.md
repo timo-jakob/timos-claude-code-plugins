@@ -104,9 +104,10 @@ Pointed at an epic, the skill lists the epic's open sub-issues that carry `needs
 phases. First it drafts every child in turn, asking each child's questions as it goes; a child that ends early (already
 ready, parked, or split) finishes there, and a child that parks does not stop the walk. Then it shows you every
 finished draft at once and asks one approval for the batch: approve all, or name the children to revisit, to skip, or
-whose automatic answer you overturn. Revisited children redraft and come back as the next batch. At the end it posts
-one summary on the epic: which children are now ready, which were skipped, which are still parked and why, and any
-that failed. The epic's own body is never refined, and re-running the skill on the epic resumes the walk.
+whose automatic answer you overturn. Revisited children, and any child the readiness gate still sends back after its
+rewrite, redraft and come back as the next batch. At the end it posts one summary on the epic: which children are
+now ready, which were skipped, which are still parked and why, and any that failed. The epic's own body is never
+refined, and re-running the skill on the epic resumes the walk.
 
 ## Who does what {#refine-who-does-what}
 
