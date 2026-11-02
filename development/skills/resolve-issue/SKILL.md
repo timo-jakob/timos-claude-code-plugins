@@ -972,8 +972,7 @@ the sub-loop was never invoked even though the phase was offered and its prompt
 answered — it is the plain `--status` invocation. State it as the artifact, never
 as "the phase ran": that phrase is true on *If NONE matched* and would send you
 hunting for a status file to pass, which is exactly how a reused-scratch leftover
-gets folded into the audit record. Passing one promotion flag without the other is a usage
-error, not a fallback.
+gets folded into the audit record. Passing one promotion flag without the other is a usage error, not a fallback.
 
 The residue Summary duty (#1435) went with its terminal (#2580): a run that
 opens its PR has no open blocker left to disclose.
@@ -989,7 +988,8 @@ differs from it, so a re-run changes nothing. An issue with no origin comment
 left as it is — never post a second origin comment.
 
 **Before open-pr (#2903):** see `reference/ask-branches.md` § RS-09 — the parked follow-up default (#2903)
-**When the fallback review panel engaged (#2909):** see `reference/ask-branches.md` § RS-06a — the fallback review panel default (#2909)
+**When the fallback review panel engaged (#2909):**
+see `reference/ask-branches.md` § RS-06a — the fallback review panel default (#2909)
 
 When the promotion **prompt was presented**, **name in the Summary** both
 counts — **how many suggestions the human picked, and how many the sub-loop

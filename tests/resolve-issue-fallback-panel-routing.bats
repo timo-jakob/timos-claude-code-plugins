@@ -88,7 +88,7 @@ setup() {
   contains "$t" 'Who prints it depends on the wiring: in step mode the conductor prints it on the round the fallback engages, from the line the panel subagent returns beside its `ok` verdict (`reference/review-loop/briefs/panel.md`, step 5); in hook mode `resolve-story-loop.zsh` prints it on stderr as it engages the fallback.'
   contains "$(flat "$SUB")" 'When an `ok` panel verdict comes with the line naming both panels, the fallback engaged this round (#2909): print that line first, as `reference/ask-branches.md` § RS-06a says.'
   # and §6 reaches the procedure
-  contains "$(cat "$REPO_ROOT/development/skills/resolve-issue/SKILL.md")" '**When the fallback review panel engaged (#2909):** see `reference/ask-branches.md` § RS-06a — the fallback review panel default (#2909)'
+  contains "$(flat "$REPO_ROOT/development/skills/resolve-issue/SKILL.md")" '**When the fallback review panel engaged (#2909):** see `reference/ask-branches.md` § RS-06a — the fallback review panel default (#2909)'
 }
 
 @test "the note after the exit-2 frozen span states the routing and which panels report NOT APPLICABLE on a non-empty diff (#2909)" {
