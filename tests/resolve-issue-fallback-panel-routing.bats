@@ -41,12 +41,12 @@ setup() {
 
 @test "the panel brief returns not-applicable only when the fallback is NOT APPLICABLE or unavailable (#2909)" {
   local t; t="$(flat "$BRIEF")"
-  contains "$t" 'Return `not_applicable` / `not-applicable` only when the fallback is NOT APPLICABLE or unavailable.'
+  contains "$t" 'Return `not_applicable` / `not-applicable` only when the fallback is NOT APPLICABLE or unavailable, or when the repo-type panel'"'"'s NOT APPLICABLE falls on a round that never engages the fallback.'
   contains "$t" 'an unresolvable fallback `review_skill` is never `render-failed`.'
   contains "$t" 'It is unavailable when its `SKILL.md` is not in the plugin cache because `development-claude-plugin` is not installed;'
   contains "$t" 'On the round it engages, return to the conductor, beside the verdict, one line naming the repo-type panel and the fallback.'
   contains "$t" 'Return to the conductor only that the verdict was written, plus, on the round the fallback engages, the one line naming both panels (#2909).'
-  contains "$t" '| on a full round, the fallback panel is NOT APPLICABLE or unavailable, after the repo-type panel reported NOT APPLICABLE | `not_applicable` / `not-applicable` |'
+  contains "$t" '| the repo-type panel reported NOT APPLICABLE, and the fallback panel is NOT APPLICABLE or unavailable or the round never engages it | `not_applicable` / `not-applicable` |'
   lacks "$t" '| the language panel reported NOT APPLICABLE on a full round |'
 }
 
@@ -54,7 +54,7 @@ setup() {
   run grep -F '| `not-applicable` | `not_applicable` |' "$SUB"
   [ "$status" -eq 0 ]
   [ "${#lines[@]}" -eq 1 ]
-  contains "$output" 'fires only when the fallback panel is NOT APPLICABLE or unavailable (#2909)'
+  contains "$output" 'fires only when the fallback panel is NOT APPLICABLE or unavailable, or on a round that never engages it (#2909)'
   contains "$output" 'autonomous, stop with no commit and no PR; interactive, its three options, none taken without an explicit choice.'
 }
 
@@ -78,6 +78,8 @@ setup() {
   contains "$t" 'how to overrule: request changes on the PR, or re-run deliberately with `--no-review`.'
   contains "$t" '`Decision taken (not asked): <repo-type review_skill> is NOT APPLICABLE on this diff, so development-claude-plugin:review reviews it in fallback mode`'
   contains "$t" '**Record it in the body (#2909).** When `<work-dir>/.fallback-engaged` exists as §6 opens the PR, the body'"'"'s `## Decisions taken` section'
+  contains "$t" 'choice: the fallback panel, `development-claude-plugin:review` in fallback mode, from round `<the marker'"'"'s round>` on;'
+  contains "$t" 'On an ending with no PR body, the entry goes in the run'"'"'s report.'
   # and §6 reaches the procedure
   contains "$(cat "$REPO_ROOT/development/skills/resolve-issue/SKILL.md")" '**When the fallback review panel engaged (#2909):** see `reference/ask-branches.md` § RS-06a — the fallback review panel default (#2909)'
 }
@@ -89,7 +91,8 @@ setup() {
   contains "$after" 'Today the `kubernetes` and `javascript` panels report NOT APPLICABLE on a non-empty diff'
   contains "$after" '- **step mode** — the panel brief re-plans with `review-dispatch.zsh plan --fallback`'
   contains "$after" '- **hook mode** — `resolve-story-loop.zsh` sees a `--review-cmd` that wrote no findings file'
-  contains "$after" 'Step 2'"'"'s arm, its autonomous stop and its three interactive options, applies only when the fallback is NOT APPLICABLE or unavailable (`development-claude-plugin` not installed), or on a round that never engages it'
+  contains "$after" 'and records the same marker once that re-run wrote a findings file.'
+  contains "$after" 'Step 2'"'"'s arm, its autonomous stop and its three interactive options, applies only when the fallback is NOT APPLICABLE or unavailable (`development-claude-plugin` not installed), or on a round that never engages it (a carried round, or a repo whose own panel is the fallback). Engaging the fallback asks nothing;'
 }
 
 @test "the exit-2 round-protocol-recover frozen span is byte-unchanged (#2909)" {
@@ -106,7 +109,7 @@ setup() {
   contains "$t" '**The fallback review panel (#2909).**'
   contains "$t" '`plan --fallback` plans it: the round'"'"'s normal descriptor with `review_skill` `"development-claude-plugin:review"`, `review_mode` `"fallback"`, `fallback_for` naming the repo-type `review_skill` it stands in for, and `topic_review_skills` `[]`'
   contains "$t" 'Hook mode exports `$REVIEW_MODE` beside `$REVIEW_SCOPE_MODE`'
-  contains "$t" 'records the engagement in `<work-dir>/.fallback-engaged` once the fallback has reviewed something, and plans every later round of the run with `--fallback`, `--resume` included; a fresh run never inherits the marker.'
+  contains "$t" 'records the engagement in `<work-dir>/.fallback-engaged` once the fallback has reviewed something, and plans every later round of the run with `--fallback`, `--resume` included; a fresh hook-mode run clears the marker.'
   contains "$t" '**Fallback unavailable** — `development-claude-plugin` not installed'
   contains "$t" 'never the `render-failed` FAILED arm.'
 }

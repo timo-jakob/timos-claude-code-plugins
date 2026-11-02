@@ -4549,7 +4549,7 @@ step mode the panel brief, in hook mode `resolve-story-loop.zsh` on a
 `--review-cmd` that wrote no findings file — records the engagement in
 `<work-dir>/.fallback-engaged` once the fallback has reviewed something, and
 plans every later round of the run with `--fallback`, `--resume` included; a
-fresh run never inherits the marker. A fallback is never followed by another
+fresh hook-mode run clears the marker. A fallback is never followed by another
 fallback, so a repo whose own panel is `development-claude-plugin:review`
 never engages it, and neither does a carried round, whose entries the
 fallback's dimensions cannot own. Hook mode exports `$REVIEW_MODE` beside `$REVIEW_SCOPE_MODE`:

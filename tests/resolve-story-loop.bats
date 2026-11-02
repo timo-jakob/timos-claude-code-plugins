@@ -300,6 +300,43 @@ fallback_review() {
   [ "${#lines[@]}" -eq 1 ]
 }
 
+@test "#2909 hook mode: a carried full round never engages the fallback" {
+  # round 1's repo-type panel raises a blocker; the fix changes nothing, so
+  # round 2 is re-planned to a full round that carries it — and that panel
+  # writes nothing
+  loop --review-cmd "$(fallback_review)"'; if [ -z "$REVIEW_MODE" ] && [ "$REVIEW_ROUND" = 1 ]; then printf "%s" '"'"$CRIT"'"' > "$REVIEW_FINDINGS"; fi' \
+       --fix-cmd 'true'
+  [ "$status" -eq 2 ]
+  [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "STALE_FINDINGS" ]
+  lacks "$output" "wrote no findings either"
+  [ ! -e "$BATS_TEST_TMPDIR/wd/.fallback-engaged" ]
+  lacks "$(cat "$BATS_TEST_TMPDIR/hook.log")" "|fallback|"
+}
+
+@test "#2909 hook mode: a failed fallback re-plan exits 1 before the re-run and records nothing" {
+  local fake="$BATS_TEST_TMPDIR/fake-dispatch.zsh" real
+  real="$(dirname "$LOOP_REAL")/review-dispatch.zsh"
+  printf '#!/usr/bin/env zsh\nif [[ " $* " == *" --fallback "* ]]; then exit 1; fi\nexec zsh %q "$@"\n' "$real" > "$fake"
+  chmod +x "$fake"
+  run --separate-stderr env RESOLVE_LOOP_DISPATCH_BIN="$fake" DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$BATS_TEST_TMPDIR/wd" \
+    --review-cmd "$(fallback_review)" --fix-cmd 'true'
+  [ "$status" -eq 1 ]
+  contains "$stderr" "fallback dispatch plan failed at round 1"
+  [ ! -e "$BATS_TEST_TMPDIR/wd/.fallback-engaged" ]
+  run cat "$BATS_TEST_TMPDIR/hook.log"
+  [ "${#lines[@]}" -eq 1 ]
+}
+
+@test "#2909 hook mode: a marker that cannot be recorded is exit 1" {
+  # the fallback re-run reviews the round, then blocks the marker path with a
+  # directory, so the loop's write of the engagement fails
+  loop --review-cmd "$(fallback_review 'printf "[]" > "$REVIEW_FINDINGS"; mkdir -p "'"$BATS_TEST_TMPDIR"'/wd/.fallback-engaged"')" --fix-cmd 'true'
+  [ "$status" -eq 1 ]
+  contains "$output" "could not record the fallback engagement"
+}
+
 @test "#2909 the --review-cmd header lists \$REVIEW_MODE" {
   run grep -c 'REVIEW_MODE (#2909' "$LOOP_REAL"
   [ "$output" -ge 1 ]

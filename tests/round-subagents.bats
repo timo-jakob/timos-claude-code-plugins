@@ -375,7 +375,7 @@ _background_wait_pins() {
   contains "$panel" '| `worktree_root` is not the implementation worktree | `failed` / `wrong-worktree-root` |'
   contains "$panel" '| a `[DELETED by this story]` excerpt came back empty | `failed` / `empty-excerpt` |'
   contains "$panel" '| a full round whose story diff is empty | `not_applicable` / `story-diff-empty` |'
-  contains "$panel" '| on a full round, the fallback panel is NOT APPLICABLE or unavailable, after the repo-type panel reported NOT APPLICABLE | `not_applicable` / `not-applicable` |'
+  contains "$panel" '| the repo-type panel reported NOT APPLICABLE, and the fallback panel is NOT APPLICABLE or unavailable or the round never engages it | `not_applicable` / `not-applicable` |'
   contains "$panel" '| you have no `Agent` tool | `failed` / `no-agent-tool` |'
 }
 
@@ -748,7 +748,7 @@ load_carry_section() {
   contains "$arms" '| `empty-excerpt` | `failed` | report-and-stop'
   contains "$arms" 'and a fresh panel "fails the same way" |'
   contains "$arms" '| `no-agent-tool` | `failed` | report-and-stop |'
-  contains "$arms" '| `not-applicable` | `not_applicable` | fires only when the fallback panel is NOT APPLICABLE or unavailable (#2909): the panel brief has already routed the repo-type panel'"'"'s NOT APPLICABLE to the fallback. Then the **NOT APPLICABLE on a full round** arm: autonomous, stop with no commit and no PR; interactive, its three options, none taken without an explicit choice. Never coerced to `[]`, and the panel is not re-run |'
+  contains "$arms" '| `not-applicable` | `not_applicable` | fires only when the fallback panel is NOT APPLICABLE or unavailable, or on a round that never engages it (#2909): the panel brief has already routed the repo-type panel'"'"'s NOT APPLICABLE to the fallback wherever the round engages it. Then the **NOT APPLICABLE on a full round** arm: autonomous, stop with no commit and no PR; interactive, its three options, none taken without an explicit choice. Never coerced to `[]`, and the panel is not re-run |'
   contains "$arms" '| `story-diff-empty` | `not_applicable` | the **empty story diff** shape: go back to **§2 (Implement)**'
   contains "$arms" 'The three NOT APPLICABLE options are never offered, and, per the #1485 note, neither the re-invoke arm nor the panel re-run arm is taken |'
   # the quoted arms really exist where the table says they do (#2055: the

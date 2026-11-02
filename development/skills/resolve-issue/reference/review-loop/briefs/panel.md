@@ -63,7 +63,8 @@ modes* names.
    fallback is never followed by another fallback. On the round it engages,
    return to the conductor, beside the verdict, one line naming the repo-type
    panel and the fallback. Return `not_applicable` / `not-applicable` only
-   when the fallback is NOT APPLICABLE or unavailable. It is unavailable when
+   when the fallback is NOT APPLICABLE or unavailable, or when the repo-type
+   panel's NOT APPLICABLE falls on a round that never engages the fallback. It is unavailable when
    its `SKILL.md` is not in the plugin cache because `development-claude-plugin`
    is not installed; an unresolvable fallback `review_skill` is never
    `render-failed`.
@@ -155,7 +156,7 @@ non-`ok` verdict instead, and write no findings file:
 | `worktree_root` is not the implementation worktree | `failed` / `wrong-worktree-root` |
 | a `[DELETED by this story]` excerpt came back empty | `failed` / `empty-excerpt` |
 | a full round whose story diff is empty | `not_applicable` / `story-diff-empty` |
-| on a full round, the fallback panel is NOT APPLICABLE or unavailable, after the repo-type panel reported NOT APPLICABLE | `not_applicable` / `not-applicable` |
+| the repo-type panel reported NOT APPLICABLE, and the fallback panel is NOT APPLICABLE or unavailable or the round never engages it | `not_applicable` / `not-applicable` |
 | you have no `Agent` tool | `failed` / `no-agent-tool` |
 
 **Planned** is the review skill's own Step 1 table, read for this round (#2008).

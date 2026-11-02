@@ -195,9 +195,10 @@ same round, and it stays engaged for the rest of the run:
   `<work-dir>/.fallback-engaged`, and returns `ok` when the fallback reviewed
   something (*Panel subagent brief*);
 - **hook mode** — `resolve-story-loop.zsh` sees a `--review-cmd` that wrote no
-  findings file on such a round, records the same marker, re-plans with
-  `--fallback`, and re-runs the hook once with `REVIEW_MODE=fallback`,
-  `REVIEW_SKILL=development-claude-plugin:review` and `REVIEW_TOPIC_SKILLS='[]'`.
+  findings file on such a round, re-plans with `--fallback`, re-runs the hook
+  once with `REVIEW_MODE=fallback`,
+  `REVIEW_SKILL=development-claude-plugin:review` and `REVIEW_TOPIC_SKILLS='[]'`,
+  and records the same marker once that re-run wrote a findings file.
   A re-run that writes no findings file either is refused as `STALE_FINDINGS`
   as before, and the refusal says the fallback wrote no findings.
 

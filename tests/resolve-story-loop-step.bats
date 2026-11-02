@@ -1736,6 +1736,22 @@ promote_file() {
   [ ! -e "$WD/.findings-digest-2" ]
 }
 
+@test "#2909 step mode: the loop keeps the fallback marker the panel brief wrote" {
+  # in step mode round 1's panel runs, and writes the marker, BEFORE the
+  # loop's first (fresh) invocation; neither that nor a --resume clears it
+  mkdir -p "$WD"
+  echo 1 > "$WD/.fallback-engaged"
+  printf '%s' "$CRIT" > "$F"
+  step
+  [ "$status" -eq 20 ]
+  [ "$(cat "$WD/.fallback-engaged")" = "1" ]
+  echo "print(2)" > "$R/fixed.py"
+  printf '[]' > "$F"
+  step --resume
+  [ "$status" -eq 20 ]
+  [ "$(cat "$WD/.fallback-engaged")" = "1" ]
+}
+
 @test "#1434 step mode: a BLANK prior tree at round 2 is exit 1, not a silent full diff" {
   # The identity is read with the whitespace stripped precisely so a corrupt
   # write cannot become a blank `--prior-tree` value: review-dispatch would
