@@ -11,8 +11,9 @@ description: >
   bot PR), re-gate, remove the `needs-refinement` label only if READY, and post a
   before/after comment trail. When a session can't converge, take a typed parked
   exit (needs-decision / split-recommended / deferred) that a later run resumes
-  from (#578). Pointed at an epic, it walks each needs-refinement child through
-  that single-issue flow and posts an epic-level summary (#580). With --follow-up
+  from (#578). Pointed at an epic, it drafts each needs-refinement child through
+  that single-issue flow, asks one approval for the batch of drafts (#2904), and
+  posts an epic-level summary (#580). With --follow-up
   it refines a pipeline-filed follow-up unattended, from its source story (#2588).
   The intelligence lives in the agent, this skill is the conductor. Composes story-readiness (#559) and
   issue-refiner (#575); consumes the story-spec/v1 contract (#574).
