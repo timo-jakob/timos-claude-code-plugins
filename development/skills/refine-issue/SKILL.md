@@ -596,7 +596,16 @@ gh issue view <N> --json number,title,body,state,labels,url,comments
   the park `type` and any `decision`/`owner`/`candidate_children`) are context
   the human is resuming from. Write its `decisions`, when present, to a file as
   `{"auto": <decisions>}`: that file counts as one of this issue's round split files for the Decisions taken section.
-  Tell the human what the prior run parked on before continuing the loop.
+  Tell the human what the prior run parked on before continuing the loop. A
+  resumed session is **never all-auto** (#2938): its parked questions already
+  reached the human, and Step 0 emptied the rounds directory that would have
+  shown it, so its rewrite is always presented for approval.
+
+  ```bash
+  # only when a parked state was read; an epic walk child uses its own
+  # /tmp/refine-issue-epic-<E>/<N>.rounds/ instead
+  touch /tmp/refine-issue-rounds/resumed
+  ```
 
 ## Step 1 — diagnose (fresh objections)
 
@@ -931,7 +940,9 @@ Branch on its exit:
 A refinement is **all-auto** when, across the whole run, every round's split
 file had an empty `ask` set (intent and gap questions only), every size check
 passed or was skipped, and no round's refiner turn carried a non-null
-`proposed_split`. On every converged draft that the size check did not stop,
+`proposed_split`. A resumed parked session (its rounds directory holds
+`resumed`, Step 0) is never all-auto: skip the check and take *Any other
+reason* below. On every other converged draft that the size check did not stop,
 judge the whole run so far, from the repository root:
 
 ```bash

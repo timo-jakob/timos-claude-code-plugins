@@ -263,7 +263,7 @@ setup() {
   local t; t="$(flat "$SKILL")"
   contains "$t" 'Keep this run'"'"'s turn and split files of every round, and every sizing'"'"'s verdict file, Step 1'"'"'s and Step 2'"'"'s, in its rounds directory for the all-auto check: `/tmp/refine-issue-rounds/`, or a child'"'"'s `/tmp/refine-issue-epic-<E>/<N>.rounds/` in an epic walk, which a redraft keeps.'
   contains "$t" 'Keep this sizing'"'"'s verdict file in the rounds directory for the all-auto check: its stdout on exit 0 or 1, else the one-line file `{"verdict":"unjudged"}`.'
-  contains "$t" 'On every converged draft that the size check did not stop, judge the whole run so far, from the repository root:'
+  contains "$t" 'On every other converged draft that the size check did not stop, judge the whole run so far, from the repository root:'
   contains "$t" 'Pass no other file: the conductor'"'"'s defaults file and a resumed park'"'"'s decisions file are not split files here. A run that loops back from Step 5 keeps every earlier round'"'"'s files.'
   contains "$t" '# The all-auto check'"'"'s inputs (#2938) are this run'"'"'s alone: a single-issue # run keeps them here, an epic walk child in its own directory (Step 2).'
 }
@@ -321,4 +321,12 @@ setup() {
   contains "$s" 'Any other reason: add its Decisions taken section to the draft as Step 2 says, re-read the issue'"'"'s current block into `old_block`, write its rewrite to `rewrite_path`, set `phase` to `pending`, and go on to the next child.'
   contains "$s" 'The re-spawned turn supersedes the failed one: delete the failed turn'"'"'s file, so the round keeps one turn file. When the questions are relayed as they are, write the round'"'"'s split file yourself, as `{"auto":[],"ask":[<the relayed questions>]}`, so the all-auto check sees that the round reached the human (#2938).'
   contains "$s" 'A `--split` and `--turn` count mismatch is fixed only by deleting a re-spawned round'"'"'s superseded turn file or by writing a relayed round'"'"'s split file (Step 2), never by dropping the turn file of a round whose questions went to the human.'
+}
+
+@test "a resumed parked session is never all-auto, and a second exit 2 from the check counts as not all-auto" {
+  local s; s="$(tr '\n' ' ' < "$REPO_ROOT/development/skills/refine-issue/SKILL.md" | tr -s ' ')"
+  contains "$s" 'A resumed session is **never all-auto** (#2938): its parked questions already reached the human, and Step 0 emptied the rounds directory that would have shown it, so its rewrite is always presented for approval.'
+  contains "$s" 'touch /tmp/refine-issue-rounds/resumed'
+  contains "$s" 'A resumed parked session (its rounds directory holds `resumed`, Step 0) is never all-auto: skip the check and take *Any other reason* below.'
+  contains "$s" 'never by dropping the turn file of a round whose questions went to the human. A second exit 2 counts as not all-auto.'
 }
