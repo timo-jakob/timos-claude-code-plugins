@@ -45,7 +45,7 @@ means the `--auto-accept` value is malformed: tell the human the accepted form
 (a decimal from 0 to 1, at most three decimals) and stop. On `env-ignored`,
 relay the script's stderr line. Tell the human the threshold and its source in
 one line, e.g. "auto-accept: 0.9 (from settings)". Carry `<milli>` in your notes
-for Step 2.
+for Step 2, and `<source>` for Step 6's trail of an all-auto refinement.
 
 **Epic or single issue? (#580)** First classify the target
 (`gh issue view <N> --json labels,body`): it is an **epic** when it has
@@ -237,7 +237,9 @@ this is the guided pass that clears them.
    (Steps 0–7) as written, Step 1's stamp reuse and Step 4's stamp included
    (#2956), except that the approval of the exact rewrite moves
    out of each child's Step 2 into the batch. A parked child does not halt the
-   walk — record it and continue to the next.
+   walk — record it and continue to the next. An all-auto child (*Step 2 — the
+   all-auto check*, #2938) needs no approval, so it never enters a batch: it is
+   written back in phase A, and only the others are batched.
 
    **Per-child state.** At walk start, remove `/tmp/refine-issue-epic-<E>/` (as
    Step 0 clears `/tmp/parked-state.json`) and recreate it empty. Each child
@@ -282,16 +284,22 @@ this is the guided pass that clears them.
    written: the refiner's questions, the size check with its File / Revise /
    Park choice, and the typed parked exit. A child that ends in phase A finishes
    there, Step 7 included, and never enters a batch: the READY shortcut (cleared
-   through Step 5's `READY` branch), a typed park, and a filed split. A child
-   whose draft converges and passes the size check is **not** presented for
-   approval: add its Decisions taken section to the draft as Step 2 says, re-read
-   the issue's current block into `old_block`, write its rewrite to
-   `rewrite_path`, set `phase` to `pending`, and go on to the next child.
+   through Step 5's `READY` branch), a typed park, a filed split, and an
+   all-auto write-back. A child whose draft converges and passes the size check
+   is **not** presented for approval. Run the all-auto check on its own rounds
+   and sizings first. When it reports `all-auto`, add its Decisions taken
+   section and run its Steps 2.5, 3, 4, 5, 6 and 7 at once, in this phase A, as
+   Step 2 says for an all-auto refinement: its `phase` becomes `ended`, or
+   `drafting` when its re-gate loops it back, and then it redrafts at once,
+   still in this phase A, with no wait recorded. Any other reason: add its
+   Decisions taken section to the draft as Step 2 says, re-read the issue's
+   current block into `old_block`, write its rewrite to `rewrite_path`, set
+   `phase` to `pending`, and go on to the next child.
 
    **Phase B — one approval for the batch.** Once every child of this pass has
    ended or is pending, render the batch. When no child is pending — every one
    ended in phase A — skip phase B, ask nothing, and go to step 3's epic-level
-   summary. Otherwise render it:
+   summary. An all-auto write-back is one such ending. Otherwise render it:
 
    ```bash
    "<skill-base-dir>/scripts/batch-approval.zsh" summary --dir /tmp/refine-issue-epic-<E>
@@ -491,7 +499,7 @@ Each default does two things:
 
 | Default | Question | Choice | Evidence | How to overrule |
 |---|---|---|---|---|
-| Step 0 | Refine an issue that is not marked `needs-refinement`? | Refined it without the label. | Nothing is written without Step 2's approval of the exact rewrite. | Restore the body from the issue's edit history. |
+| Step 0 | Refine an issue that is not marked `needs-refinement`? | Refined it without the label. | Nothing is written without Step 2's approval of the exact rewrite, or a run that asked the human nothing (the all-auto check, #2938). | Restore the body from the issue's edit history. |
 | Step 1 | Clear `needs-refinement` on a story the gate now passes? | Cleared it through Step 5's `READY` branch. | Step 5 removes the label only on a `READY` verdict. | Re-add the label. |
 | Step 5 | Loop again after a re-gate that still rejects? | Looped back to Step 2 with the gate's remaining reasons as objections. | The label stays, and the human can stop from inside the loop. | Stop the loop; the label stays as the resume signal. |
 
@@ -528,6 +536,9 @@ gh issue view <N> --json number,title,body,state,labels,url,comments
   # A stale parked-state from a PREVIOUS epic-walk child would otherwise be read
   # as this child's, giving its record the wrong park_type.
   rm -f /tmp/parked-state.json /tmp/parked-comment.md /tmp/parked.json /tmp/conductor-defaults.json
+  # The all-auto check's inputs (#2938) are this run's alone: a single-issue
+  # run keeps them here, an epic walk child in its own directory (Step 2).
+  rm -rf /tmp/refine-issue-rounds && mkdir -p /tmp/refine-issue-rounds
   ```
 
   `T0` is **per-run, not per-session**: `wall_s` and `ts` are measures of *one*
@@ -560,7 +571,8 @@ gh issue view <N> --json number,title,body,state,labels,url,comments
   story here, so do not ask. Otherwise, if the label is **absent**, **proceed
   without asking**, and take the default with its notice (*Defaults taken instead
   of asking*, above): you can refine a story that was never formally gated, and
-  nothing is written without Step 2's approval of the exact rewrite.
+  nothing is written without Step 2's approval of the exact rewrite, unless no
+  question reaches the human at all (*Step 2 — the all-auto check*).
 - Read the issue's **prior gate comment(s)** in the thread — the refinement
   questions the gate already posted are the objections you start from.
 - **Resume a parked session if one exists (#578).** A prior run may have taken a
@@ -690,7 +702,11 @@ Then relay its returned JSON to the human in readable form:
 - **`proposed_prose`** / **`proposed_story_spec`** — the draft, when it has one.
 
 **Split the questions against the threshold, every round.** Write the agent's
-returned JSON to a file and run:
+returned JSON to a file and run it through the script. Keep this run's turn and
+split files of every round, and Step 2's verdict file of every sizing, in its
+rounds directory for the all-auto check: `/tmp/refine-issue-rounds/`, or a
+child's `/tmp/refine-issue-epic-<E>/<N>.rounds/` in an epic walk, which a
+redraft keeps.
 
 ```bash
 "<skill-base-dir>/scripts/split-refiner-questions.zsh" \
@@ -743,9 +759,10 @@ included) to `conversation` and call the agent again with that reply as
 `human_reply`. **Converge when the agent reports every objection
 `resolved: true` AND `questions == []`** — its `resolved_objections` drives this
 decision (that is its whole purpose). Then **size the draft** (*Step 2 — size
-the draft before approval*, below), and only a draft that does not stop is
-presented: the **final `proposed_prose` + `proposed_story_spec`**, for the
-human's **explicit approval of the exact rewrite**.
+the draft before approval*, below), then run **the all-auto check** (*Step 2 —
+the all-auto check*, below), and only a draft that does not stop and is not
+all-auto is presented: the **final `proposed_prose` + `proposed_story_spec`**,
+for the human's **explicit approval of the exact rewrite**.
 
 **Add the Decisions taken section before the approval.** Run
 `"<skill-base-dir>/scripts/render-decisions-taken.zsh" --split <split.json>` on
@@ -762,12 +779,16 @@ want changes, feed their reply back for another round.
 **In an epic walk the approval is the batch's (#2904).** A child's sized draft
 is not presented here: it becomes **pending approval**, and the Epic walk's
 phase B asks one approval for every pending child at once. The batch summary
-carries the same **Answers taken automatically** this step would show.
+carries the same **Answers taken automatically** this step would show. An
+all-auto child is never pending: phase A writes it back.
 
-**Auto-accept never approves the rewrite.** The threshold only answers the
-refiner's questions. The approval of the exact rewrite is always the human's,
-whatever the threshold. The one exception is the unattended follow-up mode
-below, where its `accept` decision stands in for that approval. Present it with a heading **Answers taken
+**Auto-accept approves the rewrite only when it answered everything.** The
+threshold only answers the refiner's questions. The approval of the exact
+rewrite is the human's, whatever the threshold, unless the refinement is
+all-auto (*Step 2 — the all-auto check*, below): no question reached the human,
+so there is no choice left to approve. The other exception is the unattended
+follow-up mode below, where its `accept` decision stands in for that approval.
+Present it with a heading **Answers taken
 automatically**, listing each auto-accepted `intent` or `gap` question, the
 answer, its confidence and its weakest criterion. The human can overturn any of them
 before approving. An overturned answer is a normal human reply: feed it back for
@@ -892,6 +913,46 @@ Branch on its exit:
   files the children a second time. Record the run as for exit 0, with
   `children_filed` the length of the report's `filed` list, and tell the human
   what is left to finish by hand.
+
+### Step 2 — the all-auto check (#2938)
+
+A refinement is **all-auto** when, across the whole run, every round's split
+file had an empty `ask` set (intent and gap questions only), every size check
+passed or was skipped, and no round's refiner turn carried a non-null
+`proposed_split`. On every converged draft that the size check did not stop,
+judge the whole run so far, from the repository root:
+
+```bash
+"<skill-base-dir>/scripts/all-auto-check.zsh" \
+  --split <round-1-split.json> --turn <round-1-turn.json> … \
+  --size-check <sizing-1-verdict.json> …
+```
+
+Pass one `--split` and one `--turn` per round of this run, and one
+`--size-check` per `size-check.zsh` run of this run, Step 1's included: its
+stdout on exit 0 or 1. For a sizing that ended in exit 3, or in a second exit
+2, write the one-line file `{"verdict":"unjudged"}` and pass that. Pass no
+other file: the conductor's defaults file and a resumed park's decisions file
+are not split files here. A run that loops back from Step 5 keeps every earlier
+round's files.
+
+It prints `{all_auto, reason}`, the reason the first that fails of
+`no-rounds`, `ask-question`, `size-check-stop`, `size-check-unjudged` and
+`proposed-split`, else `all-auto`. An exit 2 is your own malformed call or a
+malformed file, named on stderr: fix it and re-run once. A second exit 2 counts
+as not all-auto.
+
+- **`all-auto`** — no approval prompt. Add the Decisions taken section as for an
+  approved rewrite and run Step 2.5 and Step 3 at once, with
+  `provenance.generated_by` set to `issue-refiner via /development:refine-issue
+  (all answers auto-accepted)`. Then Steps 4 to 7 as written; Step 6's trail
+  names every answer the run took for the human.
+- **Any other reason** — present the exact rewrite for the human's approval, as
+  above. A refinement in which any intent or gap question reached the human is
+  never all-auto.
+
+The unattended follow-up mode never runs this check: its `accept` stands in for
+the approval, with its own provenance string.
 
 ### Step 2 — the typed parked exit (#578)
 
@@ -1023,7 +1084,8 @@ Then **emit telemetry** (Step 7, `outcome: "parked"` with the `park_type`) and
 
 ## Step 2.5 — spin out the test cases (hybrid model, #671)
 
-Once the human approves the rewrite, and **before** you write the block back
+Once the human approves the rewrite, or the all-auto check reports `all-auto`
+(#2938), and **before** you write the block back
 (Step 3), reconcile the approved `proposed_story_spec`'s `test_cases[]` into
 linked **`test-case` issues** — the hybrid model (#671): the cases live *both*
 structured in the block (the gate-validatable source of truth) *and* as separate
@@ -1083,7 +1145,9 @@ spun out to:
    ```
 
    Set the block's `provenance`: `generated_by` (e.g.
-   `"issue-refiner via /development:refine-issue"`), `generated_at` (an ISO-8601
+   `"issue-refiner via /development:refine-issue"`, or `"issue-refiner via
+   /development:refine-issue (all answers auto-accepted)"` for an all-auto
+   refinement), `generated_at` (an ISO-8601
    UTC timestamp), and `prose_sha256` = `$PROSE_HASH`. The agent left these
    `null` on purpose — **you** finalize the hash over the *approved* prose,
    because the approved prose (not the agent's draft) is authoritative.
@@ -1211,7 +1275,8 @@ re-states the child's literals from that file.
   (*Defaults taken instead of asking*, above). The unattended follow-up mode
   never loops back: it takes the stop below, its deferred route. In an epic
   walk the looped-back child redrafts and joins the **next batch** (the Epic
-  walk's batch loop-back rule), rather than being presented on its own.
+  walk's batch loop-back rule), rather than being presented on its own; a child
+  written back all-auto in phase A redrafts at once instead (#2938).
 
   **A stop the human takes in that loop before its next Step 3 write-back is a
   recorded ending, but NOT Step 2's parked exit.**
@@ -1243,6 +1308,13 @@ automatically**, each with its confidence and the threshold; its
 `implementation` answers are in the body's **Decisions taken** section. A later reader can then tell which parts of the
 story the human stated and which parts the refiner stated for them. This is the
 audit trail a later reader — or `resolve-issue` — relies on.
+
+**An all-auto refinement's trail (#2938)** says that the rewrite was written
+back without an approval prompt because every answer was auto-accepted. It lists
+every auto-taken answer of the run, `implementation` ones included, each with
+its question, answer, confidence and weakest criterion, and states the threshold
+with its source, as resolved before Step 0 (e.g. "auto-accept: 0.9 (from
+settings)").
 
 ## Step 7 — emit telemetry (every decided ending, #579)
 
@@ -1438,17 +1510,20 @@ fi
   write to GitHub — every side effect (edit, label, comment) is yours.
 - **Human-approved, human-authored write-back.** No bot token, no PR: you edit
   the issue with the human's auth, and only after they approve the exact rewrite
-  — the unattended follow-up mode's `accept` is the only exception.
+  — the two exceptions are an all-auto refinement (#2938), in which no
+  question reached the human, and the unattended follow-up mode's `accept`.
 - **Auto-accept answers questions, nothing else.** The threshold
   (`--auto-accept`, else `refine_auto_accept_threshold`, else 1) decides only
   which refiner questions you answer with the refiner's recommendation, and
-  `scripts/split-refiner-questions.zsh` makes that decision. It never approves
-  the rewrite, and it never answers the Step 0, Step 1 or Step 5 prompts; the
+  `scripts/split-refiner-questions.zsh` makes that decision. It approves the
+  rewrite only when it answered everything, as `scripts/all-auto-check.zsh`
+  decides, and it never answers the Step 0, Step 1 or Step 5 prompts; the
   unattended follow-up mode, the only exception, answers them as it lists.
   An attended run asks none of the three either: they are the conductor's
   defaults (*Defaults taken instead of asking*), which the threshold never
   decides. Every auto-taken answer is shown at approval and recorded in Step 6's trail,
   or, for an `implementation` answer, in the body's **Decisions taken** section.
+  An all-auto refinement shows no approval, and its trail lists every one.
 - **The label tells the truth.** Remove `needs-refinement` **only** on a `READY`
   re-gate; otherwise it stays.
 - **One canonical hash.** Compute `prose_sha256` with

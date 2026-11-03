@@ -5,9 +5,9 @@ readiness gate labelled `needs-refinement` and, with you present throughout, tur
 plain prose a reviewer can read, plus a machine-readable `story-spec/v1` block that resolve-issue builds and tests from.
 
 Two things hold for the whole run. **A human is always present** — the skill relays every question it cannot answer
-with confidence, and only you can approve a rewrite. And **nothing is written by a bot** — the issue edit and the
-comments go out under your own `gh` login, not through a PR. The colour key for the diagrams is on
-[How the plugins work](how-the-plugins-work.md).
+with confidence, and only you can approve a rewrite, unless no question reached you at all. And **nothing is
+written by a bot** — the issue edit and the comments go out under your own `gh` login, not through a PR. The colour
+key for the diagrams is on [How the plugins work](how-the-plugins-work.md).
 
 ![refine-issue end to end: diagnose, loop with the refiner until you approve a rewrite, write it back and
 re-gate](diagrams/refine-issue.svg)
@@ -51,8 +51,11 @@ re-gate](diagrams/refine-issue.svg)
    of files the plan would have touched, so the skill asks for a split straight away instead of offering to clear
    the label.
 8. **Approve the exact rewrite.** The skill shows you the final prose, the story spec and every answer that was taken
-   automatically, any of which you can overturn. Only your explicit approval of that exact text moves the run on.
-   Auto-accept never approves a rewrite.
+   automatically, any of which you can overturn. Only your explicit approval of that exact text moves the run on,
+   unless the refinement is all-auto. Auto-accept approves the rewrite only when it answered everything: when no
+   intent or gap question reached you, no size check stopped or could not be judged, and the refiner proposed no
+   split, the rewrite is written back without asking you, and the comment on the issue lists every answer taken for
+   you, with its confidence, its weakest criterion and the threshold.
 
 ### What one refinement turn looks like {#refine-what-one-refinement-turn-looks-like}
 
@@ -102,7 +105,8 @@ before it builds anything.
 
 Pointed at an epic, the skill lists the epic's open sub-issues that carry `needs-refinement` and walks them in two
 phases. First it drafts every child in turn, asking each child's questions as it goes; a child that ends early (already
-ready, parked, or split) finishes there, and a child that parks does not stop the walk. Then it shows you every
+ready, parked, or split) finishes there, and a child that parks does not stop the walk. An all-auto child, one whose
+questions were all answered automatically, is written back there too and never joins the batch. Then it shows you every
 finished draft at once and asks one approval for the batch: approve all, or name the children to revisit, to skip, or
 whose automatic answer you overturn. Revisited children, and any child the readiness gate still sends back after its
 rewrite, redraft and come back as the next batch. At the end it posts one summary on the epic: which children are

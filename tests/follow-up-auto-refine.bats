@@ -423,8 +423,8 @@ _turn()  { printf '%s\n' "{\"questions\":$1,\"resolved_objections\":$2${3-$DRAFT
   local s="$REPO_ROOT/development/skills/refine-issue/SKILL.md" t
   t="$(flat "$s")"
   grep -qxF '## Unattended follow-up mode (`--follow-up`, #2588)' "$s"
-  grep -qF '**Auto-accept never approves the rewrite.** The threshold only answers the refiner' <<< "$t"
-  grep -qF 'The one exception is the unattended follow-up mode below, where its `accept` decision stands in for that approval.' <<< "$t"
+  grep -qF '**Auto-accept approves the rewrite only when it answered everything.** The threshold only answers the refiner' <<< "$t"
+  grep -qF 'The other exception is the unattended follow-up mode below, where its `accept` decision stands in for that approval.' <<< "$t"
   grep -qF '**This mode' <<< "$t"
   grep -qF 'stands in for the human' <<< "$t"
   grep -qF '**A park never stops the caller**: report it and return, so the calling run, its epic walk and the next follow-up go on.' <<< "$t"
@@ -455,8 +455,8 @@ _turn()  { printf '%s\n' "{\"questions\":$1,\"resolved_objections\":$2${3-$DRAFT
   grep -qF 'failed label removal — report it.' <<< "$t"
   grep -qF 'Step 2.5 has no prompt: on `accept` it runs as written, before Step 3.' <<< "$t"
   grep -qF 'write it back as Steps 2.5 and 3 do' <<< "$t"
-  grep -qF 'only after they approve the exact rewrite — the unattended follow-up mode' <<< "$t"
-  grep -qF '`accept` is the only exception.' <<< "$t"
+  grep -qF 'only after they approve the exact rewrite — the two exceptions are an all-auto refinement (#2938), in which no question reached the human, and the unattended follow-up mode' <<< "$t"
+  grep -qF 's `accept`. - **Auto-accept answers questions, nothing else.**' <<< "$t"
   grep -qF 'never answers the Step 0, Step 1 or Step 5 prompts; the unattended follow-up mode, the only exception, answers them as it lists.' <<< "$t"
   # C: exit 2
   grep -qF 'from `follow-up-auto-refine.zsh` or `follow-up-origin.zsh` is your own malformed input: fix it and re-run once. A second exit 2 stops the mode for that follow-up: report it and write nothing, so the label stays.' <<< "$t"
@@ -512,9 +512,9 @@ _turn()  { printf '%s\n' "{\"questions\":$1,\"resolved_objections\":$2${3-$DRAFT
   local a; a="$(flat "$REPO_ROOT/ARCHITECTURE.md")"
   grep -qF '### The unattended follow-up mode — `refine-issue --follow-up` (#2588)' "$REPO_ROOT/ARCHITECTURE.md"
   grep -qF 'This accept stands in for the human' <<< "$a"
-  grep -qF 'Everywhere else auto-accept still never approves a rewrite.' <<< "$a"
+  grep -qF 'Everywhere else auto-accept approves the rewrite only when it answered everything: an all-auto refinement (#2938) is written back without the approval prompt' <<< "$a"
   grep -qF 'A second optional key (#2588), `auto_refinement`' <<< "$a"
   local h; h="$(flat "$REPO_ROOT/docs/how-to/let-refine-issue-answer-confident-questions.md")"
   grep -qF '## Follow-ups the pipeline filed' "$REPO_ROOT/docs/how-to/let-refine-issue-answer-confident-questions.md"
-  grep -qF 'This is the one place a rewrite is accepted for you.' <<< "$h"
+  grep -qF 'Outside a refinement that answered every question, this is the one place a rewrite is accepted for you.' <<< "$h"
 }

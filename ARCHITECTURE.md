@@ -7929,8 +7929,10 @@ a script with no GitHub calls.
   called again with the automatic answers. An accepted draft is written back
   like a human-approved one, with `provenance.generated_by` naming the mode, and
   re-gated: `READY` removes `needs-refinement`. This accept stands in for the
-  human's approval in this mode only. Everywhere else auto-accept still never
-  approves a rewrite.
+  human's approval in this mode. Everywhere else auto-accept approves the
+  rewrite only when it answered everything: an all-auto refinement (#2938) is
+  written back without the approval prompt, and any other refinement waits for
+  the human's approval of the exact rewrite.
 - **Park routes.** A park takes refine-issue's typed parked exit with the label
   kept and no block written, so a human run resumes it; it never stops the
   calling run or its epic walk.
@@ -8808,12 +8810,26 @@ confident enough.
   `gap` also carries `proposed_doc_change` (`target`, a repo-relative path;
   `section`; `wording`), the document change that would close the gap; one
   missing or malformed is the refiner breaking its contract, exit 2 (#2901).
-- **Scope:** questions only. The human's approval of the exact rewrite before
-  the Step 3 write-back is unchanged, and so is the rule that the write-back
-  is human-authored. So are the Step 0, Step 1 and Step 5 prompts. Every
-  auto-accepted answer is listed at approval and in Step 6's before/after
-  comment. The refiner treats an auto-accepted human turn as an answer, never
-  as a waiver.
+- **Scope:** questions, and the approval of an all-auto refinement (#2938).
+  Auto-accept approves the rewrite only when it answered everything. A
+  refinement is **all-auto** when, across the whole run, every round's
+  `split-refiner-questions.zsh` ask set (intent and gap questions only) was
+  empty, every size check passed or was skipped, and no round's
+  `issue-refiner` turn carried a non-null `proposed_split`.
+  `development/skills/refine-issue/scripts/all-auto-check.zsh` decides it, and
+  reports the first failing reason in the order `no-rounds`, `ask-question`,
+  `size-check-stop`, `size-check-unjudged`, `proposed-split`, else `all-auto`.
+  An all-auto refinement runs Step 2.5 and Step 3 with no approval prompt, with
+  `provenance.generated_by` "issue-refiner via /development:refine-issue (all
+  answers auto-accepted)"; in an epic walk it is written back before the batch
+  and never enters it (#2904). Any other refinement still presents the exact
+  rewrite for the human's approval before the Step 3 write-back. The write-back
+  is human-authored either way. The Step 0, Step 1 and Step 5 prompts are
+  unchanged. Every auto-accepted answer is listed in Step 6's before/after
+  comment, and at approval when there is one; an all-auto refinement's
+  comment lists every auto-taken answer with its confidence and weakest
+  criterion, and the threshold with its source. The refiner treats an
+  auto-accepted human turn as an answer, never as a waiver.
 - **Telemetry:** unchanged. The `refine-issue` payload carries no auto-accept
   count.
 
