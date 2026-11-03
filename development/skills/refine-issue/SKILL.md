@@ -540,8 +540,9 @@ gh issue view <N> --json number,title,body,state,labels,url,comments
   # as this child's, giving its record the wrong park_type.
   rm -f /tmp/parked-state.json /tmp/parked-comment.md /tmp/parked.json /tmp/conductor-defaults.json
   # The all-auto check's inputs (#2938) are this run's alone: a single-issue
-  # run keeps them here, an epic walk child in its own directory (Step 2).
-  rm -rf /tmp/refine-issue-rounds && mkdir -p /tmp/refine-issue-rounds
+  # run keeps them in a directory named for its issue, so a concurrent session
+  # on another issue never shares it; an epic walk child uses its own (Step 2).
+  rm -rf /tmp/refine-issue-<N>.rounds && mkdir -p /tmp/refine-issue-<N>.rounds
   ```
 
   `T0` is **per-run, not per-session**: `wall_s` and `ts` are measures of *one*
@@ -606,7 +607,7 @@ gh issue view <N> --json number,title,body,state,labels,url,comments
   ```bash
   # only when a parked state was read; an epic walk child uses its own
   # /tmp/refine-issue-epic-<E>/<N>.rounds/ instead, created here if missing
-  mkdir -p /tmp/refine-issue-rounds && touch /tmp/refine-issue-rounds/resumed
+  mkdir -p /tmp/refine-issue-<N>.rounds && touch /tmp/refine-issue-<N>.rounds/resumed
   ```
 
 ## Step 1 — diagnose (fresh objections)
@@ -718,7 +719,7 @@ Then relay its returned JSON to the human in readable form:
 **Split the questions against the threshold, every round.** Write the agent's
 returned JSON to a file and run it through the script. Keep this run's turn and
 split files of every round, and every sizing's verdict file, Step 1's and Step
-2's, in its rounds directory for the all-auto check: `/tmp/refine-issue-rounds/`,
+2's, in its rounds directory for the all-auto check: `/tmp/refine-issue-<N>.rounds/`,
 or a child's `/tmp/refine-issue-epic-<E>/<N>.rounds/` in an epic walk, which a
 redraft keeps.
 

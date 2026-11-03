@@ -69,6 +69,27 @@ setup() {
   [ "$output" = '{"all_auto":false,"reason":"size-check-unjudged"}' ]
 }
 
+@test "an ask entry only in a middle round: ask-question" {
+  run -0 zsh "$S" --split "$D/split-empty.json" --split "$D/split-ask.json" --split "$D/split-empty.json" \
+    --turn "$D/turn-null.json" --turn "$D/turn-null.json" --turn "$D/turn-null.json" --size-check "$D/pass.json"
+  [ "$output" = '{"all_auto":false,"reason":"ask-question"}' ]
+}
+
+@test "a non-null proposed_split only in a middle or last turn: proposed-split" {
+  run -0 zsh "$S" --split "$D/split-empty.json" --split "$D/split-empty.json" --split "$D/split-empty.json" \
+    --turn "$D/turn-null.json" --turn "$D/turn-split.json" --turn "$D/turn-null.json" --size-check "$D/pass.json"
+  [ "$output" = '{"all_auto":false,"reason":"proposed-split"}' ]
+  run -0 zsh "$S" --split "$D/split-empty.json" --split "$D/split-empty.json" \
+    --turn "$D/turn-null.json" --turn "$D/turn-split.json" --size-check "$D/pass.json"
+  [ "$output" = '{"all_auto":false,"reason":"proposed-split"}' ]
+}
+
+@test "a single-issue run's rounds directory is named for its issue" {
+  local t; t="$(flat "$SKILL")"
+  contains "$t" 'a single-issue # run keeps them in a directory named for its issue, so a concurrent session # on another issue never shares it; an epic walk child uses its own (Step 2).'
+  lacks "$t" '/tmp/refine-issue-rounds'
+}
+
 @test "a non-null proposed_split in a non-final turn: proposed-split" {
   run -0 zsh "$S" --split "$D/split-empty.json" --turn "$D/turn-split.json" \
     --split "$D/split-empty.json" --turn "$D/turn-null.json" --size-check "$D/pass.json"
@@ -245,7 +266,7 @@ setup() {
   contains "$t" '- **Any other reason** — present the exact rewrite for the human'"'"'s approval, as above. A refinement in which any intent or gap question reached the human is never all-auto.'
   contains "$t" 'The unattended follow-up mode never runs this check: its `accept` stands in for the approval, with its own provenance string.'
   contains "$t" 'Once the human approves the rewrite, or the all-auto check reports `all-auto` (#2938), and **before** you write the block back'
-  contains "$t" 'rm -rf /tmp/refine-issue-rounds && mkdir -p /tmp/refine-issue-rounds'
+  contains "$t" 'rm -rf /tmp/refine-issue-<N>.rounds && mkdir -p /tmp/refine-issue-<N>.rounds'
 }
 
 @test "SKILL.md: Step 6's all-auto trail lists every answer with confidence, weakest criterion and the threshold's source" {
@@ -308,11 +329,11 @@ setup() {
 
 @test "SKILL.md: every sizing's verdict file, Step 1's included, is kept in the run's rounds directory" {
   local t; t="$(flat "$SKILL")"
-  contains "$t" 'Keep this run'"'"'s turn and split files of every round, and every sizing'"'"'s verdict file, Step 1'"'"'s and Step 2'"'"'s, in its rounds directory for the all-auto check: `/tmp/refine-issue-rounds/`, or a child'"'"'s `/tmp/refine-issue-epic-<E>/<N>.rounds/` in an epic walk, which a redraft keeps.'
+  contains "$t" 'Keep this run'"'"'s turn and split files of every round, and every sizing'"'"'s verdict file, Step 1'"'"'s and Step 2'"'"'s, in its rounds directory for the all-auto check: `/tmp/refine-issue-<N>.rounds/`, or a child'"'"'s `/tmp/refine-issue-epic-<E>/<N>.rounds/` in an epic walk, which a redraft keeps.'
   contains "$t" 'Keep this sizing'"'"'s verdict file in the rounds directory for the all-auto check: its stdout on exit 0 or 1, else the one-line file `{"verdict":"unjudged"}`.'
   contains "$t" 'On every other converged draft that the size check did not stop, judge the whole run so far, from the repository root:'
   contains "$t" 'Pass no other file: the conductor'"'"'s defaults file and a resumed park'"'"'s decisions file are not split files here. A run that loops back from Step 5 keeps every earlier round'"'"'s files.'
-  contains "$t" '# The all-auto check'"'"'s inputs (#2938) are this run'"'"'s alone: a single-issue # run keeps them here, an epic walk child in its own directory (Step 2).'
+  contains "$t" '# The all-auto check'"'"'s inputs (#2938) are this run'"'"'s alone: a single-issue # run keeps them in a directory named for its issue'
 }
 
 @test "SKILL.md: the size check's exits route through the all-auto check before any approval" {
@@ -373,7 +394,7 @@ setup() {
 @test "a resumed parked session is never all-auto, and a second exit 2 from the check counts as not all-auto" {
   local s; s="$(tr '\n' ' ' < "$REPO_ROOT/development/skills/refine-issue/SKILL.md" | tr -s ' ')"
   contains "$s" 'A resumed session is **never all-auto** (#2938): its parked questions already reached the human, and Step 0 emptied the rounds directory that would have shown it, so its rewrite is always presented for approval.'
-  contains "$s" '# only when a parked state was read; an epic walk child uses its own # /tmp/refine-issue-epic-<E>/<N>.rounds/ instead, created here if missing mkdir -p /tmp/refine-issue-rounds && touch /tmp/refine-issue-rounds/resumed'
+  contains "$s" '# only when a parked state was read; an epic walk child uses its own # /tmp/refine-issue-epic-<E>/<N>.rounds/ instead, created here if missing mkdir -p /tmp/refine-issue-<N>.rounds && touch /tmp/refine-issue-<N>.rounds/resumed'
   contains "$s" 'fix it and re-run once. A `--split` and `--turn` count mismatch'
   contains "$s" 'A resumed parked session (its rounds directory holds `resumed`, Step 0) is never all-auto: skip the check and take *Any other reason* below.'
   contains "$s" 'never by dropping the turn file of a round whose questions went to the human. A second exit 2 counts as not all-auto.'
