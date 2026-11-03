@@ -387,3 +387,10 @@ setup() {
 @test "the header documents --help as exit 0" {
   contains "$(flat "$S")" '# 0 also for -h/--help, which prints the usage on stderr and judges nothing.'
 }
+
+@test "the description and Step 3 name the all-auto exception to human approval" {
+  local t; t="$(flat "$SKILL")"
+  contains "$t" 'relaying between it and the human until they approve a rewrite, or with no approval prompt when every question was answered automatically and no size check or split intervened (all-auto, #2938).'
+  contains "$t" 'This edit is **human-authored**, and human-approved unless the refinement was all-auto (Step 2, #2938)'
+  lacks "$t" 'This edit is **human-approved and human-authored**'
+}

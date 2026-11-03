@@ -6,7 +6,9 @@ description: >
   is present throughout: you diagnose the story with `story-readiness`, then loop
   the `issue-refiner` agent (per-turn: explanation, questions, recommendations, a
   draft rewrite, a proposed `story-spec/v1` block) relaying between it and the
-  human until they approve a rewrite. Then you write back the human-approved prose
+  human until they approve a rewrite, or with no approval prompt when every
+  question was answered automatically and no size check or split intervened
+  (all-auto, #2938). Then you write back the approved prose
   plus a provenance-stamped `story-spec` block (a human-authored issue edit, NOT a
   bot PR), re-gate, remove the `needs-refinement` label only if READY, and post a
   before/after comment trail. When a session can't converge, take a typed parked
@@ -1151,7 +1153,8 @@ issues — same-PR closure (`resolve-issue`, #577/#696) makes ordering moot.
 
 ## Step 3 — write back the approved rewrite (human-authored)
 
-This edit is **human-approved and human-authored** — you run it with the
+This edit is **human-authored**, and human-approved unless the refinement was
+all-auto (Step 2, #2938) — you run it with the
 session's own `gh` auth (the human's identity), **not** a bot token and **not** a
 PR. You are editing the issue in place.
 
