@@ -192,9 +192,10 @@ fresh() {
   contains "$(flat "$SKILL")" 'whenever its work stops to wait — it becomes pending, or it loops back (it redrafts only in the next phase A) — set `waiting_since` to `$(date +%s)`; whenever its own work resumes (its Steps 2.5 to 7, or its redraft), first write the wait into its state file `f` (`/tmp/refine-issue-epic-<E>/<N>.json`) with: ```bash jq --argjson now "$(date +%s)" '"'"'.paused_s += ($now - .waiting_since) | .waiting_since = null'"'"' "$f" > "$f.tmp" && mv "$f.tmp" "$f" ```'
 }
 
-@test "the auto-accept guardrail is unchanged: a batch never lets auto-accept approve a rewrite" {
+@test "the auto-accept guardrail: a batch lets auto-accept approve only an all-auto child's rewrite (#2938)" {
   local t; t="$(flat "$SKILL")"
-  contains "$t" '**Auto-accept never approves the rewrite.** The threshold only answers the refiner'"'"'s questions.'
+  contains "$t" '**Auto-accept approves the rewrite only when it answered everything.** The threshold only answers the refiner'"'"'s questions.'
+  contains "$t" 'An all-auto child is never pending: phase A writes it back, until *The all-auto loop is bounded* (below) sends its next draft to the batch.'
   contains "$t" 'The batch summary carries the same **Answers taken automatically** this step would show.'
 }
 

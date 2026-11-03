@@ -8,7 +8,8 @@ skill answers the questions whose score is high enough itself, and asks you
 only the rest.
 
 You still approve the finished rewrite before anything is written to the
-issue. The threshold only answers questions. When you refine an epic, the
+issue, unless the threshold answered every question. The threshold only answers
+questions. When you refine an epic, the
 skill drafts every child first and asks you once for the whole batch: you
 approve all of them, or name the children to revisit or skip, and the batch
 lists each child's automatically taken answers so you can overturn one.
@@ -96,8 +97,17 @@ body.
 
 ## What it does not do
 
-It never approves the rewrite for you. The threshold decides nothing else
-either. Three questions are no longer asked at all, whatever the threshold:
+Auto-accept approves the rewrite only when it answered everything. When no
+intent or gap question reached you, no size check stopped or could not be
+judged, and the refiner proposed no split, the rewrite is written back without
+asking you. The comment on the issue then lists every answer taken for you,
+with its confidence and weakest criterion, and the threshold and where it came
+from. In an epic, such a child is written back while the children are drafted
+and is not in the batch you approve. If the readiness gate rejects two such
+rewrites, the next draft waits for your approval. A refinement resumed from a
+parked comment always waits for it too, since its earlier questions already
+reached you. The threshold decides nothing else.
+Three questions are no longer asked at all, whatever the threshold:
 whether to refine an issue that is not marked `needs-refinement`, whether to
 clear the label of a story that already passes, and whether to loop again after
 a failed re-gate. The skill takes the safe answer to each, prints one line, and
@@ -123,8 +133,9 @@ so `/development:resolve-issue` refines these follow-ups for you, with
   the same threshold as above to answer the refiner's questions.
 - **When it is accepted.** Only when every question was answered at or above the
   threshold and every objection is resolved, within three rounds. The rewrite is
-  then written back without your approval, and the readiness gate runs. This is
-  the one place a rewrite is accepted for you.
+  then written back without your approval, and the readiness gate runs. Outside
+  a refinement that answered every question, this is the one place a rewrite is
+  accepted for you.
 - **When it is not.** Any question below the threshold, or no agreement after
   three rounds, parks the follow-up. It stays `needs-refinement`, and
   `/development:refine-issue <issue>` resumes from where it stopped.

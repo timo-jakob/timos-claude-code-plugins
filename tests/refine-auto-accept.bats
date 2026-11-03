@@ -13,7 +13,8 @@
 #     thousandths with `>=`; a plain-string, unrecommended, unscored or
 #     malformed question is always asked.
 #   * WIRING — the conductor resolves the threshold, splits every turn with the
-#     script, still requires the human's approval of the exact rewrite, and
+#     script, still requires the human's approval of the exact rewrite unless
+#     the refinement is all-auto (#2938), and
 #     lists the auto-taken answers there and in the Step 6 trail; the agent
 #     emits the scored shape; the how-to and the settings table name the
 #     variable.
@@ -416,8 +417,8 @@ gap_split() {
   contains "$(cat "$SKILL")" '--auto-accept'
 }
 
-@test "auto-accept never skips the approval of the exact rewrite" {
-  contains "$(cat "$SKILL")" 'Auto-accept never approves the rewrite'
+@test "auto-accept skips the approval of the exact rewrite only when it answered everything (#2938)" {
+  contains "$(cat "$SKILL")" 'Auto-accept approves the rewrite only when it answered everything'
   contains "$(cat "$SKILL")" 'Answers taken automatically'
 }
 

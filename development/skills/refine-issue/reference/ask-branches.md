@@ -22,12 +22,12 @@ before it ships, and a row whose text moved is updated here.
 | id | file | anchors | kind | outcome |
 |---|---|---|---|---|
 | RF-01 | SKILL.md | `ask for native sub-issues, or for the list` · `halt and ask rather than` · `ask for native sub-issues or for the list` | gap | human-owned: only the author knows which issues an epic body's near-miss or mistyped lines meant as its children |
-| RF-02 | SKILL.md | `## Defaults taken instead of asking (#2903)` · `if the label is **absent**, **proceed` | implementation | **default:** proceed without the label, with a notice; nothing is written without the approval of the exact rewrite |
+| RF-02 | SKILL.md | `## Defaults taken instead of asking (#2903)` · `if the label is **absent**, **proceed` | implementation | **default:** proceed without the label, with a notice; nothing is written without the approval of the exact rewrite, or an all-auto refinement (#2938) |
 | RF-03 | SKILL.md | `Step 5 without asking** — no loop needed` | implementation | **default:** clear the label through Step 5's `READY` branch |
 | RF-04 | SKILL.md | `relay these as before` | intent / gap | human-owned: the refiner's own questions, governed by the auto-accept threshold and #2898's refiner children |
-| RF-05 | SKILL.md | `explicit approval of the exact rewrite` | intent | human-owned: auto-accept never approves a rewrite (#2898) |
+| RF-05 | SKILL.md | `explicit approval of the exact rewrite` | intent | human-owned: auto-accept approves the rewrite only when it answered everything (#2898) — the all-auto exception: a refinement `scripts/all-auto-check.zsh` reports `all-auto` (no intent or gap question reached the human, no size check stopped or went unjudged, no split was proposed) is written back with no approval prompt (#2938) |
 | RF-06 | SKILL.md | `show no children and ask once` · `` then ask once (`AskUserQuestion`) `` | intent | human-owned: a split restructures the backlog |
 | RF-07 | SKILL.md | `Relay its stderr and offer the parked exit` | gap | human-owned: the filing failure's cause is unknown |
 | RF-08 | SKILL.md | `**can't converge now**` | intent | human-owned: the human decides the session cannot converge now |
 | RF-09 | SKILL.md | `**Loop back to Step 2 without asking**` | implementation | **default:** loop back to Step 2 with the gate's remaining reasons as objections; the human can still stop from inside the loop |
-| RF-10 | SKILL.md | `` Show it, then ask once (`AskUserQuestion`): **Approve all** `` | intent | human-owned: the batch approval of an epic walk's rewrites (#2904) is RF-05's approval, asked once per batch instead of once per child |
+| RF-10 | SKILL.md | `` Show it, then ask once (`AskUserQuestion`): **Approve all** `` | intent | human-owned: the batch approval of an epic walk's rewrites (#2904) is RF-05's approval, asked once per batch instead of once per child; an all-auto child is written back in phase A and never batched (#2938) |

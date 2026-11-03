@@ -110,7 +110,9 @@ section() {
   contains "$s" '"<skill-base-dir>/scripts/file-split-children.zsh" --repo "$REPO" --parent <N> --plan <plan.json>'
   contains "$s" 'and `SIZE_PREFLIGHT`'"'"'s `children_filed` to the length of its `filed` list'
   contains "$s" "Never re-run it — a re-run"
-  contains "$s" "- **Exit 0** — \`pass\` or \`skipped\`: present the draft for approval as above."
+  contains "$s" "- **Exit 0** — \`pass\` or \`skipped\`: keep its stdout as this sizing's verdict
+  file, run the all-auto check (below), and present the draft for approval as
+  above only if it is not all-auto."
   contains "$s" "an empty \`files\` array when no concrete path can be"
   contains "$s" 'Record the run as for exit 0, with
   `children_filed` the length of the report'"'"'s `filed` list'
@@ -196,6 +198,7 @@ section() {
   grep -qF 's size-check exit 1, which with an inventory is the re-sized stop.' <<< "$t"
   grep -qF 'write it to a file and run `size-check.zsh --file <it>` from the repository root.' <<< "$t"
   grep -qF 'Append the size objection to the verdict' <<< "$t"
+  grep -qF 'Exit 2 or 3, after one re-run of a malformed call: the fallback below.' <<< "$t"
 }
 
 @test "#2602 refine-issue never sets or clears needs-split itself, and states each ending" {
