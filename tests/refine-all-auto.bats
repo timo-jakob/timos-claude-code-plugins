@@ -415,3 +415,16 @@ setup() {
   contains "$t" 'This edit is **human-authored**, and human-approved unless the refinement was all-auto (Step 2, #2938)'
   lacks "$t" 'This edit is **human-approved and human-authored**'
 }
+
+@test "a jq failure while judging is exit 2, never all-auto" {
+  # A jq that validates (jq -e -s) normally but fails every judging call (jq -e without -s).
+  local real_jq; real_jq="$(command -v jq)"
+  mkdir -p "$BATS_TEST_TMPDIR/shim"
+  printf '#!/bin/sh\ncase " $* " in *" -s "*|*" -n"*) exec "%s" "$@" ;; esac\nexit 5\n' "$real_jq" > "$BATS_TEST_TMPDIR/shim/jq"
+  chmod +x "$BATS_TEST_TMPDIR/shim/jq"
+  run -2 --separate-stderr env PATH="$BATS_TEST_TMPDIR/shim:$PATH" zsh "$S" \
+    --split "$D/split-empty.json" --turn "$D/turn-null.json" --size-check "$D/pass.json"
+  [ -z "$output" ]
+  contains "$stderr" "all-auto-check: jq failed judging $D/split-empty.json"
+  contains "$(flat "$S")" '# 2 also when jq fails while judging a file it has validated'
+}

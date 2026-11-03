@@ -49,6 +49,8 @@
 #           file the conductor forgot can never read as all-auto; stderr names
 #           the counts. With no --split at all the result stays no-rounds.
 #         0 also for -h/--help, which prints the usage on stderr and judges nothing.
+#         2 also when jq fails while judging a file it has validated: a failure
+#           never counts as a condition not met, so it can never read as all-auto.
 
 emulate -L zsh
 setopt no_unset pipe_fail
@@ -105,23 +107,29 @@ if (( ${#splits} > 0 )); then
     print -r -u2 -- "all-auto-check: --split given but no --size-check: got ${#splits} --split and 0 --size-check"; exit 2 }
 fi
 
-# Judge, in the documented order.
-local reason="all-auto" v
+# Judge, in the documented order. A jq failure while judging fails closed:
+# exit 2, never a condition read as not met.
+local reason="all-auto" v rc
+judge() {  # $1 = jq filter, $2 = file; 0 true, 1 false, else exit 2
+  jq -e "$1" "$2" >/dev/null 2>&1; rc=$?
+  (( rc <= 1 )) && return $rc
+  print -r -u2 -- "all-auto-check: jq failed judging $2"; exit 2
+}
 verdict_seen() {  # $1 = verdict; true when any --size-check file carries it
   for v in "${sizes[@]}"; do
-    [[ "$(jq -r '.verdict' "$v")" == "$1" ]] && return 0
+    judge ".verdict == \"$1\"" "$v" && return 0
   done
   return 1
 }
 any_ask() {
   for v in "${splits[@]}"; do
-    jq -e '.ask | length > 0' "$v" >/dev/null && return 0
+    judge '.ask | length > 0' "$v" && return 0
   done
   return 1
 }
 any_split() {
   for v in "${turns[@]}"; do
-    jq -e '.proposed_split != null' "$v" >/dev/null && return 0
+    judge '.proposed_split != null' "$v" && return 0
   done
   return 1
 }
