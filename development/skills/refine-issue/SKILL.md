@@ -291,10 +291,11 @@ this is the guided pass that clears them.
    section and run its Steps 2.5, 3, 4, 5, 6 and 7 at once, in this phase A, as
    Step 2 says for an all-auto refinement: its `phase` becomes `ended`, or
    `drafting` when its re-gate loops it back, and then it redrafts at once,
-   still in this phase A, with no wait recorded. Any other reason: add its
-   Decisions taken section to the draft as Step 2 says, re-read the issue's
-   current block into `old_block`, write its rewrite to `rewrite_path`, set
-   `phase` to `pending`, and go on to the next child.
+   still in this phase A, with no wait recorded. Once the all-auto loop's bound
+   (Step 2) is reached, its next draft is pending like any other. Any other
+   reason: add its Decisions taken section to the draft as Step 2 says, re-read
+   the issue's current block into `old_block`, write its rewrite to
+   `rewrite_path`, set `phase` to `pending`, and go on to the next child.
 
    **Phase B — one approval for the batch.** Once every child of this pass has
    ended or is pending, render the batch. When no child is pending — every one
@@ -501,7 +502,7 @@ Each default does two things:
 |---|---|---|---|---|
 | Step 0 | Refine an issue that is not marked `needs-refinement`? | Refined it without the label. | Nothing is written without Step 2's approval of the exact rewrite, or a run that asked the human nothing (the all-auto check, #2938). | Restore the body from the issue's edit history. |
 | Step 1 | Clear `needs-refinement` on a story the gate now passes? | Cleared it through Step 5's `READY` branch. | Step 5 removes the label only on a `READY` verdict. | Re-add the label. |
-| Step 5 | Loop again after a re-gate that still rejects? | Looped back to Step 2 with the gate's remaining reasons as objections. | The label stays, and the human can stop from inside the loop. | Stop the loop; the label stays as the resume signal. |
+| Step 5 | Loop again after a re-gate that still rejects? | Looped back to Step 2 with the gate's remaining reasons as objections. | The label stays, and the human can stop from inside the loop; after a second rejected all-auto write-back, the next draft goes to the human (#2938). | Stop the loop; the label stays as the resume signal. |
 
 ## Step 0 — fetch, and check the precondition
 
@@ -647,7 +648,9 @@ before anything else:
   <it>` from the repository root. Exit 1: the objection carries the re-sized
   triggers and counts. Exit 0: the plan now passes, so there is **no**
   objection; tell the human the `needs-split` label looks stale. Exit 2 or 3,
-  after one re-run of a malformed call: the fallback below.
+  after one re-run of a malformed call: the fallback below. Keep this sizing's
+  verdict file in the rounds directory for the all-auto check: its stdout on
+  exit 0 or 1, else the one-line file `{"verdict":"unjudged"}`.
 - **Without one** (the fallback), the objection carries the reader's `summary`,
   and Step 2's size check sizes only the draft's declared inventory, as before.
 
@@ -703,9 +706,9 @@ Then relay its returned JSON to the human in readable form:
 
 **Split the questions against the threshold, every round.** Write the agent's
 returned JSON to a file and run it through the script. Keep this run's turn and
-split files of every round, and Step 2's verdict file of every sizing, in its
-rounds directory for the all-auto check: `/tmp/refine-issue-rounds/`, or a
-child's `/tmp/refine-issue-epic-<E>/<N>.rounds/` in an epic walk, which a
+split files of every round, and every sizing's verdict file, Step 1's and Step
+2's, in its rounds directory for the all-auto check: `/tmp/refine-issue-rounds/`,
+or a child's `/tmp/refine-issue-epic-<E>/<N>.rounds/` in an epic walk, which a
 redraft keeps.
 
 ```bash
@@ -780,7 +783,8 @@ want changes, feed their reply back for another round.
 is not presented here: it becomes **pending approval**, and the Epic walk's
 phase B asks one approval for every pending child at once. The batch summary
 carries the same **Answers taken automatically** this step would show. An
-all-auto child is never pending: phase A writes it back.
+all-auto child is never pending: phase A writes it back, until *The all-auto
+loop is bounded* (below) sends its next draft to the batch.
 
 **Auto-accept approves the rewrite only when it answered everything.** The
 threshold only answers the refiner's questions. The approval of the exact
@@ -857,12 +861,16 @@ named), and run, from the repository root:
 
 It applies the size pre-flight's own thresholds; this skill restates none.
 
-- **Exit 0** — `pass` or `skipped`: present the draft for approval as above.
+- **Exit 0** — `pass` or `skipped`: keep its stdout as this sizing's verdict
+  file, run the all-auto check (below), and present the draft for approval as
+  above only if it is not all-auto.
 - **Exit 2** — your own malformed call: fix it and re-run once.
-- **Exit 3, or a second 2** — the inventory could not be judged. Tell the human
-  in one line and present the draft: resolve-issue §2's pre-flight remains the
-  backstop.
-- **Exit 1** — `stop`. Do **not** present the draft for approval. Relay the
+- **Exit 3, or a second 2** — the inventory could not be judged. Write the
+  one-line file `{"verdict":"unjudged"}` as this sizing's verdict file, run the
+  all-auto check (below), tell the human in one line and present the draft:
+  resolve-issue §2's pre-flight remains the backstop.
+- **Exit 1** — `stop`. Do **not** present the draft for approval. Keep its
+  stdout as this sizing's verdict file. Relay the
   triggers and counts, and run another refiner turn with the stop as an
   objection: *the draft's declared inventory stops the size check
   (`<triggers>`, `<counts>`); propose a split into child stories, each a bounded
@@ -950,6 +958,14 @@ as not all-auto.
 - **Any other reason** — present the exact rewrite for the human's approval, as
   above. A refinement in which any intent or gap question reached the human is
   never all-auto.
+
+**The all-auto loop is bounded.** On a Step 5 `NEEDS_REFINEMENT` re-gate after
+an all-auto write-back, append one line to `all-auto-rejections` in the run's
+rounds directory. Once that file holds two lines, the re-gate has rejected two
+all-auto write-backs: the next draft and every later one of this run go to the
+human for approval as for any other reason, whatever the check reports, so the
+human can stop the loop. In an epic walk such a child's draft is pending and
+joins the next batch.
 
 The unattended follow-up mode never runs this check: its `accept` stands in for
 the approval, with its own provenance string.
@@ -1276,7 +1292,9 @@ re-states the child's literals from that file.
   never loops back: it takes the stop below, its deferred route. In an epic
   walk the looped-back child redrafts and joins the **next batch** (the Epic
   walk's batch loop-back rule), rather than being presented on its own; a child
-  written back all-auto in phase A redrafts at once instead (#2938).
+  written back all-auto in phase A redrafts at once instead (#2938). A second
+  rejected all-auto write-back sends the next draft to the human (*The all-auto
+  loop is bounded*, Step 2).
 
   **A stop the human takes in that loop before its next Step 3 write-back is a
   recorded ending, but NOT Step 2's parked exit.**

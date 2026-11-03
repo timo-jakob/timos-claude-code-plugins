@@ -103,7 +103,8 @@ judged, and the refiner proposed no split, the rewrite is written back without
 asking you. The comment on the issue then lists every answer taken for you,
 with its confidence and weakest criterion, and the threshold and where it came
 from. In an epic, such a child is written back while the children are drafted
-and is not in the batch you approve. The threshold decides nothing else
+and is not in the batch you approve. If the readiness gate rejects two such
+rewrites, the next draft waits for your approval. The threshold decides nothing else
 either. Three questions are no longer asked at all, whatever the threshold:
 whether to refine an issue that is not marked `needs-refinement`, whether to
 clear the label of a story that already passes, and whether to loop again after

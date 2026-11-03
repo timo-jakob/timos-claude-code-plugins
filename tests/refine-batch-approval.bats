@@ -195,7 +195,7 @@ fresh() {
 @test "the auto-accept guardrail: a batch lets auto-accept approve only an all-auto child's rewrite (#2938)" {
   local t; t="$(flat "$SKILL")"
   contains "$t" '**Auto-accept approves the rewrite only when it answered everything.** The threshold only answers the refiner'"'"'s questions.'
-  contains "$t" 'An all-auto child is never pending: phase A writes it back.'
+  contains "$t" 'An all-auto child is never pending: phase A writes it back, until *The all-auto loop is bounded* (below) sends its next draft to the batch.'
   contains "$t" 'The batch summary carries the same **Answers taken automatically** this step would show.'
 }
 

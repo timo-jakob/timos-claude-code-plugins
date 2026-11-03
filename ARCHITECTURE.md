@@ -8819,6 +8819,11 @@ confident enough.
   `development/skills/refine-issue/scripts/all-auto-check.zsh` decides it, and
   reports the first failing reason in the order `no-rounds`, `ask-question`,
   `size-check-stop`, `size-check-unjudged`, `proposed-split`, else `all-auto`.
+  It fails closed on a forgotten file: a call with `--split` files whose
+  `--turn` count differs, or with no `--size-check`, is exit 2, which the
+  conductor counts as not all-auto. Step 1's sizing is kept as a verdict file
+  too. The loop is bounded: once the re-gate has rejected two all-auto
+  write-backs, every later draft of the run goes to the human for approval.
   An all-auto refinement runs Step 2.5 and Step 3 with no approval prompt, with
   `provenance.generated_by` "issue-refiner via /development:refine-issue (all
   answers auto-accepted)"; in an epic walk it is written back before the batch

@@ -55,7 +55,8 @@ re-gate](diagrams/refine-issue.svg)
    unless the refinement is all-auto. Auto-accept approves the rewrite only when it answered everything: when no
    intent or gap question reached you, no size check stopped or could not be judged, and the refiner proposed no
    split, the rewrite is written back without asking you, and the comment on the issue lists every answer taken for
-   you, with its confidence, its weakest criterion and the threshold.
+   you, with its confidence, its weakest criterion and the threshold. If the readiness gate rejects two such rewrites,
+   the next draft waits for your approval.
 
 ### What one refinement turn looks like {#refine-what-one-refinement-turn-looks-like}
 

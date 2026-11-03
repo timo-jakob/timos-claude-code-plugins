@@ -110,7 +110,9 @@ section() {
   contains "$s" '"<skill-base-dir>/scripts/file-split-children.zsh" --repo "$REPO" --parent <N> --plan <plan.json>'
   contains "$s" 'and `SIZE_PREFLIGHT`'"'"'s `children_filed` to the length of its `filed` list'
   contains "$s" "Never re-run it — a re-run"
-  contains "$s" "- **Exit 0** — \`pass\` or \`skipped\`: present the draft for approval as above."
+  contains "$s" "- **Exit 0** — \`pass\` or \`skipped\`: keep its stdout as this sizing's verdict
+  file, run the all-auto check (below), and present the draft for approval as
+  above only if it is not all-auto."
   contains "$s" "an empty \`files\` array when no concrete path can be"
   contains "$s" 'Record the run as for exit 0, with
   `children_filed` the length of the report'"'"'s `filed` list'

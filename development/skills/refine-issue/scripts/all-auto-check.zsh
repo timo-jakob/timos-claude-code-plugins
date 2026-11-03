@@ -43,6 +43,11 @@
 #           the expected JSON shape, a verdict outside the four included. The
 #           file is named on stderr, and nothing is printed on stdout. jq
 #           missing from PATH is exit 2 too: nothing could be judged.
+#         2 also when any --split is given and the call is incomplete: the
+#           --turn count differs from the --split count (one turn per round),
+#           or no --size-check is given (every converged draft was sized). A
+#           file the conductor forgot can never read as all-auto; stderr names
+#           the counts. With no --split at all the result stays no-rounds.
 
 emulate -L zsh
 setopt no_unset pipe_fail
@@ -90,6 +95,14 @@ for f in "${sizes[@]}"; do
             and ((.[0].verdict // null) | IN("pass", "skipped", "stop", "unjudged"))' "$f" >/dev/null 2>&1 || {
     print -r -u2 -- "all-auto-check: --size-check is not one JSON object whose verdict is pass, skipped, stop or unjudged: $f"; exit 2 }
 done
+
+# A forgotten file fails closed: an incomplete call is a usage error, never all-auto.
+if (( ${#splits} > 0 )); then
+  (( ${#turns} == ${#splits} )) || {
+    print -r -u2 -- "all-auto-check: one --turn per --split: got ${#splits} --split and ${#turns} --turn"; exit 2 }
+  (( ${#sizes} >= 1 )) || {
+    print -r -u2 -- "all-auto-check: --split given but no --size-check: got ${#splits} --split and 0 --size-check"; exit 2 }
+fi
 
 # Judge, in the documented order.
 local reason="all-auto" v

@@ -53,17 +53,19 @@ setup() {
 
 @test "one ask entry in a later round: ask-question" {
   run -0 zsh "$S" --split "$D/split-empty.json" --split "$D/split-empty.json" --split "$D/split-ask.json" \
-    --size-check "$D/pass.json"
+    --turn "$D/turn-null.json" --turn "$D/turn-null.json" --turn "$D/turn-null.json" --size-check "$D/pass.json"
   [ "$output" = '{"all_auto":false,"reason":"ask-question"}' ]
 }
 
 @test "a size-check stop in an earlier sizing, though the last one passed: size-check-stop" {
-  run -0 zsh "$S" --split "$D/split-empty.json" --size-check "$D/stop.json" --size-check "$D/pass.json"
+  run -0 zsh "$S" --split "$D/split-empty.json" --turn "$D/turn-null.json" \
+    --size-check "$D/stop.json" --size-check "$D/pass.json"
   [ "$output" = '{"all_auto":false,"reason":"size-check-stop"}' ]
 }
 
 @test "an unjudged sizing (the conductor's one-line sentinel): size-check-unjudged" {
-  run -0 zsh "$S" --split "$D/split-empty.json" --size-check "$D/pass.json" --size-check "$D/unjudged.json"
+  run -0 zsh "$S" --split "$D/split-empty.json" --turn "$D/turn-null.json" \
+    --size-check "$D/pass.json" --size-check "$D/unjudged.json"
   [ "$output" = '{"all_auto":false,"reason":"size-check-unjudged"}' ]
 }
 
@@ -75,10 +77,11 @@ setup() {
 
 @test "two failing conditions report the first in the documented order" {
   # ask-question beats size-check-stop
-  run -0 zsh "$S" --split "$D/split-ask.json" --size-check "$D/stop.json"
+  run -0 zsh "$S" --split "$D/split-ask.json" --turn "$D/turn-null.json" --size-check "$D/stop.json"
   [ "$output" = '{"all_auto":false,"reason":"ask-question"}' ]
   # size-check-stop beats size-check-unjudged, whichever file comes first
-  run -0 zsh "$S" --split "$D/split-empty.json" --size-check "$D/unjudged.json" --size-check "$D/stop.json"
+  run -0 zsh "$S" --split "$D/split-empty.json" --turn "$D/turn-null.json" \
+    --size-check "$D/unjudged.json" --size-check "$D/stop.json"
   [ "$output" = '{"all_auto":false,"reason":"size-check-stop"}' ]
   # size-check-unjudged beats proposed-split
   run -0 zsh "$S" --split "$D/split-empty.json" --turn "$D/turn-split.json" --size-check "$D/unjudged.json"
@@ -86,6 +89,15 @@ setup() {
   # no-rounds beats everything
   run -0 zsh "$S" --turn "$D/turn-split.json" --size-check "$D/stop.json"
   [ "$output" = '{"all_auto":false,"reason":"no-rounds"}' ]
+}
+
+@test "a falsy but non-null proposed_split ([], {}, false, \"\", 0) still counts as a proposed split" {
+  local v
+  for v in '[]' '{}' 'false' '""' '0'; do
+    printf '{"questions":[],"proposed_split":%s}\n' "$v" > "$D/turn-falsy.json"
+    run -0 zsh "$S" --split "$D/split-empty.json" --turn "$D/turn-falsy.json" --size-check "$D/pass.json"
+    [ "$output" = '{"all_auto":false,"reason":"proposed-split"}' ]
+  done
 }
 
 # --- exit 2 --------------------------------------------------------------------
@@ -131,6 +143,33 @@ setup() {
   contains "$stderr" "all-auto-check: --split needs a file"
   run -2 --separate-stderr zsh "$S" --turn "$D/nope.json"
   contains "$stderr" "all-auto-check: --turn file missing or unreadable: $D/nope.json"
+}
+
+@test "a forgotten --turn file fails closed: exit 2 naming the counts, never all-auto" {
+  # The reviewer's case: the only turn proposed a split, and it was left out.
+  run -2 --separate-stderr zsh "$S" --split "$D/split-empty.json" --size-check "$D/pass.json"
+  [ -z "$output" ]
+  contains "$stderr" "all-auto-check: one --turn per --split: got 1 --split and 0 --turn"
+  run -2 --separate-stderr zsh "$S" --split "$D/split-empty.json" --split "$D/split-empty.json" \
+    --turn "$D/turn-null.json" --size-check "$D/pass.json"
+  [ -z "$output" ]
+  contains "$stderr" "all-auto-check: one --turn per --split: got 2 --split and 1 --turn"
+  # One turn too many is incomplete too.
+  run -2 --separate-stderr zsh "$S" --split "$D/split-empty.json" \
+    --turn "$D/turn-null.json" --turn "$D/turn-null.json" --size-check "$D/pass.json"
+  contains "$stderr" "got 1 --split and 2 --turn"
+}
+
+@test "a forgotten --size-check file fails closed: exit 2 when any --split is given with no sizing" {
+  run -2 --separate-stderr zsh "$S" --split "$D/split-empty.json" --turn "$D/turn-null.json"
+  [ -z "$output" ]
+  contains "$stderr" "all-auto-check: --split given but no --size-check: got 1 --split and 0 --size-check"
+}
+
+@test "the header documents both fail-closed exits" {
+  local h; h="$(flat "$S")"
+  contains "$h" '# 2 also when any --split is given and the call is incomplete: the # --turn count differs from the --split count (one turn per round), # or no --size-check is given (every converged draft was sized).'
+  contains "$h" 'A # file the conductor forgot can never read as all-auto; stderr names # the counts. With no --split at all the result stays no-rounds.'
 }
 
 @test "--help prints the usage and exits 0" {
@@ -216,4 +255,63 @@ setup() {
 @test "ask-branches.md's RF-05 row states the all-auto exception" {
   contains "$(cat "$REPO_ROOT/development/skills/refine-issue/reference/ask-branches.md")" \
     '| RF-05 | SKILL.md | `explicit approval of the exact rewrite` | intent | human-owned: auto-accept approves the rewrite only when it answered everything (#2898) — the all-auto exception:'
+}
+
+# --- every new or changed sentence is pinned (#2938 round 1) ---------------------
+
+@test "SKILL.md: every sizing's verdict file, Step 1's included, is kept in the run's rounds directory" {
+  local t; t="$(flat "$SKILL")"
+  contains "$t" 'Keep this run'"'"'s turn and split files of every round, and every sizing'"'"'s verdict file, Step 1'"'"'s and Step 2'"'"'s, in its rounds directory for the all-auto check: `/tmp/refine-issue-rounds/`, or a child'"'"'s `/tmp/refine-issue-epic-<E>/<N>.rounds/` in an epic walk, which a redraft keeps.'
+  contains "$t" 'Keep this sizing'"'"'s verdict file in the rounds directory for the all-auto check: its stdout on exit 0 or 1, else the one-line file `{"verdict":"unjudged"}`.'
+  contains "$t" 'On every converged draft that the size check did not stop, judge the whole run so far, from the repository root:'
+  contains "$t" 'Pass no other file: the conductor'"'"'s defaults file and a resumed park'"'"'s decisions file are not split files here. A run that loops back from Step 5 keeps every earlier round'"'"'s files.'
+  contains "$t" '# The all-auto check'"'"'s inputs (#2938) are this run'"'"'s alone: a single-issue # run keeps them here, an epic walk child in its own directory (Step 2).'
+}
+
+@test "SKILL.md: the size check's exits route through the all-auto check before any approval" {
+  local t; t="$(flat "$SKILL")"
+  contains "$t" '- **Exit 0** — `pass` or `skipped`: keep its stdout as this sizing'"'"'s verdict file, run the all-auto check (below), and present the draft for approval as above only if it is not all-auto.'
+  contains "$t" '- **Exit 3, or a second 2** — the inventory could not be judged. Write the one-line file `{"verdict":"unjudged"}` as this sizing'"'"'s verdict file, run the all-auto check (below), tell the human in one line and present the draft: resolve-issue §2'"'"'s pre-flight remains the backstop.'
+  contains "$t" '- **Exit 1** — `stop`. Do **not** present the draft for approval. Keep its stdout as this sizing'"'"'s verdict file. Relay the'
+  lacks "$t" '`pass` or `skipped`: present the draft for approval as above.'
+  contains "$t" 'then run **the all-auto check** (*Step 2 — the all-auto check*, below), and only a draft that does not stop and is not all-auto is presented: the **final `proposed_prose` + `proposed_story_spec`**, for the human'"'"'s **explicit approval of the exact rewrite**.'
+}
+
+@test "SKILL.md: the all-auto loop is bounded at two rejected all-auto write-backs" {
+  local t; t="$(flat "$SKILL")"
+  contains "$t" '**The all-auto loop is bounded.** On a Step 5 `NEEDS_REFINEMENT` re-gate after an all-auto write-back, append one line to `all-auto-rejections` in the run'"'"'s rounds directory. Once that file holds two lines, the re-gate has rejected two all-auto write-backs: the next draft and every later one of this run go to the human for approval as for any other reason, whatever the check reports, so the human can stop the loop. In an epic walk such a child'"'"'s draft is pending and joins the next batch.'
+  contains "$t" 'A second rejected all-auto write-back sends the next draft to the human (*The all-auto loop is bounded*, Step 2).'
+  contains "$t" 'Once the all-auto loop'"'"'s bound (Step 2) is reached, its next draft is pending like any other.'
+  contains "$t" 'An all-auto child is never pending: phase A writes it back, until *The all-auto loop is bounded* (below) sends its next draft to the batch.'
+  contains "$t" '| The label stays, and the human can stop from inside the loop; after a second rejected all-auto write-back, the next draft goes to the human (#2938). |'
+}
+
+@test "SKILL.md: the all-auto exception's other mentions" {
+  local t s3; t="$(flat "$SKILL")"
+  contains "$t" 'Then Steps 4 to 7 as written; Step 6'"'"'s trail names every answer the run took for the human.'
+  contains "$t" '| Nothing is written without Step 2'"'"'s approval of the exact rewrite, or a run that asked the human nothing (the all-auto check, #2938). |'
+  contains "$t" 'nothing is written without Step 2'"'"'s approval of the exact rewrite, unless no question reaches the human at all (*Step 2 — the all-auto check*).'
+  contains "$t" 'Run the all-auto check on its own rounds and sizings first.'
+  contains "$t" 'An all-auto write-back is one such ending.'
+  contains "$t" 'An all-auto refinement shows no approval, and its trail lists every one.'
+  contains "$t" '**Auto-accept approves the rewrite only when it answered everything.** The threshold only answers the refiner'"'"'s questions. The approval of the exact rewrite is the human'"'"'s, whatever the threshold, unless the refinement is all-auto (*Step 2 — the all-auto check*, below): no question reached the human, so there is no choice left to approve.'
+  contains "$t" '— the two exceptions are an all-auto refinement (#2938), in which no question reached the human, and the unattended follow-up mode'"'"'s `accept`.'
+  s3="$(sed -n '/^## Step 3 /,/^## Step 4 /p' "$SKILL" > "$BATS_TEST_TMPDIR/s3.md"; flat "$BATS_TEST_TMPDIR/s3.md")"
+  contains "$s3" '`"issue-refiner via /development:refine-issue"`, or `"issue-refiner via /development:refine-issue (all answers auto-accepted)"` for an all-auto refinement'
+}
+
+@test "ask-branches.md's RF-02 and RF-10 outcome cells state the all-auto exception in full" {
+  local a; a="$(cat "$REPO_ROOT/development/skills/refine-issue/reference/ask-branches.md")"
+  contains "$a" '| implementation | **default:** proceed without the label, with a notice; nothing is written without the approval of the exact rewrite, or an all-auto refinement (#2938) |'
+  contains "$a" '| intent | human-owned: the batch approval of an epic walk'"'"'s rewrites (#2904) is RF-05'"'"'s approval, asked once per batch instead of once per child; an all-auto child is written back in phase A and never batched (#2938) |'
+}
+
+@test "ARCHITECTURE.md and the docs pages state the fail-closed call and the loop's bound" {
+  local a e h
+  a="$(flat "$REPO_ROOT/ARCHITECTURE.md")"
+  e="$(flat "$REPO_ROOT/docs/explanation/workflow-refine-issue.md")"
+  h="$(flat "$REPO_ROOT/docs/how-to/let-refine-issue-answer-confident-questions.md")"
+  contains "$a" 'It fails closed on a forgotten file: a call with `--split` files whose `--turn` count differs, or with no `--size-check`, is exit 2, which the conductor counts as not all-auto. Step 1'"'"'s sizing is kept as a verdict file too. The loop is bounded: once the re-gate has rejected two all-auto write-backs, every later draft of the run goes to the human for approval.'
+  contains "$e" 'If the readiness gate rejects two such rewrites, the next draft waits for your approval.'
+  contains "$h" 'If the readiness gate rejects two such rewrites, the next draft waits for your approval.'
 }
