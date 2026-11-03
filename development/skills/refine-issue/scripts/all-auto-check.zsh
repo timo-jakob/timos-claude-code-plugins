@@ -48,6 +48,7 @@
 #           or no --size-check is given (every converged draft was sized). A
 #           file the conductor forgot can never read as all-auto; stderr names
 #           the counts. With no --split at all the result stays no-rounds.
+#         0 also for -h/--help, which prints the usage on stderr and judges nothing.
 
 emulate -L zsh
 setopt no_unset pipe_fail

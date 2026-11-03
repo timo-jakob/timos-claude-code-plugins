@@ -187,6 +187,50 @@ setup() {
   contains "$stderr" "all-auto-check: jq not found on PATH"
 }
 
+
+@test "each file must hold exactly one JSON document: a second document is exit 2, never all-auto" {
+  # Every other part of each call is valid, so only the one-document rule can reject it.
+  cat "$D/split-empty.json" "$D/split-empty.json" > "$D/two-splits.json"
+  run -2 --separate-stderr zsh "$S" --split "$D/two-splits.json" --turn "$D/turn-null.json" --size-check "$D/pass.json"
+  [ -z "$output" ]
+  contains "$stderr" "--split is not one JSON object with auto and ask arrays: $D/two-splits.json"
+  cat "$D/turn-null.json" "$D/turn-null.json" > "$D/two-turns.json"
+  run -2 --separate-stderr zsh "$S" --split "$D/split-empty.json" --turn "$D/two-turns.json" --size-check "$D/pass.json"
+  [ -z "$output" ]
+  contains "$stderr" "--turn is not one JSON object with a questions array: $D/two-turns.json"
+  cat "$D/pass.json" "$D/pass.json" > "$D/two-verdicts.json"
+  run -2 --separate-stderr zsh "$S" --split "$D/split-empty.json" --turn "$D/turn-null.json" --size-check "$D/two-verdicts.json"
+  [ -z "$output" ]
+  contains "$stderr" "--size-check is not one JSON object whose verdict is pass, skipped, stop or unjudged: $D/two-verdicts.json"
+}
+
+@test "a split's auto and a turn's questions must be arrays: any other type is exit 2" {
+  printf '{"auto":{},"ask":[]}\n' > "$D/auto-object.json"
+  run -2 --separate-stderr zsh "$S" --split "$D/auto-object.json" --turn "$D/turn-null.json" --size-check "$D/pass.json"
+  [ -z "$output" ]
+  contains "$stderr" "--split is not one JSON object with auto and ask arrays: $D/auto-object.json"
+  printf '{"ask":[]}\n' > "$D/auto-missing.json"
+  run -2 --separate-stderr zsh "$S" --split "$D/auto-missing.json" --turn "$D/turn-null.json" --size-check "$D/pass.json"
+  contains "$stderr" "$D/auto-missing.json"
+  printf '{"questions":{},"proposed_split":null}\n' > "$D/questions-object.json"
+  run -2 --separate-stderr zsh "$S" --split "$D/split-empty.json" --turn "$D/questions-object.json" --size-check "$D/pass.json"
+  [ -z "$output" ]
+  contains "$stderr" "--turn is not one JSON object with a questions array: $D/questions-object.json"
+  printf '{"proposed_split":null}\n' > "$D/questions-missing.json"
+  run -2 --separate-stderr zsh "$S" --split "$D/split-empty.json" --turn "$D/questions-missing.json" --size-check "$D/pass.json"
+  contains "$stderr" "$D/questions-missing.json"
+}
+
+@test "an unreadable file is exit 2, named on stderr" {
+  [ "$(id -u)" -ne 0 ] || skip "root reads a mode-000 file"
+  cp "$D/split-empty.json" "$D/locked.json"
+  chmod 000 "$D/locked.json"
+  run -2 --separate-stderr zsh "$S" --split "$D/locked.json" --turn "$D/turn-null.json" --size-check "$D/pass.json"
+  chmod 600 "$D/locked.json"
+  [ -z "$output" ]
+  contains "$stderr" "all-auto-check: --split file missing or unreadable: $D/locked.json"
+}
+
 # --- the wiring ----------------------------------------------------------------
 
 @test "SKILL.md runs the check and writes an all-auto refinement back with no approval prompt" {
@@ -330,4 +374,13 @@ setup() {
   contains "$s" 'fix it and re-run once. A `--split` and `--turn` count mismatch'
   contains "$s" 'A resumed parked session (its rounds directory holds `resumed`, Step 0) is never all-auto: skip the check and take *Any other reason* below.'
   contains "$s" 'never by dropping the turn file of a round whose questions went to the human. A second exit 2 counts as not all-auto.'
+}
+
+@test "the docs pages say a resumed refinement always asks for approval" {
+  contains "$(flat "$REPO_ROOT/docs/how-to/let-refine-issue-answer-confident-questions.md")" 'A refinement resumed from a parked comment always waits for it too, since its earlier questions already reached you.'
+  contains "$(flat "$REPO_ROOT/docs/explanation/workflow-refine-issue.md")" 'A refinement resumed from a parked comment always waits for it too, since its earlier questions already reached you.'
+}
+
+@test "the header documents --help as exit 0" {
+  contains "$(flat "$S")" '# 0 also for -h/--help, which prints the usage on stderr and judges nothing.'
 }

@@ -56,7 +56,8 @@ re-gate](diagrams/refine-issue.svg)
    intent or gap question reached you, no size check stopped or could not be judged, and the refiner proposed no
    split, the rewrite is written back without asking you, and the comment on the issue lists every answer taken for
    you, with its confidence, its weakest criterion and the threshold. If the readiness gate rejects two such rewrites,
-   the next draft waits for your approval.
+   the next draft waits for your approval. A refinement resumed from a parked comment always waits for it too, since
+   its earlier questions already reached you.
 
 ### What one refinement turn looks like {#refine-what-one-refinement-turn-looks-like}
 
