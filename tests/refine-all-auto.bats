@@ -172,9 +172,12 @@ setup() {
   contains "$h" 'A # file the conductor forgot can never read as all-auto; stderr names # the counts. With no --split at all the result stays no-rounds.'
 }
 
-@test "--help prints the usage and exits 0" {
+@test "-h and --help print the usage and exit 0" {
   run -0 --separate-stderr zsh "$S" --help
   [ "$status" -eq 0 ]
+  contains "$stderr" "usage: all-auto-check.zsh"
+  run -0 --separate-stderr zsh "$S" -h
+  [ -z "$output" ]
   contains "$stderr" "usage: all-auto-check.zsh"
 }
 

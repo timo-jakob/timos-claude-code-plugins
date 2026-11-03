@@ -106,7 +106,7 @@ from. In an epic, such a child is written back while the children are drafted
 and is not in the batch you approve. If the readiness gate rejects two such
 rewrites, the next draft waits for your approval. A refinement resumed from a
 parked comment always waits for it too, since its earlier questions already
-reached you. The threshold decides nothing else either.
+reached you. The threshold decides nothing else.
 Three questions are no longer asked at all, whatever the threshold:
 whether to refine an issue that is not marked `needs-refinement`, whether to
 clear the label of a story that already passes, and whether to loop again after
