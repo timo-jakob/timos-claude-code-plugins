@@ -315,3 +315,10 @@ setup() {
   contains "$e" 'If the readiness gate rejects two such rewrites, the next draft waits for your approval.'
   contains "$h" 'If the readiness gate rejects two such rewrites, the next draft waits for your approval.'
 }
+
+@test "phase A's pending branch keeps its Decisions-taken step, and a relayed or re-spawned round keeps one split and one turn file" {
+  local s; s="$(tr '\n' ' ' < "$REPO_ROOT/development/skills/refine-issue/SKILL.md" | tr -s ' ')"
+  contains "$s" 'Any other reason: add its Decisions taken section to the draft as Step 2 says, re-read the issue'"'"'s current block into `old_block`, write its rewrite to `rewrite_path`, set `phase` to `pending`, and go on to the next child.'
+  contains "$s" 'The re-spawned turn supersedes the failed one: delete the failed turn'"'"'s file, so the round keeps one turn file. When the questions are relayed as they are, write the round'"'"'s split file yourself, as `{"auto":[],"ask":[<the relayed questions>]}`, so the all-auto check sees that the round reached the human (#2938).'
+  contains "$s" 'A `--split` and `--turn` count mismatch is fixed only by deleting a re-spawned round'"'"'s superseded turn file or by writing a relayed round'"'"'s split file (Step 2), never by dropping the turn file of a round whose questions went to the human.'
+}

@@ -731,8 +731,12 @@ second exception (#2901) — an entry whose own `kind` is `gap` has no
 `target` that is absolute or contains `..`. An entry routed as `gap` only
 because its `kind` is missing or unknown is exempt. Either way, re-spawn the
 refiner for this round once, and if it fails again, relay the questions to the
-human as they are. The unattended follow-up mode applies its own exit-2 rule
-instead.
+human as they are. The re-spawned turn supersedes the failed one: delete the
+failed turn's file, so the round keeps one turn file. When the questions are
+relayed as they are, write the round's split file yourself, as
+`{"auto":[],"ask":[<the relayed questions>]}`, so the all-auto check sees that
+the round reached the human (#2938). The unattended follow-up mode applies its
+own exit-2 rule instead.
 
 **An answered gap's acceptance criterion is the refiner's.** From the turn after
 a `gap` question is answered, the refiner's drafts carry one
@@ -947,8 +951,11 @@ round's files.
 It prints `{all_auto, reason}`, the reason the first that fails of
 `no-rounds`, `ask-question`, `size-check-stop`, `size-check-unjudged` and
 `proposed-split`, else `all-auto`. An exit 2 is your own malformed call or a
-malformed file, named on stderr: fix it and re-run once. A second exit 2 counts
-as not all-auto.
+malformed file, named on stderr: fix it and re-run once. A `--split` and
+`--turn` count mismatch is fixed only by deleting a re-spawned round's
+superseded turn file or by writing a relayed round's split file (Step 2), never
+by dropping the turn file of a round whose questions went to the human. A
+second exit 2 counts as not all-auto.
 
 - **`all-auto`** — no approval prompt. Add the Decisions taken section as for an
   approved rewrite and run Step 2.5 and Step 3 at once, with

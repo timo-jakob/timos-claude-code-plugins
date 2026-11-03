@@ -198,6 +198,7 @@ section() {
   grep -qF 's size-check exit 1, which with an inventory is the re-sized stop.' <<< "$t"
   grep -qF 'write it to a file and run `size-check.zsh --file <it>` from the repository root.' <<< "$t"
   grep -qF 'Append the size objection to the verdict' <<< "$t"
+  grep -qF 'Exit 2 or 3, after one re-run of a malformed call: the fallback below.' <<< "$t"
 }
 
 @test "#2602 refine-issue never sets or clears needs-split itself, and states each ending" {
