@@ -30,3 +30,4 @@ before it ships, and a row whose text moved is updated here.
 | RF-07 | SKILL.md | `Relay its stderr and offer the parked exit` | gap | human-owned: the filing failure's cause is unknown |
 | RF-08 | SKILL.md | `**can't converge now**` | intent | human-owned: the human decides the session cannot converge now |
 | RF-09 | SKILL.md | `**Loop back to Step 2 without asking**` | implementation | **default:** loop back to Step 2 with the gate's remaining reasons as objections; the human can still stop from inside the loop |
+| RF-10 | SKILL.md | `` Show it, then ask once (`AskUserQuestion`): **Approve all** `` | intent | human-owned: the batch approval of an epic walk's rewrites (#2904) is RF-05's approval, asked once per batch instead of once per child |

@@ -130,8 +130,8 @@ section() {
   grep -qF '**Record the verdict'"'"'s `size` object too** (#2589)' "$REFINE"
   grep -qF '`SIZE_PREFLIGHT` from its `size` object (Step 1)' "$REFINE"
   # both re-assign lists name it: Step 2's rule and Step 7's
-  grep -qF '`ROUNDS`, `RAISED`, `RESOLVED` and `SIZE_PREFLIGHT`, and its guard reads them' "$REFINE"
-  grep -qF '`SIZE_PREFLIGHT` must all be' "$REFINE"
+  grep -qF '`ROUNDS`, `RAISED`, `RESOLVED`, `SIZE_PREFLIGHT` and `PAUSED_S`, and its guard reads them' "$REFINE"
+  grep -qF '`SIZE_PREFLIGHT` and `PAUSED_S` must all be' "$REFINE"
   local code
   code="$(section '## Step 7 — emit telemetry (every decided ending, #579)' "$REFINE" \
           | sed -n '/^```bash/,/^```$/p')"

@@ -8,7 +8,10 @@ skill answers the questions whose score is high enough itself, and asks you
 only the rest.
 
 You still approve the finished rewrite before anything is written to the
-issue. The threshold only answers questions.
+issue. The threshold only answers questions. When you refine an epic, the
+skill drafts every child first and asks you once for the whole batch: you
+approve all of them, or name the children to revisit or skip, and the batch
+lists each child's automatically taken answers so you can overturn one.
 
 ## Set it for one run
 

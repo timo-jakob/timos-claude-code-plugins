@@ -184,7 +184,9 @@ stale() {
   contains "$(flat "$REPO_ROOT/docs/explanation/workflow-refine-issue.md")" 'If the story is already READY, the skill clears the label and says so.'
   run -1 grep -qF 'offer to just clear the label' <<< "$t"
   run -1 grep -qF 'ask whether they want to refine anyway' <<< "$t"
-  run -1 grep -qF 'human declined' <<< "$t"
+  # Scoped to Step 1, the READY shortcut this guards: #2904's batch skip ends a
+  # child as *skipped (human declined)* in the Epic walk, which is not this ask.
+  run -1 grep -qF 'human declined' <<< "$(sed -n '/^## Step 1 /,/^## Step 2 /p' "$REFINE/SKILL.md")"
 }
 
 @test "RF-09: refine-issue loops back to Step 2 on a still-rejected re-gate without asking" {
@@ -205,7 +207,7 @@ stale() {
   contains "$t" 'The body is never edited only to record a default.'
   contains "$t" 'drop it from the file, so nothing records it twice.'
   contains "$t" '| Step 5 | Loop again after a re-gate that still rejects? |'
-  contains "$t" 'Append it as `{"kind": "implementation", "question": …, "answer": <choice>, "rationale": <evidence>, "overrule": <how to overrule>}` to the `auto` array of `/tmp/conductor-defaults.json`, created as `{"auto": []}`; Step 0 deletes it with the parked state.'
+  contains "$t" 'Append it as `{"kind": "implementation", "question": …, "answer": <choice>, "rationale": <evidence>, "overrule": <how to overrule>}` to the `auto` array of `/tmp/conductor-defaults.json` (in an epic walk, the child'"'"'s `/tmp/refine-issue-epic-<E>/<N>.defaults.json`), created as `{"auto": []}`; Step 0 deletes it with the parked state.'
   contains "$t" 'rm -f /tmp/parked-state.json /tmp/parked-comment.md /tmp/parked.json /tmp/conductor-defaults.json'
   contains "$(flat "$REPO_ROOT/docs/how-to/let-refine-issue-answer-confident-questions.md")" 'Three questions are no longer asked at all, whatever the threshold: whether to refine an issue that is not marked `needs-refinement`, whether to clear the label of a story that already passes, and whether to loop again after a failed re-gate. The skill takes the safe answer to each, prints one line, and records it under **Decisions taken**: in the body when it writes one, else as a one-line comment.'
 }
