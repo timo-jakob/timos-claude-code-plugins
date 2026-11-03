@@ -263,8 +263,12 @@ this is the guided pass that clears them.
    pending, or it loops back (it redrafts only in the next phase A) — set
    `waiting_since` to `$(date +%s)`; whenever its own work resumes (its Steps
    2.5 to 7, or its redraft), first write the wait into its state file `f`
-   (`/tmp/refine-issue-epic-<E>/<N>.json`) with
-   `jq --argjson now "$(date +%s)" '.paused_s += ($now - .waiting_since) | .waiting_since = null' "$f" > "$f.tmp" && mv "$f.tmp" "$f"`.
+   (`/tmp/refine-issue-epic-<E>/<N>.json`) with:
+
+   ```bash
+   jq --argjson now "$(date +%s)" '.paused_s += ($now - .waiting_since) | .waiting_since = null' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+   ```
+
    Every step that assigns one of those run variables — Step 0's `t0`,
    `repo_root` and `paused_s`, Step 1's verdict and its already-`READY`
    shortcut, Step 2's typed park or filed split, Step 4's re-gate and Step 5's
