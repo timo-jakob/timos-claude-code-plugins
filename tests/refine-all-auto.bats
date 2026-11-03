@@ -326,7 +326,8 @@ setup() {
 @test "a resumed parked session is never all-auto, and a second exit 2 from the check counts as not all-auto" {
   local s; s="$(tr '\n' ' ' < "$REPO_ROOT/development/skills/refine-issue/SKILL.md" | tr -s ' ')"
   contains "$s" 'A resumed session is **never all-auto** (#2938): its parked questions already reached the human, and Step 0 emptied the rounds directory that would have shown it, so its rewrite is always presented for approval.'
-  contains "$s" 'touch /tmp/refine-issue-rounds/resumed'
+  contains "$s" '# only when a parked state was read; an epic walk child uses its own # /tmp/refine-issue-epic-<E>/<N>.rounds/ instead, created here if missing mkdir -p /tmp/refine-issue-rounds && touch /tmp/refine-issue-rounds/resumed'
+  contains "$s" 'fix it and re-run once. A `--split` and `--turn` count mismatch'
   contains "$s" 'A resumed parked session (its rounds directory holds `resumed`, Step 0) is never all-auto: skip the check and take *Any other reason* below.'
   contains "$s" 'never by dropping the turn file of a round whose questions went to the human. A second exit 2 counts as not all-auto.'
 }

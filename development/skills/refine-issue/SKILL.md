@@ -603,8 +603,8 @@ gh issue view <N> --json number,title,body,state,labels,url,comments
 
   ```bash
   # only when a parked state was read; an epic walk child uses its own
-  # /tmp/refine-issue-epic-<E>/<N>.rounds/ instead
-  touch /tmp/refine-issue-rounds/resumed
+  # /tmp/refine-issue-epic-<E>/<N>.rounds/ instead, created here if missing
+  mkdir -p /tmp/refine-issue-rounds && touch /tmp/refine-issue-rounds/resumed
   ```
 
 ## Step 1 — diagnose (fresh objections)
