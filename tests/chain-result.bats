@@ -145,6 +145,13 @@ EOF
   [ "$(jq -c '[.questions[] | has("proposed_doc_change")]' <<< "$output")" = '[false,false]' ]
 }
 
+@test "questions-pending accepts the re-dispatch's ask-only split of the unanswered entries" {
+  jq -c '{ask: [.ask[1]]}' "$D/split.json" > "$D/pending.json"
+  run -0 zsh "$S" emit --issue 2939 --outcome questions-pending --split "$D/pending.json" \
+    --turn "$D/turn.json" --resume /r.json --round 2
+  [ "$(jq -c '[.questions[] | del(.proposed_doc_change)]' <<< "$output")" = "$(jq -c '.ask' "$D/pending.json")" ]
+}
+
 @test "stopped carries the reason" {
   run -0 zsh "$S" emit --issue 2939 --outcome stopped --reason "no convergence within the round cap"
   [ "$output" = '{"schema":"chain-result/v1","issue":2939,"outcome":"stopped","reason":"no convergence within the round cap"}' ]
