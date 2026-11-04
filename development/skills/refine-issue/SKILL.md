@@ -531,8 +531,9 @@ auto-accept threshold included.
    `<question> → <answer>`. When every pending question is answered, it
    calls the refiner with that reply. A pending question still unanswered
    returns `questions-pending` again with only the unanswered entries, and
-   makes no refiner call: it keeps the lines it did add in the resume file, and
-   passes `--split` a file holding `{"ask": [<the unanswered entries>]}`.
+   makes no refiner call: it rewrites the resume file with the lines it did
+   add, `waiting_since` reset to now and only the unanswered entries pending,
+   and passes `--split` a file holding `{"ask": [<the unanswered entries>]}`.
 6. **The round cap.** `ROUNDS` counts across dispatches, through the resume
    file. A round that ends at or past 3 without converging and without an ask
    question returns `stopped` with the reason
