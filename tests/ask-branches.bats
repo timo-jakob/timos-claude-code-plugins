@@ -98,11 +98,11 @@ stale() {
   [ -z "$bad" ] || { printf '%s\n' "$bad" >&2; return 1; }
 }
 
-@test "exactly RS-06a, RS-09, RF-02, RF-03 and RF-09 are implementation rows" {
+@test "exactly RS-06a, RS-09, RF-02, RF-03, RF-09 and RF-11 are implementation rows" {
   local ids
   ids="$( { rows "$RESOLVE/reference/ask-branches.md"; rows "$REFINE/reference/ask-branches.md"; } \
     | awk -F '\t' '$4 == "implementation" { print $1 }' | sort -u | tr '\n' ' ')"
-  [ "$ids" = "RF-02 RF-03 RF-09 RS-06a RS-09 " ]
+  [ "$ids" = "RF-02 RF-03 RF-09 RF-11 RS-06a RS-09 " ]
 }
 
 # --- both directions of the anchor guard ----------------------------------------
@@ -243,4 +243,20 @@ stale() {
   contains "$ids" "RS-06a "
   contains "$ids" "RS-06b "
   lacks "$ids" "RS-06 "
+}
+
+@test "RF-05, RF-06, RF-11 and RF-12 record #2939: the split, the test-case spin-out and the chained relay" {
+  local r t
+  r="$(flat "$REFINE/reference/ask-branches.md")"; t="$(flat "$REFINE/SKILL.md")"
+  # RF-05: a chained write-back replaces the approval
+  contains "$r" 'a chained refinement (#2939) presents no approval prompt either: the human'"'"'s relayed answers, the auto-accepted answers and the Decisions taken stand in for it |'
+  # RF-06: only the no-children question is left; the File / Revise / Park ask is gone
+  contains "$r" '| RF-06 | SKILL.md | `show no children and ask once` | intent | human-owned: a split that names no children is the human'"'"'s to revise or park in a direct run, and stops a chained run; a split that names its children is filed without asking in every run, chained or direct (#2939)'
+  lacks "$r" 'then ask once (`AskUserQuestion`) `` | intent | human-owned: a split restructures the backlog'
+  # RF-11: the test-case spin-out is an implementation default, a standing rule
+  contains "$r" '| RF-11 | SKILL.md | `closes the story'"'"'s test-case issues through` | implementation | **default:** Step 2.5 files, edits and closes the story'"'"'s test-case issues without asking, in every run (#2939)'
+  contains "$r" 'RF-11 is the one standing rule among them: the human approved it once, so it prints no notice and records no entry.'
+  contains "$t" 'Step 2.5'"'"'s test-case spin-out (#2939) is not one of these three: it is a standing rule the human approved, so it prints no notice and records no entry'
+  # RF-12: a chained run's intent or gap question is relayed, not asked
+  contains "$r" '| RF-12 | SKILL.md | `never asked in place or through a side channel` | intent / gap | human-owned: a chained refinement'"'"'s intent or gap question is relayed, not asked'
 }

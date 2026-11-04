@@ -7905,7 +7905,9 @@ a script with no GitHub calls.
   `<!-- refine-auto: follow-up-origin/v1 -->` comment yet (one attempt per
   follow-up), and its source carries no origin record. A follow-up filed while
   resolving a follow-up is second generation and stays for a human.
-  Auto-refinement never splits.
+  Auto-refinement never splits. A follow-up refined in the chained mode
+  (#2939, below) is not this mode: it still receives its seed, and the
+  already-attempted and second-generation refusals do not apply to it.
 - **Trusted authors (#2645).** On a public repository anyone can comment, and
   this mode rewrites an issue body without a human approving the text. So an
   origin record or a refine-auto marker counts only in a comment whose
@@ -7932,7 +7934,17 @@ a script with no GitHub calls.
   human's approval in this mode. Everywhere else auto-accept approves the
   rewrite only when it answered everything: an all-auto refinement (#2938) is
   written back without the approval prompt, and any other refinement waits for
-  the human's approval of the exact rewrite.
+  the human's approval of the exact rewrite. A chained refinement (#2939) is the
+  other exception: it presents no approval prompt, because the human's relayed
+  answers, the auto-accepted answers and the Decisions taken stand in for it.
+- **Splits and test cases outside this mode (#2939).** This mode parks a
+  size-check stop `deferred` and never splits. In every other refine-issue run,
+  chained or direct, a size-check stop whose split names its children is filed
+  without asking through `file-split-children.zsh`, and the filed children are
+  walked in the same run; a split that names no children still asks to revise
+  or park in a direct run, and stops a chained run. Step 2.5 files, edits and
+  closes a story's test-case issues without asking in every run: the approval,
+  or the write-back that replaces it, covers them.
 - **Park routes.** A park takes refine-issue's typed parked exit with the label
   kept and no block written, so a human run resumes it; it never stops the
   calling run or its epic walk.
@@ -7941,6 +7953,47 @@ a script with no GitHub calls.
   confidence, the threshold, the **accept score** (the lowest confidence, or
   `null` when nothing was answered automatically) and the outcome — and the
   `auto_refinement` telemetry key (*Refine-issue telemetry*).
+
+### Step handoff contract (`step-handoff/v1`)
+
+A step handoff is one JSON object the root writes for a step. Its fields are
+schema ("step-handoff/v1"), issue (int ≥ 1, the issue the step works on),
+chained_from (int ≥ 1, the root issue of the run), origin (human or pipeline),
+scratch_dir (an absolute path) and answers, a list of {issue, question, answer}
+entries. An entry's question is the question text of a pending ask entry,
+verbatim, so a refinement matches each answer to the question it asked. A reader
+requires the fields it reads and ignores keys it does not read, so other step
+kinds may add fields. refine-issue's chained mode (#2939) reads it with
+chain-result.zsh read-handoff.
+
+A missing or malformed handoff is `read-handoff`'s exit 2, with one reason on
+stderr, and the chained run then returns `stopped` with the reason "unreadable
+step handoff". #2940 adopts this contract for the step dispatch, which ships
+after it.
+
+### The chained refinement mode — `refine-issue --chained-from` (#2939)
+
+A chained refinement returns one outcome document from chain-result.zsh, whose
+outcome is ready, split, questions-pending or stopped. Each is a step verdict
+value by the same name: a refinement step ends with the verdict its outcome
+names, and never ends done, needs-refinement or blocked. ready carries the risk
+and the auto-accepted answers, split the children filed, questions-pending the
+pending ask entries and the resume-state path, and stopped the reason.
+
+`/development:refine-issue <N> --chained-from <root> --handoff <file>` runs as a
+fresh subagent of a resolve-issue run on `<root>`, and asks the human nothing
+itself. A below-threshold intent or gap question ends the dispatch
+`questions-pending`, with nothing written back and nothing posted; the run's
+state waits in `<scratch_dir>/refine-<N>-resume.json`, and a re-dispatch whose
+handoff answers the questions restores it and continues the refinement loop
+without a new diagnosis. A dispatch that reaches 3 rounds without converging
+and without a question stops with "no convergence within the round cap". A
+converged draft is written back with `provenance.generated_by` ending
+"via /development:resolve-issue". Only a dispatch that ends ready, split or
+stopped emits refine-issue's telemetry record, its counters cumulative across
+dispatches. Every document is printed by
+`development/skills/refine-issue/scripts/chain-result.zsh emit`, which refuses
+any other outcome with exit 2.
 
 ## Story-spec contract (`story-spec/v1`, #574)
 

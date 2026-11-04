@@ -17,6 +17,9 @@ description: >
   that single-issue flow, asks one approval for the batch of drafts (#2904), and
   posts an epic-level summary (#580). With --follow-up
   it refines a pipeline-filed follow-up unattended, from its source story (#2588).
+  With --chained-from it runs as a step of a resolve-issue run: it asks no one,
+  returns one outcome document, and its caller relays its questions (#2939). A
+  size-check split that names its children is filed without asking.
   The intelligence lives in the agent, this skill is the conductor. Composes story-readiness (#559) and
   issue-refiner (#575); consumes the story-spec/v1 contract (#574).
 disable-model-invocation: false
@@ -29,10 +32,12 @@ function; **you** relay between it and the human, and **you** own every GitHub
 write. The payoff of doing this well: the story reaches the implementer precisely
 specified, and a durable machine-readable `story-spec/v1` block rides along.
 
-**User input:** an issue number or URL, optionally with `--auto-accept <t>` and
-`--follow-up` (*Unattended follow-up mode*, below). Operate on the session's repo
+**User input:** an issue number or URL, optionally with `--auto-accept <t>`,
+`--follow-up` (*Unattended follow-up mode*, below) or `--chained-from <root>
+--handoff <file>` (*Chained refinement mode*, below). Operate on the session's repo
 (`gh repo view --json nameWithOwner`); the issue must belong to it. If empty, print
-`/development:refine-issue <issue-number|url> [--auto-accept <0..1>] [--follow-up]` and stop.
+`/development:refine-issue <issue-number|url> [--auto-accept <0..1>] [--follow-up | --chained-from <root> --handoff <file>]`
+and stop.
 
 **Resolve the auto-accept threshold once, before anything else.** The run
 applies it in Step 2. Resolve it once per invocation, not once per epic child:
@@ -283,8 +288,8 @@ this is the guided pass that clears them.
    fence.
 
    **Phase A — draft each child, in sub-issue order.** Run Steps 0, 1 and 2 as
-   written: the refiner's questions, the size check with its File / Revise /
-   Park choice, and the typed parked exit. A child that ends in phase A finishes
+   written: the refiner's questions, the size check and its split, filed
+   without asking (#2939), and the typed parked exit. A child that ends in phase A finishes
    there, Step 7 included, and never enters a batch: the READY shortcut (cleared
    through Step 5's `READY` branch), a typed park, a filed split, and an
    all-auto write-back. A child whose draft converges and passes the size check
@@ -471,6 +476,91 @@ that round once; a second one stops the mode the same way.
 else.** **A park never stops the caller**: report it and return, so the calling
 run, its epic walk and the next follow-up go on.
 
+## Chained refinement mode (`--chained-from`, #2939)
+
+`--chained-from <root> --handoff <file>` runs this skill as a **step** of a
+`/development:resolve-issue` run on `<root>`: a fresh subagent that refines one
+unready issue for its caller (#2907, *Context isolation*). **It never asks the
+human itself.** Its caller relays the questions and dispatches it again, so a
+chained run returns one outcome document instead of prompting.
+`--chained-from` is never combined with `--follow-up`: print the usage line and
+stop. Everything this section does not change runs as Steps 0–7 say, the
+auto-accept threshold included.
+
+1. **Read the handoff first**, before Step 0:
+   `"<skill-base-dir>/scripts/chain-result.zsh" read-handoff --file <file>`. It
+   validates the `step-handoff/v1` object (ARCHITECTURE.md, *Step handoff
+   contract (`step-handoff/v1`)*) and prints it. On exit 2 or 1, return
+   `stopped` with the reason "unreadable step handoff" and write nothing. Its
+   `scratch_dir` holds this issue's chained state: the rounds directory is
+   `<scratch_dir>/refine-<N>.rounds/` and the conductor's defaults file
+   `<scratch_dir>/refine-<N>.defaults.json`, in place of the `/tmp` paths
+   Step 0 names.
+2. **A first dispatch** is one with no `<scratch_dir>/refine-<N>-resume.json`.
+   It runs Steps 0 and 1 as written. **A re-dispatch** finds that file: it
+   skips Steps 0 and 1, restores the state the file holds, and continues
+   Step 2 with no new Step 1 diagnosis (step 5 below).
+3. **A follow-up keeps its seed (#2588).** When the issue carries a
+   `follow-up-origin/v1` record (`follow-up-auto-refine.zsh origin` exits 0),
+   run `seed` as the unattended follow-up mode does and pass it as the `seed`
+   field of every `issue-refiner` call. The `already-attempted` and
+   `second-generation` refusals do not apply to it: `eligible` is not run.
+   Everything else follows this section, not the follow-up mode's.
+4. **A below-threshold question is relayed, not asked.** In a chained
+   refinement, a below-threshold intent or gap question is
+   never asked in place or through a side channel. When a round's split leaves
+   any `ask` entry, the run writes nothing back, and the needs-decision park is
+   never taken. It writes
+   `<scratch_dir>/refine-<N>-resume.json`, holding the `conversation`, the open
+   objections, the round split-file paths, the decisions taken, the
+   auto-accepted answers so far, the `ROUNDS`/`RAISED`/`RESOLVED` counters,
+   Step 0's `t0` and `repo_root`, `paused_s` and `waiting_since` (now), and the
+   pending `ask` entries. Then it returns `questions-pending` with
+   `chain-result.zsh emit --outcome questions-pending --split <the round's split>
+   --turn <the round's turn> --resume <the resume file> --round <ROUNDS>`. Nothing
+   is posted to GitHub between dispatches.
+5. **A re-dispatch adds the answers as plain human lines.** It adds
+   `now - waiting_since` to `paused_s`, then takes each handoff `answers` entry
+   for this issue whose `question` is a pending entry's question text,
+   verbatim, and adds it to the round's human reply as the plain human line
+   `<question> → <answer>`. When every pending question is answered, it
+   calls the refiner with that reply. A pending question still unanswered
+   returns `questions-pending` again with only the unanswered entries, and
+   makes no refiner call.
+6. **The round cap.** A chained dispatch that reaches 3 rounds without
+   converging and without an ask question returns `stopped` with the reason
+   "no convergence within the round cap" — the follow-up mode's bound and
+   wording.
+7. **No approval prompt.** On convergence the size check runs as Step 2 says.
+   A draft that passes is written back at once: the human's relayed answers,
+   the auto-accepted answers and the Decisions taken stand in for the
+   approval. Add the Decisions taken section, then run Steps 2.5 and 3, with
+   `provenance.generated_by` set to `issue-refiner via
+   /development:resolve-issue`. Then Steps 4 to 6; a still-rejected re-gate
+   loops back to Step 2 within the same cap. The all-auto check does not run:
+   no chained run has an approval to skip.
+8. **A split is filed and handed back.** A size-check stop whose
+   `proposed_split` names its children is filed without asking (Step 2), and the
+   run returns `split` with the `filed` children: the caller walks them, each
+   as its own chained refinement, in the same resolve-issue run. A `null`
+   `proposed_split`, or a child with an empty `files`, stops the chain as a
+   permanent failure: return `stopped` with the reason "the size check stops
+   the draft and the split names no children". A `file-split-children.zsh`
+   exit 1 runs another round within the cap; an exit 3 or 5 returns `stopped`
+   with its stderr as the reason.
+9. **One outcome document.** The run prints exactly one document from
+   `chain-result.zsh emit`: `ready` (Step 5's `READY` branch, with Step 1's
+   risk and the auto-accepted answers), `split`, `questions-pending` or
+   `stopped`. Each is a step verdict value by the same name, and a refinement
+   step never ends `done`, `needs-refinement` or `blocked`.
+10. **Telemetry.** Only the dispatch that ends `ready`, `split` or `stopped`
+    emits Step 7's record, with `ROUNDS`, `RAISED` and `RESOLVED` cumulative
+    across dispatches through the resume file. A `questions-pending` dispatch
+    emits none. `ready` records `refined-ready`, `split` records `parked` with
+    `split-recommended`, and `stopped` records `parked` with `deferred`. An
+    unreadable handoff stops before Step 0, so it is not a run and records
+    nothing.
+
 ## Defaults taken instead of asking (#2903)
 
 Three of this skill's flow questions have one safe, reversible answer. Under
@@ -479,7 +569,12 @@ record* (#2899) they are `implementation`, so you take the answer instead of
 asking: Step 0's missing-label precondition, Step 1's `READY` shortcut and Step
 5's still-rejected re-gate. `reference/ask-branches.md` inventories every ask
 branch this skill has, with its kind; every `intent` or `gap` branch stays with
-the human. The unattended follow-up mode keeps its own fixed answers.
+the human. The unattended follow-up mode keeps its own fixed answers. Step
+2.5's test-case spin-out (#2939) is not one of these three: it is a standing
+rule the human approved, so it prints no notice and records no entry, and the
+approval of the rewrite, or the write-back that replaces it, covers it. A
+chained refinement takes these defaults as written, and relays every intent or
+gap question to its caller (*Chained refinement mode*).
 
 Each default does two things:
 
@@ -768,7 +863,9 @@ human approves it as part of the rewrite, and Step 3 writes it back unchanged.
   section below. Keep this issue's split file of every round for that section.
 - **`ask`** — relay these as before. Show the `recommended_answer`,
   `confidence` and, on a `gap`, the turn's `proposed_doc_change` next to each one
-  when present, so the human can simply agree.
+  when present, so the human can simply agree. A chained refinement shows them
+  to no one: it returns `questions-pending` for its caller to relay
+  (*Chained refinement mode*, step 4).
 
 When every question is `auto`, do not wait for the human: call the agent again
 straight away with the auto-accepted answers as `human_reply`.
@@ -807,7 +904,10 @@ threshold only answers the refiner's questions. The approval of the exact
 rewrite is the human's, whatever the threshold, unless the refinement is
 all-auto (*Step 2 — the all-auto check*, below): no question reached the human,
 so there is no choice left to approve. The other exception is the unattended
-follow-up mode below, where its `accept` decision stands in for that approval.
+follow-up mode below, where its `accept` decision stands in for that approval. A
+chained refinement is a third (*Chained refinement mode*, #2939): the human's
+relayed answers, the auto-accepted answers and the Decisions taken stand in
+for it.
 Present it with a heading **Answers taken
 automatically**, listing each auto-accepted `intent` or `gap` question, the
 answer, its confidence and its weakest criterion. The human can overturn any of them
@@ -901,15 +1001,18 @@ It applies the size pre-flight's own thresholds; this skill restates none.
   A `null` `proposed_split`, or a child with an empty `files`, is never filled
   in by you: show no children and ask once — **Revise the draft** or **Park as
   `deferred`** (the typed parked exit below), never the `split-recommended`
-  park, which is offered only when the split names its children.
+  park, which is offered only when the split names its children. That question
+  is a direct run's: in a chained run it stops the chain as a permanent failure
+  (*Chained refinement mode*, step 8).
 
-  Otherwise show the human every child, then ask once (`AskUserQuestion`):
-  **File these N child stories (Recommended)**, **Revise the draft** (their
-  reply is another round, and the revised draft is sized again) or **Park as
-  `split-recommended`** (the typed parked exit below, with the children's titles
-  as `candidate_children`).
+  **Otherwise the split is filed without asking, in every refine-issue run,
+  chained or direct (#2939):** show the human every child, then file them
+  (below). The split names each child with its own declared inventory, and
+  `file-split-children.zsh` sizes every child before any write, so no choice is
+  left that the size check has not already made. The unattended follow-up mode
+  is the one exception: it never splits, and parks `deferred` (unchanged).
 
-**When the human chooses to file the split**, run from the repository root:
+**Filing the split.** Run from the repository root:
 
 ```bash
 "<skill-base-dir>/scripts/file-split-children.zsh" --repo "$REPO" --parent <N> --plan <plan.json>
@@ -924,12 +1027,15 @@ Branch on its exit:
   written back to it. Set `STATE_OUTCOME="parked"`, `PARK_TYPE="split-recommended"`
   and `SIZE_PREFLIGHT`'s `children_filed` to the length of its `filed` list (an
   empty `SIZE_PREFLIGHT` stays empty: the children go uncounted), run
-  Step 7, and stop. Tell the human the children are refined next —
-  `/development:refine-issue <N>` walks them as an epic. (In an epic walk that
-  ends **this child**, not the walk: note it in the epic summary as split into
-  its filed children and continue to the next child.)
+  Step 7, and then **walk the filed children as an epic in the same run**: the
+  Epic walk below, on `<N>`. A chained run instead returns `split` with the
+  filed children, and its caller walks them (*Chained refinement mode*, step 8).
+  (In an epic walk that ends **this child**, not the walk: note it in the epic
+  summary as split into its filed children, and walk them after the rest of
+  this pass, as children of their new epic `<N>`.)
 - **1** — a child's inventory still stops; **nothing was written**. Relay which
-  child and its triggers, and run another round to revise the split.
+  child and its triggers, and run another round to revise the split; the
+  revised split is filed the same way.
 - **2** — your own malformed call: fix it and re-run once.
 - **3** — nothing was written. Relay its stderr and offer the parked exit.
 - **5** — partial. Relay its report verbatim: the children it filed, and what
@@ -1129,6 +1235,13 @@ structured in the block (the gate-validatable source of truth) *and* as separate
 backlog-visible issues, while staying implemented in the **same PR** as the story
 (#577/#696), so tests and feature never drift.
 
+**In every refine-issue run, chained or direct, Step 2.5 files, edits and
+closes the story's test-case issues through `test-case-spinout.zsh` without
+asking (#2939).** Approving the rewrite, or the all-auto or chained write-back
+that replaces the approval, also covers the test-case issues, and no branch
+puts their filing to the human. This is a standing rule the human approved on
+2026-10-30.
+
 A **surface-touching** story has outside-in `test_cases[]`; a **no-surface**
 story has `test_cases: []` and this step creates nothing (proportionality). Drive
 the reconcile primitive — never hand-roll the `gh issue create`/`close` calls:
@@ -1155,7 +1268,7 @@ issues — same-PR closure (`resolve-issue`, #577/#696) makes ordering moot.
 ## Step 3 — write back the approved rewrite (human-authored)
 
 This edit is **human-authored**, and human-approved unless the refinement was
-all-auto (Step 2, #2938) — you run it with the
+all-auto (Step 2, #2938) or chained (#2939) — you run it with the
 session's own `gh` auth (the human's identity), **not** a bot token and **not** a
 PR. You are editing the issue in place.
 
@@ -1548,6 +1661,8 @@ fi
 - **The intelligence is the agent; you are the conductor.** Never invent the
   refinement judgment yourself — spawn `issue-refiner`. Never let the agent
   write to GitHub — every side effect (edit, label, comment) is yours.
+- **A chained refinement writes back on convergence (#2939).** It shows no
+  approval prompt: the answers its caller relayed stand in for the approval.
 - **Human-approved, human-authored write-back.** No bot token, no PR: you edit
   the issue with the human's auth, and only after they approve the exact rewrite
   — the two exceptions are an all-auto refinement (#2938), in which no
@@ -1573,9 +1688,15 @@ fi
   (#583), never in `story-spec`.
 - **Size every draft; never write back one that stops (#2589).** Step 2 runs
   `scripts/size-check.zsh` on the draft's declared inventory before approval. A
-  stop becomes a proposed split, filed only on the human's choice and only by
+  stop becomes a proposed split. A split that names its children is filed
+  without asking, in every run, chained or direct (#2939), and only by
   `scripts/file-split-children.zsh` — never with raw `gh issue create` calls,
-  and never re-run after a partial result.
+  and never re-run after a partial result. A split that names no children is
+  never filed: a direct run asks to revise or park, and a chained run stops.
+- **A chained refinement asks no one (#2939).** It returns one
+  `scripts/chain-result.zsh` outcome document — `ready`, `split`,
+  `questions-pending` or `stopped` — and writes nothing back while a question is
+  pending; its caller relays the questions.
 - **Spin out test cases with the script, not by hand (#671).** Step 2.5 runs
   `scripts/test-case-spinout.zsh` to create/reconcile/close the linked
   `test-case` issues; splice its reconciled `test_cases[]` (with issue links)
