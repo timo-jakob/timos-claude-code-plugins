@@ -499,6 +499,18 @@ EOF
   [ "$(jq -c .roots <<<"$output")" = '[".","_terraform"]' ]
 }
 
+@test "the roots order is byte order under a UTF-8 locale too (#2951)" {
+  # en_US.UTF-8 collates `_terraform` before `.`; skip where the host lacks it
+  [ "$(printf '.\n_terraform\n' | LC_ALL=en_US.UTF-8 sort | head -1)" = "_terraform" ] ||
+    skip "en_US.UTF-8 does not collate differently from C on this host"
+  stub_tofu
+  mkdir -p "$REPO/_terraform"
+  printf 'variable "a" {}\n' >"$REPO/_terraform/main.tf"
+  run --separate-stderr env PATH="$BIN" LC_ALL=en_US.UTF-8 "$GATE" --repo "$REPO"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c .roots <<<"$output")" = '[".","_terraform"]' ]
+}
+
 @test "a repo whose only .tf is pruned is verdict EMPTY, not an error (#1161)" {
   stub_tofu
   rm -rf "$REPO"/*.tf "$REPO/modules"
