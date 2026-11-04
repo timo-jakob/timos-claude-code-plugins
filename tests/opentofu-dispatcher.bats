@@ -177,7 +177,7 @@ section() {
   # charter violation this file asserts in prose two tests down — would keep the
   # key set, the name set and the never-auto-fix sentence all intact
   local rows
-  rows="$(sed -n 's/^| `\([a-z_]*\)` | .* | `\([a-z-]*\)` |$/\1=\2/p' "$SKILL" | sort | tr '\n' ' ')"
+  rows="$(sed -n 's/^| `\([a-z_]*\)` | .* | `\([a-z-]*\)` |$/\1=\2/p' "$SKILL" | LC_ALL=C sort | tr '\n' ' ')"
   [ -n "$rows" ]
   [ "$rows" = "format=opentofu-format-fixer lint=opentofu-format-fixer misconfiguration=opentofu-security-reviewer policy=opentofu-policy-triage policy_tests=opentofu-policy-triage state_encryption=opentofu-security-reviewer validate=opentofu-security-reviewer " ]
 }

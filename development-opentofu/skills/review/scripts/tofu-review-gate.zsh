@@ -232,7 +232,10 @@ done
 for d in "${dirs[@]}"; do
   [[ -n "${reached[$d]:-}" ]] || roots+=("$d")
 done
-roots=("${(@o)roots}")
+# Byte order, not the caller's collation: `(o)` sorts by LC_COLLATE, and a
+# UTF-8 locale puts `_terraform` before `.`, so `roots` would differ by host
+# (#2951). The anonymous function scopes LC_ALL=C to this one sort.
+() { local LC_ALL=C; roots=("${(@o)roots}") }
 
 local -a validated=() source_only=() notes=() failures=()
 local out rc
