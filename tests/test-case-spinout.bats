@@ -231,9 +231,9 @@ NEW_TWO='{"schema":"story-spec/v1","test_cases":[
 @test "#2939 a chained refinement relays a below-threshold intent or gap question as questions-pending, never asks it" {
   local t; t="$(tr '\n' ' ' < "$REPO_ROOT/development/skills/refine-issue/SKILL.md" | tr -s ' ')"
   contains "$t" 'In a chained refinement, a below-threshold intent or gap question is never asked in place or through a side channel. When a round'"'"'s split leaves any `ask` entry, the run writes nothing back, and the needs-decision park is never taken.'
-  contains "$t" 'Then it returns `questions-pending` with `chain-result.zsh emit --outcome questions-pending'
+  contains "$t" 'Then it returns `questions-pending` with `chain-result.zsh emit --issue <N> --outcome questions-pending'
   contains "$t" 'Nothing is posted to GitHub between dispatches.'
-  contains "$t" 'A chained dispatch that reaches 3 rounds without converging and without an ask question returns `stopped` with the reason "no convergence within the round cap"'
+  contains "$t" '`ROUNDS` counts across dispatches, through the resume file. A round that ends at or past 3 without converging and without an ask question returns `stopped` with the reason "no convergence within the round cap"'
   contains "$t" 'Only the dispatch that ends `ready`, `split` or `stopped` emits Step 7'"'"'s record, with `ROUNDS`, `RAISED` and `RESOLVED` cumulative across dispatches through the resume file. A `questions-pending` dispatch emits none.'
   contains "$t" '`provenance.generated_by` set to `issue-refiner via /development:resolve-issue`.'
   contains "$t" 'On exit 2 or 1, return `stopped` with the reason "unreadable step handoff" and write nothing.'

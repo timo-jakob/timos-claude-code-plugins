@@ -455,8 +455,8 @@ _turn()  { printf '%s\n' "{\"questions\":$1,\"resolved_objections\":$2${3-$DRAFT
   grep -qF 'failed label removal — report it.' <<< "$t"
   grep -qF 'Step 2.5 has no prompt: on `accept` it runs as written, before Step 3.' <<< "$t"
   grep -qF 'write it back as Steps 2.5 and 3 do' <<< "$t"
-  grep -qF 'only after they approve the exact rewrite — the two exceptions are an all-auto refinement (#2938), in which no question reached the human, and the unattended follow-up mode' <<< "$t"
-  grep -qF 's `accept`. - **Auto-accept answers questions, nothing else.**' <<< "$t"
+  grep -qF 'only after they approve the exact rewrite — the exceptions are an all-auto refinement (#2938), in which no question reached the human, the unattended follow-up mode' <<< "$t"
+  grep -qF 'relayed answers stand in for the approval. - **Auto-accept answers questions, nothing else.**' <<< "$t"
   grep -qF 'never answers the Step 0, Step 1 or Step 5 prompts; the unattended follow-up mode, the only exception, answers them as it lists.' <<< "$t"
   # C: exit 2
   grep -qF 'from `follow-up-auto-refine.zsh` or `follow-up-origin.zsh` is your own malformed input: fix it and re-run once. A second exit 2 stops the mode for that follow-up: report it and write nothing, so the label stays.' <<< "$t"

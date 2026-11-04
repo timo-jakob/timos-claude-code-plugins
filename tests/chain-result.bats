@@ -107,12 +107,15 @@ EOF
 @test "ready without --answers carries an empty auto_accepted list" {
   run -0 zsh "$S" emit --issue 2939 --outcome ready --risk low
   [ "$output" = '{"schema":"chain-result/v1","issue":2939,"outcome":"ready","risk":"low","auto_accepted":[]}' ]
+  run -0 zsh "$S" emit --issue 2939 --outcome ready --risk normal
+  [ "$output" = '{"schema":"chain-result/v1","issue":2939,"outcome":"ready","risk":"normal","auto_accepted":[]}' ]
 }
 
 @test "split carries the children filed" {
-  printf '[{"number":3101,"title":"child a"},{"number":3102,"title":"child b"}]' > "$D/children.json"
+  # file-split-children.zsh's own filed array, unchanged
+  printf '[{"index":1,"issue":3101,"linked":true},{"index":2,"issue":3102,"linked":false}]' > "$D/children.json"
   run -0 zsh "$S" emit --issue 2939 --outcome split --children "$D/children.json"
-  [ "$output" = '{"schema":"chain-result/v1","issue":2939,"outcome":"split","children":[{"number":3101,"title":"child a"},{"number":3102,"title":"child b"}]}' ]
+  [ "$output" = '{"schema":"chain-result/v1","issue":2939,"outcome":"split","children":[{"index":1,"issue":3101,"linked":true},{"index":2,"issue":3102,"linked":false}]}' ]
 }
 
 @test "questions-pending carries each ask entry unchanged, the resume path and the round" {
@@ -163,16 +166,23 @@ EOF
   run --separate-stderr -2 zsh "$S" emit --issue 2939 --outcome stopped --reason x --risk low
   [ -z "$output" ]
   contains "$stderr" "--risk does not belong to outcome stopped"
-  printf '[{"number":1,"title":"t"}]' > "$D/children.json"
+  printf '[{"index":1,"issue":1,"linked":true}]' > "$D/children.json"
   run --separate-stderr -2 zsh "$S" emit --issue 2939 --outcome ready --risk low --children "$D/children.json"
   contains "$stderr" "--children does not belong to outcome ready"
 }
 
 @test "malformed emit input is exit 2 with nothing on stdout" {
   printf '[]' > "$D/empty.json"
-  printf '[{"number":0,"title":"t"}]' > "$D/badchild.json"
+  printf '[{"index":1,"issue":0,"linked":true}]' > "$D/badchild.json"
+  printf '[{"number":3101,"title":"child a"}]' > "$D/oldchild.json"
   printf '[{"question":"q"}]' > "$D/badanswers.json"
+  printf '[{"question":"q","answer":"a","confidence":"0.95"}]' > "$D/noweakest.json"
+  printf '[{"answer":"a","confidence":"0.95","weakest":[]}]' > "$D/noquestion.json"
+  printf '{}' > "$D/obj.json"
   jq -c '.ask = []' "$D/split.json" > "$D/noask.json"
+  jq -c '.ask[0].kind = "bogus"' "$D/split.json" > "$D/badkind.json"
+  jq -c '.ask[0] |= del(.reason)' "$D/split.json" > "$D/noreason.json"
+  jq -c '.ask[0].question = " "' "$D/split.json" > "$D/blankq.json"
   local -a calls=(
     "--issue 0 --outcome stopped --reason x|--issue must be an integer >= 1"
     "--issue abc --outcome stopped --reason x|--issue must be an integer >= 1"
@@ -180,14 +190,22 @@ EOF
     "--issue 2939 --outcome ready|--risk must be low, normal or elevated"
     "--issue 2939 --outcome ready --risk high|--risk must be low, normal or elevated"
     "--issue 2939 --outcome ready --risk low --answers $D/badanswers.json|--answers must be an array"
+    "--issue 2939 --outcome ready --risk low --answers $D/noweakest.json|--answers must be an array"
+    "--issue 2939 --outcome ready --risk low --answers $D/noquestion.json|--answers must be an array"
+    "--issue 2939 --outcome ready --risk low --answers $D/obj.json|--answers must be an array"
     "--issue 2939 --outcome split|--children is required"
-    "--issue 2939 --outcome split --children $D/empty.json|--children must be a non-empty array"
-    "--issue 2939 --outcome split --children $D/badchild.json|--children must be a non-empty array"
+    "--issue 2939 --outcome split --children $D/empty.json|--children must be file-split-children.zsh's non-empty filed array"
+    "--issue 2939 --outcome split --children $D/badchild.json|--children must be file-split-children.zsh's non-empty filed array"
+    "--issue 2939 --outcome split --children $D/oldchild.json|--children must be file-split-children.zsh's non-empty filed array"
     "--issue 2939 --outcome questions-pending --split $D/noask.json --turn $D/turn.json --resume /r --round 1|non-empty ask set"
+    "--issue 2939 --outcome questions-pending --split $D/badkind.json --turn $D/turn.json --resume /r --round 1|non-empty ask set"
+    "--issue 2939 --outcome questions-pending --split $D/noreason.json --turn $D/turn.json --resume /r --round 1|non-empty ask set"
+    "--issue 2939 --outcome questions-pending --split $D/blankq.json --turn $D/turn.json --resume /r --round 1|non-empty ask set"
     "--issue 2939 --outcome questions-pending --split $D/split.json --turn $D/turn.json --resume r.json --round 1|--resume must be an absolute path"
     "--issue 2939 --outcome questions-pending --split $D/split.json --turn $D/turn.json --resume /r --round 0|--round must be an integer >= 1"
     "--issue 2939 --outcome questions-pending --split $D/split.json --resume /r --round 1|--turn is required"
     "--issue 2939 --outcome questions-pending --split $D/split.json --turn $D/empty.json --resume /r --round 1|--turn must be one issue-refiner turn"
+    "--issue 2939 --outcome questions-pending --split $D/split.json --turn $D/obj.json --resume /r --round 1|--turn must be one issue-refiner turn"
     "--issue 2939 --outcome stopped|--reason must be a non-blank string"
     "--issue 2939 --outcome stopped --reason x --reason y|--reason given twice"
   )
@@ -248,10 +266,21 @@ EOF
   contains "$t" '`--chained-from` is never combined with `--follow-up`: print the usage line and stop.'
   contains "$t" 'Its `scratch_dir` holds this issue'"'"'s chained state: the rounds directory is `<scratch_dir>/refine-<N>.rounds/` and the conductor'"'"'s defaults file `<scratch_dir>/refine-<N>.defaults.json`'
   contains "$t" '**A first dispatch** is one with no `<scratch_dir>/refine-<N>-resume.json`.'
-  contains "$t" 'A pending question still unanswered returns `questions-pending` again with only the unanswered entries, and makes no refiner call.'
+  contains "$t" 'A pending question still unanswered returns `questions-pending` again with only the unanswered entries, and makes no refiner call:'
   contains "$t" 'The run prints exactly one document from `chain-result.zsh emit`: `ready` (Step 5'"'"'s `READY` branch, with Step 1'"'"'s risk and the auto-accepted answers), `split`, `questions-pending` or `stopped`.'
   contains "$t" 'A `questions-pending` dispatch emits none.'
   contains "$t" 'A chained refinement shows them to no one: it returns `questions-pending` for its caller to relay'
+  contains "$t" '`/development:refine-issue <issue-number|url> [--auto-accept <0..1>] [--follow-up | --chained-from <root> --handoff <file>]`'
+  contains "$t" 'A target the classification does not find a single issue returns `stopped` with the classification'"'"'s finding as the reason: the Epic walk never runs in a chained refinement.'
+  contains "$t" 'it skips Steps 0 and 1, restores the state the file holds, and continues Step 2 with no new Step 1 diagnosis (step 5 below).'
+  contains "$t" '`<scratch_dir>/refine-<N>-resume.json`, holding the issue'"'"'s `title` and `body`, the `conversation`, the open objections, the round turn- and split-file paths, the decisions taken, the auto-accepted answers so far, the `ROUNDS`/`RAISED`/`RESOLVED` counters, Step 0'"'"'s `t0` and `repo_root`, Step 1'"'"'s `RISK` and `SIZE_PREFLIGHT`, `paused_s` and `waiting_since` (now), and the pending `ask` entries.'
+  contains "$t" '`chain-result.zsh emit --issue <N> --outcome questions-pending --split <the round'"'"'s split> --turn <the round'"'"'s turn> --resume <the resume file> --round <ROUNDS>`.'
+  contains "$t" 'It adds `now - waiting_since` to `paused_s`, then takes each handoff `answers` entry for this issue whose `question` is a pending entry'"'"'s question text, verbatim, and adds it to the round'"'"'s human reply as the plain human line `<question> → <answer>`.'
+  contains "$t" 'it keeps the lines it did add in the resume file, and passes `--split` a file holding `{"ask": [<the unanswered entries>]}`.'
+  contains "$t" 'The all-auto check does not run: no chained run has an approval to skip.'
+  contains "$t" 'A `null` `proposed_split`, or a child with an empty `files`, stops the chain as a permanent failure: return `stopped` with the reason "the size check stops the draft and the split names no children". A `file-split-children.zsh` exit 1 runs another round within the cap; an exit 3 or 5 returns `stopped` with its stderr as the reason.'
+  contains "$t" '`ready` records `refined-ready`, `split` records `parked` with `split-recommended`, and `stopped` records `parked` with `deferred`. An unreadable handoff stops before Step 0, so it is not a run and records nothing.'
+  contains "$t" 'A chained refinement is another (*Chained refinement mode*, #2939): the human'"'"'s relayed answers, the auto-accepted answers and the Decisions taken stand in for it.'
 }
 
 @test "refine-issue's split rules: an epic-walk child's filed split, and a split with no children" {

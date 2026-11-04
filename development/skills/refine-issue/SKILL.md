@@ -487,11 +487,14 @@ chained run returns one outcome document instead of prompting.
 stop. Everything this section does not change runs as Steps 0–7 say, the
 auto-accept threshold included.
 
-1. **Read the handoff first**, before Step 0:
+1. **Read the handoff first**, before the epic classification and Step 0:
    `"<skill-base-dir>/scripts/chain-result.zsh" read-handoff --file <file>`. It
    validates the `step-handoff/v1` object (ARCHITECTURE.md, *Step handoff
    contract (`step-handoff/v1`)*) and prints it. On exit 2 or 1, return
-   `stopped` with the reason "unreadable step handoff" and write nothing. Its
+   `stopped` with the reason "unreadable step handoff" and write nothing. A
+   target the classification does not find a single issue returns `stopped`
+   with the classification's finding as the reason: the Epic walk never runs
+   in a chained refinement. Its
    `scratch_dir` holds this issue's chained state: the rounds directory is
    `<scratch_dir>/refine-<N>.rounds/` and the conductor's defaults file
    `<scratch_dir>/refine-<N>.defaults.json`, in place of the `/tmp` paths
@@ -511,13 +514,15 @@ auto-accept threshold included.
    never asked in place or through a side channel. When a round's split leaves
    any `ask` entry, the run writes nothing back, and the needs-decision park is
    never taken. It writes
-   `<scratch_dir>/refine-<N>-resume.json`, holding the `conversation`, the open
-   objections, the round split-file paths, the decisions taken, the
-   auto-accepted answers so far, the `ROUNDS`/`RAISED`/`RESOLVED` counters,
-   Step 0's `t0` and `repo_root`, `paused_s` and `waiting_since` (now), and the
+   `<scratch_dir>/refine-<N>-resume.json`, holding the issue's `title` and
+   `body`, the `conversation`, the open objections, the round turn- and
+   split-file paths, the decisions taken, the auto-accepted answers so far, the
+   `ROUNDS`/`RAISED`/`RESOLVED` counters, Step 0's `t0` and `repo_root`, Step
+   1's `RISK` and `SIZE_PREFLIGHT`, `paused_s` and `waiting_since` (now), and the
    pending `ask` entries. Then it returns `questions-pending` with
-   `chain-result.zsh emit --outcome questions-pending --split <the round's split>
-   --turn <the round's turn> --resume <the resume file> --round <ROUNDS>`. Nothing
+   `chain-result.zsh emit --issue <N> --outcome questions-pending --split <the
+   round's split> --turn <the round's turn> --resume <the resume file> --round
+   <ROUNDS>`. Nothing
    is posted to GitHub between dispatches.
 5. **A re-dispatch adds the answers as plain human lines.** It adds
    `now - waiting_since` to `paused_s`, then takes each handoff `answers` entry
@@ -526,9 +531,11 @@ auto-accept threshold included.
    `<question> → <answer>`. When every pending question is answered, it
    calls the refiner with that reply. A pending question still unanswered
    returns `questions-pending` again with only the unanswered entries, and
-   makes no refiner call.
-6. **The round cap.** A chained dispatch that reaches 3 rounds without
-   converging and without an ask question returns `stopped` with the reason
+   makes no refiner call: it keeps the lines it did add in the resume file, and
+   passes `--split` a file holding `{"ask": [<the unanswered entries>]}`.
+6. **The round cap.** `ROUNDS` counts across dispatches, through the resume
+   file. A round that ends at or past 3 without converging and without an ask
+   question returns `stopped` with the reason
    "no convergence within the round cap" — the follow-up mode's bound and
    wording.
 7. **No approval prompt.** On convergence the size check runs as Step 2 says.
@@ -597,7 +604,7 @@ Each default does two things:
 
 | Default | Question | Choice | Evidence | How to overrule |
 |---|---|---|---|---|
-| Step 0 | Refine an issue that is not marked `needs-refinement`? | Refined it without the label. | Nothing is written without Step 2's approval of the exact rewrite, or a run that asked the human nothing (the all-auto check, #2938). | Restore the body from the issue's edit history. |
+| Step 0 | Refine an issue that is not marked `needs-refinement`? | Refined it without the label. | Nothing is written without Step 2's approval of the exact rewrite, a run that asked the human nothing (the all-auto check, #2938), or a chained refinement's relayed answers (#2939). | Restore the body from the issue's edit history. |
 | Step 1 | Clear `needs-refinement` on a story the gate now passes? | Cleared it through Step 5's `READY` branch. | Step 5 removes the label only on a `READY` verdict. | Re-add the label. |
 | Step 5 | Loop again after a re-gate that still rejects? | Looped back to Step 2 with the gate's remaining reasons as objections. | The label stays, and the human can stop from inside the loop; after a second rejected all-auto write-back, the next draft goes to the human (#2938). | Stop the loop; the label stays as the resume signal. |
 
@@ -671,7 +678,8 @@ gh issue view <N> --json number,title,body,state,labels,url,comments
   without asking**, and take the default with its notice (*Defaults taken instead
   of asking*, above): you can refine a story that was never formally gated, and
   nothing is written without Step 2's approval of the exact rewrite, unless no
-  question reaches the human at all (*Step 2 — the all-auto check*).
+  question reaches the human at all (*Step 2 — the all-auto check*) or the run
+  is a chained refinement (*Chained refinement mode*).
 - Read the issue's **prior gate comment(s)** in the thread — the refinement
   questions the gate already posted are the objections you start from.
 - **Resume a parked session if one exists (#578).** A prior run may have taken a
@@ -905,7 +913,7 @@ rewrite is the human's, whatever the threshold, unless the refinement is
 all-auto (*Step 2 — the all-auto check*, below): no question reached the human,
 so there is no choice left to approve. The other exception is the unattended
 follow-up mode below, where its `accept` decision stands in for that approval. A
-chained refinement is a third (*Chained refinement mode*, #2939): the human's
+chained refinement is another (*Chained refinement mode*, #2939): the human's
 relayed answers, the auto-accepted answers and the Decisions taken stand in
 for it.
 Present it with a heading **Answers taken
@@ -1661,12 +1669,12 @@ fi
 - **The intelligence is the agent; you are the conductor.** Never invent the
   refinement judgment yourself — spawn `issue-refiner`. Never let the agent
   write to GitHub — every side effect (edit, label, comment) is yours.
-- **A chained refinement writes back on convergence (#2939).** It shows no
-  approval prompt: the answers its caller relayed stand in for the approval.
 - **Human-approved, human-authored write-back.** No bot token, no PR: you edit
   the issue with the human's auth, and only after they approve the exact rewrite
-  — the two exceptions are an all-auto refinement (#2938), in which no
-  question reached the human, and the unattended follow-up mode's `accept`.
+  — the exceptions are an all-auto refinement (#2938), in which no
+  question reached the human, the unattended follow-up mode's `accept`, and a
+  chained refinement (#2939), whose caller's relayed answers stand in for the
+  approval.
 - **Auto-accept answers questions, nothing else.** The threshold
   (`--auto-accept`, else `refine_auto_accept_threshold`, else 1) decides only
   which refiner questions you answer with the refiner's recommendation, and

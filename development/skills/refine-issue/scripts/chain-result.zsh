@@ -34,7 +34,8 @@
 #                        {question, answer, confidence, weakest}; [] without it
 #     split              --children <file>
 #                        adds children: <file> holds file-split-children.zsh's
-#                        non-empty `filed` array of {number, title}
+#                        non-empty `filed` array of {index, issue, linked},
+#                        unchanged
 #     questions-pending  --split <split.json> --turn <turn.json>
 #                        --resume <abs path> --round <R>
 #                        adds questions, resume and round. questions is the
@@ -145,8 +146,8 @@ case "$outcome" in
   split)
     local children; children="$(readjson --children)" || exit 2
     jq -e "$defs"'type == "array" and length > 0
-          and all(.[]; type == "object" and (.number // null | posint) and (.title // null | nonblank))' \
-      <<< "$children" >/dev/null || die "--children must be a non-empty array of {number, title}"
+          and all(.[]; type == "object" and (.index // null | posint) and (.issue // null | posint))' \
+      <<< "$children" >/dev/null || die "--children must be file-split-children.zsh's non-empty filed array"
     jq -c --argjson c "$children" '. + {children: $c}' <<< "$base"
     ;;
   questions-pending)
