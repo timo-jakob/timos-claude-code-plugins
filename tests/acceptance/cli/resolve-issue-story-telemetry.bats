@@ -86,7 +86,7 @@ step0() {
   run --separate-stderr zsh "$DRIVER" args "$@"
   [ "$status" -eq 0 ] || return 1
   local parsed="$output"
-  local -a start_args=(start --run-file "$RUN")
+  local -a start_args=(start --run-file "$RUN" --origin human)
   local f d
   f="$(jq -r '.telemetry_file // empty' <<<"$parsed")"
   d="$(jq -r '.telemetry_dir // empty' <<<"$parsed")"

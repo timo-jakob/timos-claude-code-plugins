@@ -103,12 +103,14 @@ flat() {
   contains "$(flat "$REF/interactive/remediation.md")" "$POINTER"
 }
 
-@test "#2583 the size pre-flight override is attended-only, and unattended takes terminal (c)" {
+@test "#2583 #2940 the size pre-flight asks no run: the override (a) is retired, and (c) never prompts" {
+  # #2583 made the override attended-only; #2940 retired it, so no session mode
+  # reaches a question at §2 and there is no asking branch left to route.
   local skill
   skill="$(flat "$RI/SKILL.md")"
-  contains "$skill" '**(a) The human overrides.** Interactive only (mode `attended`, §0a'"'"'s `resolve-session.zsh`)'
-  contains "$skill" '**(c) No human present** (autonomous: mode `unattended`, §0a'"'"'s `resolve-session.zsh` — an E3 child included). Never prompt: take (b) without the question.'
-  contains "$skill" 'Never prompt: take (b) without the question.'
+  lacks "$skill" '**(a) The human overrides.**'
+  contains "$skill" 'The override question (a) is retired: no run reaches it, and no run asks it.'
+  contains "$skill" '**(c) A pipeline-started run or an E3 child parks and stops.** Never prompt:'
 }
 
 @test "#2583 the interactive extension points at the helper, before its frozen span and in the index" {

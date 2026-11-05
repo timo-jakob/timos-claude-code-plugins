@@ -21,7 +21,8 @@
 #       failing).
 #
 #   story-telemetry.zsh start --run-file FILE [--telemetry-file PATH]
-#       [--telemetry-dir DIR] [--parent-run-id ID] [--ts EPOCH]
+#       [--telemetry-dir DIR] [--parent-run-id ID] [--origin human|pipeline]
+#       [--ts EPOCH]
 #       Stamp the run's start and PRE-MINT its run_id in the emitter's own
 #       format, `resolve-issue-<ts>-<4 hex>`, so the id can be handed to every
 #       review-loop invocation as --parent-run-id BEFORE the run's own record
@@ -38,6 +39,10 @@
 #       run and overwrites FILE: `start` cannot tell a fresh invocation from a
 #       re-entry, so it is called exactly once per invocation, and a re-entering
 #       skill re-reads FILE instead of calling it again. Touches no sink.
+#       --origin (#2940) records who started the run — `human` when a human
+#       invoked the skill, `pipeline` for a maintenance-pipeline run — as the
+#       run file's `origin` (null without it), and `child_start_args` carries
+#       `--origin` with it, so every run the chain starts inherits it.
 #
 #   story-telemetry.zsh emit --run-file FILE --state FILE --repo-dir DIR
 #       --issue N [--epic] [--repo-type T] [--loop-work-dir DIR ...] [--now EPOCH]
@@ -49,7 +54,9 @@
 #       stamp, the run file's parent_run_id when it has one, and the run's sink
 #       flags. Each --loop-work-dir contributes the ids
 #       in its `.telemetry-run-ids` ledger (written by resolve-story-loop.zsh) to
-#       payload.review_loop_run_ids; a --loop-work-dir that is not a directory at
+#       payload.review_loop_run_ids; a story-mode state with no `origin` takes
+#       the run file's (#2940), and a state that names one keeps its own; a
+#       --loop-work-dir that is not a directory at
 #       all is warned about and contributes nothing. An epic run drives no loop
 #       of its own, so --epic with --loop-work-dir is a usage error. Prints the emitted record on
 #       success, and marks the run file `emitted: true`, so a repeated `emit` for
@@ -89,7 +96,7 @@ local invocation_help="usage: /development:resolve-issue <issue-number|url> [--t
 
 local usage="usage: story-telemetry.zsh args [WORD ...]
        story-telemetry.zsh start --run-file FILE [--telemetry-file PATH] [--telemetry-dir DIR]
-                                 [--parent-run-id ID] [--ts EPOCH]
+                                 [--parent-run-id ID] [--origin human|pipeline] [--ts EPOCH]
        story-telemetry.zsh emit --run-file FILE --state FILE --repo-dir DIR --issue N [--epic]
                                 [--repo-type T] [--loop-work-dir DIR ...] [--now EPOCH]"
 
@@ -179,10 +186,11 @@ _rand4() {
 }
 
 _cmd_start() {
-  local run_file="" tfile="" tdir="" ts="" parent=""
+  local run_file="" tfile="" tdir="" ts="" parent="" origin=""
   while (( $# > 0 )); do
     case "$1" in
     --run-file) _need_val "$1" $# "${2:-}"; run_file="$2"; shift 2 ;;
+    --origin) _need_val "$1" $# "${2:-}"; origin="$2"; shift 2 ;;
     --telemetry-file) _need_val "$1" $# "${2:-}"; tfile="$2"; shift 2 ;;
     --telemetry-dir) _need_val "$1" $# "${2:-}"; tdir="$2"; shift 2 ;;
     --parent-run-id) _need_val "$1" $# "${2:-}"; parent="$2"; shift 2 ;;
@@ -191,6 +199,13 @@ _cmd_start() {
     esac
   done
   [[ -n "$run_file" ]] || { print -u2 -- "story-telemetry start: --run-file is required"; exit 2 }
+  # Unlike the sink and parent flags below, a literal `null` origin is REFUSED,
+  # not dropped: a step reads its origin out of the handoff, where null is a
+  # malformed value, and dropping it would lose the run's record at emit (#2940).
+  [[ "$origin" != "null" ]] || {
+    print -u2 -- "story-telemetry start: --origin is null — read it from the handoff or the run file (human|pipeline)"; exit 2 }
+  [[ -z "$origin" || "$origin" == (human|pipeline) ]] || {
+    print -u2 -- "story-telemetry start: --origin must be human or pipeline (got: $origin)"; exit 2 }
   if [[ -n "$ts" ]]; then
     [[ "$ts" == <-> && ${#ts} -le 18 ]] || {
       print -u2 -- "story-telemetry start: --ts must be a non-negative integer (got: $ts)"; exit 2 }
@@ -217,15 +232,17 @@ _cmd_start() {
   local run_id="resolve-issue-${ts}-$(_rand4)"
   local doc=""
   doc=$(jq -nc --arg id "$run_id" --argjson ts "$ts" --arg f "$tfile" --arg d "$tdir" \
-    --arg p "$parent" '
+    --arg p "$parent" --arg o "$origin" '
     (  (if $f == "" then [] else ["--telemetry-file", $f] end)
      + (if $d == "" then [] else ["--telemetry-dir", $d] end)) as $sinks
     | {run_id:$id, ts:$ts,
        parent_run_id:(if $p == "" then null else $p end),
+       origin:(if $o == "" then null else $o end),
        telemetry_file:(if $f == "" then null else $f end),
        telemetry_dir:(if $d == "" then null else $d end),
        loop_args:(["--parent-run-id", $id] + $sinks),
-       child_start_args:(["--parent-run-id", $id] + $sinks)}') || {
+       child_start_args:(["--parent-run-id", $id] + $sinks
+                         + (if $o == "" then [] else ["--origin", $o] end))}') || {
     print -u2 -- "story-telemetry start: failed to build the run file"; exit 1 }
   { print -r -- "$doc" > "$run_file" } 2>/dev/null || {
     print -u2 -- "story-telemetry start: cannot write the run file: $run_file"; exit 1 }
@@ -278,8 +295,9 @@ _cmd_emit() {
 
   command -v jq >/dev/null 2>&1 || _advise "jq not found on PATH"
   [[ -f "$run_file" && -r "$run_file" ]] || _advise "no readable run file at $run_file (was 'start' run?)"
-  local run_id="" ts="" tfile="" tdir="" emitted="" parent=""
+  local run_id="" ts="" tfile="" tdir="" emitted="" parent="" origin=""
   run_id=$(jq -r '.run_id // empty' "$run_file" 2>/dev/null) || run_id=""
+  origin=$(jq -r '.origin // empty' "$run_file" 2>/dev/null) || origin=""
   parent=$(jq -r '.parent_run_id // empty' "$run_file" 2>/dev/null) || parent=""
   ts=$(jq -r '.ts // empty' "$run_file" 2>/dev/null) || ts=""
   tfile=$(jq -r '.telemetry_file // empty' "$run_file" 2>/dev/null) || tfile=""
@@ -316,8 +334,9 @@ _cmd_emit() {
   if (( epic )); then
     jq -c '.' "$state_file" > "$tmp_state" 2>/dev/null || _advise "the state file is not JSON"
   else
-    jq -c --argjson ids "$ids_json" \
-      '.review_loop_run_ids = ((.review_loop_run_ids // []) + $ids)' "$state_file" \
+    jq -c --argjson ids "$ids_json" --arg o "$origin" \
+      '.review_loop_run_ids = ((.review_loop_run_ids // []) + $ids)
+       | if (.origin == null) and $o != "" then .origin = $o else . end' "$state_file" \
       > "$tmp_state" 2>/dev/null || _advise "the state file is not a JSON object"
   fi
 

@@ -6746,12 +6746,15 @@ directory; squash auto-merge folds them into one commit on `main`.
   from a re-entry. So the skill calls it once per invocation and re-reads the
   file on re-entry, and a fresh invocation never inherits a run an earlier one
   left un-emitted. A §0a remediation rung that runs the Single-issue flow on a
-  blocker is its own run, with its own run file and the same sink flags. An
+  blocker is its own run, with its own run file, the same sink flags and the
+  same `--origin` (#2940). An
   epic-kind rung, like any epic, is an epic run. `start --parent-run-id ID`
   (#1227) stores a **parent** for the run itself — an epic child's, set to the
   epic run's id — which `emit` hands to the emitter; without it the record's
-  `parent_run_id` is `null`. The run file's `child_start_args` is that flag plus
-  the run's sink flags, ready for a nested `start`.
+  `parent_run_id` is `null`. `start --origin human|pipeline` (#2940) stores the
+  run's origin as the run file's `origin`. The run file's `child_start_args` is
+  that parent flag plus the run's sink flags and its `--origin`, ready for a
+  nested `start`.
 - **`emit`** runs at the run's ending. It builds the payload with
   `build-story-telemetry-record.zsh`, narrows the outcome with its
   `--print-outcome`, and emits through the shared emitter with `--run-id` = the
@@ -6797,6 +6800,7 @@ record's `run_id`, as it always was.
 | `clean_stop` | `true` only for the unattended clean stop (#2579); `false` on every other ending, today's escalation terminal included. The builder refuses `true` unless the run is `escalated`, in session mode `unattended`, on `BUDGET_EXHAUSTED` or `ESCALATE_NO_CONVERGENCE` |
 | `convergence_failures` | the clean stop's failing conditions, drawn from `too-few-rounds`, `trend`, `stuck`, `critical`, `cap`; non-empty exactly when `clean_stop` is `true`, else `[]` |
 | `resumed_from` | `checkpoint` \| `clean_stop` \| `null` (#2920) — the kept state a `--resume` continued; `null` on a run that was not resumed, so a record from before the key reads the same |
+| `origin` | `human` \| `pipeline` (#2940) — `human` when a human invoked `/development:resolve-issue` (the attended inference, whatever `resolve_session` says), and on every run that human-started chain starts, each of which inherits it; `pipeline` for a maintenance-pipeline run. Required: the builder refuses a state whose `origin` is missing, `null` or any other value |
 
 The builder's state carries a fine-grained ending — `pr-opened`, `gate-parked`,
 `precheck-parked`, `escalated`, `failed` — plus the facts above and `pr`, and
@@ -6930,8 +6934,8 @@ epic run, and the epic record lists the child in `payload.child_run_ids`. The
 join resolves from both ends. With no sink flag, worktree epic, child and loop
 records share the user-level default sink (#1972), so the join survives the
 worktrees. The child's loops stay parented to the child run.
-On a failed epic `start` the children still get their own runs and the sink
-flags, with no parent. A child's size pre-flight record is parented to the
+On a failed epic `start` the children still get their own runs, the sink
+flags and the run's `--origin`, with no parent. A child's size pre-flight record is parented to the
 child run, as in story mode.
 
 **Envelope.** `issue` is the epic; `pr` is `null` — the children's PRs are
@@ -7367,9 +7371,11 @@ is its first segment when that names a marketplace plugin or a plugin the
 change creates; repo-root artifacts are unowned, counting toward the file total
 only. A repo with no marketplace manifest — every app repo — has no known
 plugins, so there only the file count can stop a story. The skill's §2 states
-the three stop terminals — a human override, an accepted split, and the
-autonomous park with the `needs-split` label that E3 children take — and the
-script's header states the ownership rules in full.
+its two stop terminals (#2940) — a human-started run parks and chains a
+refinement, and a pipeline-started run or an E3 child parks and stops, both with
+the `needs-split` label — and the script's header states the ownership rules in
+full. The human override is retired: `overridden` survives only in older
+records.
 
 **Telemetry.** Every verdict appends one `kind: "run"` record on the
 `story-preflight` pipeline — an open identifier, so no schema change — through
@@ -7397,9 +7403,9 @@ runs one way, through `parent_run_id`: the story record lists only its review
 loops, so this stream is an exception to rule 4 of *Per-pipeline telemetry
 instrumentation*. A split ends the run under its `failed` row, since the story
 record has no split outcome; the pre-flight record is where the `parked` lives.
-A stop whose human narrows the plan is followed by a second verdict for the same
-run, so count parked *runs* by the last pre-flight record under each
-`parent_run_id`.
+Before #2940 retired the override, a stop whose human narrowed the plan was
+followed by a second verdict for the same run, so count parked *runs* by the
+last pre-flight record under each `parent_run_id`.
 
 **The park carries its inventory (#2602).** The park's `size pre-flight: SPLIT`
 comment ends with a hidden `<!-- size-preflight-inventory/v1: {…} -->` marker
@@ -7968,8 +7974,52 @@ chain-result.zsh read-handoff.
 
 A missing or malformed handoff is `read-handoff`'s exit 2, with one reason on
 stderr, and the chained run then returns `stopped` with the reason "unreadable
-step handoff". #2940 adopts this contract for the step dispatch, which ships
-after it.
+step handoff". #2940 adopts this contract, unchanged, for resolve-issue's step
+dispatch (*Step verdict contract*, below).
+
+### Step verdict contract (#2940)
+
+In a human-started `/development:resolve-issue` run, every unit of work is a
+**step**: a fresh subagent the root dispatches — the named issue's own run, each
+chained refinement and each E3 child's run. The root and a step exchange work
+only through two files: the step handoff (step-handoff/v1 above, adopted
+unchanged; a step kind other than a refinement adds only the fields it needs,
+which a reader that does not read them ignores) and the **step verdict**. The
+root reads only the verdict file; it never reads a step's transcript as its
+result.
+
+A step verdict is one JSON object written to `<scratch_dir>/step-<N>-verdict.json`.
+Its fields are schema ("step-verdict/v1"), issue (int ≥ 1, the issue the step
+worked on), verdict, follow_ups (the issues the step filed, a list of ints ≥ 1,
+`[]` when none), optionally run_id (an issue-run step's own story run, or
+`null` when it never reached `start`), and the fields its verdict value
+carries:
+
+| `verdict` | Carries |
+|---|---|
+| `done` | `pr`, the opened PR's number |
+| `needs-refinement` | `reason`: `gate` (the §0b gate returned NEEDS_REFINEMENT) or `size` (the §2 size pre-flight stopped and parked) |
+| `ready` | `risk` and `auto_accepted`, the chain-result `ready` document's fields |
+| `split` | `children`, the chain-result `split` document's `children` (file-split-children.zsh's `filed` entries) |
+| `blocked` | `blockers`, the open blockers the dependency precheck found |
+| `questions-pending` | `questions`, `resume` and `round`, the chain-result `questions-pending` document's fields |
+| `stopped` | `reason`, a non-blank string |
+
+A refinement step ends with the verdict its chain-result outcome names (ready,
+split, questions-pending or stopped) and copies that document's fields; an
+issue-run step never ends ready or questions-pending. The conductor reads a
+verdict with jq against this table. A verdict file that is missing, not one JSON
+object, or carries a value outside the table is not a result: a step that ends
+its turn with no verdict file is messaged to carry on, not counted as failed,
+and a retry or a recovery is a new dispatch, never a resumed agent. A step
+dispatches no further step, so the depth stays root (0) → step (1) → panel or
+refiner (2) → reviewers (3). Each issue-run step emits its own story record,
+parented to the root's run; a single-issue root's `run_id` is a correlation
+key that groups them and has no record of its own, while an epic root's is the
+epic record's. Only the root asks the human: a `questions-pending`
+verdict is relayed with AskUserQuestion, and the answers go into a fresh
+handoff's `answers` with the same `scratch_dir` and `chained_from`. The step
+briefs live in `development/skills/resolve-issue/reference/chain-steps.md`.
 
 ### The chained refinement mode — `refine-issue --chained-from` (#2939)
 

@@ -29,7 +29,18 @@ setup() {
   SLUG_SINK="$TDIR/timos-platform-tenant-service.jsonl"
 }
 
-state() { printf '%s' "$1" > "$ST"; }
+# A JSON object with no `origin` key gets "origin":"human" (#2940), so the
+# emit cases below run on a state the story builder accepts; anything else is
+# written as given. state_raw writes exactly what it is given, for the cases
+# that drive where origin comes from.
+state() {
+  if jq -e 'type == "object" and (has("origin") | not)' <<<"$1" >/dev/null 2>&1; then
+    jq -c '. + {origin: "human"}' <<<"$1" > "$ST"
+  else
+    printf '%s' "$1" > "$ST"
+  fi
+}
+state_raw() { printf '%s' "$1" > "$ST"; }
 
 SUCCESS='{"outcome":"pr-opened","dependency_precheck":"PROCEED","gate_verdict":"READY","risk":"elevated","pr":413,"story_spec_present":true}'
 
@@ -1202,4 +1213,78 @@ EPIC_RUN_STATE='{"outcome":"parked","e1_classification":"native_children","child
   [ "$status" -eq 0 ]
   [ "$(grep -c '' "$SLUG_SINK")" -eq 1 ]
   [ "$(jq -r '.parent_run_id' "$SLUG_SINK")" = "null" ]
+}
+
+# --- origin (#2940) ------------------------------------------------------------
+
+@test "#2940 start --origin records it in the run file and hands it to every child start" {
+  local o
+  for o in human pipeline; do
+    run --separate-stderr zsh "$D" start --run-file "$RUN" --ts 7 --origin "$o"
+    [ "$status" -eq 0 ]
+    [ "$(jq -r '.origin' "$RUN")" = "$o" ]
+    [ "$(jq -c '.child_start_args' "$RUN")" = "$(jq -c --arg o "$o" '["--parent-run-id", .run_id, "--origin", $o]' "$RUN")" ]
+    # the loops are this run's own, so they never carry it
+    [ "$(jq -c '.loop_args' "$RUN")" = "$(jq -c '["--parent-run-id", .run_id]' "$RUN")" ]
+  done
+  # a child started from those args inherits the origin
+  local parent_run="$BATS_TEST_TMPDIR/parent.json" child_run="$BATS_TEST_TMPDIR/child.json"
+  zsh "$D" start --run-file "$parent_run" --ts 8 --origin human >/dev/null
+  local -a args; args=( $(jq -r '.child_start_args[]' "$parent_run") )
+  run --separate-stderr zsh "$D" start --run-file "$child_run" --ts 9 "${args[@]}"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.origin' "$child_run")" = "human" ]
+  [ "$(jq -r '.parent_run_id' "$child_run")" = "$(jq -r '.run_id' "$parent_run")" ]
+}
+
+@test "#2940 start without --origin writes origin null and no --origin child arg" {
+  run --separate-stderr zsh "$D" start --run-file "$RUN" --ts 7
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.origin' "$RUN")" = "null" ]
+  [ "$(jq -c '.child_start_args | index("--origin")' "$RUN")" = "null" ]
+}
+
+@test "#2940 start refuses an --origin other than human or pipeline" {
+  local bad
+  for bad in robot Human attended; do
+    run --separate-stderr zsh "$D" start --run-file "$RUN" --origin "$bad"
+    [ "$status" -eq 2 ]
+    [ -z "$output" ]
+    contains "$stderr" "--origin must be human or pipeline"
+  done
+  run --separate-stderr zsh "$D" start --run-file "$RUN" --origin
+  [ "$status" -eq 2 ]
+  # a literal `null`, as a `jq -r` of an absent origin prints, is refused by name
+  run --separate-stderr zsh "$D" start --run-file "$RUN" --origin null
+  [ "$status" -eq 2 ]
+  contains "$stderr" "--origin is null"
+}
+
+@test "#2940 emit fills a missing state origin from the run file, and a state's own origin wins" {
+  zsh "$D" start --run-file "$RUN" --ts 1752403000 --origin pipeline --telemetry-dir "$TDIR" >/dev/null
+  state_raw "$SUCCESS"
+  emit --now 1752403100
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.payload.origin' <<<"$output")" = "pipeline" ]
+  zsh "$D" start --run-file "$RUN" --ts 1752403000 --origin pipeline --telemetry-dir "$TDIR" >/dev/null
+  state_raw "$(jq -c '. + {origin: "human"}' <<<"$SUCCESS")"
+  emit --now 1752403100
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.payload.origin' <<<"$output")" = "human" ]
+  # an explicit `origin: null` in the state is filled from the run file too
+  zsh "$D" start --run-file "$RUN" --ts 1752403000 --origin pipeline --telemetry-dir "$TDIR" >/dev/null
+  state_raw "$(jq -c '. + {origin: null}' <<<"$SUCCESS")"
+  emit --now 1752403100
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.payload.origin' <<<"$output")" = "pipeline" ]
+}
+
+@test "#2940 emit with no origin in the state or the run file emits nothing, never fatally" {
+  zsh "$D" start --run-file "$RUN" --ts 1752403000 --telemetry-dir "$TDIR" >/dev/null
+  state_raw "$SUCCESS"
+  emit --now 1752403100
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  contains "$stderr" "record NOT emitted — the payload builder rejected the state"
+  [ ! -e "$SLUG_SINK" ]
 }
