@@ -274,7 +274,7 @@ EOF
   contains "$t" 'Its `scratch_dir` holds this issue'"'"'s chained state: the rounds directory is `<scratch_dir>/refine-<N>.rounds/` and the conductor'"'"'s defaults file `<scratch_dir>/refine-<N>.defaults.json`'
   contains "$t" '**A first dispatch** is one with no `<scratch_dir>/refine-<N>-resume.json`.'
   contains "$t" 'A pending question still unanswered returns `questions-pending` again with only the unanswered entries, and makes no refiner call:'
-  contains "$t" 'The run prints exactly one document from `chain-result.zsh emit`: `ready` (Step 5'"'"'s `READY` branch, with Step 1'"'"'s risk and the auto-accepted answers), `split`, `questions-pending` or `stopped`.'
+  contains "$t" 'The run prints exactly one document from `chain-result.zsh emit`: `ready` (Step 5'"'"'s `READY` branch, with the re-gate verdict'"'"'s risk and the auto-accepted answers), `split`, `questions-pending` or `stopped`.'
   contains "$t" 'A `questions-pending` dispatch emits none.'
   contains "$t" 'A chained refinement shows them to no one: it returns `questions-pending` for its caller to relay'
   contains "$t" '`/development:refine-issue <issue-number|url> [--auto-accept <0..1>] [--follow-up | --chained-from <root> --handoff <file>]`'
@@ -285,8 +285,8 @@ EOF
   contains "$t" 'It adds `now - waiting_since` to `paused_s`, then takes each handoff `answers` entry for this issue whose `question` is a pending entry'"'"'s question text, verbatim, and adds it to the round'"'"'s human reply as the plain human line `<question> → <answer>`.'
   contains "$t" 'it rewrites the resume file with the lines it did add, `waiting_since` reset to now and only the unanswered entries pending, and passes `--split` a file holding `{"ask": [<the unanswered entries>]}`.'
   contains "$t" 'The all-auto check does not run: no chained run has an approval to skip.'
-  contains "$t" 'A `null` `proposed_split`, or a child with an empty `files`, stops the chain as a permanent failure: return `stopped` with the reason "the size check stops the draft and the split names no children". A `file-split-children.zsh` exit 1 runs another round within the cap; an exit 3 or 5 returns `stopped` with its stderr as the reason.'
-  contains "$t" '`ready` records `refined-ready`, `split` records `parked` with `split-recommended`, and `stopped` records `parked` with `deferred`. An unreadable handoff stops before Step 0, so it is not a run and records nothing.'
+  contains "$t" 'A `null` `proposed_split`, or a child with an empty `files`, stops the chain as a permanent failure: return `stopped` with the reason "the size check stops the draft and the split names no children". A `file-split-children.zsh` exit 1 runs another round within the cap; an exit 3 returns `stopped` with its stderr as the reason, and an exit 5 with its report'"'"'s `error`.'
+  contains "$t" '`ready` records `refined-ready`, `split` and step 8'"'"'s exit 5 record `parked` with `split-recommended`, and any other `stopped` records `parked` with `deferred`. An unreadable handoff stops before Step 0, so it is not a run and records nothing.'
   contains "$t" 'A chained refinement is another (*Chained refinement mode*, #2939): the human'"'"'s relayed answers, the auto-accepted answers and the Decisions taken stand in for it.'
 }
 

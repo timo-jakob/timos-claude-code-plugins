@@ -7986,8 +7986,8 @@ itself. A below-threshold intent or gap question ends the dispatch
 `questions-pending`, with nothing written back and nothing posted; the run's
 state waits in `<scratch_dir>/refine-<N>-resume.json`, and a re-dispatch whose
 handoff answers the questions restores it and continues the refinement loop
-without a new diagnosis. A run that reaches 3 rounds, counted across
-dispatches, without converging and without a question stops with "no convergence within the round cap". A
+without a new diagnosis. Once a run has reached 3 rounds, counted across
+dispatches, whatever would start another round stops it with "no convergence within the round cap". A
 converged draft is written back with `provenance.generated_by` ending
 "via /development:resolve-issue". Only a dispatch that ends ready, split or
 stopped emits refine-issue's telemetry record, its counters cumulative across

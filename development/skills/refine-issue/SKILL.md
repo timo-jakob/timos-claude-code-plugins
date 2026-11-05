@@ -535,12 +535,12 @@ auto-accept threshold included.
    add, `waiting_since` reset to now and only the unanswered entries pending,
    and passes `--split` a file holding `{"ask": [<the unanswered entries>]}`.
 6. **The round cap.** `ROUNDS` counts across dispatches, through the resume
-   file. A round that ends at or past 3 without converging and without an ask
-   question returns `stopped` with the reason
+   file. Once `ROUNDS` is at or past 3, whatever would start another round
+   returns `stopped` instead, with the reason
    "no convergence within the round cap" — the follow-up mode's bound and
    wording.
 7. **No approval prompt.** On convergence the size check runs as Step 2 says.
-   A draft that passes is written back at once: the human's relayed answers,
+   A draft it does not stop is written back at once: the human's relayed answers,
    the auto-accepted answers and the Decisions taken stand in for the
    approval. Add the Decisions taken section, then run Steps 2.5 and 3, with
    `provenance.generated_by` set to `issue-refiner via
@@ -554,18 +554,19 @@ auto-accept threshold included.
    `proposed_split`, or a child with an empty `files`, stops the chain as a
    permanent failure: return `stopped` with the reason "the size check stops
    the draft and the split names no children". A `file-split-children.zsh`
-   exit 1 runs another round within the cap; an exit 3 or 5 returns `stopped`
-   with its stderr as the reason.
+   exit 1 runs another round within the cap; an exit 3 returns `stopped` with
+   its stderr as the reason, and an exit 5 with its report's `error`.
 9. **One outcome document.** The run prints exactly one document from
-   `chain-result.zsh emit`: `ready` (Step 5's `READY` branch, with Step 1's
-   risk and the auto-accepted answers), `split`, `questions-pending` or
+   `chain-result.zsh emit`: `ready` (Step 5's `READY` branch, with the re-gate
+   verdict's risk and the auto-accepted answers), `split`, `questions-pending` or
    `stopped`. Each is a step verdict value by the same name, and a refinement
    step never ends `done`, `needs-refinement` or `blocked`.
 10. **Telemetry.** Only the dispatch that ends `ready`, `split` or `stopped`
-    emits Step 7's record, with `ROUNDS`, `RAISED` and `RESOLVED` cumulative
-    across dispatches through the resume file. A `questions-pending` dispatch
-    emits none. `ready` records `refined-ready`, `split` records `parked` with
-    `split-recommended`, and `stopped` records `parked` with `deferred`. An
+    emits Step 7's record, with `T0`, `PAUSED_S`, `ROUNDS`, `RAISED` and
+    `RESOLVED` carried across dispatches through the resume file. A
+    `questions-pending` dispatch emits none. `ready` records `refined-ready`,
+    `split` and step 8's exit 5 record `parked` with `split-recommended`, and
+    any other `stopped` records `parked` with `deferred`. An
     unreadable handoff stops before Step 0, so it is not a run and records
     nothing.
 
@@ -634,7 +635,7 @@ gh issue view <N> --json number,title,body,state,labels,url,comments
   SIZE_PREFLIGHT=""   # optional, never guarded — Step 7's size_preflight (#2589)
   AUTO_REFINEMENT=""  # optional, never guarded — --follow-up only (#2588)
   # The time this run spent waiting on an epic walk's batch approval (#2904),
-  # which Step 7 subtracts from wall_s. A measured zero on a single-issue run.
+  # which Step 7 subtracts from wall_s.
   PAUSED_S=0
   # Print the two stamps: Step 7 needs their LITERAL values many tool calls
   # later, and a shell variable does not survive that gap.
@@ -1528,8 +1529,10 @@ fabricated value the payload builder deliberately does not police.
 re-stated as literals **in the same Bash invocation as the fence**, on the lines
 above the guard (Step 2's rule). In an epic walk they come from the child's
 state file (the Epic walk's *Per-child state*), and `PAUSED_S` is its
-`paused_s`: its waits on others, which `WALL_S` excludes. Everywhere else it is
-Step 0's measured `0`, and the guard requires it to be digits. In the unattended follow-up mode
+`paused_s`: its waits on others, which `WALL_S` excludes. In a chained
+refinement they come from the resume file (*Chained refinement mode*, step 10).
+Everywhere else it is Step 0's measured `0`, and the guard requires it to be
+digits. In the unattended follow-up mode
 `AUTO_REFINEMENT` is one more, re-stated the same way. Values assigned in an earlier tool call are
 gone, and the guard would then skip the record for a run that was measured
 perfectly well. This holds on **every** path here — including Step 1's
@@ -1560,8 +1563,8 @@ if [[ ! "${T0:-}" =~ $T0_RE || -z "${REPO_ROOT:-}" || ! -d "${REPO_ROOT:-/nonexi
   echo "telemetry not recorded for this run (a Step 0 stamp, the run outcome, a run count, the paused time, or a park's type is missing) — the run itself is unaffected"
 else
   # 10# so a leading-zero stamp can't be read as a bad octal literal, matching
-  # the emitter's own normalization. PAUSED_S is an epic walk's waits on others
-  # (#2904), never refinement work; 0 everywhere else.
+  # the emitter's own normalization. PAUSED_S is the run's waits on others
+  # (#2904), never refinement work.
   WALL_S=$(( $(date +%s) - 10#$T0 - 10#$PAUSED_S ))
   (( WALL_S >= 0 )) || WALL_S=0     # a backwards clock (NTP) would be rejected
 
