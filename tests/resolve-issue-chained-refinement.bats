@@ -44,9 +44,10 @@ arch_section() {
 }
 
 # The conductor's verdict check, as chain-steps.md states it: the jq filter
-# between `jq -e -s --argjson n <N> '` and `' <scratch_dir>/step-<N>-verdict.json`.
+# between `jq -e -s --argjson n <N> --arg kind <issue|refinement> '` and
+# `' <scratch_dir>/step-<N>-verdict.json`.
 verdict_filter() {
-  perl -0ne "print \$1 if /jq -e -s --argjson n <N> '(length == 1 and .*?)' <scratch_dir>\\/step-<N>-verdict\\.json/s" "$STEPS"
+  perl -0ne "print \$1 if /jq -e -s --argjson n <N> --arg kind <issue\\|refinement> '(length == 1 and .*?)' <scratch_dir>\\/step-<N>-verdict\\.json/s" "$STEPS"
 }
 
 # The refinement step's conversion of a chain-result/v1 document to a verdict.
@@ -54,10 +55,10 @@ convert_filter() {
   perl -0ne "print \$1 if /jq '(\\{schema: \"step-verdict\\/v1\".*?)' > <scratch_dir>/s" "$STEPS"
 }
 
-check() {  # <verdict json> -> exit status of the documented check
+check() {  # <verdict json> [issue|refinement] -> exit status of the documented check
   local f; f="$(verdict_filter)"
   [ -n "$f" ] || { echo "could not extract the verdict check from $STEPS" >&2; return 99; }
-  printf '%s' "$1" | jq -e -s --argjson n 2940 "$f" >/dev/null
+  printf '%s' "$1" | jq -e -s --argjson n 2940 --arg kind "${2:-issue}" "$f" >/dev/null
 }
 
 v() {  # <verdict> <jq object of extra fields> -> a verdict document
@@ -219,10 +220,15 @@ v() {  # <verdict> <jq object of extra fields> -> a verdict document
   check "$(v split '{"children": [{"index": 1, "issue": 3011, "linked": true}]}')"
   check "$(v blocked '{"blockers": [2941]}')"
   check "$(v questions-pending '{"questions": [{"question": "q?"}], "resume": "/s/refine-2940-resume.json", "round": 1}')"
-  check "$(v stopped '{"reason": "no convergence within the round cap"}')"
+  check "$(v stopped '{"reason": "no convergence within the round cap"}')" refinement
   # an issue-run step's run_id, a string or null, and filed follow-ups
   check "$(v done '{"pr": 3010, "run_id": "resolve-issue-1-abcd", "follow_ups": [3020]}')"
-  check "$(v stopped '{"reason": "unreadable step handoff", "run_id": null}')"
+  check "$(v stopped '{"reason": "unreadable step handoff", "cause": "tooling", "run_id": null}')"
+  # an issue-run step's stopped carries each of the four causes E3 triages
+  local c
+  for c in escalation clean-stop tooling failed; do
+    check "$(v stopped "$(jq -cn --arg c "$c" '{reason: "r", cause: $c}')")"
+  done
 }
 
 @test "#2940 the documented verdict check refuses an unknown value, a missing field and a wrong schema" {
@@ -242,6 +248,8 @@ v() {  # <verdict> <jq object of extra fields> -> a verdict document
     "$(v questions-pending '{"questions": [{"question": "q?"}], "resume": "/s/r.json"}')" \
     "$(v stopped '{"reason": ""}')" \
     "$(v stopped '{"reason": "   "}')" \
+    "$(v stopped '{"reason": "an issue step with no cause"}')" \
+    "$(v stopped '{"reason": "r", "cause": "parked"}')" \
     "$(v done '{"pr": 1, "follow_ups": ["x"]}')" \
     "$(v done '{"pr": 1, "follow_ups": [0]}')" \
     "$(v done '{"pr": 1, "run_id": 7}')" \
@@ -274,7 +282,7 @@ v() {  # <verdict> <jq object of extra fields> -> a verdict document
   zsh "$CR" emit --issue 2940 --outcome stopped --reason "unreadable step handoff" > "$D/stopped.json"
   jq -c "$conv" "$D/stopped.json" > "$D/v.json"
   [ "$(jq -r '"\(.verdict)|\(.reason)|\(.schema)"' "$D/v.json")" = "stopped|unreadable step handoff|step-verdict/v1" ]
-  check "$(cat "$D/v.json")"
+  check "$(cat "$D/v.json")" refinement
   # questions-pending
   jq -n '{ask: [{question: "Which?", kind: "intent", recommended_answer: "A", confidence: 0.4,
                  weakest: [], rationale: "r", reason: "below"}]}' > "$D/split-q.json"
@@ -311,7 +319,9 @@ v() {  # <verdict> <jq object of extra fields> -> a verdict document
   contains "$issue" 'Never ask the human anything, never dispatch a step, and never launch a headless claude.'
   contains "$issue" 'STEP_HANDOFF=<scratch_dir>/step-<N>-handoff.json'
   contains "$issue" '"<skill-base-dir>/../refine-issue/scripts/chain-result.zsh" read-handoff --file "$STEP_HANDOFF"'
-  contains "$issue" 'On its exit 1 or 2, write verdict stopped with the reason "unreadable step handoff".'
+  contains "$issue" 'On its exit 1 or 2, write verdict stopped with the reason "unreadable step handoff" and cause "tooling".'
+  contains "$issue" 'When the handoff'"'"'s after is not null, branch with step 1'"'"'s script plus --after <after>.'
+  contains "$issue" 'A stopped verdict carries its cause: escalation, clean-stop, tooling or failed.'
   contains "$issue" 'plus the root'"'"'s telemetry flags and its --no-review when given'
   contains "$issue" 'In place of Step 0'"'"'s start, run story-telemetry.zsh start --run-file <scratch_dir>/story-run-<N>.json --parent-run-id <parent_run_id> --origin <origin>'
   contains "$issue" 'move any kept state aside without --resume, deleting nothing, as an attended run does.'
@@ -334,7 +344,8 @@ v() {  # <verdict> <jq object of extra fields> -> a verdict document
     'The rule against a headless `claude` still holds: a step is an Agent-tool subagent, never a separate `claude` process.' \
     '`done` with the PR.' \
     '`blocked`, with the blockers §0a found.' \
-    '`stopped`, with the reason, for any other ending: an escalation, a clean stop, a red gate or a failure.' \
+    '`stopped`, with the reason, for any other ending: an escalation, a clean stop, a red gate or a failure. Its `cause` names which, for E3'"'"'s triage:' \
+    '`kind` is the step'"'"'s handoff `kind`: an issue-run step'"'"'s `stopped` must carry its `cause`, a refinement step'"'"'s never does.' \
     '**`done`** → report the PR.' \
     '**`blocked`** → until #2941 lands, the root handles it as §0a'"'"'s autonomous arm handles a rejection: the step already posted the comment and the label, so the root reports the blockers and stops, offering no remediation.' \
     'In an epic, the root parks the child as E3 parks a dependency rejection and continues with the children that don'"'"'t depend on it.' \
@@ -364,4 +375,72 @@ v() {  # <verdict> <jq object of extra fields> -> a verdict document
   contains "$t" 'In a human-started run each child'"'"'s run is a step the root dispatches (#2940). That covers the sequential chain below as well as the parallel set. Its brief, handoff and verdict: see `reference/chain-steps.md` § The issue step (#2940)'
   t="$(flat "$SKILL_DIR/reference/telemetry.md")"
   contains "$t" '**`--origin` is the run'"'"'s origin (§0a, #2940)**: `human` when a human invoked the skill, `pipeline` for a maintenance-pipeline run, and a step'"'"'s or an E3 child'"'"'s the origin it inherits.'
+}
+
+# --- review round 1: the step model's seams ------------------------------------
+
+@test "#2940 an epic's walk mode does not reach a step, and the root triages clean stops in every human-started walk" {
+  local t; t="$(flat "$SKILL")"
+  contains "$t" 'In a human-started run (#2940) the walk mode does not reach the steps: each child'"'"'s step resolves its own mode (as in `reference/chain-steps.md`), may clean-stop, and the root runs E3'"'"'s triage below.'
+  t="$(flat "$STEPS")"
+  contains "$t" 'An epic'"'"'s walk mode does not reach a step.'
+  t="$(flat "$SKILL_DIR/reference/epic-telemetry.md")"
+  contains "$t" 'A human-started walk (#2940) runs the triage whatever its mode, so an attended one counts them too.'
+}
+
+@test "#2940 a parallel child's step runs in its own worktree, and a sequential child's step branches off the previous merge" {
+  local t; t="$(flat "$STEPS")"
+  contains "$t" '**A parallel child'"'"'s step runs in its own worktree.** The root dispatches the step of each child in E3'"'"'s parallel set with the Agent tool'"'"'s `isolation: "worktree"`, so each runs in a worktree of its own and their edits can'"'"'t collide. Every other step runs in the root'"'"'s checkout, one at a time.'
+  contains "$t" '`after` is `null`, or, for a child of E3'"'"'s sequential chain, the merge commit of the child before it (the PR'"'"'s `mergeCommit.oid`), which the step passes to step 1'"'"'s branch script as `--after`.'
+  # the handoff example carries after, and chain-result still reads it
+  perl -0ne 'print $1 if /```json\n(\{ "schema": "step-handoff\/v1".*?\})\n```/s' "$STEPS" > "$D/h.json"
+  [ "$(jq -c 'has("after") and .after == null' "$D/h.json")" = true ]
+}
+
+@test "#2940 an epic root triages a stopped child by its cause and counts it in the matching bucket" {
+  local t; t="$(section "$STEPS" 'The issue step (#2940)' | tr '\n' ' ' | tr -s ' ')"
+  local needle
+  for needle in \
+    '`escalation`: a typed escalation other than the clean stop;' \
+    '`clean-stop`: #2579'"'"'s clean stop;' \
+    '`tooling`: a precheck exit 1, or an exit 2 that recurs after the fixed re-run; a size pre-flight error; an unreadable step handoff;' \
+    '`failed`: any other ending `reference/telemetry.md` step 4 records `failed`' \
+    'In an epic, triage the child by its `cause`, as E3 triages that ending, and count it in the bucket `reference/epic-telemetry.md` step 3 names:' \
+    '`escalation` → as E3 triages an escalation, counted `escalated`;' \
+    '`clean-stop` → the same, and the child joins `epic-clean-stop-triage.zsh`'"'"'s `--clean-stopped` list;' \
+    '`tooling` → as E3 parks a tooling failure: no label, the reason quoted in the epic summary, counted `parked`;' \
+    '`failed` → as E3 treats a child whose run ended `failed` for a cause its triage does not park, counted `queued`.'
+  do
+    contains "$t" "$needle"
+  done
+  lacks "$t" 'triage the child as E3 triages an escalation.'
+  t="$(arch_section 'Step verdict contract (#2940)' | tr '\n' ' ' | tr -s ' ')"
+  contains "$t" 'an issue-run step'"'"'s also carries `cause`: `escalation`, `clean-stop`, `tooling` or `failed`'
+}
+
+@test "#2940 a recurrent park posts a fixed 'chained refinement stopped:' body, never the verdict file's reason" {
+  local t; t="$(section "$STEPS" 'The chained refinement step (#2940)' | tr '\n' ' ' | tr -s ' ')"
+  contains "$t" 'The root takes the `stopped` arm below, but the verdict file holds no refinement'"'"'s `stopped`, so it posts the comment with a fixed body that names the park'"'"'s reason:'
+  contains "$t" 'printf '"'"'chained refinement stopped: the %s park recurred after a ready refinement\n'"'"' <gate|size>'
+}
+
+@test "#2940 messaging a step to carry on is not a retry; a retry is a new dispatch" {
+  local t; t="$(flat "$STEPS")"
+  contains "$t" 'That message is not a retry or a recovery: the same agent finishes its own unfinished work, and nothing is run again. Any retry after it is a new dispatch.'
+  t="$(flat "$ARCH")"
+  contains "$t" 'that message lets the same agent finish its own unfinished work and is not a retry or a recovery, and a retry or a recovery is a new dispatch, never a resumed agent.'
+}
+
+@test "#2940 a human-started root stamps only the chain run, and a split makes the chain run the epic run" {
+  local t; t="$(flat "$SKILL_DIR/reference/telemetry.md")"
+  contains "$t" '**A human-started root stamps no story run (#2940).** When the origin is `human`, the run was not given `--resume`, and its dispatch brief names no `STEP_HANDOFF`, this session is the chain'"'"'s root. It skips this step and step 4, and stamps `chain-run-<N>.json` in their place'
+  contains "$t" 'A human-started root emits nothing here (step 2).'
+  t="$(flat "$STEPS")"
+  contains "$t" 'The root never stamps or emits `story-run-<N>.json`: that file is the issue step'"'"'s'
+  contains "$t" '**A single-issue entry that splits.** When a refinement `split`s the named issue, the chain run becomes the epic run. The root stamps no `epic-run-<N>.json`, and uses `chain-run-<N>.json` wherever `reference/epic-telemetry.md` names the epic run file'
+  contains "$t" '`child_run_ids` lists the named issue'"'"'s own step runs first, then the children'"'"'s, each in start order, so every record parented to the run is listed.'
+  t="$(flat "$SKILL_DIR/reference/epic-telemetry.md")"
+  contains "$t" 'In a human-started run whose single-issue entry a refinement split (#2940), skip this stamp: the root'"'"'s `chain-run-<N>.json` is the epic run file'
+  t="$(flat "$ARCH")"
+  contains "$t" 'and so is a single-issue root'"'"'s once a refinement splits its issue: the chain run then becomes the epic run.'
 }

@@ -1147,7 +1147,9 @@ is **attended** only when its line says `attended`; otherwise it is
 mode rather than resolving its own, and a parallel sub-agent receives the mode
 in its prompt next to `child_start_args`. A child of an attended walk never
 takes the clean stop (#2579): an escalation takes today's terminal, and E3's
-triage of it below is unchanged.
+triage of it below is unchanged. In a human-started run (#2940) the walk mode
+does not reach the steps: each child's step resolves its own mode (as in
+`reference/chain-steps.md`), may clean-stop, and the root runs E3's triage below.
 
 ### E1. Enumerate the children
 

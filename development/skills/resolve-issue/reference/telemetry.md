@@ -97,6 +97,13 @@ within the same invocation — say, after a compacted context — **re-read the
 run file**; never call `start` again. A second call would move the `run_id`
 out from under loops already parented to the first.
 
+**A human-started root stamps no story run (#2940).** When the origin is
+`human`, the run was not given `--resume`, and its dispatch brief names no
+`STEP_HANDOFF`, this session is the chain's root. It skips this step and step 4,
+and stamps `chain-run-<N>.json` in their place (`reference/chain-steps.md`,
+*The step model*). The issue step it dispatches stamps `story-run-<N>.json` and
+emits the record, so the root never writes or emits that file.
+
 - **Exit 2** is your own malformed invocation. Fix it and re-run once. A second
   exit 2 is handled as exit 1.
 - **Exit 1** is an internal failure: for example no clock, an unwritable run
@@ -166,7 +173,8 @@ on.
 
 ### 4. At the ending, emit once
 
-Write the state to `<scratch>/story-state-<N>.json` and emit. The state's
+Write the state to `<scratch>/story-state-<N>.json` and emit. A human-started
+root emits nothing here (step 2). The state's
 `outcome` names the ending the run actually reached. **Take the first row that
 matches:**
 

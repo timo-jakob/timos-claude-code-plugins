@@ -15,7 +15,13 @@ flow. Each child's run is still a step. In a human-started run, attended and
 unattended behave alike, whatever `resolve_session` says (#2907). A step
 resolves its session mode as an E3 child does: §0a's
 `scripts/resolve-session.zsh` with the inferred mode `unattended`, autonomous
-whatever its line says, so no step ever asks.
+whatever its line says, so no step ever asks. An epic's walk mode does not reach
+a step.
+
+**A parallel child's step runs in its own worktree.** The root dispatches the
+step of each child in E3's parallel set with the Agent tool's
+`isolation: "worktree"`, so each runs in a worktree of its own and their edits
+can't collide. Every other step runs in the root's checkout, one at a time.
 
 **`--resume` is the exception.** A human-started run given `--resume` does not
 chain: the session the human invoked runs §0a's `--resume` check itself and
@@ -33,14 +39,14 @@ every step of the run shares it. Before each dispatch the root deletes the
 issue's old verdict file, so it never reads a previous step's result as the new
 one.
 
-An issue-run step's handoff carries the step-handoff/v1 fields and three more,
+An issue-run step's handoff carries the step-handoff/v1 fields and four more,
 which a reader that does not read them ignores:
 
 ```json
 { "schema": "step-handoff/v1", "issue": 2940, "chained_from": 2907,
   "origin": "human", "scratch_dir": "/abs/scratch", "answers": [],
   "kind": "issue", "parent_run_id": "<the root's run_id>",
-  "start_at": "0a", "risk": null }
+  "start_at": "0a", "risk": null, "after": null }
 ```
 
 `start_at` is `"0a"` for a first run, or `"1"` for the fresh step that follows a
@@ -48,13 +54,15 @@ refinement's `ready`. That step skips §0a and §0b, carries `risk` from the
 `ready` verdict, and records `dependency_precheck: PROCEED` and
 `gate_verdict: READY`. It never runs a second gate. A step whose handoff `issue`
 differs from its `chained_from` is an E3 child's run, which §2 parks by
-terminal (c). A refinement step's handoff is the plain step-handoff/v1 object
-plus `"kind": "refinement"`.
+terminal (c). `after` is `null`, or, for a child of E3's sequential chain, the
+merge commit of the child before it (the PR's `mergeCommit.oid`), which the step
+passes to step 1's branch script as `--after`. A refinement step's handoff is the
+plain step-handoff/v1 object plus `"kind": "refinement"`.
 
 **Read every verdict against the contract** before acting on it:
 
 ```bash
-jq -e -s --argjson n <N> 'length == 1 and (.[0] | (.schema == "step-verdict/v1")
+jq -e -s --argjson n <N> --arg kind <issue|refinement> 'length == 1 and (.[0] | (.schema == "step-verdict/v1")
   and (.issue == $n)
   and (.follow_ups | type == "array" and all(type == "number" and . >= 1 and . == floor))
   and ((has("run_id") | not) or (.run_id | type == "string" or . == null))
@@ -65,8 +73,12 @@ jq -e -s --argjson n <N> 'length == 1 and (.[0] | (.schema == "step-verdict/v1")
        elif .verdict == "blocked" then (.blockers | type == "array")
        elif .verdict == "questions-pending" then (.questions | type == "array" and length > 0) and (.resume | type == "string") and (.round | type == "number" and . >= 1)
        elif .verdict == "stopped" then (.reason | type == "string" and test("\\S"))
+         and ($kind != "issue" or (.cause | IN("escalation", "clean-stop", "tooling", "failed")))
        else false end))' <scratch_dir>/step-<N>-verdict.json
 ```
+
+`kind` is the step's handoff `kind`: an issue-run step's `stopped` must carry
+its `cause`, a refinement step's never does.
 
 **A step that ends its turn with no verdict file is messaged to carry on, not
 counted as failed.** Send it one SendMessage asking it to finish and write the
@@ -75,7 +87,9 @@ the field that fails. Only a step that still writes no valid verdict is a
 failure: report it and emit nothing on the step's behalf. A single-issue root
 then stops the chain. In an epic, the root treats it as a tooling failure of
 that child: it parks the child, quotes the failure in the epic summary, and
-continues E3.
+continues E3. That message is not a retry or a recovery: the same agent finishes
+its own unfinished work, and nothing is run again. Any retry after it is a new
+dispatch.
 
 **A retry or a recovery is a new dispatch, never a resumed agent.** A step
 dispatches no further step, so the depth stays root (0) → step (1) → panel or
@@ -97,7 +111,16 @@ a separate `claude` process.
 - **What the root emits.** For an epic entry, the root emits the epic record.
   For a single-issue entry, it emits no story record of its own: its `run_id`
   is a correlation key that groups the chain's step records, with no record of
-  its own.
+  its own. The root never stamps or emits `story-run-<N>.json`: that file is the
+  issue step's (`reference/telemetry.md` step 2).
+- **A single-issue entry that splits.** When a refinement `split`s the named
+  issue, the chain run becomes the epic run. The root stamps no
+  `epic-run-<N>.json`, and uses `chain-run-<N>.json` wherever
+  `reference/epic-telemetry.md` names the epic run file: its `child_start_args`,
+  and its `run_id` as each child handoff's `parent_run_id`. It emits the epic
+  record from it when the walk ends. `child_run_ids` lists the named issue's
+  own step runs first, then the children's, each in start order, so every
+  record parented to the run is listed.
 
 ## The issue step (#2940)
 
@@ -112,17 +135,20 @@ flags and its --no-review when given, and run its Single-issue flow as a step.
 Read the handoff first with
 "<skill-base-dir>/../refine-issue/scripts/chain-result.zsh" read-handoff --file "$STEP_HANDOFF",
 where <skill-base-dir> is the resolve-issue skill's base directory. On its exit 1
-or 2, write verdict stopped with the reason "unreadable step handoff".
+or 2, write verdict stopped with the reason "unreadable step handoff" and cause
+"tooling".
 Take its origin and parent_run_id. In place of Step 0's start, run
 story-telemetry.zsh start --run-file <scratch_dir>/story-run-<N>.json
 --parent-run-id <parent_run_id> --origin <origin> with the telemetry flags,
-then start at its start_at. Resolve the session mode as an E3 child does
+then start at its start_at. When the handoff's after is not null, branch with
+step 1's script plus --after <after>. Resolve the session mode as an E3 child does
 (inferred unattended, autonomous whatever the line says), but move any kept
 state aside without --resume, deleting nothing, as an attended run does.
 Never ask the human anything, never dispatch a step, and never launch a
 headless claude. Before you end your turn, write <scratch_dir>/step-<N>-verdict.json
 (step-verdict/v1, ARCHITECTURE.md *Step verdict contract*), listing every
-follow-up issue you filed in follow_ups and your run's run_id in run_id.
+follow-up issue you filed in follow_ups and your run's run_id in run_id. A
+stopped verdict carries its cause: escalation, clean-stop, tooling or failed.
 ```
 
 The step ends with one of these verdicts:
@@ -132,7 +158,14 @@ The step ends with one of these verdicts:
   `reason: "size"` after §2's park.
 - `blocked`, with the blockers §0a found.
 - `stopped`, with the reason, for any other ending: an escalation, a clean
-  stop, a red gate or a failure.
+  stop, a red gate or a failure. Its `cause` names which, for E3's triage:
+  - `escalation`: a typed escalation other than the clean stop;
+  - `clean-stop`: #2579's clean stop;
+  - `tooling`: a precheck exit 1, or an exit 2 that recurs after the fixed
+    re-run; a size pre-flight error; an unreadable step handoff;
+  - `failed`: any other ending `reference/telemetry.md` step 4 records `failed`,
+    such as an abandoned red gate, a gate or loop error, or a round protocol
+    that stopped before any loop ran.
 
 How the root handles each:
 
@@ -144,8 +177,16 @@ How the root handles each:
   so the root reports the blockers and stops, offering no remediation. In an
   epic, the root parks the child as E3 parks a dependency rejection and
   continues with the children that don't depend on it.
-- **`stopped`** → report the reason and stop. In an epic, triage the child as
-  E3 triages an escalation.
+- **`stopped`** → report the reason and stop. In an epic, triage the child by
+  its `cause`, as E3 triages that ending, and count it in the bucket
+  `reference/epic-telemetry.md` step 3 names:
+  - `escalation` → as E3 triages an escalation, counted `escalated`;
+  - `clean-stop` → the same, and the child joins `epic-clean-stop-triage.zsh`'s
+    `--clean-stopped` list;
+  - `tooling` → as E3 parks a tooling failure: no label, the reason quoted in
+    the epic summary, counted `parked`;
+  - `failed` → as E3 treats a child whose run ended `failed` for a cause its
+    triage does not park, counted `queued`.
 
 ## The chained refinement step (#2940)
 
@@ -159,8 +200,13 @@ The root dispatches a chained refinement step in three places:
 **One refinement per issue and reason.** A second `needs-refinement` for the
 same issue and reason in one run, or a leaf already refined in this run that
 re-gates `NEEDS_REFINEMENT` at E1b, is never chained again. The root takes the
-`stopped` arm below, with the reason that the park recurred after a `ready`
-refinement.
+`stopped` arm below, but the verdict file holds no refinement's `stopped`, so
+it posts the comment with a fixed body that names the park's reason:
+
+```bash
+printf 'chained refinement stopped: the %s park recurred after a ready refinement\n' <gate|size> \
+  | gh issue comment <N> --body-file -
+```
 
 The brief:
 

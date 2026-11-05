@@ -8003,20 +8003,23 @@ carries:
 | `split` | `children`, the chain-result `split` document's `children` (file-split-children.zsh's `filed` entries) |
 | `blocked` | `blockers`, the open blockers the dependency precheck found |
 | `questions-pending` | `questions`, `resume` and `round`, the chain-result `questions-pending` document's fields |
-| `stopped` | `reason`, a non-blank string |
+| `stopped` | `reason`, a non-blank string; an issue-run step's also carries `cause`: `escalation`, `clean-stop`, `tooling` or `failed`, which E3's triage of the child and the epic record's buckets read |
 
 A refinement step ends with the verdict its chain-result outcome names (ready,
 split, questions-pending or stopped) and copies that document's fields; an
 issue-run step never ends ready or questions-pending. The conductor reads a
 verdict with jq against this table. A verdict file that is missing, not one JSON
 object, or carries a value outside the table is not a result: a step that ends
-its turn with no verdict file is messaged to carry on, not counted as failed,
-and a retry or a recovery is a new dispatch, never a resumed agent. A step
+its turn with no verdict file is messaged to carry on, not counted as failed;
+that message lets the same agent finish its own unfinished work and is not a
+retry or a recovery, and a retry or a recovery is a new dispatch, never a
+resumed agent. A step
 dispatches no further step, so the depth stays root (0) → step (1) → panel or
 refiner (2) → reviewers (3). Each issue-run step emits its own story record,
 parented to the root's run; a single-issue root's `run_id` is a correlation
 key that groups them and has no record of its own, while an epic root's is the
-epic record's. Only the root asks the human: a `questions-pending`
+epic record's, and so is a single-issue root's once a refinement splits its
+issue: the chain run then becomes the epic run. Only the root asks the human: a `questions-pending`
 verdict is relayed with AskUserQuestion, and the answers go into a fresh
 handoff's `answers` with the same `scratch_dir` and `chained_from`. The step
 briefs live in `development/skills/resolve-issue/reference/chain-steps.md`.
