@@ -1530,7 +1530,10 @@ re-stated as literals **in the same Bash invocation as the fence**, on the lines
 above the guard (Step 2's rule). In an epic walk they come from the child's
 state file (the Epic walk's *Per-child state*), and `PAUSED_S` is its
 `paused_s`: its waits on others, which `WALL_S` excludes. In a chained
-refinement they come from the resume file (*Chained refinement mode*, step 10).
+refinement, a re-dispatch reads the carried values (`T0`, `PAUSED_S` and the
+counters) from the resume file (*Chained refinement mode*, step 10) and then
+updates them with this dispatch's wait and rounds; a first dispatch with no
+resume file starts them fresh (`T0` is this dispatch's start, `PAUSED_S` is `0`).
 Everywhere else it is Step 0's measured `0`, and the guard requires it to be
 digits. In the unattended follow-up mode
 `AUTO_REFINEMENT` is one more, re-stated the same way. Values assigned in an earlier tool call are
