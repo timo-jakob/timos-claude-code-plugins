@@ -357,20 +357,20 @@ setup() {
 @test "SKILL.md: the all-auto exception's other mentions" {
   local t s3; t="$(flat "$SKILL")"
   contains "$t" 'Then Steps 4 to 7 as written; Step 6'"'"'s trail names every answer the run took for the human.'
-  contains "$t" '| Nothing is written without Step 2'"'"'s approval of the exact rewrite, or a run that asked the human nothing (the all-auto check, #2938). |'
-  contains "$t" 'nothing is written without Step 2'"'"'s approval of the exact rewrite, unless no question reaches the human at all (*Step 2 — the all-auto check*).'
+  contains "$t" '| Nothing is written without Step 2'"'"'s approval of the exact rewrite, a run that asked the human nothing (the all-auto check, #2938), or a chained refinement'"'"'s relayed answers (#2939). |'
+  contains "$t" 'nothing is written without Step 2'"'"'s approval of the exact rewrite, unless no question reaches the human at all (*Step 2 — the all-auto check*) or the run is a chained refinement (*Chained refinement mode*).'
   contains "$t" 'Run the all-auto check on its own rounds and sizings first.'
   contains "$t" 'An all-auto write-back is one such ending.'
   contains "$t" 'An all-auto refinement shows no approval, and its trail lists every one.'
   contains "$t" '**Auto-accept approves the rewrite only when it answered everything.** The threshold only answers the refiner'"'"'s questions. The approval of the exact rewrite is the human'"'"'s, whatever the threshold, unless the refinement is all-auto (*Step 2 — the all-auto check*, below): no question reached the human, so there is no choice left to approve.'
-  contains "$t" '— the two exceptions are an all-auto refinement (#2938), in which no question reached the human, and the unattended follow-up mode'"'"'s `accept`.'
+  contains "$t" '— the exceptions are an all-auto refinement (#2938), in which no question reached the human, the unattended follow-up mode'"'"'s `accept`, and a chained refinement (#2939), whose caller'"'"'s relayed answers stand in for the approval.'
   s3="$(sed -n '/^## Step 3 /,/^## Step 4 /p' "$SKILL" > "$BATS_TEST_TMPDIR/s3.md"; flat "$BATS_TEST_TMPDIR/s3.md")"
   contains "$s3" '`"issue-refiner via /development:refine-issue"`, or `"issue-refiner via /development:refine-issue (all answers auto-accepted)"` for an all-auto refinement'
 }
 
 @test "ask-branches.md's RF-02 and RF-10 outcome cells state the all-auto exception in full" {
   local a; a="$(cat "$REPO_ROOT/development/skills/refine-issue/reference/ask-branches.md")"
-  contains "$a" '| implementation | **default:** proceed without the label, with a notice; nothing is written without the approval of the exact rewrite, or an all-auto refinement (#2938) |'
+  contains "$a" '| implementation | **default:** proceed without the label, with a notice; nothing is written without the approval of the exact rewrite, an all-auto refinement (#2938), or a chained refinement (#2939) |'
   contains "$a" '| intent | human-owned: the batch approval of an epic walk'"'"'s rewrites (#2904) is RF-05'"'"'s approval, asked once per batch instead of once per child; an all-auto child is written back in phase A and never batched (#2938) |'
 }
 

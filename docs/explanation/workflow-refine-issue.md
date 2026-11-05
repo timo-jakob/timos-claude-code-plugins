@@ -5,7 +5,8 @@ readiness gate labelled `needs-refinement` and, with you present throughout, tur
 plain prose a reviewer can read, plus a machine-readable `story-spec/v1` block that resolve-issue builds and tests from.
 
 Two things hold for the whole run. **A human is always present** — the skill relays every question it cannot answer
-with confidence, and only you can approve a rewrite, unless no question reached you at all. And **nothing is
+with confidence, and only you can approve a rewrite, unless no question reached you at all or the refinement runs
+chained inside a resolve-issue run. And **nothing is
 written by a bot** — the issue edit and the comments go out under your own `gh` login, not through a PR. The colour
 key for the diagrams is on [How the plugins work](how-the-plugins-work.md).
 
@@ -43,9 +44,10 @@ re-gate](diagrams/refine-issue.svg)
 7. **Size the draft.** Before you see the final rewrite, the skill lists every file the drafted story would touch and
    runs it through the same size check resolve-issue applies just before it builds. A story too big to build as one
    change is never written back. The refiner proposes a split into child stories instead, each with its own file
-   list, and you choose: file the children, revise the draft, or park the story as `split-recommended`. Filing checks
-   every child first and writes nothing if one is still too big. It then files them as sub-issues of the original,
-   each labelled `needs-refinement`, turns the original into an epic and posts a comment listing them. The readiness
+   list, and the skill files it without asking you. Filing checks every child first and writes nothing if one is
+   still too big. It then files them as sub-issues of the original, each labelled `needs-refinement`, turns the
+   original into an epic, posts a comment listing them, and refines the new children in the same run. A split that
+   names no children is never filed: you choose to revise the draft or park the story as `deferred`. The readiness
    gate runs the same check, so a story too big to build is sent back for refinement before anyone starts on it.
    A story that resolve-issue's own size check stopped arrives with that objection already open, carrying the list
    of files the plan would have touched, so the skill asks for a split straight away instead of offering to clear
@@ -68,8 +70,9 @@ and you curate them rather than write them from scratch.
 ## Write back and re-gate {#refine-write-back-and-re-gate}
 
 1. **Step 2.5 — spin out test cases.** Each test case in the approved spec becomes its own `test-case`-labelled
-   issue. The step is idempotent: re-running it edits those issues in place and closes the ones the spec no longer
-   lists. A story that touches no interface has no test cases to spin out.
+   issue, without asking you: approving the rewrite also approves its test-case issues. The step is idempotent:
+   re-running it edits those issues in place and closes the ones the spec no longer lists. A story
+   that touches no interface has no test cases to spin out.
 2. **Step 3 — write back.** The approved prose goes between `story-spec:prose` sentinels, followed by the
    `story-spec/v1` block in a collapsed *"generated, do not hand-edit"* section. The block records who generated it,
    when, and a hash of the prose, so a later hand-edit to the prose shows up as a stale block. It is written with your
@@ -115,11 +118,23 @@ rewrite, redraft and come back as the next batch. At the end it posts one summar
 now ready, which were skipped, which are still parked and why, and any that failed. The epic's own body is never
 refined, and re-running the skill on the epic resumes the walk.
 
+## Chained refinement inside a resolve-issue run {#refine-chained}
+
+When resolve-issue meets an unready issue, it can refine it as a step of the same run instead of stopping:
+`/development:refine-issue <N> --chained-from <root> --handoff <file>`. The refinement runs as its own subagent and
+asks you nothing itself. A question it cannot answer with confidence ends the step as *questions pending*; the
+resolve-issue run puts the question to you, and dispatches the refinement again with your answer, which carries on
+from the saved conversation. There is no approval prompt: your answers, the automatic answers and the decisions
+recorded in the body stand in for it, and a converged draft is written back at once. A step ends with one of four
+outcomes — ready, split, questions pending or stopped — and three rounds without converging stop it. The contract for
+the handoff file and the outcomes is in ARCHITECTURE.md, under *Step handoff contract* and *The chained refinement
+mode*.
+
 ## Who does what {#refine-who-does-what}
 
 | Actor | Does |
 | --- | --- |
-| You | Start the run, answer the questions put to you, approve the exact rewrite, choose to park or stop |
+| You | Start the run, answer the questions put to you, approve the exact rewrite, choose to park or stop; in a chained refinement, answer the questions the resolve-issue run relays |
 | `refine-issue` (conductor) | Every GitHub read and write, the question split, the write-back, the label, the comments |
 | `story-readiness` | Diagnoses the story at step 1 and re-gates it at step 4 |
 | `issue-refiner` | Drafts each turn: explanations, scored questions, the prose and the story spec |

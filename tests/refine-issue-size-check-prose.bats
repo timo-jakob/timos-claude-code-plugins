@@ -6,8 +6,9 @@
 #
 #   - story-readiness runs size-check.zsh, fails check 2 on a stop, and reports
 #     an additive top-level `size` object while `checks` keeps its five keys;
-#   - refine-issue never writes back a draft that stops, offers a split instead,
-#     and files an accepted split only through file-split-children.zsh;
+#   - refine-issue never writes back a draft that stops, proposes a split
+#     instead, and files a split that names its children without asking, only
+#     through file-split-children.zsh (#2939);
 #   - refine-issue's Step 7 carries the optional size_preflight key;
 #   - resolve-issue §2(b) says refine-issue files the accepted split's children.
 #
@@ -102,11 +103,22 @@ section() {
   grep -qF 'Then **size the draft** (*Step 2 — size' "$REFINE"
 }
 
-@test "refine-issue offers a split and files it only through file-split-children.zsh" {
-  local s
+@test "refine-issue files a split that names its children without asking, only through file-split-children.zsh" {
+  local s f
   s="$(section '### Step 2 — size the draft before approval (#2589)' "$REFINE")"
+  f="$(printf '%s' "$s" | tr '\n' ' ' | tr -s ' ')"
   contains "$s" "propose a split into child stories, each a bounded"
-  contains "$s" "**File these N child stories (Recommended)**"
+  # #2939: the split is filed without asking, in every run, and its children are walked in the same run
+  contains "$f" '**Otherwise the split is filed without asking, in every refine-issue run, chained or direct (#2939):** show the human every child, then file them (below).'
+  contains "$f" 'The unattended follow-up mode is the one exception: it never splits, and parks `deferred` (unchanged).'
+  contains "$f" 'run Step 7, and then **walk the filed children as an epic in the same run**: the Epic walk below, on `<N>`.'
+  contains "$f" 'A chained run instead returns `split` with the filed children, and its caller walks them'
+  contains "$f" 'That question is a direct run'"'"'s: in a chained run it stops the chain as a permanent failure'
+  # ...and the File / Revise / Park question it replaced is gone everywhere
+  lacks "$(tr '\n' ' ' < "$REFINE" | tr -s ' ')" "**File these N child stories (Recommended)**"
+  lacks "$(tr '\n' ' ' < "$REFINE" | tr -s ' ')" "File / Revise / Park"
+  lacks "$f" "When the human chooses to file the split"
+  contains "$(tr '\n' ' ' < "$REFINE" | tr -s ' ')" 'A split that names its children is filed without asking, in every run, chained or direct (#2939), and only by `scripts/file-split-children.zsh`'
   contains "$s" '"<skill-base-dir>/scripts/file-split-children.zsh" --repo "$REPO" --parent <N> --plan <plan.json>'
   contains "$s" 'and `SIZE_PREFLIGHT`'"'"'s `children_filed` to the length of its `filed` list'
   contains "$s" "Never re-run it — a re-run"
