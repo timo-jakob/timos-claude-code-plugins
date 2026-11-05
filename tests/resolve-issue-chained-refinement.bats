@@ -438,9 +438,29 @@ v() {  # <verdict> <jq object of extra fields> -> a verdict document
   t="$(flat "$STEPS")"
   contains "$t" 'The root never stamps or emits `story-run-<N>.json`: that file is the issue step'"'"'s'
   contains "$t" '**A single-issue entry that splits.** When a refinement `split`s the named issue, the chain run becomes the epic run. The root stamps no `epic-run-<N>.json`, and uses `chain-run-<N>.json` wherever `reference/epic-telemetry.md` names the epic run file'
-  contains "$t" '`child_run_ids` lists the named issue'"'"'s own step runs first, then the children'"'"'s, each in start order, so every record parented to the run is listed.'
+  contains "$t" '`child_run_ids` lists only the children'"'"'s runs, in start order, as the epic record'"'"'s contract defines it: the named issue'"'"'s own step runs are not children, and their records reach the run through their `parent_run_id`.'
+  lacks "$t" 'lists the named issue'"'"'s own step runs first'
   t="$(flat "$SKILL_DIR/reference/epic-telemetry.md")"
   contains "$t" 'In a human-started run whose single-issue entry a refinement split (#2940), skip this stamp: the root'"'"'s `chain-run-<N>.json` is the epic run file'
   t="$(flat "$ARCH")"
   contains "$t" 'and so is a single-issue root'"'"'s once a refinement splits its issue: the chain run then becomes the epic run.'
+}
+
+# --- review round 2 ------------------------------------------------------------
+
+@test "#2940 a refinement other than the relay's re-dispatch starts with no stale resume file" {
+  local t; t="$(section "$STEPS" 'The chained refinement step (#2940)' | tr '\n' ' ' | tr -s ' ')"
+  contains "$t" '**A first dispatch starts with no resume state.** Before every refinement dispatch other than the questions-pending relay'"'"'s re-dispatch, the root deletes the issue'"'"'s old resume file, so a refinement of an issue refined earlier in the run starts as a first dispatch rather than restoring that refinement'"'"'s state:'
+  contains "$t" 'rm -f -- <scratch_dir>/refine-<N>-resume.json'
+}
+
+@test "#2940 the issue step's handoff names as many extra fields as its example carries" {
+  local t; t="$(flat "$STEPS")"
+  contains "$t" 'An issue-run step'"'"'s handoff carries the step-handoff/v1 fields and five more, which a reader that does not read them ignores:'
+  perl -0ne 'print $1 if /```json\n(\{ "schema": "step-handoff\/v1".*?\})\n```/s' "$STEPS" > "$D/h.json"
+  local n word
+  n="$(jq '[keys[] | select(IN("schema","issue","chained_from","origin","scratch_dir","answers") | not)] | length' "$D/h.json")"
+  word="$(printf '%s' "$t" | sed -n 's/.*step-handoff\/v1 fields and \([a-z]*\) more,.*/\1/p')"
+  local -a words=(zero one two three four five six seven eight nine)
+  [ "${words[$n]}" = "$word" ]
 }

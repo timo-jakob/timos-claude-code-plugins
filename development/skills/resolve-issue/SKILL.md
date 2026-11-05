@@ -1589,15 +1589,15 @@ the rest against the escalated child:
 - never fail silently — the escalation already posted its own typed comment on
   the child (§#564).
 
-**In an unattended walk, a clean stop is triaged by one script (#2585).**
-A clean-stopped child (#2579) is a typed escalation, so the triage above holds,
-but who walks, who is parked and who is skipped is decided by
-`"<skill-base-dir>/scripts/epic-clean-stop-triage.zsh" --repo "$REPO" --children
-<open children in walk order> --deps <file>` (plus `--clean-stopped <children
-that clean-stopped this invocation>` once any has). Call it once before the
-first child and again after each child that clean-stops. `--deps` is a JSON
-Lines file holding one `read-dependencies.zsh --repo "$REPO" --issue <N>` record
-per child. Then:
+**In an unattended or a human-started walk (#2940), a clean stop is triaged by
+one script (#2585).** A clean-stopped child (#2579) is a typed escalation, so
+the triage above holds, but who walks, who is parked and who is skipped is
+decided by `"<skill-base-dir>/scripts/epic-clean-stop-triage.zsh" --repo "$REPO"
+--children <open children in walk order> --deps <file>` (plus `--clean-stopped
+<children that clean-stopped this invocation>` once any has). Call it once
+before the first child and again after each child that clean-stops. `--deps` is
+a JSON Lines file holding one `read-dependencies.zsh --repo "$REPO" --issue <N>`
+record per child. Then:
 
 - never walk a child in `skip` — a kept `clean-stop.json` marker makes a child
   clean-stopped on a later walk too, so its kept work-dir is never overwritten;

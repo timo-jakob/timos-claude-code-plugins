@@ -39,7 +39,7 @@ every step of the run shares it. Before each dispatch the root deletes the
 issue's old verdict file, so it never reads a previous step's result as the new
 one.
 
-An issue-run step's handoff carries the step-handoff/v1 fields and four more,
+An issue-run step's handoff carries the step-handoff/v1 fields and five more,
 which a reader that does not read them ignores:
 
 ```json
@@ -118,9 +118,10 @@ a separate `claude` process.
   `epic-run-<N>.json`, and uses `chain-run-<N>.json` wherever
   `reference/epic-telemetry.md` names the epic run file: its `child_start_args`,
   and its `run_id` as each child handoff's `parent_run_id`. It emits the epic
-  record from it when the walk ends. `child_run_ids` lists the named issue's
-  own step runs first, then the children's, each in start order, so every
-  record parented to the run is listed.
+  record from it when the walk ends. `child_run_ids` lists only the children's
+  runs, in start order, as the epic record's contract defines it: the named
+  issue's own step runs are not children, and their records reach the run
+  through their `parent_run_id`.
 
 ## The issue step (#2940)
 
@@ -196,6 +197,15 @@ The root dispatches a chained refinement step in three places:
   size park;
 - once per unready leaf at E1b;
 - on an E3 child that comes back parked by §2.
+
+**A first dispatch starts with no resume state.** Before every refinement
+dispatch other than the questions-pending relay's re-dispatch, the root deletes
+the issue's old resume file, so a refinement of an issue refined earlier in the
+run starts as a first dispatch rather than restoring that refinement's state:
+
+```bash
+rm -f -- <scratch_dir>/refine-<N>-resume.json
+```
 
 **One refinement per issue and reason.** A second `needs-refinement` for the
 same issue and reason in one run, or a leaf already refined in this run that

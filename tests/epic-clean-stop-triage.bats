@@ -209,7 +209,7 @@ flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
   contains "$skill" 'Call it once before the first child and again after each child that clean-stops.'
   contains "$skill" '`--deps` is a JSON Lines file holding one `read-dependencies.zsh --repo "$REPO" --issue <N>` record per child.'
   contains "$skill" 'never walk a child in `skip` — a kept `clean-stop.json` marker makes a child clean-stopped on a later walk too, so its kept work-dir is never overwritten;'
-  contains "$skill" '**In an unattended walk, a clean stop is triaged by one script (#2585).**'
+  contains "$skill" '**In an unattended or a human-started walk (#2940), a clean stop is triaged by one script (#2585).**'
   contains "$skill" 'A clean-stopped child (#2579) is a typed escalation, so the triage above holds, but who walks, who is parked and who is skipped is decided by'
   contains "$skill" 'park every child in `parked` not yet handled this invocation, never branch it, and leave the epic note that it is blocked on the `blocked_by` children;'
   contains "$skill" 'walk, in `walk` order, only the children of `walk` E3 has not yet handled this invocation.'
