@@ -14,9 +14,14 @@ The root keeps Step 0's classification and, for an epic, E1 to E5's control
 flow. Each child's run is still a step. In a human-started run, attended and
 unattended behave alike, whatever `resolve_session` says (#2907). A step
 resolves its session mode as an E3 child does: §0a's
-`scripts/resolve-session.zsh` with the inferred mode `unattended`, autonomous
-whatever its line says, so no step ever asks. An epic's walk mode does not reach
-a step.
+`scripts/resolve-session.zsh` with the inferred mode `unattended`, and it stays
+autonomous whatever the line says, so no step ever asks. **A step's mode is
+`unattended` for every branch keyed on the mode**, even when the line says
+`attended`: §0a's arms, §3.5's extension and suggestion promotion, and
+the escalation's automatic grant and clean stop. It records
+`session_mode: unattended`, with the line's source, or `inferred` when the line
+says `attended`, and quotes the line it set aside. An epic's walk mode does not
+reach a step.
 
 **A parallel child's step runs in its own worktree.** The root dispatches the
 step of each child in E3's parallel set with the Agent tool's
@@ -49,8 +54,10 @@ which a reader that does not read them ignores:
   "start_at": "0a", "risk": null, "after": null }
 ```
 
-`start_at` is `"0a"` for a first run, or `"1"` for the fresh step that follows a
-refinement's `ready`. That step skips §0a and §0b, carries `risk` from the
+`start_at` is `"0a"` for a first run, a leaf refined `ready` at E1b included.
+It is `"1"` only for the issue step re-dispatched after a refinement's `ready`
+on an issue whose own step already passed §0a: the single-issue entry and the
+E3 child. That step skips §0a and §0b, carries `risk` from the
 `ready` verdict, and records `dependency_precheck: PROCEED` and
 `gate_verdict: READY`. It never runs a second gate. A step whose handoff `issue`
 differs from its `chained_from` is an E3 child's run, which §2 parks by
@@ -69,9 +76,9 @@ jq -e -s --argjson n <N> --arg kind <issue|refinement> 'length == 1 and (.[0] | 
   and (if .verdict == "done" then (.pr | type == "number")
        elif .verdict == "needs-refinement" then (.reason | IN("gate", "size"))
        elif .verdict == "ready" then (.risk | IN("low", "normal", "elevated")) and (.auto_accepted | type == "array")
-       elif .verdict == "split" then (.children | type == "array" and length > 0)
+       elif .verdict == "split" then (.children | type == "array" and length > 0 and all(type == "object"))
        elif .verdict == "blocked" then (.blockers | type == "array")
-       elif .verdict == "questions-pending" then (.questions | type == "array" and length > 0) and (.resume | type == "string") and (.round | type == "number" and . >= 1)
+       elif .verdict == "questions-pending" then (.questions | type == "array" and length > 0 and all(type == "object")) and (.resume | type == "string") and (.round | type == "number" and . >= 1)
        elif .verdict == "stopped" then (.reason | type == "string" and test("\\S"))
          and ($kind != "issue" or (.cause | IN("escalation", "clean-stop", "tooling", "failed")))
        else false end))' <scratch_dir>/step-<N>-verdict.json
@@ -143,8 +150,11 @@ story-telemetry.zsh start --run-file <scratch_dir>/story-run-<N>.json
 --parent-run-id <parent_run_id> --origin <origin> with the telemetry flags,
 then start at its start_at. When the handoff's after is not null, branch with
 step 1's script plus --after <after>. Resolve the session mode as an E3 child does
-(inferred unattended, autonomous whatever the line says), but move any kept
-state aside without --resume, deleting nothing, as an attended run does.
+(inferred unattended). Your mode is unattended whatever the line says, for every
+branch keyed on it, the escalation grant and the clean stop included: record
+session_mode unattended, with the line's source, or inferred when the line says
+attended. But move any kept state aside without --resume, deleting nothing, as
+an attended run does.
 Never ask the human anything, never dispatch a step, and never launch a
 headless claude. Before you end your turn, write <scratch_dir>/step-<N>-verdict.json
 (step-verdict/v1, ARCHITECTURE.md *Step verdict contract*), listing every
@@ -240,7 +250,9 @@ no other:
   - **A single-issue entry:** dispatch a fresh issue step with `start_at: "1"`
     and the verdict's `risk`.
   - **A leaf at E1b:** the leaf is READY for E1b, with the verdict's `risk`.
-    Nothing is dispatched for it until E3 builds it.
+    Nothing is dispatched for it until E3 builds it. Its E3 step is a first run,
+    `start_at: "0a"`, so §0a's dependency precheck runs; §0b then takes the
+    READY stamp the refinement's re-gate left as a cache hit.
   - **An E3 child:** dispatch its fresh issue step with `start_at: "1"` and the
     verdict's `risk`, in the child's place in the walk.
 - **`split`** → the issue is now a parent.

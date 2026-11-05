@@ -253,6 +253,15 @@ v() {  # <verdict> <jq object of extra fields> -> a verdict document
     "$(v done '{"pr": 1, "follow_ups": ["x"]}')" \
     "$(v done '{"pr": 1, "follow_ups": [0]}')" \
     "$(v done '{"pr": 1, "run_id": 7}')" \
+    "$(v done '{"pr": 1, "follow_ups": [1.5]}')" \
+    "$(v done '{"pr": 1, "follow_ups": "3020"}')" \
+    "$(v split '{"children": "3011"}')" \
+    "$(v split '{"children": [3011]}')" \
+    "$(v questions-pending '{"questions": "q?", "resume": "/s/r.json", "round": 1}')" \
+    "$(v questions-pending '{"questions": ["q?"], "resume": "/s/r.json", "round": 1}')" \
+    "$(v questions-pending '{"questions": [{"question": "q?"}], "resume": "/s/r.json", "round": 0}')" \
+    "$(v questions-pending '{"questions": [{"question": "q?"}], "resume": "/s/r.json", "round": "1"}')" \
+    "$(v questions-pending '{"questions": [{"question": "q?"}], "resume": 7, "round": 1}')" \
     "$(jq -c '.issue = "2940"' <<< "$(v done '{"pr": 1}')")" \
     "$(jq -c '.issue = 2941' <<< "$(v done '{"pr": 1}')")" \
     "$(jq -c 'del(.follow_ups)' <<< "$(v done '{"pr": 1}')")" \
@@ -340,7 +349,7 @@ v() {  # <verdict> <jq object of extra fields> -> a verdict document
     'In a human-started run, attended and unattended behave alike, whatever `resolve_session` says (#2907).' \
     '`scratch_dir` is the root'"'"'s own scratch directory, outside the repository, and every step of the run shares it.' \
     'Before each dispatch the root deletes the issue'"'"'s old verdict file, so it never reads a previous step'"'"'s result as the new one.' \
-    '`start_at` is `"0a"` for a first run, or `"1"` for the fresh step that follows a refinement'"'"'s `ready`.' \
+    '`start_at` is `"0a"` for a first run, a leaf refined `ready` at E1b included. It is `"1"` only for the issue step re-dispatched after a refinement'"'"'s `ready` on an issue whose own step already passed §0a: the single-issue entry and the E3 child.' \
     'The rule against a headless `claude` still holds: a step is an Agent-tool subagent, never a separate `claude` process.' \
     '`done` with the PR.' \
     '`blocked`, with the blockers §0a found.' \
@@ -365,6 +374,28 @@ v() {  # <verdict> <jq object of extra fields> -> a verdict document
   do
     contains "$t" "$needle"
   done
+}
+
+@test "#2940 a step's mode is unattended for every mode-keyed branch, even when its resolve_session line says attended" {
+  local t issue
+  t="$(section "$STEPS" 'The step model (#2940)' | tr '\n' ' ' | tr -s ' ')"
+  contains "$t" 'and it stays autonomous whatever the line says, so no step ever asks.'
+  contains "$t" '**A step'"'"'s mode is `unattended` for every branch keyed on the mode**, even when the line says `attended`: §0a'"'"'s arms, §3.5'"'"'s extension and suggestion promotion, and the escalation'"'"'s automatic grant and clean stop.'
+  contains "$t" 'It records `session_mode: unattended`, with the line'"'"'s source, or `inferred` when the line says `attended`, and quotes the line it set aside.'
+  issue="$(section "$STEPS" 'The issue step (#2940)' | tr '\n' ' ' | tr -s ' ')"
+  contains "$issue" 'Your mode is unattended whatever the line says, for every branch keyed on it, the escalation grant and the clean stop included: record session_mode unattended, with the line'"'"'s source, or inferred when the line says attended.'
+  lacks "$issue" 'autonomous whatever the line says), but'
+  # the record a step's clean stop writes is one the story-record builder accepts
+  grep -q 'clean_stop needs an escalated, unattended run' "$REPO_ROOT/development/skills/resolve-issue/scripts/build-story-telemetry-record.zsh"
+}
+
+@test "#2940 a leaf refined ready at E1b is built by E3 as a first run: start_at 0a, so §0a's dependency precheck runs" {
+  local t; t="$(section "$STEPS" 'The chained refinement step (#2940)' | tr '\n' ' ' | tr -s ' ')"
+  contains "$t" '**A leaf at E1b:** the leaf is READY for E1b, with the verdict'"'"'s `risk`. Nothing is dispatched for it until E3 builds it. Its E3 step is a first run, `start_at: "0a"`, so §0a'"'"'s dependency precheck runs; §0b then takes the READY stamp the refinement'"'"'s re-gate left as a cache hit.'
+  # "1" is narrowed to the two cases whose own step already passed §0a
+  t="$(flat "$STEPS")"
+  contains "$t" 'It is `"1"` only for the issue step re-dispatched after a refinement'"'"'s `ready` on an issue whose own step already passed §0a: the single-issue entry and the E3 child.'
+  lacks "$t" 'or `"1"` for the fresh step that follows a refinement'"'"'s `ready`'
 }
 
 @test "#2940 SKILL.md names the step entry and the stopped arms at E1b and E3" {
