@@ -54,6 +54,9 @@ named issue, whatever the target.
      blocker itself, so it parks and chains as a single-issue entry, never by
      E3's terminal (c). Its verdict decides what follows:
      - `done` → wait for its PR to merge (step 4); the blocker is then cleared.
+       The chain queue's step 3, named in step 5, records that PR and marks the
+       blocker `done`, as it marks an epic-kind blocker once the Epic flow closes
+       its epic.
      - `needs-refinement` → #2940's chained refinement step on the blocker. Its
        `ready` dispatches the blocker's step again with `start_at` `"1"`; its
        `split` makes the blocker a confirmed epic, which runs the Epic flow;

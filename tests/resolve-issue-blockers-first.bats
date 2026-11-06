@@ -109,6 +109,7 @@ after_span() {
 
 @test "AC1/AC8: each blocker merges before the next branches; it advances only under auto-merge or override=on" {
   contains "$(bf_step 3)" "\`done\` → wait for its PR to merge (step 4); the blocker is then cleared."
+  contains "$(bf_step 3)" "The chain queue's step 3, named in step 5, records that PR and marks the blocker \`done\`, as it marks an epic-kind blocker once the Epic flow closes its epic."
   s="$(bf_step 4)"
   contains "$s" "Merge each blocker before the next one branches."
   contains "$s" "In an Approver repo, armed auto-merge merges it on green."
