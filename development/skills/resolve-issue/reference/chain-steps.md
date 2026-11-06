@@ -18,7 +18,10 @@ resolves its session mode as an E3 child does: §0a's
 autonomous whatever the line says, so no step ever asks. **A step's mode is
 `unattended` for every branch keyed on the mode**, even when the line says
 `attended`: §0a's arms, §3.5's extension and suggestion promotion, and
-the escalation's automatic grant and clean stop. It records
+the escalation's automatic grant and clean stop. **The one exception is §0a's
+kept-state arm without `--resume`:** a step moves any kept state aside as an
+attended run does, deleting nothing, and never runs `clean-stop.zsh clear`,
+so it never deletes state a human could still resume. It records
 `session_mode: unattended`, with the line's source, or `inferred` when the line
 says `attended`, and quotes the line it set aside. An epic's walk mode does not
 reach a step.
@@ -71,21 +74,28 @@ plain step-handoff/v1 object plus `"kind": "refinement"`.
 ```bash
 jq -e -s --argjson n <N> --arg kind <issue|refinement> 'length == 1 and (.[0] | (.schema == "step-verdict/v1")
   and (.issue == $n)
+  and ($kind | IN("issue", "refinement"))
+  and (.verdict | IN(if $kind == "issue" then ("done", "needs-refinement", "blocked", "stopped")
+       else ("ready", "split", "questions-pending", "stopped") end))
   and (.follow_ups | type == "array" and all(type == "number" and . >= 1 and . == floor))
   and ((has("run_id") | not) or (.run_id | type == "string" or . == null))
-  and (if .verdict == "done" then (.pr | type == "number")
+  and (if .verdict == "done" then (.pr | type == "number" and . >= 1 and . == floor)
        elif .verdict == "needs-refinement" then (.reason | IN("gate", "size"))
        elif .verdict == "ready" then (.risk | IN("low", "normal", "elevated")) and (.auto_accepted | type == "array")
        elif .verdict == "split" then (.children | type == "array" and length > 0 and all(type == "object"))
        elif .verdict == "blocked" then (.blockers | type == "array")
-       elif .verdict == "questions-pending" then (.questions | type == "array" and length > 0 and all(type == "object")) and (.resume | type == "string") and (.round | type == "number" and . >= 1)
+       elif .verdict == "questions-pending" then (.questions | type == "array" and length > 0 and all(type == "object")) and (.resume | type == "string") and (.round | type == "number" and . >= 1 and . == floor)
        elif .verdict == "stopped" then (.reason | type == "string" and test("\\S"))
-         and ($kind != "issue" or (.cause | IN("escalation", "clean-stop", "tooling", "failed")))
+         and (if $kind == "issue" then (.cause | IN("escalation", "clean-stop", "tooling", "failed"))
+              else (has("cause") | not) end)
        else false end))' <scratch_dir>/step-<N>-verdict.json
 ```
 
-`kind` is the step's handoff `kind`: an issue-run step's `stopped` must carry
-its `cause`, a refinement step's never does.
+`kind` is the step's handoff `kind`, `issue` or `refinement`. An issue-run
+step ends only `done`, `needs-refinement`, `blocked` or `stopped`, a refinement
+step only `ready`, `split`, `questions-pending` or `stopped`, so the root never
+holds a verdict it has no arm for. An issue-run step's `stopped` must carry its
+`cause`, a refinement step's never does.
 
 **A step that ends its turn with no verdict file is messaged to carry on, not
 counted as failed.** Send it one SendMessage asking it to finish and write the

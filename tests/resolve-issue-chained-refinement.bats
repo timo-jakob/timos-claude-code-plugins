@@ -216,10 +216,10 @@ v() {  # <verdict> <jq object of extra fields> -> a verdict document
   check "$(v done '{"pr": 3010}')"
   check "$(v needs-refinement '{"reason": "gate"}')"
   check "$(v needs-refinement '{"reason": "size"}')"
-  check "$(v ready '{"risk": "elevated", "auto_accepted": []}')"
-  check "$(v split '{"children": [{"index": 1, "issue": 3011, "linked": true}]}')"
+  check "$(v ready '{"risk": "elevated", "auto_accepted": []}')" refinement
+  check "$(v split '{"children": [{"index": 1, "issue": 3011, "linked": true}]}')" refinement
   check "$(v blocked '{"blockers": [2941]}')"
-  check "$(v questions-pending '{"questions": [{"question": "q?"}], "resume": "/s/refine-2940-resume.json", "round": 1}')"
+  check "$(v questions-pending '{"questions": [{"question": "q?"}], "resume": "/s/refine-2940-resume.json", "round": 1}')" refinement
   check "$(v stopped '{"reason": "no convergence within the round cap"}')" refinement
   # an issue-run step's run_id, a string or null, and filed follow-ups
   check "$(v done '{"pr": 3010, "run_id": "resolve-issue-1-abcd", "follow_ups": [3020]}')"
@@ -234,18 +234,19 @@ v() {  # <verdict> <jq object of extra fields> -> a verdict document
 @test "#2940 the documented verdict check refuses an unknown value, a missing field and a wrong schema" {
   # jq -e exits 1 on a false result; 99 (no filter extracted) or 3 (a syntax
   # error) would be the check breaking, never a refusal
+  refuse() {  # <issue|refinement> <doc>
+    run check "$2" "$1"
+    [ "$status" -eq 1 ] || { echo "accepted or broke on ($1): $2 (status $status)"; return 1; }
+  }
   local doc
   for doc in \
     "$(v merged '{"pr": 1}')" \
     "$(v done '{}')" \
+    "$(v done '{"pr": "3010"}')" \
+    "$(v done '{"pr": 1.5}')" \
     "$(v needs-refinement '{"reason": "x"}')" \
-    "$(v ready '{"risk": "high", "auto_accepted": []}')" \
-    "$(v ready '{"risk": "normal", "auto_accepted": null}')" \
-    "$(v split '{"children": []}')" \
     "$(v blocked '{}')" \
-    "$(v questions-pending '{"questions": [], "resume": "/s/r.json", "round": 1}')" \
-    "$(v questions-pending '{"questions": [{"question": "q?"}], "round": 1}')" \
-    "$(v questions-pending '{"questions": [{"question": "q?"}], "resume": "/s/r.json"}')" \
+    "$(v blocked '{"blockers": 2941}')" \
     "$(v stopped '{"reason": ""}')" \
     "$(v stopped '{"reason": "   "}')" \
     "$(v stopped '{"reason": "an issue step with no cause"}')" \
@@ -255,22 +256,44 @@ v() {  # <verdict> <jq object of extra fields> -> a verdict document
     "$(v done '{"pr": 1, "run_id": 7}')" \
     "$(v done '{"pr": 1, "follow_ups": [1.5]}')" \
     "$(v done '{"pr": 1, "follow_ups": "3020"}')" \
-    "$(v split '{"children": "3011"}')" \
-    "$(v split '{"children": [3011]}')" \
-    "$(v questions-pending '{"questions": "q?", "resume": "/s/r.json", "round": 1}')" \
-    "$(v questions-pending '{"questions": ["q?"], "resume": "/s/r.json", "round": 1}')" \
-    "$(v questions-pending '{"questions": [{"question": "q?"}], "resume": "/s/r.json", "round": 0}')" \
-    "$(v questions-pending '{"questions": [{"question": "q?"}], "resume": "/s/r.json", "round": "1"}')" \
-    "$(v questions-pending '{"questions": [{"question": "q?"}], "resume": 7, "round": 1}')" \
     "$(jq -c '.issue = "2940"' <<< "$(v done '{"pr": 1}')")" \
     "$(jq -c '.issue = 2941' <<< "$(v done '{"pr": 1}')")" \
     "$(jq -c 'del(.follow_ups)' <<< "$(v done '{"pr": 1}')")" \
     "$(jq -c '.schema = "step-verdict/v2"' <<< "$(v done '{"pr": 1}')")" \
-    "$(v done '{"pr": 1}')$(v done '{"pr": 2}')"
+    "$(v done '{"pr": 1}')$(v done '{"pr": 2}')" \
+    "$(v ready '{"risk": "normal", "auto_accepted": []}')" \
+    "$(v split '{"children": [{"index": 1, "issue": 3011, "linked": true}]}')" \
+    "$(v questions-pending '{"questions": [{"question": "q?"}], "resume": "/s/r.json", "round": 1}')"
   do
-    run check "$doc"
-    [ "$status" -eq 1 ] || { echo "accepted or broke on: $doc (status $status)"; return 1; }
+    refuse issue "$doc"
   done
+  for doc in \
+    "$(v ready '{"risk": "high", "auto_accepted": []}')" \
+    "$(v ready '{"risk": "normal", "auto_accepted": null}')" \
+    "$(v ready '{"risk": "normal", "auto_accepted": "x"}')" \
+    "$(v split '{"children": []}')" \
+    "$(v split '{"children": "3011"}')" \
+    "$(v split '{"children": [3011]}')" \
+    "$(v questions-pending '{"questions": [], "resume": "/s/r.json", "round": 1}')" \
+    "$(v questions-pending '{"questions": [{"question": "q?"}], "round": 1}')" \
+    "$(v questions-pending '{"questions": [{"question": "q?"}], "resume": "/s/r.json"}')" \
+    "$(v questions-pending '{"questions": "q?", "resume": "/s/r.json", "round": 1}')" \
+    "$(v questions-pending '{"questions": ["q?"], "resume": "/s/r.json", "round": 1}')" \
+    "$(v questions-pending '{"questions": [{"question": "q?"}], "resume": "/s/r.json", "round": 0}')" \
+    "$(v questions-pending '{"questions": [{"question": "q?"}], "resume": "/s/r.json", "round": 1.5}')" \
+    "$(v questions-pending '{"questions": [{"question": "q?"}], "resume": "/s/r.json", "round": "1"}')" \
+    "$(v questions-pending '{"questions": [{"question": "q?"}], "resume": 7, "round": 1}')" \
+    "$(v stopped '{"reason": ""}')" \
+    "$(v stopped '{"reason": "r", "cause": "tooling"}')" \
+    "$(v done '{"pr": 3010}')" \
+    "$(v needs-refinement '{"reason": "gate"}')" \
+    "$(v blocked '{"blockers": [2941]}')"
+  do
+    refuse refinement "$doc"
+  done
+  # a kind outside the two refuses even a verdict valid for either
+  refuse issues "$(v done '{"pr": 3010}')"
+  refuse step "$(v stopped '{"reason": "r"}')"
 }
 
 @test "#2940 a refinement step's verdict is its chain-result outcome, converted as documented and accepted by the check" {
@@ -280,13 +303,13 @@ v() {  # <verdict> <jq object of extra fields> -> a verdict document
   zsh "$CR" emit --issue 2940 --outcome ready --risk normal > "$D/ready.json"
   jq -c "$conv" "$D/ready.json" > "$D/v.json"
   [ "$(jq -r '"\(.verdict) \(.risk) \(.auto_accepted | length)"' "$D/v.json")" = "ready normal 0" ]
-  check "$(cat "$D/v.json")"
+  check "$(cat "$D/v.json")" refinement
   # split
   printf '[{"index":1,"issue":3011,"linked":true}]' > "$D/children.json"
   zsh "$CR" emit --issue 2940 --outcome split --children "$D/children.json" > "$D/split.json"
   jq -c "$conv" "$D/split.json" > "$D/v.json"
   [ "$(jq -r '"\(.verdict) \(.children[0].issue)"' "$D/v.json")" = "split 3011" ]
-  check "$(cat "$D/v.json")"
+  check "$(cat "$D/v.json")" refinement
   # stopped
   zsh "$CR" emit --issue 2940 --outcome stopped --reason "unreadable step handoff" > "$D/stopped.json"
   jq -c "$conv" "$D/stopped.json" > "$D/v.json"
@@ -300,7 +323,7 @@ v() {  # <verdict> <jq object of extra fields> -> a verdict document
     --turn "$D/turn.json" --resume /var/tmp/r/refine-2940-resume.json --round 2 > "$D/qp.json"
   jq -c "$conv" "$D/qp.json" > "$D/v.json"
   [ "$(jq -r '"\(.verdict) \(.questions[0].question) \(.resume)"' "$D/v.json")" = "questions-pending Which? /var/tmp/r/refine-2940-resume.json" ]
-  check "$(cat "$D/v.json")"
+  check "$(cat "$D/v.json")" refinement
 }
 
 # --- AC11: only the root asks ------------------------------------------------
@@ -354,7 +377,7 @@ v() {  # <verdict> <jq object of extra fields> -> a verdict document
     '`done` with the PR.' \
     '`blocked`, with the blockers §0a found.' \
     '`stopped`, with the reason, for any other ending: an escalation, a clean stop, a red gate or a failure. Its `cause` names which, for E3'"'"'s triage:' \
-    '`kind` is the step'"'"'s handoff `kind`: an issue-run step'"'"'s `stopped` must carry its `cause`, a refinement step'"'"'s never does.' \
+    '`kind` is the step'"'"'s handoff `kind`, `issue` or `refinement`. An issue-run step ends only `done`, `needs-refinement`, `blocked` or `stopped`, a refinement step only `ready`, `split`, `questions-pending` or `stopped`, so the root never holds a verdict it has no arm for. An issue-run step'"'"'s `stopped` must carry its `cause`, a refinement step'"'"'s never does.' \
     '**`done`** → report the PR.' \
     '**`blocked`** → until #2941 lands, the root handles it as §0a'"'"'s autonomous arm handles a rejection: the step already posted the comment and the label, so the root reports the blockers and stops, offering no remediation.' \
     'In an epic, the root parks the child as E3 parks a dependency rejection and continues with the children that don'"'"'t depend on it.' \
@@ -379,11 +402,13 @@ v() {  # <verdict> <jq object of extra fields> -> a verdict document
 @test "#2940 a step's mode is unattended for every mode-keyed branch, even when its resolve_session line says attended" {
   local t issue
   t="$(section "$STEPS" 'The step model (#2940)' | tr '\n' ' ' | tr -s ' ')"
-  contains "$t" 'and it stays autonomous whatever the line says, so no step ever asks.'
-  contains "$t" '**A step'"'"'s mode is `unattended` for every branch keyed on the mode**, even when the line says `attended`: §0a'"'"'s arms, §3.5'"'"'s extension and suggestion promotion, and the escalation'"'"'s automatic grant and clean stop.'
+  contains "$t" 'A step resolves its session mode as an E3 child does: §0a'"'"'s `scripts/resolve-session.zsh` with the inferred mode `unattended`, and it stays autonomous whatever the line says, so no step ever asks.'
+  contains "$t" '**A step'"'"'s mode is `unattended` for every branch keyed on the mode**, even when the line says `attended`: §0a'"'"'s arms, §3.5'"'"'s extension and suggestion promotion, and the escalation'"'"'s automatic grant and clean stop. **The one exception is §0a'"'"'s kept-state arm without `--resume`:** a step moves any kept state aside as an attended run does, deleting nothing, and never runs `clean-stop.zsh clear`, so it never deletes state a human could still resume.'
   contains "$t" 'It records `session_mode: unattended`, with the line'"'"'s source, or `inferred` when the line says `attended`, and quotes the line it set aside.'
   issue="$(section "$STEPS" 'The issue step (#2940)' | tr '\n' ' ' | tr -s ' ')"
   contains "$issue" 'Your mode is unattended whatever the line says, for every branch keyed on it, the escalation grant and the clean stop included: record session_mode unattended, with the line'"'"'s source, or inferred when the line says attended.'
+  contains "$issue" 'Resolve the session mode as an E3 child does (inferred unattended).'
+  contains "$issue" 'But move any kept state aside without --resume, deleting nothing, as an attended run does.'
   lacks "$issue" 'autonomous whatever the line says), but'
   # the record a step's clean stop writes is one the story-record builder accepts
   grep -q 'clean_stop needs an escalated, unattended run' "$REPO_ROOT/development/skills/resolve-issue/scripts/build-story-telemetry-record.zsh"
