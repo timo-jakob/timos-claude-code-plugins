@@ -192,7 +192,7 @@ file; never re-add an entry under another kind.
    blockers first's step 4 waits, then `done --entry <I> --pr <P>`. An
    epic-kind entry has no PR of its own: once the Epic flow closes its epic,
    `done --entry <I>` without `--pr`; an Epic flow that ends with the epic still
-   open is a park (step 5). Where the
+   open is a park (step 5). Take `next` once the entry is `done`. Where the
    PR cannot advance by itself, stop (step 5) with `--pause` and the reason that
    PR #P awaits a merge: the report lists that stop as a pause, not a failure.
 4. **Done.** `next`'s exit 4 means every queued issue is closed and the queue is
@@ -214,7 +214,9 @@ file; never re-add an entry under another kind.
    issue, open or closed, whose body is `chain-queue.zsh report --stopped <I>
    --reason <why>`, beginning `chain stopped:`, and prints the same text in the
    run's report. It applies no label, because the stopping issue keeps what its
-   own run posted. Every record keeps its own run's outcome, and no telemetry
+   own run posted. Its `Merged in this run:` line lists the PRs recorded on
+   `done` entries; an epic-kind entry's child PRs are in its E3 report.
+   Every record keeps its own run's outcome, and no telemetry
    outcome or field is added. The queue file is kept.
 7. **Resume from the queue.** A re-run on the named issue that finds the file
    resumes with `next`, the entry that stopped the run. An entry that is now

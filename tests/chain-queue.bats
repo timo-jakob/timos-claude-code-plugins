@@ -108,6 +108,15 @@ order() { jq -c '[.entries[].issue]' "$QF"; }
   [ "$output" = "$expected" ]
 }
 
+@test "report: an epic-kind entry marked done without --pr adds no PR to the merged line" {
+  q add --entry 10 --kind named >/dev/null
+  q add --entry 20 --kind follow-up --after 10 --finding "$(fnd a 1 x)" >/dev/null
+  q done --entry 10 >/dev/null
+  run -0 q report --stopped 20 --reason 'it parked'
+  expected="$(printf '%s\n' 'chain stopped: #20 — it parked' 'Merged in this run: none' 'Still queued: #20')"
+  [ "$output" = "$expected" ]
+}
+
 @test "report --pause names the stop a pause, not a failure; an empty run reports none" {
   run -0 q report --stopped 10 --reason 'PR #7 awaits a merge' --pause
   expected="$(printf '%s\n' 'chain stopped: #10 (paused, not failed) — PR #7 awaits a merge' 'Merged in this run: none' 'Still queued: none')"

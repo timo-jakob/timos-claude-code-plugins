@@ -90,12 +90,17 @@ cq_step() {
 @test "AC3: an epic-kind entry, a follow-up or split included, is marked done without a PR once its epic closes" {
   contains "$(cq_step 2)" "the epic-kind entry it belongs to, a named issue, blocker or follow-up that runs the Epic flow, a refinement split's included, and its PR takes E3's own wait."
   s="$(cq_step 3)"
-  contains "$s" "An epic-kind entry has no PR of its own: once the Epic flow closes its epic, \`done --entry <I>\` without \`--pr\`; an Epic flow that ends with the epic still open is a park (step 5)."
+  contains "$s" "An epic-kind entry has no PR of its own: once the Epic flow closes its epic, \`done --entry <I>\` without \`--pr\`; an Epic flow that ends with the epic still open is a park (step 5). Take \`next\` once the entry is \`done\`."
+}
+
+@test "AC3: the stop report's merged line lists PRs recorded on done entries; an epic's child PRs are in its E3 report" {
+  contains "$(cq_step 6)" "Its \`Merged in this run:\` line lists the PRs recorded on \`done\` entries; an epic-kind entry's child PRs are in its E3 report."
 }
 
 @test "AC3: chain-steps' arms route the queue: done follows queue step 3, blocked re-queues, ready starts a follow-up at §0a" {
   t="$(flat < "$STEPS")"
-  contains "$t" "**\`done\`** → report the PR. In an epic, continue E3, and mark the epic-kind entry \`done\` only once the Epic flow ends; otherwise record the PR, wait for its merge and mark the entry \`done\` (queue step 3). Then take \`next\`."
+  contains "$t" "**\`done\`** → report the PR. In an epic, continue E3. Queue step 3 alone says when an entry, epic-kind or not, is marked \`done\` and \`next\` is taken."
+  lacks "$t" "only once the Epic flow ends"
   contains "$t" "On a follow-up's step, the root adds each open local blocker \`--before\` the follow-up, deepest first, and takes \`next\`; the re-run follow-up's §0a clears its label."
   contains "$t" "A cycle or an open foreign blocker parks it (queue step 5)."
   contains "$t" "A follow-up entry, whose step never passed §0a, gets \`start_at: \"0a\"\`."

@@ -38,7 +38,9 @@
 #                          [--pause]
 #       Print the stop comment's body: the line `chain stopped: #I — TEXT`
 #       (`chain stopped: #I (paused, not failed) — TEXT` with --pause), every PR
-#       merged in the run (or none) and every issue still queued (or none).
+#       recorded on a done entry (or none; an epic-kind entry records none, its
+#       children's PRs are in its E3 report) and every issue still queued (or
+#       none).
 #   chain-queue.zsh clear  --repo-dir DIR --issue N
 #       Delete the queue file. Absent is not an error.
 #
