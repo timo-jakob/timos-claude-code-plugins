@@ -90,7 +90,8 @@ it gave a path. (`start` drops a literal `null` for you, but the flag is
 meaningless without a value.)
 
 It prints the run file — `{run_id, ts, parent_run_id, origin, telemetry_file,
-telemetry_dir, loop_args, child_start_args}` — and touches no sink. **Call `start` exactly once per invocation.** Every call mints a new
+telemetry_dir, loop_args, child_start_args}` — and touches no sink. **Call
+`start` exactly once per invocation.** Every call mints a new
 run and overwrites the file. A fresh invocation of the same issue therefore
 starts fresh, whatever an earlier run left behind. If you re-enter this step
 within the same invocation — say, after a compacted context — **re-read the
