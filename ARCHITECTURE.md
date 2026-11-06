@@ -7771,7 +7771,8 @@ mode, it takes *resolve blocker + named issue* without asking. Its root clears
 the chain deepest-first, one step per blocker, and builds the named issue after
 a re-verified `PROCEED`. At the first blocker that cannot finish, it stops the
 whole run with one `blockers first stopped:` comment and the `blocked` label
-(`reference/interactive/blockers-first.md`). In **interactive**
+(`reference/interactive/blockers-first.md`). A `--resume` run does not chain,
+so it keeps its session mode's arm. In **interactive**
 runs the skill layers guided remediation on top
 (#586): the human explicitly chooses *resolve blocker + named issue* or
 *just the blocker* (declining stops); plain-issue chains resolve

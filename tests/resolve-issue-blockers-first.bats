@@ -129,8 +129,20 @@ after_span() {
 @test "AC3: the post-chain precheck must return PROCEED, and a second rejection stops without a second chain" {
   s="$(bf_step 5)"
   contains "$s" "Once every blocker from step 3 is cleared, run the precheck on the target again; exit 1 or 2 is handled as in step 1."
-  contains "$s" "On \`PROCEED\`, dispatch the target's step with \`start_at\` \`\"0a\"\`: it re-runs §0a, clears the stale \`blocked\` label and builds the target"
+  contains "$s" "On \`PROCEED\`, dispatch the target's step with \`start_at\` \`\"0a\"\`: it re-runs §0a, clears the stale \`blocked\` label and builds the target. A blocker target's verdict is handled as step 3 handles a blocker's."
   contains "$s" "A rejection here, or a \`blocked\` verdict from that step, stops the run (step 6). Never clear the chain a second time, because that loop has no bound."
+}
+
+@test "step 5: the named issue's own verdict takes the issue step's arms, never the merge wait or the stop" {
+  s="$(bf_step 5)"
+  contains "$s" "The named issue's verdict takes the issue step's own arms, never step 4 or step 6: \`done\` reports the PR and ends the run with no merge wait, comment or label, and \`stopped\` keeps that step's own ending."
+}
+
+@test "a --resume run does not chain, so it keeps its session mode's arm" {
+  contains "$(bf)" "A \`--resume\` run does not chain, so it keeps §0a's arm for its session mode: attended offers remediation, unattended posts \`comment_md\` and applies \`blocked\`."
+  contains "$(after_span)" "A \`--resume\` run does not chain, so it keeps the offer."
+  contains "$(flat < "$ARCH")" "A \`--resume\` run does not chain, so it keeps its session mode's arm."
+  contains "$(flat < "$REPO_ROOT/docs/how-to/run-resolve-issue-unattended.md")" "a resumed run does not clear blockers by itself, as a run you start fresh does"
 }
 
 @test "AC4: a cycle, a shape (ii) rejection and an open foreign blocker stop before anything is built" {
@@ -163,29 +175,48 @@ after_span() {
   contains "$s" "Every stop posts one comment and applies the label."
   contains "$s" "in either session mode"
   contains "$s" "Run the precheck on the named issue once more for a current \`comment_md\`, since earlier ones still list blockers this run merged."
-  contains "$s" "On its exit 1 or 2 the comment carries no \`comment_md\`."
+  contains "$s" "On its exit 1 or 2 the comment carries no \`comment_md\`, and so does it on \`PROCEED\`, which also applies no label: that stop is not a dependency stop."
+  contains "$s" "Run the block in one Bash call, and single-quote each substituted value (a \`'\` inside one written \`'\\''\`), so a reason's backticks or \`\$\` stay literal:"
   contains "$s" "except after a precheck failure, which applies no label, as §0a applies none on those exits"
   contains "$s" "gh label create blocked --color b60205"
-  contains "$s" "printf '%s\\n' \"\$COMMENT_MD\"; } | gh issue comment <N> --body-file -"
-  contains "$s" "gh issue edit <N> --add-label blocked"
+  contains "$s" "if [ -n \"\$COMMENT_MD\" ]; then printf '\\n%s\\n' \"\$COMMENT_MD\"; fi; } | gh issue comment <N> --body-file -"
+  contains "$s" "gh issue edit <N> --add-label blocked # never on PROCEED or a precheck failure"
   contains "$s" "The named issue's own record is the one its first step emitted, with outcome \`precheck-parked\` (\`reference/telemetry.md\` step 4, the row for a rung that failed, halted or paused)."
   contains "$s" "No new outcome or field is added."
 }
 
-@test "AC7: the stop comment's body renders the prefix, the merged list and comment_md, in that order" {
-  # The documented block with its gh calls cut off: what is left is the brace
-  # group that writes the comment body.
+# The documented stop block with its gh calls cut off, its placeholders
+# replaced by $1 (the reason) and $2 (comment_md): what is left assigns the
+# values and writes the comment body.
+stop_body() {
+  local body
   body="$(awk '/```bash/ { b = 1; next } b && /```/ { exit } b' "$BF" |
     sed -e 's/ | gh issue comment <N> --body-file -$//' -e '/^ *gh issue edit /d' \
       -e '/^ *gh label create /,/|| true$/d')"
-  contains "$body" "printf '%s\\n' \"\$COMMENT_MD\"; }"
   body="${body//<the stopping blocker, or the foreign ref>/#7}"
-  body="${body//<the reason>/its CI will not go green}"
+  body="${body//<the reason>/$1}"
   body="${body//<#PR, #PR …, or none>/#11}"
-  run bash -c "COMMENT_MD='**Rejected** — #7 is open.'; $body"
+  body="${body//<the comment_md of that precheck, or nothing on its PROCEED, exit 1 or 2>/$2}"
+  printf '%s\n' "$body"
+}
+
+@test "AC7: the stop comment's body renders the prefix, the merged list and comment_md, in that order" {
+  body="$(stop_body 'its CI will not go green' '**Rejected** — #7 is open.')"
+  contains "$body" "if [ -n \"\$COMMENT_MD\" ]; then printf '\\n%s\\n' \"\$COMMENT_MD\"; fi; }"
+  run --separate-stderr bash -c "$body"
   [ "$status" -eq 0 ]
   expected="$(printf '%s\n' 'blockers first stopped: #7 — its CI will not go green' 'Merged in this run: #11' '' '**Rejected** — #7 is open.')"
   [ "$output" = "$expected" ]
+  [ -z "$stderr" ]
+}
+
+@test "AC5/AC7: a reason's backticks stay literal, and an empty comment_md adds no tail" {
+  body="$(stop_body 'it needs native sub-issues or a `- [ ] #N` rewrite' '')"
+  run --separate-stderr bash -c "$body"
+  [ "$status" -eq 0 ]
+  expected="$(printf '%s\n' 'blockers first stopped: #7 — it needs native sub-issues or a `- [ ] #N` rewrite' 'Merged in this run: #11')"
+  [ "$output" = "$expected" ]
+  [ -z "$stderr" ]
 }
 
 @test "precheck failures: exit 2 is re-run once; exit 1 or a second 2 stops with 'precheck failed'" {
@@ -209,7 +240,7 @@ after_span() {
 
 @test "AC10: SKILL.md §0a points a human-started run at the shard, keyed on BLOCKERS_FIRST=1" {
   t="$(flat < "$SKILL")"
-  contains "$t" "human-started run (#2941), in either mode, takes \`reference/interactive/blockers-first.md\` and never asks:"
+  contains "$t" "human-started run without \`--resume\` (#2941), in either mode, takes \`reference/interactive/blockers-first.md\` and never asks:"
   contains "$t" "A step whose brief names \`BLOCKERS_FIRST=1\` is the exception (#2941): it posts nothing and ends \`blocked\` for its root."
 }
 

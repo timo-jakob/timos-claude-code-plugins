@@ -6,7 +6,9 @@
 **A human-started run clears its blockers without asking.** In a run whose
 origin is `human` (§0a), whatever session mode `scripts/resolve-session.zsh`
 reports, a shape (i) rejection of the named issue takes remediation's option 1 — *Resolve the dependency AND the
-named issue* — and never puts the choice to the human. A pipeline-started run is
+named issue* — and never puts the choice to the human. A `--resume` run does not
+chain, so it keeps §0a's arm for its session mode: attended offers remediation,
+unattended posts `comment_md` and applies `blocked`. A pipeline-started run is
 unchanged: it posts `comment_md`, applies the `blocked` label and stops, as #583
 requires.
 
@@ -76,28 +78,35 @@ named issue, whatever the target.
 5. **Re-verify, then build the target.** Once every blocker from step 3 is
    cleared, run the precheck on the target again; exit 1 or 2 is handled as in
    step 1. On `PROCEED`, dispatch the target's step with `start_at` `"0a"`: it
-   re-runs §0a, clears the stale `blocked` label and builds the target, and its
-   verdict is handled as step 3 handles a blocker's. A rejection here, or a
-   `blocked` verdict from that step, stops the run (step 6). Never clear the
-   chain a second time, because that loop has no bound.
+   re-runs §0a, clears the stale `blocked` label and builds the target. A
+   blocker target's verdict is handled as step 3 handles a blocker's. The named
+   issue's verdict takes the issue step's own arms, never step 4 or step 6:
+   `done` reports the PR and ends the run with no merge wait, comment or label,
+   and `stopped` keeps that step's own ending. A rejection here, or a `blocked`
+   verdict from that step, stops the run (step 6). Never clear the chain a
+   second time, because that loop has no bound.
 6. **Every stop posts one comment and applies the label.** When this
    procedure stops, in either session mode, it starts no further blocker step
    and does not build the named issue. A stopped blocker keeps whatever its own
    run posted, and its own record keeps its own outcome. Run the precheck on
    the named issue once more for a current `comment_md`, since earlier ones
    still list blockers this run merged. On its exit 1 or 2 the comment carries
-   no `comment_md`. Then post one comment on the named issue and apply
-   `blocked`, except after a precheck failure, which applies no label, as §0a
-   applies none on those exits:
+   no `comment_md`, and so does it on `PROCEED`, which also applies no label:
+   that stop is not a dependency stop. Then post one comment on the named issue
+   and apply `blocked`, except after a precheck failure, which applies no label,
+   as §0a applies none on those exits. Run the block in one Bash call, and
+   single-quote each substituted value (a `'` inside one written `'\''`), so a
+   reason's backticks or `$` stay literal:
 
    ```bash
    gh label create blocked --color b60205 \
      --description "Rejected by the dependency precheck — open blockers in its blocked-by graph" \
      2>/dev/null || true
-   { printf 'blockers first stopped: %s — %s\nMerged in this run: %s\n\n' \
-       "<the stopping blocker, or the foreign ref>" "<the reason>" "<#PR, #PR …, or none>"
-     printf '%s\n' "$COMMENT_MD"; } | gh issue comment <N> --body-file -
-   gh issue edit <N> --add-label blocked
+   BLOCKER='<the stopping blocker, or the foreign ref>' REASON='<the reason>' MERGED='<#PR, #PR …, or none>'
+   COMMENT_MD='<the comment_md of that precheck, or nothing on its PROCEED, exit 1 or 2>'
+   { printf 'blockers first stopped: %s — %s\nMerged in this run: %s\n' "$BLOCKER" "$REASON" "$MERGED"
+     if [ -n "$COMMENT_MD" ]; then printf '\n%s\n' "$COMMENT_MD"; fi; } | gh issue comment <N> --body-file -
+   gh issue edit <N> --add-label blocked   # never on PROCEED or a precheck failure
    ```
 
    The named issue's own record is the one its first step emitted, with

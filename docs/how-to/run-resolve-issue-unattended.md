@@ -1,7 +1,7 @@
 # Run resolve-issue unattended
 
-`/development:resolve-issue` asks you before it takes some decisions: whether to
-clear a blocker first, whether to grant the review loop more rounds, which waived suggestions to
+`/development:resolve-issue` asks you before it takes some decisions: whether a
+resumed run clears a blocker first, whether to grant the review loop more rounds, which waived suggestions to
 promote. It decides whether you are there to ask by inference. When you invoke
 the skill yourself, it assumes you are present.
 
@@ -49,9 +49,10 @@ This section covers a run that continues in your own session: one you resume
 with `--resume`. A run you start fresh takes the step model in the next section
 instead. Every branch of a single-issue run that would ask you follows the setting:
 `attended` asks, and `unattended` takes the arm the skill already takes when
-nobody is present. For example, when the story is blocked by an open
+nobody is present. For example, when a resumed story is blocked by an open
 dependency, `attended` offers to resolve the blocker first, and `unattended`
-comments on the story and adds the `blocked` label instead. The same holds for
+comments on the story and adds the `blocked` label instead: a resumed run does
+not clear blockers by itself, as a run you start fresh does. The same holds for
 the extra review rounds after an escalation,
 the options for a review that did not apply, and suggestion promotion. The
 run's telemetry

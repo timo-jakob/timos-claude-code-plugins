@@ -308,8 +308,8 @@ which is the session mode resolved above:
   (below) rather than dead-ending — with a human present, a rejection is a
   fork in the road, not a stop sign.
 
-**Interactive remediation.** Read it when this step rejects with shape (i) and a human is present; a
-human-started run (#2941), in either mode, takes `reference/interactive/blockers-first.md` and never asks:
+**Interactive remediation.** Read it on a shape (i) rejection with a human present; a human-started run
+without `--resume` (#2941), in either mode, takes `reference/interactive/blockers-first.md` and never asks:
 see `reference/interactive/remediation.md` § Interactive remediation — offer to clear the blockage (#586, #587)
 
 ### 0b. Readiness gate — is the story ready to build? (do NOT skip)
