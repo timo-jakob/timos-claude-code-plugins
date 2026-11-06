@@ -21,14 +21,19 @@ be read for `<root>` and `<scratch_dir>`, write the verdict
 `{"schema": "step-verdict/v1", "issue": <N>, "verdict": "stopped", "follow_ups": [], "reason": "unreadable step handoff"}`
 beside the handoff, as `step-<N>-verdict.json`, and end your turn.
 
-When it prints its chain-result/v1 document, write it as the step verdict:
+When it prints its chain-result/v1 document, save that document verbatim to
+`<scratch_dir>/chain-result-<N>.json` with the Write tool, never through a
+shell string, then write it as the step verdict:
 
 ```bash
 jq '{schema: "step-verdict/v1", issue, verdict: .outcome, follow_ups: []}
-    + del(.schema, .issue, .outcome)' > <scratch_dir>/step-<N>-verdict.json
+    + del(.schema, .issue, .outcome)' <scratch_dir>/chain-result-<N>.json > <scratch_dir>/step-<N>-verdict.json
 ```
 
-and end your turn. Never dispatch a step, and never launch a headless claude.
+and end your turn. When the skill ends without printing one, write
+`{"schema": "step-verdict/v1", "issue": <N>, "verdict": "stopped", "follow_ups": [], "reason": "no chain-result document"}`
+as `<scratch_dir>/step-<N>-verdict.json` and end your turn; never end it
+without a verdict file. Never dispatch a step, and never launch a headless claude.
 A subagent the skill itself dispatches — the readiness gate, the
 issue-refiner — is not a step. Which verdict each outcome writes, and what the
 root does with it, is the resolve-issue skill's `reference/chain-steps.md`

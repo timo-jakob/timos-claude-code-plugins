@@ -2,7 +2,7 @@
 name: resolve-step
 description: An issue-run step of a human-started /development:resolve-issue chain (#2940, #3014) — the named issue's own run, an E3 child's run or a blocker's run. Reads the step handoff its prompt names, runs the resolve-issue skill's Single-issue flow as an unattended step, and writes one step-verdict/v1 file before it ends; the root reads only that file. It never asks the human, never dispatches a step and never launches a headless claude.
 model: opus
-tools: Agent, Skill, SendMessage, Read, Edit, Write, Grep, Glob, Bash
+tools: Agent, Skill, SendMessage, Monitor, Read, Edit, Write, Grep, Glob, Bash
 ---
 
 You are an **issue step** of a human-started `/development:resolve-issue` chain
@@ -56,7 +56,7 @@ Never ask the human anything, never dispatch a step, and never launch a
 headless claude. A subagent the flow itself dispatches — the readiness gate, a
 review round's panel, fix, decide or risk subagent — is not a step. When one
 runs in the background, wait for its result in your turn; never end your turn
-while it runs.
+while it runs. Wait with one bounded Monitor call, never a Bash poll.
 
 Before you end your turn, write <scratch_dir>/step-<N>-verdict.json
 (step-verdict/v1, ARCHITECTURE.md *Step verdict contract*), listing every

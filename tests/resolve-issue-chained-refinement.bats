@@ -55,7 +55,7 @@ verdict_filter() {
 # The refinement step's conversion of a chain-result/v1 document to a verdict,
 # carried by the refine-step agent's definition since #3014.
 convert_filter() {
-  perl -0ne "print \$1 if /jq '(\\{schema: \"step-verdict\\/v1\".*?)' > <scratch_dir>/s" "$FSTEP"
+  perl -0ne "print \$1 if /jq '(\\{schema: \"step-verdict\\/v1\".*?)' <scratch_dir>\\/chain-result-<N>\\.json > <scratch_dir>\\/step-<N>-verdict\\.json/s" "$FSTEP"
 }
 
 check() {  # <verdict json> [issue|refinement] -> exit status of the documented check
@@ -546,6 +546,8 @@ fm() { awk -v k="$2" 'NR == 1 && /^---$/ { f = 1; next } f && /^---$/ { exit } f
   done
   # the issue step implements the story, so it edits files
   printf '%s\n' "$(fm "$RSTEP" tools)" | tr ',' '\n' | tr -d ' ' | grep -qxF Edit
+  # the issue step waits on the gate and its background round dispatches with Monitor (core.md, subagents.md)
+  printf '%s\n' "$(fm "$RSTEP" tools)" | tr ',' '\n' | tr -d ' ' | grep -qxF Monitor
 }
 
 @test "#3014 chain-steps.md dispatches each step as its plugin agent and never as general-purpose" {
@@ -591,11 +593,24 @@ fm() { awk -v k="$2" 'NR == 1 && /^---$/ { f = 1; next } f && /^---$/ { exit } f
   lacks "$doc" '"cause"'
 }
 
+@test "#3014 the refine-step agent feeds its conversion a saved document and writes a verdict when none is printed" {
+  local t; t="$(flat "$FSTEP")"
+  contains "$t" 'save that document verbatim to `<scratch_dir>/chain-result-<N>.json` with the Write tool, never through a shell string'
+  contains "$t" 'never end it without a verdict file.'
+  local doc
+  doc="$(perl -0ne 'print $1 if /`(\{"schema": "step-verdict\/v1", "issue": <N>, "verdict": "stopped", "follow_ups": \[\], "reason": "no chain-result document"\})`/s' "$FSTEP")"
+  [ -n "$doc" ]
+  doc="${doc//<N>/2940}"
+  check "$doc" refinement
+  lacks "$doc" '"cause"'
+}
+
 @test "#3014 the resolve-step agent names its brief's lines, waits on its own subagents and points at the verdict arms" {
   local t; t="$(flat "$RSTEP")"
   contains "$t" '`<N>` in its name is the issue you work on.'
   contains "$t" '`FLAGS=<flags>`, only when the root was given any: its telemetry flags and its `--no-review`.'
   contains "$t" 'When one runs in the background, wait for its result in your turn; never end your turn while it runs.'
+  contains "$t" 'Wait with one bounded Monitor call, never a Bash poll.'
   contains "$t" 'Which verdict each ending writes is `reference/chain-steps.md` § The issue step (#2940).'
   # the section it points at exists
   grep -qxF '## The issue step (#2940)' "$STEPS"
