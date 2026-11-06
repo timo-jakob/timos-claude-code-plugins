@@ -166,6 +166,11 @@ tracked_diagrams() {
   # RS-06a, the fallback panel default, lives inside the review loop's rounds,
   # which these diagrams leave out
   lacks "$ship" 'fallback'
+  # the page shows the committed SVGs, so each must carry its source's new boxes
+  contains "$(cat "$REPO_ROOT/docs/explanation/diagrams/resolve-issue.svg")" '> chained</tspan>'
+  contains "$(cat "$REPO_ROOT/docs/explanation/diagrams/resolve-issue.svg")" '> blockers</tspan>'
+  contains "$(cat "$REPO_ROOT/docs/explanation/diagrams/resolve-issue-ship.svg")" '> Decisions</tspan>'
+  contains "$(cat "$REPO_ROOT/docs/explanation/diagrams/resolve-issue-ship.svg")" '> chain</tspan>'
 }
 
 @test "#3021 step 8 of the resolve-issue page states the Decisions taken record and the parked follow-up default" {
