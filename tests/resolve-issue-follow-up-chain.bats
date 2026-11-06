@@ -47,7 +47,8 @@ cq_step() {
   t="$(cq)"
   contains "$t" "**Only the root of a human-started run keeps a queue.**"
   contains "$t" "A pipeline-started run writes no queue file and keeps §7's \`refine-issue --follow-up\` call and its rule that a follow-up that parks never stops the run."
-  contains "$t" "\`clean-stop.zsh clear\` keeps it, so an entry's own run never deletes it."
+  contains "$t" "\`clean-stop.zsh clear\` keeps it, so an entry's own run never deletes it"
+  contains "$t" "whose \`--repo-dir\` and \`--issue\` always name the **named** issue."
 }
 
 @test "AC10: SKILL.md §7 limits the never-stops rule to a pipeline-started run" {
@@ -56,7 +57,7 @@ cq_step() {
 
 @test "AC10: ARCHITECTURE.md's follow-up mode and RS-09 state the chained exception" {
   t="$(awk '/^### The unattended follow-up mode/ { f = 1 } f && /^- \*\*Eligibility/ { exit } f' "$ARCH" | flat)"
-  contains "$t" "**A human-started chain is the exception (#2942):** its root queues each follow-up in the chain queue, refines it in the chained mode and resolves it, through every generation"
+  contains "$t" "**A human-started chain is the exception (#2942):** its root queues each follow-up in the chain queue, refines it in the chained mode and resolves it, through every generation, and a park there stops the run"
   contains "$t" "A pipeline-started run keeps this mode and writes no queue file."
   run grep -F '| RS-09 | SKILL.md |' "$ASK"
   contains "$output" "in a human-started chain (#2942), follow-ups are queued, refined in chained mode and resolved instead"
@@ -75,7 +76,7 @@ cq_step() {
   contains "$s" "This replaces §7's \`refine-issue --follow-up\` call in a human-started run."
   t="$(flat < "$STEPS")"
   contains "$t" "Skip §7's refine-issue --follow-up call: list the follow-ups only, since the root queues them (#2942)."
-  contains "$t" "Then the root queues the step's \`follow_ups\` and takes the queue's next entry (#2942)"
+  contains "$t" "How the root handles each, once it has queued the verdict's \`follow_ups\` in the chain queue (#2942), which replaces §7's \`refine-issue --follow-up\` call in a human-started run:"
   contains "$t" "see \`reference/checkpoint.md\` § The chain queue in a human-started run (#2942)"
 }
 
@@ -106,6 +107,7 @@ cq_step() {
   contains "$s" "Every later stop posts one comment on the named issue, open or closed, whose body is \`chain-queue.zsh report --stopped <I> --reason <why>\`, beginning \`chain stopped:\`, and prints the same text in the run's report."
   contains "$s" "It applies no label, because the stopping issue keeps what its own run posted."
   contains "$s" "Every record keeps its own run's outcome, and no telemetry outcome or field is added."
+  contains "$s" "The queue file is kept."
 }
 
 @test "AC7: a re-run resumes from the queue: closed entries are done, an open PR is waited on, never rebuilt" {
@@ -116,11 +118,13 @@ cq_step() {
   contains "$s" "A re-run on the named issue that finds the file resumes with \`next\`, the entry that stopped the run."
   contains "$s" "An entry that is now closed is marked \`done\`."
   contains "$s" "An entry whose recorded PR is still open is waited on as in step 3, never rebuilt."
+  contains "$s" "Any other entry runs again."
 }
 
 @test "AC8: there is no numeric cap; a follow-up cycle is refused by add and stops the run" {
   s="$(cq_step 2)"
   contains "$s" "There is no numeric cap."
+  contains "$s" "\`{\"file\": \"follow-up\", \"line\": null, \"dimension\": \"follow-up\", \"title\": <its title>}\`"
   contains "$s" "\`add\`'s exit 3 refuses a follow-up whose identity matches one already resolved in this run: that is a follow-up cycle, and it stops the run (step 5)."
 }
 

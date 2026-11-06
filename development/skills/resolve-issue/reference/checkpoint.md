@@ -161,7 +161,10 @@ rule that a follow-up that parks never stops the run. The root keeps the queue
 with `<skill-base-dir>/scripts/chain-queue.zsh`, whose `--repo-dir` and
 `--issue` always name the **named** issue. Its file, `chain-queue.json`, lives
 in the named issue's durable base, the one `clean-stop.zsh dir` prints, and
-`clean-stop.zsh clear` keeps it, so an entry's own run never deletes it.
+`clean-stop.zsh clear` keeps it, so an entry's own run never deletes it, nor
+does `checkpoint.zsh supersede` move it. An exit 2 is your own malformed call:
+fix it and re-run once. An exit 1 or 5 stops the run (step 5) and keeps the
+file; never re-add an entry under another kind.
 
 1. **Start or resume.** Test for the file in that base. **With no queue file**,
    start one: `add --entry <N> --kind named`. **With one**, this run resumes
@@ -172,8 +175,11 @@ in the named issue's durable base, the one `clean-stop.zsh dir` prints, and
    verdict lists `follow_ups`, an E3 child's included, `add` each one
    `--kind follow-up --after <the entry that filed it>` with `--finding`: the
    `finding` of its follow-up-origin/v1 comment (`follow-up-origin.zsh parse`),
-   or, with no parked-finding record, `{"file": "#<issue>", "line": null,
-   "dimension": "follow-up", "title": <its title>}`. There is no numeric cap.
+   or, with no parked-finding record, `{"file": "follow-up", "line": null,
+   "dimension": "follow-up", "title": <its title>}`. An E3 child is never an
+   entry: its follow-ups go `--after` the epic-kind entry it belongs to, a
+   named issue or blocker that runs the Epic flow, and its PR takes E3's own
+   wait. There is no numeric cap.
    `add`'s exit 3 refuses a follow-up whose identity matches one already
    resolved in this run: that is a follow-up cycle, and it stops the run
    (step 5).

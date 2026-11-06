@@ -104,3 +104,5 @@ history and re-add `needs-refinement`. An exit 1 or 2 adds no section.
 there is no PR body, so the same entry goes in the run's report, as it does
 whenever §7 refines follow-ups an open PR's body does not hold. Either way the
 decision is recorded once: §7 adds nothing to a PR whose body already holds it.
+A step of a human-started chain (#2942) records neither the line nor the entry:
+it lists the issues in `follow_ups`, and the root queues them.

@@ -10,6 +10,8 @@ In a human-started run, the session the human invoked is the **root**, and it
 only drives the chain. Every unit of work is a **step**: the named issue's own
 run, each chained refinement and each E3 child's run. The root dispatches each
 step as a fresh subagent, with the Agent tool, `subagent_type: general-purpose`.
+Before its first dispatch it starts or resumes the chain queue (#2942):
+see `reference/checkpoint.md` § The chain queue in a human-started run (#2942)
 The root keeps Step 0's classification and, for an epic, E1 to E5's control
 flow. Each child's run is still a step. In a human-started run, attended and
 unattended behave alike, whatever `resolve_session` says (#2907). A step
@@ -192,12 +194,12 @@ The step ends with one of these verdicts:
     such as an abandoned red gate, a gate or loop error, or a round protocol
     that stopped before any loop ran.
 
-How the root handles each:
+How the root handles each, once it has queued the verdict's `follow_ups` in the
+chain queue (#2942), which replaces §7's `refine-issue --follow-up` call in a
+human-started run:
 
-- **`done`** → report the PR. In an epic, continue E3. Then the root queues the
-  step's `follow_ups` and takes the queue's next entry (#2942), which replaces
-  §7's `refine-issue --follow-up` call in a human-started run:
-  see `reference/checkpoint.md` § The chain queue in a human-started run (#2942)
+- **`done`** → report the PR. In an epic, continue E3, and take the queue's next
+  entry only once the Epic flow ends; otherwise take it now.
 - **`needs-refinement`** → dispatch *The chained refinement step (#2940)* on
   the same issue.
 - **`blocked`** → on the named issue's step, or a blocker's, the root runs
@@ -206,7 +208,10 @@ How the root handles each:
   see `reference/interactive/blockers-first.md` § Blockers first in a human-started run (#2941)
   An E3 child's brief never names that line, so the child posted the comment
   and the label: the root parks the child as E3 parks a dependency rejection
-  and continues with the children that don't depend on it.
+  and continues with the children that don't depend on it. On a follow-up's
+  step, the root adds each open local blocker `--before` the follow-up,
+  deepest first, and takes `next`; the re-run follow-up's §0a clears its label.
+  A cycle or an open foreign blocker parks it (queue step 5).
 - **`stopped`** → report the reason and stop. In an epic, triage the child by
   its `cause`, as E3 triages that ending, and count it in the bucket
   `reference/epic-telemetry.md` step 3 names:
@@ -225,7 +230,8 @@ The root dispatches a chained refinement step in three places:
 - on a `needs-refinement` verdict, whether its reason is the §0b gate or the §2
   size park;
 - once per unready leaf at E1b;
-- on an E3 child that comes back parked by §2.
+- on an E3 child that comes back parked by §2;
+- on each follow-up entry, before it is built (#2942).
 
 **A first dispatch starts with no resume state.** Before every refinement
 dispatch other than the questions-pending relay's re-dispatch, the root deletes
@@ -267,7 +273,8 @@ no other:
 
 - **`ready`** → the issue is ready to build.
   - **A single-issue entry:** dispatch a fresh issue step with `start_at: "1"`
-    and the verdict's `risk`.
+    and the verdict's `risk`. A follow-up entry, whose step never passed §0a,
+    gets `start_at: "0a"`.
   - **A leaf at E1b:** the leaf is READY for E1b, with the verdict's `risk`.
     Nothing is dispatched for it until E3 builds it. Its E3 step is a first run,
     `start_at: "0a"`, so §0a's dependency precheck runs; §0b then takes the
@@ -275,8 +282,8 @@ no other:
   - **An E3 child:** dispatch its fresh issue step with `start_at: "1"` and the
     verdict's `risk`, in the child's place in the walk.
 - **`split`** → the issue is now a parent.
-  - **A single-issue entry:** the root resolves the parent with the Epic flow as
-    written. Its children are the new leaves.
+  - **A single-issue entry, a follow-up entry included:** the root resolves
+    the parent with the Epic flow as written. Its children are the new leaves.
   - **A leaf at E1b:** re-read the tree with E1's `read-sub-issues.zsh --tree`,
     then re-gate every open leaf.
   - **An E3 child:** that child becomes an inner node. The root gates its new

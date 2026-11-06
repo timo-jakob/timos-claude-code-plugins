@@ -10,8 +10,9 @@
 #
 #   $HOME/.claude/resolve-issue/<repo-slug>/<named N>/chain-queue.json
 #
-# `clean-stop.zsh clear` keeps that file, so an entry's own run clearing its
-# durable state never deletes the queue; `chain-queue.zsh clear` deletes it.
+# `clean-stop.zsh clear` keeps that file and `checkpoint.zsh supersede` leaves
+# it in place, so an entry's own run never deletes or moves the queue;
+# `chain-queue.zsh clear` deletes it.
 #
 # Usage:
 #   chain-queue.zsh add    --repo-dir DIR --issue N --entry I
@@ -25,7 +26,7 @@
 #       filed it, and --finding, its follow-up-origin/v1 finding identity
 #       {file, line, dimension, title}; it goes after M and after every entry
 #       already queued from M. An issue already queued is not added twice;
-#       with --pr its recorded PR is set. A follow-up whose finding identity
+#       with --pr its recorded PR is set, and --kind may then be left out. A follow-up whose finding identity
 #       equals a follow-up already done in this queue is refused as a cycle
 #       (exit 3) and nothing is written.
 #   chain-queue.zsh next   --repo-dir DIR --issue N
@@ -95,9 +96,9 @@ _num --issue "$issue"
 [[ -d "$repo_dir" ]] || { print -u2 -- "chain-queue: --repo-dir is not a directory: $repo_dir"; exit 2 }
 case "$cmd" in
 add)
-  [[ -n "$entry" && -n "$kind" ]] || { print -u2 -- "chain-queue: add needs --entry and --kind"; exit 2 }
+  [[ -n "$entry" && ( -n "$kind" || -n "$pr" ) ]] || { print -u2 -- "chain-queue: add needs --entry and --kind"; exit 2 }
   _num --entry "$entry"
-  [[ "$kind" == blocker || "$kind" == named || "$kind" == follow-up ]] || {
+  [[ -z "$kind" ]] || [[ "$kind" == blocker || "$kind" == named || "$kind" == follow-up ]] || {
     print -u2 -- "chain-queue: --kind must be blocker, named or follow-up (got: $kind)"; exit 2 }
   [[ "$depth" == <-> && "$depth" != 0* ]] || { print -u2 -- "chain-queue: --depth must be a positive integer (got: $depth)"; exit 2 }
   [[ -z "$before" ]] || _num --before "$before"
@@ -157,6 +158,7 @@ add)
       '.entries |= map(if .issue == $i then .pr = $p else . end)')
     _write "$q"; exit 0
   fi
+  [[ -n "$kind" ]] || { print -u2 -- "chain-queue: no queued entry #$entry"; exit 5 }
   if [[ "$kind" == follow-up ]]; then
     print -r -- "$q" | jq -e --argjson f "$finding" \
       'any(.entries[]; .kind == "follow-up" and .state == "done"

@@ -81,8 +81,8 @@ named issue, whatever the target.
    re-runs §0a, clears the stale `blocked` label and builds the target. A
    blocker target's verdict is handled as step 3 handles a blocker's. The named
    issue's `done`, `needs-refinement` and `stopped` take the issue step's own
-   arms, never step 4 or step 6: `done` reports the PR and ends the run with no
-   merge wait, comment or label, `needs-refinement` dispatches #2940's chained
+   arms, never step 4 or step 6: `done` takes the chain queue's step 3
+   (`reference/checkpoint.md`), `needs-refinement` dispatches #2940's chained
    refinement step on it, and `stopped` keeps that step's own ending. A
    rejection here, or a `blocked` verdict from that step, stops the run (step
    6). Never clear the chain a second time, because that loop has no bound.

@@ -65,7 +65,7 @@ see `reference/telemetry.md` § Story telemetry (#1226)
 gh issue view <N> --json number,title,body,state,labels,url
 ```
 
-- If `state` is not `OPEN`, stop — it's already handled.
+- If `state` is not `OPEN`, stop — it's already handled — unless a human-started run kept a chain queue (#2942).
 - **Epic?** It's an epic when it has **native sub-issues**
   (`read-sub-issues.zsh --repo "$REPO" --epic <N>` reports
   `summary.total > 0` — the authoritative signal, #802), when it carries an

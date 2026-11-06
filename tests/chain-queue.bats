@@ -74,6 +74,9 @@ order() { jq -c '[.entries[].issue]' "$QF"; }
   q add --entry 10 --kind named --pr 55 >/dev/null
   [ "$(jq '.entries | length' "$QF")" = "1" ]
   [ "$(jq '.entries[0].pr' "$QF")" = "55" ]
+  q add --entry 20 --kind follow-up --after 10 --finding "$(fnd a 1 x)" >/dev/null
+  run -0 q add --entry 20 --pr 56
+  [ "$(jq '.entries[1].pr' "$QF")" = "56" ]
 }
 
 @test "next prints the first entry not done; done marks it; an empty queue is the done condition (exit 4)" {
@@ -138,6 +141,21 @@ order() { jq -c '[.entries[].issue]' "$QF"; }
   run -0 q clear
   [ ! -e "$BASE" ]
   run -0 q clear
+  q add --entry 10 --kind named >/dev/null
+  : > "$BASE/status.json"
+  run -0 q clear
+  [ ! -e "$QF" ]
+  [ -f "$BASE/status.json" ]
+}
+
+@test "checkpoint.zsh supersede moves kept state aside and leaves the queue file in the base" {
+  q add --entry 10 --kind named >/dev/null
+  : > "$BASE/clean-stop.json"
+  git init -q --bare "$BATS_TEST_TMPDIR/remote.git"
+  run -0 --separate-stderr zsh "$SCRIPTS/checkpoint.zsh" supersede --repo-dir "$R" --issue 10 \
+    --branch feat/10-x --remote "$BATS_TEST_TMPDIR/remote.git"
+  [ -f "$QF" ]
+  [ -e "$(jq -r .superseded_to <<<"$output")/clean-stop.json" ]
 }
 
 @test "without a queue file clean-stop.zsh clear still removes the whole directory" {

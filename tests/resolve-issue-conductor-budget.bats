@@ -460,7 +460,7 @@ _unreached_reference_files() {
   # and 31 until chain-steps.md's blocked verdict pointed at remediation.md's
   # *Blockers first* section (#2941), and 32 until remediation.md pointed at its new
   # shard reference/interactive/blockers-first.md (#2941), and 33 until
-  # chain-steps.md's done arm pointed at checkpoint.md's chain queue (#2942).
+  # chain-steps.md's step model pointed at checkpoint.md's chain queue (#2942).
   if [ "$rows" -ne 34 ]; then
     printf 'the skill carries %s pointer(s), expected 34.\n' "$rows" >&2
     printf 'A pointer was added or removed — update this count in the same PR,\n' >&2

@@ -14,7 +14,8 @@ The colour key for the diagrams is on [How the plugins work](how-the-plugins-wor
 Nothing is branched or built until the story has passed three checks.
 
 1. **Step 0 — classify.** The issue is an *epic* when it has native sub-issues, carries the `epic` label, or its body
-   declares child issues as a task list; epics take the [epic path](#resolve-epics). A closed issue stops the run here.
+   declares child issues as a task list; epics take the [epic path](#resolve-epics). A closed issue stops the run
+   here, unless a run you started kept its queue (#2942).
 2. **Step 0a — dependency precheck.** A script reads the issue's native *blocked by* links. If a blocker is still
    open, or the links form a cycle, a maintenance-pipeline run stops: it labels the issue `blocked` and comments why,
    and never starts the blocking issue on its own. A run you start clears the open blockers first, without asking, in

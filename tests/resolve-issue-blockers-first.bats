@@ -135,7 +135,7 @@ after_span() {
 
 @test "step 5: the named issue's done, needs-refinement and stopped take the issue step's arms, never the merge wait or the stop" {
   s="$(bf_step 5)"
-  contains "$s" "The named issue's \`done\`, \`needs-refinement\` and \`stopped\` take the issue step's own arms, never step 4 or step 6: \`done\` reports the PR and ends the run with no merge wait, comment or label, \`needs-refinement\` dispatches #2940's chained refinement step on it, and \`stopped\` keeps that step's own ending."
+  contains "$s" "The named issue's \`done\`, \`needs-refinement\` and \`stopped\` take the issue step's own arms, never step 4 or step 6: \`done\` takes the chain queue's step 3 (\`reference/checkpoint.md\`), \`needs-refinement\` dispatches #2940's chained refinement step on it, and \`stopped\` keeps that step's own ending."
 }
 
 @test "a --resume run does not chain, so it keeps its session mode's arm" {
