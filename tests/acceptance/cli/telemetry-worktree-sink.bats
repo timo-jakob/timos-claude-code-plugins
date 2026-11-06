@@ -70,7 +70,7 @@ loop_emit() {  # $1 = --repo-dir, then extra flags
   local WB="$MAIN/.claude/worktrees/child-2138" ERUN="$BATS_TEST_TMPDIR/epic-run.json"
   local CRUN="$BATS_TEST_TMPDIR/story-run-2138.json" a
   git -C "$MAIN" worktree add -q "$WB" -b fix/2138-worktree-sink
-  (cd "$WT" && zsh "$DRIVER" start --run-file "$ERUN" --ts 1791280000 >/dev/null)
+  (cd "$WT" && zsh "$DRIVER" start --run-file "$ERUN" --ts 1791280000 --origin human >/dev/null)
   local -a cargs=() largs=()
   while IFS= read -r a; do cargs+=("$a"); done < <(jq -r '.child_start_args[]' "$ERUN")
   (cd "$WB" && zsh "$DRIVER" start --run-file "$CRUN" --ts 1791280410 "${cargs[@]}" >/dev/null)

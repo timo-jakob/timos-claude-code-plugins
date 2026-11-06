@@ -70,7 +70,7 @@ resolve_issue_files() {
   # later.)
   local -a ordered
   ordered=(review-loop.md residue.md promotion.md escalation.md interactive.md checkpoint.md ask-branches.md sequential.md telemetry.md epic-telemetry.md epic-tree.md
-    readiness-cache.md)
+    readiness-cache.md chain-steps.md)
 
   # #2055 split review-loop.md into shards under reference/review-loop/ and left
   # the old path as an INDEX. The shards are members too — a sweep over the

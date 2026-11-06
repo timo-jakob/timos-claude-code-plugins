@@ -22,6 +22,9 @@ Nothing is branched or built until the story has passed three checks.
    build: testable acceptance criteria, bounded scope, declared dependencies, and — for a story that touches an
    interface — a use case and test cases. On NEEDS_REFINEMENT the run labels the issue `needs-refinement`, posts the
    gate's questions as a comment and stops without branching; [refine-issue](workflow-refine-issue.md) is the way back.
+   That stop is a pipeline run's. In a run you started, the skill refines the story in the same run instead: it
+   dispatches a chained refinement, asks you only the questions the refinement cannot answer itself, and then builds
+   the story, or the children it was split into.
    On READY the gate's risk classification is carried forward to the PR and the Approver. The gate's verdict is
    stamped on the issue as a comment, and it is reused while the gate's inputs are unchanged: the title, the body,
    the issue's own *blocked by* links, its labels, and the gate's own instructions. A re-run over an unchanged story
@@ -36,7 +39,9 @@ Nothing is branched or built until the story has passed three checks.
 3. **Step 2 — implement.** The change is written from the issue's `story-spec/v1` block, or from its prose when there
    is none. Acceptance tests for the story's test cases ship in the same PR, and so do the user docs the change needs.
    A size pre-flight runs before the first edit: a change that would touch too many files, or straddle plugins, stops
-   and offers a split instead.
+   and parks the story with the `needs-split` label without asking. In a run you started, a chained refinement then
+   files the split and the run builds the children. A pipeline run stops there. No run offers to build it as one
+   change any more.
 4. **Step 3 — test gate.** The profile's gate runs: the whole test suite plus the repo's own checks (pre-commit, the C4
    currency check, a strict docs build where it applies). A red gate that cannot be fixed abandons the run.
 5. **Step 3.5 — the local review loop.** A panel of reviewers examines the change, a fix pass addresses what they

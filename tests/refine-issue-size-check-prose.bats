@@ -179,8 +179,8 @@ section() {
 
 # --- resolve-issue §2(b) -----------------------------------------------------
 
-@test "resolve-issue §2(b) says refine-issue files the accepted split's children" {
-  grep -qF '`/development:refine-issue`, which, once the human accepts a split there,' "$RESOLVE"
+@test "resolve-issue §2(c) says refine-issue files the accepted split's children" {
+  grep -qF 'at `/development:refine-issue`, which, once a split is accepted there,' "$RESOLVE"
   grep -qF '**files the children as native sub-issues** of this story (#2589).' "$RESOLVE"
   # the retired claim is gone
   run -1 grep -qF 'parks — it files nothing' "$RESOLVE"

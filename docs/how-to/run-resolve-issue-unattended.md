@@ -1,8 +1,7 @@
 # Run resolve-issue unattended
 
 `/development:resolve-issue` asks you before it takes some decisions: whether to
-clear a blocker first, whether to build an oversized story as one change,
-whether to grant the review loop more rounds, which waived suggestions to
+clear a blocker first, whether to grant the review loop more rounds, which waived suggestions to
 promote. It decides whether you are there to ask by inference. When you invoke
 the skill yourself, it assumes you are present.
 
@@ -46,15 +45,30 @@ ask you something.
 
 ## What changes when it is unattended
 
-Every branch of a single-issue run that would ask you follows the setting:
+This section covers a run that continues in your own session: one you resume
+with `--resume`. A run you start fresh takes the step model in the next section
+instead. Every branch of a single-issue run that would ask you follows the setting:
 `attended` asks, and `unattended` takes the arm the skill already takes when
 nobody is present. For example, when the story is blocked by an open
 dependency, `attended` offers to resolve the blocker first, and `unattended`
 comments on the story and adds the `blocked` label instead. The same holds for
-the size pre-flight's override, the extra review rounds after an escalation,
+the extra review rounds after an escalation,
 the options for a review that did not apply, and suggestion promotion. The
 run's telemetry
 record carries the mode and its source (`session_mode`, `session_mode_source`).
+
+## A run you start behaves the same in both modes
+
+When you invoke `/development:resolve-issue` yourself, the run is
+human-started. Your session is the root: it dispatches every unit of work as a
+fresh subagent and only drives the chain. Those units are the story's own run,
+each refinement and each epic child. Such a run does not stop when a story is
+unready or too large. It refines the story in the same run, splits it if
+needed, and carries on. Only a question the refinement cannot answer for itself
+reaches you. The steps never ask you anything, whatever the setting says.
+A maintenance-pipeline run still stops at those points, as it always did. Each
+issue the run works on gets its own telemetry record, whose `origin` is `human`
+or `pipeline`.
 
 ## When an unattended run cannot finish
 

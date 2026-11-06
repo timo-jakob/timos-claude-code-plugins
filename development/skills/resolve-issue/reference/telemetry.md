@@ -74,21 +74,36 @@ inside the repo (a file there moves the tree identity and would be committed):
 
 ```bash
 "<skill-base-dir>/scripts/story-telemetry.zsh" start \
-  --run-file <scratch>/story-run-<N>.json \
+  --run-file <scratch>/story-run-<N>.json --origin <human|pipeline> \
   [--telemetry-file <telemetry_file>] [--telemetry-dir <telemetry_dir>]
 ```
+
+**`--origin` is the run's origin (§0a, #2940)**: `human` when a human invoked the
+skill, `pipeline` for a maintenance-pipeline run, and a step's or an E3 child's
+the origin it inherits. It is known from the invocation before §0a, which
+notes it; a remediation rung passes the run's own. `start` stores it in the run file, `child_start_args`
+carries it to every child, and `emit` fills the state's `origin` from it when the
+state left it `null`. A record without one is refused, so the record is lost.
 
 **Omit either sink flag when `args` reported it `null`** — pass only the ones
 it gave a path. (`start` drops a literal `null` for you, but the flag is
 meaningless without a value.)
 
-It prints `{run_id, ts, telemetry_file, telemetry_dir, loop_args}` and touches
-no sink. **Call `start` exactly once per invocation.** Every call mints a new
+It prints the run file — `{run_id, ts, parent_run_id, origin, telemetry_file,
+telemetry_dir, loop_args, child_start_args}` — and touches no sink. **Call
+`start` exactly once per invocation.** Every call mints a new
 run and overwrites the file. A fresh invocation of the same issue therefore
 starts fresh, whatever an earlier run left behind. If you re-enter this step
 within the same invocation — say, after a compacted context — **re-read the
 run file**; never call `start` again. A second call would move the `run_id`
 out from under loops already parented to the first.
+
+**A human-started root stamps no story run (#2940).** When the origin is
+`human`, the run was not given `--resume`, and its dispatch brief names no
+`STEP_HANDOFF`, this session is the chain's root. It skips this step and step 4,
+and stamps `chain-run-<N>.json` in their place (`reference/chain-steps.md`,
+*The step model*). The issue step it dispatches stamps `story-run-<N>.json` and
+emits the record, so the root never writes or emits that file.
 
 - **Exit 2** is your own malformed invocation. Fix it and re-run once. A second
   exit 2 is handled as exit 1.
@@ -103,8 +118,8 @@ out from under loops already parented to the first.
 
 **A remediation rung is its own run.** When §0a's interactive remediation runs
 the Single-issue flow on a blocker, that rung calls `start` with its **own**
-issue's run file (`story-run-<blocker>.json`) and the **same** sink flags this
-run was given. It emits its own record. It never overwrites this run's file,
+issue's run file (`story-run-<blocker>.json`), the **same** sink flags this
+run was given and the run's `--origin` (#2940). It emits its own record. It never overwrites this run's file,
 and so never takes over this run's `run_id`.
 
 **An epic child is started by E3, not here.** Its `start` adds the epic run's
@@ -148,6 +163,7 @@ decided. None may be guessed at the end.
 | `fallbacks_fired` | Steps 2 and 3 | `acceptance_tests` when the acceptance planner exited 1; `user_docs` when the user-docs step no-oped for any of its reasons; `c4_currency` when the C4 check no-oped (`[]`, exit 1, or skipped on a detection failure) |
 | `escalation_status` | §3.5 | the `ESCALATE_*` / `BUDGET_EXHAUSTED` status the run **ended** on, and **only** when step 4 below picks the `escalated` row. It is `null` on every other ending, including after either of §3.5's PR-opening terminals, a `--no-review` `SKIPPED`, a loop `ERROR`, and an escalation that a later grant superseded. Never write a non-escalation status here: the builder refuses it and the record is lost |
 | `pr` | Step 6 | the opened PR's number |
+| `origin` | §0a | `human` or `pipeline` (#2940), the run's origin as `start --origin` stored it; required — a state with none is refused |
 | `resumed_from` | §0a | `clean_stop` when `--resume` continued a kept clean stop, `checkpoint` when it continued a checkpoint (#2920, `reference/checkpoint.md`), `null` on a run that was not resumed |
 | `clean_stop`, `convergence_failures` | §3.5 | `true` and the marker's `convergence_failures` only when the run took the unattended clean stop (`reference/escalation.md`, #2579); `false` and `[]` on every other ending, today's escalation terminal included. The builder refuses `clean_stop: true` unless the run is `escalated`, in mode `unattended`, on `BUDGET_EXHAUSTED` or `ESCALATE_NO_CONVERGENCE` |
 
@@ -158,7 +174,8 @@ on.
 
 ### 4. At the ending, emit once
 
-Write the state to `<scratch>/story-state-<N>.json` and emit. The state's
+Write the state to `<scratch>/story-state-<N>.json` and emit. A human-started
+root emits nothing here (step 2). The state's
 `outcome` names the ending the run actually reached. **Take the first row that
 matches:**
 
@@ -184,7 +201,8 @@ emits nothing, so pick the row before writing the state, not after.
   "pr": 413, "story_spec_present": true,
   "escalation_status": null, "fallbacks_fired": ["c4_currency"],
   "session_mode": "unattended", "session_mode_source": "env",
-  "clean_stop": false, "convergence_failures": [], "resumed_from": null }
+  "clean_stop": false, "convergence_failures": [], "resumed_from": null,
+  "origin": "human" }
 ```
 
 ```bash

@@ -26,9 +26,13 @@ keyed by the epic's number and lives in the session scratch directory:
 
 ```bash
 "<skill-base-dir>/scripts/story-telemetry.zsh" start \
-  --run-file <scratch>/epic-run-<N>.json \
+  --run-file <scratch>/epic-run-<N>.json --origin <human|pipeline> \
   [--telemetry-file <telemetry_file>] [--telemetry-dir <telemetry_dir>]
 ```
+
+In a human-started run whose single-issue entry a refinement split (#2940),
+skip this stamp: the root's `chain-run-<N>.json` is the epic run file
+(`reference/chain-steps.md`, *The step model*).
 
 Call it once per invocation and re-read the file on re-entry, exactly as
 `reference/telemetry.md` step 2 says. Exit 2 is your own malformed call: fix it and re-run once. **Exit
@@ -41,8 +45,8 @@ reported as `null`; never pass the string `null`.
 
 Each child E3 drives stamps its **own** story run before its step 0a, in place
 of the Single-issue flow's own Step 0 `start`. It takes the epic run file's
-`child_start_args` — `--parent-run-id <epic run_id>` plus the epic's sink
-flags:
+`child_start_args` — `--parent-run-id <epic run_id>`, the epic's sink flags
+and its `--origin` (#2940), which every child inherits:
 
 ```bash
 "<skill-base-dir>/scripts/story-telemetry.zsh" start \
@@ -54,8 +58,8 @@ flags:
 the **child record's own** `parent_run_id` is the epic run. From there the child
 follows `reference/telemetry.md` steps 2–4 with its own run file: its loops take
 **its** `loop_args` (parented to the child run, never to the epic), and it emits
-its own record at its own ending. When the epic `start` failed, pass only the
-sink flags from `args`, with no `--parent-run-id`. Omit any sink flag `args`
+its own record at its own ending. When the epic `start` failed, pass the
+sink flags from `args` and the run's `--origin`, with no `--parent-run-id`. Omit any sink flag `args`
 reported as `null`; never pass the string `null`.
 
 - **A parallel sub-agent** gets, in its prompt, the epic `run_id` and the sink
@@ -66,16 +70,18 @@ reported as `null`; never pass the string `null`.
   sink, which every worktree of the repo shares (#1972).
 - **Note every child run's `run_id`** in `child_run_ids`, in start order (a
   parallel batch in dispatch order) — escalated and parked children included.
-  A child that never reached its `start` has no run and is not listed.
+  A child that never reached its `start` has no run and is not listed. In a
+  human-started walk (#2940), the root reads each child's `run_id` from its step
+  verdict's `run_id`, never from the step's transcript.
 
 ### 3. Keep the epic's facts as you go
 
 | Fact | Where it is decided | Value |
 |---|---|---|
 | `e1_classification` | E1 | the row from the table below |
-| `children` | E1, then E3 | **leaves only** (#2857): `total` is the number of `leaf` nodes below the target in the invocation's **first** `read-sub-issues.zsh --tree` read, open and closed, and `completed_before` the closed ones among them — after a live backfill's re-read when one ran and succeeded. Inner, `undecomposed`, `read_failed` and `foreign` nodes count nowhere, and neither does a leaf under a closed subtree, which that read never lists; "child" below means such a leaf. Every child **open** at that read goes in the **first** of these buckets whose test it meets: `resolved_this_run` (closed as completed during this run), `escalated` (ended on a typed escalation, or in the `skip` of E3's clean-stop triage — a child skipped for a kept marker from an earlier walk counts here too), `parked` (parked by E3's triage: a §0a dependency rejection, a precheck tooling failure — exit 1, or an exit 2 that recurs after the fixed re-run or whose malformation cannot be seen — a §2 size pre-flight stop or error, and every child that depends on an escalated or parked child, or, under `override=on`, on a child stopped short of `MERGED` at §6's human-only stop), then `queued` (every other open child: a PR awaiting a human merge, a child whose own story run ended `failed` for a cause E3's triage does not park — an abandoned red gate, a gate or loop error, or a round protocol that stopped before any loop invocation — and every child when E1b halts). Review-residue sub-issues filed mid-run are not in that read, so they count nowhere |
-| `children.clean_stopped`, `children.parked_behind_clean_stop` | E3 | sub-counts (#2585), kept **out** of the bucket sum above, both from `epic-clean-stop-triage.zsh`'s `counts` at E3's last call that exited 0: `clean_stopped` is its `counts.clean_stopped` — every child in its `skip`, clean-stopped this invocation or skipped for a kept marker from an earlier walk, each counted `escalated`; `parked_behind_clean_stop` is its `counts.parked_behind_clean_stop`, each of those children counted `parked`. Both `0` in an attended walk and when no child clean-stopped. The builder refuses `clean_stopped` above `escalated` and `parked_behind_clean_stop` above `parked` |
-| `readiness_preflight` | E1b | `{gated, needs_refinement}`: the children E1b judged, whether `story-readiness` ran on them, a stamp's cached verdict answered (#2955) or a dependency cycle decided them, and how many of them are `NEEDS_REFINEMENT`; `null` when E1b never ran (every E1 halt, and the rows that go straight to E4/E5) |
+| `children` | E1, then E3 | **leaves only** (#2857): `total` is the number of `leaf` nodes below the target in the invocation's **first** `read-sub-issues.zsh --tree` read, open and closed, and `completed_before` the closed ones among them — after a live backfill's re-read when one ran and succeeded. Inner, `undecomposed`, `read_failed` and `foreign` nodes count nowhere, and neither does a leaf under a closed subtree, which that read never lists; "child" below means such a leaf. Every child **open** at that read goes in the **first** of these buckets whose test it meets: `resolved_this_run` (closed as completed during this run), `escalated` (ended on a typed escalation, or in the `skip` of E3's clean-stop triage — a child skipped for a kept marker from an earlier walk counts here too), `parked` (parked by E3's triage: a §0a dependency rejection, a precheck tooling failure — exit 1, or an exit 2 that recurs after the fixed re-run or whose malformation cannot be seen — a §2 size pre-flight stop or error, and every child that depends on an escalated or parked child, or, under `override=on`, on a child stopped short of `MERGED` at §6's human-only stop), then `queued` (every other open child: a PR awaiting a human merge, a child whose own story run ended `failed` for a cause E3's triage does not park — an abandoned red gate, a gate or loop error, or a round protocol that stopped before any loop invocation — and every child when E1b halts). Review-residue sub-issues filed mid-run are not in that read, so they count nowhere. In a human-started run (#2940), a leaf a chained refinement split, at E1b or at E3, is an inner node from then on: it leaves `total` and every bucket, and the leaves it was split into count in its place |
+| `children.clean_stopped`, `children.parked_behind_clean_stop` | E3 | sub-counts (#2585), kept **out** of the bucket sum above, both from `epic-clean-stop-triage.zsh`'s `counts` at E3's last call that exited 0: `clean_stopped` is its `counts.clean_stopped` — every child in its `skip`, clean-stopped this invocation or skipped for a kept marker from an earlier walk, each counted `escalated`; `parked_behind_clean_stop` is its `counts.parked_behind_clean_stop`, each of those children counted `parked`. Both `0` in an attended walk and when no child clean-stopped. A human-started walk (#2940) runs the triage whatever its mode, so an attended one counts them too. The builder refuses `clean_stopped` above `escalated` and `parked_behind_clean_stop` above `parked` |
+| `readiness_preflight` | E1b | `{gated, needs_refinement}`: the children E1b judged, whether `story-readiness` ran on them, a stamp's cached verdict answered (#2955) or a dependency cycle decided them, and how many of them are `NEEDS_REFINEMENT` — in a human-started run whose E1b chained refinements (#2940), at its last re-gate, so a walk that went on to E2 records `0`; `null` when E1b never ran (every E1 halt, and the rows that go straight to E4/E5) |
 | `readiness_cache` | E1b | optional (#2955): the planner's `readiness_cache`, `{hits, misses, miss_reasons}` — the children a cached verdict answered, the children gated fresh, and the misses counted by reason. Leave it out when E1b never ran or its planner failed. The builder refuses it without `readiness_preflight`, `hits + misses` above `gated`, and `miss_reasons` that do not sum to `misses` |
 | `split` | E3 | `{parallel, sequential}`: only children whose PR E3 **opened this run**, by the path each took |
 | `child_run_ids` | E3 | step 2 |

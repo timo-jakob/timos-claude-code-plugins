@@ -194,6 +194,7 @@ Normative: `ARCHITECTURE.md`, *Refine-issue telemetry*.
 | `clean_stop` | boolean | `true` when an unattended run that could not converge stopped cleanly, keeping its state for `--resume` (#2579); `false` on every other ending |
 | `convergence_failures` | array | why a clean stop stopped: `too-few-rounds`, `trend`, `stuck`, `critical`, `cap`; `[]` unless `clean_stop` is `true` |
 | `resumed_from` | string or null | the kept state a `--resume` continued: `checkpoint` or `clean_stop`; `null` when the run was not resumed (#2920) |
+| `origin` | string | `human` when a human invoked `/development:resolve-issue`, and on every run that chain started; `pipeline` for a maintenance-pipeline run (#2940); absent on records written before #2940 |
 
 Normative: `ARCHITECTURE.md`, *Resolve-issue telemetry*.
 

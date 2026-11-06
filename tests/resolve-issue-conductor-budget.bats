@@ -47,8 +47,12 @@ setup() {
   # adding the no-profile floors §3, §4 and E4 need for the fallback path.
   # Later stories grew it to exactly 1 635, the ceiling itself, and #2055
   # re-measured 1 643 after adding the read-once / `next_ref` rule, which is what
-  # lets the conductor stop re-reading its reference files.
-  CEILING=1810
+  # lets the conductor stop re-reading its reference files. Later stories grew
+  # it to exactly 1 810, and #2940 re-measured 1 833 after adding the run's
+  # origin and the chained-refinement branches at §0b, §2, E1b and E3, each a
+  # pointer into `reference/chain-steps.md`, then 1 838 once E1b and E3 pointed
+  # at that file too.
+  CEILING=1840
 
   VERIFY="$SKILL_DIR/scripts/verify-reference-move.zsh"
   # The pre-move commit, READ OUT OF THE SCRIPT rather than transcribed here.
@@ -383,9 +387,13 @@ _unreached_reference_files() {
   #
   # TWENTY-SIX since #2909: reference/ask-branches.md gains RS-06a's fallback
   # review panel default.
+  #
+  # THIRTY since #2940: the new reference/chain-steps.md declares FOUR `##`
+  # sections — the step model, the issue step, the chained refinement step and
+  # the questions-pending relay.
   local n
   n="$(_ref_headings | grep -c .)"
-  [ "$n" -eq 26 ]
+  [ "$n" -eq 30 ]
 }
 
 # --- pointers resolve -------------------------------------------------------
@@ -441,9 +449,10 @@ _unreached_reference_files() {
   # and 22 until §0b and reference/epic-tree.md's E1b pointed at
   # reference/readiness-cache.md (#2955),
   # and 24 until §6 and the exit-2 note pointed at RS-06a in
-  # reference/ask-branches.md (#2909).
-  if [ "$rows" -ne 26 ]; then
-    printf 'the skill carries %s pointer(s), expected 26.\n' "$rows" >&2
+  # reference/ask-branches.md (#2909),
+  # and 26 until §0a, §0b, §2, E1b and E3 pointed at reference/chain-steps.md (#2940).
+  if [ "$rows" -ne 31 ]; then
+    printf 'the skill carries %s pointer(s), expected 31.\n' "$rows" >&2
     printf 'A pointer was added or removed — update this count in the same PR,\n' >&2
     printf 'and check the step that gained or lost one still reaches its procedure.\n' >&2
     _all_pointers >&2

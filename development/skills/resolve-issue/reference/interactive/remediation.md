@@ -224,7 +224,7 @@ story run for each child it drives, and emits its own epic record
 Before a single-issue rung's step 0a, it calls `story-telemetry.zsh start`
 with its **own** run file,
 `<scratch>/story-run-<blocker>.json`, and the **same** sink flags the named
-issue's run was given. Its loops take **its** `loop_args`, never the named
+issue's run was given, and its `--origin` (#2940). Its loops take **its** `loop_args`, never the named
 issue's, and it emits its own record at its own ending. The named issue's run
 file is never touched by a rung, so the named issue's own record is unaffected
 (`reference/telemetry.md`, step 2).

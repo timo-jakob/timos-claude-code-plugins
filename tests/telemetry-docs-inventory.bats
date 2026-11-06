@@ -79,7 +79,7 @@ builder_payload() {
       printf '%s' '{"rounds":3,"objections_raised":4,"objections_resolved":4,"outcome":"refined-ready","risk_classification":"low","size_preflight":{"verdict":"pass","triggers":[],"children_filed":0}}' > "$W/rf.json"
       out="$(zsh "$REPO_ROOT/development/skills/refine-issue/scripts/build-refine-telemetry-record.zsh" --state "$W/rf.json")" ;;
     "resolve-issue, story mode")
-      printf '%s' '{"outcome":"pr-opened","dependency_precheck":"PROCEED","gate_verdict":"READY","risk":"elevated","pr":413,"story_spec_present":true,"review_loop_run_ids":["review-loop-1752403000-8f3a"],"fallbacks_fired":["user_docs"]}' > "$W/st.json"
+      printf '%s' '{"outcome":"pr-opened","dependency_precheck":"PROCEED","gate_verdict":"READY","risk":"elevated","pr":413,"story_spec_present":true,"review_loop_run_ids":["review-loop-1752403000-8f3a"],"fallbacks_fired":["user_docs"],"origin":"human"}' > "$W/st.json"
       out="$(zsh "$RI/scripts/build-story-telemetry-record.zsh" --state "$W/st.json")" ;;
     "resolve-issue, epic mode")
       printf '%s' '{"outcome":"parked","e1_classification":"halt_undecomposed","children":{"total":0,"completed_before":0,"resolved_this_run":0,"escalated":0,"parked":0,"queued":0}}' > "$W/ep.json"

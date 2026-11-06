@@ -30,7 +30,7 @@ before it ships, and a row whose text moved is updated here.
 | RS-03 | reference/interactive/remediation.md | `ask the human which it is` | gap | human-owned: an epic-kind blocker the intent half cannot confirm needs the author's reading |
 | RS-04 | reference/interactive/remediation.md | `ask for native sub-issues or a` · `Anything else you cannot classify` | gap | human-owned: a near-miss rung or an unclassifiable blocker has no document that settles it |
 | RS-04 | SKILL.md | `anything else → ask the human` | gap | human-owned: as above |
-| RS-05 | SKILL.md | `` one `AskUserQuestion` naming `` | intent | human-owned: overriding the size pre-flight is risk acceptance, and only that explicit answer overrides (#2589) |
+| RS-05 | SKILL.md | `The override question (a) is retired` | intent | human-owned: retired by #2940 — no run reaches the size pre-flight override or asks it; a human-started run parks and chains a refinement instead, and the human answers that refinement's questions through RS-13 |
 | RS-06a | reference/review-loop/briefs/panel.md | `Route a full-round NOT APPLICABLE to the fallback panel (#2909)` | implementation | **default:** run the fallback panel — the repo-type panel's NOT APPLICABLE on a full round dispatches `development-claude-plugin:review` in fallback mode in the same round, so every file it covers is reviewed |
 | RS-06a | reference/review-loop/subagents.md | `fires only when the fallback panel is NOT APPLICABLE or unavailable` | implementation | **default:** as above |
 | RS-06b | reference/review-loop/exit-2-stale-findings.md | `put it to the human as three options` | intent | human-owned: the fallback is NOT APPLICABLE or unavailable, so waiving or replacing panel review is risk acceptance |
@@ -42,6 +42,7 @@ before it ships, and a row whose text moved is updated here.
 | RS-10 | SKILL.md | `ask the human to fix the` · `halt and ask rather than proceeding` · `→ **halt** and ask for` · `has no human to ask, so "ask the human to` | gap | human-owned: an epic body's mistyped or near-miss child lines need the author's reading |
 | RS-11 | reference/checkpoint.md | `so ask the human before you discard them` | intent | human-owned: discarding a half-finished round's uncommitted changes loses data |
 | RS-12 | reference/checkpoint.md | `ask the human whether to delete it` | intent | human-owned: deleting an old run's local branch cannot be undone from this run |
+| RS-13 | reference/chain-steps.md | `**Only the root asks the human.**` · `The root asks the verdict's` · `Never ask the human anything` · `neither with AskUserQuestion` | intent / gap | human-owned: a chained refinement's below-threshold intent and gap questions, which the root relays with AskUserQuestion; a step never asks (#2940) |
 
 ## RS-06a — the fallback review panel default (#2909)
 

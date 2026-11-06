@@ -166,6 +166,15 @@ child or the maintenance pipeline stays autonomous whatever the line says (E3
 cannot prompt). Say the mode and its source once, quoting any stderr warning,
 and note both for the run's record. An exit 2 is your own malformed call: fix it.
 
+**Then note the run's origin (#2940)** — `human` when a human invoked the skill
+(the attended inference above, whatever `resolve_session` says), `pipeline` for a
+maintenance-pipeline run — and pass it to `story-telemetry.zsh start --origin`.
+Every run the chain starts inherits it. In a human-started run this session is
+the root and only drives the chain: every unit of work, this issue's own run
+included, is a step it dispatches as a fresh subagent. A run whose dispatch
+brief names a `STEP_HANDOFF` is such a step:
+see `reference/chain-steps.md` § The step model (#2940)
+
 **Then, on `--resume` (#2579)** — `story-telemetry.zsh args` reported
 `resume: true` — check the kept clean stop before anything else:
 `"<skill-base-dir>/scripts/clean-stop.zsh" read --repo-dir <worktree> --issue <N>
@@ -320,7 +329,11 @@ see `reference/readiness-cache.md` § Step 0b — gate only a stamp miss
 - **`NEEDS_REFINEMENT`** → do **not** branch or implement. Ensure the
   `needs-refinement` label exists (idempotent), post the refinement questions as
   an issue comment, emit the run's record (§7), and **stop** — report that the
-  story went back for refinement.
+  story went back for refinement. In a human-started run (#2940) the step ends
+  with verdict `needs-refinement`, and the root dispatches a chained refinement
+  step: on `ready` a fresh step starts at §1 with the re-gate's risk and no second
+  gate, and on `split` the root resolves the parent with the Epic flow:
+  see `reference/chain-steps.md` § The chained refinement step (#2940)
 
   ```bash
   gh label create needs-refinement --color d4c5f9 \
@@ -592,12 +605,12 @@ It stops on any of three triggers: `files` — more than 20 files; `plugin` — 
 owned file outside the primary plugin, a tie for primary included;
 `bootstrap-straddle` — a bootstrap template with an owned file outside the
 bootstrap skill (its plugin's `plugin.json` excepted). **Record every verdict** as one `story-preflight` run
-record, after the human's answer on a stop, never before:
+record:
 
 ```bash
 B="<skill-base-dir>/scripts/build-story-preflight-telemetry-record.zsh"
-"$B" --state <scratch>/size-verdict.json [--override human] [--readiness-cache <scratch>/readiness-plan.json] > <scratch>/size-payload.json
-outcome="$("$B" --state <scratch>/size-verdict.json [--override human] --print-outcome)"
+"$B" --state <scratch>/size-verdict.json [--readiness-cache <scratch>/readiness-plan.json] > <scratch>/size-payload.json
+outcome="$("$B" --state <scratch>/size-verdict.json --print-outcome)"
 "<skill-base-dir>/../../scripts/telemetry/emit-telemetry.zsh" --pipeline story-preflight \
   --outcome "$outcome" --ts <the noted time> --wall-s <now − the noted time> --repo-dir . --issue <N> \
   --payload <scratch>/size-payload.json <the run's loop_args>
@@ -605,29 +618,25 @@ outcome="$("$B" --state <scratch>/size-verdict.json [--override human] --print-o
 
 `loop_args` are the run's — Step 0's, or for an E3 child the child run E3
 started (#1227); `--readiness-cache` is §0b's plan (#2955). Telemetry is never fatal: a
-failure costs the record, never the run. **The stop branch has three terminals**:
+failure costs the record, never the run. **The stop branch has two terminals**
+(#2940). The override question (a) is retired: no run reaches it, and no run
+asks it.
 
-- **(a) The human overrides.** Interactive only (mode `attended`, §0a's
-  `resolve-session.zsh`): one `AskUserQuestion` naming
-  the triggers and counts (and any earlier `OVERRIDDEN` comment), answered *build it
-  as one change*. Record it with `--override human`, run the clear block, and continue
-  with the rest of Step 2. **Only that explicit answer is an override** — silence, a
-  timeout, an absent human, any other answer or an earlier run's `OVERRIDDEN` comment
-  never is: a later run asks again, or with no human takes (c).
-- **(b) The human accepts the split.** Record it (no `--override`), then park with
-  the park block: the `needs-split` label and the `SPLIT` comment, the branch **un-pushed**, **no PR**,
-  emit the run's record (§7) and stop. Point the human at
-  `/development:refine-issue`, which, once the human accepts a split there,
+- **(b) A human-started run parks and chains.** Origin `human` (§0a), whatever the
+  session mode, and not an E3 child: record the stop (no `--override`) and run the park block **without
+  asking** — the `needs-split` label and the `SPLIT` comment, the branch
+  **un-pushed**, **no PR** — emit the run's record (§7), and end the step with
+  verdict `needs-refinement`. The root dispatches a chained refinement step, which
+  files the split from that comment's inventory, and resolves the parent with the
+  Epic flow:
+  see `reference/chain-steps.md` § The chained refinement step (#2940)
+- **(c) A pipeline-started run or an E3 child parks and stops.** Never prompt:
+  record the stop, run the park block, emit the run's record (§7) and stop. Point
+  at `/development:refine-issue`, which, once a split is accepted there,
   **files the children as native sub-issues** of this story (#2589).
-- **(c) No human present** (autonomous: mode `unattended`, §0a's
-  `resolve-session.zsh` — an E3 child included). Never prompt:
-  take (b) without the question.
-
-**Any other answer** is no override: if it narrows the plan, record this stop and
-re-run on the rewritten inventory as a new verdict; else take (b), which records it.
 
 ```bash
-# park block — (b) and (c) only
+# park block — every stop
 gh label create needs-split --color fbca04 \
   --description "Stopped by the size pre-flight — split into smaller stories before implementing" \
   2>/dev/null || true   # idempotent: ignore "already exists"
@@ -635,8 +644,7 @@ gh issue comment <N> --body "size pre-flight: SPLIT — <triggers + counts>; see
 
 <!-- size-preflight-inventory/v1: $(jq -c . <scratch>/size-inventory.json) -->"
 gh issue edit <N> --add-label needs-split
-# clear block — a pass or (a) only, never after the park block
-gh issue comment <N> --body "size pre-flight: OVERRIDDEN by the human — <triggers + counts>"  # (a) only
+# clear block — a pass only, never after the park block; it posts no OVERRIDDEN comment
 gh issue edit <N> --remove-label needs-split 2>/dev/null || true
 ```
 
@@ -644,7 +652,10 @@ gh issue edit <N> --remove-label needs-split 2>/dev/null || true
 `size-preflight-inventory/v1` marker holds `<scratch>/size-inventory.json` as
 written, so `/development:refine-issue` can re-size the plan that stopped: the
 inventory otherwise stays on this un-pushed branch. Only the park block writes
-it; the clear block and the `OVERRIDDEN` comment never do.
+it; the clear block never does. The `--override` flag of
+`build-story-preflight-telemetry-record.zsh`, the size pre-flight's record
+builder, and `read-split-park.zsh`'s reading of `OVERRIDDEN` comments stay, for
+older runs' records and comments.
 
 **Never `blocked`** — it asserts open blockers, which this check never judges.
 
@@ -1136,7 +1147,9 @@ is **attended** only when its line says `attended`; otherwise it is
 mode rather than resolving its own, and a parallel sub-agent receives the mode
 in its prompt next to `child_start_args`. A child of an attended walk never
 takes the clean stop (#2579): an escalation takes today's terminal, and E3's
-triage of it below is unchanged.
+triage of it below is unchanged. In a human-started run (#2940) the walk mode
+does not reach the steps: each child's step resolves its own mode (as in
+`reference/chain-steps.md`), may clean-stop, and the root runs E3's triage below.
 
 ### E1. Enumerate the children
 
@@ -1435,7 +1448,15 @@ see `reference/epic-tree.md` § E1b — gate leaves only
   (quoting the body **lines**, not the array entry, named as a self-reference
   that was not migrated) — and **stop**. This halt runs *before* E3, so its
   summary is the only comment the run posts: omitting the item loses it.
-  One unready child means the epic is not ready.
+  One unready child means the epic is not ready. That halt is a
+  pipeline-started run's (#2940). In a human-started run (origin `human`,
+  decided as §0a decides it), after labelling and
+  commenting, the root dispatches one chained refinement step for every
+  unready leaf. After any split it re-reads the tree and re-gates every open
+  leaf, and it proceeds to E2 only when all are READY. A `stopped` refinement
+  takes the halt above, naming each stopped child and its reason. An E3 child
+  never prompts or refines. The step, its brief and its verdicts:
+  see `reference/chain-steps.md` § The chained refinement step (#2940)
 
 Re-running after the stories are refined (criteria added, the `needs-refinement`
 label cleared) continues the pre-flight from the still-open children — the gate
@@ -1519,6 +1540,11 @@ see `reference/epic-tree.md` § E3 — build leaves
 > the end-of-run summary comment instead (below), and let E5's own note decide
 > what they mean for closure.
 
+In a human-started run each child's run is a step the root dispatches (#2940).
+That covers the sequential chain below as well as the parallel set. Its brief,
+handoff and verdict:
+see `reference/chain-steps.md` § The issue step (#2940)
+
 - **Disjoint children** → **parallel sub-agents**, each in its own **worktree**
   (so edits can't collide), each running the Single-issue flow to its own
   bot-authored PR. They don't depend on each other, so their PRs open and merge
@@ -1563,15 +1589,15 @@ the rest against the escalated child:
 - never fail silently — the escalation already posted its own typed comment on
   the child (§#564).
 
-**In an unattended walk, a clean stop is triaged by one script (#2585).**
-A clean-stopped child (#2579) is a typed escalation, so the triage above holds,
-but who walks, who is parked and who is skipped is decided by
-`"<skill-base-dir>/scripts/epic-clean-stop-triage.zsh" --repo "$REPO" --children
-<open children in walk order> --deps <file>` (plus `--clean-stopped <children
-that clean-stopped this invocation>` once any has). Call it once before the
-first child and again after each child that clean-stops. `--deps` is a JSON
-Lines file holding one `read-dependencies.zsh --repo "$REPO" --issue <N>` record
-per child. Then:
+**In an unattended or a human-started walk (#2940), a clean stop is triaged by
+one script (#2585).** A clean-stopped child (#2579) is a typed escalation, so
+the triage above holds, but who walks, who is parked and who is skipped is
+decided by `"<skill-base-dir>/scripts/epic-clean-stop-triage.zsh" --repo "$REPO"
+--children <open children in walk order> --deps <file>` (plus `--clean-stopped
+<children that clean-stopped this invocation>` once any has). Call it once
+before the first child and again after each child that clean-stops. `--deps` is
+a JSON Lines file holding one `read-dependencies.zsh --repo "$REPO" --issue <N>`
+record per child. Then:
 
 - never walk a child in `skip` — a kept `clean-stop.json` marker makes a child
   clean-stopped on a later walk too, so its kept work-dir is never overwritten;
@@ -1598,7 +1624,11 @@ So does a child whose **size pre-flight stops it** (§2). E3 cannot prompt, so
 the child takes the pre-flight's no-human terminal (c): one comment naming the
 triggers and counts, the `needs-split` label — **never** `blocked` — and the
 child is **parked**; the run continues with the children that don't depend on
-it. Never auto-chain into a split. A pre-flight **error** (exit 2 or 3 that §2's
+it. A pipeline-started walk never chains into a split. In a human-started walk,
+when that child's step returns, the root dispatches a chained refinement step on
+it (#2940). On `split` the child becomes an inner node, whose new leaves the root
+gates by E1b's rule and builds in the same walk, before any child that is
+`blockedBy` it. On `stopped` it stays parked. A pre-flight **error** (exit 2 or 3 that §2's
 one re-run does not clear) is a tooling failure instead: park the child with no
 label, quote the stderr in the epic summary, and continue. The pre-flight runs
 **per child only**: an epic's aggregate size is never checked, because

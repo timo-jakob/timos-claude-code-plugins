@@ -635,26 +635,45 @@ e3_paragraph() {
   contains "$block" "emit the run's record (§7) and stop"
 }
 
-@test "the pre-flight block documents all three stop terminals and records through the emitter" {
-  local block
+@test "#2940 the pre-flight block documents two stop terminals, the override retired, and records through the emitter" {
+  local block flat
   block="$(preflight_block)"
-  contains "$block" '**(a) The human overrides.**'
-  contains "$block" '**(b) The human accepts the split.**'
-  contains "$block" '**(c) No human present**'
-  contains "$block" '**Any other answer** is no override'
-  contains "$block" 'else take (b), which records it'
-  lacks "$block" 'records a stop (no `--override`)'
-  contains "$block" "timeout, an absent human, any other answer or an earlier run's \`OVERRIDDEN\` comment
-  never is: a later run asks again, or with no human takes (c)."
-  lacks "$block" 'without asking'
-  contains "$block" '**Only that explicit answer is an override**'
-  contains "$block" 'silence, a
-  timeout, an absent human'
-  contains "$block" 'the branch **un-pushed**, **no PR**'
+  flat="$(printf '%s' "$block" | tr '\n' ' ' | tr -s ' ')"
+  contains "$flat" '**The stop branch has two terminals** (#2940). The override question (a) is retired: no run reaches it, and no run asks it.'
+  contains "$block" '**(b) A human-started run parks and chains.**'
+  contains "$block" '**(c) A pipeline-started run or an E3 child parks and stops.**'
+  contains "$flat" 'run the park block **without asking**'
+  contains "$flat" 'and end the step with verdict `needs-refinement`'
+  contains "$flat" 'see `reference/chain-steps.md` § The chained refinement step (#2940)'
+  contains "$flat" 'and not an E3 child'
+  # the retired override (a): no question, no override answer, no --override in the recipe
+  lacks "$block" '**(a) The human overrides.**'
+  lacks "$block" 'AskUserQuestion'
+  lacks "$block" '**Only that explicit answer is an override**'
+  lacks "$block" '**Any other answer** is no override'
+  lacks "$block" '[--override human]'
+  lacks "$flat" "after the human's answer on a stop"
+  contains "$block" 'the branch
+  **un-pushed**, **no PR**'
   contains "$block" '--pipeline story-preflight'
   contains "$block" '--ts <the noted time> --wall-s <now − the noted time>'
   contains "$block" 'build-story-preflight-telemetry-record.zsh'
-  contains "$block" '--override human'
+}
+
+@test "#2940 the size pre-flight's --override flag and read-split-park.zsh's OVERRIDDEN reading stay for older records" {
+  local flat
+  flat="$(preflight_block | tr '\n' ' ' | tr -s ' ')"
+  contains "$flat" "The \`--override\` flag of \`build-story-preflight-telemetry-record.zsh\`, the size pre-flight's record builder, and \`read-split-park.zsh\`'s reading of \`OVERRIDDEN\` comments stay, for older runs' records and comments."
+  # the builder still accepts the flag (pinned by the override test above) and
+  # the reader still parses an OVERRIDDEN comment
+  grep -qF 'OVERRIDDEN' "$REPO_ROOT/development/skills/refine-issue/scripts/read-split-park.zsh"
+}
+
+@test "#2940 ask-branches.md marks RS-05 retired by #2940" {
+  local row
+  row="$(grep -F '| RS-05 |' "$REPO_ROOT/development/skills/resolve-issue/reference/ask-branches.md")"
+  [ -n "$row" ]
+  contains "$row" 'retired by #2940'
 }
 
 @test "the pre-flight block applies needs-split and never the blocked label" {
@@ -663,7 +682,9 @@ e3_paragraph() {
   contains "$block" '--add-label needs-split'
   contains "$block" 'run the clear block below, continue; ask nothing'
   contains "$block" 'size pre-flight: SPLIT — <triggers + counts>'
-  contains "$block" 'size pre-flight: OVERRIDDEN by the human — <triggers + counts>'
+  # #2940: the clear block posts no OVERRIDDEN comment any more
+  lacks "$block" 'size pre-flight: OVERRIDDEN by the human'
+  contains "$block" '# clear block — a pass only, never after the park block; it posts no OVERRIDDEN comment'
   contains "$block" 'gh label create needs-split'
   run -1 grep -E -- '--add-label blocked|gh label create blocked' <<< "$block"
 }
@@ -690,5 +711,5 @@ e3_paragraph() {
   lacks "$clear" 'size-preflight-inventory'
   local flatb; flatb="$(printf '%s' "$block" | tr '\n' ' ' | tr -s ' ')"
   contains "$flatb" '**The SPLIT comment carries the plan inventory (#2602).**'
-  contains "$flatb" 'Only the park block writes it; the clear block and the `OVERRIDDEN` comment never do.'
+  contains "$flatb" 'Only the park block writes it; the clear block never does.'
 }

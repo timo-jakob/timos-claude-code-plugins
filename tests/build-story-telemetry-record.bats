@@ -15,18 +15,33 @@ setup() {
   ST="$BATS_TEST_TMPDIR/state.json"
 }
 
-# build from a state given inline; $1 = state JSON, rest = extra flags
+# build from a state given inline; $1 = state JSON, rest = extra flags.
+# A JSON object with no `origin` key gets "origin":"human" (#2940), so every
+# other rule is driven on a state the origin rule accepts; anything else — a
+# state that names its own origin, malformed JSON, a non-object — is written as
+# given. The origin rule itself is driven by build_raw.
 build() {
+  if jq -e 'type == "object" and (has("origin") | not)' <<<"$1" >/dev/null 2>&1; then
+    jq -c '. + {origin: "human"}' <<<"$1" > "$ST"
+  else
+    printf '%s' "$1" > "$ST"
+  fi
+  shift
+  run --separate-stderr zsh "$B" --state "$ST" "$@"
+}
+
+# build from a state written exactly as given (no origin added)
+build_raw() {
   printf '%s' "$1" > "$ST"
   shift
   run --separate-stderr zsh "$B" --state "$ST" "$@"
 }
 
-SUCCESS='{"outcome":"pr-opened","dependency_precheck":"PROCEED","gate_verdict":"READY","risk":"elevated","pr":413,"story_spec_present":true,"review_loop_run_ids":["review-loop-1752403000-8f3a"],"fallbacks_fired":["user_docs"]}'
-GATE_PARKED='{"outcome":"gate-parked","dependency_precheck":"PROCEED","gate_verdict":"NEEDS_REFINEMENT","risk":"normal"}'
-PRECHECK_PARKED='{"outcome":"precheck-parked","dependency_precheck":"REJECT_BLOCKED"}'
-ESCALATED='{"outcome":"escalated","dependency_precheck":"PROCEED","gate_verdict":"READY","risk":"normal","escalation_status":"ESCALATE_NO_CONVERGENCE","review_loop_run_ids":["review-loop-1752403000-8f3a"]}'
-FAILED='{"outcome":"failed","dependency_precheck":"PROCEED","gate_verdict":"READY","risk":"low"}'
+SUCCESS='{"outcome":"pr-opened","dependency_precheck":"PROCEED","gate_verdict":"READY","risk":"elevated","pr":413,"story_spec_present":true,"review_loop_run_ids":["review-loop-1752403000-8f3a"],"fallbacks_fired":["user_docs"],"origin":"human"}'
+GATE_PARKED='{"outcome":"gate-parked","dependency_precheck":"PROCEED","gate_verdict":"NEEDS_REFINEMENT","risk":"normal","origin":"human"}'
+PRECHECK_PARKED='{"outcome":"precheck-parked","dependency_precheck":"REJECT_BLOCKED","origin":"human"}'
+ESCALATED='{"outcome":"escalated","dependency_precheck":"PROCEED","gate_verdict":"READY","risk":"normal","escalation_status":"ESCALATE_NO_CONVERGENCE","review_loop_run_ids":["review-loop-1752403000-8f3a"],"origin":"human"}'
+FAILED='{"outcome":"failed","dependency_precheck":"PROCEED","gate_verdict":"READY","risk":"low","origin":"human"}'
 
 # --- the five outcome branches ----------------------------------------------
 
@@ -43,7 +58,7 @@ FAILED='{"outcome":"failed","dependency_precheck":"PROCEED","gate_verdict":"READ
   [ "$(jq -c '.fallbacks_fired' <<<"$output")" = '["user_docs"]' ]
   # exactly the documented keys — an envelope key (pr, issue, ts, wall_s) here
   # would give a consumer two places to read one fact
-  [ "$(jq -c 'keys' <<<"$output")" = '["clean_stop","convergence_failures","dependency_precheck","escalation_status","fallbacks_fired","gate_verdict","mode","resumed_from","review_loop_run_ids","risk","session_mode","session_mode_source","story_spec_present"]' ]
+  [ "$(jq -c 'keys' <<<"$output")" = '["clean_stop","convergence_failures","dependency_precheck","escalation_status","fallbacks_fired","gate_verdict","mode","origin","resumed_from","review_loop_run_ids","risk","session_mode","session_mode_source","story_spec_present"]' ]
   build "$SUCCESS" --print-outcome
   [ "$status" -eq 0 ]
   [ "$output" = "success" ]
@@ -491,5 +506,41 @@ clean_state() {  # $1 = escalation_status, $2 = convergence_failures JSON, $3 = 
     [ "$bad: $status" = "$bad: 1" ]
     [ -z "$output" ]
     contains "$stderr" "resumed_from must be checkpoint | clean_stop | null"
+  done
+}
+
+# --- origin (#2940) ------------------------------------------------------------
+
+@test "#2940 origin: human and pipeline pass through to the payload unchanged" {
+  local o
+  for o in human pipeline; do
+    build_raw "$(jq -c --arg o "$o" '. + {origin: $o}' <<<"$FAILED")"
+    [ "$status" -eq 0 ]
+    [ "$(jq -r '.origin' <<<"$output")" = "$o" ]
+  done
+}
+
+@test "#2940 origin: a missing or null origin is refused, with nothing on stdout" {
+  build_raw "$(jq -c 'del(.origin)' <<<"$FAILED")"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  contains "$stderr" "state.origin is required (human | pipeline)"
+  build_raw "$(jq -c '. + {origin: null}' <<<"$FAILED")"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  contains "$stderr" "state.origin is required (human | pipeline)"
+  # --print-outcome validates first, so it refuses the same state
+  build_raw "$(jq -c 'del(.origin)' <<<"$FAILED")" --print-outcome
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+}
+
+@test "#2940 origin: a value other than human or pipeline is refused" {
+  local bad
+  for bad in '"attended"' '"Human"' '""' '1' 'true' '["human"]'; do
+    build_raw "$(jq -c --argjson o "$bad" '. + {origin: $o}' <<<"$FAILED")"
+    [ "$status" -eq 1 ]
+    [ -z "$output" ]
+    contains "$stderr" "origin must be human | pipeline"
   done
 }
