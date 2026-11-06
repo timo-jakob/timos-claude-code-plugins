@@ -44,7 +44,7 @@ before it ships, and a row whose text moved is updated here.
 | RS-10 | SKILL.md | `ask the human to fix the` · `halt and ask rather than proceeding` · `→ **halt** and ask for` · `has no human to ask, so "ask the human to` | gap | human-owned: an epic body's mistyped or near-miss child lines need the author's reading |
 | RS-11 | reference/checkpoint.md | `so ask the human before you discard them` | intent | human-owned: discarding a half-finished round's uncommitted changes loses data |
 | RS-12 | reference/checkpoint.md | `ask the human whether to delete it` | intent | human-owned: deleting an old run's local branch cannot be undone from this run |
-| RS-13 | reference/chain-steps.md | `**Only the root asks the human.**` · `The root asks the verdict's` · `Never ask the human anything` · `neither with AskUserQuestion` | intent / gap | human-owned: a chained refinement's below-threshold intent and gap questions, which the root relays with AskUserQuestion; a step never asks (#2940) |
+| RS-13 | reference/chain-steps.md | `**Only the root asks the human.**` · `The root asks the verdict's` · `neither with AskUserQuestion` | intent / gap | human-owned: a chained refinement's below-threshold intent and gap questions, which the root relays with AskUserQuestion; a step never asks (#2940) |
 
 ## RS-06a — the fallback review panel default (#2909)
 
