@@ -548,6 +548,8 @@ fm() { awk -v k="$2" 'NR == 1 && /^---$/ { f = 1; next } f && /^---$/ { exit } f
   printf '%s\n' "$(fm "$RSTEP" tools)" | tr ',' '\n' | tr -d ' ' | grep -qxF Edit
   # the issue step waits on the gate and its background round dispatches with Monitor (core.md, subagents.md)
   printf '%s\n' "$(fm "$RSTEP" tools)" | tr ',' '\n' | tr -d ' ' | grep -qxF Monitor
+  # the refinement step waits on a background readiness gate or issue-refiner with Monitor
+  printf '%s\n' "$(fm "$FSTEP" tools)" | tr ',' '\n' | tr -d ' ' | grep -qxF Monitor
 }
 
 @test "#3014 chain-steps.md dispatches each step as its plugin agent and never as general-purpose" {
@@ -605,11 +607,18 @@ fm() { awk -v k="$2" 'NR == 1 && /^---$/ { f = 1; next } f && /^---$/ { exit } f
   lacks "$doc" '"cause"'
 }
 
+@test "#3014 the refine-step agent dispatches its skill's subagents in the foreground and waits on a background one" {
+  local t; t="$(flat "$FSTEP")"
+  contains "$t" 'Dispatch each in the foreground (`run_in_background: false`).'
+  contains "$t" 'When one runs in the background anyway, wait for its result in your turn; never end your turn while it runs, and never write the "no chain-result document" verdict before it has ended.'
+  contains "$t" 'Wait with one bounded Monitor call, never a Bash poll.'
+}
+
 @test "#3014 the resolve-step agent names its brief's lines, waits on its own subagents and points at the verdict arms" {
   local t; t="$(flat "$RSTEP")"
   contains "$t" '`<N>` in its name is the issue you work on.'
   contains "$t" '`FLAGS=<flags>`, only when the root was given any: its telemetry flags and its `--no-review`.'
-  contains "$t" 'When one runs in the background, wait for its result in your turn; never end your turn while it runs.'
+  contains "$t" 'Dispatch each in the foreground (`run_in_background: false`). When one runs in the background, wait for its result in your turn; never end your turn while it runs.'
   contains "$t" 'Wait with one bounded Monitor call, never a Bash poll.'
   contains "$t" 'Which verdict each ending writes is `reference/chain-steps.md` § The issue step (#2940).'
   # the section it points at exists

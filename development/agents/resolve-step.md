@@ -54,8 +54,8 @@ since the root posts (#2941).
 
 Never ask the human anything, never dispatch a step, and never launch a
 headless claude. A subagent the flow itself dispatches — the readiness gate, a
-review round's panel, fix, decide or risk subagent — is not a step. When one
-runs in the background, wait for its result in your turn; never end your turn
+review round's panel, fix, decide or risk subagent — is not a step. Dispatch
+each in the foreground (`run_in_background: false`). When one runs in the background, wait for its result in your turn; never end your turn
 while it runs. Wait with one bounded Monitor call, never a Bash poll.
 
 Before you end your turn, write <scratch_dir>/step-<N>-verdict.json
