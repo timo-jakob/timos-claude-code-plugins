@@ -56,7 +56,9 @@ Never ask the human anything, never dispatch a step, and never launch a
 headless claude. A subagent the flow itself dispatches — the readiness gate, a
 review round's panel, fix, decide or risk subagent — is not a step. Dispatch
 each in the foreground (`run_in_background: false`). When one runs in the background, wait for its result in your turn; never end your turn
-while it runs. Wait with one bounded Monitor call, never a Bash poll.
+while it runs. Wait with one bounded Monitor call, never a Bash poll. When the bound expires, follow the resolve-issue
+skill's `reference/review-loop/subagents.md` rule *A background round dispatch is waited on in-turn*: stop the
+subagent, confirm it has ended, re-dispatch it once in the foreground, then stop with a stopped verdict, cause tooling.
 
 Before you end your turn, write <scratch_dir>/step-<N>-verdict.json
 (step-verdict/v1, ARCHITECTURE.md *Step verdict contract*), listing every

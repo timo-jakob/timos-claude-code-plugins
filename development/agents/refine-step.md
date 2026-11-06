@@ -39,6 +39,10 @@ issue-refiner — is not a step. Dispatch each in the foreground
 (`run_in_background: false`). When one runs in the background anyway, wait for
 its result in your turn; never end your turn while it runs, and never write the
 "no chain-result document" verdict before it has ended. Wait with one bounded
-Monitor call, never a Bash poll. Which verdict each outcome writes, and what the
+Monitor call, never a Bash poll. When the bound expires, follow the resolve-issue
+skill's `reference/review-loop/subagents.md` rule *A background round dispatch
+is waited on in-turn*: stop the subagent, confirm it has ended, re-dispatch it
+once in the foreground, then stop; a stall that ends the skill writes the "no
+chain-result document" verdict above. Which verdict each outcome writes, and what the
 root does with it, is the resolve-issue skill's `reference/chain-steps.md`
 § The chained refinement step (#2940).
