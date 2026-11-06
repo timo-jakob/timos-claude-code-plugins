@@ -372,15 +372,15 @@ v() {  # <verdict> <jq object of extra fields> -> a verdict document
     'In a human-started run, attended and unattended behave alike, whatever `resolve_session` says (#2907).' \
     '`scratch_dir` is the root'"'"'s own scratch directory, outside the repository, and every step of the run shares it.' \
     'Before each dispatch the root deletes the issue'"'"'s old verdict file, so it never reads a previous step'"'"'s result as the new one.' \
-    '`start_at` is `"0a"` for a first run, a leaf refined `ready` at E1b included. It is `"1"` only for the issue step re-dispatched after a refinement'"'"'s `ready` on an issue whose own step already passed §0a: the single-issue entry and the E3 child.' \
+    '`start_at` is `"0a"` for a first run, a leaf refined `ready` at E1b included. It is `"1"` only for the issue step re-dispatched after a refinement'"'"'s `ready` on an issue whose own step already passed §0a: the single-issue entry, the E3 child and a blocker (#2941).' \
     'The rule against a headless `claude` still holds: a step is an Agent-tool subagent, never a separate `claude` process.' \
     '`done` with the PR.' \
     '`blocked`, with the blockers §0a found.' \
     '`stopped`, with the reason, for any other ending: an escalation, a clean stop, a red gate or a failure. Its `cause` names which, for E3'"'"'s triage:' \
     '`kind` is the step'"'"'s handoff `kind`, `issue` or `refinement`. An issue-run step ends only `done`, `needs-refinement`, `blocked` or `stopped`, a refinement step only `ready`, `split`, `questions-pending` or `stopped`, so the root never holds a verdict it has no arm for. An issue-run step'"'"'s `stopped` must carry its `cause`, a refinement step'"'"'s never does.' \
     '**`done`** → report the PR.' \
-    '**`blocked`** → until #2941 lands, the root handles it as §0a'"'"'s autonomous arm handles a rejection: the step already posted the comment and the label, so the root reports the blockers and stops, offering no remediation.' \
-    'In an epic, the root parks the child as E3 parks a dependency rejection and continues with the children that don'"'"'t depend on it.' \
+    '**`blocked`** → on the named issue'"'"'s step, or a blocker'"'"'s, the root runs the blockers-first procedure' \
+    'An E3 child'"'"'s brief never names that line, so the child posted the comment and the label: the root parks the child as E3 parks a dependency rejection' \
     '**`stopped`** → report the reason and stop.' \
     '**`ready`** → the issue is ready to build.' \
     '**A single-issue entry:** dispatch a fresh issue step with `start_at: "1"` and the verdict'"'"'s `risk`.' \
@@ -419,7 +419,7 @@ v() {  # <verdict> <jq object of extra fields> -> a verdict document
   contains "$t" '**A leaf at E1b:** the leaf is READY for E1b, with the verdict'"'"'s `risk`. Nothing is dispatched for it until E3 builds it. Its E3 step is a first run, `start_at: "0a"`, so §0a'"'"'s dependency precheck runs; §0b then takes the READY stamp the refinement'"'"'s re-gate left as a cache hit.'
   # "1" is narrowed to the two cases whose own step already passed §0a
   t="$(flat "$STEPS")"
-  contains "$t" 'It is `"1"` only for the issue step re-dispatched after a refinement'"'"'s `ready` on an issue whose own step already passed §0a: the single-issue entry and the E3 child.'
+  contains "$t" 'It is `"1"` only for the issue step re-dispatched after a refinement'"'"'s `ready` on an issue whose own step already passed §0a: the single-issue entry, the E3 child and a blocker (#2941).'
   lacks "$t" 'or `"1"` for the fresh step that follows a refinement'"'"'s `ready`'
 }
 

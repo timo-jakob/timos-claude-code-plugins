@@ -24,11 +24,13 @@ before it ships, and a row whose text moved is updated here.
 | id | file | anchors | kind | outcome |
 |---|---|---|---|---|
 | RS-01 | SKILL.md | `ask the human to attach native sub-issues` | gap | human-owned: only the author knows which issues a near-miss epic body meant as its children |
-| RS-02 | SKILL.md | `offer to clear the blockage` | intent | human-owned: remediation widens the run's scope to other issues |
-| RS-02 | reference/interactive/remediation.md | `offer to clear the blockage` · `put the choice to the human` · `(AskUserQuestion —` | intent | human-owned: as above |
+| RS-02 | SKILL.md | `offer to clear the blockage` | intent | human-owned: retired by #2941 — every run a human starts takes "resolve the dependency and the named issue" without asking (`reference/interactive/blockers-first.md`), and a pipeline-started run never offers it |
+| RS-02 | reference/interactive/remediation.md | `offer to clear the blockage` · `put the choice to the human` · `(AskUserQuestion —` | intent | human-owned: as above; the frozen span keeps the question's text |
+| RS-02 | reference/interactive/blockers-first.md | `never puts the choice to the human` | intent | human-owned: as above |
 | RS-02 | reference/interactive.md | `offer to clear a shape (i) blockage` | intent | human-owned: as above |
 | RS-03 | reference/interactive/remediation.md | `ask the human which it is` | gap | human-owned: an epic-kind blocker the intent half cannot confirm needs the author's reading |
-| RS-04 | reference/interactive/remediation.md | `ask for native sub-issues or a` · `Anything else you cannot classify` | gap | human-owned: a near-miss rung or an unclassifiable blocker has no document that settles it |
+| RS-03 | reference/interactive/blockers-first.md | `The root asks the human, in both session` · `modes, with AskUserQuestion: two options` | gap | human-owned: an epic-kind blocker the intent half cannot confirm needs the author's reading; in a human-started run the root asks it in both session modes and waits (#2941) |
+| RS-04 | reference/interactive/remediation.md | `ask for native sub-issues or a` · `Anything else you cannot classify` | gap | human-owned: a near-miss rung or an unclassifiable blocker has no document that settles it; in a human-started run a near-miss blocker stops the run naming its fix, and an unclassifiable one is RS-03's root question (#2941) |
 | RS-04 | SKILL.md | `anything else → ask the human` | gap | human-owned: as above |
 | RS-05 | SKILL.md | `The override question (a) is retired` | intent | human-owned: retired by #2940 — no run reaches the size pre-flight override or asks it; a human-started run parks and chains a refinement instead, and the human answers that refinement's questions through RS-13 |
 | RS-06a | reference/review-loop/briefs/panel.md | `Route a full-round NOT APPLICABLE to the fallback panel (#2909)` | implementation | **default:** run the fallback panel — the repo-type panel's NOT APPLICABLE on a full round dispatches `development-claude-plugin:review` in fallback mode in the same round, so every file it covers is reviewed |

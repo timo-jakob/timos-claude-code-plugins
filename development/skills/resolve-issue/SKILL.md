@@ -291,8 +291,8 @@ which is the session mode resolved above:
 - **Autonomous / non-interactive** (mode `unattended`: maintenance pipeline,
   epic-driven resolve — no human to prompt): post `comment_md` as an issue comment, apply the
   `blocked` label idempotently, and **stop**. **Never auto-chain** into
-  resolving the blocker unattended — an unattended run must not widen its own
-  scope (#583's decision).
+  resolving the blocker unattended — an unattended run must not widen its own scope (#583's decision). A step
+  whose brief names `BLOCKERS_FIRST=1` is the exception (#2941): it posts nothing and ends `blocked` for its root.
 
   ```bash
   gh label create blocked --color b60205 \
@@ -308,8 +308,8 @@ which is the session mode resolved above:
   (below) rather than dead-ending — with a human present, a rejection is a
   fork in the road, not a stop sign.
 
-**Interactive remediation.** Read it when this step rejects with shape (i) and
-a human is present:
+**Interactive remediation.** Read it when this step rejects with shape (i) and a human is present; a
+human-started run (#2941), in either mode, takes `reference/interactive/blockers-first.md` and never asks:
 see `reference/interactive/remediation.md` § Interactive remediation — offer to clear the blockage (#586, #587)
 
 ### 0b. Readiness gate — is the story ready to build? (do NOT skip)

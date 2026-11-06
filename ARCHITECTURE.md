@@ -7766,7 +7766,13 @@ fall through to `PROCEED` when its own tooling fails is worse than no gate. Like
 writes; the skill posts. In **autonomous** runs (maintenance pipeline,
 epic-driven resolve) a rejection posts the comment, applies the `blocked` label,
 and stops — an unattended run never auto-chains into resolving the blocker
-itself. In **interactive** runs the skill layers guided remediation on top
+itself. **A human-started run is the exception (#2941)**: whatever its session
+mode, it takes *resolve blocker + named issue* without asking. Its root clears
+the chain deepest-first, one step per blocker, and builds the named issue after
+a re-verified `PROCEED`. At the first blocker that cannot finish, it stops the
+whole run with one `blockers first stopped:` comment and the `blocked` label
+(`reference/interactive/blockers-first.md`). In **interactive**
+runs the skill layers guided remediation on top
 (#586): the human explicitly chooses *resolve blocker + named issue* or
 *just the blocker* (declining stops); plain-issue chains resolve
 **deepest-first**, each blocker through the full single-issue flow (one PR per

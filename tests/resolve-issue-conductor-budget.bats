@@ -391,9 +391,12 @@ _unreached_reference_files() {
   # THIRTY since #2940: the new reference/chain-steps.md declares FOUR `##`
   # sections — the step model, the issue step, the chained refinement step and
   # the questions-pending relay.
+  #
+  # THIRTY-ONE since #2941: reference/interactive/remediation.md gains *Blockers
+  # first in a human-started run (#2941)* after its frozen moved span.
   local n
   n="$(_ref_headings | grep -c .)"
-  [ "$n" -eq 30 ]
+  [ "$n" -eq 31 ]
 }
 
 # --- pointers resolve -------------------------------------------------------
@@ -450,9 +453,12 @@ _unreached_reference_files() {
   # reference/readiness-cache.md (#2955),
   # and 24 until §6 and the exit-2 note pointed at RS-06a in
   # reference/ask-branches.md (#2909),
-  # and 26 until §0a, §0b, §2, E1b and E3 pointed at reference/chain-steps.md (#2940).
-  if [ "$rows" -ne 31 ]; then
-    printf 'the skill carries %s pointer(s), expected 31.\n' "$rows" >&2
+  # and 26 until §0a, §0b, §2, E1b and E3 pointed at reference/chain-steps.md (#2940),
+  # and 31 until chain-steps.md's blocked verdict pointed at remediation.md's
+  # *Blockers first* section (#2941), and 32 until remediation.md pointed at its new
+  # shard reference/interactive/blockers-first.md (#2941).
+  if [ "$rows" -ne 33 ]; then
+    printf 'the skill carries %s pointer(s), expected 33.\n' "$rows" >&2
     printf 'A pointer was added or removed — update this count in the same PR,\n' >&2
     printf 'and check the step that gained or lost one still reaches its procedure.\n' >&2
     _all_pointers >&2

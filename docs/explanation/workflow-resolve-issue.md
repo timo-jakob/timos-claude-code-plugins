@@ -16,8 +16,11 @@ Nothing is branched or built until the story has passed three checks.
 1. **Step 0 — classify.** The issue is an *epic* when it has native sub-issues, carries the `epic` label, or its body
    declares child issues as a task list; epics take the [epic path](#resolve-epics). A closed issue stops the run here.
 2. **Step 0a — dependency precheck.** A script reads the issue's native *blocked by* links. If a blocker is still
-   open, or the links form a cycle, the run stops: an unattended run labels the issue `blocked` and comments why; with
-   you present, it offers guided remediation instead. It never starts the blocking issue on its own.
+   open, or the links form a cycle, a maintenance-pipeline run stops: it labels the issue `blocked` and comments why,
+   and never starts the blocking issue on its own. A run you start clears the open blockers first, without asking, in
+   either mode (#2941). It resolves them deepest-first, one PR each, merged before the next one branches, then
+   re-checks the links and builds the issue. A cycle, an open blocker in another repository, or a blocker that cannot
+   finish stops the run: the issue gets one `blockers first stopped:` comment and the `blocked` label.
 3. **Step 0b — readiness gate.** The `story-readiness` agent judges whether the story is specified well enough to
    build: testable acceptance criteria, bounded scope, declared dependencies, and — for a story that touches an
    interface — a use case and test cases. On NEEDS_REFINEMENT the run labels the issue `needs-refinement`, posts the
@@ -112,7 +115,7 @@ budgets, promotion, what you see while it runs — is in [The local review loop]
 
 | Actor | Does |
 | --- | --- |
-| You | Start the run; answer remediation and extension questions; approve PRs on a Claude-plugin repo |
+| You | Start the run; answer questions about a blocker the run cannot classify, and extension questions; approve PRs on a Claude-plugin repo |
 | `resolve-issue` (conductor) | Branches, implements, runs gates and scripts, commits, mints the writer token |
 | `story-readiness` | Gates every story, and every child of an epic, before any code |
 | `round-panel` and its reviewers | Review each round's tree, one reviewer per dimension |

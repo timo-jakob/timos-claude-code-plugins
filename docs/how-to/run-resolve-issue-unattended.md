@@ -66,6 +66,11 @@ each refinement and each epic child. Such a run does not stop when a story is
 unready or too large. It refines the story in the same run, splits it if
 needed, and carries on. Only a question the refinement cannot answer for itself
 reaches you. The steps never ask you anything, whatever the setting says.
+A run you start also clears the story's open blockers first, without asking:
+each blocker gets its own PR, merged before the next one starts, and then the
+story is built. If a blocker cannot finish, the run stops and the story gets one
+comment that begins `blockers first stopped:` and the `blocked` label. You are
+asked only about a blocker the run cannot classify as an epic or a single issue.
 A maintenance-pipeline run still stops at those points, as it always did. Each
 issue the run works on gets its own telemetry record, whose `origin` is `human`
 or `pipeline`.
