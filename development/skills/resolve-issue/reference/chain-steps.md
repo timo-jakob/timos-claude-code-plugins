@@ -166,7 +166,8 @@ branch keyed on it, the escalation grant and the clean stop included: record
 session_mode unattended, with the line's source, or inferred when the line says
 attended. But move any kept state aside without --resume, deleting nothing, as
 an attended run does.
-When this brief names BLOCKERS_FIRST=1, a §0a rejection posts no comment and
+Skip §7's refine-issue --follow-up call: list the follow-ups only, since the
+root queues them (#2942). When this brief names BLOCKERS_FIRST=1, a §0a rejection posts no comment and
 applies no label: write verdict blocked and end, since the root posts (#2941).
 Never ask the human anything, never dispatch a step, and never launch a
 headless claude. Before you end your turn, write <scratch_dir>/step-<N>-verdict.json
@@ -193,7 +194,10 @@ The step ends with one of these verdicts:
 
 How the root handles each:
 
-- **`done`** → report the PR. In an epic, continue E3.
+- **`done`** → report the PR. In an epic, continue E3. Then the root queues the
+  step's `follow_ups` and takes the queue's next entry (#2942), which replaces
+  §7's `refine-issue --follow-up` call in a human-started run:
+  see `reference/checkpoint.md` § The chain queue in a human-started run (#2942)
 - **`needs-refinement`** → dispatch *The chained refinement step (#2940)* on
   the same issue.
 - **`blocked`** → on the named issue's step, or a blocker's, the root runs

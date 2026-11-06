@@ -1124,7 +1124,7 @@ usually ends (`ESCALATE_NO_CONVERGENCE`): run `follow-up-origin.zsh parked-issue
 <work-dir>/progress.md`; exit 1 means nothing was parked. Then invoke `/development:refine-issue <issue> --follow-up`
 for each issue it prints. Do it without asking, in every session mode (`resolve-session.zsh`, #2575), and record it:
 see `reference/ask-branches.md` § RS-09 — the parked follow-up default (#2903)
-**A follow-up that parks never stops this run or its epic walk**: name it in the report and go on.
+**A follow-up that parks never stops this run or its epic walk**, if pipeline-started (#2942): name it and go on.
 
 ## Epic flow
 

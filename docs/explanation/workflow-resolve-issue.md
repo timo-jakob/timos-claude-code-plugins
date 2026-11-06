@@ -20,7 +20,9 @@ Nothing is branched or built until the story has passed three checks.
    and never starts the blocking issue on its own. A run you start clears the open blockers first, without asking, in
    either mode (#2941). It resolves them deepest-first, one PR each, merged before the next one branches, then
    re-checks the links and builds the issue. A cycle, an open blocker in another repository, or a blocker that cannot
-   finish stops the run: the issue gets one `blockers first stopped:` comment and the `blocked` label.
+   finish stops the run: the issue gets one `blockers first stopped:` comment and the `blocked` label. The run then
+   keeps going through every follow-up the build files, each refined, built and merged in turn, until its queue is
+   empty (#2942); the first failure stops it with one `chain stopped:` comment, and a re-run resumes the queue.
 3. **Step 0b — readiness gate.** The `story-readiness` agent judges whether the story is specified well enough to
    build: testable acceptance criteria, bounded scope, declared dependencies, and — for a story that touches an
    interface — a use case and test cases. On NEEDS_REFINEMENT the run labels the issue `needs-refinement`, posts the
