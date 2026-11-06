@@ -7,7 +7,7 @@ version bump, the review panel) comes from a *resolve-profile* the skill loads f
 
 The colour key for the diagrams is on [How the plugins work](how-the-plugins-work.md).
 
-![resolve-issue end to end: the gates, the build, the review loop, and the bot-authored PR](diagrams/resolve-issue.svg)
+![resolve-issue's gates: a pipeline-started run stops, a human-started run clears blockers and refines first](diagrams/resolve-issue.svg)
 
 ## The gates before any code {#resolve-the-gates-before-any-code}
 
@@ -38,6 +38,8 @@ Nothing is branched or built until the story has passed three checks.
 
 ## From branch to merge {#resolve-from-branch-to-merge}
 
+![resolve-issue from branch to merge: the review loop, the bot-authored PR and its Decisions taken, and the follow-up chain](diagrams/resolve-issue-ship.svg)
+
 1. **Step 1 — branch.** A branch named `<type>/<issue>-<slug>` is created off a freshly fetched `main`.
 2. **Step 1b — load the profile.** The skill detects the repo type and loads `development-<type>:resolve-profile`. The
    profile says which test gate is blessed, what a version bump means here, which review panel applies, and how a fix
@@ -56,7 +58,10 @@ Nothing is branched or built until the story has passed three checks.
    `plugin.json` and its marketplace entry.
 7. **Step 5 — commit.** A Conventional Commit that closes the issue, with pre-commit hooks run and never skipped.
 8. **Step 6 — open the PR as the bot.** The branch is rebased onto `main`, a Maintenance App token is minted, and the
-   bot pushes the branch, opens the PR with a review dossier in its body, and arms squash auto-merge.
+   bot pushes the branch, opens the PR with a review dossier in its body, and arms squash auto-merge. The PR body's
+   `## Decisions taken` section records each decision the run took without asking (#2899). A maintenance-pipeline run
+   that parked follow-ups records there that it refines them without asking, then refines them as the run ends and
+   prints a `Decision taken (not asked)` line (#2903).
 9. **Approval and merge.** On an app repository the Approver bot reviews and approves; on a Claude-plugin repository a
    human does, unless the plugin Approver has been opted in for the session. The PR merges once it is approved and CI
    is green.

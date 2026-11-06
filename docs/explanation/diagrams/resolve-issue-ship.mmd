@@ -1,0 +1,39 @@
+flowchart TD
+    classDef human fill:#fde7c8,stroke:#b8741a,color:#222
+    classDef conductor fill:#dbe8fb,stroke:#3567b5,color:#222
+    classDef agent fill:#e9ddf7,stroke:#7a4cb5,color:#222
+    classDef bot fill:#d9f2df,stroke:#2e8b4e,color:#222
+    classDef artifact fill:#eeeeee,stroke:#777,color:#222
+    classDef stop fill:#f8d7d7,stroke:#b33,color:#222
+
+    IN(["Unblocked and READY<br/>(previous diagram)"]):::conductor
+    BUILD["Steps 1-3: branch, load profile,<br/>implement, test gate"]:::conductor
+    REFINE(["Oversized: chained refinement<br/>(human-started run)"]):::conductor
+
+    subgraph LOOP["Step 3.5: review loop"]
+        PANEL["Panel + full gate<br/>on one tree"]:::agent
+        BLOCK{"Blockers?"}
+        FIX["Fix pass"]:::agent
+    end
+
+    ESC(["Escalate: branch pushed,<br/>no PR"]):::stop
+    SHIP["Steps 4-6: version bump, commit,<br/>PR by the Maintenance App"]:::bot
+    RS09["Decision taken (not asked):<br/>refine parked follow-ups<br/>(pipeline-started run)"]:::conductor
+    DECS(["PR body: ## Decisions taken"]):::artifact
+    APPR["Approver bot or<br/>a human approves"]:::bot
+    MERGE(["Merged on green CI"]):::artifact
+    CHAIN["chain step: follow-up chain<br/>refine and resolve each<br/>filed follow-up, generation<br/>after generation"]:::conductor
+    CSTOP(["Stop: chain stopped:<br/>a re-run resumes the queue"]):::stop
+
+    IN --> BUILD --> PANEL --> BLOCK
+    BUILD -- "oversized,<br/>human-started" --> REFINE
+    BLOCK -- yes --> FIX -- "next round" --> PANEL
+    BLOCK -- "none, on a full sweep" --> SHIP
+    FIX -- "budget spent" --> ESC
+    SHIP -- "follow-ups parked" --> RS09
+    RS09 -. "recorded in" .-> DECS
+    SHIP -. "body carries" .-> DECS
+    SHIP --> APPR --> MERGE
+    MERGE -- "human-started" --> CHAIN
+    CHAIN -- "next follow-up,<br/>refined first" --> CHAIN
+    CHAIN -- "first failure" --> CSTOP
