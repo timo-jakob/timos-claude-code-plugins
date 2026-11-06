@@ -612,7 +612,10 @@ fm() { awk -v k="$2" 'NR == 1 && /^---$/ { f = 1; next } f && /^---$/ { exit } f
   contains "$t" 'Dispatch each in the foreground (`run_in_background: false`).'
   contains "$t" 'When one runs in the background anyway, wait for its result in your turn; never end your turn while it runs, and never write the "no chain-result document" verdict before it has ended.'
   contains "$t" 'Wait with one bounded Monitor call, never a Bash poll.'
-  contains "$t" 'When the bound expires, follow the resolve-issue skill'"'"'s `reference/review-loop/subagents.md` rule *A background round dispatch is waited on in-turn*: stop the subagent, confirm it has ended, re-dispatch it once in the foreground, then stop; a stall that ends the skill writes the "no chain-result document" verdict above.'
+  contains "$t" 'When the bound expires, the resolve-issue skill'"'"'s `reference/review-loop/subagents.md` rule *A background round dispatch is waited on in-turn* governs the retry; follow it as written.'
+  contains "$t" 'Write the "no chain-result document" verdict above only when that rule stops the skill.'
+  # the retry sequence is the rule's own: the agent points at it and never restates it
+  lacks "$t" 're-dispatch it once'
 }
 
 @test "#3014 the resolve-step agent names its brief's lines, waits on its own subagents and points at the verdict arms" {
@@ -621,7 +624,10 @@ fm() { awk -v k="$2" 'NR == 1 && /^---$/ { f = 1; next } f && /^---$/ { exit } f
   contains "$t" '`FLAGS=<flags>`, only when the root was given any: its telemetry flags and its `--no-review`.'
   contains "$t" 'Dispatch each in the foreground (`run_in_background: false`). When one runs in the background, wait for its result in your turn; never end your turn while it runs.'
   contains "$t" 'Wait with one bounded Monitor call, never a Bash poll.'
-  contains "$t" 'When the bound expires, follow the resolve-issue skill'"'"'s `reference/review-loop/subagents.md` rule *A background round dispatch is waited on in-turn*: stop the subagent, confirm it has ended, re-dispatch it once in the foreground, then stop with a stopped verdict, cause tooling.'
+  contains "$t" 'When the bound expires, the resolve-issue skill'"'"'s `reference/review-loop/subagents.md` rule *A background round dispatch is waited on in-turn* governs the retry; follow it as written.'
+  contains "$t" 'Write a stopped verdict, cause tooling, only when that rule stops the run.'
+  # the retry sequence is the rule's own: the agent points at it and never restates it
+  lacks "$t" 're-dispatch it once'
   contains "$t" 'Which verdict each ending writes is `reference/chain-steps.md` § The issue step (#2940).'
   # the section it points at exists
   grep -qxF '## The issue step (#2940)' "$STEPS"
