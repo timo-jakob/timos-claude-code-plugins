@@ -7910,7 +7910,11 @@ unattended from the source's context.
 The reader of that record. A pipeline-filed follow-up arrives `needs-refinement`,
 but its source story was refined well enough to build, so `resolve-issue` runs
 `/development:refine-issue <issue> --follow-up` on each one before its record,
-without asking, in every session mode (#2903).
+without asking, in every session mode (#2903). **A human-started chain is the
+exception (#2942):** its root queues each follow-up in the chain queue, refines
+it in the chained mode and resolves it, through every generation, and a park
+there stops the run (`reference/checkpoint.md`, *The chain queue*). A
+pipeline-started run keeps this mode and writes no queue file.
 Every decision is `development/skills/refine-issue/scripts/follow-up-auto-refine.zsh`'s,
 a script with no GitHub calls.
 

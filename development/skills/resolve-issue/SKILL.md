@@ -65,7 +65,7 @@ see `reference/telemetry.md` § Story telemetry (#1226)
 gh issue view <N> --json number,title,body,state,labels,url
 ```
 
-- If `state` is not `OPEN`, stop — it's already handled.
+- If `state` is not `OPEN`, stop — it's already handled — unless a human-started run kept a chain queue (#2942).
 - **Epic?** It's an epic when it has **native sub-issues**
   (`read-sub-issues.zsh --repo "$REPO" --epic <N>` reports
   `summary.total > 0` — the authoritative signal, #802), when it carries an
@@ -1124,7 +1124,7 @@ usually ends (`ESCALATE_NO_CONVERGENCE`): run `follow-up-origin.zsh parked-issue
 <work-dir>/progress.md`; exit 1 means nothing was parked. Then invoke `/development:refine-issue <issue> --follow-up`
 for each issue it prints. Do it without asking, in every session mode (`resolve-session.zsh`, #2575), and record it:
 see `reference/ask-branches.md` § RS-09 — the parked follow-up default (#2903)
-**A follow-up that parks never stops this run or its epic walk**: name it in the report and go on.
+**A follow-up that parks never stops this run or its epic walk**, if pipeline-started (#2942): name it and go on.
 
 ## Epic flow
 

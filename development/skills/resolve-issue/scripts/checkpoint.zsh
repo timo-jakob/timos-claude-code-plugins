@@ -56,8 +56,8 @@
 #   checkpoint.zsh supersede --repo-dir DIR --issue N --branch NAME [--remote NAME|URL]
 #       A fresh run's step, once §1 has cut BRANCH. When the durable directory
 #       keeps a clean-stop or checkpoint marker, move the whole directory to
-#       <N>.superseded-<UTC stamp>/ (nothing deleted) and recreate it empty
-#       with a lease.json naming the head the run's first checkpoint push may
+#       <N>.superseded-<UTC stamp>/ (nothing deleted) and recreate it, empty
+#       but for a chain's chain-queue.json (#2942), with a lease.json naming the head the run's first checkpoint push may
 #       replace: the kept checkpoint's SHA for BRANCH, else BRANCH's remote
 #       head read now, before any work. With nothing kept, lease BRANCH's
 #       remote head only when it is a `wip(resolve-issue #N): …` commit and no
@@ -355,6 +355,11 @@ supersede)
     mv -- "$base" "$dest" || { print -u2 -- "checkpoint: could not move $base aside"; exit 1 }
   fi
   mkdir -p -- "$base" || { print -u2 -- "checkpoint: could not create $base"; exit 1 }
+  # a human-started chain's queue (#2942) is the root's, not this run's: it stays
+  if [[ -n "$dest" && -f "$dest/chain-queue.json" ]]; then
+    mv -- "$dest/chain-queue.json" "$base/chain-queue.json" || {
+      print -u2 -- "checkpoint: could not keep $base/chain-queue.json"; exit 1 }
+  fi
   local lease_json='null'
   if (( have_lease )); then
     lease_json=$(jq -nc --arg b "$sbranch" --arg s "$l_sha" '{branch: $b, sha: $s}')

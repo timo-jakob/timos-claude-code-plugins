@@ -47,7 +47,8 @@
 #       and carries strictly more state (#2920).
 #   clean-stop.zsh clear --repo-dir DIR --issue N
 #       Remove issue N's durable directory (a resumed run that opened its PR, or
-#       an unattended run starting fresh). Absent is not an error.
+#       an unattended run starting fresh). Absent is not an error. A chain's
+#       queue file, chain-queue.json (#2942), is kept: everything else goes.
 #
 # The marker (clean-stop/v1):
 #   {schema, issue, branch, work_dir, status_file, status, last_round, ceiling,
@@ -194,6 +195,15 @@ read)
 
 clear)
   [[ -e "$base" ]] || exit 0
-  rm -rf -- "$base" || { print -u2 -- "clean-stop: could not remove $base"; exit 1 }
+  # A human-started chain's queue (#2942) outlives every entry's own run, so
+  # clear keeps it; chain-queue.zsh clear deletes it once the chain is done.
+  if [[ -f "$base/chain-queue.json" ]]; then
+    local -a rest=("$base"/*(DN))
+    rest=(${rest:#$base/chain-queue.json})
+    (( ${#rest} == 0 )) || rm -rf -- "${rest[@]}" || {
+      print -u2 -- "clean-stop: could not clear $base"; exit 1 }
+  else
+    rm -rf -- "$base" || { print -u2 -- "clean-stop: could not remove $base"; exit 1 }
+  fi
   ;;
 esac

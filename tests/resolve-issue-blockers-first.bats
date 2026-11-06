@@ -109,6 +109,7 @@ after_span() {
 
 @test "AC1/AC8: each blocker merges before the next branches; it advances only under auto-merge or override=on" {
   contains "$(bf_step 3)" "\`done\` → wait for its PR to merge (step 4); the blocker is then cleared."
+  contains "$(bf_step 3)" "The chain queue's step 3, named in step 5, records that PR and marks the blocker \`done\`, as it marks an epic-kind blocker once the Epic flow closes its epic."
   s="$(bf_step 4)"
   contains "$s" "Merge each blocker before the next one branches."
   contains "$s" "In an Approver repo, armed auto-merge merges it on green."
@@ -135,7 +136,7 @@ after_span() {
 
 @test "step 5: the named issue's done, needs-refinement and stopped take the issue step's arms, never the merge wait or the stop" {
   s="$(bf_step 5)"
-  contains "$s" "The named issue's \`done\`, \`needs-refinement\` and \`stopped\` take the issue step's own arms, never step 4 or step 6: \`done\` reports the PR and ends the run with no merge wait, comment or label, \`needs-refinement\` dispatches #2940's chained refinement step on it, and \`stopped\` keeps that step's own ending."
+  contains "$s" "The named issue's \`done\`, \`needs-refinement\` and \`stopped\` take the issue step's own arms, never step 4 or step 6: \`done\` takes the chain queue's step 3 (\`reference/checkpoint.md\`), \`needs-refinement\` dispatches #2940's chained refinement step on it, and \`stopped\` keeps that step's own ending."
 }
 
 @test "a --resume run does not chain, so it keeps its session mode's arm" {

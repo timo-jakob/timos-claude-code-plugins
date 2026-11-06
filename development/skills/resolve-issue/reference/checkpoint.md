@@ -150,3 +150,82 @@ clear is the run's last step:
 ```
 
 Every other ending keeps the folder, so a later `--resume` can find it.
+
+## The chain queue in a human-started run (#2942)
+
+**Only the root of a human-started run keeps a queue.** It holds every pending
+issue of the run: the named issue's open blockers, the named issue, and every
+follow-up filed while building, through every generation. A pipeline-started
+run writes no queue file and keeps §7's `refine-issue --follow-up` call and its
+rule that a follow-up that parks never stops the run. The root keeps the queue
+with `<skill-base-dir>/scripts/chain-queue.zsh`, whose `--repo-dir` and
+`--issue` always name the **named** issue. Its file, `chain-queue.json`, lives
+in the named issue's durable base, the one `clean-stop.zsh dir` prints, and
+`clean-stop.zsh clear` keeps it, so an entry's own run never deletes it, nor
+does `checkpoint.zsh supersede` move it. An exit 2 is your own malformed call:
+fix it and re-run once. An exit 1 or 5 stops the run (step 5) and keeps the
+file; never re-add an entry under another kind.
+
+1. **Start or resume.** Test for the file in that base. **With no queue file**,
+   start one: `add --entry <N> --kind named`. **With one**, this run resumes
+   (step 7) and starts nothing new.
+2. **Queue what the run finds.** When blockers first (#2941) lists the named
+   issue's open blockers, `add` each one `--kind blocker --depth <its depth>`;
+   a blocker of a later entry is added `--before <that entry>`. When any step's
+   verdict lists `follow_ups`, an E3 child's included, `add` each one
+   `--kind follow-up --after <the entry that filed it>` with `--finding`: the
+   `finding` of its follow-up-origin/v1 comment (`follow-up-origin.zsh parse`),
+   or, with no parked-finding record, `{"file": "follow-up", "line": null,
+   "dimension": "follow-up", "title": <its title>}`. An E3 child is never an
+   entry: its follow-ups go `--after` the epic-kind entry it belongs to, a
+   named issue, blocker or follow-up that runs the Epic flow, a refinement
+   split's included, and its PR takes E3's own wait. There is no numeric cap.
+   `add`'s exit 3 refuses a follow-up whose identity matches one already
+   resolved in this run: that is a follow-up cycle, and it stops the run
+   (step 5).
+3. **Work the queue in order.** Take `next` and run its entry. A follow-up is
+   first refined in chained mode (#2939, #2940) by the chained refinement step,
+   then built by the issue step, through every generation. This replaces §7's
+   `refine-issue --follow-up` call in a human-started run. Each entry's PR
+   merges before the next entry branches off fresh main: record it with
+   `add --entry <I> --pr <P>` as soon as the step reports it, wait for it as
+   blockers first's step 4 waits, then `done --entry <I> --pr <P>`. An
+   epic-kind entry has no PR of its own: once the Epic flow closes its epic,
+   `done --entry <I>` without `--pr`; an Epic flow that ends with the epic still
+   open is a park (step 5). Take `next` once the entry is `done`. Where the
+   PR cannot advance by itself, stop (step 5) with `--pause` and the reason that
+   PR #P awaits a merge: the report lists that stop as a pause, not a failure.
+4. **Done.** `next`'s exit 4 means every queued issue is closed and the queue is
+   empty. The run is done: `chain-queue.zsh clear` deletes the queue file.
+5. **Stop at the first permanent failure.** The run stops at an escalation, CI
+   that will not go green, a `blockedBy` cycle, an open foreign blocker, a
+   follow-up cycle, or a park. A park is an entry whose own run ends without a
+   merged PR on a needs-refinement, needs-split or blocked terminal, #2940's
+   `chained refinement stopped:` outcome at §0b, §2 or E1b included, and an
+   epic-kind entry that ends with a child still parked. A finding the review
+   loop parks as a follow-up is not a park: step 2 queues it. The run never
+   skips ahead to independent work in the queue. Inside an epic-kind entry, E3
+   keeps #2940's rule and carries on with the children that do not depend on a
+   parked child, and then the entry stops the run.
+6. **Report every stop once.** A stop before the named issue's precheck returns
+   `PROCEED` is blockers first's step 6, unchanged: the `blockers first stopped:`
+   comment with `comment_md`, the `blocked` label, and the named issue's
+   `precheck-parked` outcome. Every later stop posts one comment on the named
+   issue, open or closed, whose body is `chain-queue.zsh report --stopped <I>
+   --reason <why>`, beginning `chain stopped:`, and prints the same text in the
+   run's report. It applies no label, because the stopping issue keeps what its
+   own run posted. Its `Merged in this run:` line lists the PRs recorded on
+   `done` entries; an epic-kind entry's child PRs are in its E3 report.
+   Every record keeps its own run's outcome, and no telemetry
+   outcome or field is added. The queue file is kept.
+7. **Resume from the queue.** A re-run on the named issue that finds the file
+   resumes with `next`, the entry that stopped the run. An entry that is now
+   closed is marked `done`. An entry whose recorded PR is still open is waited
+   on as in step 3, never rebuilt. Any other entry runs again.
+
+**One status line per transition.** Print one line when a refinement starts or
+ends, a split is filed, a build starts, a PR merges, a follow-up is queued, and
+the run stops or is done. Each line names the issue and the queue length, the
+entries not yet done. An intent or gap answer appears in full, with who gave
+it, the human or the refinement's threshold. Implementation decisions appear
+only as a count, with a pointer to the issue's *Decisions taken*.

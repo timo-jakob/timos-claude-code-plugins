@@ -72,6 +72,13 @@ each blocker gets its own PR, merged before the next one starts, and then the
 story is built. If a blocker cannot finish, the run stops and the story gets one
 comment that begins `blockers first stopped:` and the `blocked` label. You are
 asked only about a blocker the run cannot classify as an epic or a single issue.
+Every follow-up the build files joins the same run: it is refined, built and
+merged in turn, and so are its own follow-ups. The run prints one status line
+per step and ends when nothing is left in its queue. The first failure stops
+the whole run with one comment on the story that begins `chain stopped:` and
+lists the merged PRs and what is still queued; a PR that waits for your merge
+is reported as a pause. Run `/development:resolve-issue` on the story again to
+resume where it stopped.
 A maintenance-pipeline run still stops at those points, as it always did. Each
 issue the run works on gets its own telemetry record, whose `origin` is `human`
 or `pipeline`.
