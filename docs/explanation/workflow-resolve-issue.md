@@ -21,16 +21,15 @@ Nothing is branched or built until the story has passed three checks.
    and never starts the blocking issue on its own. A run you start clears the open blockers first, without asking, in
    either mode (#2941). It resolves them deepest-first, one PR each, merged before the next one branches, then
    re-checks the links and builds the issue. A cycle, an open blocker in another repository, or a blocker that cannot
-   finish stops the run: the issue gets one `blockers first stopped:` comment and the `blocked` label. The run then
-   keeps going through every follow-up the build files, each refined, built and merged in turn, until its queue is
-   empty (#2942); the first failure stops it with one `chain stopped:` comment, and a re-run resumes the queue.
+   finish stops the run: the issue gets one `blockers first stopped:` comment and the `blocked` label.
 3. **Step 0b — readiness gate.** The `story-readiness` agent judges whether the story is specified well enough to
    build: testable acceptance criteria, bounded scope, declared dependencies, and — for a story that touches an
    interface — a use case and test cases. On NEEDS_REFINEMENT the run labels the issue `needs-refinement`, posts the
    gate's questions as a comment and stops without branching; [refine-issue](workflow-refine-issue.md) is the way back.
    That stop is a pipeline run's. In a run you started, the skill refines the story in the same run instead: it
    dispatches a chained refinement, asks you only the questions the refinement cannot answer itself, and then builds
-   the story, or the children it was split into.
+   the story, or the children it was split into. A refinement that stops ends the run with one
+   `chained refinement stopped:` comment, and the issue keeps its label.
    On READY the gate's risk classification is carried forward to the PR and the Approver. The gate's verdict is
    stamped on the issue as a comment, and it is reused while the gate's inputs are unchanged: the title, the body,
    the issue's own *blocked by* links, its labels, and the gate's own instructions. A re-run over an unchanged story
@@ -64,7 +63,9 @@ Nothing is branched or built until the story has passed three checks.
    prints a `Decision taken (not asked)` line (#2903).
 9. **Approval and merge.** On an app repository the Approver bot reviews and approves; on a Claude-plugin repository a
    human does, unless the plugin Approver has been opted in for the session. The PR merges once it is approved and CI
-   is green.
+   is green. A run you started then keeps going through every follow-up the build files, each refined, built and
+   merged in turn, until its queue is empty (#2942); the first failure stops it with one `chain stopped:` comment, and
+   a re-run resumes the queue.
 10. **Step 7 — telemetry.** Every ending after step 0a — a PR, a stop, an escalation — writes exactly one record.
 
 ## The review loop {#resolve-the-review-loop}

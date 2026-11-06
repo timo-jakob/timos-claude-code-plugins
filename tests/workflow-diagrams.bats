@@ -155,7 +155,9 @@ tracked_diagrams() {
   contains "$gates" 'chain step: chained refinement'
   contains "$gates" 'REFINE -- split --> EPIC'
   contains "$gates" 'REFINE -- ready --> BUILD'
+  contains "$gates" 'REFINE -- stopped --> RSTOP'
   contains "$ship" 'BUILD -- "oversized,<br/>human-started" --> REFINE'
+  contains "$ship" 'BUILD -- "oversized,<br/>pipeline-started" --> NSPLIT'
   contains "$ship" 'chain step: follow-up chain'
   contains "$ship" 'Stop: chain stopped:'
   contains "$ship" 'Decision taken (not asked):<br/>refine parked follow-ups<br/>(pipeline-started run)'
@@ -173,4 +175,5 @@ tracked_diagrams() {
   contains "$section" 'The PR body'"'"'s `## Decisions taken` section records each decision the run took without asking (#2899).'
   contains "$section" 'A maintenance-pipeline run that parked follow-ups records there that it refines them without asking, then refines them as the run ends and prints a `Decision taken (not asked)` line (#2903).'
   contains "$section" '](diagrams/resolve-issue-ship.svg)'
+  contains "$section" 'A run you started then keeps going through every follow-up the build files'
 }

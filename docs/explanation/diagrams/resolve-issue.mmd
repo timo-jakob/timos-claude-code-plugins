@@ -13,6 +13,7 @@ flowchart TD
     BFIRST["chain step: blockers first<br/>each open blocker resolved<br/>and merged, deepest-first,<br/>without asking"]:::conductor
     BSTOP(["Stop: blockers first stopped:<br/>a cycle, a foreign blocker<br/>or one that cannot finish"]):::stop
     REFINE["chain step: chained refinement<br/>refine the story or split it,<br/>then resume"]:::conductor
+    RSTOP(["Stop: chained refinement stopped:<br/>the park's label kept"]):::stop
     BUILD(["Steps 1-6: build, review<br/>and ship (next diagram)"]):::conductor
 
     START -- epic --> EPIC
@@ -24,4 +25,5 @@ flowchart TD
     GATES -- "not READY,<br/>human-started" --> REFINE
     REFINE -- split --> EPIC
     REFINE -- ready --> BUILD
+    REFINE -- stopped --> RSTOP
     GATES -- yes --> BUILD

@@ -8,7 +8,8 @@ flowchart TD
 
     IN(["Unblocked and READY<br/>(previous diagram)"]):::conductor
     BUILD["Steps 1-3: branch, load profile,<br/>implement, test gate"]:::conductor
-    REFINE(["Oversized: chained refinement<br/>(human-started run)"]):::conductor
+    REFINE(["chained refinement<br/>(previous diagram)"]):::conductor
+    NSPLIT(["Stop: needs-split, no PR<br/>(pipeline-started run)"]):::stop
 
     subgraph LOOP["Step 3.5: review loop"]
         PANEL["Panel + full gate<br/>on one tree"]:::agent
@@ -27,6 +28,7 @@ flowchart TD
 
     IN --> BUILD --> PANEL --> BLOCK
     BUILD -- "oversized,<br/>human-started" --> REFINE
+    BUILD -- "oversized,<br/>pipeline-started" --> NSPLIT
     BLOCK -- yes --> FIX -- "next round" --> PANEL
     BLOCK -- "none, on a full sweep" --> SHIP
     FIX -- "budget spent" --> ESC
