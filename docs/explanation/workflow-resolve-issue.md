@@ -7,7 +7,7 @@ version bump, the review panel) comes from a *resolve-profile* the skill loads f
 
 The colour key for the diagrams is on [How the plugins work](how-the-plugins-work.md).
 
-![resolve-issue end to end: the gates, the build, the review loop, and the bot-authored PR](diagrams/resolve-issue.svg)
+![resolve-issue's gates: a pipeline-started run stops, a human-started run clears blockers and refines first](diagrams/resolve-issue.svg)
 
 ## The gates before any code {#resolve-the-gates-before-any-code}
 
@@ -21,22 +21,23 @@ Nothing is branched or built until the story has passed three checks.
    and never starts the blocking issue on its own. A run you start clears the open blockers first, without asking, in
    either mode (#2941). It resolves them deepest-first, one PR each, merged before the next one branches, then
    re-checks the links and builds the issue. A cycle, an open blocker in another repository, or a blocker that cannot
-   finish stops the run: the issue gets one `blockers first stopped:` comment and the `blocked` label. The run then
-   keeps going through every follow-up the build files, each refined, built and merged in turn, until its queue is
-   empty (#2942); the first failure stops it with one `chain stopped:` comment, and a re-run resumes the queue.
+   finish stops the run: the issue gets one `blockers first stopped:` comment and the `blocked` label.
 3. **Step 0b — readiness gate.** The `story-readiness` agent judges whether the story is specified well enough to
    build: testable acceptance criteria, bounded scope, declared dependencies, and — for a story that touches an
    interface — a use case and test cases. On NEEDS_REFINEMENT the run labels the issue `needs-refinement`, posts the
    gate's questions as a comment and stops without branching; [refine-issue](workflow-refine-issue.md) is the way back.
    That stop is a pipeline run's. In a run you started, the skill refines the story in the same run instead: it
    dispatches a chained refinement, asks you only the questions the refinement cannot answer itself, and then builds
-   the story, or the children it was split into.
+   the story, or the children it was split into. A refinement that stops ends the run with one
+   `chained refinement stopped:` comment, and the issue keeps its label.
    On READY the gate's risk classification is carried forward to the PR and the Approver. The gate's verdict is
    stamped on the issue as a comment, and it is reused while the gate's inputs are unchanged: the title, the body,
    the issue's own *blocked by* links, its labels, and the gate's own instructions. A re-run over an unchanged story
    spends no gate agent. Deleting the stamp comment forces a fresh gate.
 
 ## From branch to merge {#resolve-from-branch-to-merge}
+
+![resolve-issue from branch to merge: the review loop, the bot-authored PR and its Decisions taken, and the follow-up chain](diagrams/resolve-issue-ship.svg)
 
 1. **Step 1 — branch.** A branch named `<type>/<issue>-<slug>` is created off a freshly fetched `main`.
 2. **Step 1b — load the profile.** The skill detects the repo type and loads `development-<type>:resolve-profile`. The
@@ -56,10 +57,15 @@ Nothing is branched or built until the story has passed three checks.
    `plugin.json` and its marketplace entry.
 7. **Step 5 — commit.** A Conventional Commit that closes the issue, with pre-commit hooks run and never skipped.
 8. **Step 6 — open the PR as the bot.** The branch is rebased onto `main`, a Maintenance App token is minted, and the
-   bot pushes the branch, opens the PR with a review dossier in its body, and arms squash auto-merge.
+   bot pushes the branch, opens the PR with a review dossier in its body, and arms squash auto-merge. The PR body's
+   `## Decisions taken` section records each decision the run took without asking (#2899). A maintenance-pipeline run
+   that parked follow-ups records there that it refines them without asking, then refines them as the run ends and
+   prints a `Decision taken (not asked)` line (#2903).
 9. **Approval and merge.** On an app repository the Approver bot reviews and approves; on a Claude-plugin repository a
    human does, unless the plugin Approver has been opted in for the session. The PR merges once it is approved and CI
-   is green.
+   is green. A run you started then keeps going through every follow-up the build files, each refined, built and
+   merged in turn, until its queue is empty (#2942); the first failure stops it with one `chain stopped:` comment, and
+   a re-run resumes the queue.
 10. **Step 7 — telemetry.** Every ending after step 0a — a PR, a stop, an escalation — writes exactly one record.
 
 ## The review loop {#resolve-the-review-loop}

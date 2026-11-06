@@ -141,3 +141,44 @@ tracked_diagrams() {
   # the same selection the script makes, so the two cannot drift apart
   contains "$(cat "$BOOKLET")" "grep -E '^docs/explanation/(how-the-plugins-work|how-the-family-learns|workflow-[a-z0-9-]+)\\.md\$'"
 }
+
+@test "#3021 resolve-issue's diagrams draw both origins, the follow-up chain and the Decisions taken record" {
+  # One flow split across two diagrams on the same page, so each stays readable
+  # at page width; each label is pinned in the source that draws it.
+  local gates ship
+  gates="$(cat "$REPO_ROOT/docs/explanation/diagrams/resolve-issue.mmd")"
+  ship="$(cat "$REPO_ROOT/docs/explanation/diagrams/resolve-issue-ship.mmd")"
+  contains "$gates" 'Stop: blocked or needs-refinement<br/>(pipeline-started run)'
+  contains "$gates" 'GATES -- "no, pipeline-started" --> STOP'
+  contains "$gates" 'chain step: blockers first'
+  contains "$gates" 'Stop: blockers first stopped:'
+  contains "$gates" 'chain step: chained refinement'
+  contains "$gates" 'REFINE -- split --> EPIC'
+  contains "$gates" 'REFINE -- ready --> BUILD'
+  contains "$gates" 'REFINE -- stopped --> RSTOP'
+  contains "$ship" 'BUILD -- "oversized,<br/>human-started" --> REFINE'
+  contains "$ship" 'BUILD -- "oversized,<br/>pipeline-started" --> NSPLIT'
+  contains "$ship" 'chain step: follow-up chain'
+  contains "$ship" 'Stop: chain stopped:'
+  contains "$ship" 'Decision taken (not asked):<br/>refine parked follow-ups<br/>(pipeline-started run)'
+  contains "$ship" 'PR body: ## Decisions taken'
+  contains "$ship" 'RS09 -. "recorded in" .-> DECS'
+  # RS-06a, the fallback panel default, lives inside the review loop's rounds,
+  # which these diagrams leave out
+  lacks "$ship" 'fallback'
+  # the page shows the committed SVGs, so each must carry its source's new boxes
+  contains "$(cat "$REPO_ROOT/docs/explanation/diagrams/resolve-issue.svg")" '> chained</tspan>'
+  contains "$(cat "$REPO_ROOT/docs/explanation/diagrams/resolve-issue.svg")" '> blockers</tspan>'
+  contains "$(cat "$REPO_ROOT/docs/explanation/diagrams/resolve-issue-ship.svg")" '> Decisions</tspan>'
+  contains "$(cat "$REPO_ROOT/docs/explanation/diagrams/resolve-issue-ship.svg")" '> chain</tspan>'
+}
+
+@test "#3021 step 8 of the resolve-issue page states the Decisions taken record and the parked follow-up default" {
+  local page section
+  page="$REPO_ROOT/docs/explanation/workflow-resolve-issue.md"
+  section="$(tr '\n' ' ' < "$page" | tr -s ' ' | sed -n 's/.*## From branch to merge\(.*\)## The review loop.*/\1/p')"
+  contains "$section" 'The PR body'"'"'s `## Decisions taken` section records each decision the run took without asking (#2899).'
+  contains "$section" 'A maintenance-pipeline run that parked follow-ups records there that it refines them without asking, then refines them as the run ends and prints a `Decision taken (not asked)` line (#2903).'
+  contains "$section" '](diagrams/resolve-issue-ship.svg)'
+  contains "$section" 'A run you started then keeps going through every follow-up the build files'
+}
