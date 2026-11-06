@@ -19,11 +19,13 @@ flowchart TD
     DONE(["Label removed,<br/>before/after comment"]):::ok
     KEEP(["Label kept: loop again,<br/>an epic child in the next batch,<br/>or stop as deferred"]):::stop
     OUT(["Chained: ready outcome<br/>back to resolve-issue"]):::conductor
+    CSTOP(["Chained: stopped outcome<br/>back to resolve-issue"]):::stop
     SUM(["Epic: one summary comment<br/>ready, skipped, parked, failed"]):::ok
 
     IN --> SIZE
     SIZE -- "too big,<br/>children named" --> SPLIT
-    SIZE -- "too big,<br/>no children named" --> NOCH
+    SIZE -- "too big, no children<br/>named, not chained" --> NOCH
+    SIZE -- "too big, no children<br/>named, chained" --> CSTOP
     SIZE -- fits --> WHO
     WHO -- "all-auto: no question<br/>reached you" --> WB
     WHO -- "chained: relayed<br/>answers stand in" --> WB
@@ -37,6 +39,7 @@ flowchart TD
     WB --> REGATE
     REGATE -- yes --> DONE
     REGATE -- no --> KEEP
+    KEEP -- "chained:<br/>round cap" --> CSTOP
     DONE -- chained --> OUT
     DONE -- "epic child" --> SUM
     SKIP --> SUM

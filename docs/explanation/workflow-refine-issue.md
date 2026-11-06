@@ -32,10 +32,12 @@ confidence](diagrams/refine-issue.svg)
    - concrete recommendations;
    - a rewritten prose draft and a proposed `story-spec/v1` block;
    - which objections it now considers resolved.
-5. **Relay the questions.** A script splits the questions by confidence. Those at or above the auto-accept threshold
-   are answered with the agent's recommendation, and you see one line for each. The rest are put to you with their
-   recommended answer. A question's confidence is its lowest criterion score, and the threshold defaults to `1`, so by
-   default only answers the refiner scored `1` on every criterion are taken automatically — see
+5. **Relay the questions.** A script splits the questions by kind and confidence. An implementation question is
+   decided and recorded in the body's *Decisions taken* section, never asked. An intent or gap question at or above
+   the auto-accept threshold is answered with the agent's recommendation, and you see one line for each. The rest are
+   put to you with their recommended answer, a gap question with its proposed doc change. A question's confidence is
+   its lowest criterion score, and the threshold defaults to `1`, so by default only answers the refiner scored `1` on
+   every criterion are taken automatically — see
    [Let refine-issue answer confident questions](../how-to/let-refine-issue-answer-confident-questions.md).
 6. **Converge.** The loop repeats until every objection is resolved and no question is left. If it cannot get there
    yet — a decision belongs to someone else, the story should be split, or it should wait — you take a **typed parked

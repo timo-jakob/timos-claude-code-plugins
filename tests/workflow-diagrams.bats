@@ -204,7 +204,10 @@ tracked_diagrams() {
   # the size-check split is filed without asking only when it names its children
   contains "$wb" 'Split filed without asking:'
   contains "$wb" 'SIZE -- "too big,<br/>children named" --> SPLIT'
-  contains "$wb" 'SIZE -- "too big,<br/>no children named" --> NOCH'
+  contains "$wb" 'SIZE -- "too big, no children<br/>named, not chained" --> NOCH'
+  # a chained run never asks: no children named, or the round cap, stops it
+  contains "$wb" 'SIZE -- "too big, no children<br/>named, chained" --> CSTOP'
+  contains "$wb" 'KEEP -- "chained:<br/>round cap" --> CSTOP'
   # approval is conditional
   contains "$wb" 'WHO -- "all-auto: no question<br/>reached you" --> WB'
   contains "$wb" 'WHO -- "chained: relayed<br/>answers stand in" --> WB'
@@ -218,4 +221,7 @@ tracked_diagrams() {
   contains "$(cat "$REPO_ROOT/docs/explanation/diagrams/refine-issue-write-back.svg")" '> relayed</tspan>'
   contains "$(cat "$REPO_ROOT/docs/explanation/diagrams/refine-issue-write-back.svg")" '> buildable</tspan>'
   contains "$(cat "$REPO_ROOT/docs/explanation/workflow-refine-issue.md")" '](diagrams/refine-issue-write-back.svg)'
+  # step 5's prose splits the questions by kind, as the diagram does
+  contains "$(tr '\n' ' ' < "$REPO_ROOT/docs/explanation/workflow-refine-issue.md" | tr -s ' ')" \
+    "An implementation question is decided and recorded in the body's *Decisions taken* section, never asked."
 }
