@@ -96,7 +96,7 @@ section() {
   contains "$s" "\`deferred\`** (the typed parked exit below), never the \`split-recommended\`"
   contains "$s" "**skip Steps 2.5–6**"
   contains "$s" 'Set `STATE_OUTCOME="parked"`, `PARK_TYPE="split-recommended"`'
-  contains "$s" "still stops; **nothing was written**"
+  contains "$(printf '%s' "$s" | tr '\n' ' ' | tr -s ' ')" "still stops, or the split's \`blocked_by\` forms a cycle among the children or names an index outside the plan (the report's \`error\`); **nothing was written**"
   contains "$s" "Relay its stderr and offer the parked exit."
   contains "$s" "refiner's \`proposed_split\` into a plan file as \`children\`"
   # convergence routes through the size check before approval
@@ -121,13 +121,13 @@ section() {
   contains "$(tr '\n' ' ' < "$REFINE" | tr -s ' ')" 'A split that names its children is filed without asking, in every run, chained or direct (#2939), and only by `scripts/file-split-children.zsh`'
   contains "$s" '"<skill-base-dir>/scripts/file-split-children.zsh" --repo "$REPO" --parent <N> --plan <plan.json>'
   contains "$s" 'and `SIZE_PREFLIGHT`'"'"'s `children_filed` to the length of its `filed` list'
-  contains "$s" "Never re-run it — a re-run"
+  contains "$s" "Never re-run it when a \`filed\` entry is
+  \`linked: false\`: that child would be filed a second time."
   contains "$s" "- **Exit 0** — \`pass\` or \`skipped\`: keep its stdout as this sizing's verdict
   file, run the all-auto check (below), and present the draft for approval as
   above only if it is not all-auto."
   contains "$s" "an empty \`files\` array when no concrete path can be"
-  contains "$s" 'Record the run as for exit 0, with
-  `children_filed` the length of the report'"'"'s `filed` list'
+  contains "$f" 'Record the run as for exit 0, with `children_filed` the length of the last report'"'"'s `filed` list'
   grep -qF -- '- **Size every draft; never write back one that stops (#2589).**' "$REFINE"
   # the split's source is a field of issue-refiner's output contract
   grep -qF -- '- **`proposed_split`** (#2589) — `null`, unless an objection says the draft'"'"'s' \

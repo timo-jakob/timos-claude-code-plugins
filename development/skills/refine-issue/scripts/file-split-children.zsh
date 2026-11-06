@@ -17,36 +17,65 @@
 #      original. A failure here stops at once (exit 5) and reports the children
 #      already filed; the original's labels are left exactly as they were, so the
 #      story still reads `needs-refinement` and a human can finish or undo it.
-#   3. Only once every child is filed and attached: replace the original's
-#      `needs-refinement` with `epic` (and drop any `needs-split`, best-effort),
-#      then post the trail comment listing the
-#      children. Either failing is also exit 5, reported as such.
-# Nothing here is retried and nothing is undone — a partial result is reported,
-# never guessed at.
+#   3. Declare every child's prerequisites as native `blockedBy` edges (#2947),
+#      through add-blocked-by-edges.zsh: each `blocked_by` the plan lists, and
+#      each OPEN native blocker of the original copied onto every child whose
+#      `blocked_by` names no sibling. The children that start the split's order
+#      inherit the original's blockers; the rest reach them through their
+#      sibling. Every edge is tried; any that cannot be added is a partial
+#      result (exit 5) naming the edge, and the original's labels stay as they
+#      were.
+#   4. Only once every child is filed, attached and its edges added: replace the
+#      original's `needs-refinement` with `epic` (and drop any `needs-split`,
+#      best-effort), then post the trail comment listing the children and their
+#      edges. Either failing is also exit 5, reported as such.
+# Nothing here is undone — a partial result is reported, never guessed at.
+#
+# A re-run is safe once every filed child is attached: a plan child whose title
+# equals one of the original's native sub-issues is that child, reused rather
+# than filed again, and add-blocked-by-edges.zsh skips every edge that already
+# exists, so a re-run adds only what is missing. A child filed but never
+# attached (`linked: false`) is not found that way, and a re-run would file it
+# a second time.
+#
+# A `blocked_by` whose sibling indexes form a cycle, or name an index outside
+# the plan, is refused before any write: exit 1, nothing filed, the report's
+# `error` naming it.
 #
 # Plan shape — exactly one JSON object, at least two children:
 #   { "children": [
-#       { "title": "feat(x): …", "body": "…", "files": ["development/…", …] }, … ] }
+#       { "title": "feat(x): …", "body": "…", "files": ["development/…", …],
+#         "blocked_by": [0, "#52", "owner/repo#7"] }, … ] }
 # `files` is the child's declared inventory, judged exactly as size-check.zsh
-# judges any inventory; an empty array is skipped, never a stop.
+# judges any inventory; an empty array is skipped, never a stop. `blocked_by` is
+# optional (absent reads as `[]`): each item is the 0-based index of a sibling
+# child in this plan, or an issue reference `#N` / `owner/repo#N`.
 #
 # Output — one JSON object on stdout for exits 0, 1 and 5:
 #   { "parent": N,
-#     "filed":   [ { "index": 1, "issue": M, "linked": true }, … ],
+#     "filed":   [ { "index": 1, "issue": M, "linked": true, "reused": bool }, … ],
 #     "stopped": [ { "index": 2, "verdict": { …size-check verdict… } }, … ],
+#     "edges":   [ { "issue": M, "ref": "#K" | "owner/repo#K",
+#                    "status": "added" | "present" | "refused" | "failed",
+#                    "detail": null | "why" }, … ],
 #     "relabelled": bool, "commented": bool,
 #     "error": null | "what failed" }
-# `index` is the child's 1-based position in the plan.
+# `index` is the child's 1-based position in the plan (a `blocked_by` sibling
+# index is 0-based).
 #
-# gh is reached through $GH_BIN (default `gh`), the test seam.
+# gh is reached through $GH_BIN (default `gh`), the test seam; the edge writer
+# through $EDGES_BIN (default add-blocked-by-edges.zsh beside this script).
 #
 # Exit codes:
 #   0 — every child filed and attached, the original relabelled, the trail posted.
-#   1 — at least one child's inventory stops the size check; nothing was written.
+#   1 — at least one child's inventory stops the size check, or `blocked_by`
+#       forms a sibling cycle or names an index outside the plan; nothing was
+#       written.
 #   2 — usage error (unknown/dangling flag, a missing or unreadable plan, a
 #       --parent that is not a positive integer). Nothing on stdout.
 #   3 — runtime error before any write: a malformed plan, a size check that
-#       errored, jq missing. Nothing on stdout.
+#       errored, the original's sub-issues unreadable, jq missing. Nothing on
+#       stdout.
 #   5 — partial: writes started and one failed; the report names what landed.
 #
 # Usage:
@@ -58,6 +87,7 @@ emulate -L zsh
 set -uo pipefail
 
 local -r size_check="${0:A:h}/size-check.zsh"
+local edges_bin="${EDGES_BIN:-${0:A:h}/add-blocked-by-edges.zsh}"
 local gh_bin="${GH_BIN:-gh}"
 
 local repo="" parent="" plan="" manifest=""
@@ -99,6 +129,13 @@ problem="$(jq -rs '
       then "every child needs a non-empty title"
     elif any(.children[]; (.body | type) != "string") then "every child needs a body string"
     elif any(.children[]; (.files | type) != "array") then "every child needs a files array"
+    elif any(.children[]; has("blocked_by") and (.blocked_by | type) != "array")
+      then "blocked_by must be an array"
+    elif any(.children[].blocked_by[]?;
+             if type == "number" then . != floor
+             elif type == "string" then test("^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#[1-9][0-9]*$") | not
+             else true end)
+      then "every blocked_by item must be a sibling index or #N / owner/repo#N"
     else "" end
   end' "$plan" 2>/dev/null)" \
   || { print -u2 "file-split-children.zsh: the plan is not valid JSON"; exit 3; }
@@ -111,8 +148,41 @@ trap 'rm -rf "$work"' EXIT
 local -i count i
 count="$(jq '.children | length' "$plan")"
 
+local -a filed=() stopped=() edges=()
+_report() {  # $1 relabelled, $2 commented, $3 error ("" for none)
+  jq -nc --argjson parent "$parent" \
+    --argjson filed "[${(j:,:)filed}]" --argjson stopped "[${(j:,:)stopped}]" \
+    --argjson edges "[${(j:,:)edges}]" \
+    --argjson relabelled "$1" --argjson commented "$2" --arg error "$3" \
+    '{parent: $parent, filed: $filed, stopped: $stopped, edges: $edges,
+      relabelled: $relabelled, commented: $commented,
+      error: (if $error == "" then null else $error end)}'
+}
+
+# --- 0. the sibling order must be satisfiable -------------------------------
+local refusal
+refusal="$(jq -r '
+  . as $p | ($p.children | length) as $n
+  | def succ($i): [$p.children[$i].blocked_by[]? | numbers];
+    def reach($s): $s | until(([.[], (.[] | succ(.)[])] | unique) == .;
+                               [.[], (.[] | succ(.)[])] | unique);
+    ([range(0; $n) as $i | succ($i)[] | select(. < 0 or . >= $n)] | unique) as $bad
+  | if ($bad | length) > 0 then
+      "blocked_by names an index outside the plan: \($bad | map(tostring) | join(", "))"
+    else
+      [range(0; $n) as $i | select(reach(succ($i) | unique) | index([$i])) | $i] as $cyc
+      | if ($cyc | length) > 0 then
+          "blocked_by forms a cycle among the children at indexes \($cyc | map(tostring) | join(", "))"
+        else "" end
+    end' "$plan")" \
+  || { print -u2 "file-split-children.zsh: the blocked_by order could not be checked"; exit 3; }
+if [[ -n "$refusal" ]]; then
+  _report false false "$refusal"
+  exit 1
+fi
+
 # --- 1. size-check every child before any write ----------------------------
-local -a stopped=() args=()
+local -a args=()
 [[ -z "$manifest" ]] || args=(--manifest "$manifest")
 local verdict
 local -i rc
@@ -127,22 +197,24 @@ for (( i = 1; i <= count; i++ )); do
   esac
 done
 
-local -a filed=()
-_report() {  # $1 relabelled, $2 commented, $3 error ("" for none)
-  jq -nc --argjson parent "$parent" \
-    --argjson filed "[${(j:,:)filed}]" --argjson stopped "[${(j:,:)stopped}]" \
-    --argjson relabelled "$1" --argjson commented "$2" --arg error "$3" \
-    '{parent: $parent, filed: $filed, stopped: $stopped,
-      relabelled: $relabelled, commented: $commented,
-      error: (if $error == "" then null else $error end)}'
-}
-
 if (( ${#stopped} > 0 )); then
   _report false false ""
   exit 1
 fi
 
 # --- 2. file and attach each child ------------------------------------------
+# The original's current sub-issues, `<number>\t<title>` a line: a plan child
+# whose title is already one of them was filed by an earlier run and is reused.
+local subs
+subs="$("$gh_bin" api --paginate "repos/$repo/issues/$parent/sub_issues" \
+          --jq '.[] | "\(.number)\t\(.title)"' 2>/dev/null)" \
+  || { print -u2 "file-split-children.zsh: reading the sub-issues of #$parent failed"; exit 3; }
+local -A sub_by_title=()
+local line
+for line in ${(f)subs}; do
+  [[ "$line" == <1->$'\t'* ]] && sub_by_title[${line#*$'\t'}]="${line%%$'\t'*}"
+done
+
 "$gh_bin" label create needs-refinement --repo "$repo" --color d4c5f9 \
   --description "Sent back by the readiness gate — needs clarification before implementation" \
   >/dev/null 2>&1 || true
@@ -151,8 +223,14 @@ fi
 
 local title url num out id
 local -a ids
+local -a nums=()
 for (( i = 1; i <= count; i++ )); do
   title="$(jq -r --argjson i "$i" '.children[$i - 1].title' "$plan")"
+  if [[ -n "${sub_by_title[$title]:-}" ]]; then
+    nums[i]="${sub_by_title[$title]}"
+    filed+=("$(jq -nc --argjson i "$i" --argjson n "$nums[i]" '{index: $i, issue: $n, linked: true, reused: true}')")
+    continue
+  fi
   jq -r --argjson i "$i" --argjson p "$parent" \
     '.children[$i - 1].body + "\n\nSplit from #\($p)."' "$plan" > "$work/body-$i.md"
   if ! url="$("$gh_bin" issue create --repo "$repo" --title "$title" \
@@ -167,21 +245,61 @@ for (( i = 1; i <= count; i++ )); do
   fi
   # the issue exists now, linked or not — report it either way
   if ! out="$("$gh_bin" api "repos/$repo/issues/$num" --jq .id 2>&1)"; then
-    filed+=("$(jq -nc --argjson i "$i" --argjson n "$num" '{index: $i, issue: $n, linked: false}')")
+    filed+=("$(jq -nc --argjson i "$i" --argjson n "$num" '{index: $i, issue: $n, linked: false, reused: false}')")
     _report false false "resolving the id of #$num failed: ${out//[^[:print:]]/?}"
     exit 5
   fi
   ids=( ${(M)${(f)out}:#<->} )
   if (( ${#ids} != 1 )) || ! "$gh_bin" api -X POST "repos/$repo/issues/$parent/sub_issues" \
         -F sub_issue_id="$ids[1]" >/dev/null 2>&1; then
-    filed+=("$(jq -nc --argjson i "$i" --argjson n "$num" '{index: $i, issue: $n, linked: false}')")
+    filed+=("$(jq -nc --argjson i "$i" --argjson n "$num" '{index: $i, issue: $n, linked: false, reused: false}')")
     _report false false "attaching #$num as a sub-issue of #$parent failed"
     exit 5
   fi
-  filed+=("$(jq -nc --argjson i "$i" --argjson n "$num" '{index: $i, issue: $n, linked: true}')")
+  nums[i]="$num"
+  filed+=("$(jq -nc --argjson i "$i" --argjson n "$num" '{index: $i, issue: $n, linked: true, reused: false}')")
 done
 
-# --- 3. relabel the original, then post the trail ---------------------------
+# --- 3. declare every child's prerequisites as native blockedBy edges -------
+local parent_blockers
+if ! parent_blockers="$("$gh_bin" api --paginate "repos/$repo/issues/$parent/dependencies/blocked_by" \
+        --jq '.[] | select(.state == "open")
+              | ((.repository_url | sub("^.*/repos/"; "")) + "#" + (.number | tostring))' 2>&1)"; then
+  _report false false "reading the open blockers of #$parent failed: ${parent_blockers//[^[:print:]]/?}"
+  exit 5
+fi
+local -a inherited=( ${(f)parent_blockers} )
+local siblings report
+local -i erc
+local -a failed_edges=()
+for (( i = 1; i <= count; i++ )); do
+  # sibling indexes -> "#<filed number>"; references kept as they are
+  jq -c --argjson i "$i" --argjson nums "[${(j:,:)nums}]" --argjson inh "$(jq -nc '$ARGS.positional' --args "${inherited[@]}")" '
+    (.children[$i - 1].blocked_by // []) as $b
+    | [$b[] | if type == "number" then "#\($nums[.])" else . end]
+      + (if any($b[]; type == "number") then [] else $inh end)' "$plan" > "$work/refs-$i.json"
+  report="$(GH_BIN="$gh_bin" zsh "$edges_bin" --repo "$repo" --issue "$nums[i]" \
+              --refs "$work/refs-$i.json" --no-cycle-check 2>"$work/edges-err-$i")"
+  erc=$?
+  if [[ -n "$report" ]] && jq -e '.edges | type == "array"' <<< "$report" >/dev/null 2>&1; then
+    edges+=( ${(f)"$(jq -c --argjson n "$nums[i]" '.edges[] | {issue: $n} + .' <<< "$report")"} )
+  fi
+  if (( erc != 0 )); then
+    if [[ -n "$report" ]]; then
+      failed_edges+=( ${(f)"$(jq -r --argjson n "$nums[i]" \
+        '.edges[] | select(.status != "added" and .status != "present")
+         | "#\($n) blockedBy \(.ref) (\(.status): \(.detail // "no detail"))"' <<< "$report" 2>/dev/null)"} )
+    else
+      failed_edges+=("the edges of #$nums[i] (exit $erc: $(tr -cd '[:print:]' < "$work/edges-err-$i"))")
+    fi
+  fi
+done
+if (( ${#failed_edges} > 0 )); then
+  _report false false "adding blockedBy edges failed: ${(j:; :)failed_edges}"
+  exit 5
+fi
+
+# --- 4. relabel the original, then post the trail ---------------------------
 if ! "$gh_bin" issue edit "$parent" --repo "$repo" \
       --remove-label needs-refinement --add-label epic >/dev/null 2>&1; then
   _report false false "relabelling #$parent failed"
@@ -195,7 +313,8 @@ fi
   print -r -- "as one change, so the story was split into $count child stories, filed as native sub-issues:"
   print
   for (( i = 1; i <= count; i++ )); do
-    print -r -- "- #$(jq -r --argjson i "$i" '.[] | select(.index == $i) | .issue' <<< "[${(j:,:)filed}]") — $(jq -r --argjson i "$i" '.children[$i - 1].title' "$plan")"
+    print -r -- "- #$nums[i] — $(jq -r --argjson i "$i" '.children[$i - 1].title' "$plan")$(jq -r --argjson n "$nums[i]" \
+      '[.[] | select(.issue == $n) | .ref] | if length > 0 then " (blocked by \(join(", ")))" else "" end' <<< "[${(j:,:)edges}]")"
   done
   print
   print -r -- "Each child carries \`needs-refinement\`; this issue is now an \`epic\`."

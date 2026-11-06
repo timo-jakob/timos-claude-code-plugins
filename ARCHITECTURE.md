@@ -7610,6 +7610,25 @@ nothing can enforce it, and it drifts. So the contract is:
   dependency precheck (#585), the epic-as-dependency recursion (#587) — reads
   through `development/skills/resolve-issue/scripts/read-dependencies.zsh`, so
   traversal, classification, and cycle semantics cannot drift between them.
+- **Refinement and splitting declare prerequisites natively (#2947).** Every
+  prerequisite `refine-issue` finds — named in the prose, or raised by the
+  gate as a prose-only dependency — and every order a split states between its
+  children becomes a native edge, never prose alone, so the re-gate passes
+  check 3 with no manual `gh api` call. The refiner returns them as
+  `proposed_blocked_by` (a single story) and `proposed_split[].blocked_by` (a
+  sibling's 0-based index, or `#N` / `owner/repo#N`). After Step 3's
+  write-back, `development/skills/refine-issue/scripts/add-blocked-by-edges.zsh`
+  adds the approved edges: idempotent, it skips an edge that exists and
+  refuses one that would close a cycle, checked through the shared reader.
+  `file-split-children.zsh` refuses a sibling cycle or an out-of-plan index
+  before any write; after filing every child it adds each child's edges, and
+  copies each **open** blocker of the original onto every child whose
+  `blocked_by` names no sibling — the children that start the split's order
+  inherit them, the rest reach them through their sibling. An edge that cannot
+  be added is reported, never dropped. Only stated prerequisites are declared:
+  no edge is inferred (file overlap stays E2's to serialise), and refinement
+  never removes one. The unattended follow-up mode and a chained refinement add
+  the same edges with no prompt, under their own approval rules.
 
 The helper (`read-dependencies.zsh --repo OWNER/NAME --issue N`) emits one JSON
 object: the issue's **transitive** open blockers (`blocked`, `open_blockers`),

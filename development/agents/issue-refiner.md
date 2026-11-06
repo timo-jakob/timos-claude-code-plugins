@@ -528,6 +528,7 @@ Emit exactly one fenced `json` block and no other prose. Shape:
     { "objection": "The acceptance criterion 'fast' has no measurable target.", "resolved": false, "note": "still awaiting the p95 number" }
   ],
   "expected_docs_pages": ["docs/how-to/use-the-rest-api.md"],
+  "proposed_blocked_by": ["#412"],
   "proposed_split": null
 }
 ```
@@ -701,11 +702,31 @@ Rules for the payload:
   refactor, library-internal) and whenever `proposed_story_spec` is still
   `null` — this field is **visibility, not enforcement**, and never blocks
   convergence.
+- **`proposed_blocked_by`** (#2947) — the issue references (`#N` or
+  `owner/repo#N`) of **every prerequisite the prose names as one**: an issue
+  the story must wait for, whether the current body, a gate objection
+  ("declare #M as a blocked-by relationship") or the human's reply names it.
+  Leave out a reference the prose marks as context only (`for context, see
+  #M`, a parent or a sibling it merely cites), and never infer a prerequisite
+  the prose does not state — a shared file is not one. List an edge the issue
+  already has too: the conductor's script skips it. `[]` when there is none.
+  This is what turns a prose-only dependency into a native `blockedBy` edge
+  (ARCHITECTURE.md, *Issue-dependency model*): the conductor shows it with the
+  draft and adds each edge after the write-back, so the prose naming a
+  prerequisite and this list agree, and `proposed_story_spec` still carries no
+  `dependencies` field.
 - **`proposed_split`** (#2589) — `null`, unless an objection says the draft's
   declared inventory stops the size check. Then it is the split you propose:
-  `[{ "title", "body", "files" }, …]`, two or more child stories, each `body` a
-  bounded story's prose and each `files` that child's own declared inventory —
-  every repo-relative path the child will touch, never empty.
+  `[{ "title", "body", "files", "blocked_by" }, …]`, two or more child stories,
+  each `body` a bounded story's prose and each `files` that child's own
+  declared inventory — every repo-relative path the child will touch, never
+  empty. **`blocked_by`** (#2947) lists the child's prerequisites, each either
+  the **0-based index** of a sibling child in this array or an issue reference
+  (`#N` / `owner/repo#N`): fill it from the order the split states ("B after
+  A" puts A's index in B's list) and from the child's own prerequisites, `[]`
+  when it has none. The conductor's script copies the original's open blockers
+  onto every child whose list names no sibling, so do not repeat them. Never
+  make the sibling order cyclic.
 - **Never write to GitHub, never fabricate evidence.** If the repo has no
   OpenAPI/tests/persona to mine, say so in a recommendation and draft from the
   prose alone — a grounded "I couldn't find X" beats an invented test case.
