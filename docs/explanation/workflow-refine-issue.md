@@ -10,8 +10,8 @@ chained inside a resolve-issue run. And **nothing is
 written by a bot** — the issue edit and the comments go out under your own `gh` login, not through a PR. The colour
 key for the diagrams is on [How the plugins work](how-the-plugins-work.md).
 
-![refine-issue end to end: diagnose, loop with the refiner until you approve a rewrite, write it back and
-re-gate](diagrams/refine-issue.svg)
+![refine-issue's refinement loop: three entries, and each question decided, answered or asked by its kind and
+confidence](diagrams/refine-issue.svg)
 
 ## Diagnose and converge {#refine-diagnose-and-converge}
 
@@ -60,6 +60,12 @@ re-gate](diagrams/refine-issue.svg)
    you, with its confidence, its weakest criterion and the threshold. If the readiness gate rejects two such rewrites,
    the next draft waits for your approval. A refinement resumed from a parked comment always waits for it too, since
    its earlier questions already reached you.
+
+The second diagram picks up the converged draft: the size check and its split, who approves the rewrite, and the
+write-back and re-gate that follow.
+
+![refine-issue from converged draft to re-gate: the size check, the approval an all-auto or chained run skips, and an
+epic's batch approval](diagrams/refine-issue-write-back.svg)
 
 ### What one refinement turn looks like {#refine-what-one-refinement-turn-looks-like}
 
