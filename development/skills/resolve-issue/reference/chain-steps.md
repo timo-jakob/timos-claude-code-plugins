@@ -198,8 +198,9 @@ How the root handles each, once it has queued the verdict's `follow_ups` in the
 chain queue (#2942), which replaces §7's `refine-issue --follow-up` call in a
 human-started run:
 
-- **`done`** → report the PR. In an epic, continue E3, and take the queue's next
-  entry only once the Epic flow ends; otherwise take it now.
+- **`done`** → report the PR. In an epic, continue E3, and mark the epic-kind
+  entry `done` only once the Epic flow ends; otherwise record the PR, wait for
+  its merge and mark the entry `done` (queue step 3). Then take `next`.
 - **`needs-refinement`** → dispatch *The chained refinement step (#2940)* on
   the same issue.
 - **`blocked`** → on the named issue's step, or a blocker's, the root runs

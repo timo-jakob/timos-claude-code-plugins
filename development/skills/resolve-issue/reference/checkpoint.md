@@ -178,8 +178,8 @@ file; never re-add an entry under another kind.
    or, with no parked-finding record, `{"file": "follow-up", "line": null,
    "dimension": "follow-up", "title": <its title>}`. An E3 child is never an
    entry: its follow-ups go `--after` the epic-kind entry it belongs to, a
-   named issue or blocker that runs the Epic flow, and its PR takes E3's own
-   wait. There is no numeric cap.
+   named issue, blocker or follow-up that runs the Epic flow, a refinement
+   split's included, and its PR takes E3's own wait. There is no numeric cap.
    `add`'s exit 3 refuses a follow-up whose identity matches one already
    resolved in this run: that is a follow-up cycle, and it stops the run
    (step 5).
@@ -189,7 +189,10 @@ file; never re-add an entry under another kind.
    `refine-issue --follow-up` call in a human-started run. Each entry's PR
    merges before the next entry branches off fresh main: record it with
    `add --entry <I> --pr <P>` as soon as the step reports it, wait for it as
-   blockers first's step 4 waits, then `done --entry <I> --pr <P>`. Where the
+   blockers first's step 4 waits, then `done --entry <I> --pr <P>`. An
+   epic-kind entry has no PR of its own: once the Epic flow closes its epic,
+   `done --entry <I>` without `--pr`; an Epic flow that ends with the epic still
+   open is a park (step 5). Where the
    PR cannot advance by itself, stop (step 5) with `--pause` and the reason that
    PR #P awaits a merge: the report lists that stop as a pause, not a failure.
 4. **Done.** `next`'s exit 4 means every queued issue is closed and the queue is

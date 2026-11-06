@@ -49,6 +49,7 @@ cq_step() {
   contains "$t" "A pipeline-started run writes no queue file and keeps §7's \`refine-issue --follow-up\` call and its rule that a follow-up that parks never stops the run."
   contains "$t" "\`clean-stop.zsh clear\` keeps it, so an entry's own run never deletes it"
   contains "$t" "whose \`--repo-dir\` and \`--issue\` always name the **named** issue."
+  contains "$t" "An exit 1 or 5 stops the run (step 5) and keeps the file; never re-add an entry under another kind."
 }
 
 @test "AC10: SKILL.md §7 limits the never-stops rule to a pipeline-started run" {
@@ -86,6 +87,20 @@ cq_step() {
   contains "$s" "Where the PR cannot advance by itself, stop (step 5) with \`--pause\` and the reason that PR #P awaits a merge: the report lists that stop as a pause, not a failure."
 }
 
+@test "AC3: an epic-kind entry, a follow-up or split included, is marked done without a PR once its epic closes" {
+  contains "$(cq_step 2)" "the epic-kind entry it belongs to, a named issue, blocker or follow-up that runs the Epic flow, a refinement split's included, and its PR takes E3's own wait."
+  s="$(cq_step 3)"
+  contains "$s" "An epic-kind entry has no PR of its own: once the Epic flow closes its epic, \`done --entry <I>\` without \`--pr\`; an Epic flow that ends with the epic still open is a park (step 5)."
+}
+
+@test "AC3: chain-steps' arms route the queue: done follows queue step 3, blocked re-queues, ready starts a follow-up at §0a" {
+  t="$(flat < "$STEPS")"
+  contains "$t" "**\`done\`** → report the PR. In an epic, continue E3, and mark the epic-kind entry \`done\` only once the Epic flow ends; otherwise record the PR, wait for its merge and mark the entry \`done\` (queue step 3). Then take \`next\`."
+  contains "$t" "On a follow-up's step, the root adds each open local blocker \`--before\` the follow-up, deepest first, and takes \`next\`; the re-run follow-up's §0a clears its label."
+  contains "$t" "A cycle or an open foreign blocker parks it (queue step 5)."
+  contains "$t" "A follow-up entry, whose step never passed §0a, gets \`start_at: \"0a\"\`."
+}
+
 @test "AC4: the run is done when the queue is empty, and clear deletes the queue file" {
   s="$(cq_step 4)"
   contains "$s" "\`next\`'s exit 4 means every queued issue is closed and the queue is empty."
@@ -114,6 +129,7 @@ cq_step() {
   contains "$(cq_step 1)" "**With no queue file**, start one: \`add --entry <N> --kind named\`."
   contains "$(cq_step 1)" "**With one**, this run resumes (step 7) and starts nothing new."
   contains "$(cq_step 3)" "Take \`next\` and run its entry."
+  contains "$(flat < "$SKILL")" "If \`state\` is not \`OPEN\`, stop — it's already handled — unless a human-started run kept a chain queue (#2942)."
   s="$(cq_step 7)"
   contains "$s" "A re-run on the named issue that finds the file resumes with \`next\`, the entry that stopped the run."
   contains "$s" "An entry that is now closed is marked \`done\`."
