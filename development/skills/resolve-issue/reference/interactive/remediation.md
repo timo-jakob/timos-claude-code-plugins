@@ -241,3 +241,12 @@ continues once the PR reads `MERGED`, not merely green. Wherever §6 ends on its
 human-only stop, that is the span's human-only wait, and the report names the
 verdict §6 named. On `override=off`, or a helper failure (its diagnostic
 relayed), the span's human-only wait is unchanged.
+
+**A human-started run never puts this offer (#2941).** In a run whose origin is
+`human` (§0a), whatever its session mode, a shape (i) rejection of the named
+issue takes option 1 above without asking, and its root clears the chain by the
+blockers-first procedure. A `--resume` run does not chain, so it keeps the
+offer. The span is frozen, so the exception is stated here.
+A pipeline-started run is unchanged: it posts `comment_md`, applies the
+`blocked` label and stops, as #583 requires:
+see `reference/interactive/blockers-first.md` § Blockers first in a human-started run (#2941)

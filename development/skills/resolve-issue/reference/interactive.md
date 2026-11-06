@@ -8,12 +8,15 @@ Whether a human is present is §0a's determination, read from
 takes the autonomous arm and never prompts.
 
 Both procedures it carries run only when a human invoked the skill and is
-present; an autonomous run takes neither. It is split into shards under
+present; an autonomous run takes neither, except blockers first, which every
+human-started run takes (#2941). It is split into shards under
 `reference/interactive/`, each at most 20,000 bytes (#2058). Read order:
 
 1. `reference/interactive/remediation.md` — `## Interactive remediation`: the
    §0a offer to clear a shape (i) blockage, and the #1226 note that makes each
    single-issue rung its own telemetry run.
+2. `reference/interactive/blockers-first.md` — `## Blockers first`: the root's
+   procedure that replaces the offer in a human-started run (#2941).
 
 Then, for the interactive extension, in this order:
 

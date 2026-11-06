@@ -95,7 +95,7 @@ resolve_issue_files() {
   # #2058 split interactive.md the same way, into reference/interactive/. Its
   # roster, in that index's read order, under the same discipline.
   local -a interactive_shards
-  interactive_shards=(remediation.md extension.md extension-grant.md
+  interactive_shards=(remediation.md blockers-first.md extension.md extension-grant.md
     extension-ceiling.md)
 
   for f in "$base"/reference/*.md; do

@@ -1,7 +1,7 @@
 # Run resolve-issue unattended
 
-`/development:resolve-issue` asks you before it takes some decisions: whether to
-clear a blocker first, whether to grant the review loop more rounds, which waived suggestions to
+`/development:resolve-issue` asks you before it takes some decisions: whether a
+resumed run clears a blocker first, whether to grant the review loop more rounds, which waived suggestions to
 promote. It decides whether you are there to ask by inference. When you invoke
 the skill yourself, it assumes you are present.
 
@@ -49,9 +49,10 @@ This section covers a run that continues in your own session: one you resume
 with `--resume`. A run you start fresh takes the step model in the next section
 instead. Every branch of a single-issue run that would ask you follows the setting:
 `attended` asks, and `unattended` takes the arm the skill already takes when
-nobody is present. For example, when the story is blocked by an open
+nobody is present. For example, when a resumed story is blocked by an open
 dependency, `attended` offers to resolve the blocker first, and `unattended`
-comments on the story and adds the `blocked` label instead. The same holds for
+comments on the story and adds the `blocked` label instead: a resumed run does
+not clear blockers by itself, as a run you start fresh does. The same holds for
 the extra review rounds after an escalation,
 the options for a review that did not apply, and suggestion promotion. The
 run's telemetry
@@ -66,6 +67,11 @@ each refinement and each epic child. Such a run does not stop when a story is
 unready or too large. It refines the story in the same run, splits it if
 needed, and carries on. Only a question the refinement cannot answer for itself
 reaches you. The steps never ask you anything, whatever the setting says.
+A run you start also clears the story's open blockers first, without asking:
+each blocker gets its own PR, merged before the next one starts, and then the
+story is built. If a blocker cannot finish, the run stops and the story gets one
+comment that begins `blockers first stopped:` and the `blocked` label. You are
+asked only about a blocker the run cannot classify as an epic or a single issue.
 A maintenance-pipeline run still stops at those points, as it always did. Each
 issue the run works on gets its own telemetry record, whose `origin` is `human`
 or `pipeline`.

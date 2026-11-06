@@ -59,12 +59,13 @@ which a reader that does not read them ignores:
 
 `start_at` is `"0a"` for a first run, a leaf refined `ready` at E1b included.
 It is `"1"` only for the issue step re-dispatched after a refinement's `ready`
-on an issue whose own step already passed §0a: the single-issue entry and the
-E3 child. That step skips §0a and §0b, carries `risk` from the
+on an issue whose own step already passed §0a: the single-issue entry, the
+E3 child and a blocker (#2941). That step skips §0a and §0b, carries `risk` from the
 `ready` verdict, and records `dependency_precheck: PROCEED` and
 `gate_verdict: READY`. It never runs a second gate. A step whose handoff `issue`
 differs from its `chained_from` is an E3 child's run, which §2 parks by
-terminal (c). `after` is `null`, or, for a child of E3's sequential chain, the
+terminal (c). A blocker step's `chained_from` is the blocker itself
+(#2941). `after` is `null`, or, for a child of E3's sequential chain, the
 merge commit of the child before it (the PR's `mergeCommit.oid`), which the step
 passes to step 1's branch script as `--after`. A refinement step's handoff is the
 plain step-handoff/v1 object plus `"kind": "refinement"`.
@@ -165,6 +166,8 @@ branch keyed on it, the escalation grant and the clean stop included: record
 session_mode unattended, with the line's source, or inferred when the line says
 attended. But move any kept state aside without --resume, deleting nothing, as
 an attended run does.
+When this brief names BLOCKERS_FIRST=1, a §0a rejection posts no comment and
+applies no label: write verdict blocked and end, since the root posts (#2941).
 Never ask the human anything, never dispatch a step, and never launch a
 headless claude. Before you end your turn, write <scratch_dir>/step-<N>-verdict.json
 (step-verdict/v1, ARCHITECTURE.md *Step verdict contract*), listing every
@@ -193,11 +196,13 @@ How the root handles each:
 - **`done`** → report the PR. In an epic, continue E3.
 - **`needs-refinement`** → dispatch *The chained refinement step (#2940)* on
   the same issue.
-- **`blocked`** → until #2941 lands, the root handles it as §0a's autonomous
-  arm handles a rejection: the step already posted the comment and the label,
-  so the root reports the blockers and stops, offering no remediation. In an
-  epic, the root parks the child as E3 parks a dependency rejection and
-  continues with the children that don't depend on it.
+- **`blocked`** → on the named issue's step, or a blocker's, the root runs
+  the blockers-first procedure. The root puts `BLOCKERS_FIRST=1` in the brief
+  of the named issue's first step and of every blocker step:
+  see `reference/interactive/blockers-first.md` § Blockers first in a human-started run (#2941)
+  An E3 child's brief never names that line, so the child posted the comment
+  and the label: the root parks the child as E3 parks a dependency rejection
+  and continues with the children that don't depend on it.
 - **`stopped`** → report the reason and stop. In an epic, triage the child by
   its `cause`, as E3 triages that ending, and count it in the bucket
   `reference/epic-telemetry.md` step 3 names:

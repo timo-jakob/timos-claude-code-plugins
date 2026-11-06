@@ -54,7 +54,7 @@ setup() {
     step-7-terminal.md step-8-status-files.md)
   # #2058 split interactive.md into reference/interactive/, in that index's read
   # order.
-  EXPECTED_INTERACTIVE_SHARDS=(remediation.md extension.md extension-grant.md
+  EXPECTED_INTERACTIVE_SHARDS=(remediation.md blockers-first.md extension.md extension-grant.md
     extension-ceiling.md)
 }
 
