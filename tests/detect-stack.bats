@@ -2812,3 +2812,58 @@ SOLE_GO_SKIPPED=(.github/workflows/gitleaks.yml .github/workflows/no-cluster-dep
     [ "$(missing_has "$out" "$p")" = "number" ] || { echo "no primary lost the gap: $p"; return 1; }
   done
 }
+
+# ---- #3029: a git-ignored marker file is not a project language marker -------
+# A composition repo git-ignores its local member checkouts; their package.json
+# detected the composition as javascript. Each case runs with git's own
+# environment cleared, so a gate launched from a git hook cannot point these
+# fixtures at another repository.
+
+ignored_member_fixture() {
+  mkdir -p member
+  printf '{}\n' > member/package.json
+  printf 'member/\n' > .gitignore
+}
+
+detect_langs() {
+  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE bash "$DETECT" 2>/dev/null | jq -c .languages
+}
+
+@test "detect-stack #3029: the only marker sits in a git-ignored member -> no languages" {
+  ignored_member_fixture
+  [ "$(detect_langs)" = '[]' ]
+}
+
+@test "detect-stack #3029: an ignored member that is itself a git checkout -> no languages" {
+  ignored_member_fixture
+  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C member init -q
+  [ "$(detect_langs)" = '[]' ]
+}
+
+@test "detect-stack #3029: the same member untracked but NOT ignored still counts" {
+  ignored_member_fixture
+  printf 'other/\n' > .gitignore
+  [ "$(detect_langs)" = '["javascript"]' ]
+}
+
+@test "detect-stack #3029: outside any git work tree every marker counts, as before" {
+  local plain="$BATS_TEST_TMPDIR/plain"
+  mkdir -p "$plain/member"
+  cd "$plain"
+  printf '{}\n' > member/package.json
+  printf 'member/\n' > .gitignore
+  # The ceiling keeps git from finding a repository above the fixture.
+  [ "$(GIT_CEILING_DIRECTORIES="$BATS_TEST_TMPDIR" detect_langs)" = '["javascript"]' ]
+}
+
+@test "detect-stack #3029: a root marker plus an ignored marker of another language -> only the root's" {
+  ignored_member_fixture
+  printf '[project]\nname = "x"\nversion = "0.1.0"\n' > pyproject.toml
+  [ "$(detect_langs)" = '["python"]' ]
+}
+
+@test "detect-stack #3029: a TRACKED marker matching an ignore pattern still counts" {
+  ignored_member_fixture
+  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git add -f member/package.json
+  [ "$(detect_langs)" = '["javascript"]' ]
+}

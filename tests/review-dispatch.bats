@@ -1673,6 +1673,22 @@ detect() {  # $1 = languages json ; rest = extra flags
   [ "$(echo "$output" | jq -r '.languages | join(",")')" = "rust" ]
 }
 
+@test "detect: #3029 a git-ignored member checkout's package.json is not javascript" {
+  # Un-stubbed on purpose: the defect lived in the real detector. The member is
+  # a nested git checkout, as a composition repo's local member clones are.
+  local m="$BATS_TEST_TMPDIR/composition"
+  mkdir -p "$m/member"
+  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$m" init -q
+  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$m/member" init -q
+  printf 'member/\n' > "$m/.gitignore"
+  printf '{}\n' > "$m/member/package.json"
+  run env -u DETECT_STACK_BIN -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \
+    zsh "$S" detect --repo "$m"
+  [ "$status" -eq 3 ]
+  [ "$(echo "$output" | jq -r .error)" = "unsupported_repo_type" ]
+  [ "$(echo "$output" | jq -c .languages)" = '[]' ]
+}
+
 @test "detect: #1504 an ambiguous repo type is plan's TYPED error, exit 3" {
   detect '{"languages":["python","go"]}'
   [ "$status" -eq 3 ]

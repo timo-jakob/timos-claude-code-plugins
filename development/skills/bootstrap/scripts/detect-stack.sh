@@ -8,7 +8,13 @@
 #   github_repo           string  (owner/repo or "")
 #   default_branch        string  ("" if not detectable)
 #   visibility            "public" | "private" | "unknown"
-#   languages             []string  subset of [swift, javascript, python, go, java]
+#   languages             []string  subset of [swift, javascript, python, go, java].
+#                                  Inside a git work tree a marker file git
+#                                  reports as ignored never counts — a
+#                                  git-ignored member checkout is not this
+#                                  repo's language (#3029). Untracked files
+#                                  that are not ignored still count; outside a
+#                                  work tree, or with no git, every marker counts.
 #   has_dockerfile        bool     (unchanged semantics: an exact `Dockerfile`
 #                                  exists — now a NARROWER fact than `containers`,
 #                                  since a bootBuildImage repo has a container yet
@@ -421,13 +427,35 @@ fi
 # A composition repo's root `mfe-contract/` is bootstrap §3m's own publish
 # output (#1899), not application code, so it is pruned there too — otherwise
 # its package.json reads as javascript and §3m's language guard stops a re-run.
+#
+# A marker file git reports as IGNORED is not a project language marker (#3029).
+# A composition repo keeps local checkouts of its member repos beside its own
+# files and git-ignores them; their package.json counted, so the composition
+# detected as javascript and resolve-issue loaded the wrong resolve-profile.
+# Inside a git work tree each hit is therefore asked `git check-ignore`, and only
+# its exit 0 (ignored) drops it. An untracked file that is not ignored still
+# counts, and so does any hit check-ignore cannot judge (exit 128). A directory
+# that is not a git work tree, or a host with no git, is scanned exactly as
+# before. detect_lang's prune set is untouched: the topic-marker suites derive it.
+lang_in_work_tree="false"
+if [[ "$(git -C "$cwd" rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
+	lang_in_work_tree="true"
+fi
+
 detect_lang() {
 	local lang="$1"
 	shift
 	local -a mfe_prune=()
 	[[ -f "$cwd/.claude-workspace.yaml" ]] && mfe_prune=(-path "$cwd/mfe-contract" -prune -o)
+	local hit
 	for marker in "$@"; do
-		while IFS= read -r -d '' _; do
+		while IFS= read -r -d '' hit; do
+			# Relative to $cwd, so a symlinked prefix (macOS /tmp -> /private/tmp)
+			# can never read as a path outside the repository.
+			if [[ "$lang_in_work_tree" == "true" ]] &&
+				git -C "$cwd" check-ignore -q -- "${hit#"$cwd"/}" 2>/dev/null; then
+				continue
+			fi
 			printf '%s\n' "$lang"
 			return
 		done < <(find "$cwd" -mindepth 1 ${mfe_prune[@]+"${mfe_prune[@]}"} \
