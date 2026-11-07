@@ -109,7 +109,7 @@ for mmd in ${(ko)covered}; do
   fi
   want="$(heading_hash $sources)"
   if [[ "${hex#sha256=}" != "$want" ]]; then
-    problem "stale: $mmd — the headings of its sources changed; update the diagram if it no longer matches, then replace line 1 with:"
+    problem "stale: $mmd — the headings of its sources changed; update the .mmd if it no longer matches and re-render it with ./scripts/render-diagrams.zsh, then replace line 1 with:"
     print -- "${PREFIX}sha256=$want ${(j: :)sources}"
   fi
 done

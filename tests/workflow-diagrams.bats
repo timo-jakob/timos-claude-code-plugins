@@ -354,6 +354,7 @@ run_stamps() {
   [ "$status" -eq 1 ]
   contains "$output" 'stale: docs/explanation/diagrams/demo.mmd'
   contains "$output" 'stale: docs/explanation/diagrams/sdlc.mmd'
+  contains "$output" 're-render it with ./scripts/render-diagrams.zsh, then replace line 1 with:'
   # the replacement line, printed on its own line exactly as it must be written
   [ "$(printf '%s\n' "$output" | grep -cxF -- "$want")" -eq 2 ]
 }
@@ -476,7 +477,7 @@ run_stamps() {
   contains "$guide" '**Workflow diagrams carry a drawn-against stamp.**'
   contains "$guide" 'starts with `%% drawn-against: sha256=<hex> <source> ...`'
   contains "$guide" 'The hash covers only their heading lines.'
-  contains "$guide" 'the script-tests suite fails until the diagram is updated and re-stamped, or re-stamped alone if it still matches.'
+  contains "$guide" 'the script-tests suite fails until the diagram is updated, re-rendered and re-stamped, or re-stamped alone if it still matches.'
   contains "$guide" 'Wording and link edits that leave headings alone never trip it.'
   contains "$guide" 'The stamp is a tripwire, not a proof: a behaviour change written only inside a paragraph still needs the diagram checked by hand.'
 }
