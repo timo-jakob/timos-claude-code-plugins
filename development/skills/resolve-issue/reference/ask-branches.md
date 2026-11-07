@@ -82,11 +82,14 @@ never records it.
 
 ## RS-09 — the parked follow-up default (#2903)
 
-§7 refines the run's parked follow-ups without asking, in every session mode
-(`resolve-session.zsh`, #2575): the follow-up mode refines only from the source
-story and parks whatever it cannot settle, so the question has one safe,
-reversible answer. That makes it an `implementation` decision under
-ARCHITECTURE.md's *Decision rights* (#2899), and it is recorded like one.
+Outside a human-started chain, §7 refines the run's parked follow-ups without
+asking, in every session mode (`resolve-session.zsh`, #2575): the follow-up mode
+refines only from the source story and parks whatever it cannot settle, so the
+question has one safe, reversible answer. That makes it an `implementation`
+decision under ARCHITECTURE.md's *Decision rights* (#2899), and it is recorded
+like one. A step of a human-started chain (#2942) neither refines its follow-ups
+nor records the line or the entry below: it lists the issues in `follow_ups`,
+and the root queues them.
 
 **Print one line** when §7 starts the refinements:
 `Decision taken (not asked): auto-refining the parked follow-ups #A, #B`.
@@ -104,5 +107,3 @@ history and re-add `needs-refinement`. An exit 1 or 2 adds no section.
 there is no PR body, so the same entry goes in the run's report, as it does
 whenever §7 refines follow-ups an open PR's body does not hold. Either way the
 decision is recorded once: §7 adds nothing to a PR whose body already holds it.
-A step of a human-started chain (#2942) records neither the line nor the entry:
-it lists the issues in `follow_ups`, and the root queues them.
