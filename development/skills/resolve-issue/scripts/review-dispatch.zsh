@@ -141,19 +141,22 @@
 #       unavailable", never a render failure.
 #       `--max-rounds` is deliberately NOT a flag here: finality is the
 #       loop's rule, and duplicating the ceiling would mean two places to change.
-#       repo_type ∈ {swift, python, java, go, javascript, claude-plugin, kubernetes};
+#       repo_type ∈ {swift, python, java, go, javascript, claude-plugin, composition, kubernetes};
 #       review_skill is the
 #       review skill the orchestrator invokes (development-<repo_type>:review),
-#       passing changed_files as the review scope. claude-plugin (#809) and
-#       kubernetes (#1153) are FALLBACK repo_types: selected only when no
-#       supported language matched and detect-stack reports is_claude_plugin /
-#       is_kubernetes — a language always wins, and neither fallback
-#       participates in the ambiguity tiebreak. They are ORDERED, claude-plugin
-#       first: both markers fire on a plugin repo that ALSO carries Kubernetes
-#       content, and plugin prose is what such a repo is actually made of.
-#       kubernetes additionally requires NO detected language at all (not merely
-#       no supported one), so a Rust service shipping a Helm chart keeps the
-#       typed escalation instead of being reviewed by the manifest panel.
+#       passing changed_files as the review scope. claude-plugin (#809),
+#       composition (#3030) and kubernetes (#1153) are FALLBACK repo_types:
+#       selected only when no supported language matched and detect-stack
+#       reports is_claude_plugin / is_composition / is_kubernetes — a language
+#       always wins, and no fallback participates in the ambiguity tiebreak.
+#       They are ORDERED claude-plugin, then composition, then kubernetes: every
+#       pair of markers can fire together, and the earlier type is what such a
+#       repo is actually made of. composition, like claude-plugin, does not
+#       require zero detected languages, because a root `.claude-workspace.yaml`
+#       defines what the repo is. kubernetes additionally requires NO detected
+#       language at all (not merely no supported one), so a Rust service
+#       shipping a Helm chart keeps the typed escalation instead of being
+#       reviewed by the manifest panel.
 #       topic_review_skills (#1072) is the TOPIC-COMPOSITION seam: always
 #       present, directly after review_skill, an array of
 #       `development-<topic>:review` strings — `[]` when no topic applies. It
@@ -162,7 +165,7 @@
 #       `.is_<T>` true (a `-` in T read as `_`), and T is not the repo_type;
 #       table order, no duplicates. The markers are read from detect-stack's
 #       output, never re-derived here. Only some topics have a flag there today
-#       (is_opentofu, is_composition, is_react beside the two fallbacks' own); a
+#       (is_opentofu, is_react beside the three fallbacks' own); a
 #       topic whose marker exists only as a maintenance SKILL.md *Topics* recipe
 #       (docs) must gain its detect-stack flag when it is registered, or its row
 #       never fires — the missing key reads as false. The one row today is
@@ -172,8 +175,9 @@
 #       exit 1, never read as false. A topic never
 #       rescues an `unsupported_repo_type` nor settles an `ambiguous_repo_type`:
 #       both exit 3 before any topic is read. The fallback repo_types
-#       (claude-plugin, kubernetes) are NOT table rows, so they stay fallbacks —
-#       a Go repo carrying a Helm chart is reviewed exactly as before. Every
+#       (claude-plugin, composition, kubernetes) are NOT table rows, so they
+#       stay fallbacks — a Go repo carrying a Helm chart is reviewed exactly as
+#       before. Every
 #       listed panel runs in the same round against this same descriptor, and
 #       the conductor joins their findings into the one findings_path
 #       (reference/review-loop/topic-panels.md, *Topic panels*).
@@ -217,9 +221,9 @@
 # Seams (for tests / non-PATH installs):
 #   DETECT_STACK_BIN  overrides the detect-stack.sh binary (must emit the same
 #                     JSON, at least the `.languages` array; `.is_claude_plugin`,
-#                     `.is_kubernetes` and, on `plan`, each review-topic table
-#                     row's `.is_<topic>` (#1072) are read with a false default
-#                     when absent).
+#                     `.is_composition`, `.is_kubernetes` and, on `plan`, each
+#                     review-topic table row's `.is_<topic>` (#1072) are read
+#                     with a false default when absent).
 #   SELECT_CONTRACT_BIN  overrides select-contract-dimension.zsh (#2009), which
 #                     `plan` calls only on a claude-plugin delta round.
 #   GIT_BIN           overrides the `git` binary. It is also handed to
@@ -298,9 +302,9 @@ local select_bin="${SELECT_CONTRACT_BIN:-${self_dir}/select-contract-dimension.z
 # dispatch. Registering a topic follows ARCHITECTURE.md, *Review-panel invocation
 # contract*, *Registering a review topic* — the whole recipe lives there, not
 # here. `react` (#959): development-react:review, gated on detect-stack's
-# is_react. claude-plugin and kubernetes are FALLBACK repo_types; docs and
-# composition have no review skill; opentofu (and kubernetes as a topic) is
-# #1943's decision, after #1806 — so none of them is a row.
+# is_react. claude-plugin, composition and kubernetes are FALLBACK repo_types;
+# docs has no review skill; opentofu (and kubernetes as a topic) is #1943's
+# decision, after #1806 — so none of them is a row.
 typeset -ga _RD_REVIEW_TOPICS=(react)
 if (( ${+REVIEW_TOPIC_TABLE} )); then
   _RD_REVIEW_TOPICS=( ${=REVIEW_TOPIC_TABLE} )
@@ -920,6 +924,11 @@ _repo_type() {
   local is_k8s; is_k8s=$(print -r -- "$detect_json" | jq -r '.is_kubernetes // false') || {
     print -u2 -- "${ctx}: could not read .is_kubernetes from the detect-stack output"; exit 1
   }
+  # same `// false` default, same reason (#3030): an older detect-stack without
+  # the key falls through to the typed error rather than crashing.
+  local is_comp; is_comp=$(print -r -- "$detect_json" | jq -r '.is_composition // false') || {
+    print -u2 -- "${ctx}: could not read .is_composition from the detect-stack output"; exit 1
+  }
 
   # supported review languages present, preserving nothing but membership
   local -a supported
@@ -941,10 +950,12 @@ _repo_type() {
 
   local repo_type=""
   if (( ${#supported} == 0 )); then
-    # Fallbacks ONLY (#809, #1153): these repos detect no language — a plugin
-    # repo's content is prose, agent definitions, zsh scripts and JSON
-    # manifests; a GitOps repo's is charts, overlays and Argo CD resources.
-    # A detected language always wins, and neither joins the `.maintenance.yml`
+    # Fallbacks ONLY (#809, #3030, #1153): these repos detect no language — a
+    # plugin repo's content is prose, agent definitions, zsh scripts and JSON
+    # manifests; a composition repo's is its `.claude-workspace.yaml` member
+    # pins, zsh scripts, bats suites and workflows; a GitOps repo's is charts,
+    # overlays and Argo CD resources.
+    # A detected language always wins, and none joins the `.maintenance.yml`
     # primary tiebreak (which lives in the multi-language `else` branch below).
     #
     # ORDER IS LOAD-BEARING: both markers fire on a plugin repo that ALSO
@@ -968,6 +979,15 @@ _repo_type() {
     # `.claude-plugin/plugin.json` is definitional for what the repo *is*, and
     # a plugin repo carrying one unsupported-language file is still a plugin
     # repo. A `Chart.yaml` is routinely incidental to an application repo.
+    #
+    # composition (#3030) sits between the two and, like claude-plugin, carries
+    # no zero-language condition: a root `.claude-workspace.yaml` is definitional
+    # for a constellation repo. It must come BEFORE kubernetes, because a
+    # composition repo routinely ships its own deploy charts, so both markers
+    # fire and its manifest — not its charts — is what the repo is. It comes
+    # AFTER claude-plugin for the reason claude-plugin leads: a plugin repo that
+    # also holds a workspace manifest is still made of plugin prose.
+    #
     # NOT `local -i`, and the status IS checked — both deliberate. zsh
     # arithmetic-evaluates an empty string assigned to an integer-attributed
     # parameter to **0**, and 0 is precisely the value that OPENS this gate. So
@@ -985,6 +1005,8 @@ _repo_type() {
     }
     if [[ "$is_plugin" == "true" ]]; then
       repo_type="claude-plugin"
+    elif [[ "$is_comp" == "true" ]]; then
+      repo_type="composition"
     elif [[ "$is_k8s" == "true" ]] && (( lang_count == 0 )); then
       repo_type="kubernetes"
     else

@@ -253,7 +253,7 @@ YAML
   contains "$flat" 'Its intended callers are bootstrap'
   contains "$flat" 'and `render-importmap.zsh`, which judges the manifest with it'
   contains "$flat" 'no validator CI job is ever rendered into a composition repo'
-  contains "$flat" 'ships **one skill and one agent**'
+  contains "$flat" 'ships **three skills and two agents**'
   # …and the clauses a reader IMPLEMENTS against, each with a needle of its
   # own: the framing sentences above would survive any rewrite of these
   contains "$flat" '`1` a contract violation'
@@ -1781,21 +1781,97 @@ YAML
   contains "$desc" "#1744"
 }
 
-@test "the plugin ships exactly what it claims — one skill, one agent (#1744, #1745, #1747, #1748)" {
+@test "the plugin ships exactly what it claims — three skills, two agents (#1744, #1745, #1747, #1748, #3030)" {
   # the charter and plugins.md both say so; without this the claim is prose only.
   # templates/ is the skeleton the #1745 scaffold copies into a composition repo;
-  # skills/maintenance is the #1747 dispatcher; agents/ the #1748 bump triage
+  # skills/maintenance is the #1747 dispatcher; agents/ the #1748 bump triage;
+  # skills/review, skills/resolve-profile and the manifest reviewer are the
+  # #3030 repo type's panel and driver rules
   local entries
   # .DS_Store is filtered, not asserted against: Finder drops one into any
   # directory a macOS working copy opens, and an OS artifact must not red a
   # claim about which plugin content ships
   entries="$(ls -A "$PLUGIN_DIR" | grep -v '^\.DS_Store$' | LC_ALL=C sort | tr '\n' ' ')"
   [ "$entries" = ".claude-plugin agents scripts skills templates " ]
-  [ "$(ls -A "$PLUGIN_DIR/skills" | grep -v '^\.DS_Store$' | tr '\n' ' ')" = "maintenance " ]
-  [ "$(ls -A "$PLUGIN_DIR/agents" | grep -v '^\.DS_Store$' | tr '\n' ' ')" = "composition-tag-bump-triage.md " ]
-  # …so both generated pages carry its section
+  [ "$(ls -A "$PLUGIN_DIR/skills" | grep -v '^\.DS_Store$' | LC_ALL=C sort | tr '\n' ' ')" \
+    = "maintenance resolve-profile review " ]
+  [ "$(ls -A "$PLUGIN_DIR/agents" | grep -v '^\.DS_Store$' | LC_ALL=C sort | tr '\n' ' ')" \
+    = "composition-manifest-reviewer.md composition-tag-bump-triage.md " ]
+  # …so both generated pages carry its section, with the new skills and agent in it
   run -0 grep -qx "## development-composition" "$REPO_ROOT/docs/reference/commands.md"
   run -0 grep -qx "## development-composition" "$REPO_ROOT/docs/reference/agents.md"
+  run -0 grep -qF '/development-composition:review' "$REPO_ROOT/docs/reference/commands.md"
+  run -0 grep -qF 'composition-manifest-reviewer' "$REPO_ROOT/docs/reference/agents.md"
+}
+
+@test "the composition repo type ships its profile and panel together (#3030)" {
+  # review-dispatch.zsh emits `composition`, so its profile and its panel must
+  # both exist — tests/resolve-profile-contract.bats holds the profile set equal
+  # to the emitted set, and review-dispatch.bats the panel's skill name
+  local profile="$PLUGIN_DIR/skills/resolve-profile/SKILL.md"
+  local panel="$PLUGIN_DIR/skills/review/SKILL.md"
+  grep -qx 'name: resolve-profile' "$profile"
+  grep -qx 'name: review' "$panel"
+  # the Gate names both halves and the nothing-to-gate rule
+  local gate
+  gate="$(awk '/^## Gate$/{f=1;next} /^## /{f=0} f' "$profile" | tr -s '[:space:]' ' ')"
+  contains "$gate" 'validate-workspace.zsh'
+  contains "$gate" 'run-gate.zsh --tests-dir tests'
+  contains "$gate" '**An empty bats suite is *nothing to gate*, never green.**'
+  # the panel names its new agent, and the two it reuses by their qualified names
+  grep -qF '| composition-manifest-reviewer |' "$panel"
+  grep -qF '| development-claude-plugin:claude-plugin-script-reviewer |' "$panel"
+  grep -qF '| development-claude-plugin:claude-plugin-test-reviewer |' "$panel"
+  # the reused agents exist where the qualified names point
+  [ -f "$REPO_ROOT/development-claude-plugin/agents/claude-plugin-script-reviewer.md" ]
+  [ -f "$REPO_ROOT/development-claude-plugin/agents/claude-plugin-test-reviewer.md" ]
+}
+
+@test "the composition profile's Gate states how to read each validator exit (#3030)" {
+  # each exit takes a different action, and reading `3` as red or green is the
+  # misreading the validator's typed exits exist to prevent
+  local gate
+  gate="$(awk '/^## Gate$/{f=1;next} /^## /{f=0} f' "$PLUGIN_DIR/skills/resolve-profile/SKILL.md" \
+    | tr -s '[:space:]' ' ')"
+  contains "$gate" '**Read the validator by its exit code, never by its stdout.**'
+  contains "$gate" '`0` is a valid manifest.'
+  contains "$gate" 'both are a **red gate** — fix the manifest the change broke'
+  contains "$gate" '`2` is your own malformed call: fix it and re-run.'
+  contains "$gate" "\`3\` means the runner lacks mikefarah's \`yq\` or a working \`jq\`."
+  contains "$gate" 'That is no verdict about the manifest, red or green'
+  contains "$gate" 'joined with `&&`, the validator first'
+  contains "$gate" 'The `<full gate>` is then the validator alone'
+  contains "$gate" 'E4 has no end-to-end half to drive here'
+}
+
+@test "the composition panel splits the scope per reviewer and fails a dimension that did not run (#3030)" {
+  local panel
+  panel="$(tr -s '[:space:]' ' ' <"$PLUGIN_DIR/skills/review/SKILL.md")"
+  contains "$panel" '`scripts/promote.zsh` is in two reviewers'"'"' lists on purpose'
+  contains "$panel" '**The script and test reviewers are reused, not owned.**'
+  contains "$panel" 'Step 2'"'"'s failed-dimension rule applies to each'
+  contains "$panel" '**Rendered output is not in scope.**'
+  contains "$panel" '**A non-empty scope with no in-scope file is NOT APPLICABLE, not clean.**'
+  contains "$panel" 'means you launch that dimension'"'"'s agent'
+  contains "$panel" '**Do not write the findings file at all.** Report the round as **failed**'
+  contains "$panel" 'only when every launched agent completed'
+}
+
+@test "the manifest reviewer's severity table is fixed and leaves the contract to the validator (#3030)" {
+  local agent="$PLUGIN_DIR/agents/composition-manifest-reviewer.md" flat
+  grep -qx 'tools: Read, Grep, Glob' "$agent"
+  flat="$(tr -s '[:space:]' ' ' <"$agent")"
+  contains "$flat" 'or a workflow that exposes a secret or runs untrusted input | **CRITICAL** |'
+  contains "$flat" '| A member pin changed in a way the change does not account for, or a weakened pin |'
+  contains "$flat" 'or a weakened pin | **WARNING** |'
+  contains "$flat" '| A workflow that widens its permissions or loosens an action pin | **WARNING** |'
+  contains "$flat" '| A Renovate rule that stops seeing, or auto-merges past review, the member pins | **WARNING** |'
+  contains "$flat" 'Never raise a finding above its row.'
+  contains "$flat" 'is a duplicate of a gate that already ran'
+  contains "$flat" 'A digest suffix (`@sha256:…`) removed from a member that carried one'
+  contains "$flat" 'A `uses:` that the change moves from a full commit SHA to a tag or branch.'
+  contains "$flat" 'An `automerge` rule that lets a **major** member bump merge without a review.'
+  contains "$flat" 'review its source, the manifest, never the output'
 }
 
 @test "the script-tests workflow records the composition tree (#1744)" {

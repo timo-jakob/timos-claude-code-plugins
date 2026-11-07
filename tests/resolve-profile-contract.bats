@@ -402,7 +402,14 @@ _gate_clauses() {
     'python|only exit that halts WITHOUT further checking' \
     'python|never read *not 1* as *push*' \
     'python|its **own entry guard**' \
-    'python|from **this** tree'
+    'python|from **this** tree' \
+    'composition|the validator first' \
+    'composition|never the validator' \
+    'composition|report the missing tool and stop' \
+    'composition|never green.**' \
+    'composition|Do not run `run-gate.zsh` over it' \
+    'composition|never report that half as green or as a pass' \
+    'composition|omit `--gate-attest` entirely'
 }
 
 # Every missing Gate clause, one per line. $1 overrides the repo root so the
@@ -795,8 +802,8 @@ _arch_order_violation() {
   # the same PR, which is what a derived sweep alone can never see.
   local n
   n="$(_profiles | grep -c . || true)"
-  [ "$n" -eq 7 ] || {
-    printf 'the repo ships %s profile(s), expected 7.\n' "$n" >&2
+  [ "$n" -eq 8 ] || {
+    printf 'the repo ships %s profile(s), expected 8.\n' "$n" >&2
     printf 'Adding one? THREE figures move together, in the same PR: this count,\n' >&2
     printf "the Resolve profile contract row in MAINTAINING.md's Invariants in force,\n" >&2
     printf "and ARCHITECTURE.md's 'Profiles populated today: **N**' sentence.\n" >&2
@@ -866,9 +873,9 @@ _arch_order_violation() {
   # a red that names its own remedy.
   local n
   n="$(_repo_type_assignment_sites)"
-  [ "$n" -eq 6 ] || {
-    printf 'review-dispatch.zsh has %s `repo_type=` site(s), expected 6.\n' "$n" >&2
-    printf 'Today: the `local repo_type=""` declaration, the two fallback\n' >&2
+  [ "$n" -eq 7 ] || {
+    printf 'review-dispatch.zsh has %s `repo_type=` site(s), expected 7.\n' "$n" >&2
+    printf 'Today: the `local repo_type=""` declaration, the three fallback\n' >&2
     printf 'literals, ${supported[1]}, $primary, and `local repo_type="$_RD_REPO_TYPE"`.\n' >&2
     printf 'A NEW site must be taught to _emitted_types in the same PR, or the\n' >&2
     printf 'set-equality below stops seeing the type it emits.\n' >&2
@@ -1283,7 +1290,8 @@ _gate_pairs() {
     'go|development-go/agents/go-ci-fixer.md|go test ./...|-race' \
     'javascript|development-javascript/agents/js-ci-fixer.md|npm run typecheck && npm test|.scripts.typecheck // empty' \
     'swift|development-swift/agents/swift-ci-fixer.md|swift test|--enable-code-coverage' \
-    'kubernetes|development-kubernetes/skills/maintenance/SKILL.md|kubeconform|kube-linter|kyverno test'
+    'kubernetes|development-kubernetes/skills/maintenance/SKILL.md|kubeconform|kube-linter|kyverno test' \
+    'composition|development/skills/maintenance/scripts/gather-composition-findings.zsh|validate-workspace.zsh'
 }
 
 # Planted row sets for the non-vacuity control below. Each is a `_gate_pairs`
@@ -1342,19 +1350,41 @@ _gate_pair_violations() {
   # The tripwire the roster count is to the sweep. Both needle tests below
   # iterate this list and report clean on a short one, so a session resolving a
   # red pair could delete the row and go green with no other signal.
-  local n_pairs n_app
-  # `|| true` on both: an empty set is exactly what this tripwire must REPORT
-  # (a discriminator that matches nothing makes every caller vacuous), and the
+  #
+  # COVERAGE plus a recorded COUNT, not equality (#3030). Every runner-less
+  # profile needs a row — derived, so a new one reds here — but a profile WITH a
+  # runner may carry one too: composition's Gate runs the claude-workspace/v1
+  # validator before run-gate.zsh, and that half is a command no run-gate.zsh
+  # attests, so it is pinned to the maintenance gather that already runs it.
+  # The recorded count is what still refuses a deleted row.
+  local n_pairs p t bad=""
+  local -r want_pairs=7
+  # `|| true`: an empty set is exactly what this tripwire must REPORT (a
+  # discriminator that matches nothing makes every caller vacuous), and the
   # bare `grep -c` would abort under errexit before the message could print.
   n_pairs="$(_gate_pairs | grep -c . || true)"
-  n_app="$(_profiles_without_runner | grep -c . || true)"
-  [ "$n_pairs" -eq "$n_app" ] || {
-    printf '%s gate pair(s) for %s profile(s) with no attestable runner.\n' \
-      "$n_pairs" "$n_app" >&2
-    printf 'Every such profile needs a row in _gate_pairs, or its Gate is unpinned.\n' >&2
-    _profiles_without_runner >&2
+  [ "$n_pairs" -eq "$want_pairs" ] || {
+    printf '%s gate pair(s), expected %s.\n' "$n_pairs" "$want_pairs" >&2
+    printf 'Removing a row unpins that Gate from the artifact that runs its command.\n' >&2
     return 1
   }
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    t="${p%%/*}"; t="${t#development-}"
+    _gate_pairs | cut -d'|' -f1 | grep -qxF -- "$t" \
+      || bad+="$p"$'\n'
+  done < <(_profiles_without_runner)
+  [ -z "$bad" ] || {
+    printf 'Every profile with no attestable runner needs a _gate_pairs row, or its Gate is unpinned:\n%s' \
+      "$bad" >&2
+    return 1
+  }
+  # ...and every row names a shipped profile, so a row cannot outlive its type
+  while IFS= read -r t; do
+    [ -n "$t" ] || continue
+    _profiles | grep -qxF -- "development-$t/skills/resolve-profile/SKILL.md" \
+      || { printf '_gate_pairs row for %s names no shipped profile\n' "$t" >&2; return 1; }
+  done < <(_gate_pairs | cut -d'|' -f1)
   # ...and the split is real: the exemplar HAS a runner, so it is not in the set
   local runnerless
   runnerless="$(_profiles_without_runner)"
@@ -1410,7 +1440,7 @@ _gate_pair_violations() {
   # gone. So a row may not repeat a token either — the gate-pair twin of the
   # duplicate-row refusal in the clause tripwire below.
   local row n=0 t k want got summed=0 bad=""
-  local -a expect=( 'python 2' 'java 1' 'go 2' 'javascript 2' 'swift 2' 'kubernetes 3' )
+  local -a expect=( 'python 2' 'java 1' 'go 2' 'javascript 2' 'swift 2' 'kubernetes 3' 'composition 1' )
   local rows toks
   rows="$(_gate_pairs)"
   while IFS= read -r row; do
@@ -1503,8 +1533,8 @@ _gate_pair_violations() {
   local dims total
   dims="$(_review_dimensions)"
   total="$(printf '%s\n' "$dims" | grep -c . || true)"
-  [ "$total" -eq 16 ] || {
-    printf 'the derived dimension roster holds %s entries, expected 16:\n%s\n' \
+  [ "$total" -eq 17 ] || {
+    printf 'the derived dimension roster holds %s entries, expected 17:\n%s\n' \
       "$total" "$dims" >&2
     printf 'A panel gaining or losing a dimension moves this figure in the same PR.\n' >&2
     return 1
@@ -1605,7 +1635,7 @@ _gate_pair_violations() {
   # ONE source for the figure: the assertion and its diagnostic drifted
   # apart once already (#1561), and the message is the only thing carrying
   # the table's admission argument to whoever trips it.
-  local -r want_rows=175
+  local -r want_rows=182
   n="$(_gate_clauses | grep -c . || true)"
   local uniq
   uniq="$(_gate_clauses | LC_ALL=C sort -u | grep -c . || true)"
@@ -1634,7 +1664,7 @@ _gate_pair_violations() {
   # `#1505 the gate-pair rows carry the exact token count recorded` records its
   # own figure, and DERIVED from the table rather than counted by hand.
   local want row t got bad=""
-  local -a expect=( 'python 9' 'java 8' 'go 51' 'javascript 11' 'swift 8' 'kubernetes 88' )
+  local -a expect=( 'python 9' 'java 8' 'go 51' 'javascript 11' 'swift 8' 'kubernetes 88' 'composition 7' )
   for row in "${expect[@]}"; do
     t="${row%% *}"; want="${row##* }"
     got="$(_gate_clauses | cut -d'|' -f1 | grep -cxF -- "$t" || true)"

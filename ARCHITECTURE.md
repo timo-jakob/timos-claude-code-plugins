@@ -2655,6 +2655,15 @@ declaration. That is the sequence `primary: kubernetes` and `primary: opentofu`
 each passed through before their markers landed. How the topic is detected,
 gathered and routed is *Composition maintenance* below.
 
+**It is also a `/development:resolve-issue` repo type since #3030.**
+`review-dispatch.zsh` emits `composition` as a no-language fallback, so a repo
+with a root `.claude-workspace.yaml` and no supported language is reviewed by
+`development-composition:review` and driven by
+`development-composition:resolve-profile`. The two ship together because
+`tests/resolve-profile-contract.bats` holds the profile set equal to the
+emitted repo-type set; *Review-panel invocation contract* states the fallback
+ordering and *Resolve profile contract* the profile.
+
 **Deployment is deliberately absent, and says so rather than pretending.**
 `deploy_target` accepts exactly one value, `none`, until the compose (#719) and
 Kubernetes (#720) renderers land; **deployment** manifests (compose or
@@ -3628,13 +3637,13 @@ from the descriptor's `fix_verification_path` **or** hook mode's
 `$REVIEW_FIX_VERIFICATION`, since a hook-mode panel sees no descriptor at all
 and would otherwise declare every hook-mode round's carry absent. When neither
 names a readable carry the caller omitted `--fix-verification`, so there is
-nothing to enumerate and nothing to cite. All nine panels therefore write **no findings file at all** there and
+nothing to enumerate and nothing to cite. All ten panels therefore write **no findings file at all** there and
 report the slip to the caller, naming the flag — absence of the carry is never
 evidence of an empty one, and the missing aggregate is what makes the caller's
 omission surface as a refusal instead of a silently unverified round.
 
-All nine panels (`claude-plugin`, `python`, `java`, `go`, `swift`, `javascript`,
-`kubernetes`, `opentofu`, and the `react` topic panel)
+All ten panels (`claude-plugin`, `python`, `java`, `go`, `swift`, `javascript`,
+`kubernetes`, `opentofu`, `composition`, and the `react` topic panel)
 carry **both rules**, with the empty-scope one's two qualifications, the
 confirmation-count report and two later duties: since #1583 —
 the hook-mode sidecar duty (write the per-entry accounting to
@@ -4056,8 +4065,9 @@ registry row points at — a profile written to the list above alone would red:
   **both** manifests and says it **narrows** that floor rather than superseding
   it, because a detected language beats the `claude-plugin` fallback and such a
   repo would otherwise lose the bump entirely. A type that genuinely cannot
-  carry plugin content — `kubernetes`, which the fallback ordering reaches only
-  when `is_claude_plugin` is false — states that reason instead.
+  carry plugin content — `kubernetes` or `composition`, each of which the
+  fallback ordering reaches only when `is_claude_plugin` is false — states that
+  reason instead.
 
 **A profile's Gate may NARROW the conductor's E4 disposition rule, by the same
 mechanism and under the same disclosure duty** (#1561). The conductor
@@ -4122,7 +4132,7 @@ reason above, and Residue because
 `development/skills/resolve-issue/reference/residue.md` is the same for every
 repo type, so no profile has a residue rule to state.
 
-Profiles populated today: **7** — **claude-plugin** (its blessed
+Profiles populated today: **8** — **claude-plugin** (its blessed
 `run-gate.zsh` gate and attestation capture, its degraded-mode relay, its epic
 verification command, §4's version-bump rule, and the **Panel** pointer above),
 plus **python**, **java**, **go**, **swift** and **kubernetes** (#1505), and
@@ -4135,8 +4145,16 @@ pointer with no dimension list). Their **Version bump** is a *conditional*
 **unless the repo also ships a `<plugin>/` tree**, because a detected language
 beats the `claude-plugin` fallback, so a language repo that ships plugin content
 loads *its* profile and would otherwise lose §4's floor entirely; the kubernetes
-profile's `none` rests on a cluster-definition repo, not an app one. The
-plugin-only rules that sit
+profile's `none` rests on a cluster-definition repo, not an app one. And
+**composition** (#3030), whose Gate has two halves — `validate-workspace.zsh` on
+the `.claude-workspace.yaml` manifest, then the whole bats suite through
+`run-gate.zsh --tests-dir tests`, with an empty suite *nothing to gate* and
+never green. That compound gate is why its `_gate_pairs` row exists although
+its Gate names a runner: the validator half is a command no `run-gate.zsh`
+attests, so it is pinned to the maintenance gather that already runs it, and
+`--gate-attest` is omitted for it as for any compound gate. Its **Version bump**
+`none` rests, like kubernetes', on a repo that ships no installable plugin
+content. The plugin-only rules that sit
 inside `development/skills/resolve-issue/reference/*.md` byte-frozen sentinel
 spans are **not** in it: extracting those is #1804.
 
@@ -4410,17 +4428,19 @@ cannot mint a second artifact path for the same round:
 - **Repo-type detection reuses the maintenance logic** — it runs
   `bootstrap/scripts/detect-stack.sh` and reads its `.languages`. Supported
   review types are `swift` | `python` | `java` | `go` | `javascript` |
-  `claude-plugin` | `kubernetes` — the last two are no-language FALLBACKS, not
+  `claude-plugin` | `composition` | `kubernetes` — the last three are no-language FALLBACKS, not
   `.languages` values — each mapping to that type's
   `:review` skill. When several apply, `.maintenance.yml`'s `primary`
   disambiguates.
-- **The two fallbacks are ordered, and a language beats both — but their
-  triggers differ.** Both are keyed on `detect-stack.sh`'s `is_claude_plugin` /
-  `is_kubernetes` markers (#1153). `claude-plugin` is reached when `.languages`
+- **The three fallbacks are ordered, and a language beats all of them — but
+  their triggers differ.** They are keyed on `detect-stack.sh`'s
+  `is_claude_plugin` / `is_composition` / `is_kubernetes` markers (#1153,
+  #3030). `claude-plugin` and `composition` are reached when `.languages`
   contains no **supported** review language; `kubernetes` additionally requires
   **no detected language at all**. The asymmetry is deliberate: a
   `.claude-plugin/plugin.json` is definitional for what the repo *is*, so a
   plugin repo carrying one unsupported-language file is still a plugin repo —
+  and so is a root `.claude-workspace.yaml` for a constellation repo —
   whereas a `Chart.yaml` is routinely incidental to an application repo, and
   handing a Rust service's diff to the manifest panel would converge
   finding-free and record a review that never happened. Such a repo keeps the
@@ -4435,8 +4455,12 @@ cannot mint a second artifact path for the same round:
   `claude-plugin` is tried first, because both markers fire on a plugin repo
   that *also* carries Kubernetes content, and such a repo's content is plugin
   prose — it must be reviewed by the plugin panel. This repo becomes exactly
-  that case once #1155 lands its Kubernetes fixtures. Neither fallback ever
-  joins the ambiguity tiebreak.
+  that case once #1155 lands its Kubernetes fixtures. `composition` is tried
+  second, before `kubernetes`, because a constellation repo routinely ships its
+  own deploy charts, so both markers fire and the manifest is what the repo is;
+  and after `claude-plugin`, because a plugin repo that also holds a workspace
+  manifest is still made of plugin prose. No fallback ever joins the ambiguity
+  tiebreak.
 - **Topic panels compose beside the language panel (#1072).** Maintenance
   dispatch composes — a repo can be `java` *and* `spring` — and review dispatch
   now has the same seam. `topic_review_skills` is **always present**, directly
@@ -4452,7 +4476,7 @@ cannot mint a second artifact path for the same round:
   repo with its panel silently missing. Entries follow table order with no duplicates. The markers
   are read from `detect-stack.sh`'s output, never re-derived in the dispatch —
   but only some topics have a flag there today (`is_opentofu`,
-  `is_composition`, `is_react`, beside the two fallbacks' own). A topic whose
+  `is_react`, beside the three fallbacks' own). A topic whose
   marker exists only as a maintenance SKILL.md *Topics* recipe, as `docs` does
   today, has no `is_<topic>` flag yet: its row would never fire, since the
   missing key reads as false. A row lands **only in the PR that ships its
@@ -4465,8 +4489,8 @@ cannot mint a second artifact path for the same round:
   #1943's decision, sequenced after #1806. The fallback repo_types are **not**
   rows, so they stay fallbacks — a Go repo carrying a Helm chart or `*.tf` is
   reviewed exactly as before, and a
-  `kubernetes`- or `claude-plugin`-typed repo never lists its own type; `docs`
-  and `composition` have no review skill and are never rows. A topic marker
+  `kubernetes`-, `composition`- or `claude-plugin`-typed repo never lists its
+  own type; `docs` has no review skill and is never a row. A topic marker
   **never** rescues an `unsupported_repo_type` nor settles an
   `ambiguous_repo_type`: both exit 3 before any topic is read, and `detect`
   still emits only `repo_type`. Every listed panel runs **in the same round
