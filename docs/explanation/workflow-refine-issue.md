@@ -10,8 +10,8 @@ chained inside a resolve-issue run. And **nothing is
 written by a bot** — the issue edit and the comments go out under your own `gh` login, not through a PR. The colour
 key for the diagrams is on [How the plugins work](how-the-plugins-work.md).
 
-![refine-issue end to end: diagnose, loop with the refiner until you approve a rewrite, write it back and
-re-gate](diagrams/refine-issue.svg)
+![refine-issue's refinement loop: three entries, and each question decided, answered or asked by its kind and
+confidence](diagrams/refine-issue.svg)
 
 ## Diagnose and converge {#refine-diagnose-and-converge}
 
@@ -32,10 +32,12 @@ re-gate](diagrams/refine-issue.svg)
    - concrete recommendations;
    - a rewritten prose draft and a proposed `story-spec/v1` block;
    - which objections it now considers resolved.
-5. **Relay the questions.** A script splits the questions by confidence. Those at or above the auto-accept threshold
-   are answered with the agent's recommendation, and you see one line for each. The rest are put to you with their
-   recommended answer. A question's confidence is its lowest criterion score, and the threshold defaults to `1`, so by
-   default only answers the refiner scored `1` on every criterion are taken automatically — see
+5. **Relay the questions.** A script splits the questions by kind and confidence. An implementation question is
+   decided and recorded in the body's *Decisions taken* section, never asked. An intent or gap question at or above
+   the auto-accept threshold is answered with the agent's recommendation, and you see one line for each. The rest are
+   put to you with their recommended answer, a gap question with its proposed doc change. A question's confidence is
+   its lowest criterion score, and the threshold defaults to `1`, so by default only answers the refiner scored `1` on
+   every criterion are taken automatically — see
    [Let refine-issue answer confident questions](../how-to/let-refine-issue-answer-confident-questions.md).
 6. **Converge.** The loop repeats until every objection is resolved and no question is left. If it cannot get there
    yet — a decision belongs to someone else, the story should be split, or it should wait — you take a **typed parked
@@ -60,6 +62,12 @@ re-gate](diagrams/refine-issue.svg)
    you, with its confidence, its weakest criterion and the threshold. If the readiness gate rejects two such rewrites,
    the next draft waits for your approval. A refinement resumed from a parked comment always waits for it too, since
    its earlier questions already reached you.
+
+The second diagram picks up the converged draft: the size check and its split, who approves the rewrite, and the
+write-back and re-gate that follow.
+
+![refine-issue from converged draft to re-gate: the size check, the approval an all-auto or chained run skips, and an
+epic's batch approval](diagrams/refine-issue-write-back.svg)
 
 ### What one refinement turn looks like {#refine-what-one-refinement-turn-looks-like}
 

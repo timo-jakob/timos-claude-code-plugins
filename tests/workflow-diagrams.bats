@@ -182,3 +182,46 @@ tracked_diagrams() {
   contains "$section" '](diagrams/resolve-issue-ship.svg)'
   contains "$section" 'A run you started then keeps going through every follow-up the build files'
 }
+
+@test "#3022 refine-issue's diagrams draw the question kinds, conditional approval, split, epic walk and chained entry" {
+  # One flow split across two diagrams on the same page, so each stays readable
+  # at page width; each label is pinned in the source that draws it.
+  local loop wb
+  loop="$(cat "$REPO_ROOT/docs/explanation/diagrams/refine-issue.mmd")"
+  wb="$(cat "$REPO_ROOT/docs/explanation/diagrams/refine-issue-write-back.mmd")"
+  # question kinds: implementation decided, confident intent/gap answered, the rest asked
+  contains "$loop" 'Implementation question:<br/>decided and recorded in<br/>Decisions taken, never asked'
+  contains "$loop" 'KIND -- implementation --> DEC --> TURN'
+  contains "$loop" 'KIND -- "intent or gap,<br/>confident" --> AUTO --> TURN'
+  contains "$loop" 'the threshold, a gap with its doc<br/>change: you answer'
+  contains "$loop" 'KIND -- "intent or gap,<br/>below threshold" --> ASK --> TURN'
+  # the chained entry, and the questions it hands back for resolve-issue to relay
+  contains "$loop" 'Chained entry from resolve-issue:<br/>--chained-from root --handoff file'
+  contains "$loop" 'KIND -- "below threshold,<br/>chained" --> PEND'
+  contains "$loop" 'PEND -- "your answers" --> TURN'
+  # the epic walk's phase A drafts each child through the single-issue flow
+  contains "$loop" 'EPIC --> WALK --> DIAG'
+  # the size-check split is filed without asking only when it names its children
+  contains "$wb" 'Split filed without asking:'
+  contains "$wb" 'SIZE -- "too big,<br/>children named" --> SPLIT'
+  contains "$wb" 'SIZE -- "too big, no children<br/>named, not chained" --> NOCH'
+  # a chained run never asks: no children named, or the round cap, stops it
+  contains "$wb" 'SIZE -- "too big, no children<br/>named, chained" --> CSTOP'
+  contains "$wb" 'KEEP -- "chained:<br/>round cap" --> CSTOP'
+  # approval is conditional
+  contains "$wb" 'WHO -- "all-auto: no question<br/>reached you" --> WB'
+  contains "$wb" 'WHO -- "chained: relayed<br/>answers stand in" --> WB'
+  contains "$wb" 'WHO -- "single issue" --> APPR'
+  contains "$wb" 'WHO -- "epic child" --> BATCH'
+  contains "$wb" 'Epic walk, phase B:<br/>you approve the<br/>batch of drafts?'
+  contains "$wb" 'DONE -- chained --> OUT'
+  # the page shows the committed SVGs, so each must carry its source's new boxes
+  contains "$(cat "$REPO_ROOT/docs/explanation/diagrams/refine-issue.svg")" '> threshold:</tspan>'
+  contains "$(cat "$REPO_ROOT/docs/explanation/diagrams/refine-issue.svg")" '> --handoff</tspan>'
+  contains "$(cat "$REPO_ROOT/docs/explanation/diagrams/refine-issue-write-back.svg")" '> relayed</tspan>'
+  contains "$(cat "$REPO_ROOT/docs/explanation/diagrams/refine-issue-write-back.svg")" '> buildable</tspan>'
+  contains "$(cat "$REPO_ROOT/docs/explanation/workflow-refine-issue.md")" '](diagrams/refine-issue-write-back.svg)'
+  # step 5's prose splits the questions by kind, as the diagram does
+  contains "$(tr '\n' ' ' < "$REPO_ROOT/docs/explanation/workflow-refine-issue.md" | tr -s ' ')" \
+    "An implementation question is decided and recorded in the body's *Decisions taken* section, never asked."
+}
