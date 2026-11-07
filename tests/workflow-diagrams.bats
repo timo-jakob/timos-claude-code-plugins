@@ -262,3 +262,221 @@ tracked_diagrams() {
   contains "$page" 'a pipeline-started run parks it with `needs-split` and stops'
   contains "$page" 'the follow-up chain refines each one, then builds and ships it the same way'
 }
+
+# --- #3024: drawn-against stamps --------------------------------------------
+#
+# scripts/check-workflow-diagram-stamps.zsh recomputes each workflow diagram's
+# stamp from its sources' heading lines. The repo case proves the committed
+# stamps are current; the fixture cases mutate a small tree to prove the guard
+# goes red on a heading change and stays green on a wording change.
+
+STAMPS_PREFIX='%% drawn-against: '
+
+# The hash the stamp must carry, computed here independently of the script:
+# sha256 over the heading lines (two to six `#` and a space) of each source,
+# in the listed order. Run from the tree's root.
+expected_hash() {
+  local sum
+  if command -v sha256sum >/dev/null 2>&1; then sum='sha256sum'; else sum='shasum -a 256'; fi
+  local src
+  for src in "$@"; do grep -E '^#{2,6} ' "$src" || true; done | $sum | cut -d' ' -f1
+}
+
+# A minimal tree: one workflow page embedding one diagram, the SKILL.md it
+# documents, and the lifecycle overview, each diagram freshly stamped.
+make_stamp_fixture() {
+  FX="$BATS_TEST_TMPDIR/fx"
+  mkdir -p "$FX/docs/explanation/diagrams" "$FX/skills/demo"
+  printf '# Demo workflow\n\nIntro text with a [link](https://example.com/a).\n\n![demo](diagrams/demo.svg)\n\n## Step one\n\nDo the first thing.\n\n## Step two\n\nDo the second thing.\n' \
+    > "$FX/docs/explanation/workflow-demo.md"
+  printf -- '---\nname: demo\n---\n\n## Gate\n\nRun it.\n\n### Gate details\n\nMore.\n' > "$FX/skills/demo/SKILL.md"
+  DEMO_SOURCES='docs/explanation/workflow-demo.md skills/demo/SKILL.md'
+  stamp_fixture docs/explanation/diagrams/demo.mmd
+  stamp_fixture docs/explanation/diagrams/sdlc.mmd
+}
+
+# (Re)write a fixture diagram with a stamp over DEMO_SOURCES at the current hash.
+stamp_fixture() {
+  local hex
+  # shellcheck disable=SC2086
+  hex="$(cd "$FX" && expected_hash $DEMO_SOURCES)"
+  printf '%ssha256=%s %s\nflowchart TD\n    A --> B\n' "$STAMPS_PREFIX" "$hex" "$DEMO_SOURCES" > "$FX/$1"
+}
+
+run_stamps() {
+  run "$REPO_ROOT/scripts/check-workflow-diagram-stamps.zsh" --root "$FX"
+}
+
+@test "#3024 every workflow diagram's drawn-against stamp is current on the repo tree" {
+  run "$REPO_ROOT/scripts/check-workflow-diagram-stamps.zsh"
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  [ -z "$output" ]
+}
+
+@test "#3024 every diagram a workflow page embeds, and sdlc.mmd, starts with a stamp naming its sources" {
+  # An independent sweep of the covered set, so a page that embeds a new
+  # diagram is covered without editing a list here.
+  local page ref covered="docs/explanation/diagrams/sdlc.mmd" f line unstamped="" n=0
+  while IFS= read -r page; do
+    while IFS= read -r ref; do
+      covered+=$'\n'"docs/explanation/diagrams/$ref.mmd"
+    done < <(grep -oE '\]\(diagrams/[^)<>]+\.svg\)' "$REPO_ROOT/$page" | sed -E 's|^\]\(diagrams/||; s|\.svg\)$||')
+  done < <(git -C "$REPO_ROOT" ls-files 'docs/explanation/workflow-*.md')
+  while IFS= read -r f; do
+    n=$((n + 1))
+    line="$(head -n 1 "$REPO_ROOT/$f")"
+    case "$line" in
+      "${STAMPS_PREFIX}sha256="*' docs/explanation/workflow-'*'.md development/skills/'*'/SKILL.md'*) ;;
+      *) unstamped+=" $f" ;;
+    esac
+  done < <(printf '%s\n' "$covered" | sort -u)
+  # bootstrap, maintenance, refine-issue (two), resolve-issue (two) and sdlc
+  [ "$n" -ge 7 ]
+  [ -z "$unstamped" ] || { echo "unstamped:$unstamped"; false; }
+  # improvement-loop documents no single workflow and stays unstamped
+  lacks "$(head -n 1 "$REPO_ROOT/docs/explanation/diagrams/improvement-loop.mmd")" "$STAMPS_PREFIX"
+}
+
+@test "#3024 the stamp guard passes on a freshly stamped fixture tree" {
+  make_stamp_fixture
+  run_stamps
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  [ -z "$output" ]
+}
+
+@test "#3024 a renamed heading without a re-stamp fails, naming the diagram and the exact replacement line" {
+  make_stamp_fixture
+  sed -i.bak 's/^## Step two$/## Step two, revised/' "$FX/docs/explanation/workflow-demo.md"
+  local want
+  # shellcheck disable=SC2086
+  want="${STAMPS_PREFIX}sha256=$(cd "$FX" && expected_hash $DEMO_SOURCES) $DEMO_SOURCES"
+  run_stamps
+  [ "$status" -eq 1 ]
+  contains "$output" 'stale: docs/explanation/diagrams/demo.mmd'
+  contains "$output" 'stale: docs/explanation/diagrams/sdlc.mmd'
+  # the replacement line, printed on its own line exactly as it must be written
+  [ "$(printf '%s\n' "$output" | grep -cxF -- "$want")" -eq 2 ]
+}
+
+@test "#3024 an added, removed or reordered heading in either source fails the guard" {
+  make_stamp_fixture
+  printf '\n## Step three\n' >> "$FX/docs/explanation/workflow-demo.md"
+  run_stamps
+  [ "$status" -eq 1 ]
+  make_stamp_fixture
+  sed -i.bak '/^### Gate details$/d' "$FX/skills/demo/SKILL.md"
+  run_stamps
+  [ "$status" -eq 1 ]
+  contains "$output" 'stale: docs/explanation/diagrams/demo.mmd'
+  make_stamp_fixture
+  sed -i.bak 's/^## Step one$/## TMP/; s/^## Step two$/## Step one/; s/^## TMP$/## Step two/' \
+    "$FX/docs/explanation/workflow-demo.md"
+  run_stamps
+  [ "$status" -eq 1 ]
+}
+
+@test "#3024 a heading change re-stamped passes, and reverting the re-stamp fails again" {
+  make_stamp_fixture
+  local old
+  old="$(head -n 1 "$FX/docs/explanation/diagrams/demo.mmd")"
+  sed -i.bak 's/^## Step one$/## Step one, renamed/' "$FX/docs/explanation/workflow-demo.md"
+  stamp_fixture docs/explanation/diagrams/demo.mmd
+  stamp_fixture docs/explanation/diagrams/sdlc.mmd
+  run_stamps
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  # revert demo.mmd's stamp to the one drawn against the old headings
+  printf '%s\nflowchart TD\n    A --> B\n' "$old" > "$FX/docs/explanation/diagrams/demo.mmd"
+  run_stamps
+  [ "$status" -eq 1 ]
+  contains "$output" 'stale: docs/explanation/diagrams/demo.mmd'
+  lacks "$output" 'sdlc.mmd'
+}
+
+@test "#3024 a wording or link edit that leaves every heading alone stays green" {
+  make_stamp_fixture
+  sed -i.bak 's/Do the first thing./Do the first thing, carefully, as #3024 says./; s|https://example.com/a|https://example.com/b|' \
+    "$FX/docs/explanation/workflow-demo.md"
+  sed -i.bak 's/^Run it.$/Run it twice./' "$FX/skills/demo/SKILL.md"
+  run_stamps
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+}
+
+@test "#3024 an embedded diagram or sdlc.mmd without a stamp fails the sweep" {
+  make_stamp_fixture
+  printf 'flowchart TD\n    A --> B\n' > "$FX/docs/explanation/diagrams/demo.mmd"
+  run_stamps
+  [ "$status" -eq 1 ]
+  contains "$output" 'unstamped: docs/explanation/diagrams/demo.mmd (embedded by docs/explanation/workflow-demo.md)'
+  make_stamp_fixture
+  printf 'flowchart TD\n    A --> B\n' > "$FX/docs/explanation/diagrams/sdlc.mmd"
+  run_stamps
+  [ "$status" -eq 1 ]
+  contains "$output" 'unstamped: docs/explanation/diagrams/sdlc.mmd'
+  make_stamp_fixture
+  rm "$FX/docs/explanation/diagrams/demo.mmd"
+  run_stamps
+  [ "$status" -eq 1 ]
+  contains "$output" 'missing: docs/explanation/diagrams/demo.mmd'
+}
+
+@test "#3024 a stamp naming a missing source, or with no hash or sources, fails" {
+  make_stamp_fixture
+  rm "$FX/skills/demo/SKILL.md"
+  run_stamps
+  [ "$status" -eq 1 ]
+  contains "$output" 'missing source: docs/explanation/diagrams/demo.mmd names skills/demo/SKILL.md'
+  make_stamp_fixture
+  printf '%ssha256=abc\nflowchart TD\n' "$STAMPS_PREFIX" > "$FX/docs/explanation/diagrams/demo.mmd"
+  run_stamps
+  [ "$status" -eq 1 ]
+  contains "$output" 'malformed stamp: docs/explanation/diagrams/demo.mmd'
+  make_stamp_fixture
+  printf '%sabc %s\nflowchart TD\n' "$STAMPS_PREFIX" "$DEMO_SOURCES" > "$FX/docs/explanation/diagrams/demo.mmd"
+  run_stamps
+  [ "$status" -eq 1 ]
+  contains "$output" 'malformed stamp: docs/explanation/diagrams/demo.mmd'
+}
+
+@test "#3024 a stamped diagram outside the covered set is checked too" {
+  make_stamp_fixture
+  stamp_fixture docs/explanation/diagrams/extra.mmd
+  run_stamps
+  [ "$status" -eq 0 ]
+  printf '\n## Step three\n' >> "$FX/skills/demo/SKILL.md"
+  stamp_fixture docs/explanation/diagrams/demo.mmd
+  stamp_fixture docs/explanation/diagrams/sdlc.mmd
+  run_stamps
+  [ "$status" -eq 1 ]
+  contains "$output" 'stale: docs/explanation/diagrams/extra.mmd'
+}
+
+@test "#3024 the stamp guard prints usage on --help and refuses a bad invocation with exit 2" {
+  run "$REPO_ROOT/scripts/check-workflow-diagram-stamps.zsh" --help
+  [ "$status" -eq 0 ]
+  contains "$output" 'usage: check-workflow-diagram-stamps.zsh [--root <dir>]'
+  run "$REPO_ROOT/scripts/check-workflow-diagram-stamps.zsh" --root
+  [ "$status" -eq 2 ]
+  run "$REPO_ROOT/scripts/check-workflow-diagram-stamps.zsh" --bogus
+  [ "$status" -eq 2 ]
+  run "$REPO_ROOT/scripts/check-workflow-diagram-stamps.zsh" --root "$BATS_TEST_TMPDIR/does-not-exist"
+  [ "$status" -eq 2 ]
+}
+
+@test "#3024 the required script-tests job runs on a change to any covered source" {
+  local wf
+  wf="$(cat "$REPO_ROOT/.github/workflows/script-tests.yml")"
+  contains "$wf" "- 'docs/explanation/**'"
+  contains "$wf" "- 'development/skills/**/SKILL.md'"
+  contains "$wf" "- 'scripts/**'"
+}
+
+@test "#3024 the authoring guide records the drawn-against stamp" {
+  local guide
+  guide="$(tr '\n' ' ' < "$REPO_ROOT/docs/how-to/authoring-guide.md" | tr -s ' ')"
+  contains "$guide" '**Workflow diagrams carry a drawn-against stamp.**'
+  contains "$guide" 'starts with `%% drawn-against: sha256=<hex> <source> ...`'
+  contains "$guide" 'The hash covers only their heading lines.'
+  contains "$guide" 'the script-tests suite fails until the diagram is updated and re-stamped, or re-stamped alone if it still matches.'
+  contains "$guide" 'Wording and link edits that leave headings alone never trip it.'
+  contains "$guide" 'The stamp is a tripwire, not a proof: a behaviour change written only inside a paragraph still needs the diagram checked by hand.'
+}
