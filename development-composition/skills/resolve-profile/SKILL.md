@@ -39,9 +39,9 @@ These are the §3 rules for this repo type. The conductor's generic bullet says
   the validator first, so a manifest that fails the contract never spends a
   suite run.
 - **Read the validator by its exit code, never by its stdout.** `0` is a valid
-  manifest. `1` with the validator's stderr line naming a member or
-  environment is a contract violation, and `4` a missing or unreadable
-  manifest: both are a **red gate** — fix the manifest the change broke,
+  manifest. `1` is a contract violation, whose one stderr line names the
+  offending member or environment, or the document-level defect, and `4` a
+  missing or unreadable manifest: both are a **red gate** — fix the manifest the change broke,
   never the validator. `2` is your own malformed call: fix it and re-run. Any
   other status is no verdict about the manifest, red or green — `3`, the
   runner lacking mikefarah's `yq` or a working `jq`, among them:
