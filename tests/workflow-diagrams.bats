@@ -225,3 +225,38 @@ tracked_diagrams() {
   contains "$(tr '\n' ' ' < "$REPO_ROOT/docs/explanation/workflow-refine-issue.md" | tr -s ' ')" \
     "An implementation question is decided and recorded in the body's *Decisions taken* section, never asked."
 }
+
+@test "#3023 the lifecycle overview draws refinement, blockers and follow-ups driven from inside resolve-issue" {
+  local src svg page
+  src="$(cat "$REPO_ROOT/docs/explanation/diagrams/sdlc.mmd")"
+  svg="$(cat "$REPO_ROOT/docs/explanation/diagrams/sdlc.svg")"
+  # a human-started run refines or splits the story itself, as resolve-issue.mmd draws it
+  contains "$src" 'chain step: chained refinement'
+  contains "$src" 'GATE -- "not READY,<br/>human-started" --> CREF'
+  contains "$src" 'CREF -- ready --> IMPL'
+  contains "$src" 'CREF -- "split: each child<br/>through this flow" --> GATE'
+  contains "$src" 'IMPL -- "oversized,<br/>human-started" --> CREF'
+  # it resolves its blockers first
+  contains "$src" 'chain step: blockers first'
+  contains "$src" 'GATE -- "blocked,<br/>human-started" --> BFIRST'
+  contains "$src" 'BFIRST -- "all merged:<br/>re-check" --> GATE'
+  # and carries its follow-ups through to merge, as resolve-issue-ship.mmd draws it
+  contains "$src" 'chain step: follow-up chain'
+  contains "$src" 'MERGE -- "human-started" --> CHAIN'
+  contains "$src" 'CHAIN -- "next follow-up,<br/>refined first" --> IMPL'
+  # standalone refine-issue stays the path a human drives
+  contains "$src" '/development:refine-issue<br/>you drive it'
+  contains "$src" 'GATE -- "not READY,<br/>pipeline-started" --> REF'
+  # the old separate loop, which every story had to finish before Build, is gone
+  lacks "$src" 'GATE -- "not ready" --> REF'
+  # the page shows the committed SVG, so it must carry the source's new boxes
+  contains "$svg" '> chained</tspan>'
+  contains "$svg" '> blockers</tspan>'
+  contains "$svg" '> follow-up</tspan>'
+  # the prose around the diagram tells the same story
+  page="$(tr '\n' ' ' < "$REPO_ROOT/docs/explanation/how-the-plugins-work.md" | tr -s ' ')"
+  contains "$page" 'a chained refinement step refines the story, or splits it into children'
+  contains "$page" 'the blockers-first step resolves and merges every open blocker before the story'
+  contains "$page" '`/development:refine-issue` stays the path you drive yourself'
+  contains "$page" 'the follow-up chain refines each one, then builds and ships it the same way'
+}
