@@ -65,6 +65,7 @@ development-claude-plugin/agents/claude-plugin-manifest-check.md
 development-claude-plugin/agents/claude-plugin-prose-logic.md
 development-claude-plugin/agents/claude-plugin-script-reviewer.md
 development-claude-plugin/agents/claude-plugin-test-reviewer.md
+development-composition/agents/composition-manifest-reviewer.md
 development-go/agents/go-bug-hunter.md
 development-go/agents/go-code-quality.md
 development-go/agents/go-performance-reviewer.md
@@ -104,7 +105,7 @@ development-swift/agents/test-reviewer.md
 development/agents/bootstrap-config-consistency.md
 development/agents/bootstrap-idempotency-reviewer.md
 development/agents/bootstrap-security-reviewer.md"
-  EXPECTED_COUNT=44
+  EXPECTED_COUNT=45
 }
 
 # Print every tracked agent file in the git work tree $1, repo-relative, sorted.

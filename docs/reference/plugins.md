@@ -46,7 +46,7 @@ of this plugin):
 | Bootstrap | `/development:bootstrap` | Sets up the full quality + security toolchain. The quality toolchain is a declaration in `.maintenance.yml`, composed per tool: public repos default to SonarCloud + Snyk + CodeQL, private repos to self-hosted SonarQube + Trivy + a self-hosted runner, and any other valid combination is composed too, with branch protection and the setup preflight following the declared tools. Generates pre-commit hooks, Dependabot config, issue/PR templates, branch protection, and the **Zero Tolerance standard** (≥90% new-code coverage, 0 code smells, all A ratings) enforced via a layered model: a `coverage-floor` CI step + a `diff-cover` pre-push hook + the configured Sonar gate. The Sonar gate uses a custom Quality Gate on paid SonarCloud / self-hosted SonarQube; on SonarCloud free (where custom-gate assignment is paywalled) it falls back to `Sonar way` and the CI step remains the real 90% enforcement. On macOS, automation scripts handle SonarCloud / SonarQube / Snyk setup, secret storage, gate configuration, and runner registration. Idempotent — safe to re-run. **Requires macOS + Homebrew** (see [Requirements](requirements.md)). |
 | Maintenance | `/development:maintenance [--dry-run] [--no-merge]` | Orchestrator. Runs detection + per-tool findings gathering + coverage measurement, constructs the JSON payload, dispatches to the matching language plugin (`development-python`, `development-java`, `development-swift`, `development-go`, `development-javascript`) and any topic plugins (`development-spring`, `development-claude-plugin`, `development-docs`, `development-react`, `development-kubernetes`, `development-opentofu`), collects results, and merges worktree branches back to the user's current branch. Effective entry point for "go fix everything safely fixable on this project." `--dry-run` prints the payload without dispatching; `--no-merge` leaves the worktree branches available for manual merge. |
 | Commit | `/development:commit [message]` | Runs formatting/linting (delegates to language-specific plugin), generates a commit message, ensures a feature branch, and commits |
-| Resolve Issue | `/development:resolve-issue <issue#\|epic#>` | Takes a filed issue (or an epic of issues) and drives it to a merge-ready, **bot-authored** PR: dependency precheck (GitHub-native `blockedBy`; rejects on open blockers, refuses cycles, offers guided remediation interactively — epic #583) → readiness gate → branch off fresh main → implement → validate (tests must be green) → commit → `open-pr` (Maintenance-App-authored, auto-merge armed). For an epic: decomposes the children, orders them conflict-aware (sequential-by-default, disjoint-only parallel worktrees), tests each before merge, then runs a holistic end-to-end test over the merged epic. Repo-type-agnostic (Swift / Python / Java / Go / JavaScript / Claude-plugin / Kubernetes). |
+| Resolve Issue | `/development:resolve-issue <issue#\|epic#>` | Takes a filed issue (or an epic of issues) and drives it to a merge-ready, **bot-authored** PR: dependency precheck (GitHub-native `blockedBy`; rejects on open blockers, refuses cycles, offers guided remediation interactively — epic #583) → readiness gate → branch off fresh main → implement → validate (tests must be green) → commit → `open-pr` (Maintenance-App-authored, auto-merge armed). For an epic: decomposes the children, orders them conflict-aware (sequential-by-default, disjoint-only parallel worktrees), tests each before merge, then runs a holistic end-to-end test over the merged epic. Repo-type-agnostic (Swift / Python / Java / Go / JavaScript / Claude-plugin / Composition / Kubernetes). |
 | Refine Issue | `/development:refine-issue <issue#>` | **Interactive** — drives a `needs-refinement` issue back to READY. Diagnoses via the readiness gate, then loops the `issue-refiner` agent with you (explanation → questions → recommendations → a prose rewrite → a proposed `story-spec/v1` block, with outside-in test cases mined from the repo), writes back the **human-approved** prose + block (a human-authored issue edit, not a bot PR), re-gates, and clears the label only on READY. Spins out linked `test-case` issues for a surface-touching story's outside-in cases; takes a typed parked exit when a session can't converge; pointed at an **epic**, walks each `needs-refinement` child and posts an epic summary. |
 | Define Personas | `/development:define-personas` | **Interactive** — creates or updates a repo's `personas/v1` registry (`docs/personas.md`): who actually uses each surface and what they type into it. Loops the `persona-definer` agent with you (repo-grounded candidate personas + Socratic questions), then writes back the **human-approved** prose + machine block to the working tree (lands via the normal PR flow). The registry feeds `refine-issue`'s realistic test-data generation and the readiness gate's advisory persona-reference check. |
 | Git Branch Naming | `/development:git-branch-naming` | Defines the branch naming convention (`<type>/<issue>-<description>`) and creates properly named branches |
@@ -756,7 +756,7 @@ detected topic — `docs`, say — as auxiliary. On a repo **without** a
 detected target dispatches as primary, and the run's summary notes the
 declaration.
 
-**What's built (v0.1):** the ownership boundary, the `claude-workspace/v1`
+**What's built (v0.2):** the ownership boundary, the `claude-workspace/v1`
 contract, and the validator that enforces it
 ([#1744](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1744));
 the bootstrap scaffold with its promote-to-prod workflow
@@ -775,10 +775,16 @@ foundation; the deploy renderers are
 [#719](https://github.com/timo-jakob/timos-claude-code-plugins/issues/719)
 (compose) and
 [#720](https://github.com/timo-jakob/timos-claude-code-plugins/issues/720)
-(Kubernetes). So the plugin ships **one skill and one agent** — the maintenance
-dispatcher and `composition-tag-bump-triage` — plus its scripts and the
-templates the scaffold copies. The validator's callers are bootstrap, the
-maintenance gather and `render-importmap.zsh`.
+(Kubernetes). Since
+[#3030](https://github.com/timo-jakob/timos-claude-code-plugins/issues/3030)
+`composition` is also a **repo type** for `/development:resolve-issue`: a repo
+with a root `.claude-workspace.yaml` and no supported language is reviewed by
+this plugin's panel and gated by its resolve profile. So the plugin ships
+**three skills and two agents** — the maintenance dispatcher, the review panel,
+the resolve profile, `composition-tag-bump-triage` and
+`composition-manifest-reviewer` — plus its scripts and the templates the
+scaffold copies. The validator's callers are bootstrap, the maintenance gather,
+`render-importmap.zsh` and the resolve profile's Gate.
 
 | Piece | What it is |
 | --- | --- |
@@ -789,6 +795,9 @@ maintenance gather and `render-importmap.zsh`.
 | `templates/` | the skeleton the scaffold copies: the promote-to-prod workflow, `promote.zsh`, the sockets, `renovate.json` |
 | `/development-composition:maintenance` | the maintenance dispatcher; its `skills/maintenance/scripts/plan-dispatch.zsh` computes the response |
 | `composition-tag-bump-triage` | the agent that triages Renovate image-tag bump PRs |
+| Review panel | `/development-composition:review [scope]` — the panel `review-dispatch.zsh` names for a `composition` repo: `composition-manifest-reviewer` over the manifest's member pins and the promotion machinery, plus `development-claude-plugin`'s script and test reviewers over the zsh scripts and bats suites. Emits #558-schema findings alongside the prose report |
+| `composition-manifest-reviewer` | the panel's read-only agent for what the validator cannot judge: a weakened pin, a promotion path that bypasses a protected environment, a workflow that widens permissions or runs untrusted input, a Renovate rule that stops seeing the pins |
+| Resolve profile | `/development-composition:resolve-profile` (not invoked by hand — loaded by name by `/development:resolve-issue` at its §1b step) — the composition repo type's driver rules for the resolve-issue conductor: six contract headings (named once in the *Resolve profile contract* in ARCHITECTURE.md, not restated here) holding a two-half gate, `validate-workspace.zsh` on the manifest and then the whole bats suite through `run-gate.zsh --tests-dir tests` (an empty suite is *nothing to gate*, never green), `--gate-attest: not applicable`, a `none` version bump (a constellation repo ships no installable plugin content), and the panel pointer. Not for direct use |
 
 ### Maintenance
 

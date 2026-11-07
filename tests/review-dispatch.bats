@@ -838,7 +838,7 @@ EOF
   langs="$(sed -n 's/^  for l in \(.*\); do$/\1/p' "$S")"
   [ -n "$langs" ]
   [ "$(printf '%s\n' "$langs" | wc -w | tr -d ' ')" -eq 5 ]
-  for t in $langs claude-plugin kubernetes; do
+  for t in $langs claude-plugin composition kubernetes; do
     [ -f "$REPO_ROOT/development-$t/skills/review/SKILL.md" ]
     # and each panel's skill really is named `review`, or the synthesised
     # `development-<type>:review` resolves to nothing
@@ -885,6 +885,89 @@ EOF
 
 @test "plan: #1153 the kubernetes fallback does not defuse language ambiguity" {
   plan '{"languages":["python","java"],"is_kubernetes":true}'
+  [ "$status" -eq 3 ]
+  [ "$(echo "$output" | jq -r .error)" = "ambiguous_repo_type" ]
+}
+
+# ---- composition fallback repo_type (#3030): a constellation repo pins its
+# members' images in a root `.claude-workspace.yaml` and detects no language.
+# The fixture cases run the REAL detect-stack, so detect-stack's `is_composition`
+# key and the dispatcher's jq path are pinned together, as #1153's end-to-end
+# case pins `is_kubernetes`.
+
+# Run subcommand $1 (`detect` or `plan`) over the fixture repo $R with the REAL
+# detect-stack, never the stub.
+real() {  # $1 = subcommand ; rest = extra flags
+  local sub="$1"; shift
+  run env -u DETECT_STACK_BIN -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \
+    zsh "$S" "$sub" --repo "$R" "$@"
+}
+
+@test "detect: #3030 a root .claude-workspace.yaml with no language marker is composition" {
+  printf 'schema: claude-workspace/v1\n' > "$R/.claude-workspace.yaml"
+  real detect
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c .)" = '{"repo_type":"composition"}' ]
+}
+
+@test "detect: #3030 the same fixture plus a root package.json is javascript — a language wins" {
+  printf 'schema: claude-workspace/v1\n' > "$R/.claude-workspace.yaml"
+  printf '{}\n' > "$R/package.json"
+  real detect
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "javascript" ]
+}
+
+@test "detect: #3030 claude-plugin wins when a workspace manifest sits beside .claude-plugin" {
+  printf 'schema: claude-workspace/v1\n' > "$R/.claude-workspace.yaml"
+  mkdir -p "$R/.claude-plugin"
+  printf '{"name":"p"}\n' > "$R/.claude-plugin/plugin.json"
+  real detect
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "claude-plugin" ]
+}
+
+@test "detect: #3030 composition wins over kubernetes when a Chart.yaml is present too" {
+  printf 'schema: claude-workspace/v1\n' > "$R/.claude-workspace.yaml"
+  mkdir -p "$R/deploy/chart"
+  printf 'apiVersion: v2\nname: app\nversion: 0.1.0\n' > "$R/deploy/chart/Chart.yaml"
+  real detect
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "composition" ]
+}
+
+@test "plan: #3030 a composition fixture plans development-composition:review" {
+  printf 'schema: claude-workspace/v1\n' > "$R/.claude-workspace.yaml"
+  real plan --base main
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "composition" ]
+  [ "$(echo "$output" | jq -r .review_skill)" = "development-composition:review" ]
+  # composition is a fallback repo_type, not a topic row, so it never lists itself
+  [ "$(echo "$output" | jq -c .topic_review_skills)" = "[]" ]
+}
+
+@test "plan: #3030 a detect-stack output without is_composition stays the typed error" {
+  # an older detect-stack omits the key; the `// false` default must fall
+  # through to the typed escalation, exactly as #809's and #1153's absent keys do
+  plan '{"languages":[]}'
+  [ "$status" -eq 3 ]
+  [ "$(echo "$output" | jq -r .error)" = "unsupported_repo_type" ]
+  # ...and the same document WITH the marker is the fallback, so the key is read
+  plan '{"languages":[],"is_composition":true}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "composition" ]
+}
+
+@test "plan: #3030 an UNSUPPORTED language does NOT block the composition fallback" {
+  # unlike kubernetes, composition carries no zero-language condition: the
+  # workspace manifest defines the repo, as `.claude-plugin/plugin.json` does
+  plan '{"languages":["rust"],"is_composition":true,"is_kubernetes":true}'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "composition" ]
+}
+
+@test "plan: #3030 the composition fallback does not defuse language ambiguity" {
+  plan '{"languages":["python","java"],"is_composition":true}'
   [ "$status" -eq 3 ]
   [ "$(echo "$output" | jq -r .error)" = "ambiguous_repo_type" ]
 }
@@ -1137,6 +1220,15 @@ EOF
     zsh "$S" plan --repo "$R" --base main
   [ "$status" -eq 1 ]
   echo "$output" | grep -q 'is_kubernetes'
+}
+
+@test "plan: #3030 a failing .is_composition read is exit 1, not the typed escalation" {
+  local shim; shim="$(jq_failing_on '.is_composition')"
+  run env PATH="$shim:$PATH" DETECT_STACK_BIN="$STUB" \
+    DETECT_LANGS_JSON='{"is_composition":true}' \
+    zsh "$S" plan --repo "$R" --base main
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'is_composition'
 }
 
 @test "plan: #1177 an UNREADABLE --repo is named as such, not blamed on detect-stack" {
@@ -1654,6 +1746,7 @@ detect() {  # $1 = languages json ; rest = extra flags
                '{"languages":["go"]}' \
                '{"languages":["javascript"]}' \
                '{"languages":[],"is_claude_plugin":true}' \
+               '{"languages":[],"is_composition":true}' \
                '{"languages":[],"is_kubernetes":true}'; do
     plan "$langs"
     [ "$status" -eq 0 ] || { echo "plan failed for $langs: $output"; return 1; }

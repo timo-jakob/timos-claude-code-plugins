@@ -12,8 +12,8 @@ description: >
   rest sequentially off fresh main (each child independently tested), then run a
   holistic end-to-end test over the merged epic and explicitly close the epic
   issue (nothing auto-closes it). Repo-type-agnostic (Swift / Python / Java /
-  Go / JavaScript / Claude-plugin / Kubernetes). Composes git-branch-naming, commit, and open-pr; never pushes
-  to the default branch. When a human is driving, a `BUDGET_EXHAUSTED` /
+  Go / JavaScript / Claude-plugin / Composition / Kubernetes). Composes
+  git-branch-naming, commit, and open-pr; never pushes to the default branch. When a human is driving, a `BUDGET_EXHAUSTED` /
   non-converging review-loop exit becomes an interactive extension (offer more
   rounds, give guidance, ask questions). CONVERGED is the only review-loop
   ending that opens a PR: the residue terminal (exit 14) is retired, so a run

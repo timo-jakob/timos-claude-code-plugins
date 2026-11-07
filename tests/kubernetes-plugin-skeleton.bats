@@ -1271,13 +1271,14 @@ rstep() {
   # starts later, so this bullet — the change's central new dispatch rule — had
   # one behavioural gate and zero prose gates.
   local fb
-  fb="$(sed -n '/^- \*\*The two fallbacks are ordered/,/^- \*\*/p' "$ARCH" | tr -s '[:space:]' ' ')"
+  # #3030 made it three fallbacks; composition shares claude-plugin's trigger
+  fb="$(sed -n '/^- \*\*The three fallbacks are ordered/,/^- \*\*/p' "$ARCH" | tr -s '[:space:]' ' ')"
   [ -n "$fb" ]
   # the superseded single-trigger phrasing must be GONE
   lacks "$fb" 'reached only when `.languages` contains no supported review language, and are keyed'
   # both triggers, stated separately
   contains "$fb" 'their triggers differ'
-  contains "$fb" '`claude-plugin` is reached when `.languages` contains no **supported** review language'
+  contains "$fb" '`claude-plugin` and `composition` are reached when `.languages` contains no **supported** review'
   contains "$fb" '`kubernetes` additionally requires **no detected language at all**'
   # and the rationale, without which a later editor "harmonises" the two
   contains "$fb" 'definitional for what the repo *is*'
