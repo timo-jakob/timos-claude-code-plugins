@@ -12,12 +12,14 @@ flowchart TD
 
     subgraph SPEC["2 · Specify"]
         ISSUE["Issue or epic filed"]:::human
-        GATE{"story-readiness:<br/>ready to build?"}
-        REF["/development:refine-issue<br/>questions, rewrite, story spec"]:::conductor
+        GATE{"resolve-issue steps 0-0b:<br/>unblocked,<br/>READY?"}
+        CREF["chain step: chained refinement<br/>refine the story or split it,<br/>then resume"]:::conductor
+        BFIRST["chain step: blockers first<br/>each open blocker resolved<br/>and merged, deepest-first"]:::conductor
+        REF["/development:refine-issue<br/>you drive it: questions,<br/>rewrite, story spec"]:::conductor
     end
 
     subgraph BUILD["3 · Build"]
-        IMPL["/development:resolve-issue<br/>branch, implement, test gate"]:::conductor
+        IMPL["resolve-issue steps 1-3:<br/>branch, implement, test gate"]:::conductor
         LOOP["Review loop<br/>panel, fix, re-test"]:::agent
     end
 
@@ -25,6 +27,7 @@ flowchart TD
         PR["PR by the Maintenance App,<br/>auto-merge armed"]:::bot
         APPR["Approval: Approver bot<br/>or a human"]:::bot
         MERGE[("Merged on green CI")]:::artifact
+        CHAIN["chain step: follow-up chain<br/>each filed follow-up<br/>refined, then built"]:::conductor
     end
 
     subgraph OPS["5 · Maintain"]
@@ -33,13 +36,21 @@ flowchart TD
     end
 
     BOOT -- "toolchain in place" --> ISSUE
-    ISSUE --> GATE
-    GATE -- "not ready" --> REF
-    REF -- "ready" --> GATE
+    ISSUE -- "you start<br/>resolve-issue" --> GATE
+    GATE -- "not READY,<br/>human-started" --> CREF
+    CREF -- ready --> IMPL
+    CREF -- "split: each child<br/>through this flow" --> GATE
+    GATE -- "blocked,<br/>human-started" --> BFIRST
+    BFIRST -- "all merged:<br/>re-check" --> GATE
+    GATE -- "not READY,<br/>pipeline-started" --> REF
+    REF -- "ready: run<br/>resolve-issue again" --> GATE
     PERS -. "personas, test data" .-> REF
-    GATE -- ready --> IMPL --> LOOP
+    GATE -- yes --> IMPL --> LOOP
+    IMPL -- "oversized,<br/>human-started" --> CREF
     LOOP -- converged --> PR
     PR --> APPR --> MERGE
+    MERGE -- "human-started" --> CHAIN
+    CHAIN -- "next follow-up,<br/>refined first" --> IMPL
     MERGE --> FIND
     FIND --> MAINT --> PR
     MAINT -. "work for a human:<br/>new issues" .-> ISSUE
