@@ -128,12 +128,16 @@ for the why and [Amend a C4 diagram](amend-a-c4-diagram.md) for the how.
   dozen steps; a tall diagram is scaled down to fit the page, and its text with
   it. Inside a sequence diagram a `;` ends the statement, so do not use one in
   message or note text.
+- **Re-render the SVG after every `.mmd` edit**, a drawn-against re-stamp included. Each SVG carries a
+  `<!-- rendered-from: sha256=<hex> -->` stamp of the `.mmd` bytes it was rendered from, and the
+  script-tests suite in CI fails when the two disagree. CI never re-renders, so the stamp is how it
+  tells a forgotten re-render from a current picture.
 - **Workflow diagrams carry a drawn-against stamp.** Each diagram for a workflow
   page (and `sdlc.mmd`) starts with `%% drawn-against: sha256=<hex> <source> ...`,
   naming the workflow pages and `SKILL.md` files it draws. The hash covers only
   their heading lines. When a PR adds, removes, renames or reorders a heading in
   one of those sources, the script-tests suite fails until the diagram is updated,
-  re-rendered and re-stamped, or re-stamped alone if it still matches. Wording and link edits
+  re-stamped and re-rendered, or only re-stamped and re-rendered if it still matches. Wording and link edits
   that leave headings alone never trip it. The stamp is a tripwire, not a proof: a
   behaviour change written only inside a paragraph still needs the diagram checked
   by hand. Run `./scripts/check-workflow-diagram-stamps.zsh`: on a stale stamp it

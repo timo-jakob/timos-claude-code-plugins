@@ -263,6 +263,95 @@ tracked_diagrams() {
   contains "$page" 'the follow-up chain refines each one, then builds and ships it the same way'
 }
 
+# --- #3040: rendered-from stamps --------------------------------------------
+#
+# scripts/render-diagrams.zsh stamps each SVG with the sha256 of the .mmd bytes
+# it was rendered from. CI cannot re-render, so comparing that hash with the
+# committed .mmd is what catches a source edited without a re-render. The repo
+# case sweeps every tracked pair; the fixture cases copy one real pair to a
+# scratch tree and mutate it.
+
+# Print one line per .mmd under <root> (repo-relative paths after it) whose SVG
+# does not carry exactly one rendered-from stamp matching the .mmd's bytes.
+svg_stamp_problems() {
+  local root="$1" mmd svg n got want sum
+  shift
+  if command -v sha256sum >/dev/null 2>&1; then sum='sha256sum'; else sum='shasum -a 256'; fi
+  for mmd in "$@"; do
+    svg="${mmd%.mmd}.svg"
+    n="$(grep -o 'rendered-from:' "$root/$svg" | grep -c . || true)"
+    if [ "$n" -ne 1 ]; then
+      echo "$mmd -> $svg carries $n rendered-from stamps, not 1; run scripts/render-diagrams.zsh $mmd"
+      continue
+    fi
+    got="$(grep -oE '<!-- rendered-from: sha256=[0-9a-f]{64} -->' "$root/$svg" | sed -E 's/.*sha256=([0-9a-f]{64}).*/\1/')"
+    want="$($sum < "$root/$mmd" | cut -d' ' -f1)"
+    [ "$got" = "$want" ] \
+      || echo "$mmd -> $svg is stale against its source; run scripts/render-diagrams.zsh $mmd"
+  done
+}
+
+# A scratch tree holding a copy of one real, freshly stamped pair.
+make_svg_stamp_fixture() {
+  SX="$BATS_TEST_TMPDIR/sx"
+  PAIR='docs/explanation/diagrams/sdlc'
+  mkdir -p "$SX/docs/explanation/diagrams"
+  cp "$REPO_ROOT/$PAIR.mmd" "$REPO_ROOT/$PAIR.svg" "$SX/docs/explanation/diagrams/"
+}
+
+@test "#3040 every committed diagram SVG carries one rendered-from stamp matching its .mmd" {
+  local problems
+  # shellcheck disable=SC2046
+  problems="$(svg_stamp_problems "$REPO_ROOT" $(tracked_diagrams mmd))"
+  [ -z "$problems" ] || { echo "$problems"; false; }
+}
+
+@test "#3040 a .mmd edited without a re-render fails naming the pair; restoring the byte passes" {
+  make_svg_stamp_fixture
+  [ -z "$(svg_stamp_problems "$SX" "$PAIR.mmd")" ]
+  # flip one byte: the trailing newline becomes a space
+  cp "$SX/$PAIR.mmd" "$BATS_TEST_TMPDIR/orig.mmd"
+  printf '%s ' "$(cat "$BATS_TEST_TMPDIR/orig.mmd")" > "$SX/$PAIR.mmd"
+  [ "$(wc -c < "$SX/$PAIR.mmd")" -eq "$(wc -c < "$BATS_TEST_TMPDIR/orig.mmd")" ]
+  run svg_stamp_problems "$SX" "$PAIR.mmd"
+  contains "$output" "$PAIR.mmd -> $PAIR.svg is stale against its source; run scripts/render-diagrams.zsh $PAIR.mmd"
+  cp "$BATS_TEST_TMPDIR/orig.mmd" "$SX/$PAIR.mmd"
+  [ -z "$(svg_stamp_problems "$SX" "$PAIR.mmd")" ]
+}
+
+@test "#3040 an SVG with no rendered-from stamp, or with two, fails" {
+  make_svg_stamp_fixture
+  local stamp
+  stamp="$(grep -oE '<!-- rendered-from: sha256=[0-9a-f]{64} -->' "$SX/$PAIR.svg")"
+  sed -E 's/<!-- rendered-from: sha256=[0-9a-f]{64} -->//' "$REPO_ROOT/$PAIR.svg" > "$SX/$PAIR.svg"
+  run svg_stamp_problems "$SX" "$PAIR.mmd"
+  contains "$output" "$PAIR.mmd -> $PAIR.svg carries 0 rendered-from stamps, not 1"
+  { cat "$REPO_ROOT/$PAIR.svg"; printf '%s\n' "$stamp"; } > "$SX/$PAIR.svg"
+  run svg_stamp_problems "$SX" "$PAIR.mmd"
+  contains "$output" "$PAIR.mmd -> $PAIR.svg carries 2 rendered-from stamps, not 1"
+}
+
+@test "#3040 render-diagrams.zsh stamps each SVG with its source's sha256 after the root tag" {
+  local body
+  body="$(cat "$RENDER")"
+  contains "$body" 'hex="$(shasum -a 256 < "$src" | cut -d'"' '"' -f1)"'
+  contains "$body" '"1s/>/><!-- rendered-from: sha256=$hex -->/"'
+  contains "$body" 'render-diagrams: could not stamp $svg with its source hash'
+  # every committed stamp sits directly after the root <svg …> opening tag
+  local f bad=""
+  while IFS= read -r f; do
+    head -c 4000 "$REPO_ROOT/$f" | grep -qE '^<svg [^>]*><!-- rendered-from: sha256=[0-9a-f]{64} -->' || bad+=" $f"
+  done < <(tracked_diagrams svg)
+  [ -z "$bad" ] || { echo "stamp not after the root tag:$bad"; false; }
+}
+
+@test "#3040 the authoring guide says to re-render after any .mmd edit and that CI checks it" {
+  local guide
+  guide="$(tr '\n' ' ' < "$REPO_ROOT/docs/how-to/authoring-guide.md" | tr -s ' ')"
+  contains "$guide" '**Re-render the SVG after every `.mmd` edit**, a drawn-against re-stamp included.'
+  contains "$guide" 'Each SVG carries a `<!-- rendered-from: sha256=<hex> -->` stamp of the `.mmd` bytes it was rendered from, and the script-tests suite in CI fails when the two disagree.'
+}
+
 # --- #3024: drawn-against stamps --------------------------------------------
 #
 # scripts/check-workflow-diagram-stamps.zsh recomputes each workflow diagram's
@@ -354,7 +443,7 @@ run_stamps() {
   [ "$status" -eq 1 ]
   contains "$output" 'stale: docs/explanation/diagrams/demo.mmd'
   contains "$output" 'stale: docs/explanation/diagrams/sdlc.mmd'
-  contains "$output" 're-render it with ./scripts/render-diagrams.zsh, then replace line 1 with:'
+  contains "$output" 'replace its line 1 with the line below, then re-render it with ./scripts/render-diagrams.zsh docs/explanation/diagrams/demo.mmd:'
   # the replacement line, printed on its own line exactly as it must be written
   [ "$(printf '%s\n' "$output" | grep -cxF -- "$want")" -eq 2 ]
 }
@@ -477,7 +566,7 @@ run_stamps() {
   contains "$guide" '**Workflow diagrams carry a drawn-against stamp.**'
   contains "$guide" 'starts with `%% drawn-against: sha256=<hex> <source> ...`'
   contains "$guide" 'The hash covers only their heading lines.'
-  contains "$guide" 'the script-tests suite fails until the diagram is updated, re-rendered and re-stamped, or re-stamped alone if it still matches.'
+  contains "$guide" 'the script-tests suite fails until the diagram is updated, re-stamped and re-rendered, or only re-stamped and re-rendered if it still matches.'
   contains "$guide" 'Wording and link edits that leave headings alone never trip it.'
   contains "$guide" 'The stamp is a tripwire, not a proof: a behaviour change written only inside a paragraph still needs the diagram checked by hand.'
 }
