@@ -2862,6 +2862,12 @@ detect_langs() {
   [ "$(detect_langs)" = '["python"]' ]
 }
 
+@test "detect-stack #3029: an ignored marker does not hide a real marker of the same language" {
+  ignored_member_fixture
+  printf '{}\n' > tsconfig.json
+  [ "$(detect_langs)" = '["javascript"]' ]
+}
+
 @test "detect-stack #3029: a TRACKED marker matching an ignore pattern still counts" {
   ignored_member_fixture
   env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git add -f member/package.json
