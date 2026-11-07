@@ -258,5 +258,7 @@ tracked_diagrams() {
   contains "$page" 'a chained refinement step refines the story, or splits it into children'
   contains "$page" 'the blockers-first step resolves and merges every open blocker before the story'
   contains "$page" '`/development:refine-issue` stays the path you drive yourself'
+  contains "$page" 'an open blocker gets the story the `blocked` label and a comment naming it'
+  contains "$page" 'a pipeline-started run parks it with `needs-split` and stops'
   contains "$page" 'the follow-up chain refines each one, then builds and ships it the same way'
 }

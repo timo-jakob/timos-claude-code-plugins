@@ -44,13 +44,15 @@ shipped. Every change, whichever skill produced it, ships the same way.
    the way and have the `story-readiness` agent judge whether the story is specified well enough. In a run you started,
    resolve-issue clears both itself: a chained refinement step refines the story, or splits it into children that each
    go through the same flow, and the blockers-first step resolves and merges every open blocker before the story. A run
-   the maintenance pipeline started stops instead, and the story keeps its `needs-refinement` label and the gate's
-   questions. `/development:refine-issue` stays the path you drive yourself: it walks you through answering them until
-   the story is ready, and you run resolve-issue again ([How refine-issue works](workflow-refine-issue.md)).
+   the maintenance pipeline started stops instead: an open blocker gets the story the `blocked` label and a comment
+   naming it, and a story not yet ready keeps its `needs-refinement` label and the gate's questions. For that case
+   `/development:refine-issue` stays the path you drive yourself: it walks you through answering them until the story
+   is ready, and you run resolve-issue again ([How refine-issue works](workflow-refine-issue.md)).
 3. **Build — on your machine.** `/development:resolve-issue` branches, implements the story with its acceptance tests
    and docs, runs the test gate, and puts the change through a local review loop until it converges
-   ([How resolve-issue works](workflow-resolve-issue.md)). A story too big for one change goes back to the chained
-   refinement to be split. No PR exists yet.
+   ([How resolve-issue works](workflow-resolve-issue.md)). In a run you started, a story too big for one change goes
+   back to the chained refinement to be split; a pipeline-started run parks it with `needs-split` and stops. No PR
+   exists yet.
 4. **Ship.** The change arrives as a PR authored by the Maintenance App bot, with squash auto-merge armed. The Approver
    bot or a human approves it, and it merges once CI is green. In a run you started, the follow-ups the build filed do
    not wait for you: the follow-up chain refines each one, then builds and ships it the same way, until none is left
