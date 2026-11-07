@@ -1841,6 +1841,7 @@ YAML
   contains "$gate" '`1` is a contract violation, whose one stderr line names the offending member or environment, or the document-level defect'
   contains "$gate" 'joined with `&&`, the validator first'
   contains "$gate" 'The `<full gate>` of that round is then the validator alone'
+  contains "$gate" 'Re-check this condition at every round boundary and before every loop invocation, before choosing `--test-cmd`'
   contains "$gate" 'E4 has no end-to-end half to drive here'
 }
 

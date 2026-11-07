@@ -54,7 +54,10 @@ These are the §3 rules for this repo type. The conductor's generic bullet says
   never report that half as green or as a pass: say *nothing to gate* in those
   words, in the round's narration and in the PR's Test plan. The `<full gate>` of that round is then the
   validator alone, so the change is proven by the manifest check and nothing
-  else, and the report says so.
+  else, and the report says so. Re-check this condition at every round
+  boundary and before every loop invocation, before choosing `--test-cmd`:
+  once a fix pass adds the first `tests/*.bats`, the `<full gate>` is the
+  compound command again for every later round, the closing sweep and E4.
 - **`--gate-attest`: not applicable.** The `<full gate>` here is compound —
   the validator joined with `run-gate.zsh` — or the validator alone, which
   reports no tree at all. Either way, omit `--gate-attest` entirely and pass
