@@ -141,3 +141,343 @@ tracked_diagrams() {
   # the same selection the script makes, so the two cannot drift apart
   contains "$(cat "$BOOKLET")" "grep -E '^docs/explanation/(how-the-plugins-work|how-the-family-learns|workflow-[a-z0-9-]+)\\.md\$'"
 }
+
+@test "#3021 resolve-issue's diagrams draw both origins, the follow-up chain and the Decisions taken record" {
+  # One flow split across two diagrams on the same page, so each stays readable
+  # at page width; each label is pinned in the source that draws it.
+  local gates ship
+  gates="$(cat "$REPO_ROOT/docs/explanation/diagrams/resolve-issue.mmd")"
+  ship="$(cat "$REPO_ROOT/docs/explanation/diagrams/resolve-issue-ship.mmd")"
+  contains "$gates" 'Stop: blocked or needs-refinement<br/>(pipeline-started run)'
+  contains "$gates" 'GATES -- "no, pipeline-started" --> STOP'
+  contains "$gates" 'chain step: blockers first'
+  contains "$gates" 'Stop: blockers first stopped:'
+  contains "$gates" 'chain step: chained refinement'
+  contains "$gates" 'REFINE -- split --> EPIC'
+  contains "$gates" 'REFINE -- ready --> BUILD'
+  contains "$gates" 'REFINE -- stopped --> RSTOP'
+  contains "$ship" 'BUILD -- "oversized,<br/>human-started" --> REFINE'
+  contains "$ship" 'BUILD -- "oversized,<br/>pipeline-started" --> NSPLIT'
+  contains "$ship" 'chain step: follow-up chain'
+  contains "$ship" 'Stop: chain stopped:'
+  contains "$ship" 'Decision taken (not asked):<br/>refine parked follow-ups<br/>(pipeline-started run)'
+  contains "$ship" 'PR body: ## Decisions taken'
+  contains "$ship" 'RS09 -. "recorded in" .-> DECS'
+  # RS-06a, the fallback panel default, lives inside the review loop's rounds,
+  # which these diagrams leave out
+  lacks "$ship" 'fallback'
+  # the page shows the committed SVGs, so each must carry its source's new boxes
+  contains "$(cat "$REPO_ROOT/docs/explanation/diagrams/resolve-issue.svg")" '> chained</tspan>'
+  contains "$(cat "$REPO_ROOT/docs/explanation/diagrams/resolve-issue.svg")" '> blockers</tspan>'
+  contains "$(cat "$REPO_ROOT/docs/explanation/diagrams/resolve-issue-ship.svg")" '> Decisions</tspan>'
+  contains "$(cat "$REPO_ROOT/docs/explanation/diagrams/resolve-issue-ship.svg")" '> chain</tspan>'
+}
+
+@test "#3021 step 8 of the resolve-issue page states the Decisions taken record and the parked follow-up default" {
+  local page section
+  page="$REPO_ROOT/docs/explanation/workflow-resolve-issue.md"
+  section="$(tr '\n' ' ' < "$page" | tr -s ' ' | sed -n 's/.*## From branch to merge\(.*\)## The review loop.*/\1/p')"
+  contains "$section" 'The PR body'"'"'s `## Decisions taken` section records each decision the run took without asking (#2899).'
+  contains "$section" 'A maintenance-pipeline run that parked follow-ups records there that it refines them without asking, then refines them as the run ends and prints a `Decision taken (not asked)` line (#2903).'
+  contains "$section" '](diagrams/resolve-issue-ship.svg)'
+  contains "$section" 'A run you started then keeps going through every follow-up the build files'
+}
+
+@test "#3022 refine-issue's diagrams draw the question kinds, conditional approval, split, epic walk and chained entry" {
+  # One flow split across two diagrams on the same page, so each stays readable
+  # at page width; each label is pinned in the source that draws it.
+  local loop wb
+  loop="$(cat "$REPO_ROOT/docs/explanation/diagrams/refine-issue.mmd")"
+  wb="$(cat "$REPO_ROOT/docs/explanation/diagrams/refine-issue-write-back.mmd")"
+  # question kinds: implementation decided, confident intent/gap answered, the rest asked
+  contains "$loop" 'Implementation question:<br/>decided and recorded in<br/>Decisions taken, never asked'
+  contains "$loop" 'KIND -- implementation --> DEC --> TURN'
+  contains "$loop" 'KIND -- "intent or gap,<br/>confident" --> AUTO --> TURN'
+  contains "$loop" 'the threshold, a gap with its doc<br/>change: you answer'
+  contains "$loop" 'KIND -- "intent or gap,<br/>below threshold" --> ASK --> TURN'
+  # the chained entry, and the questions it hands back for resolve-issue to relay
+  contains "$loop" 'Chained entry from resolve-issue:<br/>--chained-from root --handoff file'
+  contains "$loop" 'KIND -- "below threshold,<br/>chained" --> PEND'
+  contains "$loop" 'PEND -- "your answers" --> TURN'
+  # the epic walk's phase A drafts each child through the single-issue flow
+  contains "$loop" 'EPIC --> WALK --> DIAG'
+  # the size-check split is filed without asking only when it names its children
+  contains "$wb" 'Split filed without asking:'
+  contains "$wb" 'SIZE -- "too big,<br/>children named" --> SPLIT'
+  contains "$wb" 'SIZE -- "too big, no children<br/>named, not chained" --> NOCH'
+  # a chained run never asks: no children named, or the round cap, stops it
+  contains "$wb" 'SIZE -- "too big, no children<br/>named, chained" --> CSTOP'
+  contains "$wb" 'KEEP -- "chained:<br/>round cap" --> CSTOP'
+  # approval is conditional
+  contains "$wb" 'WHO -- "all-auto: no question<br/>reached you" --> WB'
+  contains "$wb" 'WHO -- "chained: relayed<br/>answers stand in" --> WB'
+  contains "$wb" 'WHO -- "single issue" --> APPR'
+  contains "$wb" 'WHO -- "epic child" --> BATCH'
+  contains "$wb" 'Epic walk, phase B:<br/>you approve the<br/>batch of drafts?'
+  contains "$wb" 'DONE -- chained --> OUT'
+  # the page shows the committed SVGs, so each must carry its source's new boxes
+  contains "$(cat "$REPO_ROOT/docs/explanation/diagrams/refine-issue.svg")" '> threshold:</tspan>'
+  contains "$(cat "$REPO_ROOT/docs/explanation/diagrams/refine-issue.svg")" '> --handoff</tspan>'
+  contains "$(cat "$REPO_ROOT/docs/explanation/diagrams/refine-issue-write-back.svg")" '> relayed</tspan>'
+  contains "$(cat "$REPO_ROOT/docs/explanation/diagrams/refine-issue-write-back.svg")" '> buildable</tspan>'
+  contains "$(cat "$REPO_ROOT/docs/explanation/workflow-refine-issue.md")" '](diagrams/refine-issue-write-back.svg)'
+  # step 5's prose splits the questions by kind, as the diagram does
+  contains "$(tr '\n' ' ' < "$REPO_ROOT/docs/explanation/workflow-refine-issue.md" | tr -s ' ')" \
+    "An implementation question is decided and recorded in the body's *Decisions taken* section, never asked."
+}
+
+@test "#3023 the lifecycle overview draws refinement, blockers and follow-ups driven from inside resolve-issue" {
+  local src svg page
+  src="$(cat "$REPO_ROOT/docs/explanation/diagrams/sdlc.mmd")"
+  svg="$(cat "$REPO_ROOT/docs/explanation/diagrams/sdlc.svg")"
+  # a human-started run refines or splits the story itself, as resolve-issue.mmd draws it
+  contains "$src" 'chain step: chained refinement'
+  contains "$src" 'GATE -- "not READY,<br/>human-started" --> CREF'
+  contains "$src" 'CREF -- ready --> IMPL'
+  contains "$src" 'CREF -- "split: each child<br/>through this flow" --> GATE'
+  contains "$src" 'IMPL -- "oversized,<br/>human-started" --> CREF'
+  # it resolves its blockers first
+  contains "$src" 'chain step: blockers first'
+  contains "$src" 'GATE -- "blocked,<br/>human-started" --> BFIRST'
+  contains "$src" 'BFIRST -- "all merged:<br/>re-check" --> GATE'
+  # and carries its follow-ups through to merge, as resolve-issue-ship.mmd draws it
+  contains "$src" 'chain step: follow-up chain'
+  contains "$src" 'MERGE -- "human-started" --> CHAIN'
+  contains "$src" 'CHAIN -- "next follow-up,<br/>refined first" --> IMPL'
+  # standalone refine-issue stays the path a human drives
+  contains "$src" '/development:refine-issue<br/>you drive it'
+  contains "$src" 'GATE -- "not READY,<br/>pipeline-started" --> REF'
+  # the old separate loop, which every story had to finish before Build, is gone
+  lacks "$src" 'GATE -- "not ready" --> REF'
+  # the page shows the committed SVG, so it must carry the source's new boxes
+  contains "$svg" '> chained</tspan>'
+  contains "$svg" '> blockers</tspan>'
+  contains "$svg" '> follow-up</tspan>'
+  # the prose around the diagram tells the same story
+  page="$(tr '\n' ' ' < "$REPO_ROOT/docs/explanation/how-the-plugins-work.md" | tr -s ' ')"
+  contains "$page" 'a chained refinement step refines the story, or splits it into children'
+  contains "$page" 'the blockers-first step resolves and merges every open blocker before the story'
+  contains "$page" '`/development:refine-issue` stays the path you drive yourself'
+  contains "$page" 'an open blocker gets the story the `blocked` label and a comment naming it'
+  contains "$page" 'a pipeline-started run parks it with `needs-split` and stops'
+  contains "$page" 'the follow-up chain refines each one, then builds and ships it the same way'
+}
+
+# --- #3024: drawn-against stamps --------------------------------------------
+#
+# scripts/check-workflow-diagram-stamps.zsh recomputes each workflow diagram's
+# stamp from its sources' heading lines. The repo case proves the committed
+# stamps are current; the fixture cases mutate a small tree to prove the guard
+# goes red on a heading change and stays green on a wording change.
+
+STAMPS_PREFIX='%% drawn-against: '
+
+# The hash the stamp must carry, computed here independently of the script:
+# sha256 over the heading lines (two to six `#` and a space) of each source,
+# in the listed order. Run from the tree's root.
+expected_hash() {
+  local sum
+  if command -v sha256sum >/dev/null 2>&1; then sum='sha256sum'; else sum='shasum -a 256'; fi
+  local src
+  for src in "$@"; do grep -E '^#{2,6} ' "$src" || true; done | $sum | cut -d' ' -f1
+}
+
+# A minimal tree: one workflow page embedding one diagram, the SKILL.md it
+# documents, and the lifecycle overview, each diagram freshly stamped.
+make_stamp_fixture() {
+  FX="$BATS_TEST_TMPDIR/fx"
+  mkdir -p "$FX/docs/explanation/diagrams" "$FX/skills/demo"
+  printf '# Demo workflow\n\nIntro text with a [link](https://example.com/a).\n\n![demo](diagrams/demo.svg)\n\n## Step one\n\nDo the first thing.\n\n## Step two\n\nDo the second thing.\n' \
+    > "$FX/docs/explanation/workflow-demo.md"
+  printf -- '---\nname: demo\n---\n\n## Gate\n\nRun it.\n\n### Gate details\n\nMore.\n' > "$FX/skills/demo/SKILL.md"
+  DEMO_SOURCES='docs/explanation/workflow-demo.md skills/demo/SKILL.md'
+  stamp_fixture docs/explanation/diagrams/demo.mmd
+  stamp_fixture docs/explanation/diagrams/sdlc.mmd
+}
+
+# (Re)write a fixture diagram with a stamp over DEMO_SOURCES at the current hash.
+stamp_fixture() {
+  local hex
+  # shellcheck disable=SC2086
+  hex="$(cd "$FX" && expected_hash $DEMO_SOURCES)"
+  printf '%ssha256=%s %s\nflowchart TD\n    A --> B\n' "$STAMPS_PREFIX" "$hex" "$DEMO_SOURCES" > "$FX/$1"
+}
+
+run_stamps() {
+  run "$REPO_ROOT/scripts/check-workflow-diagram-stamps.zsh" --root "$FX"
+}
+
+@test "#3024 every workflow diagram's drawn-against stamp is current on the repo tree" {
+  run "$REPO_ROOT/scripts/check-workflow-diagram-stamps.zsh"
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  [ -z "$output" ]
+}
+
+@test "#3024 every diagram a workflow page embeds, and sdlc.mmd, starts with a stamp naming its sources" {
+  # An independent sweep of the covered set, so a page that embeds a new
+  # diagram is covered without editing a list here.
+  local page ref covered="docs/explanation/diagrams/sdlc.mmd" f line unstamped="" n=0
+  while IFS= read -r page; do
+    while IFS= read -r ref; do
+      covered+=$'\n'"docs/explanation/diagrams/$ref.mmd"
+    done < <(grep -oE '\]\(diagrams/[^)<>]+\.svg\)' "$REPO_ROOT/$page" | sed -E 's|^\]\(diagrams/||; s|\.svg\)$||')
+  done < <(git -C "$REPO_ROOT" ls-files 'docs/explanation/workflow-*.md')
+  while IFS= read -r f; do
+    n=$((n + 1))
+    line="$(head -n 1 "$REPO_ROOT/$f")"
+    case "$line" in
+      "${STAMPS_PREFIX}sha256="*' docs/explanation/workflow-'*'.md development/skills/'*'/SKILL.md'*) ;;
+      *) unstamped+=" $f" ;;
+    esac
+  done < <(printf '%s\n' "$covered" | sort -u)
+  # bootstrap, maintenance, refine-issue (two), resolve-issue (two) and sdlc
+  [ "$n" -ge 7 ]
+  [ -z "$unstamped" ] || { echo "unstamped:$unstamped"; false; }
+  # improvement-loop documents no single workflow and stays unstamped
+  lacks "$(head -n 1 "$REPO_ROOT/docs/explanation/diagrams/improvement-loop.mmd")" "$STAMPS_PREFIX"
+}
+
+@test "#3024 the stamp guard passes on a freshly stamped fixture tree" {
+  make_stamp_fixture
+  run_stamps
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  [ -z "$output" ]
+}
+
+@test "#3024 a renamed heading without a re-stamp fails, naming the diagram and the exact replacement line" {
+  make_stamp_fixture
+  sed -i.bak 's/^## Step two$/## Step two, revised/' "$FX/docs/explanation/workflow-demo.md"
+  local want
+  # shellcheck disable=SC2086
+  want="${STAMPS_PREFIX}sha256=$(cd "$FX" && expected_hash $DEMO_SOURCES) $DEMO_SOURCES"
+  run_stamps
+  [ "$status" -eq 1 ]
+  contains "$output" 'stale: docs/explanation/diagrams/demo.mmd'
+  contains "$output" 'stale: docs/explanation/diagrams/sdlc.mmd'
+  contains "$output" 're-render it with ./scripts/render-diagrams.zsh, then replace line 1 with:'
+  # the replacement line, printed on its own line exactly as it must be written
+  [ "$(printf '%s\n' "$output" | grep -cxF -- "$want")" -eq 2 ]
+}
+
+@test "#3024 an added, removed or reordered heading in either source fails the guard" {
+  make_stamp_fixture
+  printf '\n## Step three\n' >> "$FX/docs/explanation/workflow-demo.md"
+  run_stamps
+  [ "$status" -eq 1 ]
+  make_stamp_fixture
+  sed -i.bak '/^### Gate details$/d' "$FX/skills/demo/SKILL.md"
+  run_stamps
+  [ "$status" -eq 1 ]
+  contains "$output" 'stale: docs/explanation/diagrams/demo.mmd'
+  make_stamp_fixture
+  sed -i.bak 's/^## Step one$/## TMP/; s/^## Step two$/## Step one/; s/^## TMP$/## Step two/' \
+    "$FX/docs/explanation/workflow-demo.md"
+  run_stamps
+  [ "$status" -eq 1 ]
+}
+
+@test "#3024 a heading change re-stamped passes, and reverting the re-stamp fails again" {
+  make_stamp_fixture
+  local old
+  old="$(head -n 1 "$FX/docs/explanation/diagrams/demo.mmd")"
+  sed -i.bak 's/^## Step one$/## Step one, renamed/' "$FX/docs/explanation/workflow-demo.md"
+  stamp_fixture docs/explanation/diagrams/demo.mmd
+  stamp_fixture docs/explanation/diagrams/sdlc.mmd
+  run_stamps
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  # revert demo.mmd's stamp to the one drawn against the old headings
+  printf '%s\nflowchart TD\n    A --> B\n' "$old" > "$FX/docs/explanation/diagrams/demo.mmd"
+  run_stamps
+  [ "$status" -eq 1 ]
+  contains "$output" 'stale: docs/explanation/diagrams/demo.mmd'
+  lacks "$output" 'sdlc.mmd'
+}
+
+@test "#3024 a wording or link edit that leaves every heading alone stays green" {
+  make_stamp_fixture
+  sed -i.bak 's/Do the first thing./Do the first thing, carefully, as #3024 says./; s|https://example.com/a|https://example.com/b|' \
+    "$FX/docs/explanation/workflow-demo.md"
+  sed -i.bak 's/^Run it.$/Run it twice./' "$FX/skills/demo/SKILL.md"
+  run_stamps
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+}
+
+@test "#3024 an embedded diagram or sdlc.mmd without a stamp fails the sweep" {
+  make_stamp_fixture
+  printf 'flowchart TD\n    A --> B\n' > "$FX/docs/explanation/diagrams/demo.mmd"
+  run_stamps
+  [ "$status" -eq 1 ]
+  contains "$output" 'unstamped: docs/explanation/diagrams/demo.mmd (embedded by docs/explanation/workflow-demo.md)'
+  make_stamp_fixture
+  printf 'flowchart TD\n    A --> B\n' > "$FX/docs/explanation/diagrams/sdlc.mmd"
+  run_stamps
+  [ "$status" -eq 1 ]
+  contains "$output" 'unstamped: docs/explanation/diagrams/sdlc.mmd'
+  make_stamp_fixture
+  rm "$FX/docs/explanation/diagrams/demo.mmd"
+  run_stamps
+  [ "$status" -eq 1 ]
+  contains "$output" 'missing: docs/explanation/diagrams/demo.mmd'
+}
+
+@test "#3024 a stamp naming a missing source, or with no hash or sources, fails" {
+  make_stamp_fixture
+  rm "$FX/skills/demo/SKILL.md"
+  run_stamps
+  [ "$status" -eq 1 ]
+  contains "$output" 'missing source: docs/explanation/diagrams/demo.mmd names skills/demo/SKILL.md'
+  make_stamp_fixture
+  printf '%ssha256=abc\nflowchart TD\n' "$STAMPS_PREFIX" > "$FX/docs/explanation/diagrams/demo.mmd"
+  run_stamps
+  [ "$status" -eq 1 ]
+  contains "$output" 'malformed stamp: docs/explanation/diagrams/demo.mmd'
+  make_stamp_fixture
+  printf '%sabc %s\nflowchart TD\n' "$STAMPS_PREFIX" "$DEMO_SOURCES" > "$FX/docs/explanation/diagrams/demo.mmd"
+  run_stamps
+  [ "$status" -eq 1 ]
+  contains "$output" 'malformed stamp: docs/explanation/diagrams/demo.mmd'
+}
+
+@test "#3024 a stamped diagram outside the covered set is checked too" {
+  make_stamp_fixture
+  stamp_fixture docs/explanation/diagrams/extra.mmd
+  run_stamps
+  [ "$status" -eq 0 ]
+  printf '\n## Step three\n' >> "$FX/skills/demo/SKILL.md"
+  stamp_fixture docs/explanation/diagrams/demo.mmd
+  stamp_fixture docs/explanation/diagrams/sdlc.mmd
+  run_stamps
+  [ "$status" -eq 1 ]
+  contains "$output" 'stale: docs/explanation/diagrams/extra.mmd'
+}
+
+@test "#3024 the stamp guard prints usage on --help and refuses a bad invocation with exit 2" {
+  run "$REPO_ROOT/scripts/check-workflow-diagram-stamps.zsh" --help
+  [ "$status" -eq 0 ]
+  contains "$output" 'usage: check-workflow-diagram-stamps.zsh [--root <dir>]'
+  run "$REPO_ROOT/scripts/check-workflow-diagram-stamps.zsh" --root
+  [ "$status" -eq 2 ]
+  run "$REPO_ROOT/scripts/check-workflow-diagram-stamps.zsh" --bogus
+  [ "$status" -eq 2 ]
+  run "$REPO_ROOT/scripts/check-workflow-diagram-stamps.zsh" --root "$BATS_TEST_TMPDIR/does-not-exist"
+  [ "$status" -eq 2 ]
+}
+
+@test "#3024 the required script-tests job runs on a change to any covered source" {
+  local wf
+  wf="$(cat "$REPO_ROOT/.github/workflows/script-tests.yml")"
+  contains "$wf" "- 'docs/explanation/**'"
+  contains "$wf" "- 'development/skills/**/SKILL.md'"
+  contains "$wf" "- 'scripts/**'"
+}
+
+@test "#3024 the authoring guide records the drawn-against stamp" {
+  local guide
+  guide="$(tr '\n' ' ' < "$REPO_ROOT/docs/how-to/authoring-guide.md" | tr -s ' ')"
+  contains "$guide" '**Workflow diagrams carry a drawn-against stamp.**'
+  contains "$guide" 'starts with `%% drawn-against: sha256=<hex> <source> ...`'
+  contains "$guide" 'The hash covers only their heading lines.'
+  contains "$guide" 'the script-tests suite fails until the diagram is updated, re-rendered and re-stamped, or re-stamped alone if it still matches.'
+  contains "$guide" 'Wording and link edits that leave headings alone never trip it.'
+  contains "$guide" 'The stamp is a tripwire, not a proof: a behaviour change written only inside a paragraph still needs the diagram checked by hand.'
+}

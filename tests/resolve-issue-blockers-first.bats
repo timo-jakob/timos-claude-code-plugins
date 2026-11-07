@@ -229,7 +229,9 @@ stop_body() {
 
 @test "chain-steps.md: the brief's BLOCKERS_FIRST=1 line, the blocked arm, and the blocker's role" {
   t="$(flat < "$STEPS")"
-  contains "$t" "When this brief names BLOCKERS_FIRST=1, a §0a rejection posts no comment and applies no label: write verdict blocked and end, since the root posts (#2941)."
+  # the step's own instruction is its agent's definition since #3014
+  contains "$(flat < "$REPO_ROOT/development/agents/resolve-step.md")" "When this brief names BLOCKERS_FIRST=1, a §0a rejection posts no comment and applies no label: write verdict blocked and end, since the root posts (#2941)."
+  contains "$t" "BLOCKERS_FIRST=1"
   contains "$t" "on the named issue's step, or a blocker's, the root runs the blockers-first procedure. The root puts \`BLOCKERS_FIRST=1\` in the brief of the named issue's first step and of every blocker step"
   contains "$t" "see \`reference/interactive/blockers-first.md\` § Blockers first in a human-started run (#2941)"
   contains "$t" "An E3 child's brief never names that line"

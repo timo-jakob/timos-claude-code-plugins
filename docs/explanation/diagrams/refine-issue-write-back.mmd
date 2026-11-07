@@ -1,0 +1,46 @@
+%% drawn-against: sha256=f7f11bcffcf50ab88c88c7d52b7f2af713ff3abc50d46b65cccca097b14b63b1 docs/explanation/workflow-refine-issue.md development/skills/refine-issue/SKILL.md
+flowchart TD
+    classDef human fill:#fde7c8,stroke:#b8741a,color:#222
+    classDef conductor fill:#dbe8fb,stroke:#3567b5,color:#222
+    classDef agent fill:#e9ddf7,stroke:#7a4cb5,color:#222
+    classDef stop fill:#f8d7d7,stroke:#b33,color:#222
+    classDef ok fill:#d9f2df,stroke:#2e8b4e,color:#222
+
+    IN(["Converged draft<br/>(previous diagram)"]):::conductor
+    SIZE{"Size check:<br/>one buildable change?"}
+    SPLIT(["Split filed without asking:<br/>children become sub-issues,<br/>refined in the same run;<br/>chained: split outcome"]):::conductor
+    NOCH(["You revise the draft<br/>or park it as deferred"]):::human
+    WHO{"Who approves?"}
+    APPR{"You approve the<br/>exact rewrite?"}
+    BATCH{"Epic walk, phase B:<br/>you approve the<br/>batch of drafts?"}
+    REV(["Revise: next refiner turn<br/>(previous diagram)"]):::conductor
+    SKIP(["Skipped: nothing<br/>written, label kept"]):::stop
+    WB["Steps 2.5-3: spin out test cases,<br/>write prose + story-spec/v1"]:::conductor
+    REGATE{"Step 4: re-gate<br/>READY?"}
+    DONE(["Label removed,<br/>before/after comment"]):::ok
+    KEEP(["Label kept: loop again,<br/>an epic child in the next batch,<br/>or stop as deferred"]):::stop
+    OUT(["Chained: ready outcome<br/>back to resolve-issue"]):::conductor
+    CSTOP(["Chained: stopped outcome<br/>back to resolve-issue"]):::stop
+    SUM(["Epic: one summary comment<br/>ready, skipped, parked, failed"]):::ok
+
+    IN --> SIZE
+    SIZE -- "too big,<br/>children named" --> SPLIT
+    SIZE -- "too big, no children<br/>named, not chained" --> NOCH
+    SIZE -- "too big, no children<br/>named, chained" --> CSTOP
+    SIZE -- fits --> WHO
+    WHO -- "all-auto: no question<br/>reached you" --> WB
+    WHO -- "chained: relayed<br/>answers stand in" --> WB
+    WHO -- "single issue" --> APPR
+    WHO -- "epic child" --> BATCH
+    APPR -- "no: revise" --> REV
+    APPR -- yes --> WB
+    BATCH -- approved --> WB
+    BATCH -- "revisit, or overturn<br/>an automatic answer" --> REV
+    BATCH -- skip --> SKIP
+    WB --> REGATE
+    REGATE -- yes --> DONE
+    REGATE -- no --> KEEP
+    KEEP -- "chained:<br/>round cap" --> CSTOP
+    DONE -- chained --> OUT
+    DONE -- "epic child" --> SUM
+    SKIP --> SUM

@@ -8051,8 +8051,12 @@ key that groups them and has no record of its own, while an epic root's is the
 epic record's, and so is a single-issue root's once a refinement splits its
 issue: the chain run then becomes the epic run. Only the root asks the human: a `questions-pending`
 verdict is relayed with AskUserQuestion, and the answers go into a fresh
-handoff's `answers` with the same `scratch_dir` and `chained_from`. The step
-briefs live in `development/skills/resolve-issue/reference/chain-steps.md`.
+handoff's `answers` with the same `scratch_dir` and `chained_from`. Each step
+is dispatched as its own plugin agent (#3014): `development:resolve-step` for
+an issue-run step and `development:refine-step` for a chained refinement. The
+agent's definition carries the step's procedure and pins its model and tools;
+the briefs, which name only the handoff and the root's flags, live in
+`development/skills/resolve-issue/reference/chain-steps.md`.
 
 ### The chained refinement mode — `refine-issue --chained-from` (#2939)
 

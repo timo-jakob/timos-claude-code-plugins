@@ -9,7 +9,11 @@ Read this file when a run's origin is `human` (§0a): a human invoked
 In a human-started run, the session the human invoked is the **root**, and it
 only drives the chain. Every unit of work is a **step**: the named issue's own
 run, each chained refinement and each E3 child's run. The root dispatches each
-step as a fresh subagent, with the Agent tool, `subagent_type: general-purpose`.
+step as a fresh subagent, with the Agent tool and the step's own plugin agent
+(#3014): `subagent_type: development:resolve-step` for an issue-run step,
+`subagent_type: development:refine-step` for a chained refinement. Each agent's
+definition carries the step's whole contract and pins its model and tools, so
+the brief names only what differs between steps.
 Before its first dispatch it starts or resumes the chain queue (#2942):
 see `reference/checkpoint.md` § The chain queue in a human-started run (#2942)
 The root keeps Step 0's classification and, for an epic, E1 to E5's control
@@ -30,8 +34,9 @@ reach a step.
 
 **A parallel child's step runs in its own worktree.** The root dispatches the
 step of each child in E3's parallel set with the Agent tool's
-`isolation: "worktree"`, so each runs in a worktree of its own and their edits
-can't collide. Every other step runs in the root's checkout, one at a time.
+`isolation: "worktree"` beside `subagent_type: development:resolve-step`, so
+each runs in a worktree of its own and their edits can't collide. Every other
+step runs in the root's checkout, one at a time.
 
 **`--resume` is the exception.** A human-started run given `--resume` does not
 chain: the session the human invoked runs §0a's `--resume` check itself and
@@ -145,38 +150,21 @@ a separate `claude` process.
 
 ## The issue step (#2940)
 
-The brief the root dispatches for an issue-run step, whether the named issue's
-own run or an E3 child's run:
+The root dispatches an issue-run step, whether the named issue's own run, an E3
+child's run or a blocker's, with `subagent_type: development:resolve-step`. The
+agent's definition (`development/agents/resolve-step.md`) carries the step's
+procedure: the handoff read, the telemetry start, the unattended mode, the
+`BLOCKERS_FIRST=1` handling, the bans and the verdict file. The brief is only:
 
 ```text
-You are a step of a human-started /development:resolve-issue chain (#2940).
 STEP_HANDOFF=<scratch_dir>/step-<N>-handoff.json
-Invoke the development:resolve-issue skill with "<N>" plus the root's telemetry
-flags and its --no-review when given, and run its Single-issue flow as a step.
-Read the handoff first with
-"<skill-base-dir>/../refine-issue/scripts/chain-result.zsh" read-handoff --file "$STEP_HANDOFF",
-where <skill-base-dir> is the resolve-issue skill's base directory. On its exit 1
-or 2, write verdict stopped with the reason "unreadable step handoff" and cause
-"tooling".
-Take its origin and parent_run_id. In place of Step 0's start, run
-story-telemetry.zsh start --run-file <scratch_dir>/story-run-<N>.json
---parent-run-id <parent_run_id> --origin <origin> with the telemetry flags,
-then start at its start_at. When the handoff's after is not null, branch with
-step 1's script plus --after <after>. Resolve the session mode as an E3 child does
-(inferred unattended). Your mode is unattended whatever the line says, for every
-branch keyed on it, the escalation grant and the clean stop included: record
-session_mode unattended, with the line's source, or inferred when the line says
-attended. But move any kept state aside without --resume, deleting nothing, as
-an attended run does.
-Skip §7's refine-issue --follow-up call: list the follow-ups only, since the
-root queues them (#2942). When this brief names BLOCKERS_FIRST=1, a §0a rejection posts no comment and
-applies no label: write verdict blocked and end, since the root posts (#2941).
-Never ask the human anything, never dispatch a step, and never launch a
-headless claude. Before you end your turn, write <scratch_dir>/step-<N>-verdict.json
-(step-verdict/v1, ARCHITECTURE.md *Step verdict contract*), listing every
-follow-up issue you filed in follow_ups and your run's run_id in run_id. A
-stopped verdict carries its cause: escalation, clean-stop, tooling or failed.
+FLAGS=<the root's telemetry flags and its --no-review, when given>
+BLOCKERS_FIRST=1
 ```
+
+The `FLAGS` line is left out when the root was given none of those flags, and
+the `BLOCKERS_FIRST=1` line is left out of every brief but the named issue's
+first step's and a blocker step's.
 
 The step ends with one of these verdicts:
 
@@ -253,16 +241,15 @@ printf 'chained refinement stopped: the %s park recurred after a ready refinemen
   | gh issue comment <N> --body-file -
 ```
 
-The brief:
+The root dispatches a chained refinement step with
+`subagent_type: development:refine-step`. The agent's definition
+(`development/agents/refine-step.md`) carries the step's procedure: it runs
+`/development:refine-issue <N> --chained-from <root> --handoff <file>` and
+converts the chain-result/v1 document it prints into the step verdict. The
+brief is only:
 
 ```text
-You are a chained refinement step of a human-started /development:resolve-issue
-chain (#2940). Run /development:refine-issue <N> --chained-from <root>
---handoff <scratch_dir>/step-<N>-handoff.json. Never ask the human anything.
-When it prints its chain-result/v1 document, write it as the step verdict:
-  jq '{schema: "step-verdict/v1", issue, verdict: .outcome, follow_ups: []}
-      + del(.schema, .issue, .outcome)' > <scratch_dir>/step-<N>-verdict.json
-and end your turn.
+STEP_HANDOFF=<scratch_dir>/step-<N>-handoff.json
 ```
 
 A refinement step's `follow_ups` is always `[]`: a chain-result/v1 document

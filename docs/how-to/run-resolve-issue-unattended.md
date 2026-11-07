@@ -63,7 +63,9 @@ record carries the mode and its source (`session_mode`, `session_mode_source`).
 When you invoke `/development:resolve-issue` yourself, the run is
 human-started. Your session is the root: it dispatches every unit of work as a
 fresh subagent and only drives the chain. Those units are the story's own run,
-each refinement and each epic child. Such a run does not stop when a story is
+each refinement and each epic child. They show up as the plugin's own agents:
+`development:resolve-step` for a story's run and `development:refine-step` for
+a refinement. Such a run does not stop when a story is
 unready or too large. It refines the story in the same run, splits it if
 needed, and carries on. Only a question the refinement cannot answer for itself
 reaches you. The steps never ask you anything, whatever the setting says.

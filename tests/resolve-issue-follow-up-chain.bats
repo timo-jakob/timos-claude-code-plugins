@@ -56,6 +56,21 @@ cq_step() {
   contains "$(flat < "$SKILL")" "**A follow-up that parks never stops this run or its epic walk**, if pipeline-started (#2942): name it and go on."
 }
 
+@test "#3036: SKILL.md §7 names the human-started exception and points at the chain queue" {
+  t="$(flat < "$SKILL")"
+  contains "$t" "**In a human-started run** a step skips this call and lists its follow-ups in its verdict; the root queues each one: see \`reference/checkpoint.md\` § The chain queue in a human-started run (#2942)"
+  grep -qxF "see \`reference/checkpoint.md\` § The chain queue in a human-started run (#2942)" "$SKILL"
+}
+
+@test "#3036: RS-09 states the human-started exception once, in its opening paragraph" {
+  t="$(awk 'index($0, "## RS-09 — the parked follow-up default (#2903)") == 1 { f = 1; next }
+    f && /^## / { exit } f' "$ASK" | flat)"
+  contains "$t" "Outside a human-started chain, §7 refines the run's parked follow-ups without asking, in every session mode"
+  contains "$t" "A step of a human-started chain (#2942) neither refines its follow-ups nor records the line or the entry below: it lists the issues in \`follow_ups\`, and the root queues them."
+  [ "$(grep -c 'human-started chain (#2942)' <<< "$t")" -eq 1 ]
+  [ "$(grep -o 'human-started chain' <<< "$t" | wc -l | tr -d ' ')" -eq 2 ]
+}
+
 @test "AC10: ARCHITECTURE.md's follow-up mode and RS-09 state the chained exception" {
   t="$(awk '/^### The unattended follow-up mode/ { f = 1 } f && /^- \*\*Eligibility/ { exit } f' "$ARCH" | flat)"
   contains "$t" "**A human-started chain is the exception (#2942):** its root queues each follow-up in the chain queue, refines it in the chained mode and resolves it, through every generation, and a park there stops the run"
@@ -76,7 +91,8 @@ cq_step() {
   contains "$s" "A follow-up is first refined in chained mode (#2939, #2940) by the chained refinement step, then built by the issue step, through every generation."
   contains "$s" "This replaces §7's \`refine-issue --follow-up\` call in a human-started run."
   t="$(flat < "$STEPS")"
-  contains "$t" "Skip §7's refine-issue --follow-up call: list the follow-ups only, since the root queues them (#2942)."
+  # the step's own instruction is its agent's definition since #3014
+  contains "$(flat < "$REPO_ROOT/development/agents/resolve-step.md")" "Skip §7's refine-issue --follow-up call: list the follow-ups only, since the root queues them (#2942)."
   contains "$t" "How the root handles each, once it has queued the verdict's \`follow_ups\` in the chain queue (#2942), which replaces §7's \`refine-issue --follow-up\` call in a human-started run:"
   contains "$t" "see \`reference/checkpoint.md\` § The chain queue in a human-started run (#2942)"
 }

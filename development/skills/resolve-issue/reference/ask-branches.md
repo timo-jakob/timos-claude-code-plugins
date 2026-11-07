@@ -44,7 +44,7 @@ before it ships, and a row whose text moved is updated here.
 | RS-10 | SKILL.md | `ask the human to fix the` · `halt and ask rather than proceeding` · `→ **halt** and ask for` · `has no human to ask, so "ask the human to` | gap | human-owned: an epic body's mistyped or near-miss child lines need the author's reading |
 | RS-11 | reference/checkpoint.md | `so ask the human before you discard them` | intent | human-owned: discarding a half-finished round's uncommitted changes loses data |
 | RS-12 | reference/checkpoint.md | `ask the human whether to delete it` | intent | human-owned: deleting an old run's local branch cannot be undone from this run |
-| RS-13 | reference/chain-steps.md | `**Only the root asks the human.**` · `The root asks the verdict's` · `Never ask the human anything` · `neither with AskUserQuestion` | intent / gap | human-owned: a chained refinement's below-threshold intent and gap questions, which the root relays with AskUserQuestion; a step never asks (#2940) |
+| RS-13 | reference/chain-steps.md | `**Only the root asks the human.**` · `The root asks the verdict's` · `neither with AskUserQuestion` | intent / gap | human-owned: a chained refinement's below-threshold intent and gap questions, which the root relays with AskUserQuestion; a step never asks (#2940) |
 
 ## RS-06a — the fallback review panel default (#2909)
 
@@ -82,11 +82,14 @@ never records it.
 
 ## RS-09 — the parked follow-up default (#2903)
 
-§7 refines the run's parked follow-ups without asking, in every session mode
-(`resolve-session.zsh`, #2575): the follow-up mode refines only from the source
-story and parks whatever it cannot settle, so the question has one safe,
-reversible answer. That makes it an `implementation` decision under
-ARCHITECTURE.md's *Decision rights* (#2899), and it is recorded like one.
+Outside a human-started chain, §7 refines the run's parked follow-ups without
+asking, in every session mode (`resolve-session.zsh`, #2575): the follow-up mode
+refines only from the source story and parks whatever it cannot settle, so the
+question has one safe, reversible answer. That makes it an `implementation`
+decision under ARCHITECTURE.md's *Decision rights* (#2899), and it is recorded
+like one. A step of a human-started chain (#2942) neither refines its follow-ups
+nor records the line or the entry below: it lists the issues in `follow_ups`,
+and the root queues them.
 
 **Print one line** when §7 starts the refinements:
 `Decision taken (not asked): auto-refining the parked follow-ups #A, #B`.
@@ -104,5 +107,3 @@ history and re-add `needs-refinement`. An exit 1 or 2 adds no section.
 there is no PR body, so the same entry goes in the run's report, as it does
 whenever §7 refines follow-ups an open PR's body does not hold. Either way the
 decision is recorded once: §7 adds nothing to a PR whose body already holds it.
-A step of a human-started chain (#2942) records neither the line nor the entry:
-it lists the issues in `follow_ups`, and the root queues them.

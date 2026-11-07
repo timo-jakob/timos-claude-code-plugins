@@ -1,3 +1,4 @@
+%% drawn-against: sha256=f7f11bcffcf50ab88c88c7d52b7f2af713ff3abc50d46b65cccca097b14b63b1 docs/explanation/workflow-refine-issue.md development/skills/refine-issue/SKILL.md
 flowchart TD
     classDef human fill:#fde7c8,stroke:#b8741a,color:#222
     classDef conductor fill:#dbe8fb,stroke:#3567b5,color:#222
@@ -6,22 +7,29 @@ flowchart TD
     classDef ok fill:#d9f2df,stroke:#2e8b4e,color:#222
 
     START(["/development:refine-issue N"]):::human
+    EPIC(["/development:refine-issue E<br/>on an epic"]):::human
+    WALK["Epic walk, phase A: each<br/>needs-refinement child drafted<br/>through this flow in turn"]:::conductor
+    CHAIN(["Chained entry from resolve-issue:<br/>--chained-from root --handoff file"]):::conductor
     DIAG["Steps 0-1: fetch, resume a park,<br/>diagnose with story-readiness"]:::agent
-    TURN["Step 2: refiner turn<br/>explanations, scored questions,<br/>draft prose + story spec"]:::agent
-    ASK["Confident answers taken,<br/>the rest asked; you answer"]:::human
+    TURN["Step 2: refiner turn<br/>explanations, typed and scored<br/>questions, draft prose + story spec"]:::agent
     CONV{"Objections resolved,<br/>no questions left?"}
+    KIND{"Each question:<br/>its kind and confidence"}
+    DEC["Implementation question:<br/>decided and recorded in<br/>Decisions taken, never asked"]:::conductor
+    AUTO["Intent or gap question at or<br/>above the threshold: answered,<br/>one line shown to you"]:::conductor
+    ASK["Intent or gap question below<br/>the threshold, a gap with its doc<br/>change: you answer"]:::human
+    PEND(["Chained: questions pending,<br/>resolve-issue asks you and<br/>dispatches it again"]):::conductor
     PARK(["Typed parked exit"]):::stop
-    APPR{"You approve the<br/>exact rewrite?"}
-    WB["Steps 2.5-3: spin out test cases,<br/>write prose + story-spec/v1"]:::conductor
-    REGATE{"Step 4: re-gate<br/>READY?"}
-    DONE(["Label removed,<br/>before/after comment"]):::ok
-    KEEP(["Label kept: loop again<br/>or stop as deferred"]):::stop
+    NEXT(["Converged draft<br/>(next diagram)"]):::ok
 
-    START --> DIAG --> TURN --> CONV
-    CONV -- no --> ASK --> TURN
+    START --> DIAG
+    EPIC --> WALK --> DIAG
+    CHAIN -- "first dispatch" --> DIAG
+    DIAG --> TURN --> CONV
+    CONV -- "no: questions" --> KIND
+    KIND -- implementation --> DEC --> TURN
+    KIND -- "intent or gap,<br/>confident" --> AUTO --> TURN
+    KIND -- "intent or gap,<br/>below threshold" --> ASK --> TURN
     ASK -- "can't converge yet" --> PARK
-    CONV -- yes --> APPR
-    APPR -- "no: revise" --> TURN
-    APPR -- yes --> WB --> REGATE
-    REGATE -- yes --> DONE
-    REGATE -- no --> KEEP
+    KIND -- "below threshold,<br/>chained" --> PEND
+    PEND -- "your answers" --> TURN
+    CONV -- yes --> NEXT

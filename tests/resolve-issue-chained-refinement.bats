@@ -25,6 +25,8 @@ setup() {
   SKILL_DIR="$REPO_ROOT/development/skills/resolve-issue"
   SKILL="$SKILL_DIR/SKILL.md"
   STEPS="$SKILL_DIR/reference/chain-steps.md"
+  RSTEP="$REPO_ROOT/development/agents/resolve-step.md"   # the issue step's agent (#3014)
+  FSTEP="$REPO_ROOT/development/agents/refine-step.md"    # the refinement step's agent (#3014)
   ARCH="$REPO_ROOT/ARCHITECTURE.md"
   CR="$REPO_ROOT/development/skills/refine-issue/scripts/chain-result.zsh"
   D="$BATS_TEST_TMPDIR"
@@ -50,9 +52,10 @@ verdict_filter() {
   perl -0ne "print \$1 if /jq -e -s --argjson n <N> --arg kind <issue\\|refinement> '(length == 1 and .*?)' <scratch_dir>\\/step-<N>-verdict\\.json/s" "$STEPS"
 }
 
-# The refinement step's conversion of a chain-result/v1 document to a verdict.
+# The refinement step's conversion of a chain-result/v1 document to a verdict,
+# carried by the refine-step agent's definition since #3014.
 convert_filter() {
-  perl -0ne "print \$1 if /jq '(\\{schema: \"step-verdict\\/v1\".*?)' > <scratch_dir>/s" "$STEPS"
+  perl -0ne "print \$1 if /jq '(\\{schema: \"step-verdict\\/v1\".*?)' <scratch_dir>\\/chain-result-<N>\\.json > <scratch_dir>\\/step-<N>-verdict\\.json/s" "$FSTEP"
 }
 
 check() {  # <verdict json> [issue|refinement] -> exit status of the documented check
@@ -344,12 +347,13 @@ v() {  # <verdict> <jq object of extra fields> -> a verdict document
   contains "$t" 'The human follows each step through its `progress.md` and the root'"'"'s status lines.'
 }
 
-@test "#2940 both step briefs forbid asking, dispatching a step and a headless claude" {
+@test "#2940 both step agents forbid asking, dispatching a step and a headless claude" {
   local issue refine
-  issue="$(section "$STEPS" 'The issue step (#2940)' | tr '\n' ' ' | tr -s ' ')"
-  refine="$(section "$STEPS" 'The chained refinement step (#2940)' | tr '\n' ' ' | tr -s ' ')"
+  # since #3014 the step's procedure is its agent's definition, not the brief
+  issue="$(flat "$RSTEP")"
+  refine="$(flat "$FSTEP")"
   contains "$issue" 'Never ask the human anything, never dispatch a step, and never launch a headless claude.'
-  contains "$issue" 'STEP_HANDOFF=<scratch_dir>/step-<N>-handoff.json'
+  contains "$(section "$STEPS" 'The issue step (#2940)' | tr '\n' ' ' | tr -s ' ')" 'STEP_HANDOFF=<scratch_dir>/step-<N>-handoff.json'
   contains "$issue" '"<skill-base-dir>/../refine-issue/scripts/chain-result.zsh" read-handoff --file "$STEP_HANDOFF"'
   contains "$issue" 'On its exit 1 or 2, write verdict stopped with the reason "unreadable step handoff" and cause "tooling".'
   contains "$issue" 'When the handoff'"'"'s after is not null, branch with step 1'"'"'s script plus --after <after>.'
@@ -361,6 +365,7 @@ v() {  # <verdict> <jq object of extra fields> -> a verdict document
   lacks "$issue" 'development/skills/refine-issue/scripts/chain-result.zsh'
   contains "$refine" 'Never ask the human anything.'
   contains "$refine" '/development:refine-issue <N> --chained-from <root> --handoff <scratch_dir>/step-<N>-handoff.json'
+  contains "$refine" 'Never dispatch a step, and never launch a headless claude.'
 }
 
 # --- the step rules, pinned sentence by sentence ---------------------------------
@@ -405,7 +410,7 @@ v() {  # <verdict> <jq object of extra fields> -> a verdict document
   contains "$t" 'A step resolves its session mode as an E3 child does: §0a'"'"'s `scripts/resolve-session.zsh` with the inferred mode `unattended`, and it stays autonomous whatever the line says, so no step ever asks.'
   contains "$t" '**A step'"'"'s mode is `unattended` for every branch keyed on the mode**, even when the line says `attended`: §0a'"'"'s arms, §3.5'"'"'s extension and suggestion promotion, and the escalation'"'"'s automatic grant and clean stop. **The one exception is §0a'"'"'s kept-state arm without `--resume`:** a step moves any kept state aside as an attended run does, deleting nothing, and never runs `clean-stop.zsh clear`, so it never deletes state a human could still resume.'
   contains "$t" 'It records `session_mode: unattended`, with the line'"'"'s source, or `inferred` when the line says `attended`, and quotes the line it set aside.'
-  issue="$(section "$STEPS" 'The issue step (#2940)' | tr '\n' ' ' | tr -s ' ')"
+  issue="$(flat "$RSTEP")"
   contains "$issue" 'Your mode is unattended whatever the line says, for every branch keyed on it, the escalation grant and the clean stop included: record session_mode unattended, with the line'"'"'s source, or inferred when the line says attended.'
   contains "$issue" 'Resolve the session mode as an E3 child does (inferred unattended).'
   contains "$issue" 'But move any kept state aside without --resume, deleting nothing, as an attended run does.'
@@ -446,7 +451,7 @@ v() {  # <verdict> <jq object of extra fields> -> a verdict document
 
 @test "#2940 a parallel child's step runs in its own worktree, and a sequential child's step branches off the previous merge" {
   local t; t="$(flat "$STEPS")"
-  contains "$t" '**A parallel child'"'"'s step runs in its own worktree.** The root dispatches the step of each child in E3'"'"'s parallel set with the Agent tool'"'"'s `isolation: "worktree"`, so each runs in a worktree of its own and their edits can'"'"'t collide. Every other step runs in the root'"'"'s checkout, one at a time.'
+  contains "$t" '**A parallel child'"'"'s step runs in its own worktree.** The root dispatches the step of each child in E3'"'"'s parallel set with the Agent tool'"'"'s `isolation: "worktree"` beside `subagent_type: development:resolve-step`, so each runs in a worktree of its own and their edits can'"'"'t collide. Every other step runs in the root'"'"'s checkout, one at a time.'
   contains "$t" '`after` is `null`, or, for a child of E3'"'"'s sequential chain, the merge commit of the child before it (the PR'"'"'s `mergeCommit.oid`), which the step passes to step 1'"'"'s branch script as `--after`.'
   # the handoff example carries after, and chain-result still reads it
   perl -0ne 'print $1 if /```json\n(\{ "schema": "step-handoff\/v1".*?\})\n```/s' "$STEPS" > "$D/h.json"
@@ -519,4 +524,113 @@ v() {  # <verdict> <jq object of extra fields> -> a verdict document
   word="$(printf '%s' "$t" | sed -n 's/.*step-handoff\/v1 fields and \([a-z]*\) more,.*/\1/p')"
   local -a words=(zero one two three four five six seven eight nine)
   [ "${words[$n]}" = "$word" ]
+}
+
+# --- #3014: the steps are the plugin's own agents -----------------------------
+
+# One frontmatter field of an agent file: the value after `<key>: `.
+fm() { awk -v k="$2" 'NR == 1 && /^---$/ { f = 1; next } f && /^---$/ { exit } f && index($0, k ": ") == 1 { print substr($0, length(k) + 3) }' "$1"; }
+
+@test "#3014 the plugin ships resolve-step and refine-step, each pinning its name, model and tools" {
+  [ "$(fm "$RSTEP" name)" = resolve-step ]
+  [ "$(fm "$FSTEP" name)" = refine-step ]
+  [ "$(fm "$RSTEP" model)" = opus ]
+  [ "$(fm "$FSTEP" model)" = opus ]
+  # both run a skill that dispatches subagents and runs scripts
+  local a tool
+  for a in "$RSTEP" "$FSTEP"; do
+    [ -n "$(fm "$a" description)" ]
+    for tool in Agent Skill Read Write Bash; do
+      printf '%s\n' "$(fm "$a" tools)" | tr ',' '\n' | tr -d ' ' | grep -qxF "$tool"
+    done
+  done
+  # the issue step implements the story, so it edits files
+  printf '%s\n' "$(fm "$RSTEP" tools)" | tr ',' '\n' | tr -d ' ' | grep -qxF Edit
+  # the issue step waits on the gate and its background round dispatches with Monitor (core.md, subagents.md)
+  printf '%s\n' "$(fm "$RSTEP" tools)" | tr ',' '\n' | tr -d ' ' | grep -qxF Monitor
+  # the refinement step waits on a background readiness gate or issue-refiner with Monitor
+  printf '%s\n' "$(fm "$FSTEP" tools)" | tr ',' '\n' | tr -d ' ' | grep -qxF Monitor
+}
+
+@test "#3014 chain-steps.md dispatches each step as its plugin agent and never as general-purpose" {
+  run grep -c 'general-purpose' "$STEPS"
+  [ "$output" = 0 ]
+  local t
+  t="$(section "$STEPS" 'The step model (#2940)' | tr '\n' ' ' | tr -s ' ')"
+  contains "$t" '`subagent_type: development:resolve-step` for an issue-run step, `subagent_type: development:refine-step` for a chained refinement.'
+  contains "$t" 'Each agent'"'"'s definition carries the step'"'"'s whole contract and pins its model and tools, so the brief names only what differs between steps.'
+  contains "$t" '`isolation: "worktree"` beside `subagent_type: development:resolve-step`'
+  t="$(section "$STEPS" 'The issue step (#2940)' | tr '\n' ' ' | tr -s ' ')"
+  contains "$t" 'with `subagent_type: development:resolve-step`. The agent'"'"'s definition (`development/agents/resolve-step.md`) carries the step'"'"'s procedure'
+  t="$(section "$STEPS" 'The chained refinement step (#2940)' | tr '\n' ' ' | tr -s ' ')"
+  contains "$t" 'with `subagent_type: development:refine-step`. The agent'"'"'s definition (`development/agents/refine-step.md`) carries the step'"'"'s procedure'
+  # every path the sections name is a shipped agent file
+  [ -f "$RSTEP" ]
+  [ -f "$FSTEP" ]
+  t="$(flat "$ARCH")"
+  contains "$t" 'Each step is dispatched as its own plugin agent (#3014): `development:resolve-step` for an issue-run step and `development:refine-step` for a chained refinement.'
+}
+
+@test "#3014 the briefs are reduced to the handoff and the root's flags" {
+  local brief
+  # the issue step's brief: the text block of its section, line by line
+  brief="$(section "$STEPS" 'The issue step (#2940)' | awk '/^```text$/ { f = 1; next } f && /^```$/ { exit } f')"
+  [ "$brief" = "$(printf '%s\n' 'STEP_HANDOFF=<scratch_dir>/step-<N>-handoff.json' 'FLAGS=<the root'"'"'s telemetry flags and its --no-review, when given>' 'BLOCKERS_FIRST=1')" ]
+  brief="$(section "$STEPS" 'The chained refinement step (#2940)' | awk '/^```text$/ { f = 1; next } f && /^```$/ { exit } f')"
+  [ "$brief" = 'STEP_HANDOFF=<scratch_dir>/step-<N>-handoff.json' ]
+  # the procedure the briefs no longer carry is the agents'
+  lacks "$(flat "$STEPS")" 'You are a step of a human-started'
+  lacks "$(flat "$STEPS")" 'You are a chained refinement step'
+  contains "$(flat "$RSTEP")" 'Invoke the development:resolve-issue skill with "<N>" plus the root'"'"'s telemetry flags and its --no-review when given'
+  contains "$(flat "$RSTEP")" 'Before you end your turn, write <scratch_dir>/step-<N>-verdict.json (step-verdict/v1, ARCHITECTURE.md *Step verdict contract*)'
+}
+
+@test "#3014 the refine-step agent's unreadable-handoff verdict passes the root's verdict check" {
+  local doc
+  doc="$(perl -0ne 'print $1 if /`(\{"schema": "step-verdict\/v1", "issue": <N>, "verdict": "stopped".*?\})`/s' "$FSTEP")"
+  [ -n "$doc" ]
+  doc="${doc//<N>/2940}"
+  check "$doc" refinement
+  # an issue step's stopped would need a cause; a refinement's must not carry one
+  lacks "$doc" '"cause"'
+}
+
+@test "#3014 the refine-step agent feeds its conversion a saved document and writes a verdict when none is printed" {
+  local t; t="$(flat "$FSTEP")"
+  contains "$t" 'save that document verbatim to `<scratch_dir>/chain-result-<N>.json` with the Write tool, never through a shell string'
+  contains "$t" 'never end it without a verdict file.'
+  local doc
+  doc="$(perl -0ne 'print $1 if /`(\{"schema": "step-verdict\/v1", "issue": <N>, "verdict": "stopped", "follow_ups": \[\], "reason": "no chain-result document"\})`/s' "$FSTEP")"
+  [ -n "$doc" ]
+  doc="${doc//<N>/2940}"
+  check "$doc" refinement
+  lacks "$doc" '"cause"'
+}
+
+@test "#3014 the refine-step agent dispatches its skill's subagents in the foreground and waits on a background one" {
+  local t; t="$(flat "$FSTEP")"
+  contains "$t" 'Dispatch each in the foreground (`run_in_background: false`).'
+  contains "$t" 'When one runs in the background anyway, wait for its result in your turn; never end your turn while it runs, and never write the "no chain-result document" verdict before it has ended.'
+  contains "$t" 'Wait with one bounded Monitor call, never a Bash poll.'
+  contains "$t" 'When the bound expires, the resolve-issue skill'"'"'s `reference/review-loop/subagents.md` rule *A background round dispatch is waited on in-turn* governs the retry; follow it as written.'
+  contains "$t" 'Write the "no chain-result document" verdict above only when that rule stops the skill.'
+  # the retry sequence is the rule's own: the agent points at it and never restates it
+  lacks "$t" 're-dispatch it once'
+}
+
+@test "#3014 the resolve-step agent names its brief's lines, waits on its own subagents and points at the verdict arms" {
+  local t; t="$(flat "$RSTEP")"
+  contains "$t" '`<N>` in its name is the issue you work on.'
+  contains "$t" '`FLAGS=<flags>`, only when the root was given any: its telemetry flags and its `--no-review`.'
+  contains "$t" 'Dispatch each in the foreground (`run_in_background: false`). When one runs in the background, wait for its result in your turn; never end your turn while it runs.'
+  contains "$t" 'Wait with one bounded Monitor call, never a Bash poll.'
+  contains "$t" 'When the bound expires, the resolve-issue skill'"'"'s `reference/review-loop/subagents.md` rule *A background round dispatch is waited on in-turn* governs the retry; follow it as written.'
+  contains "$t" 'Write a stopped verdict, cause tooling, only when that rule stops the run.'
+  # the retry sequence is the rule's own: the agent points at it and never restates it
+  lacks "$t" 're-dispatch it once'
+  contains "$t" 'Which verdict each ending writes is `reference/chain-steps.md` § The issue step (#2940).'
+  # the section it points at exists
+  grep -qxF '## The issue step (#2940)' "$STEPS"
+  t="$(flat "$STEPS")"
+  contains "$t" 'The root dispatches a chained refinement step with `subagent_type: development:refine-step`.'
 }

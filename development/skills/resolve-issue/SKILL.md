@@ -1108,13 +1108,11 @@ that auto-merge is armed.
 
 ### 7. Emit the run's record — at every ending after Step 0a
 
-The Single-issue flow ends in exactly one of five ways — the PR opened here, a
-§0a rejection, a §0b `NEEDS_REFINEMENT`, an escalation terminal (§3.5), or
-anything else after Step 0a (a red gate abandoned, a stop in §2, an errored
-step) — and **each** of them, not only this one, emits the run's single
-`resolve-issue` record before reporting. It is never fatal. A Step 0 stop emits
-none. An epic child that E3 drives emits one too — from the child run E3
-started for it, parented to the epic run (#1227):
+The Single-issue flow ends in exactly one of five ways — the PR opened here, a §0a rejection, a §0b
+`NEEDS_REFINEMENT`, an escalation terminal (§3.5), or anything else after Step 0a (a red gate abandoned, a stop in
+§2, an errored step) — and **each** of them, not only this one, emits the run's single `resolve-issue` record before
+reporting. It is never fatal. A Step 0 stop emits none. An epic child that E3 drives emits one too — from the child
+run E3 started for it, parented to the epic run (#1227):
 see `reference/telemetry.md` § Story telemetry (#1226)
 
 **First, refine the run's parked follow-ups (#2588).** Once per run, before the
@@ -1125,6 +1123,8 @@ usually ends (`ESCALATE_NO_CONVERGENCE`): run `follow-up-origin.zsh parked-issue
 for each issue it prints. Do it without asking, in every session mode (`resolve-session.zsh`, #2575), and record it:
 see `reference/ask-branches.md` § RS-09 — the parked follow-up default (#2903)
 **A follow-up that parks never stops this run or its epic walk**, if pipeline-started (#2942): name it and go on.
+**In a human-started run** a step skips this call and lists its follow-ups in its verdict; the root queues each one:
+see `reference/checkpoint.md` § The chain queue in a human-started run (#2942)
 
 ## Epic flow
 

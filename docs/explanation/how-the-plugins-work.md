@@ -39,15 +39,24 @@ shipped. Every change, whichever skill produced it, ships the same way.
    workflows, scanners, hooks, the docs stack — and opens it as a PR ([How bootstrap works](workflow-bootstrap.md)).
    `/development:define-personas` writes the persona registry, `docs/personas.md`. Personas are optional, but they are
    what lets refinement write test data that looks like real input ([Personas](#personas-who-a-story-serves) below).
-2. **Specify.** You file an issue or an epic, as you would for a human colleague. Before anything is built, the
-   `story-readiness` agent judges whether it is specified well enough. A story it sends back gets the
-   `needs-refinement` label and the gate's questions, and `/development:refine-issue` walks you through answering them
-   until it is ready ([How refine-issue works](workflow-refine-issue.md)).
+2. **Specify.** You file an issue or an epic, as you would for a human colleague, and start
+   `/development:resolve-issue` on it. Before anything is built, its first steps check that no open blocker stands in
+   the way and have the `story-readiness` agent judge whether the story is specified well enough. In a run you started,
+   resolve-issue clears both itself: a chained refinement step refines the story, or splits it into children that each
+   go through the same flow, and the blockers-first step resolves and merges every open blocker before the story. A run
+   the maintenance pipeline started stops instead: an open blocker gets the story the `blocked` label and a comment
+   naming it, and a story not yet ready keeps its `needs-refinement` label and the gate's questions. For that case
+   `/development:refine-issue` stays the path you drive yourself: it walks you through answering them until the story
+   is ready, and you run resolve-issue again ([How refine-issue works](workflow-refine-issue.md)).
 3. **Build — on your machine.** `/development:resolve-issue` branches, implements the story with its acceptance tests
    and docs, runs the test gate, and puts the change through a local review loop until it converges
-   ([How resolve-issue works](workflow-resolve-issue.md)). No PR exists yet.
+   ([How resolve-issue works](workflow-resolve-issue.md)). In a run you started, a story too big for one change goes
+   back to the chained refinement to be split; a pipeline-started run parks it with `needs-split` and stops. No PR
+   exists yet.
 4. **Ship.** The change arrives as a PR authored by the Maintenance App bot, with squash auto-merge armed. The Approver
-   bot or a human approves it, and it merges once CI is green.
+   bot or a human approves it, and it merges once CI is green. In a run you started, the follow-ups the build filed do
+   not wait for you: the follow-up chain refines each one, then builds and ships it the same way, until none is left
+   or one fails.
 5. **Maintain — continuously.** On merged `main`, the toolchain keeps reporting: scanner findings, dependency and
    vendor PRs, coverage. `/development:maintenance` works through them one small PR at a time, and those PRs ship the
    same way as step 4. What needs a human decision becomes an issue, and re-enters the cycle at step 2
@@ -90,6 +99,8 @@ the one each agent's frontmatter names.
 | `story-readiness` | fable | resolve-issue, refine-issue | Judge whether a story is specified well enough to build; propose or validate its story spec; raise persona advisories |
 | `issue-refiner` | fable | refine-issue | One refinement turn: explain each objection, ask scored questions, draft the rewrite and the story spec |
 | `persona-definer` | fable | define-personas | One elicitation turn: propose personas from repo evidence, challenge coverage gaps, draft the registry |
+| `resolve-step` | opus | resolve-issue | Run one issue's Single-issue flow as a step of a human-started run, and write its step verdict |
+| `refine-step` | opus | resolve-issue | Run one chained refinement as a step of a human-started run, and write its step verdict |
 | `round-panel` | opus | resolve-issue | Run one review round's panel: one reviewer per dimension of the repo type's review |
 | `round-decide` | opus | resolve-issue | Run the commands reviewers attached to claims about tool results, and settle them |
 | `round-risk` | opus | resolve-issue | Optionally weigh each finding's probability and impact, demoting low-risk warnings |
