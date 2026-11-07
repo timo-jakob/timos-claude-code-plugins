@@ -76,7 +76,8 @@ cq_step() {
   contains "$s" "A follow-up is first refined in chained mode (#2939, #2940) by the chained refinement step, then built by the issue step, through every generation."
   contains "$s" "This replaces §7's \`refine-issue --follow-up\` call in a human-started run."
   t="$(flat < "$STEPS")"
-  contains "$t" "Skip §7's refine-issue --follow-up call: list the follow-ups only, since the root queues them (#2942)."
+  # the step's own instruction is its agent's definition since #3014
+  contains "$(flat < "$REPO_ROOT/development/agents/resolve-step.md")" "Skip §7's refine-issue --follow-up call: list the follow-ups only, since the root queues them (#2942)."
   contains "$t" "How the root handles each, once it has queued the verdict's \`follow_ups\` in the chain queue (#2942), which replaces §7's \`refine-issue --follow-up\` call in a human-started run:"
   contains "$t" "see \`reference/checkpoint.md\` § The chain queue in a human-started run (#2942)"
 }

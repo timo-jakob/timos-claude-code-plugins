@@ -90,6 +90,8 @@ the one each agent's frontmatter names.
 | `story-readiness` | fable | resolve-issue, refine-issue | Judge whether a story is specified well enough to build; propose or validate its story spec; raise persona advisories |
 | `issue-refiner` | fable | refine-issue | One refinement turn: explain each objection, ask scored questions, draft the rewrite and the story spec |
 | `persona-definer` | fable | define-personas | One elicitation turn: propose personas from repo evidence, challenge coverage gaps, draft the registry |
+| `resolve-step` | opus | resolve-issue | Run one issue's Single-issue flow as a step of a human-started run, and write its step verdict |
+| `refine-step` | opus | resolve-issue | Run one chained refinement as a step of a human-started run, and write its step verdict |
 | `round-panel` | opus | resolve-issue | Run one review round's panel: one reviewer per dimension of the repo type's review |
 | `round-decide` | opus | resolve-issue | Run the commands reviewers attached to claims about tool results, and settle them |
 | `round-risk` | opus | resolve-issue | Optionally weigh each finding's probability and impact, demoting low-risk warnings |
