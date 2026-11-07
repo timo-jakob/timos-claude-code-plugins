@@ -2812,3 +2812,114 @@ SOLE_GO_SKIPPED=(.github/workflows/gitleaks.yml .github/workflows/no-cluster-dep
     [ "$(missing_has "$out" "$p")" = "number" ] || { echo "no primary lost the gap: $p"; return 1; }
   done
 }
+
+# ---- #3029: a git-ignored marker file is not a project language marker -------
+# A composition repo git-ignores its local member checkouts; their package.json
+# detected the composition as javascript. Each case runs with git's own
+# environment cleared, so a gate launched from a git hook cannot point these
+# fixtures at another repository.
+
+ignored_member_fixture() {
+  mkdir -p member
+  printf '{}\n' > member/package.json
+  printf 'member/\n' > .gitignore
+}
+
+detect_langs() {
+  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE bash "$DETECT" 2>/dev/null | jq -c .languages
+}
+
+@test "detect-stack #3029: the only marker sits in a git-ignored member -> no languages" {
+  ignored_member_fixture
+  [ "$(detect_langs)" = '[]' ]
+}
+
+@test "detect-stack #3029: an ignored member that is itself a git checkout -> no languages" {
+  ignored_member_fixture
+  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C member init -q
+  [ "$(detect_langs)" = '[]' ]
+}
+
+@test "detect-stack #3029: the same member untracked but NOT ignored still counts" {
+  ignored_member_fixture
+  printf 'other/\n' > .gitignore
+  [ "$(detect_langs)" = '["javascript"]' ]
+}
+
+@test "detect-stack #3029: outside any git work tree every marker counts, as before" {
+  local plain="$BATS_TEST_TMPDIR/plain"
+  mkdir -p "$plain/member"
+  cd "$plain"
+  printf '{}\n' > member/package.json
+  printf 'member/\n' > .gitignore
+  # The ceiling keeps git from finding a repository above the fixture.
+  [ "$(GIT_CEILING_DIRECTORIES="$BATS_TEST_TMPDIR" detect_langs)" = '["javascript"]' ]
+}
+
+@test "detect-stack #3029: a root marker plus an ignored marker of another language -> only the root's" {
+  ignored_member_fixture
+  printf '[project]\nname = "x"\nversion = "0.1.0"\n' > pyproject.toml
+  [ "$(detect_langs)" = '["python"]' ]
+}
+
+@test "detect-stack #3029: an ignored marker does not hide a real marker of the same language" {
+  ignored_member_fixture
+  printf '{}\n' > tsconfig.json
+  [ "$(detect_langs)" = '["javascript"]' ]
+}
+
+@test "detect-stack #3029: a TRACKED marker matching an ignore pattern still counts" {
+  ignored_member_fixture
+  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git add -f member/package.json
+  [ "$(detect_langs)" = '["javascript"]' ]
+}
+
+@test "detect-stack #3029: an ignored member whose path starts with - is still dropped" {
+  mkdir -p -- -member
+  printf '{}\n' > -member/package.json
+  printf '/-member/\n' > .gitignore
+  [ "$(detect_langs)" = '[]' ]
+}
+
+@test "detect-stack #3029: a cwd its enclosing repository ignores is scanned as outside a work tree" {
+  ignored_member_fixture
+  cd member
+  [ "$(detect_langs)" = '["javascript"]' ]
+}
+
+# ---- #3037 / #3038: is_react and language_meta share detect_lang's ignore rule --
+
+detect_field() {
+  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE bash "$DETECT" 2>/dev/null | jq -c "$1"
+}
+
+@test "detect-stack #3037: react only in a git-ignored member -> is_react false" {
+  jq -n '{name: "root", dependencies: {lodash: "4.0.0"}}' > package.json
+  mkdir -p member
+  jq -n '{name: "m", dependencies: {react: "19.0.0"}}' > member/package.json
+  printf 'member/\n' > .gitignore
+  [ "$(detect_field .is_react)" = 'false' ]
+}
+
+@test "detect-stack #3037: react in an untracked member that is NOT ignored -> is_react true" {
+  jq -n '{name: "root", dependencies: {lodash: "4.0.0"}}' > package.json
+  mkdir -p member
+  jq -n '{name: "m", dependencies: {react: "19.0.0"}}' > member/package.json
+  printf 'other/\n' > .gitignore
+  [ "$(detect_field .is_react)" = 'true' ]
+}
+
+@test "detect-stack #3038: java language_meta ignores a git-ignored member's build file" {
+  printf 'plugins { java }\n' > build.gradle.kts
+  mkdir -p member
+  printf 'java { toolchain { languageVersion = JavaLanguageVersion.of(17) } }\n' > member/build.gradle.kts
+  printf 'member/\n' > .gitignore
+  [ "$(detect_field '.language_meta.java.version_source')" = '"default"' ]
+}
+
+@test "detect-stack #3038: swift language_meta ignores a git-ignored member's Xcode project" {
+  printf '// swift-tools-version:6.0\n' > Package.swift
+  mkdir -p member/App.xcodeproj
+  printf 'member/\n' > .gitignore
+  [ "$(detect_field '.language_meta.swift.build_system')" = '"swiftpm"' ]
+}
