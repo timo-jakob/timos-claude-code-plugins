@@ -14,12 +14,14 @@
 # leave behind an SVG that still carries a <foreignObject>. It also marks every
 # <text> xml:space="preserve" (see the loop) so word spacing survives rsvg.
 # tests/workflow-diagrams.bats pins the same invariant on what is committed.
+# Each SVG also carries a `<!-- rendered-from: sha256=<hex> -->` stamp of its
+# source (#3040), so a .mmd edited without a re-render fails that suite.
 #
 # Usage:
 #   render-diagrams.zsh [file.mmd ...]   (default: every docs/**/diagrams/*.mmd)
 #
-# Exits 0 when every SVG rendered clean, 1 when a render failed or produced a
-# <foreignObject>, 2 on usage/tooling errors (no docker, no sources).
+# Exits 0 when every SVG rendered clean, 1 when a render failed, produced a
+# <foreignObject> or could not be stamped, 2 on usage/tooling errors (no docker, no sources).
 set -euo pipefail
 
 REPO_ROOT="${0:A:h:h}"
@@ -40,7 +42,7 @@ else
 fi
 (( ${#sources} > 0 )) || { print -u2 -- "render-diagrams: no .mmd sources found"; exit 2 }
 
-local src svg rc=0
+local src svg hex rc=0
 for src in "${sources[@]}"; do
   [[ "$src" == *.mmd && -f "$src" ]] || { print -u2 -- "render-diagrams: not a .mmd file: $src"; exit 2 }
   svg="${src%.mmd}.svg"
@@ -61,6 +63,19 @@ for src in "${sources[@]}"; do
   # mermaid-cli ends the file without a newline; the end-of-file pre-commit
   # hook would otherwise rewrite every freshly rendered SVG.
   [[ -z "$(tail -c 1 "$svg")" ]] || print >> "$svg"
+  # Stamp the SVG with the sha256 of the exact .mmd bytes it was rendered from,
+  # as one comment right after the root <svg …> tag (#3040). CI cannot
+  # re-render (no docker), so tests/workflow-diagrams.bats compares this hash
+  # with the committed .mmd instead: a source edited without a re-render fails.
+  # Mermaid starts the file with the root tag on one line, so the first `>` on
+  # line 1 closes it.
+  hex="$(shasum -a 256 < "$src" | cut -d' ' -f1)"
+  sed -i.bak -e "1s/>/><!-- rendered-from: sha256=$hex -->/" "$svg" && rm -f "$svg.bak"
+  if [[ "$(head -c 4 "$svg")" != '<svg' ]] \
+      || (( $(grep -o 'rendered-from:' "$svg" | grep -c .) != 1 )); then
+    print -u2 -- "render-diagrams: could not stamp $svg with its source hash"
+    rc=1
+  fi
   if grep -q '<foreignObject' "$svg"; then
     print -u2 -- "render-diagrams: $svg carries <foreignObject> — its labels will not print in the PDF"
     rc=1
