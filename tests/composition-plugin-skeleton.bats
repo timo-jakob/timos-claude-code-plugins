@@ -1855,6 +1855,9 @@ YAML
   contains "$panel" 'means you launch that dimension'"'"'s agent'
   contains "$panel" '**Do not write the findings file at all.** Report the round as **failed**'
   contains "$panel" 'only when every launched agent completed'
+  # the borrowed test reviewer's #2011 cap needs the hunks line, on delta rounds only
+  contains "$panel" 'Fix-pass hunks (delta round): {delta_hunks} — the previous fix pass'"'"'s new-side line ranges'
+  contains "$panel" 'is added only when the plan'"'"'s `scope_mode` is `"delta"`, never because `delta_hunks` is non-null'
 }
 
 @test "the manifest reviewer's severity table is fixed and leaves the contract to the validator (#3030)" {
@@ -1862,7 +1865,7 @@ YAML
   grep -qx 'tools: Read, Grep, Glob' "$agent"
   flat="$(tr -s '[:space:]' ' ' <"$agent")"
   contains "$flat" 'or a workflow that exposes a secret or runs untrusted input | **CRITICAL** |'
-  contains "$flat" '| A weakened member pin | **WARNING** |'
+  contains "$flat" '| A weakened member pin, in the manifest or in what the promote script checks or records about it | **WARNING** |'
   contains "$flat" '| A workflow that widens its permissions or loosens an action pin | **WARNING** |'
   contains "$flat" '| A Renovate rule that stops seeing, or auto-merges past review, the member pins | **WARNING** |'
   contains "$flat" 'A promote workflow job that drops its `environment:` binding, so required reviewers no longer gate it.'

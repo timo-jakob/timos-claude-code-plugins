@@ -26,7 +26,7 @@ WARNING block a round.
 | Check | Severity |
 | --- | --- |
 | A promotion path that bypasses a protected environment, or a workflow that exposes a secret or runs untrusted input | **CRITICAL** |
-| A weakened member pin | **WARNING** |
+| A weakened member pin, in the manifest or in what the promote script checks or records about it | **WARNING** |
 | A workflow that widens its permissions or loosens an action pin | **WARNING** |
 | A Renovate rule that stops seeing, or auto-merges past review, the member pins | **WARNING** |
 | Clarity of the manifest and the promotion machinery | **SUGGESTION** |

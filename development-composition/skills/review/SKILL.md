@@ -156,11 +156,16 @@ passes no `--fix-verification`.
 The Fix verification line carries the path the split-carry map (above) gives the
 reviewer's **own** dimension, never `fix_verification_path` itself, and is
 added only when the map holds that dimension (#2010).
+The `Fix-pass hunks (delta round):` line is added only when the plan's
+`scope_mode` is `"delta"`, never because `delta_hunks` is non-null, exactly as
+`/development-claude-plugin:review` states it (#2011): the reused test reviewer's
+delta-round rule reads it.
 
 ```text
 Review scope: {the review scope}
 Fix verification (round >= 2): {own_fix_verification_path} — the previous round's blockers. Confirm each one actually landed BEFORE looking for anything new. For each carried entry report ONE of confirmed / re-raised / unconfirmed, as one line keyed by the carry's own spelling — carried entry "<title>" (<file>, <dimension>): confirmed at <file:line> | re-raised (see finding) | unconfirmed — re-raising ONLY what you observed still present, at its ORIGINAL severity, citing the carried entry and the file:line plus the unchanged text or passing mutation in the findings file, even when its file is outside this round's scope; never re-raise on the absence of a fix. A re-raise is a finding whose file, dimension and title are the carried entry's own spelling (title verbatim) and whose line is the carried line or null, with what you observed in its description — under a different title it is not matched to the carry and the round is refused. Every entry in that file is of your own dimension ("{DIMENSION}", which the identity includes) and is yours alone to account for: no other reviewer is shown it. End your report with the triple: carried: confirmed N / re-raised M / unconfirmed K of TOTAL, where TOTAL is the number of entries in that file.
 Already waived (round >= 2): {adjudicated_path} — suggestions earlier rounds surfaced and the human waived. Do not re-raise them as Suggestions, EXCEPT in a file the PREVIOUS ROUND'S FIX PASS touched (on a delta round that is this round's scope; on a closing full sweep that NO fix pass preceded the set is empty, so withhold them — but on a sweep the residue promotion earned, a fix pass did run, so the exemption applies as on any round). A genuinely blocking re-raise at CRITICAL/WARNING is always allowed.
+Fix-pass hunks (delta round): {delta_hunks} — the previous fix pass's new-side line ranges, each {file, kind, start, end}: kind "added" is a pure addition, "changed" rewrote or removed lines that existed at the prior tree. Apply them as your agent definition's delta-round rule says; a definition that states no such rule ignores this line.
 
 Analyze all composition content in scope following your instructions. Report every finding using the prose reporting format defined in your agent definition.
 

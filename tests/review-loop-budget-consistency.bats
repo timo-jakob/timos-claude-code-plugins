@@ -609,7 +609,7 @@ grep_site() {  # grep_site <file> <fixed-string>
   grep_site "$ARCH_PANEL_DUTIES" 'since #2010 — the split-carry duty'
 }
 
-@test "the five language panels state the delta-carry block in LOCKSTEP, not merely in fragments (#1434)" {
+@test "the language and composition panels state the delta-carry block in LOCKSTEP, not merely in fragments (#1434)" {
   # A structural assertion, deliberately NOT another needle. The per-panel
   # `grep -F` fragments above cannot express two things this invariant asserts,
   # and every recurrence of "the sweep was green on a broken panel" in this
@@ -623,8 +623,8 @@ grep_site() {  # grep_site <file> <fixed-string>
   #   * a fragment set is BLIND between its needles. A dangling aside and a
   #     duplicated line survived five panels for a full round precisely there.
   #
-  # Normalise the block (wraps joined, emphasis stripped) and require the five
-  # language panels to agree byte-for-byte. Any of those mutations changes the
+  # Normalise the block (wraps joined, emphasis stripped) and require the
+  # language panels and the composition panel to agree byte-for-byte. Any of those mutations changes the
   # string in at least one panel, so all of them red. kubernetes is excluded on
   # purpose: its render-first flow states the same duties in its own vocabulary,
   # which the per-panel needles above cover.
@@ -635,6 +635,7 @@ grep_site() {  # grep_site <file> <fixed-string>
     "$REPO_ROOT/development-javascript/skills/review/SKILL.md"
     "$REPO_ROOT/development-python/skills/review/SKILL.md"
     "$REPO_ROOT/development-swift/skills/review/SKILL.md"
+    "$REPO_ROOT/development-composition/skills/review/SKILL.md"
   )
   local f ln ref="" cur
   for f in "${lang[@]}"; do
@@ -652,7 +653,7 @@ grep_site() {  # grep_site <file> <fixed-string>
       }
     fi
   done
-  # ...and it really does say the load-bearing things, so five identically
+  # ...and it really does say the load-bearing things, so identically
   # BROKEN panels cannot pass by agreeing with each other
   case "$ref" in
     *"do not write a bare []"*) : ;;
