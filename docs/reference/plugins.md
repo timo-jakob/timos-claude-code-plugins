@@ -756,7 +756,7 @@ detected topic — `docs`, say — as auxiliary. On a repo **without** a
 detected target dispatches as primary, and the run's summary notes the
 declaration.
 
-**What's built (v0.1):** the ownership boundary, the `claude-workspace/v1`
+**What's built (v0.2):** the ownership boundary, the `claude-workspace/v1`
 contract, and the validator that enforces it
 ([#1744](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1744));
 the bootstrap scaffold with its promote-to-prod workflow
@@ -796,7 +796,7 @@ scaffold copies. The validator's callers are bootstrap, the maintenance gather,
 | `/development-composition:maintenance` | the maintenance dispatcher; its `skills/maintenance/scripts/plan-dispatch.zsh` computes the response |
 | `composition-tag-bump-triage` | the agent that triages Renovate image-tag bump PRs |
 | Review panel | `/development-composition:review [scope]` — the panel `review-dispatch.zsh` names for a `composition` repo: `composition-manifest-reviewer` over the manifest's member pins and the promotion machinery, plus `development-claude-plugin`'s script and test reviewers over the zsh scripts and bats suites. Emits #558-schema findings alongside the prose report |
-| `composition-manifest-reviewer` | the panel's read-only agent for what the validator cannot judge: an unintended or weakened pin, a promotion path that bypasses a protected environment, a workflow that widens permissions or runs untrusted input, a Renovate rule that stops seeing the pins |
+| `composition-manifest-reviewer` | the panel's read-only agent for what the validator cannot judge: a weakened pin, a promotion path that bypasses a protected environment, a workflow that widens permissions or runs untrusted input, a Renovate rule that stops seeing the pins |
 | Resolve profile | `/development-composition:resolve-profile` (not invoked by hand — loaded by name by `/development:resolve-issue` at its §1b step) — the composition repo type's driver rules for the resolve-issue conductor: six contract headings (named once in the *Resolve profile contract* in ARCHITECTURE.md, not restated here) holding a two-half gate, `validate-workspace.zsh` on the manifest and then the whole bats suite through `run-gate.zsh --tests-dir tests` (an empty suite is *nothing to gate*, never green), `--gate-attest: not applicable`, a `none` version bump (a constellation repo ships no installable plugin content), and the panel pointer. Not for direct use |
 
 ### Maintenance

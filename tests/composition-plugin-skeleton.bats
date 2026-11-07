@@ -163,14 +163,14 @@ YAML
   [ "$v_market" = "$v_plugin" ]
   [ "$d_market" = "$d_plugin" ]
   # the shipped-slice label is stated by VALUE in the user-facing prose ("only
-  # in v0.1" in README, "What's built (v0.1)" in plugins.md), so the manifests
+  # in v0.2" in README, "What's built (v0.2)" in plugins.md), so the manifests
   # must agree — otherwise a later child could land its capability and prose
-  # while leaving both manifests at 0.1.0, staying green while installs never
+  # while leaving both manifests at 0.2.0, staying green while installs never
   # see the change
-  starts_with "$v_plugin" "0.1."
+  starts_with "$v_plugin" "0.2."
   # …and the label is asserted where it is stated, DERIVED from the manifest
-  # rather than restated: without this the prose could move to v0.2 while both
-  # manifests stayed at 0.1.0, which is the drift the prefix pin exists to stop
+  # rather than restated: without this the prose could move to v0.3 while both
+  # manifests stayed at 0.2.0, which is the drift the prefix pin exists to stop
   local label section
   label="v${v_plugin%.*}"
   contains "$(grep -E '^\| \*\*development-composition\*\*' "$REPO_ROOT/README.md")" "only in $label"
@@ -349,7 +349,7 @@ YAML
 }
 
 @test "the version-bump rosters name this plugin's pinned prefix (#1744)" {
-  # the suite pins `0.1.` on the manifest; the two rosters a maintainer reads
+  # the suite pins `0.2.` on the manifest; the two rosters a maintainer reads
   # before bumping must name the same prefix, or a resolve run cuts a minor and
   # reds this very file
   local v_plugin prefix
@@ -1837,10 +1837,10 @@ YAML
   contains "$gate" '`0` is a valid manifest.'
   contains "$gate" 'both are a **red gate** — fix the manifest the change broke'
   contains "$gate" '`2` is your own malformed call: fix it and re-run.'
-  contains "$gate" "\`3\` means the runner lacks mikefarah's \`yq\` or a working \`jq\`."
-  contains "$gate" 'That is no verdict about the manifest, red or green'
+  contains "$gate" 'Any other status is no verdict about the manifest, red or green'
+  contains "$gate" '`1` with the validator'"'"'s stderr line naming a member or environment is a contract violation'
   contains "$gate" 'joined with `&&`, the validator first'
-  contains "$gate" 'The `<full gate>` is then the validator alone'
+  contains "$gate" 'The `<full gate>` of that round is then the validator alone'
   contains "$gate" 'E4 has no end-to-end half to drive here'
 }
 
@@ -1862,8 +1862,7 @@ YAML
   grep -qx 'tools: Read, Grep, Glob' "$agent"
   flat="$(tr -s '[:space:]' ' ' <"$agent")"
   contains "$flat" 'or a workflow that exposes a secret or runs untrusted input | **CRITICAL** |'
-  contains "$flat" '| A member pin changed in a way the change does not account for, or a weakened pin |'
-  contains "$flat" 'or a weakened pin | **WARNING** |'
+  contains "$flat" '| A weakened member pin | **WARNING** |'
   contains "$flat" '| A workflow that widens its permissions or loosens an action pin | **WARNING** |'
   contains "$flat" '| A Renovate rule that stops seeing, or auto-merges past review, the member pins | **WARNING** |'
   contains "$flat" 'Never raise a finding above its row.'

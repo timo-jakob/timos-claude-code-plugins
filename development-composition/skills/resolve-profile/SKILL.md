@@ -39,21 +39,22 @@ These are the §3 rules for this repo type. The conductor's generic bullet says
   the validator first, so a manifest that fails the contract never spends a
   suite run.
 - **Read the validator by its exit code, never by its stdout.** `0` is a valid
-  manifest. `1` is a contract violation and `4` a missing or unreadable
-  manifest: both are a **red gate** — fix the manifest the change broke (the
-  stderr line names the member or environment), never the validator. `2` is
-  your own malformed call: fix it and re-run. `3` means the runner lacks
-  mikefarah's `yq` or a working `jq`. That is no verdict about the manifest,
-  red or green: **report the missing tool and stop**, and never read it as a
-  pass.
-- **An empty bats suite is *nothing to gate*, never green.** When `tests/` holds
-  no `*.bats` file — the shape bootstrap's composition scaffold leaves — the
-  suite half has nothing to run. Do not run `run-gate.zsh` over it (its
-  zero-test guard would report red, a claim about tests that do not exist), and
+  manifest. `1` with the validator's stderr line naming a member or
+  environment is a contract violation, and `4` a missing or unreadable
+  manifest: both are a **red gate** — fix the manifest the change broke,
+  never the validator. `2` is your own malformed call: fix it and re-run. Any
+  other status is no verdict about the manifest, red or green — `3`, the
+  runner lacking mikefarah's `yq` or a working `jq`, among them:
+  **report the missing tool and stop**, and never read it as a pass.
+- **An empty bats suite is *nothing to gate*, never green.** When the round's
+  tree holds no `*.bats` file under `tests/` — the shape bootstrap's
+  composition scaffold leaves — the suite half has nothing to run.
+  Do not run `run-gate.zsh` over it (its zero-test guard would report red, a
+  claim about tests that do not exist), and
   never report that half as green or as a pass: say *nothing to gate* in those
-  words, in the round's narration and in the PR's Test plan. The `<full gate>`
-  is then the validator alone, so the change is proven by the manifest check
-  and nothing else, and the report says so.
+  words, in the round's narration and in the PR's Test plan. The `<full gate>` of that round is then the
+  validator alone, so the change is proven by the manifest check and nothing
+  else, and the report says so.
 - **`--gate-attest`: not applicable.** The `<full gate>` here is compound —
   the validator joined with `run-gate.zsh` — or the validator alone, which
   reports no tree at all. Either way, omit `--gate-attest` entirely and pass

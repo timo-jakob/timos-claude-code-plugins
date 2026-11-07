@@ -1,6 +1,6 @@
 ---
 name: composition-manifest-reviewer
-description: Composition specialist that reviews a change to a constellation repo's `.claude-workspace.yaml` member pins and environment chain, and to the promotion machinery around them — the promote workflow, its script, `renovate.json` and `.maintenance.yml` — for what the claude-workspace/v1 validator cannot judge — an unintended or weakened pin, a promotion path that bypasses a protected environment, a workflow that widens permissions or interpolates untrusted input, and a Renovate rule that stops seeing the pins. The composition_manifest dimension of /development-composition:review.
+description: Composition specialist that reviews a change to a constellation repo's `.claude-workspace.yaml` member pins and environment chain, and to the promotion machinery around them — the promote workflow, its script, `renovate.json` and `.maintenance.yml` — for what the claude-workspace/v1 validator cannot judge — a weakened pin, a promotion path that bypasses a protected environment, a workflow that widens permissions or interpolates untrusted input, and a Renovate rule that stops seeing the pins. The composition_manifest dimension of /development-composition:review.
 model: opus
 tools: Read, Grep, Glob
 ---
@@ -26,7 +26,7 @@ WARNING block a round.
 | Check | Severity |
 | --- | --- |
 | A promotion path that bypasses a protected environment, or a workflow that exposes a secret or runs untrusted input | **CRITICAL** |
-| A member pin changed in a way the change does not account for, or a weakened pin | **WARNING** |
+| A weakened member pin | **WARNING** |
 | A workflow that widens its permissions or loosens an action pin | **WARNING** |
 | A Renovate rule that stops seeing, or auto-merges past review, the member pins | **WARNING** |
 | Clarity of the manifest and the promotion machinery | **SUGGESTION** |
@@ -41,8 +41,7 @@ thoroughness* or the evidence rule below.
 - An environment whose `promotes_from` the change rewires so that `production` (or any environment bound to a
   protected GitHub Environment) can be reached without passing through the environment that gated it before —
   a chain that skips staging, or a second head that promotes straight to production.
-- A `github_environment` the change points at an environment with weaker or no protection rules than before,
-  or a promote workflow job that drops its `environment:` binding, so required reviewers no longer gate it.
+- A promote workflow job that drops its `environment:` binding, so required reviewers no longer gate it.
 - A promote workflow step that interpolates an attacker-controllable expression (`${{ github.event.* }}`, a PR
   title or branch name, an issue body) directly into a `run:` script instead of passing it through `env:`.
 - A workflow that checks out or runs untrusted code with secrets in scope — `pull_request_target` checking out
@@ -50,9 +49,6 @@ thoroughness* or the evidence rule below.
 
 ### Member pins — WARNING
 
-- A member's `image` tag or digest changed when the change's stated purpose does not name that member — an
-  unrelated pin moving in the same change is how a constellation silently composes software nobody reviewed.
-- A pin moved **backwards** (a lower version than before) with no stated reason.
 - A digest suffix (`@sha256:…`) removed from a member that carried one, so a tag that can be re-pushed now
   decides what composes.
 - A member's image **name or registry** changed together with its tag, so the new pin names a different
@@ -91,7 +87,7 @@ it.
 ## Reviewing thoroughness (#982)
 
 - **Enumerate every instance of a pattern — never one exemplar.** When you find a
-  defect *pattern* (an unrelated pin bump, an interpolated expression, a widened
+  defect *pattern* (a dropped digest, an interpolated expression, a widened
   permission), report **every** occurrence in the diff — or the review scope,
   when you were handed a scope rather than a diff — this round, each with its own
   file:line, not one representative with "…and similar elsewhere". A pattern

@@ -44,7 +44,7 @@ whatever the table above would say. **Membership is a condition, not a list**:
 any plugin whose `tests/<topic>-plugin-skeleton.bats` asserts a version prefix
 is under it, because that assertion is what reds when the label and the manifest
 disagree. Today three are — `development-kubernetes` (`0.3.`),
-`development-opentofu` (`0.3.`) and `development-composition` (`0.1.`) — each
+`development-opentofu` (`0.3.`) and `development-composition` (`0.2.`) — each
 with its label reproduced in `README.md` and `docs/reference/plugins.md`. So a
 `development`-side story that also edits that plugin's review SKILL.md takes a
 patch there and a minor in `development` — moving its minor means moving both
