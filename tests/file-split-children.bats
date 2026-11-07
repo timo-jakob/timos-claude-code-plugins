@@ -30,7 +30,12 @@ setup() {
 
   # Fake gh. `issue create` mints #901, #902, … in call order; FAIL_CREATE_AT=k
   # fails the k-th create, FAIL_LINK=k the k-th sub-issue POST, FAIL_EDIT and
-  # FAIL_COMMENT the relabel and the trail.
+  # FAIL_COMMENT the relabel and the trail, FAIL_EDGE=M every blockedBy POST
+  # onto #M. Reads are served from JSON state the writes keep up to date, with
+  # the caller's own --jq applied, so a second run sees what the first wrote:
+  #   $STUB_DIR/subs.json         the original's sub-issues  [{number,title}]
+  #   $STUB_DIR/blocked-<M>.json  #M's blockers  [{number,state,repository_url}]
+  echo '[]' > "$STUB_DIR/subs.json"
   export GH_BIN="$BATS_TEST_TMPDIR/gh-stub.sh"
   cat > "$GH_BIN" <<'EOF'
 #!/usr/bin/env bash
@@ -47,6 +52,7 @@ case "$1 $2" in
       [ "$prev" = "--body-file" ] && cp "$a" "$STUB_DIR/child-body-$n.md"
       prev="$a"
     done
+    printf '%s' "$title" > "$STUB_DIR/title-$((900 + n))"
     log "create #$((900 + n)) label=$labels title=$title"
     echo "https://github.com/o/r/issues/$((900 + n))"; exit 0 ;;
   "issue edit") log "edit $*"; [ -z "${FAIL_EDIT:-}" ] || exit 1; exit 0 ;;
@@ -55,10 +61,35 @@ case "$1 $2" in
     for a in "$@"; do [ "$prev" = "--body-file" ] && cp "$a" "$STUB_DIR/trail.md"; prev="$a"; done
     log "comment $3"; [ -z "${FAIL_COMMENT:-}" ] || exit 1; exit 0 ;;
 esac
+if [ "$1" = api ] && [ "$2" = --paginate ]; then
+  path="$3"; q="."; [ "$4" = --jq ] && q="$5"
+  case "$path" in
+    */sub_issues) f="$STUB_DIR/subs.json" ;;
+    */dependencies/blocked_by) m="${path%/dependencies/blocked_by}"; f="$STUB_DIR/blocked-${m##*/}.json" ;;
+    *) echo "unexpected gh read: $*" >&2; exit 99 ;;
+  esac
+  [ -f "$f" ] || echo '[]' > "$f"
+  jq -r "$q" "$f"; exit 0
+fi
 if [ "$1" = api ] && [ "$2" = -X ]; then
-  k=$(( $(cat "$STUB_DIR/links" 2>/dev/null || echo 0) + 1 )); echo "$k" > "$STUB_DIR/links"
-  if [ "${FAIL_LINK:-0}" = "$k" ]; then exit 1; fi
-  log "link $4 $6"; exit 0
+  path="$4"; id="${6#*=}"
+  case "$path" in
+    */sub_issues)
+      k=$(( $(cat "$STUB_DIR/links" 2>/dev/null || echo 0) + 1 )); echo "$k" > "$STUB_DIR/links"
+      if [ "${FAIL_LINK:-0}" = "$k" ]; then exit 1; fi
+      num=$(( id - 100000 ))
+      jq --argjson n "$num" --arg t "$(cat "$STUB_DIR/title-$num")" '. + [{number: $n, title: $t}]' \
+        "$STUB_DIR/subs.json" > "$STUB_DIR/subs.tmp" && mv "$STUB_DIR/subs.tmp" "$STUB_DIR/subs.json"
+      log "link $4 $6"; exit 0 ;;
+    */dependencies/blocked_by)
+      m="${path%/dependencies/blocked_by}"; m="${m##*/}"
+      if [ "${FAIL_EDGE:-0}" = "$m" ]; then echo "gh: HTTP 403" >&2; exit 1; fi
+      f="$STUB_DIR/blocked-$m.json"; [ -f "$f" ] || echo '[]' > "$f"
+      jq --argjson n "$(( id - 100000 ))" \
+        '. + [{number: $n, state: "open", repository_url: "https://api.github.com/repos/o/r"}]' \
+        "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+      log "edge #$m blockedBy $(( id - 100000 ))"; exit 0 ;;
+  esac
 fi
 if [ "$1" = api ]; then
   n="${2##*/}"; echo $(( 100000 + n )); exit 0
@@ -174,6 +205,118 @@ split() {
   [ "$status" -eq 5 ]
   printf '%s' "$output" | jq -e '.relabelled == true and .commented == false
     and (.error | test("trail comment"))' >/dev/null
+}
+
+# --- blockedBy edges (#2947) --------------------------------------------------
+
+# Three small children; $1 $2 $3 are their blocked_by arrays.
+plan_with_blocked_by() {
+  printf '%s' "{\"children\":[
+    {\"title\":\"feat(x): child 1\",\"body\":\"c1\",\"files\":[\"development/a1.md\"],\"blocked_by\":$1},
+    {\"title\":\"feat(x): child 2\",\"body\":\"c2\",\"files\":[\"development/a2.md\"],\"blocked_by\":$2},
+    {\"title\":\"feat(x): child 3\",\"body\":\"c3\",\"files\":[\"development/a3.md\"],\"blocked_by\":$3}]}" > "$PLAN"
+}
+
+# The original #700 is natively blocked by #52 and #36 (open) and #40 (closed).
+parent_blocked() {
+  printf '%s' '[
+    {"number":52,"state":"open","repository_url":"https://api.github.com/repos/o/r"},
+    {"number":36,"state":"open","repository_url":"https://api.github.com/repos/o/r"},
+    {"number":40,"state":"closed","repository_url":"https://api.github.com/repos/o/r"}]' \
+    > "$STUB_DIR/blocked-700.json"
+}
+
+@test "sibling blocked_by becomes native edges; open parent blockers go only to children with no sibling blocker" {
+  parent_blocked
+  plan_with_blocked_by '[]' '[0]' '["#88"]'
+  split
+  [ "$status" -eq 0 ]
+  # #901 starts the order: it inherits the original's open blockers
+  jq -e '[.[].number] == [52, 36]' "$STUB_DIR/blocked-901.json" >/dev/null
+  # #902 is after #901 and reaches #52/#36 through it, so inherits nothing
+  jq -e '[.[].number] == [901]' "$STUB_DIR/blocked-902.json" >/dev/null
+  # #903 names no sibling: its own prerequisite plus the inherited ones
+  jq -e '[.[].number] == [88, 52, 36]' "$STUB_DIR/blocked-903.json" >/dev/null
+  # the closed blocker is never copied
+  run -1 grep -q 'blockedBy 40$' "$GH_LOG"
+  printf '%s' "$output" >/dev/null
+  # every edge lands before the original is relabelled
+  [ "$(grep -n '^edge ' "$GH_LOG" | tail -1 | cut -d: -f1)" -lt "$(grep -n '^edit ' "$GH_LOG" | head -1 | cut -d: -f1)" ]
+  # the trail names each child's blockers
+  grep -qx -- '- #902 — feat(x): child 2 (blocked by #901)' "$STUB_DIR/trail.md"
+  grep -qx -- '- #901 — feat(x): child 1 (blocked by #52, #36)' "$STUB_DIR/trail.md"
+}
+
+@test "the report lists every edge with its child" {
+  plan_with_blocked_by '[]' '[0]' '[1]'
+  split
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | jq -e '[.edges[] | [.issue, .ref, .status]] == [[902,"#901","added"],[903,"#902","added"]]' >/dev/null
+}
+
+@test "an edge that cannot be added is partial (exit 5) naming it, and the original is untouched" {
+  plan_with_blocked_by '[]' '[0]' '[]'
+  FAIL_EDGE=902 split
+  [ "$status" -eq 5 ]
+  printf '%s' "$output" | jq -e '(.filed | length) == 3 and .relabelled == false and .commented == false
+    and (.error | test("#902 blockedBy #901"))' >/dev/null
+  run -1 grep -q '^edit ' "$GH_LOG"
+  run -1 grep -q '^comment ' "$GH_LOG"
+}
+
+@test "a re-run reuses the filed children and adds only the missing edges" {
+  parent_blocked
+  plan_with_blocked_by '[]' '[0]' '[]'
+  FAIL_EDGE=902 split
+  [ "$status" -eq 5 ]
+  local edges_before
+  edges_before="$(grep -c '^edge ' "$GH_LOG")"
+  split
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | jq -e '[.filed[] | [.issue, .reused]] == [[901,true],[902,true],[903,true]]' >/dev/null
+  # no child filed twice
+  run grep -c '^create ' "$GH_LOG"
+  [ "$output" = 3 ]
+  # the second run wrote exactly the edge the first could not
+  [ "$(grep -c '^edge ' "$GH_LOG")" -eq $(( edges_before + 1 )) ]
+  [ "$(tail -n +1 "$GH_LOG" | grep '^edge ' | tail -1)" = "edge #902 blockedBy 901" ]
+}
+
+@test "a sibling cycle is refused before any write (exit 1, nothing filed)" {
+  plan_with_blocked_by '[2]' '[0]' '[1]'
+  split
+  [ "$status" -eq 1 ]
+  printf '%s' "$output" | jq -e '.filed == [] and .edges == []
+    and .error == "blocked_by forms a cycle among the children at indexes 0, 1, 2"' >/dev/null
+  [ ! -s "$GH_LOG" ]
+  plan_with_blocked_by '[0]' '[]' '[]'
+  split
+  [ "$status" -eq 1 ]
+  printf '%s' "$output" | jq -e '.error | test("cycle among the children at indexes 0$")' >/dev/null
+  [ ! -s "$GH_LOG" ]
+}
+
+@test "a blocked_by index outside the plan is refused before any write (exit 1)" {
+  plan_with_blocked_by '[]' '[3]' '[-1]'
+  split
+  [ "$status" -eq 1 ]
+  printf '%s' "$output" | jq -e '.filed == [] and (.error | test("index outside the plan: -1, 3"))' >/dev/null
+  [ ! -s "$GH_LOG" ]
+}
+
+@test "a malformed blocked_by is a runtime error before any write" {
+  plan_with_blocked_by '[]' '"#1"' '[]'
+  split
+  [ "$status" -eq 3 ]
+  contains "$stderr" "blocked_by must be an array"
+  plan_with_blocked_by '[]' '["953"]' '[]'
+  split
+  [ "$status" -eq 3 ]
+  contains "$stderr" "sibling index or #N"
+  plan_with_blocked_by '[]' '[0.5]' '[]'
+  split
+  [ "$status" -eq 3 ]
+  [ ! -s "$GH_LOG" ]
 }
 
 @test "a malformed plan is a runtime error before any write" {

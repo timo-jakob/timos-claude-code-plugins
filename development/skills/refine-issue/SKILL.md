@@ -257,7 +257,8 @@ this is the guided pass that clears them.
    `conversation`, its `auto_accepted` answers (each `{question, answer,
    confidence, weakest}`), its `proposed_prose` and `proposed_story_spec`, the
    issue's current block as `old_block` (`null` when it has none), its
-   `expected_docs_pages`, `rewrite_path` (a file holding its full rewrite),
+   `expected_docs_pages`, its `proposed_blocked_by` (#2947), `rewrite_path`
+   (a file holding its full rewrite),
    `waiting_since` and its `phase`: `pending` while its draft awaits a batch,
    and set to its outcome (`approved`, `skipped` or `drafting`) as soon as
    `partition` places it, so no child is in two batches. Its `phase` is always
@@ -317,8 +318,8 @@ this is the guided pass that clears them.
    `acceptance_criteria` and `scope_boundaries.in`/`out` diffed against the
    current block), the test cases and the ids Step 2.5 will create, edit or
    close, the side effects, the **Answers taken automatically**, the expected
-   docs pages and the path of the full rewrite. It names no `blockedBy` edge,
-   because refine-issue creates none. Exit 1 is a malformed state file: fix it
+   docs pages, the `blockedBy` edges Step 3 will add (#2947) and the path of
+   the full rewrite. Exit 1 is a malformed state file: fix it
    with `jq` and re-run. Exit 2 is your own malformed call: fix it and re-run.
    Show it, then ask once (`AskUserQuestion`): **Approve all**, or name the
    children to **revisit** (with their reply), to **skip**, or whose
@@ -419,7 +420,8 @@ has a fixed unattended answer:**
   `deferred`, never split;
 - Step 5's failed label removal — report it.
 
-Step 2.5 has no prompt: on `accept` it runs as written, before Step 3. **An exit
+Step 2.5 has no prompt: on `accept` it runs as written, before Step 3. Step 3's
+native `blockedBy` edges (#2947) are added as written, with no prompt. **An exit
 2** from `follow-up-auto-refine.zsh` or `follow-up-origin.zsh` is your own
 malformed input: fix it and re-run once. A second exit 2 stops the mode for
 that follow-up: report it and write nothing, so the label stays. An exit 2 from
@@ -542,7 +544,8 @@ auto-accept threshold included.
 7. **No approval prompt.** On convergence the size check runs as Step 2 says.
    A draft it does not stop is written back at once: the human's relayed answers,
    the auto-accepted answers and the Decisions taken stand in for the
-   approval. Add the Decisions taken section, then run Steps 2.5 and 3, with
+   approval, the `proposed_blocked_by` edges Step 3 adds (#2947) included. Add
+   the Decisions taken section, then run Steps 2.5 and 3, with
    `provenance.generated_by` set to `issue-refiner via
    /development:resolve-issue`. Then Steps 4 to 6; a still-rejected re-gate
    loops back to Step 2 within the same cap. The all-auto check does not run:
@@ -819,7 +822,9 @@ Then relay its returned JSON to the human in readable form:
 - **`questions`** — split them first (below), then surface the **ask** ones and
   **collect the human's answers**;
 - **`recommendations`** — the concrete rewrites it suggests;
-- **`proposed_prose`** / **`proposed_story_spec`** — the draft, when it has one.
+- **`proposed_prose`** / **`proposed_story_spec`** — the draft, when it has one;
+- **`proposed_blocked_by`** (#2947) — the prerequisites Step 3 will add as
+  native `blockedBy` edges, shown with the draft and approved with it.
 
 **Split the questions against the threshold, every round.** Write the agent's
 returned JSON to a file and run it through the script. Keep this run's turn and
@@ -1000,12 +1005,13 @@ It applies the size pre-flight's own thresholds; this skill restates none.
   triggers and counts, and run another refiner turn with the stop as an
   objection: *the draft's declared inventory stops the size check
   (`<triggers>`, `<counts>`); propose a split into child stories, each a bounded
-  story with a title, a body and its own declared inventory*. Write the
+  story with a title, a body, its own declared inventory and its
+  prerequisites*. Write the
   refiner's `proposed_split` into a plan file as `children`, adding nothing of
   your own:
 
   ```json
-  { "children": [ { "title": "…", "body": "…", "files": ["…"] }, … ] }
+  { "children": [ { "title": "…", "body": "…", "files": ["…"], "blocked_by": [0, "#52"] }, … ] }
   ```
 
   A `null` `proposed_split`, or a child with an empty `files`, is never filled
@@ -1029,9 +1035,10 @@ It applies the size pre-flight's own thresholds; this skill restates none.
 ```
 
 It size-checks every child before any write, files each one as a native
-sub-issue of `<N>` labelled `needs-refinement`, replaces `<N>`'s
-`needs-refinement` with `epic`, and posts a trail comment listing the children.
-Branch on its exit:
+sub-issue of `<N>` labelled `needs-refinement`, declares each child's
+prerequisites as native `blockedBy` edges (ARCHITECTURE.md, *Issue-dependency
+model*, #2947), replaces `<N>`'s `needs-refinement` with `epic`, and posts a
+trail comment listing the children and their edges. Branch on its exit:
 
 - **0** — filed. The original is now an epic, so **skip Steps 2.5–6**: nothing is
   written back to it. Set `STATE_OUTCOME="parked"`, `PARK_TYPE="split-recommended"`
@@ -1043,16 +1050,21 @@ Branch on its exit:
   (In an epic walk that ends **this child**, not the walk: note it in the epic
   summary as split into its filed children, and walk them after the rest of
   this pass, as children of their new epic `<N>`.)
-- **1** — a child's inventory still stops; **nothing was written**. Relay which
-  child and its triggers, and run another round to revise the split; the
-  revised split is filed the same way.
+- **1** — a child's inventory still stops, or the split's `blocked_by` forms a
+  cycle among the children or names an index outside the plan (the report's
+  `error`); **nothing was written**. Relay which child and its triggers, or the
+  `error`, and run another round to revise the split; the revised split is
+  filed the same way.
 - **2** — your own malformed call: fix it and re-run once.
 - **3** — nothing was written. Relay its stderr and offer the parked exit.
-- **5** — partial. Relay its report verbatim: the children it filed, and what
-  failed. The original's labels were left untouched. Never re-run it — a re-run
-  files the children a second time. Record the run as for exit 0, with
-  `children_filed` the length of the report's `filed` list, and tell the human
-  what is left to finish by hand.
+- **5** — partial. Relay its report verbatim: the children it filed, the
+  edges, and what failed. The original's labels were left untouched. When
+  every `filed` entry is `linked: true` — an edge that could not be added, say
+  — re-run it once with the same plan: it reuses the filed children and adds
+  only the missing edges. Never re-run it when a `filed` entry is
+  `linked: false`: that child would be filed a second time. Record the run as
+  for exit 0, with `children_filed` the length of the last report's `filed`
+  list, and tell the human what is left to finish by hand.
 
 ### Step 2 — the all-auto check (#2938)
 
@@ -1334,6 +1346,27 @@ spun out to:
 
 Confirm the block is valid JSON (`jq -e` the fenced object) before writing.
 
+**Then declare the prerequisites natively (#2947).** Refinement leaves every
+prerequisite as a native `blockedBy` edge, never as prose alone
+(ARCHITECTURE.md, *Issue-dependency model*). Right after the edit, write the
+approved turn's `proposed_blocked_by` to a temporary file outside the
+repository (`[]` when the turn has none) and run:
+
+```bash
+"<skill-base-dir>/scripts/add-blocked-by-edges.zsh" --repo "$REPO" --issue <N> --refs <refs.json>
+```
+
+Keep its report for Step 6. Exit 0 — every edge added or already present.
+Exit 4 — an edge was refused (a self-reference, a cycle, or one the cycle
+check could not prove safe), and exit 5 — an edge could not be resolved or
+written: relay each such edge's `detail` in one line, go on to Step 4, and
+let the re-gate judge the story (a refused prerequisite stays a check-3
+objection, and Step 5's loop-back takes it). Exit 2 is your own malformed
+call: fix it and re-run once. Exit 3 wrote nothing: relay its stderr and go
+on to Step 4. Every mode runs this step the same way, without a prompt:
+the approval of the rewrite, the unattended follow-up mode's `accept` or a
+chained refinement's write-back covers it.
+
 ## Step 4 — re-gate
 
 **First, after Step 3's edit, save the issue's key to a file (#2956).** It is
@@ -1465,7 +1498,9 @@ re-states the child's literals from that file.
 Post one durable comment recording **what changed and why**, so the issue is a
 self-contained record: the objections you started from, a short before/after of
 the prose (or a note that the full diff is in the edit history), the re-gate
-verdict, and the resulting label state. When Step 2 auto-accepted any answers,
+verdict, the `blockedBy` edges Step 3 added (each `added` or `present` ref of
+its report, and any it refused or failed, with the `detail`), and the
+resulting label state. When Step 2 auto-accepted any answers,
 the comment also lists its `intent` and `gap` answers under **Answers taken
 automatically**, each with its confidence and the threshold; its
 `implementation` answers are in the body's **Decisions taken** section. A later reader can then tell which parts of the
@@ -1700,13 +1735,16 @@ fi
   `scripts/story-spec-prose-hash.zsh` — never hand-roll it, or the gate's
   staleness check will disagree with what you wrote.
 - **No `dependencies` in the block** — dependencies are GitHub-native `blockedBy`
-  (#583), never in `story-spec`.
+  (#583), never in `story-spec`. Refinement and splitting declare every
+  prerequisite natively (ARCHITECTURE.md, *Issue-dependency model*, #2947):
+  Step 3's `scripts/add-blocked-by-edges.zsh` and `file-split-children.zsh`,
+  never raw `gh api` calls.
 - **Size every draft; never write back one that stops (#2589).** Step 2 runs
   `scripts/size-check.zsh` on the draft's declared inventory before approval. A
   stop becomes a proposed split. A split that names its children is filed
   without asking, in every run, chained or direct (#2939), and only by
   `scripts/file-split-children.zsh` — never with raw `gh issue create` calls,
-  and never re-run after a partial result. A split that names no children is
+  and never re-run after a partial result that left a child unattached. A split that names no children is
   never filed: a direct run asks to revise or park, and a chained run stops.
 - **A chained refinement asks no one (#2939).** It returns one
   `scripts/chain-result.zsh` outcome document — `ready`, `split`,

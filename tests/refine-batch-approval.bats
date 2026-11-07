@@ -129,7 +129,7 @@ fresh() {
   contains "$output" '`needs-refinement` is cleared if the re-gate is READY'
 }
 
-@test "the summary names no blockedBy edge, and marks a child with no block as a new block" {
+@test "the summary marks a child with no block as a new block, in number order" {
   pending 12; fresh 9
   run -0 zsh "$S" summary --dir "$D"
   local sum="$output"
@@ -137,7 +137,18 @@ fresh() {
   contains "$sum" '  - new block'
   # number order: #9 before #12
   [ "$(grep -n '^### #9$' <<< "$sum" | cut -d: -f1)" -lt "$(grep -n '^### #12$' <<< "$sum" | cut -d: -f1)" ]
-  run -1 grep -qi 'blockedBy' <<< "$sum"
+}
+
+@test "the summary names the blockedBy edges the write-back adds, none when absent (#2947)" {
+  pending 12; fresh 9
+  jq '.proposed_blocked_by = ["#953", "o/r#52"]' "$D/12.json" > "$D/x" && mv "$D/x" "$D/12.json"
+  run -0 zsh "$S" summary --dir "$D"
+  contains "$output" '**Blocked-by edges added after the write-back:** #953, o/r#52'
+  contains "$output" '**Blocked-by edges added after the write-back:** none'
+  # a proposed_blocked_by that is not an array is a malformed pending state
+  jq '.proposed_blocked_by = "#953"' "$D/12.json" > "$D/x" && mv "$D/x" "$D/12.json"
+  run -1 zsh "$S" summary --dir "$D"
+  contains "$output" 'malformed pending state file'
 }
 
 @test "a summary with no pending child prints nothing" {

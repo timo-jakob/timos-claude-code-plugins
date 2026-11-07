@@ -1,0 +1,32 @@
+{
+  "issue": 954,
+  "explanation": [
+    { "objection": "The story depends on #953 in prose only; declare #953 as a native blocked-by relationship.",
+      "why": "Nothing native records the order, so a build could start before the projection #953 adds has landed." }
+  ],
+  "questions": [],
+  "recommendations": [
+    "Declare #953 as a prerequisite: this story reads the projection #953 adds. #937 is the split's parent and is cited as context only."
+  ],
+  "proposed_prose": "## Summary\n\nRender the dashboard from the projection that #953 adds; this story starts after #953 lands. For context only, see the parent #937.\n\n## Acceptance criteria\n\n- [ ] The dashboard reads the projection #953 adds.\n",
+  "proposed_story_spec": {
+    "schema": "story-spec/v1",
+    "provenance": { "generated_by": "issue-refiner via /development:refine-issue", "generated_at": null, "prose_sha256": null },
+    "acceptance_criteria": ["The dashboard reads the projection #953 adds."],
+    "scope_boundaries": { "in": ["the dashboard"], "out": ["the projection itself (#953)"] },
+    "risk_classification": "normal",
+    "testable_checks": ["a bats case renders the dashboard from a stubbed projection"],
+    "interface_surfaces": [],
+    "use_case": { "actor": "maintainer", "goal": "see the projection on the dashboard", "data_sketch": "projection row for platform-infra#937" },
+    "personas": [],
+    "test_cases": [],
+    "persona_derivations": []
+  },
+  "resolved_objections": [
+    { "objection": "The story depends on #953 in prose only; declare #953 as a native blocked-by relationship.",
+      "resolved": true, "note": "proposed_blocked_by carries #953; the write-back adds the edge" }
+  ],
+  "expected_docs_pages": [],
+  "proposed_blocked_by": ["#953"],
+  "proposed_split": null
+}

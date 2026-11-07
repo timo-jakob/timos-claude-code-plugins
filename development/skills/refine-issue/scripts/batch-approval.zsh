@@ -15,6 +15,9 @@
 #   auto_accepted        array of {question, answer, confidence, weakest}
 #   expected_docs_pages  array of strings
 #   rewrite_path         string — where the child's full rewrite is kept
+#   proposed_blocked_by  optional array of issue references (#2947) — the
+#                        prerequisites Step 3 adds as native blockedBy edges;
+#                        absent reads as none
 # Every other field of the state file (the Step 7 run variables, the
 # conversation, waiting_since, …) belongs to the conductor and is not read.
 #
@@ -27,8 +30,8 @@
 #           added and removed against old_block, or "new block"), its test
 #           cases (the count and the ids Step 2.5 will create, edit or close),
 #           its side effects, its Answers taken automatically, its expected
-#           docs pages and the path of its full rewrite. It names no blockedBy
-#           edge: refine-issue creates none.
+#           docs pages, the blockedBy edges the write-back adds (#2947) and
+#           the path of its full rewrite.
 # partition prints {"approve": [..], "revisit": [..], "skip": [..]}: every
 #           pending child is in exactly one list; the ones not named go to
 #           approve. A repeated --revisit or --skip adds to its list, never
@@ -90,6 +93,7 @@ for f in "${files[@]}"; do
     and (.auto_accepted | type == "array")
     and (.expected_docs_pages | type == "array")
     and (.rewrite_path | type == "string")
+    and ((.proposed_blocked_by // []) | type == "array")
   ' "$f" >/dev/null 2>&1 || {
     print -r -u2 -- "batch-approval: malformed pending state file (needs proposed_story_spec, old_block, auto_accepted, expected_docs_pages, rewrite_path): $f"; exit 1 }
   n="$(( 10#${${f:t}%.json} ))"
@@ -129,6 +133,7 @@ if [[ "$mode" == summary ]]; then
       ( if (.auto_accepted | length) == 0 then "  - none"
         else .auto_accepted[] | "  - \(.question | line) → \(.answer | line) (confidence \(.confidence // "?"), weakest: \((.weakest // []) | if type == "array" then join(", ") else tostring end))"
         end ),
+      "- **Blocked-by edges added after the write-back:** \(if ((.proposed_blocked_by // []) | length) == 0 then "none" else (.proposed_blocked_by | map(tostring) | join(", ")) end)",
       "- **Expected docs pages:** \(if (.expected_docs_pages | length) == 0 then "none" else (.expected_docs_pages | join(", ")) end)",
       "- **Full rewrite:** \(.rewrite_path)",
       ""
