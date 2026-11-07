@@ -2873,3 +2873,53 @@ detect_langs() {
   env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git add -f member/package.json
   [ "$(detect_langs)" = '["javascript"]' ]
 }
+
+@test "detect-stack #3029: an ignored member whose path starts with - is still dropped" {
+  mkdir -p -- -member
+  printf '{}\n' > -member/package.json
+  printf '/-member/\n' > .gitignore
+  [ "$(detect_langs)" = '[]' ]
+}
+
+@test "detect-stack #3029: a cwd its enclosing repository ignores is scanned as outside a work tree" {
+  ignored_member_fixture
+  cd member
+  [ "$(detect_langs)" = '["javascript"]' ]
+}
+
+# ---- #3037 / #3038: is_react and language_meta share detect_lang's ignore rule --
+
+detect_field() {
+  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE bash "$DETECT" 2>/dev/null | jq -c "$1"
+}
+
+@test "detect-stack #3037: react only in a git-ignored member -> is_react false" {
+  jq -n '{name: "root", dependencies: {lodash: "4.0.0"}}' > package.json
+  mkdir -p member
+  jq -n '{name: "m", dependencies: {react: "19.0.0"}}' > member/package.json
+  printf 'member/\n' > .gitignore
+  [ "$(detect_field .is_react)" = 'false' ]
+}
+
+@test "detect-stack #3037: react in an untracked member that is NOT ignored -> is_react true" {
+  jq -n '{name: "root", dependencies: {lodash: "4.0.0"}}' > package.json
+  mkdir -p member
+  jq -n '{name: "m", dependencies: {react: "19.0.0"}}' > member/package.json
+  printf 'other/\n' > .gitignore
+  [ "$(detect_field .is_react)" = 'true' ]
+}
+
+@test "detect-stack #3038: java language_meta ignores a git-ignored member's build file" {
+  printf 'plugins { java }\n' > build.gradle.kts
+  mkdir -p member
+  printf 'java { toolchain { languageVersion = JavaLanguageVersion.of(17) } }\n' > member/build.gradle.kts
+  printf 'member/\n' > .gitignore
+  [ "$(detect_field '.language_meta.java.version_source')" = '"default"' ]
+}
+
+@test "detect-stack #3038: swift language_meta ignores a git-ignored member's Xcode project" {
+  printf '// swift-tools-version:6.0\n' > Package.swift
+  mkdir -p member/App.xcodeproj
+  printf 'member/\n' > .gitignore
+  [ "$(detect_field '.language_meta.swift.build_system')" = '"swiftpm"' ]
+}

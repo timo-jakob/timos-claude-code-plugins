@@ -437,10 +437,32 @@ fi
 # counts, and so does any hit check-ignore cannot judge (exit 128). A directory
 # that is not a git work tree, or a host with no git, is scanned exactly as
 # before. detect_lang's prune set is untouched: the topic-marker suites derive it.
-lang_in_work_tree="false"
-if [[ "$(git -C "$cwd" rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
-	lang_in_work_tree="true"
+# is_ignored is the one copy of that test: detect_lang, the is_react search and
+# the language_meta scans all call it (#3037, #3038), so language_meta and
+# is_react never read a manifest `languages` skipped. A $cwd that an enclosing
+# repository itself ignores is scanned as if outside a work tree, since that
+# repository's ignore rules say nothing about the project being detected.
+in_work_tree="false"
+if [[ "$(git -C "$cwd" rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]] &&
+	! git -C "$cwd" check-ignore -q -- . 2>/dev/null; then
+	in_work_tree="true"
 fi
+
+# is_ignored PATH — true only when git reports PATH (absolute under $cwd, or
+# relative to it) as ignored. Relative to $cwd, so a symlinked prefix (macOS
+# /tmp -> /private/tmp) can never read as a path outside the repository.
+is_ignored() {
+	[[ "$in_work_tree" == "true" ]] && git -C "$cwd" check-ignore -q -- "${1#"$cwd"/}" 2>/dev/null
+}
+
+# drop_ignored — the newline-separated path list on stdin, less every path
+# is_ignored reports.
+drop_ignored() {
+	local p
+	while IFS= read -r p; do
+		if [[ -n "$p" ]] && ! is_ignored "$p"; then printf '%s\n' "$p"; fi
+	done
+}
 
 detect_lang() {
 	local lang="$1"
@@ -450,12 +472,7 @@ detect_lang() {
 	local hit
 	for marker in "$@"; do
 		while IFS= read -r -d '' hit; do
-			# Relative to $cwd, so a symlinked prefix (macOS /tmp -> /private/tmp)
-			# can never read as a path outside the repository.
-			if [[ "$lang_in_work_tree" == "true" ]] &&
-				git -C "$cwd" check-ignore -q -- "${hit#"$cwd"/}" 2>/dev/null; then
-				continue
-			fi
+			is_ignored "$hit" && continue
 			printf '%s\n' "$lang"
 			return
 		done < <(find "$cwd" -mindepth 1 ${mfe_prune[@]+"${mfe_prune[@]}"} \
@@ -622,23 +639,26 @@ if [[ "$java_in_langs" == "true" ]]; then
 	# DSL / JaCoCo from the REAL build, never a template file (which would be
 	# reported as version_source="parsed" and break the #258 reliability
 	# contract). `-mindepth 1` guards a repo dir literally named `templates`.
+	# Every scan here and in the Swift block drops what is_ignored reports, so a
+	# git-ignored member checkout never feeds language_meta (#3038).
 	gradle_files="$(find "$cwd" -mindepth 1 \
 		-path '*/.git' -prune -o \
 		-path '*/.gradle' -prune -o \
 		-path '*/build' -prune -o \
 		-path '*/templates' -prune -o \
-		\( -name 'build.gradle' -o -name 'build.gradle.kts' \) -print 2>/dev/null)"
+		\( -name 'build.gradle' -o -name 'build.gradle.kts' \) -print 2>/dev/null | drop_ignored)"
 	pom_files="$(find "$cwd" -mindepth 1 \
 		-path '*/.git' -prune -o \
 		-path '*/target' -prune -o \
 		-path '*/templates' -prune -o \
-		-name 'pom.xml' -print 2>/dev/null)"
+		-name 'pom.xml' -print 2>/dev/null | drop_ignored)"
 
 	# Build system: Gradle wins when both are present.
 	gradle_settings="$(find "$cwd" -mindepth 1 \
 		-path '*/.git' -prune -o \
 		-path '*/templates' -prune -o \
-		\( -name 'settings.gradle' -o -name 'settings.gradle.kts' \) -print -quit 2>/dev/null)"
+		\( -name 'settings.gradle' -o -name 'settings.gradle.kts' \) -print 2>/dev/null | drop_ignored)"
+	gradle_settings="${gradle_settings%%$'\n'*}"
 	if [[ -n "$gradle_files" || -n "$gradle_settings" ]]; then
 		java_build_system="gradle"
 	elif [[ -n "$pom_files" ]]; then
@@ -733,12 +753,14 @@ if [[ "$swift_in_langs" == "true" ]]; then
 		-path '*/.git' -prune -o \
 		-path '*/.build' -prune -o \
 		-path '*/templates' -prune -o \
-		\( -name '*.xcodeproj' -o -name '*.xcworkspace' \) -print -quit 2>/dev/null)"
+		\( -name '*.xcodeproj' -o -name '*.xcworkspace' \) -print 2>/dev/null | drop_ignored)"
+	xcode_proj="${xcode_proj%%$'\n'*}"
 	package_swift="$(find "$cwd" -mindepth 1 \
 		-path '*/.git' -prune -o \
 		-path '*/.build' -prune -o \
 		-path '*/templates' -prune -o \
-		-name 'Package.swift' -print -quit 2>/dev/null)"
+		-name 'Package.swift' -print 2>/dev/null | drop_ignored)"
+	package_swift="${package_swift%%$'\n'*}"
 	if [[ -n "$xcode_proj" ]]; then
 		swift_build_system="xcode"
 	elif [[ -n "$package_swift" ]]; then
@@ -760,7 +782,8 @@ if [[ "$swift_in_langs" == "true" ]]; then
 		pbxproj="$(find "$cwd" -mindepth 1 \
 			-path '*/.git' -prune -o \
 			-path '*/templates' -prune -o \
-			-name 'project.pbxproj' -print -quit 2>/dev/null)"
+			-name 'project.pbxproj' -print 2>/dev/null | drop_ignored)"
+		pbxproj="${pbxproj%%$'\n'*}"
 		if [[ -n "$pbxproj" ]]; then
 			swift_version="$(grep -oE 'SWIFT_VERSION = [0-9]+(\.[0-9]+)?' "$pbxproj" 2>/dev/null |
 				grep -oE '[0-9]+(\.[0-9]+)?' | head -n1 || true)"
@@ -783,11 +806,11 @@ if [[ "$swift_in_langs" == "true" ]]; then
 		has_swift_cov="true"
 	elif [[ -d "$cwd/Tests" ]]; then
 		has_swift_cov="true"
-	elif find "$cwd" -mindepth 1 \
+	elif [[ -n "$(find "$cwd" -mindepth 1 \
 		-path '*/.git' -prune -o \
 		-path '*/.build' -prune -o \
 		-path '*/templates' -prune -o \
-		\( -name '*Tests.swift' -o -name '*Test.swift' \) -print -quit 2>/dev/null | grep -q .; then
+		\( -name '*Tests.swift' -o -name '*Test.swift' \) -print 2>/dev/null | drop_ignored)" ]]; then
 		has_swift_cov="true"
 	fi
 fi
@@ -1754,6 +1777,18 @@ if test -f "$cwd/.claude-workspace.yaml"; then is_composition="true"; fi
 # walks answering from hits elsewhere) reads as `false`, not `null`. A manifest
 # jq cannot parse is a non-match, as in the recipe: `-exec`'s status is the
 # predicate, never find's exit status.
+#
+# A manifest is_ignored reports never counts either (#3037), the rule
+# detect_lang applies. The search stays the recipe's, with `-print0` after its
+# `-exec`, so each match arrives as jq's output, a newline, then its path and a
+# NUL; keep_unignored_react prints the output of every match whose path is not
+# ignored.
+keep_unignored_react() {
+	local rec
+	while IFS= read -r -d '' rec; do
+		if ! is_ignored "${rec##*$'\n'}"; then printf '%s\n' "${rec%$'\n'*}"; fi
+	done
+}
 # is-react-marker:begin
 is_react="false"
 react_hits=""
@@ -1769,7 +1804,7 @@ if command -v jq >/dev/null 2>&1; then
 			-path '*/dist' -prune -o \
 			-path '*/templates' -prune -o \
 			-name package.json ! -type d \
-			-exec jq -er '.dependencies.react // empty' {} \; 2>/dev/null
+			-exec jq -er '.dependencies.react // empty' {} \; -print0 2>/dev/null | keep_unignored_react
 	)" && react_find_rc=0 || react_find_rc=$?
 elif [[ " ${langs[*]-} " == *" javascript "* ]]; then
 	# no jq to evaluate the manifests with: could not evaluate. Silent on stderr,
