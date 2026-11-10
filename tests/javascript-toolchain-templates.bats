@@ -5,7 +5,7 @@
 # (they carry no {{PLACEHOLDER}}s), so the guarantee here is that the *source*
 # set is the blessed one: flat ESLint config (not the legacy .eslintrc), a
 # Prettier config at the repo-wide width 120, vitest+v8 coverage, strict TS,
-# and Node 24 pinned. One default per decision — see the maintenance SKILL.
+# and Node 26 pinned. One default per decision — see the maintenance SKILL.
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -41,6 +41,6 @@ setup() {
   [ "$(jq -r .compilerOptions.strict "$JS/tsconfig.json")" = "true" ]
 }
 
-@test "js-toolchain: Node is pinned to the 24 LTS line" {
-  [ "$(tr -d '[:space:]' < "$JS/.nvmrc")" = "24" ]
+@test "js-toolchain: Node is pinned to the 26 LTS line" {
+  [ "$(tr -d '[:space:]' < "$JS/.nvmrc")" = "26" ]
 }
