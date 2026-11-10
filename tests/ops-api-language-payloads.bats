@@ -1604,7 +1604,7 @@ ts_flat() { local b; b="$(ts_func "$1")" || return 1; ts_flatten "$b"; }
   fence="$(sed -n '/^npm install @opentelemetry/,/^```$/p' "$NODE/README.md")"
   ends_with "$fence" '```'                      # proves the range closed
   # A trailing `@<range>` is stripped before comparing, so a pinned entry
-  # (`@types/node@^24`) still matches its fragment key. The leading `@` of a scope
+  # (`@types/node@^26`) still matches its fragment key. The leading `@` of a scope
   # is untouched — the pattern requires a character before the `@` it removes.
   fence_pkgs="$(printf '%s\n' "$fence" | tr ' \\' '\n\n' | grep '^@' \
     | sed -E 's/(.)@[^@]+$/\1/' | sort -u)"
@@ -1823,7 +1823,7 @@ ts_flat() { local b; b="$(ts_func "$1")" || return 1; ts_flatten "$b"; }
   contains "$block" 'included — and if the user declines, **defer the ENTIRE ops-api'
   # …and the APPROVE arm: which major, and which pins move. Without it a raise
   # of engines.node alone leaves the base image on an unsupported major.
-  contains "$block" 'it covers both payloads, targets the shipped 24, and on approval moves'
+  contains "$block" 'it covers both payloads, targets the shipped 26, and on approval moves'
   contains "$block" 'every runtime source the repo has among the four above, the base image'
   # The floor is major-granular but NOT a range, so the block must say which majors
   # fall outside it — the odd ones between the listed majors are the easy miss,
@@ -1842,8 +1842,8 @@ ts_flat() { local b; b="$(ts_func "$1")" || return 1; ts_flatten "$b"; }
   # …and the ORDER it resolves in, not just that it asks. Reverting this body to
   # the range's lower bound is the silent direction the same block names, and the
   # trigger needle alone would not see it.
-  contains "$block" 'admit; and with no source at all, the shipped 24.'
-  contains "$block" '`.nvmrc` (24) if the ranges admit it; failing that, the highest major they'
+  contains "$block" 'admit; and with no source at all, the shipped 26.'
+  contains "$block" '`.nvmrc` (26) if the ranges admit it; failing that, the highest major they'
   # "21 and below" shares a sentence with the odd-majors rule — so without its own
   # needle it can be deleted alone, leaving the old majors unclassified.
   contains "$block" '**21 and below**'

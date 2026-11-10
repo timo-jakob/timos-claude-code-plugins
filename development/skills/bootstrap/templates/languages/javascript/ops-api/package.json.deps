@@ -44,7 +44,7 @@
     "     payloads.bats asserts that coherence.",
     "",
     "@types/node's MAJOR must match the Node major your service RUNS. This file",
-    "ships 24, the scaffold's own default. Adopting into a repo that already has",
+    "ships 26, the scaffold's own default. Adopting into a repo that already has",
     "a runtime pin: lower or raise this entry to THAT pin. The README beside this",
     "file states the source precedence in full -- do not restate it here, so there",
     "is one copy to keep true.",
@@ -65,6 +65,6 @@
     "@opentelemetry/sdk-metrics": "^2.10.0"
   },
   "devDependencies": {
-    "@types/node": "^24.10.0"
+    "@types/node": "^26.6.0"
   }
 }

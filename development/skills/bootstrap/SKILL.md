@@ -3749,7 +3749,7 @@ Like the Python, Java and Go payloads these need an explicit destination:
 
   **`@types/node`.** Its MAJOR types the Node release you RUN. Read the repo's
   **pre-existing** runtime pin — never the `.nvmrc` this run may have just staged,
-  which would make the check circular and always read 24 — in this order:
+  which would make the check circular and always read 26 — in this order:
   `engines.node`, an existing `.nvmrc`, the Dockerfile's `FROM node:<major>`, the
   CI `setup-node` version. For a containerized service the base image wins a
   disagreement. **Only an EXACT major counts as a pin.** A range —
@@ -3758,8 +3758,8 @@ Like the Python, Java and Go payloads these need an explicit destination:
   that actually runs 24 ends up typed against 20. **When none of the four yields
   an exact major** — every one is a range, or there is no source at all — fall
   back in this order, and say which rule you used in the Step-5 line: the shipped
-  `.nvmrc` (24) if the ranges admit it; failing that, the highest major they
-  admit; and with no source at all, the shipped 24. Then match the types to that
+  `.nvmrc` (26) if the ranges admit it; failing that, the highest major they
+  admit; and with no source at all, the shipped 26. Then match the types to that
   runtime, in whichever direction it differs:
   - **Target major LOWER than the fragment's** (e.g. Node 22): **lower
     `@types/node` to the target's major.** That is the default because it is
@@ -3769,7 +3769,7 @@ Like the Python, Java and Go payloads these need an explicit destination:
     the floor is a different question** — there the raise is not a preference but
     the payload's precondition, so the floor rule below governs it, decline arm
     included. Either way, never merge a `@types/node` major above the runtime.
-  - **Target major HIGHER** (e.g. Node 26): **raise `@types/node` to match it**,
+  - **Target major HIGHER** (e.g. a Node major newer than the shipped 26): **raise `@types/node` to match it**,
     so `tsc` does not reject APIs the service legitimately uses.
 
   Types ahead of the runtime is the silent direction — `tsc` accepts APIs that
@@ -3792,7 +3792,7 @@ Like the Python, Java and Go payloads these need an explicit destination:
   the check is made here rather than left to `npm install`, which would not stop.
 
   Outside the floor, surface **one** Node-pin raise as its own Step-2 plan line —
-  it covers both payloads, targets the shipped 24, and on approval moves
+  it covers both payloads, targets the shipped 26, and on approval moves
   every runtime source the repo has among the four above, the base image
   included — and if the user declines, **defer the ENTIRE ops-api
   payload** behind a Step-5 TODO, which defers the resilience payload with it

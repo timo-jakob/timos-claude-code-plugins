@@ -33,7 +33,7 @@ npm install @opentelemetry/api@^1 \
             @opentelemetry/exporter-prometheus \
             @opentelemetry/exporter-metrics-otlp-grpc \
             @opentelemetry/exporter-metrics-otlp-proto
-npm install --save-dev @types/node@^24
+npm install --save-dev @types/node@^26
 ```
 
 The three `exporter-*` packages are deliberately left unversioned **in one
@@ -51,17 +51,17 @@ diverges from what CI installs while appearing to work locally.
 
 Two more things a bare `npm install` would get wrong, both silently:
 
-- **`@types/node@^24`, pinned to your Node major.** Its major types the Node
+- **`@types/node@^26`, pinned to your Node major.** Its major types the Node
   release you *run*; unpinned, npm resolves the newest, and types ahead of the
   runtime make `tsc` accept APIs that are absent at run time — a failure that
-  lands in production rather than in your build. `^24` is what this scaffold
+  lands in production rather than in your build. `^26` is what this scaffold
   ships; **change it to the Node major you actually run** — read it from
   `engines.node`, an existing `.nvmrc`, the Dockerfile's `FROM node:<major>`, then
   the CI `setup-node` version, in that order, with the base image winning a
   disagreement for a containerized service. Only an **exact** major counts: a
   range like `">=20"` is a floor, not the runtime, so fall through to the next
-  source. If none of the four yields an exact major, keep `^24` when your ranges
-  admit 24, and otherwise pin to the highest major they do admit — never to a
+  source. If none of the four yields an exact major, keep `^26` when your ranges
+  admit 26, and otherwise pin to the highest major they do admit — never to a
   range's lower bound, which is how a service that actually runs 22 ends up typed
   against 20.
 - **The three `@opentelemetry/exporter-*` packages are one release train** and

@@ -228,7 +228,7 @@ orchestrator spawns in Phase 8.
   JavaScript a *maintained* language rather than a merely *bootstrappable* one —
   no orchestrator edit was needed to wire this plugin in (the #249
   contract-driven dispatch).
-- **npm + Node 24 LTS, ESLint flat config, Prettier @120, vitest + v8** is the
+- **npm + Node 26 LTS, ESLint flat config, Prettier @120, vitest + v8** is the
   blessed toolchain, rendered by `/development:bootstrap` from
   `templates/languages/javascript/`. One default per decision.
 - **Coverage** is withheld, not guessed, until a later slice ships the vitest/v8
