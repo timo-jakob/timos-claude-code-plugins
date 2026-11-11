@@ -302,6 +302,14 @@ SH
   [ "$(jq -r .result <<<"$output")" = closed-unmerged ]
 }
 
+@test "#3078: a PR already closed without merging on the first read is closed-unmerged, never already-merged" {
+  pr_stub CLOSED
+  run --separate-stderr zsh "$BW" pr --repo Acme/Widget --pr 41 --timeout-s 600 --interval-s 60
+  [ "$status" -eq 4 ]
+  [ "$(jq -r .result <<<"$output")" = closed-unmerged ]
+  [ "$(jq -r .reads <<<"$output")" = 1 ]
+}
+
 @test "#3078 AC3: close-out of the last paused entry marks it done and clears the queue, asking nothing" {
   q add --entry 10 --kind named --pr 41 >/dev/null
   run --separate-stderr q report --stopped 10 --reason 'PR #41 awaits a merge' --pause

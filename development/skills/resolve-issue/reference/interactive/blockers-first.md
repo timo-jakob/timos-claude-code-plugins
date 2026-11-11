@@ -94,10 +94,12 @@ named issue, whatever the target.
    and advances it. In both cases, wait for the PR as §6's approve-and-advance
    arm waits: `await-pr-checks.zsh <pr>`, then at most 30 re-reads of
    `gh pr view <pr> --json state,autoMergeRequest`, one a minute, until it
-   reads `MERGED`. Anywhere else, first take the chain queue's approval wait
-   (`reference/checkpoint.md`, the chain queue's step 3): a `merged` result
-   clears the blocker. When either wait ends unmerged, stop the run (step 6)
-   with the reason that blocker PR #P is ready and awaits a human merge.
+   reads `MERGED`. A PR still unmerged then with green checks, and a blocker
+   PR anywhere else, takes the chain queue's approval wait
+   (`reference/checkpoint.md`, the chain queue's step 3), and only the wait: a
+   `merged` result clears the blocker. When it ends unmerged, stop the run
+   (step 6), never with `--pause`, with the reason that blocker PR #P is ready
+   and awaits a human merge.
    Re-running `/development:resolve-issue` on the named issue resumes the
    chain: its precheck no longer lists the merged blockers.
 5. **Re-verify, then build the target.** Once every blocker from step 3 is

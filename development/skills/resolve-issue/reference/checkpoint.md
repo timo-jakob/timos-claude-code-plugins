@@ -195,8 +195,10 @@ file; never re-add an entry under another kind.
    open is a park (step 5). Take `next` once the entry is `done`.
 
    **Where the PR cannot advance by itself, wait for it before pausing
-   (#3078).** A `REVIEW_REQUIRED` PR on a repo with no Approver is the usual
-   case. The root watches it for 60 minutes, a fixed bound with no option, as
+   (#3078).** It cannot when its checks are green and it has not merged: a
+   `REVIEW_REQUIRED` PR on a repo with no Approver, or one still unmerged after
+   blockers first's step 4's thirty re-reads in an Approver or override repo.
+   The root watches it for 60 minutes, a fixed bound with no option, as
    two bounded `Monitor` calls of `timeout_ms` `1800000` each. The command of
    each is `"<skill-base-dir>/scripts/bounded-wait.zsh" pr --repo <owner/name>
    --pr <P>`, which reads `gh pr view <P> --json state` once a minute and prints
@@ -213,6 +215,11 @@ file; never re-add an entry under another kind.
    - `closed-unmerged`, `unreadable`, a script exit 1 or 2, or a `Monitor` call
      that expires with no line → stop (step 5), without `--pause`, naming the
      result.
+
+   A blocker entry, before the named issue's precheck returns `PROCEED`, takes
+   only the wait: `merged` or `already-merged` marks it `done` and blockers
+   first's step 3 or 5 goes on, and any other ending is blockers first's step 6,
+   never `--pause`.
 4. **Done.** `next`'s exit 4 means every queued issue is closed and the queue is
    empty. The run is done: `chain-queue.zsh clear` deletes the queue file.
 5. **Stop at the first permanent failure.** The run stops at an escalation, CI
@@ -237,12 +244,14 @@ file; never re-add an entry under another kind.
    Every record keeps its own run's outcome, and no telemetry
    outcome or field is added. The queue file is kept.
 7. **Resume from the queue.** A re-run on the named issue that finds the file
-   resumes with `next`, the entry that stopped the run. An entry with a recorded
-   PR takes step 3's approval wait, never a rebuild: a PR that merged while the
-   run was paused reads `already-merged` at once and is closed out with
-   `close-out`, so a paused last entry clears the queue and ends the run with
-   no question asked (#3078). Any other entry that is now closed is marked
-   `done`, and any other entry runs again.
+   resumes with `next`, the entry that stopped the run. An entry whose recorded
+   PR is open with green checks, or merged, takes step 3's approval wait, never
+   a rebuild: a PR that merged while the run was paused reads `already-merged`
+   at once and is closed out with `close-out`, so a paused last entry clears the
+   queue and ends the run with no question asked (#3078). A recorded PR with red
+   checks stops the run again (step 5) without `--pause`, and one closed
+   unmerged makes its entry run again. Any other entry that is now closed is
+   marked `done`, and any other entry runs again.
 
 **One status line per transition.** Print one line when a refinement starts or
 ends, a split is filed, a build starts, a PR merges, a follow-up is queued, and

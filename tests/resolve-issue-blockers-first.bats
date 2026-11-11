@@ -115,8 +115,8 @@ after_span() {
   contains "$s" "In an Approver repo, armed auto-merge merges it on green."
   contains "$s" "\`plugin-approver-override.zsh\` reports \`override=on\`, the step's §6 approves and advances it"
   contains "$s" "In both cases, wait for the PR as §6's approve-and-advance arm waits: \`await-pr-checks.zsh <pr>\`, then at most 30 re-reads of \`gh pr view <pr> --json state,autoMergeRequest\`, one a minute, until it reads \`MERGED\`."
-  contains "$s" "Anywhere else, first take the chain queue's approval wait (\`reference/checkpoint.md\`, the chain queue's step 3): a \`merged\` result clears the blocker."
-  contains "$s" "When either wait ends unmerged, stop the run (step 6) with the reason that blocker PR #P is ready and awaits a human merge."
+  contains "$s" "A PR still unmerged then with green checks, and a blocker PR anywhere else, takes the chain queue's approval wait (\`reference/checkpoint.md\`, the chain queue's step 3), and only the wait: a \`merged\` result clears the blocker."
+  contains "$s" "When it ends unmerged, stop the run (step 6), never with \`--pause\`, with the reason that blocker PR #P is ready and awaits a human merge."
   contains "$s" "Re-running \`/development:resolve-issue\` on the named issue resumes the chain"
 }
 
