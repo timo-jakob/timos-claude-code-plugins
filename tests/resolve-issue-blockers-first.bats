@@ -115,7 +115,8 @@ after_span() {
   contains "$s" "In an Approver repo, armed auto-merge merges it on green."
   contains "$s" "\`plugin-approver-override.zsh\` reports \`override=on\`, the step's §6 approves and advances it"
   contains "$s" "In both cases, wait for the PR as §6's approve-and-advance arm waits: \`await-pr-checks.zsh <pr>\`, then at most 30 re-reads of \`gh pr view <pr> --json state,autoMergeRequest\`, one a minute, until it reads \`MERGED\`."
-  contains "$s" "Anywhere else, or when the wait ends unmerged, stop the run (step 6) with the reason that blocker PR #P is ready and awaits a human merge."
+  contains "$s" "Anywhere else, first take the chain queue's approval wait (\`reference/checkpoint.md\`, the chain queue's step 3): a \`merged\` result clears the blocker."
+  contains "$s" "When either wait ends unmerged, stop the run (step 6) with the reason that blocker PR #P is ready and awaits a human merge."
   contains "$s" "Re-running \`/development:resolve-issue\` on the named issue resumes the chain"
 }
 
@@ -146,11 +147,103 @@ after_span() {
   contains "$(flat < "$REPO_ROOT/docs/how-to/run-resolve-issue-unattended.md")" "a resumed run does not clear blockers by itself, as a run you start fresh does"
 }
 
-@test "AC4: a cycle, a shape (ii) rejection and an open foreign blocker stop before anything is built" {
+@test "AC4: a cycle and a shape (ii) rejection stop before anything is built" {
   s="$(bf_step 2)"
-  contains "$s" "A \`REJECT_CYCLE\`, a shape (ii) rejection, and any \`foreign_blockers\` entry with \`open: true\` stop the run (step 6) before any blocker is built."
-  contains "$s" "The open foreign blocker stops it even when open local blockers exist"
-  contains "$s" "The stop names the cycle, the cause \`comment_md\` names, or the foreign ref."
+  contains "$s" "A \`REJECT_CYCLE\` and a shape (ii) rejection stop the run (step 6) before any blocker is built. The stop names the cycle or the cause \`comment_md\` names."
+  lacks "$s" "The open foreign blocker stops it even when open local blockers exist"
+}
+
+@test "#3078 AC1: an open foreign blocker is waited on with one bounded Monitor call before the run stops" {
+  s="$(bf_step 2)"
+  contains "$s" "**An open foreign blocker is waited on first (#3078).** Take each \`foreign_blockers\` entry with \`open: true\` in turn, before any local blocker is built, because clearing the local ones cannot make the precheck pass."
+  contains "$s" "Watch it with one bounded \`Monitor\` call, the same bound as step 4's thirty one-a-minute re-reads: its command is \`\"<skill-base-dir>/scripts/bounded-wait.zsh\" issue --repo <owner/name> --issue <M>\` and its \`timeout_ms\` is \`1800000\`."
+  contains "$s" "\`closed\` or \`already-closed\` → the blocker is gone: go back to step 1 and read the decision again. The run continues on whatever that precheck returns."
+  contains "$s" "\`timeout\`, \`unreadable\`, a script exit 1 or 2, or a \`Monitor\` call that expires with no line → stop the run (step 6) as before the wait existed, naming the foreign ref."
+  contains "$s" "The state stays resumable: re-running \`/development:resolve-issue\` on the named issue starts at step 1 again."
+  contains "$s" "Wait on each foreign ref at most once in a run; a ref that is open again after its wait stops the run (step 6)."
+}
+
+@test "#3078 AC4: the blocker choice is never put to the human, and the rule says so" {
+  s="$(bf_step 2)"
+  contains "$s" "**The blocker choice is never put to the human.** The root never asks whether to build the blocker first, remove the blocked-by link or wait longer: no rule licenses that question, in either session mode. It waits, and then it continues or stops."
+}
+
+@test "#3078 AC1: both docs pages say a foreign blocker is watched before the run stops" {
+  contains "$(flat < "$REPO_ROOT/docs/explanation/workflow-resolve-issue.md")" "An open blocker in another repository is watched for up to half an hour first, and the run carries on if it closes (#3078)."
+  contains "$(flat < "$REPO_ROOT/docs/how-to/run-resolve-issue-unattended.md")" "An open blocker in another repository is watched the same way, for half an hour, before the run stops on it."
+}
+
+# bounded-wait.zsh issue against a gh stub. Each gh call takes the next line of
+# $GH_STATES (the last line repeats); FAIL makes that call exit 1.
+gh_stub() {
+  BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"
+  export GH_STATES="$BATS_TEST_TMPDIR/states" GH_CALLS="$BATS_TEST_TMPDIR/calls"
+  printf '%s\n' "$@" > "$GH_STATES"; : > "$GH_CALLS"
+  cat > "$BIN/gh" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$GH_CALLS"
+n=$(wc -l < "$GH_CALLS"); total=$(wc -l < "$GH_STATES")
+(( n > total )) && n=$total
+st=$(sed -n "${n}p" "$GH_STATES")
+[ "$st" = FAIL ] && exit 1
+printf '{"state":"%s"}\n' "$st"
+SH
+  chmod +x "$BIN/gh"
+  export PATH="$BIN:$PATH"
+  BW="$SKILL_DIR/scripts/bounded-wait.zsh"
+}
+
+@test "#3078 AC5: a foreign blocker that closes within the wait ends it closed, exit 0" {
+  gh_stub OPEN OPEN CLOSED
+  run --separate-stderr zsh "$BW" issue --repo Other/Lib --issue 7 --timeout-s 30 --interval-s 0
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .result <<<"$output")" = closed ]
+  [ "$(jq -r .ref <<<"$output")" = "Other/Lib#7" ]
+  [ "$(jq -r .reads <<<"$output")" = 3 ]
+  run grep -cx 'issue view 7 --repo Other/Lib --json state' "$GH_CALLS"
+  [ "$output" = 3 ]
+}
+
+@test "#3078 AC5: a foreign blocker still open at the bound ends timeout, exit 3" {
+  gh_stub OPEN
+  run --separate-stderr zsh "$BW" issue --repo Other/Lib --issue 7 --timeout-s 1 --interval-s 1
+  [ "$status" -eq 3 ]
+  [ "$(jq -r .result <<<"$output")" = timeout ]
+  [ "$(wc -l <<<"$output" | tr -d ' ')" = 1 ]
+}
+
+@test "#3078 AC5: a foreign blocker already closed is not waited on" {
+  gh_stub CLOSED
+  run --separate-stderr zsh "$BW" issue --repo Other/Lib --issue 7 --timeout-s 600 --interval-s 60
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .result <<<"$output")" = already-closed ]
+  [ "$(jq -r .reads <<<"$output")" = 1 ]
+  [ "$(jq -r .waited_s <<<"$output")" -lt 5 ]
+}
+
+@test "bounded-wait: failed reads are skipped; no read at all by the bound is unreadable, exit 1" {
+  gh_stub FAIL CLOSED
+  run --separate-stderr zsh "$BW" issue --repo Other/Lib --issue 7 --timeout-s 30 --interval-s 0
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .result <<<"$output")" = closed ]
+  gh_stub FAIL
+  run --separate-stderr zsh "$BW" issue --repo Other/Lib --issue 7 --timeout-s 1 --interval-s 1
+  [ "$status" -eq 1 ]
+  [ "$(jq -r .result <<<"$output")" = unreadable ]
+}
+
+@test "bounded-wait: usage errors exit 2" {
+  gh_stub OPEN
+  run --separate-stderr zsh "$BW" issue --repo Other/Lib
+  [ "$status" -eq 2 ]
+  run --separate-stderr zsh "$BW" issue --repo nope --issue 7
+  [ "$status" -eq 2 ]
+  run --separate-stderr zsh "$BW" issue --repo Other/Lib --pr 7
+  [ "$status" -eq 2 ]
+  run --separate-stderr zsh "$BW" issue --repo Other/Lib --issue 7 --timeout-s x
+  [ "$status" -eq 2 ]
+  run --separate-stderr zsh "$BW" wait --repo Other/Lib --issue 7
+  [ "$status" -eq 2 ]
 }
 
 @test "AC5: an unconfirmable epic-kind or unclassifiable blocker is a root gap question in both modes" {

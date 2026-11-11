@@ -192,9 +192,27 @@ file; never re-add an entry under another kind.
    blockers first's step 4 waits, then `done --entry <I> --pr <P>`. An
    epic-kind entry has no PR of its own: once the Epic flow closes its epic,
    `done --entry <I>` without `--pr`; an Epic flow that ends with the epic still
-   open is a park (step 5). Take `next` once the entry is `done`. Where the
-   PR cannot advance by itself, stop (step 5) with `--pause` and the reason that
-   PR #P awaits a merge: the report lists that stop as a pause, not a failure.
+   open is a park (step 5). Take `next` once the entry is `done`.
+
+   **Where the PR cannot advance by itself, wait for it before pausing
+   (#3078).** A `REVIEW_REQUIRED` PR on a repo with no Approver is the usual
+   case. The root watches it for 60 minutes, a fixed bound with no option, as
+   two bounded `Monitor` calls of `timeout_ms` `1800000` each. The command of
+   each is `"<skill-base-dir>/scripts/bounded-wait.zsh" pr --repo <owner/name>
+   --pr <P>`, which reads `gh pr view <P> --json state` once a minute and prints
+   one line when it ends. The second call runs only when the first ends
+   `timeout`. Its `result` decides:
+   - `merged` or `already-merged` → close the entry out with
+     `chain-queue.zsh close-out --entry <I> --pr <P>`, in place of `done`. It
+     prints `cleared: true` when no entry is left and has then deleted the queue
+     file: the run is done (step 4) without a question. Otherwise take the
+     `next` it prints.
+   - `timeout` after the second call → stop (step 5) with `--pause` and the
+     reason that PR #P awaits a merge: the report lists that stop as a pause,
+     not a failure.
+   - `closed-unmerged`, `unreadable`, a script exit 1 or 2, or a `Monitor` call
+     that expires with no line → stop (step 5), without `--pause`, naming the
+     result.
 4. **Done.** `next`'s exit 4 means every queued issue is closed and the queue is
    empty. The run is done: `chain-queue.zsh clear` deletes the queue file.
 5. **Stop at the first permanent failure.** The run stops at an escalation, CI
@@ -219,9 +237,12 @@ file; never re-add an entry under another kind.
    Every record keeps its own run's outcome, and no telemetry
    outcome or field is added. The queue file is kept.
 7. **Resume from the queue.** A re-run on the named issue that finds the file
-   resumes with `next`, the entry that stopped the run. An entry that is now
-   closed is marked `done`. An entry whose recorded PR is still open is waited
-   on as in step 3, never rebuilt. Any other entry runs again.
+   resumes with `next`, the entry that stopped the run. An entry with a recorded
+   PR takes step 3's approval wait, never a rebuild: a PR that merged while the
+   run was paused reads `already-merged` at once and is closed out with
+   `close-out`, so a paused last entry clears the queue and ends the run with
+   no question asked (#3078). Any other entry that is now closed is marked
+   `done`, and any other entry runs again.
 
 **One status line per transition.** Print one line when a refinement starts or
 ends, a split is filed, a build starts, a PR merges, a follow-up is queued, and

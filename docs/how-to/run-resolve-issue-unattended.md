@@ -78,9 +78,12 @@ Every follow-up the build files joins the same run: it is refined, built and
 merged in turn, and so are its own follow-ups. The run prints one status line
 per step and ends when nothing is left in its queue. The first failure stops
 the whole run with one comment on the story that begins `chain stopped:` and
-lists the merged PRs and what is still queued; a PR that waits for your merge
-is reported as a pause. Run `/development:resolve-issue` on the story again to
-resume where it stopped.
+lists the merged PRs and what is still queued. A PR that needs your approval is
+watched for an hour first, and the run carries on if it merges in that time;
+only then is the stop reported as a pause. An open blocker in another repository
+is watched the same way, for half an hour, before the run stops on it. Run
+`/development:resolve-issue` on the story again to resume where it stopped. If
+the paused PR has merged by then, the run finishes without asking anything.
 A maintenance-pipeline run still stops at those points, as it always did. Each
 issue the run works on gets its own telemetry record, whose `origin` is `human`
 or `pipeline`.
