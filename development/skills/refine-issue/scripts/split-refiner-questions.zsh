@@ -24,13 +24,15 @@
 # answer is AUTO when it has a non-blank recommended_answer, all five scores are
 # well-formed, the rationale is non-blank, and confidence >= threshold. Every
 # other entry is ASK, with a `reason`: below-threshold | no-recommendation |
-# malformed. A malformed entry is asked, never an error: the refiner's output is
-# not the caller's mistake, and failing safe means asking the human.
+# malformed | unrequested-scope. A malformed entry is asked, never an error:
+# the refiner's output is not the caller's mistake, and failing safe means
+# asking the human.
 #
 # KIND (#2900) is the question taxonomy of ARCHITECTURE.md, *Decision rights*
 # (#2899). A missing or unknown `kind` is `gap`, the contract's tie-break, and
 # a plain string is `gap` too. `intent` and `gap` entries are split exactly as
-# above. An `implementation` entry is AUTO at any threshold: its confidence is
+# above. An `implementation` entry is AUTO at any threshold, unless it is
+# marked unrequested_scope (below): its confidence is
 # the minimum of the four scores other than `uniqueness`, reported only, never
 # compared, and null when those scores are malformed. The one exception to
 # "malformed is asked, never an error": an `implementation` entry with a null
@@ -48,6 +50,14 @@
 # script exits 2 and names the entry on stderr. The check reads the raw `kind`,
 # before the tie-break, so an entry routed as gap for a missing or unknown kind
 # is exempt; it judges the path's shape only, never whether the file exists.
+#
+# UNREQUESTED_SCOPE (#3079): an entry the refiner marks
+#   "unrequested_scope": true
+# is a decision that adds or changes user-visible behaviour without answering
+# any of the readiness gate's objections. It is ASK at any threshold and of any
+# kind, with reason `unrequested-scope`: confidence never admits scope the gate
+# did not ask for. The mark fails safe: any value but `false`, `null` or an
+# absent field counts as true, so a mis-typed mark is asked rather than taken.
 #
 # Usage:  split-refiner-questions.zsh --threshold-milli <0..1000> --turn <file>
 #         (<file> holds the refiner's whole JSON turn)
@@ -165,7 +175,8 @@ jq --argjson thr "$(( 10#$thr ))" "$defs"'
          confidence: (if $s == null then null else fmt2($min) end),
          weakest: (if $s == null then [] else [$s[] | select(.h == $min) | .name] end),
          rationale: (if ($q.rationale // null) | nonblank then $q.rationale else null end)}
-      | if $k == "implementation" then . + {auto: true}
+      | if ($q.unrequested_scope // false) != false then . + {reason: "unrequested-scope", auto: false}
+        elif $k == "implementation" then . + {auto: true}
         elif .recommended_answer == null then . + {reason: "no-recommendation", auto: false}
         elif $s == null or .rationale == null then . + {reason: "malformed", auto: false}
         elif ($min * 10) >= $thr then . + {auto: true}

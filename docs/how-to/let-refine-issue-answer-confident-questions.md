@@ -83,6 +83,14 @@ section in the rewrite you approve, and it stays in the issue body. To overrule
 a decision, edit its entry and the story text that rests on it in the issue
 body.
 
+## Scope the readiness gate did not ask for is always asked
+
+A question whose answer would add or change what users see, when the readiness
+gate raised no objection that it answers, is always put to you, whatever its
+scores and whatever the threshold. The refiner marks such a question, and the
+skill never takes its answer for you, so a story cannot grow user-visible
+behaviour you did not choose.
+
 ## What you see
 
 - **During the loop:** each answer taken for you is shown as one line with its

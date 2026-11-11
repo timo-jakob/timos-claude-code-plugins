@@ -525,7 +525,12 @@ auto-accept threshold included.
    `chain-result.zsh emit --issue <N> --outcome questions-pending --split <the
    round's split> --turn <the round's turn> --resume <the resume file> --round
    <ROUNDS>`. Nothing
-   is posted to GitHub between dispatches.
+   is posted to GitHub between dispatches. **An `unrequested-scope` question
+   is relayed the same way (#3079):** a decision that adds or changes
+   user-visible behaviour and answers none of the gate's objections is never
+   auto-accepted, at any confidence. The split leaves it in `ask`, so it goes
+   back to the root as a question like any other `ask` entry; the unattended
+   follow-up mode's `decide` parks the same entry `needs-decision`.
 5. **A re-dispatch adds the answers as plain human lines.** It adds
    `now - waiting_since` to `paused_s`, then takes each handoff `answers` entry
    for this issue whose `question` is a pending entry's question text,
@@ -844,7 +849,10 @@ the Decisions-taken record* (#2899). The script decides and you do not
 second-guess it. For an `intent` or `gap` question its confidence is the lowest
 of the refiner's five criterion scores, and the answer is `auto` only when that
 is at or above the threshold. An `implementation` question is `auto` at any
-threshold (#2900). An exit 2 means the turn is not a JSON object with a
+threshold (#2900). **A question the refiner marks `unrequested_scope` is `ask`
+at any threshold and of any kind (#3079)**, reason `unrequested-scope`: it adds
+or changes user-visible behaviour that none of the gate's objections asked for,
+so no score admits it. An exit 2 means the turn is not a JSON object with a
 `questions` array, or the refiner broke its contract in one of the two
 exceptions to "malformed is asked, never an error", each named on stderr: an
 `implementation` entry has no `recommended_answer` or `rationale`; or — the

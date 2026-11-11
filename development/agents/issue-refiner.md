@@ -591,6 +591,14 @@ Rules for the payload:
     A `kind: gap` entry without it, or with a blank field or a target of the
     wrong shape, breaks this contract, and the conductor re-asks you for the
     turn.
+  - `unrequested_scope` — `true` when the answer adds or changes user-visible
+    behaviour and answers none of your input `objections` (#3079); omit it
+    otherwise. The conductor asks such a question at any threshold and of any
+    kind, so scope the gate did not ask for is never taken on your score alone.
+    **Never add that scope to a draft any other way:** a user-visible behaviour
+    criterion that no objection asks for reaches `proposed_prose` or
+    `proposed_story_spec` only after its question, marked
+    `"unrequested_scope": true`, is answered.
 
   **An answered gap becomes an acceptance criterion.** From the turn after a
   `gap` question is answered — by the human, or by a human turn that begins
@@ -650,7 +658,13 @@ Rules for the payload:
   `story-readiness` risk rubric (`low` = small/localized/docs/config; `normal` =
   a typical feature/fix; `elevated` = security/data/auth/contract/migration/
   concurrency/cross-cutting). Each `test_cases[].issue` stays `null` — it is
-  filled in later by the test-case spin-out (#671), not by you. **No
+  filled in later by the test-case spin-out (#671), not by you. **Mark a test
+  case provisional when its expectation rests on third-party behaviour you did
+  not verify** (#3079) — a status code, payload or error of an API outside the
+  repo that you recall rather than read in a spec, the code or its tests: give
+  it `"provisional": {"assumption": "<the unverified behaviour>"}`, naming that
+  behaviour in one sentence. Omit the field when every expectation rests on
+  something you read. **No
   `dependencies` field** — dependencies are GitHub-native `blockedBy` (#583),
   never in the block. Set `provenance.generated_at`/`prose_sha256` to `null`:
   the **skill** stamps the timestamp and computes the hash over the

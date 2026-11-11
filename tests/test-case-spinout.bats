@@ -239,3 +239,36 @@ NEW_TWO='{"schema":"story-spec/v1","test_cases":[
   contains "$t" 'On exit 2 or 1, return `stopped` with the reason "unreadable step handoff" and write nothing.'
   contains "$t" 'The `already-attempted` and `second-generation` refusals do not apply to it: `eligible` is not run.'
 }
+
+# --- #3079: provisional test cases, and bodies reconciled before close ----------
+
+@test "#3079 the story-spec contract carries an optional provisional marker naming the assumption" {
+  local t; t="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/ARCHITECTURE.md")"
+  contains "$t" 'and **optional (#3079)** `provisional` — `{ assumption }`, present when the expectation rests on third-party behaviour the refiner did not verify, naming that behaviour; absent or `null` when it was verified |'
+}
+
+@test "#3079 the refiner marks a test case provisional when it rests on unverified third-party behaviour" {
+  local t; t="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/development/agents/issue-refiner.md")"
+  contains "$t" '**Mark a test case provisional when its expectation rests on third-party behaviour you did not verify** (#3079)'
+  contains "$t" '`"provisional": {"assumption": "<the unverified behaviour>"}`, naming that behaviour in one sentence.'
+}
+
+@test "#3079 resolve-issue §6 reconciles a contradicted test-case body, with a one-line note, before the PR opens" {
+  local s t r
+  s="$(awk '/^### 6\. /{f=1} f && /^### 7\. /{exit} f' "$REPO_ROOT/development/skills/resolve-issue/SKILL.md")"
+  t="$(tr -s '[:space:]' ' ' <<<"$s")"
+  contains "$t" '**Reconcile the test-case bodies before the PR opens (#3079).** When the same-PR test-case lifecycle ran, and before open-pr runs, compare each plan entry'"'"'s `test-case` issue with the acceptance test written for it, and update a body the test contradicts: see `reference/checkpoint.md` § Reconciling the test-case bodies before the PR (#3079)'
+  # The procedure lives in the section §6 points at, so the conductor stays under its ceiling.
+  s="$(awk '/^## Reconciling the test-case bodies before the PR \(#3079\)$/{f=1; print; next} f && /^## /{exit} f' "$REPO_ROOT/development/skills/resolve-issue/reference/checkpoint.md")"
+  [ -n "$s" ] || { echo "checkpoint.md has no #3079 reconciliation section" >&2; return 1; }
+  r="$(tr -s '[:space:]' ' ' <<<"$s")"
+  contains "$r" 'Compare each plan entry'"'"'s `test-case` issue with the acceptance test written for it.'
+  contains "$r" 'Read the body with `gh issue view <issue> --json body -q .body`, change nothing else in it, and write it back with `gh issue edit <issue> --body-file <file>`.'
+  contains "$r" 'A `provisional` entry'"'"'s `assumption` names the expectation to check first.'
+  contains "$r" 'whether or not the story-spec entry is `provisional`, update the body: rewrite that section to the expectation the shipped test asserts, and add one line beneath it:'
+  contains "$r" '`Reconciled before close: the build found <shipped behaviour>, not <the old expectation> (story #<N>).`'
+  contains "$r" 'A body that already matches is left alone, so a re-run changes nothing.'
+  contains "$r" 'Re-run a failed edit once; if it fails again, name that issue and the shipped expectation in the PR'"'"'s Summary and open the PR all the same.'
+  contains "$r" 'The Summary also names every body this step updated.'
+  contains "$(tr -s '[:space:]' ' ' < "$REPO_ROOT/ARCHITECTURE.md")" 'Before that PR opens, a test-case issue whose expectation the build'"'"'s tests contradict, provisional or not, has its body updated to the shipped behaviour with a one-line note (#3079)'
+}
