@@ -118,10 +118,12 @@ granted) and its `guidance` (the human's granted-round guidance, or `null`),
 loaded profile's *Fix-pass rules* reference, or `null` when that heading begins
 with `none` (§1b's test). When it is non-null, the dispatch prompt carries that
 heading's body, since the subagent cannot load a skill. It also carries
-`acceptance_criteria_file` (#3074): `acceptance-criteria.md` in the work-dir, which
-the conductor writes once per run, when it creates the work-dir, from the issue
-body it already fetched — the body's acceptance criteria verbatim, followed by
-its `story-spec/v1` block when one exists. With neither, as on a run on a bare
+`acceptance_criteria_file` (#3074): `acceptance-criteria.md` in the handoff's
+work-dir, which the conductor composes once per run from the issue body it
+already fetched — the body's acceptance criteria verbatim, followed by its
+`story-spec/v1` block when one exists — and writes into each work-dir, the
+blocking loop's and each promotion sub-loop's, before that work-dir's first fix
+handoff when it is not yet there. With neither, as on a run on a bare
 branch, the field is `null` and no file is written.
 
 **A fix verdict that is not `ok` is report-and-stop**, on either trigger; on

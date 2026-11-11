@@ -24,7 +24,8 @@ blocker whose surface an acceptance criterion names is applied, never parked —
 that is rule 1's first override. List every finding you park in the verdict's
 `parked` array as `{issue, ac_check}`: `issue` is its follow-up's number, and
 `ac_check` is `checked` when you read the file, or `no-ac-file` when the field
-is `null`.
+is `null`. When the field is not `null` but the file cannot be read, edit
+nothing and return `failed` / `cannot-fix`.
 
 **Parked follow-ups carry their origin (#2581).** When you park a finding and
 file its follow-up, also post one origin comment on that issue. Write the parked

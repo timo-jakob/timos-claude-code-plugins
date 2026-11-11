@@ -447,10 +447,14 @@ _background_wait_pins() {
   load_fix_brief
   contains "$fix" 'When the handoff'"'"'s `acceptance_criteria_file` is not `null`, read it before parking any finding'
   contains "$fix" 'A blocker whose surface an acceptance criterion names is applied, never parked'
+  contains "$fix" "List every finding you park in the verdict's \`parked\` array as \`{issue, ac_check}\`: \`issue\` is its follow-up's number"
   contains "$fix" '`ac_check` is `checked` when you read the file, or `no-ac-file` when the field is `null`'
+  contains "$fix" 'When the field is not `null` but the file cannot be read, edit nothing and return `failed` / `cannot-fix`'
   load_section
-  contains "$section" '`acceptance_criteria_file` (#3074): `acceptance-criteria.md` in the work-dir, which the conductor writes once per run'
-  contains "$section" 'the field is `null` and no file is written'
+  contains "$section" "\`acceptance_criteria_file\` (#3074): \`acceptance-criteria.md\` in the handoff's work-dir, which the conductor composes once per run from the issue body it already fetched"
+  contains "$section" "the body's acceptance criteria verbatim, followed by its \`story-spec/v1\` block when one exists"
+  contains "$section" "writes into each work-dir, the blocking loop's and each promotion sub-loop's, before that work-dir's first fix handoff when it is not yet there"
+  contains "$section" 'With neither, as on a run on a bare branch, the field is `null` and no file is written'
 }
 
 # --- AC 10: non-ok and no-op fix verdicts -------------------------------------
