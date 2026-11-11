@@ -5735,7 +5735,7 @@ conductor passes on unopened.
 | panel | `findings_count` | int ≥ 0 on `ok`; null otherwise |
 | fix | `fix_applied` | bool, never null |
 | fix | `files_changed` | int ≥ 0, never null |
-| fix | `parked` | [`{issue, ac_check}`] — one per finding the pass parked: `issue` int ≥ 1, `ac_check` `checked` \| `no-ac-file`; `[]` on `failed` (#3074) |
+| fix | `parked` | [`{issue, ac_check}`] — one per finding the pass parked: `issue` int ≥ 1, `ac_check` `checked` when the round's fix handoff names an `acceptance_criteria_file`, else `no-ac-file`; `[]` on `failed` (#3074) |
 | decide | `decided_red`, `decided_green`, `malformed` | int ≥ 0 on `ok`; null on `failed` |
 | decide | `ran_commands_file` | absolute path in the work-dir on `ok`; null on `failed` |
 | risk | `risk_file` | absolute path in the work-dir on `ok`; null on `failed` |

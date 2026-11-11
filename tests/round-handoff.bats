@@ -614,6 +614,13 @@ round_trip() {
   rejected "parked item is not {issue, ac_check}"
 }
 
+@test "rejects a parked no-ac-file when the round's fix handoff names an acceptance-criteria file (#3074)" {
+  write handoff "$(fix_handoff awaiting-fix)"
+  write verdict "$(fix_verdict_ok | jq '.parked = [{issue: 3081, ac_check: "no-ac-file"}]')"
+  [ "$status" -eq 3 ]
+  contains "$stderr" "ac_check is not checked, which handoff-2-fix.json implies"
+}
+
 @test "rejects a cannot-fix verdict that parks a finding (#3074)" {
   write verdict "$(fix_verdict_ok | jq '.outcome = "failed" | .cause = "cannot-fix" | .fix_applied = false | .files_changed = 0 | .parked = [{issue: 3081, ac_check: "checked"}]')"
   rejected "and park nothing"

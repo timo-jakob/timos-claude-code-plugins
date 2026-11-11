@@ -123,8 +123,9 @@ work-dir, which the conductor composes once per run from the issue body it
 already fetched — the body's acceptance criteria verbatim, followed by its
 `story-spec/v1` block when one exists — and writes into each work-dir, the
 blocking loop's and each promotion sub-loop's, before that work-dir's first fix
-handoff when it is not yet there. With neither, as on a run on a bare
-branch, the field is `null` and no file is written.
+handoff of the run, replacing any copy an earlier run left. With neither, as on
+a run on a bare branch, the field is `null` and any copy an earlier run left is
+deleted.
 
 **A fix verdict that is not `ok` is report-and-stop**, on either trigger; on
 `gate-red` it is §3's *abandon and report*. **A fix that changed nothing is

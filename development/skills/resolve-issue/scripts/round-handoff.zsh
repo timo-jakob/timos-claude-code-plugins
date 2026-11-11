@@ -29,7 +29,8 @@
 #     integers, rule2_mandatory a bool, carry_entries items with string file,
 #     dimension and title, the panel's base a non-empty string, every path
 #     field absolute (worktree_root, on every kind, included — #2018), the
-#     fix verdict's parked items each an {issue, ac_check} pair (#3074);
+#     fix verdict's parked items each an {issue, ac_check} pair whose
+#     ac_check agrees with the round's fix handoff beside it (#3074);
 #   - the conditional rules: carry_entries non-empty exactly in the carry
 #     modes; a cause exactly when outcome is not ok; not_applicable on a panel
 #     verdict only; the per-kind nullability rules;
@@ -319,6 +320,16 @@ for p in "${(@f)$(print -r -- "$result" | jq -r '.contained[]')}"; do
   [[ -n "$p" ]] || continue
   [[ "${p:A}" == "$src_dir"/?* ]] || reject "path resolves outside the work-dir: $p"
 done
+
+# A fix verdict's ac_check must match its round's fix handoff beside it (#3074):
+# `checked` when that handoff names an acceptance_criteria_file, `no-ac-file`
+# when it carries null.
+local sibling="$src_dir/handoff-${obj_round}-fix.json" ac_want=no-ac-file
+if [[ "$family" == verdict && "$obj_kind" == fix && -f "$sibling" ]]; then
+  if jq -e '.acceptance_criteria_file != null' "$sibling" >/dev/null 2>&1; then ac_want=checked; fi
+  print -r -- "$raw" | jq -e --arg want "$ac_want" 'all(.parked[]; .ac_check == $want)' >/dev/null \
+    || reject "a parked item's ac_check is not $ac_want, which handoff-${obj_round}-fix.json implies"
+fi
 
 if [[ "$io" == read ]]; then
   print -r -- "$raw" | jq -c .

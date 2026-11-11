@@ -453,8 +453,8 @@ _background_wait_pins() {
   load_section
   contains "$section" "\`acceptance_criteria_file\` (#3074): \`acceptance-criteria.md\` in the handoff's work-dir, which the conductor composes once per run from the issue body it already fetched"
   contains "$section" "the body's acceptance criteria verbatim, followed by its \`story-spec/v1\` block when one exists"
-  contains "$section" "writes into each work-dir, the blocking loop's and each promotion sub-loop's, before that work-dir's first fix handoff when it is not yet there"
-  contains "$section" 'With neither, as on a run on a bare branch, the field is `null` and no file is written'
+  contains "$section" "writes into each work-dir, the blocking loop's and each promotion sub-loop's, before that work-dir's first fix handoff of the run, replacing any copy an earlier run left"
+  contains "$section" 'With neither, as on a run on a bare branch, the field is `null` and any copy an earlier run left is deleted'
 }
 
 # --- AC 10: non-ok and no-op fix verdicts -------------------------------------
