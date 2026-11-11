@@ -249,3 +249,94 @@ order() { jq -c '[.entries[].issue]' "$QF"; }
   run -0 q add --entry 10 --kind named
   [ "$(jq '.entries[0].pr' "$QF")" = "5" ]
 }
+
+# --- #3078: the approval wait and the last-entry close-out --------------------
+
+# bounded-wait.zsh pr against a gh stub. Each gh call takes the next line of
+# $GH_STATES (the last line repeats).
+pr_stub() {
+  BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"
+  export GH_STATES="$BATS_TEST_TMPDIR/states" GH_CALLS="$BATS_TEST_TMPDIR/calls"
+  printf '%s\n' "$@" > "$GH_STATES"; : > "$GH_CALLS"
+  cat > "$BIN/gh" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$GH_CALLS"
+n=$(wc -l < "$GH_CALLS"); total=$(wc -l < "$GH_STATES")
+(( n > total )) && n=$total
+printf '{"state":"%s"}\n' "$(sed -n "${n}p" "$GH_STATES")"
+SH
+  chmod +x "$BIN/gh"
+  export PATH="$BIN:$PATH"
+  BW="$SCRIPTS/bounded-wait.zsh"
+}
+
+@test "#3078 AC5: a PR awaiting approval that merges within the wait ends merged, exit 0" {
+  pr_stub OPEN OPEN MERGED
+  run --separate-stderr zsh "$BW" pr --repo Acme/Widget --pr 41 --timeout-s 30 --interval-s 0
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .result <<<"$output")" = merged ]
+  [ "$(jq -r .kind <<<"$output")" = pr ]
+  run grep -cx 'pr view 41 --repo Acme/Widget --json state' "$GH_CALLS"
+  [ "$output" = 3 ]
+}
+
+@test "#3078 AC5: a PR still unmerged at the bound ends timeout, exit 3 — the --pause stop" {
+  pr_stub OPEN
+  run --separate-stderr zsh "$BW" pr --repo Acme/Widget --pr 41 --timeout-s 1 --interval-s 1
+  [ "$status" -eq 3 ]
+  [ "$(jq -r .result <<<"$output")" = timeout ]
+}
+
+@test "#3078 AC5: a PR already merged is not waited on" {
+  pr_stub MERGED
+  run --separate-stderr zsh "$BW" pr --repo Acme/Widget --pr 41 --timeout-s 600 --interval-s 60
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .result <<<"$output")" = already-merged ]
+  [ "$(jq -r .reads <<<"$output")" = 1 ]
+}
+
+@test "#3078: a PR closed without merging ends closed-unmerged, exit 4" {
+  pr_stub OPEN CLOSED
+  run --separate-stderr zsh "$BW" pr --repo Acme/Widget --pr 41 --timeout-s 30 --interval-s 0
+  [ "$status" -eq 4 ]
+  [ "$(jq -r .result <<<"$output")" = closed-unmerged ]
+}
+
+@test "#3078: a PR already closed without merging on the first read is closed-unmerged, never already-merged" {
+  pr_stub CLOSED
+  run --separate-stderr zsh "$BW" pr --repo Acme/Widget --pr 41 --timeout-s 600 --interval-s 60
+  [ "$status" -eq 4 ]
+  [ "$(jq -r .result <<<"$output")" = closed-unmerged ]
+  [ "$(jq -r .reads <<<"$output")" = 1 ]
+}
+
+@test "#3078 AC3: close-out of the last paused entry marks it done and clears the queue, asking nothing" {
+  q add --entry 10 --kind named --pr 41 >/dev/null
+  run --separate-stderr q report --stopped 10 --reason 'PR #41 awaits a merge' --pause
+  [ -f "$QF" ]
+  run -0 --separate-stderr q close-out --entry 10 --pr 41
+  [ "$(jq -c . <<<"$output")" = '{"cleared":true,"next":null}' ]
+  [ ! -e "$QF" ]
+  run q next
+  [ "$status" -eq 4 ]
+}
+
+@test "#3078: close-out of an entry with more queued records its PR and prints the next entry" {
+  q add --entry 3 --kind blocker >/dev/null
+  q add --entry 10 --kind named >/dev/null
+  run -0 --separate-stderr q close-out --entry 3 --pr 40
+  [ "$(jq -r .cleared <<<"$output")" = false ]
+  [ "$(jq -r .next.issue <<<"$output")" = 10 ]
+  [ "$(jq -c '[.entries[] | {issue, state, pr}]' "$QF")" = '[{"issue":3,"state":"done","pr":40},{"issue":10,"state":"queued","pr":null}]' ]
+}
+
+@test "#3078: close-out needs --entry and --pr, and refuses an unknown entry" {
+  q add --entry 10 --kind named >/dev/null
+  run --separate-stderr q close-out --entry 10
+  [ "$status" -eq 2 ]
+  run --separate-stderr q close-out --pr 41
+  [ "$status" -eq 2 ]
+  run --separate-stderr q close-out --entry 99 --pr 41
+  [ "$status" -eq 5 ]
+  [ -f "$QF" ]
+}

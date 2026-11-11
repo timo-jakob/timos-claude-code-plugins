@@ -100,7 +100,21 @@ cq_step() {
 @test "AC3: each PR merges before the next entry branches; a PR that cannot advance is a paused stop" {
   s="$(cq_step 3)"
   contains "$s" "Each entry's PR merges before the next entry branches off fresh main: record it with \`add --entry <I> --pr <P>\` as soon as the step reports it, wait for it as blockers first's step 4 waits, then \`done --entry <I> --pr <P>\`."
-  contains "$s" "Where the PR cannot advance by itself, stop (step 5) with \`--pause\` and the reason that PR #P awaits a merge: the report lists that stop as a pause, not a failure."
+  contains "$s" "**Where the PR cannot advance by itself, wait for it before pausing (#3078).**"
+  contains "$s" "\`timeout\` after the second call → stop (step 5) with \`--pause\` and the reason that PR #P awaits a merge: the report lists that stop as a pause, not a failure."
+}
+
+@test "#3078 AC2: a PR that cannot advance is watched for 60 minutes under two bounded Monitor calls before the pause" {
+  s="$(cq_step 3)"
+  contains "$s" "The root watches it for 60 minutes, a fixed bound with no option, as two bounded \`Monitor\` calls of \`timeout_ms\` \`1800000\` each."
+  contains "$s" "The command of each is \`\"<skill-base-dir>/scripts/bounded-wait.zsh\" pr --repo <owner/name> --pr <P>\`, which reads \`gh pr view <P> --json state\` once a minute and prints one line when it ends."
+  contains "$s" "The second call runs only when the first ends \`timeout\`."
+  contains "$s" "It cannot when its checks are green and it has not merged: a \`REVIEW_REQUIRED\` PR on a repo with no Approver, or one still unmerged after blockers first's step 4's thirty re-reads in an Approver or override repo."
+  contains "$s" "A blocker entry, before the named issue's precheck returns \`PROCEED\`, takes only the wait: \`merged\` or \`already-merged\` marks it \`done\` and blockers first's step 3 or 5 goes on, and any other ending is blockers first's step 6, never \`--pause\`."
+  contains "$s" "\`merged\` or \`already-merged\` → close the entry out with \`chain-queue.zsh close-out --entry <I> --pr <P>\`, in place of \`done\`."
+  contains "$s" "It prints \`cleared: true\` when no entry is left and has then deleted the queue file: the run is done (step 4) without a question. Otherwise take the \`next\` it prints."
+  contains "$s" "\`closed-unmerged\`, \`unreadable\`, a script exit 1 or 2, or a \`Monitor\` call that expires with no line → stop (step 5), without \`--pause\`, naming the result."
+  contains "$(flat < "$REPO_ROOT/docs/how-to/run-resolve-issue-unattended.md")" "A PR that needs your approval is watched for an hour first, and the run carries on if it merges in that time; only then is the stop reported as a pause."
 }
 
 @test "AC3: an epic-kind entry, a follow-up or split included, is marked done without a PR once its epic closes" {
@@ -153,9 +167,15 @@ cq_step() {
   contains "$(flat < "$SKILL")" "If \`state\` is not \`OPEN\`, stop — it's already handled — unless a human-started run kept a chain queue (#2942)."
   s="$(cq_step 7)"
   contains "$s" "A re-run on the named issue that finds the file resumes with \`next\`, the entry that stopped the run."
-  contains "$s" "An entry that is now closed is marked \`done\`."
-  contains "$s" "An entry whose recorded PR is still open is waited on as in step 3, never rebuilt."
-  contains "$s" "Any other entry runs again."
+  contains "$s" "An entry whose recorded PR is open, or merged, is waited on as step 3 waits, never a rebuild"
+  contains "$s" "A recorded PR whose checks end red stops the run again (step 5) without \`--pause\`, and one closed unmerged makes its entry run again."
+  contains "$s" "Any other entry that is now closed is marked \`done\`, and an entry with no recorded PR runs again."
+}
+
+@test "#3078 AC3: a paused last entry whose PR merged is closed out by a later invocation with no question" {
+  s="$(cq_step 7)"
+  contains "$s" "a PR that merged while the run was paused reads \`already-merged\` at once and is closed out with \`close-out\`, so a paused last entry clears the queue and ends the run with no question asked (#3078)."
+  contains "$(flat < "$REPO_ROOT/docs/how-to/run-resolve-issue-unattended.md")" "If the paused PR has merged by then, the run finishes without asking anything."
 }
 
 @test "AC8: there is no numeric cap; a follow-up cycle is refused by add and stops the run" {

@@ -41,6 +41,12 @@
 #       recorded on a done entry (or none; an epic-kind entry records none, its
 #       children's PRs are in its E3 report) and every issue still queued (or
 #       none).
+#   chain-queue.zsh close-out --repo-dir DIR --issue N --entry I --pr P
+#       Entry I's PR P has merged (#3078): mark I done with P, then print
+#       {"cleared": B, "next": E}. When no entry is left queued the queue file
+#       is deleted, as clear deletes it, B is true and E is null; otherwise B
+#       is false and E is the entry next would print. It asks nothing, so a
+#       paused last entry whose PR merged since closes the run out by itself.
 #   chain-queue.zsh clear  --repo-dir DIR --issue N
 #       Delete the queue file. Absent is not an error.
 #
@@ -53,12 +59,13 @@
 #
 # Exit codes: 0 ok · 1 internal (jq missing, the base not derivable, an
 # unreadable queue file) · 2 usage · 3 follow-up cycle refused · 4 queue empty
-# (next) · 5 unknown entry (done, or add --before/--after naming no entry)
+# (next) · 5 unknown entry (done or close-out, or add --before/--after naming
+# no entry)
 emulate -L zsh
 setopt err_return no_unset pipe_fail
 
 local self_dir="${0:A:h}"
-local usage="usage: chain-queue.zsh add|next|done|report|clear --repo-dir DIR --issue N [flags]"
+local usage="usage: chain-queue.zsh add|next|done|close-out|report|clear --repo-dir DIR --issue N [flags]"
 
 _need_val() { [[ $2 -ge 2 && -n "$3" ]] || { print -u2 -- "chain-queue: $1 needs a value"; exit 2 } }
 _num() { [[ "$2" == <-> && "$2" != 0* ]] || { print -u2 -- "chain-queue: $1 must be an issue or PR number (got: $2)"; exit 2 } }
@@ -66,7 +73,7 @@ _num() { [[ "$2" == <-> && "$2" != 0* ]] || { print -u2 -- "chain-queue: $1 must
 (( $# > 0 )) || { print -u2 -- "$usage"; exit 2 }
 local cmd="$1"; shift
 case "$cmd" in
-  add|next|done|report|clear) ;;
+  add|next|done|close-out|report|clear) ;;
   -h|--help) print -r -- "$usage"; exit 0 ;;
   *) print -u2 -- "chain-queue: unknown subcommand: $cmd"; print -u2 -- "$usage"; exit 2 ;;
 esac
@@ -78,13 +85,13 @@ while (( $# > 0 )); do
   case "$1" in
   --repo-dir) _need_val "$1" $# "${2:-}"; repo_dir="$2"; shift 2 ;;
   --issue) _need_val "$1" $# "${2:-}"; issue="$2"; shift 2 ;;
-  --entry) _only "$1" "add done"; _need_val "$1" $# "${2:-}"; entry="$2"; shift 2 ;;
+  --entry) _only "$1" "add done close-out"; _need_val "$1" $# "${2:-}"; entry="$2"; shift 2 ;;
   --kind) _only "$1" "add"; _need_val "$1" $# "${2:-}"; kind="$2"; shift 2 ;;
   --depth) _only "$1" "add"; _need_val "$1" $# "${2:-}"; depth="$2"; shift 2 ;;
   --before) _only "$1" "add"; _need_val "$1" $# "${2:-}"; before="$2"; shift 2 ;;
   --after) _only "$1" "add"; _need_val "$1" $# "${2:-}"; after="$2"; shift 2 ;;
   --finding) _only "$1" "add"; _need_val "$1" $# "${2:-}"; finding="$2"; shift 2 ;;
-  --pr) _only "$1" "add done"; _need_val "$1" $# "${2:-}"; pr="$2"; shift 2 ;;
+  --pr) _only "$1" "add done close-out"; _need_val "$1" $# "${2:-}"; pr="$2"; shift 2 ;;
   --stopped) _only "$1" "report"; _need_val "$1" $# "${2:-}"; stopped="$2"; shift 2 ;;
   --reason) _only "$1" "report"; _need_val "$1" $# "${2:-}"; reason="$2"; shift 2 ;;
   --pause) _only "$1" "report"; pause=1; shift ;;
@@ -116,6 +123,8 @@ add)
   ;;
 done) [[ -n "$entry" ]] || { print -u2 -- "chain-queue: done needs --entry"; exit 2 }
   _num --entry "$entry"; [[ -z "$pr" ]] || _num --pr "$pr" ;;
+close-out) [[ -n "$entry" && -n "$pr" ]] || { print -u2 -- "chain-queue: close-out needs --entry and --pr"; exit 2 }
+  _num --entry "$entry"; _num --pr "$pr" ;;
 report) [[ -n "$stopped" && -n "$reason" ]] || { print -u2 -- "chain-queue: report needs --stopped and --reason"; exit 2 }
   _num --stopped "$stopped" ;;
 esac
@@ -214,6 +223,22 @@ done)
   q=$(print -r -- "$q" | jq -c --argjson i "$entry" --argjson p "${pr:-null}" \
     '.entries |= map(if .issue == $i then .state = "done" | (if $p != null then .pr = $p else . end) else . end)')
   _write "$q"
+  ;;
+close-out)
+  print -r -- "$q" | jq -e --argjson i "$entry" 'any(.entries[]; .issue == $i)' >/dev/null || {
+    print -u2 -- "chain-queue: no queued entry #$entry"; exit 5 }
+  q=$(print -r -- "$q" | jq -c --argjson i "$entry" --argjson p "$pr" \
+    '.entries |= map(if .issue == $i then .state = "done" | .pr = $p else . end)')
+  local nx=""
+  nx=$(print -r -- "$q" | jq -c 'first(.entries[] | select(.state != "done")) // empty')
+  if [[ -n "$nx" ]]; then
+    _write "$q" >/dev/null
+    jq -nc --argjson e "$nx" '{cleared: false, next: $e}'
+  else
+    rm -f -- "$qf" || { print -u2 -- "chain-queue: could not remove $qf"; exit 1 }
+    rmdir -- "$base" 2>/dev/null || true
+    jq -nc '{cleared: true, next: null}'
+  fi
   ;;
 report)
   print -r -- "$q" | jq -r --argjson s "$stopped" --arg r "$reason" --argjson pause "$pause" '

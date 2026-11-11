@@ -28,12 +28,32 @@ named issue, whatever the target.
    procedure reads. `PROCEED` (a blocker closed meanwhile) goes straight to step
    5. Exit 2 is your own malformed call: fix it and re-run once. Exit 1, or a
    second 2, stops the run (step 6) with the reason `precheck failed`.
-2. **Stop before building anything on these.** A `REJECT_CYCLE`, a shape (ii)
-   rejection, and any `foreign_blockers` entry with `open: true` stop the run
-   (step 6) before any blocker is built. The open foreign blocker stops it even
-   when open local blockers exist, because clearing the local ones cannot make
-   the precheck pass. The stop names the cycle, the cause `comment_md` names,
-   or the foreign ref.
+2. **Stop before building anything on these.** A `REJECT_CYCLE` and a shape
+   (ii) rejection stop the run (step 6) before any blocker is built. The stop
+   names the cycle or the cause `comment_md` names.
+   **An open foreign blocker is waited on first (#3078).** Take each
+   `foreign_blockers` entry with `open: true` in turn, before any local blocker
+   is built, because clearing the local ones cannot make the precheck pass.
+   Watch it with one bounded `Monitor` call, the same bound as step 4's thirty
+   one-a-minute re-reads: its command is
+   `"<skill-base-dir>/scripts/bounded-wait.zsh" issue --repo <owner/name> --issue <M>`
+   and its `timeout_ms` is `1800000`. The script prints one line when the wait
+   ends, and its `result` decides:
+   - `closed` or `already-closed` → the blocker is gone: go back to step 1 and
+     read the decision again. The run continues on whatever that precheck
+     returns.
+   - `timeout`, `unreadable`, a script exit 1 or 2, or a `Monitor` call that
+     expires with no line → stop the run (step 6) as before the wait existed,
+     naming the foreign ref. The state stays resumable: re-running
+     `/development:resolve-issue` on the named issue starts at step 1 again.
+
+   Wait on each foreign ref at most once in a run; a ref that is open again
+   after its wait stops the run (step 6).
+
+   **The blocker choice is never put to the human.** The root never asks
+   whether to build the blocker first, remove the blocked-by link or wait
+   longer: no rule licenses that question, in either session mode. It waits,
+   and then it continues or stops.
 3. **Clear each open local blocker, deepest first.** Take the open entries of
    `blockers`, deepest `depth` first, and clear each one in turn, skipping one
    an earlier recursion already cleared. To clear a blocker:
@@ -74,9 +94,13 @@ named issue, whatever the target.
    and advances it. In both cases, wait for the PR as §6's approve-and-advance
    arm waits: `await-pr-checks.zsh <pr>`, then at most 30 re-reads of
    `gh pr view <pr> --json state,autoMergeRequest`, one a minute, until it
-   reads `MERGED`. Anywhere else, or when the wait ends unmerged, stop the run
-   (step 6) with the reason that blocker PR #P is ready and awaits a human
-   merge. Re-running `/development:resolve-issue` on the named issue resumes the
+   reads `MERGED`. A PR still unmerged then with green checks, and a blocker
+   PR anywhere else, takes the chain queue's approval wait
+   (`reference/checkpoint.md`, the chain queue's step 3), and only the wait: a
+   `merged` result clears the blocker. When it ends unmerged, stop the run
+   (step 6), never with `--pause`, with the reason that blocker PR #P is ready
+   and awaits a human merge.
+   Re-running `/development:resolve-issue` on the named issue resumes the
    chain: its precheck no longer lists the merged blockers.
 5. **Re-verify, then build the target.** Once every blocker from step 3 is
    cleared, run the precheck on the target again; exit 1 or 2 is handled as in

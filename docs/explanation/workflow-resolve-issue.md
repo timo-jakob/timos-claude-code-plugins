@@ -20,8 +20,10 @@ Nothing is branched or built until the story has passed three checks.
    open, or the links form a cycle, a maintenance-pipeline run stops: it labels the issue `blocked` and comments why,
    and never starts the blocking issue on its own. A run you start clears the open blockers first, without asking, in
    either mode (#2941). It resolves them deepest-first, one PR each, merged before the next one branches, then
-   re-checks the links and builds the issue. A cycle, an open blocker in another repository, or a blocker that cannot
-   finish stops the run: the issue gets one `blockers first stopped:` comment and the `blocked` label.
+   re-checks the links and builds the issue. An open blocker in another repository is watched for up to half an hour
+   first, and the run carries on if it closes (#3078). A cycle, a foreign blocker still open after that wait, or a
+   blocker that cannot finish stops the run: the issue gets one `blockers first stopped:` comment and the `blocked`
+   label.
 3. **Step 0b — readiness gate.** The `story-readiness` agent judges whether the story is specified well enough to
    build: testable acceptance criteria, bounded scope, declared dependencies, and — for a story that touches an
    interface — a use case and test cases. On NEEDS_REFINEMENT the run labels the issue `needs-refinement`, posts the
