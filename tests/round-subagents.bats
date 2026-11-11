@@ -443,6 +443,16 @@ _background_wait_pins() {
   contains "$section" "the dispatch prompt carries that heading's body, since the subagent cannot load a skill"
 }
 
+@test "#3074: the fix brief applies an AC-named surface, never parks it, and records the AC check" {
+  load_fix_brief
+  contains "$fix" 'When the handoff'"'"'s `acceptance_criteria_file` is not `null`, read it before parking any finding'
+  contains "$fix" 'A blocker whose surface an acceptance criterion names is applied, never parked'
+  contains "$fix" '`ac_check` is `checked` when you read the file, or `no-ac-file` when the field is `null`'
+  load_section
+  contains "$section" '`acceptance_criteria_file` (#3074): `acceptance-criteria.md` in the work-dir, which the conductor writes once per run'
+  contains "$section" 'the field is `null` and no file is written'
+}
+
 # --- AC 10: non-ok and no-op fix verdicts -------------------------------------
 
 @test "AC10: a non-ok fix verdict and a fix that changed nothing are both report-and-stop" {

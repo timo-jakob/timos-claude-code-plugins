@@ -28,7 +28,8 @@
 #     with the name's kind equal to the object's), counts non-negative
 #     integers, rule2_mandatory a bool, carry_entries items with string file,
 #     dimension and title, the panel's base a non-empty string, every path
-#     field absolute (worktree_root, on every kind, included — #2018);
+#     field absolute (worktree_root, on every kind, included — #2018), the
+#     fix verdict's parked items each an {issue, ac_check} pair (#3074);
 #   - the conditional rules: carry_entries non-empty exactly in the carry
 #     modes; a cause exactly when outcome is not ok; not_applicable on a panel
 #     verdict only; the per-kind nullability rules;
@@ -131,7 +132,8 @@ def handoff_checks:
    else empty end),
   ( ["schema", "kind", "round", "tree_id", "work_dir", "status_file"] as $common
     | { panel: ["mode", "delta_base", "carried_finding_ids", "carry_entries", "worktree_root", "base"],
-        fix: ["trigger", "grant", "guidance", "rule2_mandatory", "profile_fix_rules", "worktree_root"],
+        fix: ["trigger", "grant", "guidance", "rule2_mandatory", "profile_fix_rules", "worktree_root",
+              "acceptance_criteria_file"],
         decide: ["aggregate_findings_file", "worktree_root", "retired_file"],
         risk: ["aggregate_findings_file", "worktree_root"] }[.kind] as $own
     | ( if .kind == "fix" then (if .trigger == "awaiting-fix" then ["changelist"] else ["gate_log"] end) else [] end ) as $trig
@@ -168,6 +170,8 @@ def handoff_checks:
       (if (.rule2_mandatory | type) != "boolean" then "rule2_mandatory is not a bool" else empty end),
       (if .profile_fix_rules != null and (.profile_fix_rules | str | not)
          then "profile_fix_rules is not a string or null" else empty end),
+      (if .acceptance_criteria_file != null and (.acceptance_criteria_file | abs | not)
+         then "acceptance_criteria_file is not an absolute path or null" else empty end),
       (if .trigger == "awaiting-fix" then
          (if (.changelist | abs) | not then "changelist is not an absolute path (required on awaiting-fix)"
           elif .gate_log != null then "gate_log is set on trigger awaiting-fix" else empty end)
@@ -186,7 +190,7 @@ def verdict_checks:
   (if .kind | IN("panel", "fix", "decide", "risk") | not then "unknown kind: \(.kind | tojson)" else empty end),
   ( ["schema", "kind", "round", "outcome", "cause"] as $common
     | { panel: ["aggregate_findings_file", "carry_accounting_file", "carry_lines_file", "findings_count"],
-        fix: ["fix_applied", "files_changed"],
+        fix: ["fix_applied", "files_changed", "parked"],
         decide: ["decided_red", "decided_green", "malformed", "ran_commands_file"],
         risk: ["risk_file", "assessed_count"] }[.kind] as $own
     | (has_all($common + $own) | if length > 0 then "missing field: \(.[0])" else empty end),
@@ -223,8 +227,12 @@ def verdict_checks:
   ( select(.kind == "fix")
     | (if (.fix_applied | type) != "boolean" then "fix_applied is not a bool"
        elif (.files_changed | nonneg) | not then "files_changed is not a non-negative integer"
-       elif .outcome != "ok" and (.fix_applied or .files_changed != 0)
-         then "a cannot-fix verdict must carry fix_applied false and files_changed 0"
+       elif (.parked | type) != "array" then "parked is not an array"
+       elif any(.parked[]; (type == "object" and (keys == ["ac_check", "issue"])
+             and (.issue | isint and . >= 1) and (.ac_check | IN("checked", "no-ac-file"))) | not)
+         then "parked item is not {issue, ac_check} with ac_check checked or no-ac-file"
+       elif .outcome != "ok" and (.fix_applied or .files_changed != 0 or (.parked | length) > 0)
+         then "a cannot-fix verdict must carry fix_applied false and files_changed 0, and park nothing"
        else empty end) ),
   ( select(.kind == "decide")
     | (if .outcome == "ok" then
@@ -250,7 +258,8 @@ def verdict_checks:
 
 def contained:
   if .schema == "round-handoff/v1" then
-    (if .kind | IN("decide", "risk") then [.aggregate_findings_file] else [] end)
+    (if .kind | IN("decide", "risk") then [.aggregate_findings_file]
+     elif .kind == "fix" then [.acceptance_criteria_file] else [] end)
   else
     [.aggregate_findings_file, .carry_accounting_file, .carry_lines_file, .ran_commands_file, .risk_file]
   end | map(select(. != null));

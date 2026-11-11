@@ -5633,7 +5633,8 @@ for that kind is rejected — which is what keeps finding text out of a verdict.
 **Paths.** Every path field is absolute. Every non-null path the contracts
 place **in the work-dir** — `aggregate_findings_file` on the decide and risk
 handoffs and the panel verdict, plus `carry_accounting_file`,
-`carry_lines_file`, `ran_commands_file` and the risk verdict's `risk_file` —
+`carry_lines_file`, `ran_commands_file`, the risk verdict's `risk_file` and the
+fix handoff's `acceptance_criteria_file` —
 must, after zsh `:A` resolution
 (`..` and symlinks), lie **strictly under** `${work_dir:A}/`. A handoff's own
 `work_dir` must `:A`-equal the directory the file sits in. A verdict carries no
@@ -5672,6 +5673,7 @@ At `<work-dir>/handoff-<N>-<kind>.json`, with `kind` ∈ {`panel`, `fix`,
 | fix | `changelist` | absolute path — required on `awaiting-fix` |
 | fix | `gate_log` | absolute path — required on `gate-red` |
 | fix | `worktree_root` | absolute path |
+| fix | `acceptance_criteria_file` | absolute path in the work-dir, or null when the run has no issue spec (#3074) |
 | decide | `aggregate_findings_file` | absolute path, in the work-dir |
 | decide | `worktree_root` | absolute path |
 | decide | `retired_file` | absolute path |
@@ -5733,6 +5735,7 @@ conductor passes on unopened.
 | panel | `findings_count` | int ≥ 0 on `ok`; null otherwise |
 | fix | `fix_applied` | bool, never null |
 | fix | `files_changed` | int ≥ 0, never null |
+| fix | `parked` | [`{issue, ac_check}`] — one per finding the pass parked: `issue` int ≥ 1, `ac_check` `checked` \| `no-ac-file`; `[]` on `failed` (#3074) |
 | decide | `decided_red`, `decided_green`, `malformed` | int ≥ 0 on `ok`; null on `failed` |
 | decide | `ran_commands_file` | absolute path in the work-dir on `ok`; null on `failed` |
 | risk | `risk_file` | absolute path in the work-dir on `ok`; null on `failed` |
@@ -5744,8 +5747,8 @@ The closed cause sets:
   `fix-verification-unreadable`, `carry-unconfirmed`, `plan-failed`,
   `wrong-worktree-root`, `empty-excerpt`, `story-diff-empty`, `not-applicable`,
   `no-agent-tool`;
-- **fix:** `cannot-fix` — which carries `fix_applied: false` and
-  `files_changed: 0`;
+- **fix:** `cannot-fix` — which carries `fix_applied: false`,
+  `files_changed: 0` and `parked: []`;
 - **decide:** `wrong-worktree-root`;
 - **risk:** `wrong-worktree-root`, `assessment-failed`.
 

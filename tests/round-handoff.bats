@@ -45,7 +45,8 @@ fix_handoff() { # $1 = trigger
     work_dir: $wd, status_file: "/tmp/resolve-1934/status.json",
     trigger: $trig, grant: {rounds: 2, severity_bar: "CRITICAL"}, guidance: null,
     rule2_mandatory: false, profile_fix_rules: "development-claude-plugin:resolve-profile § Fix-pass rules",
-    worktree_root: "/Users/dev/repos/plugins/.claude/worktrees/tidy-otter" }
+    worktree_root: "/Users/dev/repos/plugins/.claude/worktrees/tidy-otter",
+    acceptance_criteria_file: ($wd + "/acceptance-criteria.md") }
     + (if $trig == "awaiting-fix" then {changelist: ($wd + "/changelist-2.json")}
        else {gate_log: ($wd + "/gate-2.log")} end)'
 }
@@ -75,7 +76,7 @@ panel_verdict_na() {
 
 fix_verdict_ok() {
   jq -n '{ schema: "round-verdict/v1", kind: "fix", round: 2, outcome: "ok", cause: null,
-    fix_applied: true, files_changed: 3 }'
+    fix_applied: true, files_changed: 3, parked: [] }'
 }
 
 decide_verdict_ok() {
@@ -200,6 +201,14 @@ round_trip() {
 
 @test "round-trip: fix verdict ok" {
   round_trip verdict "$(fix_verdict_ok)" verdict-2-fix.json
+}
+
+@test "round-trip: fix handoff with no issue spec carries acceptance_criteria_file as null (#3074)" {
+  round_trip handoff "$(fix_handoff awaiting-fix | jq '.acceptance_criteria_file = null')" handoff-2-fix.json
+}
+
+@test "round-trip: fix verdict listing the findings it parked, with their AC check (#3074)" {
+  round_trip verdict "$(fix_verdict_ok | jq '.parked = [{issue: 3081, ac_check: "checked"}, {issue: 3082, ac_check: "no-ac-file"}]')" verdict-2-fix.json
 }
 
 @test "round-trip: fix verdict cannot-fix" {
@@ -578,6 +587,36 @@ round_trip() {
 @test "rejects a null fix_applied" {
   write verdict "$(fix_verdict_ok | jq '.fix_applied = null')"
   rejected "fix_applied is not a bool"
+}
+
+@test "rejects a fix handoff that omits acceptance_criteria_file (#3074)" {
+  write handoff "$(fix_handoff awaiting-fix | jq 'del(.acceptance_criteria_file)')"
+  rejected "missing field: acceptance_criteria_file"
+}
+
+@test "rejects a relative acceptance_criteria_file (#3074)" {
+  write handoff "$(fix_handoff gate-red | jq '.acceptance_criteria_file = "acceptance-criteria.md"')"
+  rejected "acceptance_criteria_file is not an absolute path or null"
+}
+
+@test "rejects an acceptance_criteria_file outside the work-dir (#3074)" {
+  write handoff "$(fix_handoff awaiting-fix | jq --arg wd "$WD" '.acceptance_criteria_file = ($wd + "/../acceptance-criteria.md")')"
+  rejected "path resolves outside the work-dir"
+}
+
+@test "rejects a fix verdict without parked (#3074)" {
+  write verdict "$(fix_verdict_ok | jq 'del(.parked)')"
+  rejected "missing field: parked"
+}
+
+@test "rejects a parked item whose ac_check is outside its closed set (#3074)" {
+  write verdict "$(fix_verdict_ok | jq '.parked = [{issue: 3081, ac_check: "skipped"}]')"
+  rejected "parked item is not {issue, ac_check}"
+}
+
+@test "rejects a cannot-fix verdict that parks a finding (#3074)" {
+  write verdict "$(fix_verdict_ok | jq '.outcome = "failed" | .cause = "cannot-fix" | .fix_applied = false | .files_changed = 0 | .parked = [{issue: 3081, ac_check: "checked"}]')"
+  rejected "and park nothing"
 }
 
 @test "rejects a cannot-fix verdict that claims a change" {
