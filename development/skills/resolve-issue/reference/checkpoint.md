@@ -245,13 +245,13 @@ file; never re-add an entry under another kind.
    outcome or field is added. The queue file is kept.
 7. **Resume from the queue.** A re-run on the named issue that finds the file
    resumes with `next`, the entry that stopped the run. An entry whose recorded
-   PR is open with green checks, or merged, takes step 3's approval wait, never
-   a rebuild: a PR that merged while the run was paused reads `already-merged`
+   PR is open, or merged, is waited on as step 3 waits, never a rebuild: a PR
+   that merged while the run was paused reads `already-merged`
    at once and is closed out with `close-out`, so a paused last entry clears the
-   queue and ends the run with no question asked (#3078). A recorded PR with red
-   checks stops the run again (step 5) without `--pause`, and one closed
+   queue and ends the run with no question asked (#3078). A recorded PR whose
+   checks end red stops the run again (step 5) without `--pause`, and one closed
    unmerged makes its entry run again. Any other entry that is now closed is
-   marked `done`, and any other entry runs again.
+   marked `done`, and an entry with no recorded PR runs again.
 
 **One status line per transition.** Print one line when a refinement starts or
 ends, a split is filed, a build starts, a PR merges, a follow-up is queued, and

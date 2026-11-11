@@ -167,9 +167,9 @@ cq_step() {
   contains "$(flat < "$SKILL")" "If \`state\` is not \`OPEN\`, stop — it's already handled — unless a human-started run kept a chain queue (#2942)."
   s="$(cq_step 7)"
   contains "$s" "A re-run on the named issue that finds the file resumes with \`next\`, the entry that stopped the run."
-  contains "$s" "An entry whose recorded PR is open with green checks, or merged, takes step 3's approval wait, never a rebuild"
-  contains "$s" "A recorded PR with red checks stops the run again (step 5) without \`--pause\`, and one closed unmerged makes its entry run again."
-  contains "$s" "Any other entry that is now closed is marked \`done\`, and any other entry runs again."
+  contains "$s" "An entry whose recorded PR is open, or merged, is waited on as step 3 waits, never a rebuild"
+  contains "$s" "A recorded PR whose checks end red stops the run again (step 5) without \`--pause\`, and one closed unmerged makes its entry run again."
+  contains "$s" "Any other entry that is now closed is marked \`done\`, and an entry with no recorded PR runs again."
 }
 
 @test "#3078 AC3: a paused last entry whose PR merged is closed out by a later invocation with no question" {
