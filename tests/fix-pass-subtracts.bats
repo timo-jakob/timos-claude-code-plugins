@@ -686,8 +686,9 @@ _roster_hits() {
   [ "$ln" -gt "$span_end" ]
   body="$(prose_window "$PROTO" "$((ln + 10))" 10)"
   contains "$body" 'it governs where the span disagrees'
-  contains "$body" "The base is the story's merge-base with the default branch."
+  contains "$body" "The base is the story's merge-base with the loop's base."
   contains "$body" "exists at that base and the story's own diff removed or broke it, the fix pass applies the restoration and never parks it"
+  contains "$body" 'even when restoring it adds a branch, an arm or a paragraph back'
   contains "$body" 'decides this by reading the base, never from memory, and records each check in its verdict'
 }
 
@@ -695,9 +696,14 @@ _roster_hits() {
   local fix="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop/briefs/fix.md" ln body
   ln="$(prose_gate_lines "$fix" 'Check the base before you park (#3075).')"
   [ -n "$ln" ]
-  body="$(prose_window "$fix" "$((ln + 20))" 20)"
-  contains "$body" 'the merge-base of HEAD with the default branch, by reading the finding'
-  contains "$body" 'merge-base HEAD'
+  body="$(prose_window "$fix" "$((ln + 28))" 28)"
+  contains "$body" "the merge-base of HEAD with the loop's own base — the base of this round's panel handoff, handoff-<round>-panel.json in the handoff's work_dir — by reading the finding"
+  contains "$body" '--file <work_dir>/handoff-<round>-panel.json | jq -r .base)"'
+  contains "$body" 'merge-base HEAD "$loop_base"'
+  contains "$body" 'When <file> does not exist at the base, find the R line whose new path is <file> in git -C <worktree_root> diff --name-status -M "$base" HEAD and read its old path at the base instead'
+  contains "$body" 'Only with no such line, a file the story created, is the behaviour absent at the base.'
+  contains "$body" 'A git show that fails on a path never means the base cannot be computed.'
+  contains "$body" 'The base cannot be computed when the panel handoff cannot be read or merge-base fails.'
   contains "$body" "removed or broke it, the finding is a regression: apply the restoration, never park it"
   contains "$body" 'Park only when the behaviour is absent at the base.'
   contains "$body" "Record every check in the verdict's base_checks array as {base, at_base}"

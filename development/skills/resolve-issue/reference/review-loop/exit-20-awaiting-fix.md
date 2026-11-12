@@ -254,8 +254,8 @@
 
 **A regression is restored, never parked (#3075).** Rule 1 sits inside the
 byte-frozen span above, so its regression arm is recorded here, and it governs
-where the span disagrees. The base is the story's merge-base with the default
-branch. When a finding asks for behaviour that exists at that base and the
+where the span disagrees. The base is the story's merge-base with the loop's
+base. When a finding asks for behaviour that exists at that base and the
 story's own diff removed or broke it, the fix pass applies the restoration and
 never parks it, even when restoring it adds a branch, an arm or a paragraph
 back. The fix pass decides this by reading the base, never from memory, and
