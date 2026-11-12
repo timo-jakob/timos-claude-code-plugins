@@ -936,6 +936,46 @@ real() {  # $1 = subcommand ; rest = extra flags
   [ "$(echo "$output" | jq -r .repo_type)" = "composition" ]
 }
 
+# ---- #2930: an acceptance harness under the repo-root tests/acceptance/ never
+# changes the repo_type. These run the REAL detect-stack, like #3030's cases.
+
+@test "detect: #2930 a GitOps repo with a Playwright harness package.json is kubernetes" {
+  printf 'resources: []\n' > "$R/kustomization.yaml"
+  mkdir -p "$R/tests/acceptance/web-ui"
+  printf '{ "devDependencies": { "@playwright/test": "1.48.0" } }\n' > "$R/tests/acceptance/web-ui/package.json"
+  real detect
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c .)" = '{"repo_type":"kubernetes"}' ]
+  real plan --base main
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .review_skill)" = "development-kubernetes:review" ]
+}
+
+@test "detect: #2930 a nested frontend/package.json is still javascript" {
+  mkdir -p "$R/frontend"
+  printf '{ "name": "frontend" }\n' > "$R/frontend/package.json"
+  real detect
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "javascript" ]
+}
+
+@test "detect: #2930 a kubernetes marker beside a root package.json is still javascript" {
+  printf 'resources: []\n' > "$R/kustomization.yaml"
+  printf '{ "name": "ops-console" }\n' > "$R/package.json"
+  real detect
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .repo_type)" = "javascript" ]
+}
+
+@test "detect: #2930 a go module with an acceptance harness package.json is go, not ambiguous" {
+  printf 'module github.com/acme/ledger\n\ngo 1.23\n' > "$R/go.mod"
+  mkdir -p "$R/tests/acceptance/web"
+  printf '{ "name": "ledger-web-acceptance" }\n' > "$R/tests/acceptance/web/package.json"
+  real detect
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c .)" = '{"repo_type":"go"}' ]
+}
+
 @test "plan: #3030 a composition fixture plans development-composition:review" {
   printf 'schema: claude-workspace/v1\n' > "$R/.claude-workspace.yaml"
   real plan --base main

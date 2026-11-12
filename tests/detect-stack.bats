@@ -17,6 +17,7 @@
 bats_require_minimum_version 1.5.0
 
 load marker-find-stub
+load assertions
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -1503,6 +1504,76 @@ _fake_tree() {  # $1.. = ops major dirs; "vN" -> openapi.yaml, "vN:tmpl" -> open
 @test "detect-stack #1899: outside a composition repo, mfe-contract/package.json is still a javascript marker" {
   mkdir -p mfe-contract
   printf '{ "name": "@acme/mfe-contract", "version": "1.0.0" }\n' > mfe-contract/package.json
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -c '.languages' <<<"$out")" = '["javascript"]' ]
+}
+
+# --- #2930: the repo-root tests/acceptance/ harness tree is not a language ---
+# The pipeline writes acceptance harnesses under tests/acceptance/<surface>/
+# (#243). A GitOps repo whose only JavaScript was a Playwright harness detected
+# as javascript, so resolve-issue loaded the javascript profile and panel.
+
+@test "detect-stack #2930: a kubernetes repo whose only package.json is an acceptance harness detects no language" {
+  printf 'resources: []\n' > kustomization.yaml
+  mkdir -p tests/acceptance/web-ui
+  printf '{ "name": "web-ui-acceptance", "devDependencies": { "@playwright/test": "1.48.0" } }\n' \
+    > tests/acceptance/web-ui/package.json
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -c '.languages' <<<"$out")" = '[]' ]
+  [ "$(jq -r '.is_kubernetes' <<<"$out")" = "true" ]
+}
+
+@test "detect-stack #2930: a nested frontend/package.json is still javascript" {
+  mkdir -p frontend
+  printf '{ "name": "frontend", "version": "0.1.0" }\n' > frontend/package.json
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -c '.languages' <<<"$out")" = '["javascript"]' ]
+}
+
+@test "detect-stack #2930: a kubernetes repo with a root package.json is still javascript" {
+  printf 'resources: []\n' > kustomization.yaml
+  printf '{ "name": "ops-console", "version": "0.1.0" }\n' > package.json
+  mkdir -p tests/acceptance/web-ui
+  printf '{ "name": "web-ui-acceptance" }\n' > tests/acceptance/web-ui/package.json
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -c '.languages' <<<"$out")" = '["javascript"]' ]
+}
+
+@test "detect-stack #2930: a go module with an acceptance harness package.json is go alone" {
+  printf 'module github.com/acme/ledger\n\ngo 1.23\n' > go.mod
+  mkdir -p tests/acceptance/web
+  printf '{ "name": "ledger-web-acceptance" }\n' > tests/acceptance/web/package.json
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -c '.languages' <<<"$out")" = '["go"]' ]
+}
+
+@test "detect-stack #2930: every language's marker under the root tests/acceptance/ is pruned" {
+  mkdir -p tests/acceptance/cli tests/acceptance/rest
+  printf 'pytest==8.3.3\n' > tests/acceptance/cli/requirements.txt
+  printf 'plugins { java }\n' > tests/acceptance/rest/build.gradle.kts
+  printf '{ "name": "harness" }\n' > tests/acceptance/package.json
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -c '.languages' <<<"$out")" = '[]' ]
+}
+
+@test "detect-stack #2930: a nested services/api/tests/acceptance/ is not pruned" {
+  mkdir -p services/api/tests/acceptance
+  printf '{ "name": "api-acceptance" }\n' > services/api/tests/acceptance/package.json
+  out=$(bash "$DETECT" 2>/dev/null)
+  [ "$(jq -c '.languages' <<<"$out")" = '["javascript"]' ]
+}
+
+@test "detect-stack #2930: ARCHITECTURE.md records the trees that are never language markers" {
+  local arch="$REPO_ROOT/ARCHITECTURE.md" flat
+  flat="$(awk '/^### Primary \/ auxiliary model$/{f=1;next} f&&/^### /{exit} f' "$arch" | tr '\n' ' ')"
+  contains "$flat" "A detected language comes from a marker file outside the trees the pipeline itself writes."
+  contains "$flat" 'A `templates/` payload, a composition repo'"'"'s root `mfe-contract/`, a git-ignored file and the repo-root `tests/acceptance/` harness tree are never language markers, so an acceptance harness never changes what a repo is detected as'
+  contains "$flat" 'a nested `services/api/tests/acceptance/` or a root `tests/e2e/` still counts'
+}
+
+@test "detect-stack #2930: a root tests/e2e/package.json is not pruned" {
+  mkdir -p tests/e2e
+  printf '{ "name": "e2e" }\n' > tests/e2e/package.json
   out=$(bash "$DETECT" 2>/dev/null)
   [ "$(jq -c '.languages' <<<"$out")" = '["javascript"]' ]
 }

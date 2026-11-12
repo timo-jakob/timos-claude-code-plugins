@@ -428,6 +428,15 @@ fi
 # output (#1899), not application code, so it is pruned there too — otherwise
 # its package.json reads as javascript and §3m's language guard stops a re-run.
 #
+# The repo-root `tests/acceptance/` tree is where the pipeline writes acceptance
+# harnesses (`tests/acceptance/<surface>/`, #243), so it is pruned for every
+# language's markers (#2930). A GitOps repo whose only JavaScript is a Playwright
+# harness's package.json detected as javascript, and resolve-issue loaded the
+# javascript profile and panel instead of kubernetes. The prune is anchored at
+# `$cwd` and unconditional: a nested `services/api/tests/acceptance/` or a
+# root `tests/e2e/` still counts. Like the mfe-contract prune it is a `$cwd`
+# path, not a `*/<dir>` token, so the topic-marker parity suites do not see it.
+#
 # A marker file git reports as IGNORED is not a project language marker (#3029).
 # A composition repo keeps local checkouts of its member repos beside its own
 # files and git-ignores them; their package.json counted, so the composition
@@ -476,6 +485,7 @@ detect_lang() {
 			printf '%s\n' "$lang"
 			return
 		done < <(find "$cwd" -mindepth 1 ${mfe_prune[@]+"${mfe_prune[@]}"} \
+			-path "$cwd/tests/acceptance" -prune -o \
 			-path '*/node_modules' -prune -o \
 			-path '*/.git' -prune -o \
 			-path '*/vendor' -prune -o \
