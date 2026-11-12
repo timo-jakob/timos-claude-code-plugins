@@ -18,7 +18,7 @@
 #   chain-queue.zsh add    --repo-dir DIR --issue N --entry I
 #                          --kind blocker|named|follow-up
 #                          [--depth D] [--before M] [--after M] [--finding JSON]
-#                          [--pr P]
+#                          [--pr P] [--child-pr P]...
 #       Queue issue I and print the queue. Order: blockers deepest-first (by
 #       --depth, default 1), then the named issue, then follow-ups first-filed
 #       first. A blocker with --before M goes directly before entry M (a
@@ -28,7 +28,11 @@
 #       already queued from M. An issue already queued is not added twice;
 #       with --pr its recorded PR is set, and --kind may then be left out. A follow-up whose finding identity
 #       equals a follow-up already done in this queue is refused as a cycle
-#       (exit 3) and nothing is written.
+#       (exit 3) and nothing is written. --child-pr P (repeatable, #3081)
+#       records P, an E3 child's PR that has merged, on entry I, an epic-kind
+#       entry already queued: P is appended to its child_prs, in recorded
+#       order, and a PR already there is not added twice. On an entry not yet
+#       queued it exits 5 and nothing is written.
 #   chain-queue.zsh next   --repo-dir DIR --issue N
 #       Print the first entry not yet done. Exit 4 when there is none: every
 #       queued issue is done, which is the run's done condition.
@@ -37,10 +41,12 @@
 #   chain-queue.zsh report --repo-dir DIR --issue N --stopped I --reason TEXT
 #                          [--pause]
 #       Print the stop comment's body: the line `chain stopped: #I — TEXT`
-#       (`chain stopped: #I (paused, not failed) — TEXT` with --pause), every PR
-#       recorded on a done entry (or none; an epic-kind entry records none, its
-#       children's PRs are in its E3 report) and every issue still queued (or
-#       none).
+#       (`chain stopped: #I (paused, not failed) — TEXT` with --pause), every
+#       PR merged in the run (or none) and every issue still queued (or none).
+#       The merged line takes the entries in queue order: each entry's own PR
+#       when the entry is done, then its child_prs, done or not, each PR once.
+#       A PR recorded with add --pr on an entry not yet done is not listed. It
+#       reads only the queue file and makes no GitHub call.
 #   chain-queue.zsh close-out --repo-dir DIR --issue N --entry I --pr P
 #       Entry I's PR P has merged (#3078): mark I done with P, then print
 #       {"cleared": B, "next": E}. When no entry is left queued the queue file
@@ -53,14 +59,18 @@
 # A queue file that does not exist is an empty queue for next and report; add
 # creates it. The file (chain-queue/v1):
 #   {schema, named, entries: [{issue, kind, state, pr, depth, filed_by, before,
-#    finding}]}
+#    finding, child_prs?}]}
 #   state is "queued" or "done"; pr is a number or null; filed_by is the entry
 #   a follow-up came from and before the entry a --before blocker serves.
+#   child_prs, optional, is the merged PRs of an epic-kind entry's E3 children
+#   (the leaves, in an epic tree), in recorded order; it is written only by
+#   add --child-pr, and a missing child_prs reads as [], so a queue file from
+#   before #3081 reads and reports as it did. The schema stays chain-queue/v1.
 #
 # Exit codes: 0 ok · 1 internal (jq missing, the base not derivable, an
 # unreadable queue file) · 2 usage · 3 follow-up cycle refused · 4 queue empty
-# (next) · 5 unknown entry (done or close-out, or add --before/--after naming
-# no entry)
+# (next) · 5 unknown entry (done or close-out, add --before/--after naming
+# no entry, or add --child-pr on an entry not yet queued)
 emulate -L zsh
 setopt err_return no_unset pipe_fail
 
@@ -79,6 +89,7 @@ case "$cmd" in
 esac
 
 local repo_dir="" issue="" entry="" kind="" depth="1" before="" after="" finding="" pr=""
+local -a child_prs=()
 local stopped="" reason="" pause=0
 _only() { [[ " $2 " == *" $cmd "* ]] || { print -u2 -- "chain-queue: $1 is not a flag of $cmd"; exit 2 } }
 while (( $# > 0 )); do
@@ -92,6 +103,7 @@ while (( $# > 0 )); do
   --after) _only "$1" "add"; _need_val "$1" $# "${2:-}"; after="$2"; shift 2 ;;
   --finding) _only "$1" "add"; _need_val "$1" $# "${2:-}"; finding="$2"; shift 2 ;;
   --pr) _only "$1" "add done close-out"; _need_val "$1" $# "${2:-}"; pr="$2"; shift 2 ;;
+  --child-pr) _only "$1" "add"; _need_val "$1" $# "${2:-}"; child_prs+=("$2"); shift 2 ;;
   --stopped) _only "$1" "report"; _need_val "$1" $# "${2:-}"; stopped="$2"; shift 2 ;;
   --reason) _only "$1" "report"; _need_val "$1" $# "${2:-}"; reason="$2"; shift 2 ;;
   --pause) _only "$1" "report"; pause=1; shift ;;
@@ -105,7 +117,8 @@ _num --issue "$issue"
 [[ -d "$repo_dir" ]] || { print -u2 -- "chain-queue: --repo-dir is not a directory: $repo_dir"; exit 2 }
 case "$cmd" in
 add)
-  [[ -n "$entry" && ( -n "$kind" || -n "$pr" ) ]] || { print -u2 -- "chain-queue: add needs --entry and --kind"; exit 2 }
+  [[ -n "$entry" && ( -n "$kind" || -n "$pr" || ${#child_prs} -gt 0 ) ]] || {
+    print -u2 -- "chain-queue: add needs --entry and --kind"; exit 2 }
   _num --entry "$entry"
   [[ -z "$kind" ]] || [[ "$kind" == blocker || "$kind" == named || "$kind" == follow-up ]] || {
     print -u2 -- "chain-queue: --kind must be blocker, named or follow-up (got: $kind)"; exit 2 }
@@ -113,6 +126,8 @@ add)
   [[ -z "$before" ]] || _num --before "$before"
   [[ -z "$after" ]] || _num --after "$after"
   [[ -z "$pr" ]] || _num --pr "$pr"
+  local cp=""
+  for cp in "${child_prs[@]}"; do _num --child-pr "$cp"; done
   [[ -z "$before" || "$kind" == blocker ]] || { print -u2 -- "chain-queue: --before is for a blocker only"; exit 2 }
   [[ "$kind" == named && "$entry" != "$issue" ]] && { print -u2 -- "chain-queue: the named entry must be --issue itself"; exit 2 }
   if [[ "$kind" == follow-up ]]; then
@@ -167,8 +182,13 @@ add)
   if (( present > 0 )); then
     [[ -n "$pr" ]] && q=$(print -r -- "$q" | jq -c --argjson i "$entry" --argjson p "$pr" \
       '.entries |= map(if .issue == $i then .pr = $p else . end)')
+    (( ${#child_prs} > 0 )) && q=$(print -r -- "$q" | jq -c --argjson i "$entry" \
+      --argjson c "[${(j:,:)child_prs}]" \
+      '.entries |= map(if .issue == $i then .child_prs = (reduce $c[] as $p ((.child_prs // []);
+         if index([$p]) == null then . + [$p] else . end)) else . end)')
     _write "$q"; exit 0
   fi
+  (( ${#child_prs} == 0 )) || { print -u2 -- "chain-queue: --child-pr needs an entry already queued: no queued entry #$entry"; exit 5 }
   [[ -n "$kind" ]] || { print -u2 -- "chain-queue: no queued entry #$entry"; exit 5 }
   if [[ "$kind" == follow-up ]]; then
     print -r -- "$q" | jq -e --argjson f "$finding" \
@@ -244,7 +264,9 @@ report)
   print -r -- "$q" | jq -r --argjson s "$stopped" --arg r "$reason" --argjson pause "$pause" '
     def refs: if length == 0 then "none" else map("#\(.)") | join(", ") end;
     "chain stopped: #\($s)" + (if $pause == 1 then " (paused, not failed)" else "" end) + " — " + $r,
-    "Merged in this run: " + ([.entries[] | select(.state == "done" and .pr != null) | .pr] | refs),
+    "Merged in this run: " + ([.entries[] | (if .state == "done" and .pr != null then [.pr] else [] end)
+        + (.child_prs // []) | .[]]
+      | reduce .[] as $p ([]; if index([$p]) == null then . + [$p] else . end) | refs),
     "Still queued: " + ([.entries[] | select(.state != "done") | .issue] | refs)'
   ;;
 clear)
