@@ -400,9 +400,12 @@ _unreached_reference_files() {
   #
   # THIRTY-THREE since #3079: reference/checkpoint.md gains *Reconciling the
   # test-case bodies before the PR (#3079)*, the procedure §6 points at.
+  #
+  # THIRTY-FOUR since #3082: reference/epic-tree.md gains *Same-epic siblings
+  # in other repos (#3082)*, which step 0a points at.
   local n
   n="$(_ref_headings | grep -c .)"
-  [ "$n" -eq 33 ]
+  [ "$n" -eq 34 ]
 }
 
 # --- pointers resolve -------------------------------------------------------

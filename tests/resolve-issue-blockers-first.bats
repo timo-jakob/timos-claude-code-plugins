@@ -155,12 +155,20 @@ after_span() {
 
 @test "#3078 AC1: an open foreign blocker is waited on with one bounded Monitor call before the run stops" {
   s="$(bf_step 2)"
-  contains "$s" "**An open foreign blocker is waited on first (#3078).** Take each \`foreign_blockers\` entry with \`open: true\` in turn, before any local blocker is built, because clearing the local ones cannot make the precheck pass."
+  contains "$s" "**An open foreign blocker is waited on first (#3078).** Take each \`foreign_blockers\` entry with \`open: true\` in turn, before any local blocker is built but the ones named below, because clearing the local ones cannot make the precheck pass."
   contains "$s" "Watch it with one bounded \`Monitor\` call, the same bound as step 4's thirty one-a-minute re-reads: its command is \`\"<skill-base-dir>/scripts/bounded-wait.zsh\" issue --repo <owner/name> --issue <M>\` and its \`timeout_ms\` is \`1800000\`."
   contains "$s" "\`closed\` or \`already-closed\` → the blocker is gone: go back to step 1 and read the decision again. The run continues on whatever that precheck returns."
-  contains "$s" "\`timeout\`, \`unreadable\`, a script exit 1 or 2, or a \`Monitor\` call that expires with no line → stop the run (step 6) as before the wait existed, naming the foreign ref."
+  contains "$s" "\`timeout\`, \`unreadable\`, a script exit 1 or 2, or a \`Monitor\` call that expires with no line → stop the run (step 6), naming the foreign ref, with the reason that the foreign ref was still open when the wait ended, followed by the wait's \`result\` line, or that no line came. Only when the planner exited 10 and its \`lines\` name that ref, add them to the reason."
+  lacks "$s" "with the planner's exit-10 \`lines\` as the reason"
   contains "$s" "The state stays resumable: re-running \`/development:resolve-issue\` on the named issue starts at step 1 again."
   contains "$s" "Wait on each foreign ref at most once in a run; a ref that is open again after its wait stops the run (step 6)."
+}
+
+@test "#3088: a run-first sibling among the target's local blockers is cleared before the foreign wait" {
+  s="$(bf_step 2)"
+  contains "$s" "**A sibling to run first in this repo is cleared before the wait (#3088).** On the planner's exit 10, take each \`run_first\` ref in the session's own repo that is also one of the target's open \`blockers\`, and clear it first, as step 3 clears a blocker (step 4 merges it); its \`run first\` line says a blockers-first run clears it. Then wait on the foreign blocker, which may wait on it. Step 3 later skips it as already cleared."
+  clear_at="${s%%A sibling to run first in this repo*}"
+  lacks "$clear_at" "Watch it with one bounded"
 }
 
 @test "#3078 AC4: the blocker choice is never put to the human, and the rule says so" {

@@ -1,7 +1,7 @@
 # resolve-issue — the sub-issue tree
 
 On-demand reference for `development/skills/resolve-issue/SKILL.md` — read it
-when the Epic flow points here, never up front. The reader it relies on is
+when the Epic flow or step 0a points here, never up front. The reader it relies on is
 `scripts/read-sub-issues.zsh --tree`, whose header states the document, the five
 kinds and the exit codes; this file is only the procedure that consumes them.
 
@@ -91,6 +91,20 @@ on an inner node applies to **every leaf under it**: a leaf of `#231` waits for
 `#231`'s blockers. An edge that points **at** an inner node is satisfied when
 that node closes. Ordering is never the only guard: E3 enforces both.
 
+**A cross-repo epic is ordered across its repos (#3082).** When the tree holds
+a `foreign` node, run
+`"<skill-base-dir>/scripts/plan-cross-repo-order.zsh" --repo "$REPO" --epic <P>`
+once for each open node `P` with a `foreign` child, the target included, and
+print its `lines` in the run output. They give the full cross-repo order and
+name the next session to start in each other repo. Order `P`'s same-repo
+children by its `local_order`, which places each one after every sibling it
+waits on in any repo; an inner child's leaves take that child's place.
+E3's summary comment carries the same `lines`. The run never drives another
+repo: a `foreign` node is still listed, never built, and a leaf whose foreign
+sibling blocker is still open is parked by its own step 0a. An exit 1, or a
+second exit 2, costs only the plan: order as above without it, and say in the
+summary that the cross-repo plan could not be read.
+
 ## E3 — build leaves
 
 **Only leaves are built.** An inner node gets no branch, no PR and **no story
@@ -144,3 +158,16 @@ writes no `split-child` record. So a node with native sub-issues and no trusted
 record is an inner node whose children refine-issue or a human filed: E3 walks
 its sub-issues as this file describes, and never applies #2695's size route to
 it. `tests/epic-tree-walk.bats` pins that the script writes no such record.
+
+## Same-epic siblings in other repos (#3082)
+
+Step 0a runs this report right before the dependency precheck, on every
+single-issue run, an epic's leaves included:
+`"<skill-base-dir>/scripts/plan-cross-repo-order.zsh" --repo "$REPO" --issue <N>`.
+It reads the parent epic's sub-issues in every repo, with their blocked-by
+links, and decides nothing: the precheck stays the one gate. Exit 0 and exit 3
+(no parent epic) add nothing. Exit 10 means a same-epic sibling in another repo
+still blocks the issue: say its `lines` once, which name that sibling and the
+sibling to run first, each with its repo; a blockers-first stop on that sibling
+adds them to its reason (`reference/interactive/blockers-first.md` step 2).
+Exit 1 costs only that report: say so in one line and go on. Exit 2 is your own call: fix it and re-run once.
