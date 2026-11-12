@@ -195,7 +195,10 @@ file; never re-add an entry under another kind.
    blockers first's step 4 waits, then `done --entry <I> --pr <P>`. An
    epic-kind entry has no PR of its own: once the Epic flow closes its epic,
    `done --entry <I>` without `--pr`; an Epic flow that ends with the epic still
-   open is a park (step 5). Take `next` once the entry is `done`.
+   open is a park (step 5). Take `next` once the entry is `done`. Its E3
+   children's PRs are recorded on it instead (#3081): as soon as E3 sees a
+   child's PR merge, a leaf at any depth of an epic tree included, the root runs
+   `add --entry <I> --child-pr <P>`, whether or not the entry ends `done`.
 
    **Where the PR cannot advance by itself, wait for it before pausing
    (#3078).** It cannot when its checks are green and it has not merged: a
@@ -243,7 +246,8 @@ file; never re-add an entry under another kind.
    --reason <why>`, beginning `chain stopped:`, and prints the same text in the
    run's report. It applies no label, because the stopping issue keeps what its
    own run posted. Its `Merged in this run:` line lists the PRs recorded on
-   `done` entries; an epic-kind entry's child PRs are in its E3 report.
+   `done` entries and includes every merged PR of an epic-kind entry's E3
+   children, whether or not that entry is `done`, each PR once.
    Every record keeps its own run's outcome, and no telemetry
    outcome or field is added. The queue file is kept.
 7. **Resume from the queue.** A re-run on the named issue that finds the file

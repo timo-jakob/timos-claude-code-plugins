@@ -123,8 +123,11 @@ cq_step() {
   contains "$s" "An epic-kind entry has no PR of its own: once the Epic flow closes its epic, \`done --entry <I>\` without \`--pr\`; an Epic flow that ends with the epic still open is a park (step 5). Take \`next\` once the entry is \`done\`."
 }
 
-@test "AC3: the stop report's merged line lists PRs recorded on done entries; an epic's child PRs are in its E3 report" {
-  contains "$(cq_step 6)" "Its \`Merged in this run:\` line lists the PRs recorded on \`done\` entries; an epic-kind entry's child PRs are in its E3 report."
+@test "#3081 AC5: the stop report's merged line includes an epic-kind entry's child PRs, and step 3 says when they are recorded" {
+  s6="$(cq_step 6)"
+  contains "$s6" "Its \`Merged in this run:\` line lists the PRs recorded on \`done\` entries and includes every merged PR of an epic-kind entry's E3 children, whether or not that entry is \`done\`, each PR once."
+  lacks "$s6" "child PRs are in its E3 report"
+  contains "$(cq_step 3)" "Its E3 children's PRs are recorded on it instead (#3081): as soon as E3 sees a child's PR merge, a leaf at any depth of an epic tree included, the root runs \`add --entry <I> --child-pr <P>\`, whether or not the entry ends \`done\`."
 }
 
 @test "AC3: chain-steps' arms route the queue: done follows queue step 3, blocked re-queues, ready starts a follow-up at §0a" {

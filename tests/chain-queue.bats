@@ -340,3 +340,67 @@ SH
   [ "$status" -eq 5 ]
   [ -f "$QF" ]
 }
+
+# --- #3081: the merged line lists an epic-kind entry's child PRs ---------------
+
+@test "#3081 AC1: an epic-kind named entry never marked done reports its child's merged PR" {
+  q add --entry 10 --kind named >/dev/null
+  run -0 q add --entry 10 --child-pr 501
+  [ "$(jq -c '.entries[0].child_prs' "$QF")" = "[501]" ]
+  run -0 q report --stopped 10 --reason 'a child clean-stopped'
+  expected="$(printf '%s\n' 'chain stopped: #10 — a child clean-stopped' 'Merged in this run: #501' 'Still queued: #10')"
+  [ "$output" = "$expected" ]
+}
+
+@test "#3081 AC2: a PR recorded with add --pr and not yet merged stays off the merged line" {
+  q add --entry 10 --kind named --pr 41 >/dev/null
+  run -0 q report --stopped 10 --reason 'PR #41 awaits a merge' --pause
+  [ "$(sed -n 2p <<< "$output")" = "Merged in this run: none" ]
+  q add --entry 10 --child-pr 501 >/dev/null
+  run -0 q report --stopped 10 --reason 'PR #41 awaits a merge' --pause
+  [ "$(sed -n 2p <<< "$output")" = "Merged in this run: #501" ]
+}
+
+@test "#3081 AC3: each PR once, in queue order — an entry's own PR, then its child PRs as recorded" {
+  q add --entry 3 --kind blocker >/dev/null
+  q add --entry 10 --kind named >/dev/null
+  q add --entry 20 --kind follow-up --after 10 --finding "$(fnd a 1 x)" >/dev/null
+  q add --entry 20 --child-pr 703 --child-pr 702 >/dev/null
+  q add --entry 10 --child-pr 602 >/dev/null
+  q add --entry 10 --child-pr 601 --child-pr 602 >/dev/null
+  q done --entry 3 --pr 500 >/dev/null
+  q done --entry 20 --pr 700 >/dev/null
+  q add --entry 20 --child-pr 601 >/dev/null
+  [ "$(jq -c '[.entries[] | .child_prs]' "$QF")" = '[null,[602,601],[703,702,601]]' ]
+  run -0 q report --stopped 10 --reason 'it parked'
+  contains "$output" "Merged in this run: #500, #602, #601, #700, #703, #702"
+}
+
+@test "#3081 AC4: a queue file without child_prs reads and reports exactly as before" {
+  mkdir -p "$BASE"
+  printf '%s' '{"schema":"chain-queue/v1","named":10,"entries":[
+    {"issue":3,"kind":"blocker","state":"done","pr":100,"depth":1,"filed_by":null,"before":null,"finding":null},
+    {"issue":10,"kind":"named","state":"queued","pr":null,"depth":null,"filed_by":null,"before":null,"finding":null}]}' > "$QF"
+  run -0 q report --stopped 10 --reason 'it parked'
+  expected="$(printf '%s\n' 'chain stopped: #10 — it parked' 'Merged in this run: #100' 'Still queued: #10')"
+  [ "$output" = "$expected" ]
+  run -0 q next
+  [ "$(jq -r .issue <<< "$output")" = "10" ]
+  run -0 q add --entry 10 --child-pr 501
+  [ "$(jq -c '.entries[0] | has("child_prs")' "$QF")" = "false" ]
+}
+
+@test "#3081: --child-pr on an entry not yet queued exits 5 and writes nothing; a bad value is usage" {
+  q add --entry 10 --kind named >/dev/null
+  before="$(cat "$QF")"
+  run -5 q add --entry 99 --child-pr 501
+  contains "$output" "--child-pr needs an entry already queued: no queued entry #99"
+  run -5 q add --entry 99 --kind blocker --child-pr 501
+  [ "$(cat "$QF")" = "$before" ]
+  run -2 q add --entry 10 --child-pr 05
+  contains "$output" "--child-pr must be an issue or PR number (got: 05)"
+  run -2 q done --entry 10 --child-pr 501
+  contains "$output" "--child-pr is not a flag of done"
+  run -2 q add --entry 10 --child-pr
+  contains "$output" "--child-pr needs a value"
+}
