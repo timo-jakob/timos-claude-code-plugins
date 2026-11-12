@@ -1568,6 +1568,7 @@ _fake_tree() {  # $1.. = ops major dirs; "vN" -> openapi.yaml, "vN:tmpl" -> open
   flat="$(awk '/^### Primary \/ auxiliary model$/{f=1;next} f&&/^### /{exit} f' "$arch" | tr '\n' ' ')"
   contains "$flat" "A detected language comes from a marker file outside the trees the pipeline itself writes."
   contains "$flat" 'A `templates/` payload, a composition repo'"'"'s root `mfe-contract/`, a git-ignored file and the repo-root `tests/acceptance/` harness tree are never language markers, so an acceptance harness never changes what a repo is detected as'
+  contains "$flat" 'a nested `services/api/tests/acceptance/` or a root `tests/e2e/` still counts'
 }
 
 @test "detect-stack #2930: a root tests/e2e/package.json is not pruned" {
