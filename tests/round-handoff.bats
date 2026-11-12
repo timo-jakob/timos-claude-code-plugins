@@ -621,6 +621,36 @@ round_trip() {
   contains "$stderr" "ac_check is not checked, which handoff-2-fix.json implies"
 }
 
+@test "rejects a parked checked when the round's fix handoff carries a null acceptance_criteria_file (#3074)" {
+  write handoff "$(fix_handoff awaiting-fix | jq '.acceptance_criteria_file = null')"
+  write verdict "$(fix_verdict_ok | jq '.parked = [{issue: 3081, ac_check: "checked"}]')"
+  [ "$status" -eq 3 ]
+  contains "$stderr" "ac_check is not no-ac-file, which handoff-2-fix.json implies"
+  [ ! -f "$WD/verdict-2-fix.json" ]
+}
+
+@test "rejects a verdict whose parked items disagree, one checked and one no-ac-file (#3074)" {
+  write handoff "$(fix_handoff awaiting-fix)"
+  write verdict "$(fix_verdict_ok | jq '.parked = [{issue: 3081, ac_check: "checked"}, {issue: 3082, ac_check: "no-ac-file"}]')"
+  [ "$status" -eq 3 ]
+  contains "$stderr" "ac_check is not checked, which handoff-2-fix.json implies"
+  [ ! -f "$WD/verdict-2-fix.json" ]
+}
+
+@test "writes a verdict whose every parked item is checked beside a handoff naming an acceptance-criteria file (#3074)" {
+  write handoff "$(fix_handoff awaiting-fix)"
+  write verdict "$(fix_verdict_ok | jq '.parked = [{issue: 3081, ac_check: "checked"}, {issue: 3082, ac_check: "checked"}]')"
+  [ "$status" -eq 0 ]
+  [ -f "$WD/verdict-2-fix.json" ]
+}
+
+@test "writes a verdict whose every parked item is no-ac-file beside a handoff with a null acceptance_criteria_file (#3074)" {
+  write handoff "$(fix_handoff awaiting-fix | jq '.acceptance_criteria_file = null')"
+  write verdict "$(fix_verdict_ok | jq '.parked = [{issue: 3081, ac_check: "no-ac-file"}, {issue: 3082, ac_check: "no-ac-file"}]')"
+  [ "$status" -eq 0 ]
+  [ -f "$WD/verdict-2-fix.json" ]
+}
+
 @test "rejects a cannot-fix verdict that parks a finding (#3074)" {
   write verdict "$(fix_verdict_ok | jq '.outcome = "failed" | .cause = "cannot-fix" | .fix_applied = false | .files_changed = 0 | .parked = [{issue: 3081, ac_check: "checked"}]')"
   rejected "and park nothing"
