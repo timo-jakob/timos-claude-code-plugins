@@ -42,8 +42,10 @@ git -C <worktree_root> show "$base:<file>"
 
 When `<file>` does not exist at the base, find the `R` line whose new path is
 `<file>` in `git -C <worktree_root> diff --name-status -M "$base" HEAD` and
-read its old path at the base instead: the story moved it. Only with no such
-line, a file the story created, is the behaviour absent at the base. A
+read its old path at the base instead: the story moved it. With no such line,
+search the whole base for what the finding names, as in
+`git -C <worktree_root> grep -n <identifier> "$base"`: the behaviour is absent
+at the base only when that search finds nothing too. A
 `git show` that fails on a path never means the base cannot be computed.
 
 When the behaviour the finding asks for exists at the base and the story's diff

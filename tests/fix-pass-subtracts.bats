@@ -701,7 +701,7 @@ _roster_hits() {
   contains "$body" '--file <work_dir>/handoff-<round>-panel.json | jq -r .base)"'
   contains "$body" 'merge-base HEAD "$loop_base"'
   contains "$body" 'When <file> does not exist at the base, find the R line whose new path is <file> in git -C <worktree_root> diff --name-status -M "$base" HEAD and read its old path at the base instead'
-  contains "$body" 'Only with no such line, a file the story created, is the behaviour absent at the base.'
+  contains "$body" 'With no such line, search the whole base for what the finding names, as in git -C <worktree_root> grep -n <identifier> "$base": the behaviour is absent at the base only when that search finds nothing too.'
   contains "$body" 'A git show that fails on a path never means the base cannot be computed.'
   contains "$body" 'The base cannot be computed when the panel handoff cannot be read or merge-base fails.'
   contains "$body" "removed or broke it, the finding is a regression: apply the restoration, never park it"
