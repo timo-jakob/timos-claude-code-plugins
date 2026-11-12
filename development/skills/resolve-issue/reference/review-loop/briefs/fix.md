@@ -40,9 +40,10 @@ base="$(git -C <worktree_root> merge-base HEAD "$loop_base")"
 git -C <worktree_root> diff "$base" HEAD
 ```
 
-When the behaviour the finding asks for is on a line that diff removes or
-changes, in whichever file, the story's diff removed or broke it: the finding is
-a regression, so apply the restoration and never park it. Park only when the
+When the behaviour the finding asks for is carried by the base side of that
+diff, a line it removes or replaces, in whichever file, it existed at the base
+and the story's diff removed or broke it: the finding is a regression, so apply
+the restoration and never park it. Park only when the
 story's diff removed or broke none of it. Record every check in the verdict's
 `base_checks` array as `{base, at_base}`: `base` is the full commit id you read,
 and `at_base` is `true` for a restoration you applied and `false` for a finding

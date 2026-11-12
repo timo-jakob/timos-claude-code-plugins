@@ -701,7 +701,7 @@ _roster_hits() {
   contains "$body" '--file <work_dir>/handoff-<round>-panel.json | jq -r .base)"'
   contains "$body" 'merge-base HEAD "$loop_base"'
   contains "$body" 'git -C <worktree_root> diff "$base" HEAD'
-  contains "$body" "When the behaviour the finding asks for is on a line that diff removes or changes, in whichever file, the story's diff removed or broke it: the finding is a regression, so apply the restoration and never park it."
+  contains "$body" "When the behaviour the finding asks for is carried by the base side of that diff, a line it removes or replaces, in whichever file, it existed at the base and the story's diff removed or broke it: the finding is a regression, so apply the restoration and never park it."
   contains "$body" "Park only when the story's diff removed or broke none of it."
   contains "$body" 'The base cannot be computed when the panel handoff cannot be read or merge-base fails.'
   contains "$body" "Record every check in the verdict's base_checks array as {base, at_base}"
