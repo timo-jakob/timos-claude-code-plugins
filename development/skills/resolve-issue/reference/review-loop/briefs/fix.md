@@ -31,32 +31,25 @@ nothing and return `failed` / `cannot-fix`.
 after the acceptance-criteria check is first checked against the story's base,
 the merge-base of `HEAD` with the loop's own base — the `base` of this round's
 panel handoff, `handoff-<round>-panel.json` in the handoff's `work_dir` — by
-reading the finding's file there:
+reading what the story's diff removed or changed:
 
 ```bash
 loop_base="$("<skill-base-dir>/scripts/round-handoff.zsh" read-handoff \
   --file <work_dir>/handoff-<round>-panel.json | jq -r .base)"
 base="$(git -C <worktree_root> merge-base HEAD "$loop_base")"
-git -C <worktree_root> show "$base:<file>"
+git -C <worktree_root> diff "$base" HEAD
 ```
 
-When `<file>` does not exist at the base, find the `R` line whose new path is
-`<file>` in `git -C <worktree_root> diff --name-status -M "$base" HEAD` and
-read its old path at the base instead: the story moved it. With no such line,
-search the whole base for what the finding names, as in
-`git -C <worktree_root> grep -n <identifier> "$base"`: the behaviour is absent
-at the base only when that search finds nothing too. A
-`git show` that fails on a path never means the base cannot be computed.
-
-When the behaviour the finding asks for exists at the base and the story's diff
-removed or broke it, the finding is a regression: apply the restoration, never
-park it. Park only when the behaviour is absent at the base. Record every check
-in the verdict's `base_checks` array as `{base, at_base}`: `base` is the full
-commit id you read, and `at_base` is `true` for a restoration you applied and
-`false` for a finding you parked, so every parked finding has its own
-`at_base: false` check. The base cannot be computed when the panel handoff
-cannot be read or `merge-base` fails. When the base cannot be computed, edit
-nothing and return `failed` / `cannot-fix`.
+When the behaviour the finding asks for is on a line that diff removes or
+changes, in whichever file, the story's diff removed or broke it: the finding is
+a regression, so apply the restoration and never park it. Park only when the
+story's diff removed or broke none of it. Record every check in the verdict's
+`base_checks` array as `{base, at_base}`: `base` is the full commit id you read,
+and `at_base` is `true` for a restoration you applied and `false` for a finding
+you parked, so every parked finding has its own `at_base: false` check. The
+base cannot be computed when the panel handoff cannot be read or `merge-base`
+fails. When the base cannot be computed, edit nothing and return `failed` /
+`cannot-fix`.
 
 **Negative assertions are scoped (#3075).** A test you write or edit that
 asserts something is absent is scoped to the container under test, for example

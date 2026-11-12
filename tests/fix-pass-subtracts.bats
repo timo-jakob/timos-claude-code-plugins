@@ -697,15 +697,13 @@ _roster_hits() {
   ln="$(prose_gate_lines "$fix" 'Check the base before you park (#3075).')"
   [ -n "$ln" ]
   body="$(prose_window "$fix" "$((ln + 28))" 28)"
-  contains "$body" "the merge-base of HEAD with the loop's own base — the base of this round's panel handoff, handoff-<round>-panel.json in the handoff's work_dir — by reading the finding"
+  contains "$body" "the merge-base of HEAD with the loop's own base — the base of this round's panel handoff, handoff-<round>-panel.json in the handoff's work_dir — by reading what the story's diff removed or changed"
   contains "$body" '--file <work_dir>/handoff-<round>-panel.json | jq -r .base)"'
   contains "$body" 'merge-base HEAD "$loop_base"'
-  contains "$body" 'When <file> does not exist at the base, find the R line whose new path is <file> in git -C <worktree_root> diff --name-status -M "$base" HEAD and read its old path at the base instead'
-  contains "$body" 'With no such line, search the whole base for what the finding names, as in git -C <worktree_root> grep -n <identifier> "$base": the behaviour is absent at the base only when that search finds nothing too.'
-  contains "$body" 'A git show that fails on a path never means the base cannot be computed.'
+  contains "$body" 'git -C <worktree_root> diff "$base" HEAD'
+  contains "$body" "When the behaviour the finding asks for is on a line that diff removes or changes, in whichever file, the story's diff removed or broke it: the finding is a regression, so apply the restoration and never park it."
+  contains "$body" "Park only when the story's diff removed or broke none of it."
   contains "$body" 'The base cannot be computed when the panel handoff cannot be read or merge-base fails.'
-  contains "$body" "removed or broke it, the finding is a regression: apply the restoration, never park it"
-  contains "$body" 'Park only when the behaviour is absent at the base.'
   contains "$body" "Record every check in the verdict's base_checks array as {base, at_base}"
   contains "$body" 'at_base is true for a restoration you applied and false for a finding you parked'
   contains "$body" 'When the base cannot be computed, edit nothing and return failed / cannot-fix.'
