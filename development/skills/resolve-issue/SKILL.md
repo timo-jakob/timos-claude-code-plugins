@@ -194,9 +194,9 @@ first gate (#3080).
 stopped run's work-dir, status file or grant ledger. An attended run moves any
 kept state aside instead, deleting nothing.
 
-Dependencies are enforced from **GitHub-native `blockedBy` relationships** —
-the single source of truth (#583); prose declares nothing. Before anything
-else — before the readiness gate, before any branch exists — run the precheck:
+Dependencies are enforced from **GitHub-native `blockedBy` (#583)**. Before the gate or a branch,
+report same-epic siblings in other repos (`reference/epic-tree.md` § *Same-epic siblings in
+other repos (#3082)*), then run the precheck:
 
 ```bash
 "<skill-base-dir>/scripts/dependency-precheck.zsh" --repo "$REPO" --issue <N>

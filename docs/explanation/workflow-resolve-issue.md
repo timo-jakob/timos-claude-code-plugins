@@ -23,7 +23,8 @@ Nothing is branched or built until the story has passed three checks.
    re-checks the links and builds the issue. An open blocker in another repository is watched for up to half an hour
    first, and the run carries on if it closes (#3078). A cycle, a foreign blocker still open after that wait, or a
    blocker that cannot finish stops the run: the issue gets one `blockers first stopped:` comment and the `blocked`
-   label.
+   label. When that foreign blocker is a sibling under the same epic, the run also reads the epic's children in every
+   repository and names the sibling to run first, and its repository (#3082).
 3. **Step 0b — readiness gate.** The `story-readiness` agent judges whether the story is specified well enough to
    build: testable acceptance criteria, bounded scope, declared dependencies, and — for a story that touches an
    interface — a use case and test cases. On NEEDS_REFINEMENT the run labels the issue `needs-refinement`, posts the
@@ -113,6 +114,8 @@ budgets, promotion, what you see while it runs — is in [The local review loop]
    the children's *blocked by* links form a cycle is checked afresh on every run, never taken from a stamp.
 3. **E2 — order and overlap.** Children are ordered by their dependencies, by the files they would touch, and by PRs
    already in flight. Children that bump the same plugin's version always collide on that line, so they serialise.
+   An epic with children in other repositories also gets a cross-repo plan: the full order across its repositories,
+   and the next session to start in each other one. The run resolves only its own repository's children (#3082).
 4. **E3 — resolve.** Children that are provably disjoint run in parallel, each in its own worktree. Everything else
    runs sequentially: each child goes through the single-issue flow, its PR merges, and the next child branches off
    that merge. A child that escalates is parked along with the children that depend on it; independent children keep
