@@ -435,3 +435,57 @@ gap_split() {
   contains "$(cat "$REPO_ROOT/docs/how-to/index.md")" 'let-refine-issue-answer-confident-questions.md'
   contains "$(cat "$REPO_ROOT/docs/reference/plugins.md")" '`refine_auto_accept_threshold`'
 }
+
+# --- #3079: scope the gate did not ask for is never auto-accepted --------------
+
+# us <kq-args…> — kq with "unrequested_scope": true
+us() { kq "$@" | jq -c '. + {unrequested_scope: true}'; }
+
+@test "#3079 an unrequested-scope intent or gap answer is asked at threshold 0, even scored 1" {
+  split 0 "[$(us intent '"a"' 1), $(us gap '"b"' 1)]"
+  [ "$status" -eq 0 ]
+  assert_eq "$(jq -c '[.ask[] | [.kind, .reason, .confidence]]' <<<"$output")" \
+    '[["intent","unrequested-scope","1.00"],["gap","unrequested-scope","1.00"]]' "ask entries"
+  assert_eq "$(jq -r '.auto | length' <<<"$output")" 0 "auto count"
+}
+
+@test "#3079 the 0.40-over-0.3 case: an unrequested-scope answer above the threshold is asked" {
+  split 300 "[$(us intent '"add a retry banner"' 0.4), $(kq intent '"keep the form"' 0.4)]"
+  [ "$status" -eq 0 ]
+  assert_eq "$(jq -c '[.ask[] | [.question, .reason]]' <<<"$output")" '[["Q?","unrequested-scope"]]' "ask"
+  assert_eq "$(jq -c '[.auto[] | .answer]' <<<"$output")" '["keep the form"]' "auto"
+}
+
+@test "#3079 an unrequested-scope mark also overrides the implementation kind's auto route" {
+  split 1000 "[$(us implementation '"use jq"' 1)]"
+  [ "$status" -eq 0 ]
+  assert_eq "$(jq -c '[.ask[] | [.kind, .reason]]' <<<"$output")" '[["implementation","unrequested-scope"]]' "ask"
+  assert_eq "$(jq -r '.auto | length' <<<"$output")" 0 "auto count"
+}
+
+@test "#3079 the mark fails safe: any value but false or null is asked, false and null route as before" {
+  split 0 "[$(kq intent '"a"' 1 | jq -c '.unrequested_scope = "yes"'), $(kq intent '"b"' 1 | jq -c '.unrequested_scope = false'), $(kq intent '"c"' 1 | jq -c '.unrequested_scope = null')]"
+  [ "$status" -eq 0 ]
+  assert_eq "$(jq -c '[.ask[] | [.recommended_answer, .reason]]' <<<"$output")" '[["a","unrequested-scope"]]' "ask"
+  assert_eq "$(jq -c '[.auto[] | .answer]' <<<"$output")" '["b","c"]' "auto"
+}
+
+@test "#3079 SKILL.md routes an unrequested-scope question to the root in chained mode, never auto-accepted" {
+  local t; t="$(tr -s '[:space:]' ' ' < "$SKILL")"
+  contains "$t" '**A question the refiner marks `unrequested_scope` is `ask` at any threshold and of any kind (#3079)**, reason `unrequested-scope`'
+  contains "$t" '**An `unrequested-scope` question is relayed the same way (#3079):** a decision that adds or changes user-visible behaviour and answers none of the gate'"'"'s objections is never auto-accepted, at any confidence. The split leaves it in `ask`, so it goes back to the root as a question like any other `ask` entry; the unattended follow-up mode'"'"'s `decide` parks the same entry `needs-decision`.'
+}
+
+@test "#3079 the agent marks unrequested scope and adds it to no draft before it is answered" {
+  local t; t="$(tr -s '[:space:]' ' ' < "$AGENT")"
+  contains "$t" '`unrequested_scope` — `true` when the answer adds or changes user-visible behaviour and answers none of the readiness gate'"'"'s objections (#3079); omit it otherwise.'
+  contains "$t" 'The conductor asks such a question at any threshold and of any kind, so scope the gate did not ask for is never taken on your score alone.'
+  contains "$t" '**Never add that scope to a draft any other way:**'
+  contains "$t" 'only after its question, marked `"unrequested_scope": true`, is answered.'
+}
+
+@test "#3079 ARCHITECTURE.md, the script header and the how-to state the unrequested-scope route" {
+  contains "$(tr -s '[:space:]' ' ' < "$REPO_ROOT/ARCHITECTURE.md")" 'An entry marked `unrequested_scope` — its answer adds or changes user-visible behaviour and answers none of the gate'"'"'s objections — is `ask` at any threshold and of any kind, reason `unrequested-scope` (#3079).'
+  contains "$(cat "$SPLIT")" 'kind, with reason `unrequested-scope`: confidence never admits scope the gate'
+  contains "$(cat "$HOWTO")" '## Scope the readiness gate did not ask for is always asked'
+}

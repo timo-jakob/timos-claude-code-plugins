@@ -259,3 +259,24 @@ the run stops or is done. Each line names the issue and the queue length, the
 entries not yet done. An intent or gap answer appears in full, with who gave
 it, the human or the refinement's threshold. Implementation decisions appear
 only as a count, with a pointer to the issue's *Decisions taken*.
+
+## Reconciling the test-case bodies before the PR (#3079)
+
+§6 points here when the same-PR test-case lifecycle ran, before open-pr runs.
+Compare each plan entry's `test-case` issue with the acceptance test written for
+it. When the test asserts a different expectation than the issue body's
+`## Shape` section states, whether or not the story-spec entry is `provisional`,
+update the body: rewrite that section to the expectation the shipped test
+asserts, and add one line beneath it:
+`Reconciled before close: the build found <shipped behaviour>, not <the old expectation> (story #<N>).`
+Read the body with `gh issue view <issue> --json body -q .body`, change nothing
+else in it, and write it back with `gh issue edit <issue> --body-file <file>`.
+This is the one edit a spin-out body takes outside `test-case-spinout.zsh`, and
+the story's spec block is left as it is: the PR closes the story with its test
+cases, and a spin-out that regenerates the body of a story still open, its PR
+closed unmerged, is followed by the next resolve-issue run, whose §6 reconciles
+the body again. A `provisional` entry's `assumption` names the expectation to check first. A
+body that already matches is left alone, so a re-run changes nothing. Re-run a
+failed edit once; if it fails again, name that issue and the shipped
+expectation in the PR's Summary and open the PR all the same. The Summary also
+names every body this step updated.

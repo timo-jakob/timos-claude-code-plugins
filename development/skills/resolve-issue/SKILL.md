@@ -1037,20 +1037,20 @@ never carries step 4's **matched / unmatched / unverified** split or the
 promoted-but-not-reproducible naming, and on the *If NONE matched* terminal it
 carries no promotion record at all.
 
-**Joint closure of the story + its test-case issues (#696).** When the same-PR
-test-case lifecycle ran (Step 2's planner exited 0), the PR body carries **one
-`Closes #N` per issue** — the story **and** every linked `test-case` issue from
-the plan (`jq -r '.[].issue' /tmp/acc-plan.json`) — so the feature and its
-acceptance tests close together and can never drift. With no linked test cases
-(planner exited 1), it's the single `Closes #<story>` as before.
+**Joint closure of the story + its test-case issues (#696).** When the same-PR test-case lifecycle ran (Step 2's planner
+exited 0), the PR body carries **one `Closes #N` per issue** — the story **and** every linked `test-case` issue from the
+plan (`jq -r '.[].issue' /tmp/acc-plan.json`) — so the feature and its acceptance tests close together and can never
+drift. With no linked test cases (planner exited 1), it's the single `Closes #<story>` as before.
 
-**Docs pages in the PR body (#767).** When the user-docs step ran (Step 2's
-docs planner produced a non-empty plan and the machinery was present), the PR
-body's Summary **names the docs page(s) the PR added or updated** (from
-`jq -r '.[].page' /tmp/docs-plan.json`, plus any sibling page you added) — so
-the reviewer sees feature + docs as one reviewable unit. When it no-oped,
-say why in one line (`surface: none` / no story-spec block / docs machinery
-not adopted yet) — an explicit no-op beats a silent one.
+**Reconcile the test-case bodies before the PR opens (#3079).** When the same-PR test-case lifecycle ran, and before
+open-pr runs, compare each plan entry's `test-case` issue with the acceptance test written for it, and update a body
+the test contradicts: see `reference/checkpoint.md` § Reconciling the test-case bodies before the PR (#3079)
+
+**Docs pages in the PR body (#767).** When the user-docs step ran (Step 2's docs planner produced a non-empty plan and
+the machinery was present), the PR body's Summary **names the docs page(s) the PR added or updated** (from
+`jq -r '.[].page' /tmp/docs-plan.json`, plus any sibling page you added) — so the reviewer sees feature + docs as one
+reviewable unit. When it no-oped, say why in one line (`surface: none` / no story-spec block / docs machinery not
+adopted yet) — an explicit no-op beats a silent one.
 
 Outcomes:
 
