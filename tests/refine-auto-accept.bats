@@ -478,7 +478,7 @@ us() { kq "$@" | jq -c '. + {unrequested_scope: true}'; }
 
 @test "#3079 the agent marks unrequested scope and adds it to no draft before it is answered" {
   local t; t="$(tr -s '[:space:]' ' ' < "$AGENT")"
-  contains "$t" '`unrequested_scope` — `true` when the answer adds or changes user-visible behaviour and answers none of the readiness gate'"'"'s objections, open or already resolved; a blocker you raised yourself does not count (#3079).'
+  contains "$t" '`unrequested_scope` — `true` when the answer adds or changes user-visible behaviour and answers none of the readiness gate'"'"'s objections (#3079); omit it otherwise.'
   contains "$t" 'The conductor asks such a question at any threshold and of any kind, so scope the gate did not ask for is never taken on your score alone.'
   contains "$t" '**Never add that scope to a draft any other way:**'
   contains "$t" 'only after its question, marked `"unrequested_scope": true`, is answered.'
