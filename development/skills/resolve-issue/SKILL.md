@@ -182,12 +182,11 @@ see `reference/chain-steps.md` § The step model (#2940)
 line, emit the run's record as `failed`, and stop. Exit 3 (no clean stop) falls
 to the run's checkpoint (#2920), which takes its own procedure:
 see `reference/checkpoint.md` § Resuming from a checkpoint (#2920)
-On exit 0, note `resumed_from: clean_stop`, run the dependency precheck below
-as usual; on `PROCEED`, check out the
-marker's `branch` from `origin` and run §1b (detect the repo type and load its
-profile), but skip §0b, §1, §2 and §3 (the stopped run passed the readiness
-gate, so record `gate_verdict: READY`). Then enter the interactive extension
-with the marker (`reference/interactive/extension.md`).
+On exit 0, note `resumed_from: clean_stop`, run the dependency precheck below as usual; on `PROCEED`, check out the
+marker's `branch` from `origin` and run §1b (detect the repo type and load its profile), but skip §0b, §1, §2 and §3
+(the stopped run passed the readiness gate, so record `gate_verdict: READY`). Then enter the interactive extension
+with the marker (`reference/interactive/extension.md`). Run §1's `init-submodules.zsh` on that checkout before its
+first gate (#3080).
 
 **Without `--resume`**, an unattended run always runs
 `"<skill-base-dir>/scripts/clean-stop.zsh" clear --repo-dir <worktree> --issue
@@ -359,16 +358,17 @@ gate malfunction.
 
 ### 1. Branch off fresh main
 
-Per `/development:git-branch-naming` — `<type>/<N>-<slug>`, with `type` from
-the issue's type label if it has one; else from the title's Conventional-Commit
-prefix (`fix(...)` → `fix`, `feat(...)` → `feat`, …); else inferred from the
-change (`fix` / `feat` / `docs` / `chore` / `refactor`). Always pull the latest
-main, then branch from it — never stack; the script does both, and stops on exit 3.
-Without `--resume`, read first how a run's kept state and branch are handled:
+Per `/development:git-branch-naming` — `<type>/<N>-<slug>`, with `type` from the issue's type label if it has one;
+else from the title's Conventional-Commit prefix (`fix(...)` → `fix`, `feat(...)` → `feat`, …); else inferred from
+the change (`fix` / `feat` / `docs` / `chore` / `refactor`). Always pull the latest main, then branch from it — never
+stack; the script does both, and stops on exit 3. Without `--resume`, read first how a run's kept state and branch
+are handled:
 see `reference/checkpoint.md` § A fresh run on kept state (#2920)
 
 ```bash
 "<skill-base-dir>/../../scripts/git/branch-off-fresh-main.zsh" "<type>/<N>-<slug>"
+# then ready the tree's submodules before any gate (#3080): exit 3 is an environment error, never a red gate — stop
+"<skill-base-dir>/scripts/init-submodules.zsh" --repo-dir .
 ```
 
 ### 1b. Detect the repo type and load the profile

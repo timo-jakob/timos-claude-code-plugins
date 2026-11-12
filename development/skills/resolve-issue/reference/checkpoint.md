@@ -72,7 +72,10 @@ stop, says so and deletes the checkpoint.
    Note `resumed_from: checkpoint` for the run's record, run §0a's dependency
    precheck as usual and, on `PROCEED`, check out the marker's `branch` from
    `origin`. The working tree must be clean first. Its uncommitted changes are
-   the half-finished round, so ask the human before you discard them. Then run
+   the half-finished round, so ask the human before you discard them. Then make
+   its submodules ready with `init-submodules.zsh`, as §1 does after a fresh
+   branch (#3080): its exit 3 is an environment error, never a red gate, so
+   report it as one, emit the run's record as `failed` and stop. Then run
    §1b. Skip §0b, §1, §2 and §3, and record `gate_verdict: READY`: the
    interrupted run passed the readiness gate and implemented the story.
 3. **From `last_round: 0`** (`loop_resume: false`), enter §3.5 at round 1 and
