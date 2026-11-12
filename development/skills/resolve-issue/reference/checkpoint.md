@@ -271,7 +271,11 @@ asserts, and add one line beneath it:
 `Reconciled before close: the build found <shipped behaviour>, not <the old expectation> (story #<N>).`
 Read the body with `gh issue view <issue> --json body -q .body`, change nothing
 else in it, and write it back with `gh issue edit <issue> --body-file <file>`.
-A `provisional` entry's `assumption` names the expectation to check first. A
+This is the one edit a spin-out body takes outside `test-case-spinout.zsh`, and
+the story's spec block is left as it is: the PR closes the story with its test
+cases, and a spin-out that regenerates the body of a story still open, its PR
+closed unmerged, is followed by the next resolve-issue run, whose §6 reconciles
+the body again. A `provisional` entry's `assumption` names the expectation to check first. A
 body that already matches is left alone, so a re-run changes nothing. Re-run a
 failed edit once; if it fails again, name that issue and the shipped
 expectation in the PR's Summary and open the PR all the same. The Summary also

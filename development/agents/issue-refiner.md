@@ -592,8 +592,9 @@ Rules for the payload:
     wrong shape, breaks this contract, and the conductor re-asks you for the
     turn.
   - `unrequested_scope` — `true` when the answer adds or changes user-visible
-    behaviour and answers none of your input `objections` (#3079); omit it
-    otherwise. The conductor asks such a question at any threshold and of any
+    behaviour and answers none of the readiness gate's objections, open or
+    already resolved; a blocker you raised yourself does not count (#3079).
+    Omit it otherwise. The conductor asks such a question at any threshold and of any
     kind, so scope the gate did not ask for is never taken on your score alone.
     **Never add that scope to a draft any other way:** a user-visible behaviour
     criterion that no objection asks for reaches `proposed_prose` or

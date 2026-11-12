@@ -270,5 +270,6 @@ NEW_TWO='{"schema":"story-spec/v1","test_cases":[
   contains "$r" 'A body that already matches is left alone, so a re-run changes nothing.'
   contains "$r" 'Re-run a failed edit once; if it fails again, name that issue and the shipped expectation in the PR'"'"'s Summary and open the PR all the same.'
   contains "$r" 'The Summary also names every body this step updated.'
+  contains "$r" 'This is the one edit a spin-out body takes outside `test-case-spinout.zsh`, and the story'"'"'s spec block is left as it is: the PR closes the story with its test cases, and a spin-out that regenerates the body of a story still open, its PR closed unmerged, is followed by the next resolve-issue run, whose §6 reconciles the body again.'
   contains "$(tr -s '[:space:]' ' ' < "$REPO_ROOT/ARCHITECTURE.md")" 'Before that PR opens, a test-case issue whose expectation the build'"'"'s tests contradict, provisional or not, has its body updated to the shipped behaviour with a one-line note (#3079)'
 }
