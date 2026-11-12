@@ -125,6 +125,14 @@ primary: claude-plugin   # a language (python) or a topic (claude-plugin)
 No file ⇒ no distinction: every detected stack is treated as primary (the
 pre-model behavior). The model is opt-in and backward-compatible.
 
+**A detected language comes from a marker file outside the trees the pipeline
+itself writes.** A `templates/` payload, a composition repo's root
+`mfe-contract/`, a git-ignored file and the repo-root `tests/acceptance/`
+harness tree are never language markers, so an acceptance harness never changes
+what a repo is detected as (#976, #1899, #3029, #2930). `detect-stack.sh`'s
+`detect_lang` prunes them for every language; a nested
+`services/api/tests/acceptance/` or a root `tests/e2e/` still counts.
+
 **The quality toolchain is declared in the same file (#1651).** Beside
 `primary:`, bootstrap records a `tools:` block on every path except the IaC path, which records `gate:` instead —
 three independent categories, each with its own set:
