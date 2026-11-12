@@ -36,7 +36,9 @@ reach a step.
 step of each child in E3's parallel set with the Agent tool's
 `isolation: "worktree"` beside `subagent_type: development:resolve-step`, so
 each runs in a worktree of its own and their edits can't collide. Every other
-step runs in the root's checkout, one at a time.
+step runs in the root's checkout, one at a time. Either way the step's §1 runs
+`init-submodules.zsh` in that work tree before its first gate (#3080), since a
+new worktree initialises no submodules.
 
 **`--resume` is the exception.** A human-started run given `--resume` does not
 chain: the session the human invoked runs §0a's `--resume` check itself and
@@ -177,7 +179,8 @@ The step ends with one of these verdicts:
   - `escalation`: a typed escalation other than the clean stop;
   - `clean-stop`: #2579's clean stop;
   - `tooling`: a precheck exit 1, or an exit 2 that recurs after the fixed
-    re-run; a size pre-flight error; an unreadable step handoff;
+    re-run; a size pre-flight error; an unreadable step handoff; a submodule
+    initialisation that exits 3, an environment error (#3080);
   - `failed`: any other ending `reference/telemetry.md` step 4 records `failed`,
     such as an abandoned red gate, a gate or loop error, or a round protocol
     that stopped before any loop ran.
