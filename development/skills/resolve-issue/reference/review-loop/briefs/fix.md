@@ -17,6 +17,16 @@ nothing, and never commits, pushes, or runs the gate.
   subtracts*), parking — and filing — what rule 1 refuses.
 - **`trigger: gate-red`** → read `gate_log`, find what is red, and fix it.
 
+**Check the acceptance criteria before you park (#3074).** When the handoff's
+`acceptance_criteria_file` is not `null`, read it before parking any finding:
+it holds the story's acceptance criteria and its `story-spec/v1` block. A
+blocker whose surface an acceptance criterion names is applied, never parked —
+that is rule 1's first override. List every finding you park in the verdict's
+`parked` array as `{issue, ac_check}`: `issue` is its follow-up's number, and
+`ac_check` is `checked` when you read the file, or `no-ac-file` when the field
+is `null`. When the field is not `null` but the file cannot be read, edit
+nothing and return `failed` / `cannot-fix`.
+
 **Parked follow-ups carry their origin (#2581).** When you park a finding and
 file its follow-up, also post one origin comment on that issue. Write the parked
 finding's identity — its changelist entry's `file`, `line`, `dimension` and
@@ -49,6 +59,7 @@ On either trigger, apply `grant.severity_bar` when a grant is set, the human's
 `<skill-base-dir>/reference/review-loop/carry.md`), and the profile's *Fix-pass
 rules* when the prompt carries them. Then write a `fix` verdict with
 `round-handoff.zsh write-verdict --work-dir <work_dir>`: `ok` with
-`fix_applied` and `files_changed` (the number of distinct files you edited), or
+`fix_applied`, `files_changed` (the number of distinct files you edited) and
+`parked`, or
 `failed` / `cannot-fix` with `fix_applied: false` and `files_changed: 0` when
-you could not fix it. Return to the conductor only that the verdict was written.
+you could not fix it, and `parked: []`. Return to the conductor only that the verdict was written.
