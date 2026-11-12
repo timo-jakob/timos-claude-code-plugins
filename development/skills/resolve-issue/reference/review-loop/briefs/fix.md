@@ -27,6 +27,32 @@ that is rule 1's first override. List every finding you park in the verdict's
 is `null`. When the field is not `null` but the file cannot be read, edit
 nothing and return `failed` / `cannot-fix`.
 
+**Check the base before you park (#3075).** A finding still headed for a park
+after the acceptance-criteria check is first checked against the story's base,
+the merge-base of `HEAD` with the default branch, by reading the finding's file
+there:
+
+```bash
+base="$(git -C <worktree_root> merge-base HEAD "$(git -C <worktree_root> rev-parse --abbrev-ref origin/HEAD)")"
+git -C <worktree_root> show "$base:<file>"
+```
+
+When the behaviour the finding asks for exists at the base and the story's diff
+removed or broke it, the finding is a regression: apply the restoration, never
+park it. Park only when the behaviour is absent at the base. Record every check
+in the verdict's `base_checks` array as `{base, at_base}`: `base` is the full
+commit id you read, and `at_base` is `true` for a restoration you applied and
+`false` for a finding you parked, so every parked finding has its own
+`at_base: false` check. When the base cannot be computed, edit nothing and
+return `failed` / `cannot-fix`.
+
+**Negative assertions are scoped (#3075).** A test you write or edit that
+asserts something is absent is scoped to the container under test, for example
+`within(form).queryByRole("alert")`, never the whole screen or document as in
+`screen.queryByRole("alert")`. A screen-wide absence pins everything else on
+the screen as intended, a regression included. The one exception is a finding
+that is itself about the absence being global.
+
 **Parked follow-ups carry their origin (#2581).** When you park a finding and
 file its follow-up, also post one origin comment on that issue. Write the parked
 finding's identity — its changelist entry's `file`, `line`, `dimension` and
@@ -59,7 +85,7 @@ On either trigger, apply `grant.severity_bar` when a grant is set, the human's
 `<skill-base-dir>/reference/review-loop/carry.md`), and the profile's *Fix-pass
 rules* when the prompt carries them. Then write a `fix` verdict with
 `round-handoff.zsh write-verdict --work-dir <work_dir>`: `ok` with
-`fix_applied`, `files_changed` (the number of distinct files you edited) and
-`parked`, or
+`fix_applied`, `files_changed` (the number of distinct files you edited),
+`parked` and `base_checks`, or
 `failed` / `cannot-fix` with `fix_applied: false` and `files_changed: 0` when
-you could not fix it, and `parked: []`. Return to the conductor only that the verdict was written.
+you could not fix it, and `parked: []` and `base_checks: []`. Return to the conductor only that the verdict was written.

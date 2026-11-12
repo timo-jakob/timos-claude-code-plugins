@@ -671,3 +671,47 @@ _roster_hits() {
     return 1
   fi
 }
+
+# --- #3075: a regression is restored, and negative assertions are scoped ------
+#
+# Rule 1 sits in a byte-frozen `moved:` span, so its regression arm lives AFTER
+# the span in the same shard, and the fix brief carries how to check the base.
+
+@test "#3075 the regression arm sits after the frozen span and governs rule 1" {
+  local span_end ln body
+  span_end="$(grep -n '^<!-- /moved: round-protocol-steps-3-4 -->' "$PROTO" | cut -d: -f1)"
+  [ -n "$span_end" ]
+  ln="$(prose_gate_lines "$PROTO" 'A regression is restored, never parked (#3075).')"
+  [ -n "$ln" ]
+  [ "$ln" -gt "$span_end" ]
+  body="$(prose_window "$PROTO" "$((ln + 10))" 10)"
+  contains "$body" 'it governs where the span disagrees'
+  contains "$body" "The base is the story's merge-base with the default branch."
+  contains "$body" "exists at that base and the story's own diff removed or broke it, the fix pass applies the restoration and never parks it"
+  contains "$body" 'decides this by reading the base, never from memory, and records each check in its verdict'
+}
+
+@test "#3075 the fix brief checks the base before parking and records the check" {
+  local fix="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop/briefs/fix.md" ln body
+  ln="$(prose_gate_lines "$fix" 'Check the base before you park (#3075).')"
+  [ -n "$ln" ]
+  body="$(prose_window "$fix" "$((ln + 20))" 20)"
+  contains "$body" 'the merge-base of HEAD with the default branch, by reading the finding'
+  contains "$body" 'merge-base HEAD'
+  contains "$body" "removed or broke it, the finding is a regression: apply the restoration, never park it"
+  contains "$body" 'Park only when the behaviour is absent at the base.'
+  contains "$body" "Record every check in the verdict's base_checks array as {base, at_base}"
+  contains "$body" 'at_base is true for a restoration you applied and false for a finding you parked'
+  contains "$body" 'When the base cannot be computed, edit nothing and return failed / cannot-fix.'
+}
+
+@test "#3075 the fix brief scopes every negative assertion, with the global exception" {
+  local fix="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop/briefs/fix.md" ln body
+  ln="$(prose_gate_lines "$fix" 'Negative assertions are scoped (#3075).')"
+  [ -n "$ln" ]
+  body="$(prose_window "$fix" "$((ln + 7))" 7)"
+  contains "$body" 'asserts something is absent is scoped to the container under test'
+  contains "$body" 'within(form).queryByRole("alert")'
+  contains "$body" 'never the whole screen or document'
+  contains "$body" 'The one exception is a finding that is itself about the absence being global.'
+}

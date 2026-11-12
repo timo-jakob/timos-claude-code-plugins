@@ -30,7 +30,9 @@
 #     dimension and title, the panel's base a non-empty string, every path
 #     field absolute (worktree_root, on every kind, included — #2018), the
 #     fix verdict's parked items each an {issue, ac_check} pair whose
-#     ac_check agrees with the round's fix handoff beside it (#3074);
+#     ac_check agrees with the round's fix handoff beside it (#3074), and its
+#     base_checks each a {base, at_base} pair, with one at_base false per
+#     parked item (#3075);
 #   - the conditional rules: carry_entries non-empty exactly in the carry
 #     modes; a cause exactly when outcome is not ok; not_applicable on a panel
 #     verdict only; the per-kind nullability rules;
@@ -191,7 +193,7 @@ def verdict_checks:
   (if .kind | IN("panel", "fix", "decide", "risk") | not then "unknown kind: \(.kind | tojson)" else empty end),
   ( ["schema", "kind", "round", "outcome", "cause"] as $common
     | { panel: ["aggregate_findings_file", "carry_accounting_file", "carry_lines_file", "findings_count"],
-        fix: ["fix_applied", "files_changed", "parked"],
+        fix: ["fix_applied", "files_changed", "parked", "base_checks"],
         decide: ["decided_red", "decided_green", "malformed", "ran_commands_file"],
         risk: ["risk_file", "assessed_count"] }[.kind] as $own
     | (has_all($common + $own) | if length > 0 then "missing field: \(.[0])" else empty end),
@@ -232,8 +234,15 @@ def verdict_checks:
        elif any(.parked[]; (type == "object" and (keys == ["ac_check", "issue"])
              and (.issue | isint and . >= 1) and (.ac_check | IN("checked", "no-ac-file"))) | not)
          then "parked item is not {issue, ac_check} with ac_check checked or no-ac-file"
-       elif .outcome != "ok" and (.fix_applied or .files_changed != 0 or (.parked | length) > 0)
-         then "a cannot-fix verdict must carry fix_applied false and files_changed 0, and park nothing"
+       elif (.base_checks | type) != "array" then "base_checks is not an array"
+       elif any(.base_checks[]; (type == "object" and (keys == ["at_base", "base"])
+             and (.base | type == "string" and test("^[0-9a-f]{40}$")) and (.at_base | type == "boolean")) | not)
+         then "base_checks item is not {base, at_base} with base a full commit id and at_base a bool"
+       elif ([.base_checks[] | select(.at_base | not)] | length) != (.parked | length)
+         then "base_checks does not hold exactly one at_base false check per parked item"
+       elif .outcome != "ok" and (.fix_applied or .files_changed != 0 or (.parked | length) > 0
+             or (.base_checks | length) > 0)
+         then "a cannot-fix verdict must carry fix_applied false and files_changed 0, and park nothing and record no base check"
        else empty end) ),
   ( select(.kind == "decide")
     | (if .outcome == "ok" then

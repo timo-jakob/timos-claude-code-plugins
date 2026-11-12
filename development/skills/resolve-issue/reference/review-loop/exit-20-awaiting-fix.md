@@ -252,6 +252,15 @@
    is how the two statements of it came to disagree once already.
 <!-- /moved: round-protocol-steps-3-4 -->
 
+**A regression is restored, never parked (#3075).** Rule 1 sits inside the
+byte-frozen span above, so its regression arm is recorded here, and it governs
+where the span disagrees. The base is the story's merge-base with the default
+branch. When a finding asks for behaviour that exists at that base and the
+story's own diff removed or broke it, the fix pass applies the restoration and
+never parks it, even when restoring it adds a branch, an arm or a paragraph
+back. The fix pass decides this by reading the base, never from memory, and
+records each check in its verdict, as the fix brief says.
+
 **An `AWAITING_FIX` with no blockers can name a red suite (#2926), and that one
 IS a fix turn.** The loop's whole-suite run before converging exits here on a
 red, queuing the closing sweep in `.closing-sweep` (`delta-rounds.md`, item 1).
@@ -272,26 +281,15 @@ waits for an exit 14 only the sweep could produce. Neither applies any more: the
 loop never emits that status, only a **zero-blocker** delta round promotes the
 closing sweep, and a round with non-critical blockers left ends
 `ESCALATE_NO_CONVERGENCE` or `BUDGET_EXHAUSTED`. `CONVERGED` is the only ending
-that opens a PR. The #1571 note below records the residue rule as it stood
-before.
+that opens a PR.
 
-**Residue condition 2 was removed (#1571).** The procedure above still describes the fix-touched set as an input to the
-**residue decision**. That is no longer true, and the paragraph saying so sits
-inside a byte-frozen `moved:` span, so the correction is recorded here rather
-than edited into it.
-
-Since #1571 the residue terminal takes **two** conditions — 1 (the last two
-rounds are both zero-CRITICAL) and 3 (the declaring round ran as a full sweep).
-Condition 2, which required every remaining blocker's file to be in the previous
-round's fix-touched set, was removed: `scope-findings` already confines every
-round's findings to the story diff before consolidation, so the membership it
-tested is guaranteed upstream and re-checking it could never fail.
-
-**The fix-touched set itself is unchanged and still load-bearing** for
-everything else the procedure above uses it for — the per-blocker `class`
-(`new_defect` / `incomplete_propagation`) that `consolidate-findings.zsh
---fix-touched` stamps, the `by class:` progress row, and the waived-suggestion
-exemption. Only the residue predicate stopped reading it.
+**Residue condition 2 was removed (#1571).** The span above still names the
+fix-touched set as an input to the **residue decision**; it no longer is one.
+The residue terminal takes **two** conditions — 1 (the last two rounds are both
+zero-CRITICAL) and 3 (the declaring round ran as a full sweep). Condition 2
+could never fail: `scope-findings` already confines findings to the story diff.
+The fix-touched set still drives the per-blocker `class`, the `by class:` row
+and the waived-suggestion exemption. Only the residue predicate stopped reading it.
 
 **Every fix pass also applies the loaded profile's fix-pass rule (#1805).**
 Step 3's fix pass sits inside the byte-frozen span, so this is recorded here:
