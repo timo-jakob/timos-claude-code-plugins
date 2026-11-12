@@ -373,7 +373,7 @@ SH
   q add --entry 20 --child-pr 601 >/dev/null
   [ "$(jq -c '[.entries[] | .child_prs]' "$QF")" = '[null,[602,601],[703,702,601]]' ]
   run -0 q report --stopped 10 --reason 'it parked'
-  contains "$output" "Merged in this run: #500, #602, #601, #700, #703, #702"
+  [ "$(sed -n 2p <<< "$output")" = "Merged in this run: #500, #602, #601, #700, #703, #702" ]
 }
 
 @test "#3081 AC4: a queue file without child_prs reads and reports exactly as before" {
