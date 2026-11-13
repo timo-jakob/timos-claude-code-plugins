@@ -148,7 +148,10 @@ itself never asks: its root does, when the root is attended.
      and the question re-asked, as step 3 says.
   3. On a grant, post any guidance as step 4 says, then record it:
      `record-grant.zsh --work-dir <escalation.work_dir> --status
-     <escalation.status_file> --add 3`. Remove the `needs-human-decision` label
+     <escalation.status_file> --add 3`. Ask about this verdict's `deferred`
+     follow-ups before the verdict file goes
+     (`reference/chain-steps/deferred-follow-ups.md` § A step's deferred
+     follow-ups (#3077)). Remove the `needs-human-decision` label
      the clean stop added, delete the step's old verdict file, write a fresh
      handoff for the same issue with the same `scratch_dir`, `chained_from` and
      `parent_run_id`, `start_at: "0a"`, `after: null` and `resume:

@@ -93,7 +93,7 @@ cq_step() {
   t="$(flat < "$STEPS")"
   # the step's own instruction is its agent's definition since #3014
   contains "$(flat < "$REPO_ROOT/development/agents/resolve-step.md")" "Skip §7's refine-issue --follow-up call: list the follow-ups only, since the root queues them (#2942)."
-  contains "$t" "How the root handles each, once it has queued the verdict's \`follow_ups\` in the chain queue (#2942), which replaces §7's \`refine-issue --follow-up\` call in a human-started run, with its \`deferred\` items handled where \`reference/promotion/gate.md\` says (#3077):"
+  contains "$t" "How the root handles each, once it has queued the verdict's \`follow_ups\` in the chain queue (#2942), which replaces §7's \`refine-issue --follow-up\` call in a human-started run, and has handled its \`deferred\` follow-ups (#3077): see \`reference/chain-steps/deferred-follow-ups.md\` § A step's deferred follow-ups (#3077)"
   contains "$t" "see \`reference/checkpoint.md\` § The chain queue in a human-started run (#2942)"
 }
 

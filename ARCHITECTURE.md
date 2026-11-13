@@ -8095,13 +8095,14 @@ asks (#3077): escalation, on a stopped verdict with cause clean-stop and on no
 other, is the clean stop's payload — status, trigger (the marker's
 convergence_failures), trend, carried_blockers, proposal ({recommend: grant or
 guidance, add, guidance: a draft or `null`}), work_dir and status_file — and
-deferred, on any verdict of a run whose review loop ran, holds suggestions (the
-waived {file, line, dimension, title} set) and suggested_follow_ups ({title,
-body} each). A refinement step's verdict carries neither. An attended root
+deferred, on any verdict of a run whose review loop ran, holds
+suggested_follow_ups ({title, body} each) and no other key: a suggestion the
+run waived stays waived and is not handed back. A refinement step's verdict
+carries neither. An attended root
 offers the interactive extension on an escalation and, on a grant, re-dispatches
 the step with the handoff's resume set to "clean_stop"; it asks one question per
-step about filing the deferred items. An unattended root files every suggested
-follow-up and no suggestion. The conductor reads a
+step about filing the deferred follow-ups. An unattended root files every
+suggested follow-up. The conductor reads a
 verdict with jq against this table. A verdict file that is missing, not one JSON
 object, or carries a value outside the table is not a result: a step that ends
 its turn with no verdict file is messaged to carry on, not counted as failed;
