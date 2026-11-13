@@ -130,6 +130,33 @@ orphaned.
    entitled to know that before they pick, not after.
 <!-- /moved: suggestion-promotion -->
 
+**A chain step hands its waived set to its root (#3077).** A step of a
+human-started run never asks, so it never offers this phase. Its verdict
+carries `deferred` instead, on any verdict of a run whose review loop ran:
+`suggestions`, the waived set step 1 derives from the blocking phase's status
+file, and `suggested_follow_ups`, each `{title, body}`, for every follow-up the
+run would otherwise name only in prose without filing it. Both are `[]` when
+there are none, and a follow-up the run filed goes in `follow_ups`, never here.
+The root, which resolves its own mode once with `scripts/resolve-session.zsh
+--inferred attended`, handles them before the verdict's own arm:
+
+- **An attended root asks once per step.** When `deferred` holds any item, it
+  renders one numbered list, each suggestion as title · `file:line` ·
+  dimension and each suggested follow-up by its title, and asks one
+  question with AskUserQuestion: **File all** · **File the suggested follow-ups
+  only** · **File none**, with "Other" taking the numbers to file. Filing work
+  is a question of what to build, an `intent` question under ARCHITECTURE.md's
+  *Decision rights*, so it is asked and never decided for the human.
+- **An unattended root files every suggested follow-up** and no suggestion,
+  which stays waived as in any unattended run.
+- **Each filed item** becomes an issue, `gh issue create --title <title>
+  --body-file <file>`, whose body names the step's issue and its PR when there
+  is one, and is queued like a listed follow-up: `chain-queue.zsh add --entry
+  <new> --kind follow-up --after <the step's entry>` with `--finding` the
+  suggestion's `{file, line, dimension, title}`, or for a suggested follow-up
+  `{"file": "follow-up", "line": null, "dimension": "follow-up", "title":
+  <its title>}`. Nothing in `deferred` is dropped without the human's answer.
+
 **Read on, in this order.** The phase continues in other shards: step 3 in
 `reference/promotion/step-3-select.md`, steps 4–6 in
 `reference/promotion/step-4-sub-loop.md`, step 7 in

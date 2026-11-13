@@ -9,6 +9,9 @@ takes the autonomous arm and never prompts.
 
 It carries the phase offered on a convergence of an interactive run that
 waived at least one suggestion, unless the `enable_suggestions` setting is off.
+A chain step of a human-started run is never interactive and never offers the
+phase: it returns its waived set in its verdict's `deferred`, which
+`reference/promotion/gate.md` hands to the root (#3077).
 It is split into shards under `reference/promotion/`, each at most 20,000 bytes
 (#2057). Read order:
 

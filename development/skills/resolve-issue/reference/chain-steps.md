@@ -18,7 +18,8 @@ Before its first dispatch it starts or resumes the chain queue (#2942):
 see `reference/checkpoint.md` § The chain queue in a human-started run (#2942)
 The root keeps Step 0's classification and, for an epic, E1 to E5's control
 flow. Each child's run is still a step. In a human-started run, attended and
-unattended behave alike, whatever `resolve_session` says (#2907). A step
+unattended behave alike, whatever `resolve_session` says (#2907), except for a
+step's clean stop and `deferred` items (#3077). A step
 resolves its session mode as an E3 child does: §0a's
 `scripts/resolve-session.zsh` with the inferred mode `unattended`, and it stays
 autonomous whatever the line says, so no step ever asks. **A step's mode is
@@ -56,15 +57,18 @@ every step of the run shares it. Before each dispatch the root deletes the
 issue's old verdict file, so it never reads a previous step's result as the new
 one.
 
-An issue-run step's handoff carries the step-handoff/v1 fields and five more,
+An issue-run step's handoff carries the step-handoff/v1 fields and six more,
 which a reader that does not read them ignores:
 
 ```json
 { "schema": "step-handoff/v1", "issue": 2940, "chained_from": 2907,
   "origin": "human", "scratch_dir": "/abs/scratch", "answers": [],
   "kind": "issue", "parent_run_id": "<the root's run_id>",
-  "start_at": "0a", "risk": null, "after": null }
+  "start_at": "0a", "risk": null, "after": null, "resume": null }
 ```
+
+`resume` is `null`, or `"clean_stop"` on a step an attended root re-dispatches
+to resume a granted clean stop (`reference/escalation.md`, #3077).
 
 `start_at` is `"0a"` for a first run, a leaf refined `ready` at E1b included.
 It is `"1"` only for the issue step re-dispatched after a refinement's `ready`
@@ -89,6 +93,16 @@ jq -e -s --argjson n <N> --arg kind <issue|refinement> 'length == 1 and (.[0] | 
        else ("ready", "split", "questions-pending", "stopped") end))
   and (.follow_ups | type == "array" and all(type == "number" and . >= 1 and . == floor))
   and ((has("run_id") | not) or (.run_id | type == "string" or . == null))
+  and ((has("deferred") | not) or ($kind == "issue" and (.deferred | type == "object"
+    and (.suggestions | type == "array" and all(type == "object" and (.file | type == "string")
+    and (.line | type == "number" or . == null) and (.dimension | type == "string") and (.title | type == "string" and test("\\S"))))
+    and (.suggested_follow_ups | type == "array" and all(type == "object" and (.title | type == "string" and test("\\S")) and (.body | type == "string"))))))
+  and (if $kind == "issue" and .verdict == "stopped" and .cause == "clean-stop" then (.escalation | type == "object"
+    and (.status | IN("BUDGET_EXHAUSTED", "ESCALATE_NO_CONVERGENCE")) and (.trigger | type == "array" and length > 0 and all(type == "string"))
+    and (.trend | . == null or IN("improving", "flat", "regressing"))
+    and (.carried_blockers | type == "array" and all(type == "object" and (.title | type == "string")))
+    and (.proposal | type == "object" and (.recommend | IN("grant", "guidance")) and (.add | type == "number" and . >= 1 and . == floor) and (.guidance | type == "string" or . == null))
+    and ([.work_dir, .status_file] | all(type == "string" and startswith("/")))) else (has("escalation") | not) end)
   and (if .verdict == "done" then (.pr | type == "number" and . >= 1 and . == floor)
        elif .verdict == "needs-refinement" then (.reason | IN("gate", "size"))
        elif .verdict == "ready" then (.risk | IN("low", "normal", "elevated")) and (.auto_accepted | type == "array")
@@ -185,9 +199,14 @@ The step ends with one of these verdicts:
     such as an abandoned red gate, a gate or loop error, or a round protocol
     that stopped before any loop ran.
 
+A clean stop also carries `escalation`, and a run whose review loop ran
+`deferred` (#3077), built as `reference/escalation.md` and
+`reference/promotion/gate.md` say.
+
 How the root handles each, once it has queued the verdict's `follow_ups` in the
 chain queue (#2942), which replaces §7's `refine-issue --follow-up` call in a
-human-started run:
+human-started run, and has handled its `deferred` items as
+`reference/promotion/gate.md` says (#3077):
 
 - **`done`** → report the PR. In an epic, continue E3. Queue step 3 alone says
   when an entry, epic-kind or not, is marked `done` and `next` is taken.
@@ -203,6 +222,9 @@ human-started run:
   step, the root adds each open local blocker `--before` the follow-up,
   deepest first, and takes `next`; the re-run follow-up's §0a clears its label.
   A cycle or an open foreign blocker parks it (queue step 5).
+- **`stopped` with cause `clean-stop`, in an attended root (#3077)** → the
+  extension on the step's kept state (`reference/escalation.md`); only **Stop**
+  takes the `stopped` arm below, as an unattended root does.
 - **`stopped`** → report the reason and stop. In an epic, triage the child by
   its `cause`, as E3 triages that ending, and count it in the bucket
   `reference/epic-telemetry.md` step 3 names:
