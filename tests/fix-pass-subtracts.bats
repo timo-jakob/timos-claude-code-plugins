@@ -375,20 +375,12 @@ _roster_hits() {
 @test "#1496 exactly two SKILL.md sites carry the pointer" {
   # The promotion sub-loop's fix step, and the interactive extension's granted
   # fix pass. A third would mean a consumer was added without being counted; a
-  # single one would mean the other lost its pointer to a rewrite.
+  # single one would mean the other lost its pointer to a rewrite. #3128 left
+  # the promotion sub-loop unreachable, but its file stays in the corpus until
+  # #3121's later child deletes it, so the count is unchanged until then.
   local n
   n="$(_hits "$SKILL" "$POINTER")"
   [ "$n" -eq 2 ]
-}
-
-@test "#1496 the promotion sub-loop points at the rule instead of restating it" {
-  local ln body
-  ln="$(prose_gate_lines "$SKILL" 'the round protocol above — adding --promote. Its fix passes')"
-  [ -n "$ln" ]
-  body="$(prose_window "$SKILL" "$ln" 8)"
-  contains "$body" "$POINTER"
-  contains "$body" 'it is not restated'
-  lacks "$body" 'New behaviour is parked, not applied.'
 }
 
 @test "#1496 the interactive extension points at the rule instead of restating it" {
@@ -532,11 +524,12 @@ _roster_hits() {
   # review-loop.md into the three shards below. #2057 split promotion.md, and
   # its one mention fell into step-4-sub-loop.md, so the count is unchanged.
   # #2058 split interactive.md, and its one mention fell into
-  # extension-grant.md (step 5), so the count is unchanged again.
+  # extension-grant.md (step 5), so the count is unchanged again. #3128 made
+  # reference/promotion/ unreachable and stopped naming its shard here; the
+  # shard still counts toward the 7 until #3121's later child deletes it.
   printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/review-loop/exit-20-awaiting-fix.md'
   printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/review-loop/briefs/fix.md'
   printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/review-loop/scope-block.md'
-  printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/promotion/step-4-sub-loop.md'
   printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/interactive/extension-grant.md'
   printf '%s\n' "$hits" | grep -qxF 'docs/explanation/review-loop.md'
   printf '%s\n' "$hits" | grep -qxF 'ARCHITECTURE.md'

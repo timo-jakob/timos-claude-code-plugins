@@ -1236,22 +1236,6 @@ _roster_hits() {
   [ "$spellings" != "$(printf '"$T"\n<T>')" ]
 }
 
-@test "#1497 non-vacuity: a split in the PROMOTION sub-loop block reds the derived sweep" {
-  # The site the canonical-block pin structurally cannot see, and one of the two
-  # §3.5 calls the invariant is most easily forgotten.
-  local F="$BATS_TEST_TMPDIR/skill-promo-split.md" spellings
-  awk '
-    index($0, "--promote <promoted.json> --test-cmd") > 0 { promo = 1 }
-    promo == 1 && index($0, "[--gate-attest <T>] [--findings-tree <T>]") > 0 {
-      sub(/\[--findings-tree <T>\]/, "[--findings-tree <panel-T>]"); promo = 0 }
-    { print }
-  ' "$SKILL" > "$F"
-  grep -qF -- '[--findings-tree <panel-T>]' "$F"
-  spellings="$(grep -oE -- '--(gate-attest|findings-tree) (<[^>]*>|"[^"]*")' "$F" \
-    | awk '{print $2}' | sort -u)"
-  [ "$spellings" != "$(printf '"$T"\n<T>')" ]
-}
-
 @test "#1497 non-vacuity: an absent flag is NOT read as a matching pair" {
   # The vacuity a structural comparison invites: delete both flags from the
   # block and two empty strings compare equal. `_flag_placeholder`'s typed 1 is

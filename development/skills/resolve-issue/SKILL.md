@@ -824,22 +824,12 @@ below, #1226), else the repo's shared user-level default
 `~/.claude/telemetry/<repo-slug>.jsonl` (outside every checkout, #1972) — via the family's
 shared emitter, with the loop's own detail under `payload` and its status
 narrowed onto the cross-pipeline `outcome` enum. Evidence for
-convergence rate, rounds-to-converge, and escalation breakdown. **A promotion
-sub-loop (#994) is a second, terminal invocation with the same `--issue`, so a
-story that promotes anything appends its own record too** — read the pair
-together rather than as two independent stories — with one caveat: a phase
-whose keys **all** fall out unmatched/unverified never invokes the sub-loop
-(step 4's *If NONE matched* terminal), so it legitimately leaves the enrichment
-with no second run record to pair with. That second record carries
-`payload.promotion_phase: true` (#995), which is how the two documented
-convergence-**rate** recipes exclude it. The mean-rounds and escalation-breakdown
-cuts deliberately **keep** it — a promotion pass genuinely did those rounds
-(ARCHITECTURE.md, *Review-loop telemetry*). Every terminal exit that emits a
-record also drops that record's `run_id` in `<work-dir>/.telemetry-run-id` — the
-join key the promotion enrichment below needs — and appends it to the
+convergence rate, rounds-to-converge, and escalation breakdown. Every terminal
+exit that emits a record also drops that record's `run_id` in
+`<work-dir>/.telemetry-run-id` and appends it to the
 `<work-dir>/.telemetry-run-ids` ledger the run's own record lists (#1226). **Pass
-the run's `loop_args` (Step 0) on every invocation, promotion sub-loop and every
-`--resume` included**: they parent each loop record to this run and send it to
+the run's `loop_args` (Step 0) on every invocation, every `--resume`
+included**: they parent each loop record to this run and send it to
 the sink the run was given. An epic child that E3 drives here passes its own
 child run's `loop_args` — the run E3 started for it, never the epic run's
 (#1227). **Always pass an
@@ -857,13 +847,9 @@ attended `--resume` can find. Create the work-dir before round 1, and pass
 The loop consolidates each round (`consolidate-findings.zsh`, §#561) and exits
 with a status JSON + code:
 
-- **`CONVERGED`** (exit 0) → on an **interactive** run (mode `attended`, §0a's
-  `resolve-session.zsh`) with at least one waived
-  suggestion, first offer the **suggestion promotion** phase below (#994) — its
-  gate also reads the `enable_suggestions` setting, and skips the phase when off —
-  unless this loop *is* the promotion sub-loop, which never re-offers it (the
-  phase runs once per story); then proceed to **§4 (Version bump)**. **Keep the
-  loop's status JSON**
+- **`CONVERGED`** (exit 0) → proceed straight to **§4 (Version bump)**, in every
+  session mode: the run waives every suggestion the loop logged and offers none
+  of them to anyone (#3128). **Keep the loop's status JSON**
   (`--status-file`) — step 6 feeds it to `build-dossier.zsh` so the **Review
   dossier** (per-round blockers found/fixed, dimensions reviewed, waived Low
   suggestions, reviewers) lands in the PR body, with a hidden JSON block the
@@ -913,9 +899,7 @@ with a status JSON + code:
   Whichever ending the run then reaches, emit the run's record (§7) before
   stopping. That includes a loop `ERROR` that stops the run.
 
-`--no-review` skips the loop entirely (status `SKIPPED`) — and is **refused
-together with `--promote`** (exit 2), since nothing is consolidated for an
-overlay to reach. Today's fast path,
+`--no-review` skips the loop entirely (status `SKIPPED`). Today's fast path,
 for when you deliberately want no local review round. It reaches the loop from
 the invocation: Step 0's `args` reports it as `no_review: true`.
 
@@ -926,7 +910,6 @@ before the escalation terminal, so it is listed here rather than reachable only
 through the file that comes after it. The escalation terminal is where the run
 is handed to a human ([an automated state machine](https://timo-jakob.github.io/timos-claude-code-plugins/explanation/philosophy/#pillar-3)):
 
-- see `reference/promotion/gate.md` § Suggestion promotion on convergence — human-curated, opt-in (#994)
 - see `reference/interactive/extension.md` § Interactive extension (#562-resume)
 - see `reference/escalation.md` § Escalation (any `ESCALATE_*` / `BUDGET_EXHAUSTED` status) — typed, no PR (#564)
 
@@ -971,19 +954,15 @@ Test plan — include the Step 3 evidence) and carries `Closes #N`. When the rev
 loop ran and reached `CONVERGED` (§3.5) — the only PR-opening terminal
 since #2580 — append the **Review dossier** via
 `build-dossier.zsh` on the kept status JSON (#563) — appending its output
-**once**, whether or not the suggestion-promotion phase also ran. Two hidden
+**once**. Two hidden
 blocks in one body would leave the Approver reading only the first. (Once-only
 governs the *appended output*: an un-appended wrong-form run is discarded and
 re-run correctly — open-pr's recovery.) When the
-run **kept a promotion-phase status JSON** — one it wrote and did not discard,
-step 8's condition — that single invocation merges both phases (#1064) by
+run **kept a promotion-phase status JSON** — one it wrote and did not discard —
+that single invocation merges both phases (#1064) by
 also taking the pair `--promotion-status <promotion-status.json> --promoted
-<promoted.json>`. Otherwise — including the *If NONE matched* terminal, where
-the sub-loop was never invoked even though the phase was offered and its prompt
-answered — it is the plain `--status` invocation. State it as the artifact, never
-as "the phase ran": that phrase is true on *If NONE matched* and would send you
-hunting for a status file to pass, which is exactly how a reused-scratch leftover
-gets folded into the audit record. Passing one promotion flag without the other is a usage error, not a fallback.
+<promoted.json>`. Otherwise it is the plain `--status` invocation. Passing one
+promotion flag without the other is a usage error, not a fallback.
 
 The residue Summary duty (#1435) went with its terminal (#2580): a run that
 opens its PR has no open blocker left to disclose.
@@ -1001,41 +980,6 @@ left as it is — never post a second origin comment.
 **Before open-pr (#2903):** see `reference/ask-branches.md` § RS-09 — the parked follow-up default (#2903)
 **When the fallback review panel engaged (#2909):**
 see `reference/ask-branches.md` § RS-06a — the fallback review panel default (#2909)
-
-When the promotion **prompt was presented**, **name in the Summary** both
-counts — **how many suggestions the human picked, and how many the sub-loop
-actually cleared**; whenever the selection was **non-empty**, add step 4's
-unmatched / unverified split — the *If NONE matched* terminal **included**,
-where every key is one or the other and the split carries all the information
-there is (step 4 requires it there explicitly, and the dossier carries no
-promotion record on that terminal to back it up). Gate the split on step 4
-having classified, never on the sub-loop having run. (Only a select-none answer
-— prompt presented, nothing picked, step 4 never reached — is `0` and `0` with
-no split to report.)
-
-**The cleared count is the ENGINE's raised count** — `promotion.promoted`, the
-number of items it stamped — and `0` on the *If NONE matched* and
-not-reproducible terminals. It is **never** the sub-loop's total `fixed`, which
-also counts regressions cleared along the way; and it is **not** the raw size of
-step 4's matched set. That distinction is the one to get right: step 4's
-*matched* class is your approximation of the engine's #983 verdict, so the engine
-can raise **fewer** keys than you classed matched, and the sub-loop then
-converges at round ≥2 having cleared only those. Since the dossier rendered in
-the same PR body carries the engine's figure, reporting the larger matched set
-would make the PR contradict itself. So report the engine's count, and name every
-matched-but-never-raised key as promoted-but-not-reproducible — step 7's
-vocabulary.
-
-The two Summary counts are **not** the same number: the *If NONE matched*
-terminal converges with a non-zero pick count and a sub-loop that never ran, so
-reporting the picks alone would claim work that never happened. A select-none
-answer is `0` and `0`.
-
-The dossier now carries the promotion phase itself, so **no "blocking phase
-only" caveat is owed** — but the Summary counts still are, because the dossier
-never carries step 4's **matched / unmatched / unverified** split or the
-promoted-but-not-reproducible naming, and on the *If NONE matched* terminal it
-carries no promotion record at all.
 
 **Joint closure of the story + its test-case issues (#696).** When the same-PR test-case lifecycle ran (Step 2's planner
 exited 0), the PR body carries **one `Closes #N` per issue** — the story **and** every linked `test-case` issue from the

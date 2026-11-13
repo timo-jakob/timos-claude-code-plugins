@@ -1,9 +1,8 @@
 # Run resolve-issue unattended
 
 `/development:resolve-issue` asks you before it takes some decisions: whether a
-resumed run clears a blocker first, whether to grant the review loop more rounds, which waived suggestions to
-promote. It decides whether you are there to ask by inference. When you invoke
-the skill yourself, it assumes you are present.
+resumed run clears a blocker first, and whether to grant the review loop more rounds. It decides whether you are
+there to ask by inference. When you invoke the skill yourself, it assumes you are present.
 
 If you start a long run and leave, overnight for example, that inference is
 wrong, and the run stops at the first question and waits until morning. Set one
@@ -53,8 +52,9 @@ nobody is present. For example, when a resumed story is blocked by an open
 dependency, `attended` offers to resolve the blocker first, and `unattended`
 comments on the story and adds the `blocked` label instead: a resumed run does
 not clear blockers by itself, as a run you start fresh does. The same holds for
-the extra review rounds after an escalation,
-the options for a review that did not apply, and suggestion promotion. The
+the extra review rounds after an escalation
+and the options for a review that did not apply. A converged run waives every
+suggestion in either mode and asks nothing about them. The
 run's telemetry
 record carries the mode and its source (`session_mode`, `session_mode_source`).
 

@@ -7,8 +7,8 @@ on work that still has open review blockers.
 
 The procedure the skill follows is split for context economy: `SKILL.md` is a
 conductor holding each step's invocation contract and a pointer, while the
-branches described on this page — the round protocol, the
-suggestion-promotion phase, escalation and the interactive extension — live in
+branches described on this page — the round protocol, escalation and the
+interactive extension — live in
 `development/skills/resolve-issue/reference/*.md` and are read only when the run
 actually reaches them.
 
@@ -34,8 +34,7 @@ carries.
 2. **Consolidate** — and this is what waits for the suite. Findings are
    de-duplicated and split into **blockers** (Critical + Warning) and
    **Suggestions**. Only blockers drive the loop; suggestions are logged and not
-   looped on — unless a human explicitly promotes one afterwards (see
-   [Promoting a suggestion](#promoting-a-suggestion)).
+   looped on (see [Promoting a suggestion](#promoting-a-suggestion)).
 3. **Fix** — if there are blockers, an implementor pass fixes them, and the next
    round's boundary re-tests what it wrote. A suite that comes back red discards
    that round's findings and restarts the boundary; a fix that cannot be made
@@ -162,8 +161,8 @@ weighed and let go, so re-litigation is free and a nitpick in the implementer's
 own review response is indistinguishable from a defect in shipped behaviour.
 
 The loop repeats until it **converges** — a **full-sweep** round with **zero
-blockers**. Suggestions remaining is still converged; on an interactive run you
-are then offered the chance to promote some of them (below).
+blockers**. Suggestions remaining is still converged, and the run waives them
+(below).
 
 ## Watching it run
 
@@ -267,12 +266,11 @@ still in the tracker under the `review-residue` label, as history.
 
 With [`corner_case_risk_threshold`](../how-to/set-a-corner-case-risk-threshold.md)
 set, the run assesses the reviewers' blocking findings in every round. A
-non-critical one whose risk falls below the floor — unless you promoted it or a
-tool confirmed it — is **demoted to a suggestion**: logged in the round's
+non-critical one whose risk falls below the floor — unless a tool confirmed
+it — is **demoted to a suggestion**: logged in the round's
 progress and in the PR, but not fixed. That keeps the fix pass from spending
 round after round on corner cases nobody would hit, which is what most often
-left a run with only non-critical blockers. You can still promote any demoted
-finding back at convergence.
+left a run with only non-critical blockers.
 
 When a run escalates, the **grant prompt** shows the last two rounds' blockers
 broken down by class — a fresh defect, an incomplete propagation of the last
@@ -360,111 +358,16 @@ converging** — do not dead-end. Instead the run pauses and talks to you:
 ## Promoting a suggestion
 
 Suggestions never block, so by the time a run converges every one the panel
-raised has been **waived** — logged, and never acted on. That default is
-deliberate: a Low finding should not hold up a PR. But it left no way to say
-*"actually, do that one"* at the one moment you have the whole picture and the
-change is otherwise ready.
+raised has been **waived**: logged in the round's progress and in the PR's
+review dossier, and never acted on. That is where the run leaves them, attended
+or not. A converged run goes straight on to the version bump and the PR, with no
+prompt in between.
 
-So when an **interactive** run converges with at least one waived suggestion,
-you are shown them — title, `file:line`, dimension — and can **multi-select any
-subset** (including none). What you pick is promoted to blocking and resolved
-through a second pass of the very same loop: review → fix → re-test, the same
-gate every round. Nothing about the bar changes; a regression introduced while
-polishing a suggestion is caught exactly like any other blocker.
-
-A few properties worth knowing:
-
-- **Nothing is ever auto-promoted.** The list is a menu, not a plan. Selecting
-  none converges immediately — the traces are a telemetry line recording that
-  you were asked and chose nothing (when the run's own telemetry line exists;
-  see *What gets recorded about it*), and a `0` picked / `0` cleared note in the
-  PR summary.
-- **Unattended runs are untouched.** An autonomous or headless run is never
-  prompted, passes no promoted set, and converges with its suggestions waived —
-  behaviour identical to before this existed.
-- **You can switch the offer off.** Set `enable_suggestions` to `0` in your
-  settings and an interactive run behaves like an unattended one here: no
-  prompt, every suggestion waived, straight on to the PR (see
-  [Turn off suggestion prompts](../how-to/turn-off-suggestion-prompts.md)).
-- **The list is every suggestion the run logged**, not just the last round's.
-  A suggestion raised in round 1 and never repeated is still un-actioned work,
-  so it is still offered.
-- **A promoted item survives its own fix.** Matching is by identity — file,
-  dimension, and title — with a tolerance for line drift, not by an exact line
-  number. Otherwise the first edit above it would quietly drop it back to Low
-  and the pass would "converge" without doing what you asked.
-- **It runs once.** New suggestions that surface during the promotion pass are
-  waived, not re-offered — the phase is a triage moment, not a treadmill.
-- **One pick, one item.** A selection raises exactly the finding you picked, not
-  its neighbours — so promoting one suggestion never quietly enlists the two
-  next to it.
-- **The PR's review dossier covers both passes** — whenever the second pass ran
-  to a verdict the run kept. A suggestion you promoted and that pass fixed is listed as
-  found-and-fixed, not under *Waived suggestions*, and the dossier records how
-  many suggestions you picked versus how many the engine actually raised; those
-  differ whenever a pick was no longer there to raise. (When *none* of your picks
-  could be confirmed still present — each either no longer there or
-  unverifiable — the second pass never runs, so those counts appear in the PR
-  summary instead.) One caveat worth knowing: an item is dropped from the
-  waived list only when its title still matches exactly, so a suggestion the
-  panel re-worded between passes can stay listed even though it was fixed. That
-  direction is deliberate — the alternative risks hiding a genuinely un-actioned
-  suggestion that merely shares a word.
-- **The budget is a fresh allowance** — the promotion pass gets the same
-  five-round budget the blocking phase had, governed by that same single
-  constant rather than a second one, with the same extension offer if it runs
-  out. It is not the blocking phase's leftovers.
-- **A promoted item reads as promoted, everywhere.** Once raised it is a
-  blocker like any other — but it is labelled, so nobody has to guess whether a
-  reviewer flagged it or you did. The progress file counts it in the round's
-  blockers line (`critical: 0, warning: 3, promoted: 2`) and gives it its own
-  line naming the file, dimension and title; if the pass ends up escalating, the
-  per-round table gains a **Promoted** column and the item is listed as
-  `Warning (promoted)`. Both the count and the column appear **only when
-  something was actually promoted**, so an ordinary run's output is unchanged.
-  The count is always a *subset* of the warnings, never an extra category added
-  on top.
-- **A promoted item that has already vanished is reported, not silently
-  skipped.** If the code moved on and a promoted suggestion no longer exists,
-  you are told — a converged pass never implies work that was not done. And when
-  the run cannot confirm either way, it says exactly that ("could not verify")
-  rather than claiming the item is gone.
-
-### What gets recorded about it
-
-The point of offering the choice at all is to find out whether suggestions are
-worth acting on — so the run records the two numbers that answer it: **how many
-suggestions you were shown**, and **how many you promoted**. They are appended
-to the repo's local telemetry file as one extra line linked to the run that
-produced them, at the moment you answer.
-
-Four details worth knowing, because they decide what the numbers mean:
-
-- **Picking none is recorded too** (as "0 promoted"). It is a real answer to
-  "are these worth doing?", not a non-event.
-- **An unattended run records nothing here.** No prompt was shown, so there is
-  no offered-vs-promoted pair to record, and its telemetry is exactly what it
-  was before this feature existed.
-- **The promotion pass does not count against the loop's convergence rate.** It
-  is polish on an already-converged change, so the headline "did it converge?"
-  figures deliberately exclude it — otherwise choosing to promote a suggestion
-  would make the loop look worse at converging. Its rounds still show up where
-  the question is *what the loop did*: the rounds-to-converge average and the
-  escalation breakdown both keep them.
-- **If the run's own telemetry line was never written, nothing is recorded here
-  either.** The pair is linked to that line, and an unlinkable record would be
-  worse than none — so it is skipped rather than invented.
-
-The telemetry file records only counts, never the findings themselves — what
-each suggestion *was* lives in the PR's review dossier. What this adds is just
-the two numbers: what you were shown, and what you chose.
-
-If the promotion pass cannot clear what you picked, it escalates through the
-normal taxonomy rather than silently re-waiving it — you asked for those items,
-so they are treated as blockers. That has a cost worth knowing before you pick:
-an escalation ends the run **without opening a PR**, so promoting something
-unclearable can turn an otherwise-ready change into one that needs another
-session. The prompt says so at the point of choosing.
+Earlier versions stopped an attended run at this point and offered every waived
+suggestion for promotion to blocking, resolved through a second pass of the
+loop. Over a month of runs nobody promoted anything, so the offer was removed:
+the project prefers to move forward rather than re-open what a converged run
+already let go.
 
 ## When you stop, or a run is unattended
 
