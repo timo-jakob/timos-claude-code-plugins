@@ -755,7 +755,7 @@ escalation_filter() {
   for needle in \
     '**A chain step'"'"'s clean stop goes up to its root (#3077).**' \
     'The step itself never asks: its root does, when the root is attended.' \
-    'The root resolves its own mode once, before its first dispatch, with `scripts/resolve-session.zsh --inferred attended`.' \
+    'That is its root mode, as `reference/chain-steps.md` § The step model (#2940) defines it, never an epic'"'"'s walk mode.' \
     'An attended root runs the interactive extension (`reference/interactive/extension.md`) on the step'"'"'s kept state, with the same options and recommendation as a direct attended run:' \
     'Ask the extension'"'"'s step 2 question with AskUserQuestion, marking `proposal.recommend`'"'"'s option recommended.' \
     'A non-null `proposal.guidance` is offered as the draft guidance.' \
@@ -787,6 +787,7 @@ escalation_filter() {
   t="$(section "$STEPS" 'The step model (#2940)' | tr '\n' ' ' | tr -s ' ')"
   contains "$t" '`resume` is `null`, or `"clean_stop"` on a step an attended root re-dispatches to resume a granted clean stop (`reference/escalation.md`, #3077).'
   contains "$t" 'attended and unattended behave alike, whatever `resolve_session` says (#2907), except for a step'"'"'s clean stop and `deferred` (#3077).'
+  contains "$t" 'Those two read only the **root mode**, which the root resolves before its first dispatch with `scripts/resolve-session.zsh --inferred attended`, never an epic'"'"'s walk mode.'
 }
 
 @test "#3077 an unattended root treats a step's clean stop as it always did" {
@@ -807,7 +808,7 @@ escalation_filter() {
     '`suggestions`, the waived set step 1 derives from the blocking phase'"'"'s status file, or `[]` when `suggestions-enabled.zsh` prints `off`,' \
     'On a clean stop it asks after the extension'"'"'s answer, Stop included, and after a grant only about the items its earlier list did not hold: the re-dispatched step resumes on the same status file, so its verdict derives the earlier items again.' \
     'Both are `[]` when there are none, and a follow-up the run filed goes in `follow_ups`, never here.' \
-    'The root, which resolves its own mode once with `scripts/resolve-session.zsh --inferred attended`, handles them before the verdict'"'"'s own arm, except on an attended clean stop:' \
+    'The root handles them by its root mode (`reference/chain-steps.md` § The step model (#2940)) before the verdict'"'"'s own arm, except on an attended clean stop:' \
     '**An attended root asks once per step.**' \
     'question with AskUserQuestion: **File all** · **File the suggested follow-ups only** · **File none**, with "Other" taking the numbers to file.' \
     'an `intent` question under ARCHITECTURE.md'"'"'s *Decision rights*, so it is asked and never decided for the human.' \

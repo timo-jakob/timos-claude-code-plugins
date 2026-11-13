@@ -132,9 +132,9 @@ itself never asks: its root does, when the root is attended.
   `guidance` otherwise.
   `proposal.guidance` drafts guidance from the carried blockers' suggested
   fixes, `null` when none has one.
-- **The root's mode decides what happens next.** The root resolves its own mode
-  once, before its first dispatch, with `scripts/resolve-session.zsh --inferred
-  attended`. An unattended root takes the `stopped` arm as before: a
+- **The root's mode decides what happens next.** That is its root mode, as
+  `reference/chain-steps.md` § The step model (#2940) defines it, never an
+  epic's walk mode. An unattended root takes the `stopped` arm as before: a
   single-issue root stops, an epic root triages the child by its cause and
   continues E3. An attended root runs the interactive extension
   (`reference/interactive/extension.md`) on the step's kept state, with the

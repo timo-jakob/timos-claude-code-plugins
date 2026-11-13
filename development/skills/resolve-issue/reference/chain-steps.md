@@ -19,8 +19,10 @@ see `reference/checkpoint.md` § The chain queue in a human-started run (#2942)
 The root keeps Step 0's classification and, for an epic, E1 to E5's control
 flow. Each child's run is still a step. In a human-started run, attended and
 unattended behave alike, whatever `resolve_session` says (#2907), except for a
-step's clean stop and `deferred` (#3077). A step
-resolves its session mode as an E3 child does: §0a's
+step's clean stop and `deferred` (#3077). Those two read only the **root
+mode**, which the root resolves before its first dispatch with
+`scripts/resolve-session.zsh --inferred attended`, never an epic's walk mode.
+A step resolves its session mode as an E3 child does: §0a's
 `scripts/resolve-session.zsh` with the inferred mode `unattended`, and it stays
 autonomous whatever the line says, so no step ever asks. **A step's mode is
 `unattended` for every branch keyed on the mode**, even when the line says
@@ -198,10 +200,6 @@ The step ends with one of these verdicts:
   - `failed`: any other ending `reference/telemetry.md` step 4 records `failed`,
     such as an abandoned red gate, a gate or loop error, or a round protocol
     that stopped before any loop ran.
-
-A clean stop also carries `escalation`, and a run whose review loop ran
-`deferred` (#3077), built as `reference/escalation.md` and
-`reference/promotion/gate.md` say.
 
 How the root handles each, once it has queued the verdict's `follow_ups` in the
 chain queue (#2942), which replaces §7's `refine-issue --follow-up` call in a

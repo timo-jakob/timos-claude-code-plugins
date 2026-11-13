@@ -138,9 +138,8 @@ file, or `[]` when `suggestions-enabled.zsh` prints `off`, and
 `suggested_follow_ups`, each `{title, body}`, for every follow-up the
 run would otherwise name only in prose without filing it. Both are `[]` when
 there are none, and a follow-up the run filed goes in `follow_ups`, never here.
-The root, which resolves its own mode once with `scripts/resolve-session.zsh
---inferred attended`, handles them before the verdict's own arm, except on an
-attended clean stop:
+The root handles them by its root mode (`reference/chain-steps.md` § The step
+model (#2940)) before the verdict's own arm, except on an attended clean stop:
 
 - **An attended root asks once per step.** When `deferred` holds any item, it
   renders one numbered list, each suggestion as title · `file:line` ·
