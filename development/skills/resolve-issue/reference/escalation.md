@@ -100,6 +100,77 @@ the run resumable:
 4. Emit the run's record with `clean_stop: true` and the marker's
    `convergence_failures` (`reference/telemetry.md` step 4), then stop.
 
+**A chain step's clean stop goes up to its root (#3077).** In a human-started
+run the step takes the same clean stop, and its `stopped` verdict also carries
+the `escalation` payload (ARCHITECTURE.md, *Step verdict contract*). The step
+itself never asks: its root does, when the root is attended.
+
+- **The step builds the payload** after the marker is written, from the marker
+  (the `marker` path `clean-stop.zsh dir` prints), the marker's status file and
+  the convergence verdict:
+
+  ```bash
+  "<skill-base-dir>/scripts/build-escalation.zsh" --status <the marker's status_file> \
+    --format verdict --work-dir <the marker's work_dir> > <scratch_dir>/step-<N>-convergence.json
+  jq -n --slurpfile m <the marker> --slurpfile s <the marker's status_file> \
+    --slurpfile c <scratch_dir>/step-<N>-convergence.json '{status: $m[0].status,
+      trigger: $m[0].convergence_failures, trend: $c[0].trend, series: $c[0].series,
+      carried_blockers: [ ((($s[0].round_changelists // [])[-1] // {}).blocking // [])[]
+        | select(.non_converging == true and .possible_false_trip != true)
+        | {title, file, line, dimension, severity: (.severity // .priority), suggested_fix} ],
+      work_dir: $m[0].work_dir, status_file: $m[0].status_file}
+    | .proposal = {recommend: (if .status == "BUDGET_EXHAUSTED" and $c[0].converging
+        then "grant" else "guidance" end), add: 3,
+        guidance: ([ .carried_blockers[] | select((.suggested_fix // "") | tostring | test("\\S"))
+          | "- \(.title) (`\(.file):\(.line)`): \(.suggested_fix)" ]
+          | if length == 0 then null else join("\n") end)}' > <scratch_dir>/step-<N>-escalation.json
+  ```
+
+  `trigger` is the marker's `convergence_failures`. `proposal.recommend` is the
+  option a direct attended run recommends: `grant` only on `BUDGET_EXHAUSTED`
+  when the convergence verdict passes (the automatic grant hit its cap),
+  `guidance` otherwise.
+  `proposal.guidance` drafts guidance from the carried blockers' suggested
+  fixes, `null` when none has one.
+- **The root's mode decides what happens next.** That is its root mode, as
+  `reference/chain-steps.md` § The step model (#2940) defines it, never an
+  epic's walk mode. An unattended root takes the `stopped` arm as before: a
+  single-issue root stops, an epic root triages the child by its cause and
+  continues E3. An attended root runs the interactive extension
+  (`reference/interactive/extension.md`) on the step's kept state, with the
+  same options and recommendation as a direct attended run:
+  1. Show `build-escalation.zsh --status <escalation.status_file> --format
+     summary --grants <grants>`, where `grants` counts this issue's grants in
+     this run, starting at 0.
+  2. Ask the extension's step 2 question with AskUserQuestion, marking
+     `proposal.recommend`'s option recommended. A non-null `proposal.guidance`
+     is offered as the draft guidance. A question the human asks is answered
+     and the question re-asked, as step 3 says.
+  3. On a grant, post any guidance as step 4 says, then record it:
+     `record-grant.zsh --work-dir <escalation.work_dir> --status
+     <escalation.status_file> --add 3`. Remove the `needs-human-decision` label
+     the clean stop added, delete the step's old verdict file, write a fresh
+     handoff for the same issue with the same `scratch_dir`, `chained_from` and
+     `parent_run_id`, `start_at: "0a"`, `after: null` and `resume:
+     "clean_stop"`, and dispatch a fresh issue step. Its verdict is read as any
+     other, so a second clean stop comes back here.
+  4. Only **Stop** ends the step: the root then takes the `stopped` arm, as an
+     unattended root does.
+- **The re-dispatched step resumes the kept clean stop** in place of a fresh
+  run, as §0a's `--resume` arm does. It runs `clean-stop.zsh read --repo-dir
+  <worktree> --issue <N> --mode attended`, since the root's human made the
+  grant, and its exit 3 or 4 ends the step `stopped` with cause `tooling`. It
+  moves no kept state aside. It notes `resumed_from: clean_stop`, runs §0a's
+  precheck, checks out the marker's `branch` from `origin`, runs §1b, skips
+  §0b, §1, §2 and §3, and records `gate_verdict: READY`. Then it continues at
+  the extension's step 5 (`reference/interactive/extension-grant.md`), with the
+  grant already recorded and any guidance already posted: one fix pass that
+  reads the issue's comments, the next round's boundary, and the loop's
+  `--resume` with the marker's `work_dir` and `status_file` and `--max-rounds`
+  set to the ceiling in `<work_dir>/.max-rounds`. Its mode stays `unattended`
+  for everything after, so a second failure takes the automatic grant or the
+  clean stop again.
+
 `ESCALATE_CONFLICT` and `ESCALATE_AMBIGUOUS` on an unattended run, and every
 escalation on an attended run, take the terminal below unchanged; their records
 carry `clean_stop: false`.

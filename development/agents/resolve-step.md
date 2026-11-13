@@ -39,13 +39,16 @@ Take its origin and parent_run_id. In place of Step 0's start, run
 story-telemetry.zsh start --run-file <scratch_dir>/story-run-<N>.json
 --parent-run-id <parent_run_id> --origin <origin> with the telemetry flags,
 then start at its start_at. When the handoff's after is not null, branch with
-step 1's script plus --after <after>.
+step 1's script plus --after <after>. When its resume is "clean_stop", resume
+the kept clean stop the root granted more rounds on, as reference/escalation.md
+says, in place of a fresh run.
 
 Resolve the session mode as an E3 child does (inferred unattended). Your mode
 is unattended whatever the line says, for every branch keyed on it, the
 escalation grant and the clean stop included: record session_mode unattended,
-with the line's source, or inferred when the line says attended. But move any
-kept state aside without --resume, deleting nothing, as an attended run does.
+with the line's source, or inferred when the line says attended. Unless its
+resume is "clean_stop", move any kept state aside without --resume, deleting
+nothing, as an attended run does.
 
 Skip §7's refine-issue --follow-up call: list the follow-ups only, since the
 root queues them (#2942). When this brief names BLOCKERS_FIRST=1, a §0a
@@ -64,6 +67,11 @@ Before you end your turn, write <scratch_dir>/step-<N>-verdict.json
 (step-verdict/v1, ARCHITECTURE.md *Step verdict contract*), listing every
 follow-up issue you filed in follow_ups and your run's run_id in run_id. A
 stopped verdict carries its cause: escalation, clean-stop, tooling or failed.
+A clean stop's verdict also carries escalation, its payload, and a run whose
+review loop ran also carries deferred: the suggestions it waived because it
+ran unattended, and every follow-up it would otherwise name only in prose.
+Build them as reference/escalation.md and reference/promotion/gate.md say. They
+are how the root, not you, puts those choices to the human (#3077).
 ```
 
 Which verdict each ending writes is `reference/chain-steps.md` § The issue step

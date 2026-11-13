@@ -8089,7 +8089,19 @@ carries:
 
 A refinement step ends with the verdict its chain-result outcome names (ready,
 split, questions-pending or stopped) and copies that document's fields; an
-issue-run step never ends ready or questions-pending. The conductor reads a
+issue-run step never ends ready or questions-pending. An issue-run step's verdict
+also carries what an attended run would have put to a human, since a step never
+asks (#3077): escalation, on a stopped verdict with cause clean-stop and on no
+other, is the clean stop's payload — status, trigger (the marker's
+convergence_failures), trend, carried_blockers, proposal ({recommend: grant or
+guidance, add, guidance: a draft or `null`}), work_dir and status_file — and
+deferred, on any verdict of a run whose review loop ran, holds suggestions (the
+waived {file, line, dimension, title} set) and suggested_follow_ups ({title,
+body} each). A refinement step's verdict carries neither. An attended root
+offers the interactive extension on an escalation and, on a grant, re-dispatches
+the step with the handoff's resume set to "clean_stop"; it asks one question per
+step about filing the deferred items. An unattended root files every suggested
+follow-up and no suggestion. The conductor reads a
 verdict with jq against this table. A verdict file that is missing, not one JSON
 object, or carries a value outside the table is not a result: a step that ends
 its turn with no verdict file is messaged to carry on, not counted as failed;
