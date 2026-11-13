@@ -765,6 +765,8 @@ escalation_filter() {
     'Only **Stop** ends the step: the root then takes the `stopped` arm, as an unattended root does.' \
     '"<skill-base-dir>/scripts/build-escalation.zsh" --status <the marker'"'"'s status_file> \ --format verdict --work-dir <the marker'"'"'s work_dir> > <scratch_dir>/step-<N>-convergence.json' \
     'On a grant, post any guidance as step 4 says, then record it:' \
+    '**The step builds the payload** after the marker is written, from the marker (the `marker` path `clean-stop.zsh dir` prints),' \
+    '`trigger` is the marker'"'"'s `convergence_failures`.' \
     '`proposal.recommend` is the option a direct attended run recommends: `grant` only on `BUDGET_EXHAUSTED` when the convergence verdict passes' \
     'It runs `clean-stop.zsh read --repo-dir <worktree> --issue <N> --mode attended`, since the root'"'"'s human made the grant, and its exit 3 or 4 ends the step `stopped` with cause `tooling`. It moves no kept state aside.' \
     'and `--max-rounds` set to the ceiling in `<work_dir>/.max-rounds`.' \
@@ -805,6 +807,7 @@ escalation_filter() {
     '`suggestions`, the waived set step 1 derives from the blocking phase'"'"'s status file, or `[]` when `suggestions-enabled.zsh` prints `off`,' \
     'On a clean stop it asks after the extension'"'"'s answer, Stop included, and after a grant only about the items its earlier list did not hold: the re-dispatched step resumes on the same status file, so its verdict derives the earlier items again.' \
     'Both are `[]` when there are none, and a follow-up the run filed goes in `follow_ups`, never here.' \
+    'The root, which resolves its own mode once with `scripts/resolve-session.zsh --inferred attended`, handles them before the verdict'"'"'s own arm, except on an attended clean stop:' \
     '**An attended root asks once per step.**' \
     'question with AskUserQuestion: **File all** · **File the suggested follow-ups only** · **File none**, with "Other" taking the numbers to file.' \
     'an `intent` question under ARCHITECTURE.md'"'"'s *Decision rights*, so it is asked and never decided for the human.' \
