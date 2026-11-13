@@ -139,7 +139,8 @@ file, or `[]` when `suggestions-enabled.zsh` prints `off`, and
 run would otherwise name only in prose without filing it. Both are `[]` when
 there are none, and a follow-up the run filed goes in `follow_ups`, never here.
 The root, which resolves its own mode once with `scripts/resolve-session.zsh
---inferred attended`, handles them before the verdict's own arm:
+--inferred attended`, handles them before the verdict's own arm, except on an
+attended clean stop:
 
 - **An attended root asks once per step.** When `deferred` holds any item, it
   renders one numbered list, each suggestion as title · `file:line` ·
@@ -148,10 +149,10 @@ The root, which resolves its own mode once with `scripts/resolve-session.zsh
   only** · **File none**, with "Other" taking the numbers to file. Filing work
   is a question of what to build, an `intent` question under ARCHITECTURE.md's
   *Decision rights*, so it is asked and never decided for the human. On a
-  clean stop it asks after the extension's answer, and after a grant only
-  about the items its earlier list did not hold: the re-dispatched step
-  resumes on the same status file, so its verdict derives the earlier items
-  again.
+  clean stop it asks after the extension's answer, Stop included, and after a
+  grant only about the items its earlier list did not hold: the re-dispatched
+  step resumes on the same status file, so its verdict derives the earlier
+  items again.
 - **An unattended root files every suggested follow-up** and no suggestion,
   which stays waived as in any unattended run.
 - **Each filed item** becomes an issue, `gh issue create --title <title>

@@ -749,7 +749,7 @@ escalation_filter() {
   [ "$(jq -c '.carried_blockers' <<< "$output")" = "[]" ]
 }
 
-@test "#3077 an attended root runs the extension on a step's clean stop and re-dispatches it to resume on a grant; only Stop ends the chain" {
+@test "#3077 an attended root runs the extension on a step's clean stop and re-dispatches it to resume on a grant; only Stop takes the stopped arm" {
   local t; t="$(flat "$REPO_ROOT/$ESC_REL")"
   local needle
   for needle in \
@@ -762,7 +762,9 @@ escalation_filter() {
     '`record-grant.zsh --work-dir <escalation.work_dir> --status <escalation.status_file> --add 3`.' \
     '`start_at: "0a"`, `after: null` and `resume: "clean_stop"`, and dispatch a fresh issue step.' \
     'so a second clean stop comes back here.' \
-    'Only **Stop** ends the chain: the root then takes the `stopped` arm.' \
+    'Only **Stop** ends the step: the root then takes the `stopped` arm, as an unattended root does.' \
+    '"<skill-base-dir>/scripts/build-escalation.zsh" --status <the marker'"'"'s status_file> \ --format verdict --work-dir <the marker'"'"'s work_dir> > <scratch_dir>/step-<N>-convergence.json' \
+    'On a grant, post any guidance as step 4 says, then record it:' \
     '`proposal.recommend` is the option a direct attended run recommends: `grant` only on `BUDGET_EXHAUSTED` when the convergence verdict passes' \
     'It runs `clean-stop.zsh read --repo-dir <worktree> --issue <N> --mode attended`, since the root'"'"'s human made the grant, and its exit 3 or 4 ends the step `stopped` with cause `tooling`. It moves no kept state aside.' \
     'and `--max-rounds` set to the ceiling in `<work_dir>/.max-rounds`.' \
@@ -787,7 +789,7 @@ escalation_filter() {
 
 @test "#3077 an unattended root treats a step's clean stop as it always did" {
   local t; t="$(flat "$REPO_ROOT/$ESC_REL")"
-  contains "$t" 'An unattended root takes the `stopped` arm as before, and the chain stops.'
+  contains "$t" 'An unattended root takes the `stopped` arm as before: a single-issue root stops, an epic root triages the child by its cause and continues E3.'
   t="$(section "$STEPS" 'The issue step (#2940)' | tr '\n' ' ' | tr -s ' ')"
   # the stopped arm itself still stops and still triages a clean-stopped child
   contains "$t" '**`stopped`** → report the reason and stop.'
@@ -801,7 +803,7 @@ escalation_filter() {
     '**A chain step hands its waived set to its root (#3077).**' \
     'A step of a human-started run never asks, so it never offers this phase.' \
     '`suggestions`, the waived set step 1 derives from the blocking phase'"'"'s status file, or `[]` when `suggestions-enabled.zsh` prints `off`,' \
-    'On a clean stop it asks after the extension'"'"'s answer, and after a grant only about the items its earlier list did not hold: the re-dispatched step resumes on the same status file, so its verdict derives the earlier items again.' \
+    'On a clean stop it asks after the extension'"'"'s answer, Stop included, and after a grant only about the items its earlier list did not hold: the re-dispatched step resumes on the same status file, so its verdict derives the earlier items again.' \
     'Both are `[]` when there are none, and a follow-up the run filed goes in `follow_ups`, never here.' \
     '**An attended root asks once per step.**' \
     'question with AskUserQuestion: **File all** · **File the suggested follow-ups only** · **File none**, with "Other" taking the numbers to file.' \
@@ -818,6 +820,7 @@ escalation_filter() {
   [ -n "$f" ]
   jq -e . <<< "$f" >/dev/null
   mkdir -p "$D/repo"
+  unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE
   git -C "$D/repo" init -q
   git -C "$D/repo" remote add origin https://github.com/o/r.git
   run --separate-stderr zsh "$q" add --repo-dir "$D/repo" --issue 2940 --entry 2940 --kind named
@@ -826,7 +829,7 @@ escalation_filter() {
   [ "$status" -eq 0 ]
   # chain-steps.md routes the root there before every verdict arm
   t="$(flat "$STEPS")"
-  contains "$t" 'and has handled its `deferred` items as `reference/promotion/gate.md` says (#3077):'
+  contains "$t" 'with its `deferred` items handled where `reference/promotion/gate.md` says (#3077):'
   t="$(flat "$SKILL_DIR/reference/promotion.md")"
   contains "$t" 'A chain step of a human-started run is never interactive and never offers the phase: it returns its waived set in its verdict'"'"'s `deferred`'
 }

@@ -134,8 +134,9 @@ itself never asks: its root does, when the root is attended.
   fixes, `null` when none has one.
 - **The root's mode decides what happens next.** The root resolves its own mode
   once, before its first dispatch, with `scripts/resolve-session.zsh --inferred
-  attended`. An unattended root takes the `stopped` arm as before, and the chain
-  stops. An attended root runs the interactive extension
+  attended`. An unattended root takes the `stopped` arm as before: a
+  single-issue root stops, an epic root triages the child by its cause and
+  continues E3. An attended root runs the interactive extension
   (`reference/interactive/extension.md`) on the step's kept state, with the
   same options and recommendation as a direct attended run:
   1. Show `build-escalation.zsh --status <escalation.status_file> --format
@@ -153,7 +154,8 @@ itself never asks: its root does, when the root is attended.
      `parent_run_id`, `start_at: "0a"`, `after: null` and `resume:
      "clean_stop"`, and dispatch a fresh issue step. Its verdict is read as any
      other, so a second clean stop comes back here.
-  4. Only **Stop** ends the chain: the root then takes the `stopped` arm.
+  4. Only **Stop** ends the step: the root then takes the `stopped` arm, as an
+     unattended root does.
 - **The re-dispatched step resumes the kept clean stop** in place of a fresh
   run, as §0a's `--resume` arm does. It runs `clean-stop.zsh read --repo-dir
   <worktree> --issue <N> --mode attended`, since the root's human made the

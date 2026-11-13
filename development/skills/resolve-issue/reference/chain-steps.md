@@ -205,7 +205,7 @@ A clean stop also carries `escalation`, and a run whose review loop ran
 
 How the root handles each, once it has queued the verdict's `follow_ups` in the
 chain queue (#2942), which replaces §7's `refine-issue --follow-up` call in a
-human-started run, and has handled its `deferred` items as
+human-started run, with its `deferred` items handled where
 `reference/promotion/gate.md` says (#3077):
 
 - **`done`** → report the PR. In an epic, continue E3. Queue step 3 alone says
