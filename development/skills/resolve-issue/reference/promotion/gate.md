@@ -149,8 +149,9 @@ The root, which resolves its own mode once with `scripts/resolve-session.zsh
   is a question of what to build, an `intent` question under ARCHITECTURE.md's
   *Decision rights*, so it is asked and never decided for the human. On a
   clean stop it asks after the extension's answer, and after a grant only
-  about `suggested_follow_ups`: the re-dispatched step resumes on the same
-  status file, so its verdict derives the suggestions again.
+  about the items its earlier list did not hold: the re-dispatched step
+  resumes on the same status file, so its verdict derives the earlier items
+  again.
 - **An unattended root files every suggested follow-up** and no suggestion,
   which stays waived as in any unattended run.
 - **Each filed item** becomes an issue, `gh issue create --title <title>

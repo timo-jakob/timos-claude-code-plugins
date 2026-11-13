@@ -739,6 +739,9 @@ escalation_filter() {
   [ "$status" -eq 0 ]
   [ "$(jq -r '.proposal.recommend' <<< "$output")" = "grant" ]
   [ "$(jq -r '.proposal.guidance' <<< "$output")" = "null" ]
+  run --separate-stderr jq -n --slurpfile m "$D/marker2.json" --slurpfile s "$D/status.json" --slurpfile c "$D/conv.json" "$f"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.proposal.recommend' <<< "$output")" = "guidance" ]
   # a status with no rounds carries no blockers rather than failing
   echo '{}' > "$D/status3.json"
   run --separate-stderr jq -n --slurpfile m "$D/marker.json" --slurpfile s "$D/status3.json" --slurpfile c "$D/conv.json" "$f"
@@ -798,7 +801,7 @@ escalation_filter() {
     '**A chain step hands its waived set to its root (#3077).**' \
     'A step of a human-started run never asks, so it never offers this phase.' \
     '`suggestions`, the waived set step 1 derives from the blocking phase'"'"'s status file, or `[]` when `suggestions-enabled.zsh` prints `off`,' \
-    'On a clean stop it asks after the extension'"'"'s answer, and after a grant only about `suggested_follow_ups`: the re-dispatched step resumes on the same status file, so its verdict derives the suggestions again.' \
+    'On a clean stop it asks after the extension'"'"'s answer, and after a grant only about the items its earlier list did not hold: the re-dispatched step resumes on the same status file, so its verdict derives the earlier items again.' \
     'Both are `[]` when there are none, and a follow-up the run filed goes in `follow_ups`, never here.' \
     '**An attended root asks once per step.**' \
     'question with AskUserQuestion: **File all** · **File the suggested follow-ups only** · **File none**, with "Other" taking the numbers to file.' \
