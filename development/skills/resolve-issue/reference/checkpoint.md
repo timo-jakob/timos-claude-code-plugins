@@ -275,9 +275,9 @@ it. When the test asserts a different expectation than the story-spec entry's
 `shape` states, whether or not that entry is `provisional`, reconcile the entry
 in the story's `story-spec/v1` block (#3089), the single source of truth for
 that expectation. Never edit a test-case body by hand: `test-case-spinout.zsh`
-generates it and regenerates it on every refine write-back. Write a map of every
-contradicted case to a scratch file outside the repository, each id naming the
-shipped expectation and its one-line note:
+generates it and regenerates it on every refine write-back. Only when a case is
+contradicted, write a map of every contradicted case to a scratch file outside
+the repository, each id naming the shipped expectation and its one-line note:
 
 ```json
 { "<test-case id>": { "shape": "<the expectation the shipped test asserts>",
