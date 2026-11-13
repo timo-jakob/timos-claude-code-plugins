@@ -14,7 +14,7 @@
 #
 # Usage:
 #   build-escalation.zsh --status FILE [--issue N] [--branch NAME] [--compare-url URL]
-#                        [--format comment|summary|verdict|clean-stop] [--grants N]
+#                        [--format comment|summary|verdict|clean-stop|guidance] [--grants N]
 #                        [--cap-reached] [--work-dir DIR]
 #     --status       the loop's status JSON (required)
 #     --issue        issue number (for the header, optional)
@@ -33,13 +33,20 @@
 #                    and the exact attended resume command. Only a
 #                    BUDGET_EXHAUSTED or ESCALATE_NO_CONVERGENCE status is
 #                    accepted, and a passing verdict needs --cap-reached.
+#                    `guidance` (#3076) is the automatic guidance comment of the
+#                    self-guided retry (below): the carried blockers' own
+#                    suggested_fix and evidence, tagged as automatic. It needs
+#                    --work-dir and refuses (exit 2) unless the retry is eligible.
 #     --cap-reached  clean-stop only: the automatic grant was refused for want
 #                    of headroom (record-grant.zsh exit 3) — names `cap`
-#     --work-dir     clean-stop only: the kept durable work-dir, named in the
-#                    comment so the human can find it. A path under $HOME is
-#                    printed as `~/…`: the comment is posted to an issue, often
-#                    on a public repo, and the expanded home directory names
-#                    the local account
+#     --work-dir     the loop's work-dir. clean-stop: the kept durable work-dir,
+#                    named in the comment so the human can find it. A path under
+#                    $HOME is printed as `~/…`: the comment is posted to an
+#                    issue, often on a public repo, and the expanded home
+#                    directory names the local account. verdict and guidance
+#                    (#3076): read for its grant ledger (grants.jsonl), which
+#                    says whether this run already took its self-guided retry,
+#                    and for its progress.md `- parked:` notes
 #     --grants       interactive-extension grants already consumed (optional;
 #                    rendered against the soft cap so the human sees the
 #                    context at the grant prompt, #969)
@@ -58,6 +65,22 @@
 #             unstamped last round cannot show that, so it fails as `stuck`.
 #   no CRITICAL  the last round's Critical count is 0, else `critical`.
 # `failures` lists every failing condition, in that order.
+#
+# The self-guided retry (#3076): the verdict also carries
+#   "self_guided": {"eligible": bool, "refusals": [...], "used": N|null}
+# for an unattended run whose only failing condition is `stuck`. It is eligible
+# (`refusals: []`) only when all of these hold, and each failing one is named in
+# `refusals`, in this order:
+#   not-stuck         `stuck` is not among the failures — nothing to retry
+#   trend             the trend is not falling (too-few-rounds included)
+#   critical          the last round has a Critical, or a carried blocker is one
+#   unstamped         the last round is unstamped, so its carried set is unknown
+#   no-suggested-fix  a carried blocker has no non-blank suggested_fix
+#   already-retried   the grant ledger already holds a guided grant: once per run
+#   no-work-dir       no --work-dir, so "once per run" cannot be checked
+# The carried blockers are the ones `stuck` counts: non_converging, not flagged
+# possible_false_trip. `used` counts the ledger's guided grants (null without
+# --work-dir).
 #
 # Exit codes: 0 ok · 2 usage · 1 internal (unreadable / invalid status JSON)
 
@@ -91,16 +114,20 @@ while [[ $# -gt 0 ]]; do
   --grants) _need_val "$1" $# "${2:-}"; grants="$2"; shift 2 ;;
   --cap-reached) cap=1; shift ;;
   --work-dir) _need_val "$1" $# "${2:-}"; kept_wd="$2"; shift 2 ;;
-  -h|--help) print -r -- "usage: build-escalation.zsh --status FILE [--issue N] [--branch NAME] [--compare-url URL] [--format comment|summary|verdict|clean-stop] [--grants N] [--cap-reached] [--work-dir DIR]"; exit 0 ;;
+  -h|--help) print -r -- "usage: build-escalation.zsh --status FILE [--issue N] [--branch NAME] [--compare-url URL] [--format comment|summary|verdict|clean-stop|guidance] [--grants N] [--cap-reached] [--work-dir DIR]"; exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
   *) print -u2 -- "unexpected argument: $1"; exit 2 ;;
   esac
 done
-[[ -n "$status_file" ]] || { print -u2 -- "usage: build-escalation.zsh --status FILE [--issue N] [--branch NAME] [--compare-url URL] [--format comment|summary|verdict|clean-stop] [--grants N] [--cap-reached] [--work-dir DIR]"; exit 2 }
-[[ "$fmt" == "comment" || "$fmt" == "summary" || "$fmt" == "verdict" || "$fmt" == "clean-stop" ]] || {
-  print -u2 -- "build-escalation: --format must be 'comment', 'summary', 'verdict' or 'clean-stop'"; exit 2 }
-[[ "$fmt" == "clean-stop" || ( $cap -eq 0 && -z "$kept_wd" ) ]] || {
-  print -u2 -- "build-escalation: --cap-reached and --work-dir are for --format clean-stop only"; exit 2 }
+[[ -n "$status_file" ]] || { print -u2 -- "usage: build-escalation.zsh --status FILE [--issue N] [--branch NAME] [--compare-url URL] [--format comment|summary|verdict|clean-stop|guidance] [--grants N] [--cap-reached] [--work-dir DIR]"; exit 2 }
+[[ "$fmt" == "comment" || "$fmt" == "summary" || "$fmt" == "verdict" || "$fmt" == "clean-stop" || "$fmt" == "guidance" ]] || {
+  print -u2 -- "build-escalation: --format must be 'comment', 'summary', 'verdict', 'clean-stop' or 'guidance'"; exit 2 }
+[[ "$fmt" == "clean-stop" || $cap -eq 0 ]] || {
+  print -u2 -- "build-escalation: --cap-reached is for --format clean-stop only"; exit 2 }
+[[ "$fmt" == "clean-stop" || "$fmt" == "verdict" || "$fmt" == "guidance" || -z "$kept_wd" ]] || {
+  print -u2 -- "build-escalation: --work-dir is for --format clean-stop, verdict or guidance only"; exit 2 }
+[[ "$fmt" != "guidance" || -n "$kept_wd" ]] || {
+  print -u2 -- "build-escalation: --format guidance needs --work-dir (its grant ledger proves the retry is the run's first)"; exit 2 }
 [[ -z "$grants" || "$grants" == <-> ]] || {
   print -u2 -- "build-escalation: --grants must be a non-negative integer (got: $grants)"; exit 2 }
 [[ -z "$issue" || "$issue" == <-> ]] || {
@@ -397,8 +424,32 @@ assessment=$(jq -r --arg st "$st" '
 # It reuses the assessment's own reading of the last round — the stamped test,
 # the carried and false-trip counts, the improving trend — so the prompt and
 # the automatic grant cannot disagree with the prose above.
+#
+# The self-guided retry (#3076) reads two things only the work-dir holds: how
+# many guided grants the run's ledger already records (once per run), and the
+# `- parked: <title> -> #<issue>` notes the fix passes wrote to progress.md. An
+# unreadable ledger line counts as nothing, the fail-quiet direction
+# record-grant.zsh and the loop take with the same file; with no --work-dir the
+# count is null and the retry refuses as `no-work-dir`.
+local guided_used="null" parked_json="{}"
+if [[ -n "$kept_wd" ]]; then
+  guided_used=0
+  if [[ -s "$kept_wd/grants.jsonl" ]]; then
+    guided_used=$(jq -R 'fromjson? | select(type == "object" and .guided == true)' \
+      "$kept_wd/grants.jsonl" 2>/dev/null | jq -s 'length' 2>/dev/null) || guided_used=0
+    [[ "$guided_used" == <-> ]] || guided_used=0
+  fi
+  if [[ -s "$kept_wd/progress.md" ]]; then
+    parked_json=$(jq -R -s '
+      [ split("\n")[] | capture("^- parked: (?<title>.*) -> #(?<issue>[0-9]+)\\s*$")? ]
+      | map({(.title): (.issue | tonumber)}) | add // {}' "$kept_wd/progress.md" 2>/dev/null) \
+      || parked_json="{}"
+    [[ -n "$parked_json" ]] || parked_json="{}"
+  fi
+fi
+
 local verdict=""
-verdict=$(jq -c '
+verdict=$(jq -c --argjson used "$guided_used" '
   (.round_changelists // []) as $rs
   | ([ $rs[] | ((.blocking // []) | length) ]) as $series
   | (if ($rs | length) == 0 then [] else ($rs[-1].blocking // []) end) as $lastblk
@@ -416,12 +467,65 @@ verdict=$(jq -c '
       (if ($series | length) >= 2 and $trend != "improving" then "trend" else empty end),
       (if ($carried == null) or (($carried - $ftrips) > 0) then "stuck" else empty end),
       (if $crit > 0 then "critical" else empty end) ] as $f
+  # the self-guided retry (#3076): the carried blockers are the ones `stuck`
+  # counts — non_converging and not a flagged possible false trip
+  | [ $lastblk[] | select((.non_converging == true) and (.possible_false_trip != true)) ] as $stuckblk
+  | [ (if ($f | index("stuck")) == null then "not-stuck" else empty end),
+      (if $trend != "improving" then "trend" else empty end),
+      (if ($crit > 0) or ([ $stuckblk[] | select(((.severity // .priority // "") | ascii_upcase) == "CRITICAL") ] | length > 0)
+       then "critical" else empty end),
+      (if $carried == null then "unstamped" else empty end),
+      (if [ $stuckblk[] | select(((.suggested_fix // "") | tostring | test("\\S")) | not) ] | length > 0
+       then "no-suggested-fix" else empty end),
+      (if ($used != null) and ($used > 0) then "already-retried" else empty end),
+      (if $used == null then "no-work-dir" else empty end) ] as $refusals
   | {converging: ($f | length == 0), failures: $f, series: $series, trend: $trend,
-     carried: $carried, false_trips: $ftrips, critical: $crit}' "$status_file") || {
+     carried: $carried, false_trips: $ftrips, critical: $crit,
+     self_guided: {eligible: ($refusals | length == 0), refusals: $refusals, used: $used}}' "$status_file") || {
   print -u2 -- "build-escalation: could not build the convergence verdict from $status_file"; exit 1 }
 
 if [[ "$fmt" == "verdict" ]]; then
   print -r -- "$verdict"
+  exit 0
+fi
+
+# --- guidance render (#3076): the self-guided retry's automatic guidance. The
+# conductor posts it on the issue exactly as a human's guidance is posted
+# (`reference/interactive/extension.md` step 4), so the fix pass re-reads it as
+# fix context. Everything in it is the reviewers' own words — each carried
+# blocker's suggested_fix and its description as evidence — and nothing is
+# invented here. A carried blocker the fix passes parked also gets the park
+# re-judged against the story's acceptance criteria (#3074) and its base
+# behaviour (#3075).
+if [[ "$fmt" == "guidance" ]]; then
+  [[ "$(jq -r '.self_guided.eligible' <<< "$verdict")" == "true" ]] || {
+    print -u2 -- "build-escalation: the self-guided retry is refused ($(jq -r '.self_guided.refusals | join(", ")' <<< "$verdict")), so there is no automatic guidance to post"; exit 2 }
+  local items=""
+  items=$(jq -r --argjson parked "$parked_json" '
+    def sevword: if .=="Critical" then "Critical" elif .=="High" then "Warning" else "Suggestion" end;
+    def safe(n): tostring | gsub("[\r\n]"; " ") | gsub("`"; "'"'"'") | .[0:n];
+    [ (.round_changelists[-1].blocking // [])[]
+      | select((.non_converging == true) and (.possible_false_trip != true)) ]
+    | to_entries[]
+    | (.key + 1) as $i | .value as $b
+    | "\($i). `\($b.file | safe(200))\(if ($b.line | type) == "number" then ":\($b.line)" else "" end)` [\($b.dimension | safe(80))/\(($b.priority // "High") | sevword)] \($b.title | safe(200))"
+      + "\n   - Evidence: \(($b.description // "") | safe(600) | if . == "" then "_(the reviewer gave none)_" else . end)"
+      + "\n   - Suggested fix: \($b.suggested_fix | safe(600))"
+      + (if ($parked[$b.title // ""] // null) != null then
+          "\n   - Parked as #\($parked[$b.title]): re-judge the park before parking it again. Apply the suggested fix when an acceptance criterion of the story asks for this surface, or when the diff of the story removed behaviour that exists at its base; otherwise keep it parked and say why."
+         else "" end)' "$status_file") || {
+    print -u2 -- "build-escalation: could not render the automatic guidance from $status_file"; exit 1 }
+  {
+    print -r -- "<!-- review-loop-guidance -->"
+    print -r -- "<!-- review-loop-guidance-source: automatic -->"
+    print -r -- "## 🤖 Automatic guidance — self-guided retry"
+    print -r --
+    print -r -- "_Posted by the pipeline, not by a human._ This unattended run's review loop exited \`${st}\` at round ${rounds} with its blockers falling ($(jq -r '.series | map(tostring) | join(" → ")' <<< "$verdict")), no Critical open, and every carried blocker holding a reviewer's suggested fix. So it grants itself **+3 rounds, once per run**, guided by the reviewers' own fixes below. A second stuck verdict after this retry stops the run cleanly."
+    print -r --
+    print -r -- "**Carried blockers**"
+    print -r --
+    print -r -- "$items"
+  }
   exit 0
 fi
 

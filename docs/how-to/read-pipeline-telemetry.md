@@ -139,6 +139,7 @@ sections of `ARCHITECTURE.md` named under each table.
 | `rounds` | integer | review rounds the loop ran — the key the rollup's `mean_rounds` reads |
 | `max_rounds` | integer | the round budget the loop ran under |
 | `grants` | object | `human` and `automatic`: how many round grants the run took from each source |
+| `auto_guided_retry` | boolean | `true` when the record was emitted after the run's one self-guided retry, so its `outcome` is that retry's |
 | `promotion_phase` | boolean | `true` when this run is the suggestion-promotion sub-loop |
 | `possible_false_trip_auto_continues` | integer | how often the loop auto-continued past a probable false trip |
 | `findings_by_round` | array of objects | per round: `round`, `by_severity` (`Critical` / `Warning` / `Suggestion`), `promoted`, `by_dimension`, `by_class`, `new`, `carried`, `fixed_from_prev`, `false_trips` |

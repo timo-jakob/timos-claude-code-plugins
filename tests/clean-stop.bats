@@ -345,7 +345,7 @@ flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
 @test "#2579 AC2 escalation.md: only an unattended BUDGET_EXHAUSTED / NO_CONVERGENCE stops cleanly; everything else keeps the terminal" {
   local esc
   esc="$(flat "$REPO_ROOT/development/skills/resolve-issue/reference/escalation.md")"
-  contains "$esc" '**An unattended run that cannot converge stops cleanly (#2579).** When that automatic grant is not taken — the verdict fails, or `record-grant.zsh` exits 3 — a `BUDGET_EXHAUSTED` or `ESCALATE_NO_CONVERGENCE` exit in mode `unattended` takes this clean stop instead of the terminal below.'
+  contains "$esc" '**An unattended run that cannot converge stops cleanly (#2579).** When that automatic grant is not taken — the verdict fails with no self-guided retry left to take, or `record-grant.zsh` exits 3 — a `BUDGET_EXHAUSTED` or `ESCALATE_NO_CONVERGENCE` exit in mode `unattended` takes this clean stop instead of the terminal below.'
   contains "$esc" '`ESCALATE_CONFLICT` and `ESCALATE_AMBIGUOUS` on an unattended run, and every escalation on an attended run, take the terminal below unchanged; their records carry `clean_stop: false`.'
   contains "$esc" 'Pass `--cap-reached` exactly when `record-grant.zsh` exited 3.'
   contains "$esc" 'Emit the run'"'"'s record with `clean_stop: true` and the marker'"'"'s `convergence_failures`'

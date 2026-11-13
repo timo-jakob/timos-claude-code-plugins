@@ -5235,7 +5235,7 @@ mode's non-terminal
 11 conflict; 12 no-convergence; 13 budget; 2 usage; 1 operational — e.g. a red
 gate after a fix, which emits status `ERROR`) alongside a machine-readable
 status JSON (`{status, rounds, max_rounds, effective_max_rounds,
-max_rounds_source, grants, promotion_phase,
+max_rounds_source, grants, auto_guided_retry, promotion_phase,
 closing_sweep_granted, possible_false_trip_auto_continues, carry_unconfirmed, repo_type,
 review_skill, topic_review_skills, escalation_reasons, residue_replaced_reasons, history,
 round_changelists, final_changelist, next_ref}`), where `next_ref` (#2055) is
@@ -5264,6 +5264,9 @@ never takes the ceiling past 2 × the run's original `--max-rounds`, and is cut
 to the remaining headroom or, with none, not made (exit 3). The cap bounds the
 grants only: the one closing-sweep round the loop grants beyond its ceiling
 (#1434) may still follow a capped grant, once, as the safety net it is — and
+`auto_guided_retry` (#3076) is an **always-present** boolean, `true` once the
+ledger holds a line `record-grant.zsh --guided` wrote (the run's one
+self-guided retry), so every status after that retry says it ran — and
 `possible_false_trip_auto_continues` (#1498) is an
 **always-present** integer — how many rounds the run took on the all-ambiguous
 auto-continue above, `0` on every run that never did, counting *continuations*
@@ -6428,7 +6431,10 @@ later; so a `null` here means "not an escalation", **not** "succeeded", and the
 `escalation` breakdown's null bucket silently contains failed `ERROR` runs —
 read `outcome` when you want success/failure), `rounds`, `max_rounds`,
 `grants` (#2576: `{human, automatic}` counts copied from the status JSON, so
-automatic grants are told apart from human ones),
+automatic grants are told apart from human ones), `auto_guided_retry` (#3076:
+copied from the status JSON, `false` when it has none; `true` on every record
+emitted after the run's self-guided retry, so that record's `outcome` is the
+retry's outcome),
 `promotion_phase`, `possible_false_trip_auto_continues`, `findings_by_round`,
 `gate_by_round`, `step_wall_s_by_round`, `skipped_dimensions_by_round`,
 `convergence_assessment`, and `fixed`
@@ -6726,7 +6732,16 @@ not the checkpoint's SHA (exit 5).
 
 **The clean stop (#2579).** An unattended run that exits `BUDGET_EXHAUSTED` or
 `ESCALATE_NO_CONVERGENCE` and is not granted rounds automatically (#2576: the
-convergence verdict fails, or the 2 × cap leaves no headroom) opens no PR. It
+convergence verdict fails, or the 2 × cap leaves no headroom) opens no PR. One
+failing verdict is still granted (#3076): when `stuck` is its only failure, the
+trend is falling, no Critical is open or carried and every carried blocker has a
+`suggested_fix`, the verdict's `self_guided.eligible` is `true`, and the run
+takes one self-guided retry. It posts `build-escalation.zsh --format guidance`'s
+comment (the carried blockers' own fixes and evidence, tagged automatic) and
+records `record-grant.zsh --add 3 --source automatic --guided`. The ledger's
+guided line makes it once per run: a second `stuck` is refused as
+`already-retried` (and `record-grant.zsh --guided` exits 4), and the run stops
+cleanly. It
 pushes its branch, and keeps its review-loop state in a durable directory any
 later session can derive, `$HOME/.claude/resolve-issue/<repo-slug>/<N>/`
 (`work-dir/`, `status.json` and the `clean-stop.json` marker), keyed by the

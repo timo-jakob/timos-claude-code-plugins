@@ -21,7 +21,7 @@
 # produced this bug. One writer, one job, its own tests.
 #
 # Usage:
-#   record-grant.zsh --work-dir DIR --status FILE --add N [--source human|automatic]
+#   record-grant.zsh --work-dir DIR --status FILE --add N [--source human|automatic] [--guided]
 #     --work-dir  the loop's work-dir — the granted ceiling is written to
 #                 <work-dir>/.max-rounds
 #     --status    the loop's status JSON, read for the BASE ceiling
@@ -38,6 +38,13 @@
 #                 {source, add, ceiling, original_max_rounds} — `add` is the
 #                 rise actually written, after any cut or clamp — which the
 #                 loop counts by source into its status JSON and telemetry.
+#     --guided    (#3076) the automatic grant is the run's self-guided retry,
+#                 the one a `stuck` verdict buys when build-escalation.zsh
+#                 --format verdict reports `self_guided.eligible`. Automatic
+#                 grants only. The ledger line carries `"guided": true`, which
+#                 is how the verdict and the loop know the retry was taken. A
+#                 ledger that already holds a guided line refuses a second one
+#                 with exit 4 and writes nothing: the retry is once per run.
 #
 # The automatic cap (#2576): an AUTOMATIC grant never takes the ceiling past
 # 2 x the original --max-rounds — the `max_rounds` of the status JSON at the
@@ -64,12 +71,13 @@
 #
 # Exit codes: 0 ok · 2 usage · 1 internal (unreadable status JSON, jq missing,
 #             a write that failed) · 3 an automatic grant with no headroom left
-#             under its cap (nothing written)
+#             under its cap (nothing written) · 4 a second self-guided retry
+#             (--guided on a ledger that already holds one; nothing written)
 
 emulate -L zsh
 setopt nounset pipefail
 
-local work_dir="" status_file="" add="" source="human"
+local work_dir="" status_file="" add="" source="human" guided=0
 # A DANGLING value flag (`--add` as the last word — the shape a caller produces
 # from an unquoted empty variable) must not reach `shift 2`: zsh refuses the
 # shift, returns 1 and leaves the positional parameters UNCHANGED, so with no
@@ -93,15 +101,16 @@ while [[ $# -gt 0 ]]; do
   --status) _need_val "$1" $# "${2:-}"; status_file="$2"; shift 2 ;;
   --add) _need_val "$1" $# "${2:-}"; add="$2"; shift 2 ;;
   --source) _need_val "$1" $# "${2:-}"; source="$2"; shift 2 ;;
+  --guided) guided=1; shift ;;
   -h|--help)
-    print -r -- "usage: record-grant.zsh --work-dir DIR --status FILE --add N [--source human|automatic]"
+    print -r -- "usage: record-grant.zsh --work-dir DIR --status FILE --add N [--source human|automatic] [--guided]"
     exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
   *) print -u2 -- "unexpected argument: $1"; exit 2 ;;
   esac
 done
 
-local usage="usage: record-grant.zsh --work-dir DIR --status FILE --add N [--source human|automatic]"
+local usage="usage: record-grant.zsh --work-dir DIR --status FILE --add N [--source human|automatic] [--guided]"
 [[ -n "$work_dir" ]] || { print -u2 -- "record-grant: --work-dir is required
 $usage"; exit 2 }
 [[ -n "$status_file" ]] || { print -u2 -- "record-grant: --status is required
@@ -115,6 +124,8 @@ $usage"; exit 2 }
   print -u2 -- "record-grant: --add must be a positive integer of at most 18 digits (got: $add)"; exit 2 }
 [[ "$source" == human || "$source" == automatic ]] || {
   print -u2 -- "record-grant: --source must be human or automatic (got: $source)"; exit 2 }
+(( ! guided )) || [[ "$source" == automatic ]] || {
+  print -u2 -- "record-grant: --guided is for --source automatic only (the self-guided retry, #3076)"; exit 2 }
 [[ -d "$work_dir" ]] || { print -u2 -- "record-grant: --work-dir is not a directory: $work_dir"; exit 2 }
 [[ -s "$status_file" ]] || { print -u2 -- "record-grant: status file missing or empty: $status_file"; exit 1 }
 
@@ -199,6 +210,18 @@ if [[ -s "$ledger" ]]; then
   fi
 fi
 
+# Once per run (#3076): a guided line already in the ledger refuses a second
+# self-guided retry before anything is written. An unreadable line is no
+# evidence of one, the same fail-quiet reading the ledger gets above.
+if (( guided )) && [[ -s "$ledger" ]]; then
+  local prior_guided=""
+  prior_guided=$(jq -R 'fromjson? | select(type == "object" and .guided == true)' "$ledger" 2>/dev/null | jq -s 'length' 2>/dev/null)
+  if [[ "$prior_guided" == <-> ]] && (( prior_guided > 0 )); then
+    print -u2 -- "record-grant: no self-guided retry — this run already took its one (a guided line is in $ledger)"
+    exit 4
+  fi
+fi
+
 if [[ "$source" == automatic ]]; then
   local auto_cap=$(( 2 * original ))
   if (( base >= auto_cap )); then
@@ -263,7 +286,9 @@ mv -- "$tmp" "$max_rounds_file" || {
 # always one the loop can adopt. A ledger that cannot be appended to costs only
 # the source count in telemetry, never the grant: say so and carry on.
 jq -nc --arg src "$source" --argjson add "$(( new_max - base ))" --argjson ceil "$new_max" --argjson orig "$original" \
-  '{source:$src, add:$add, ceiling:$ceil, original_max_rounds:$orig}' >> "$ledger" 2>/dev/null || \
+  --argjson guided "$guided" \
+  '{source:$src, add:$add, ceiling:$ceil, original_max_rounds:$orig} + (if $guided == 1 then {guided:true} else {} end)' \
+  >> "$ledger" 2>/dev/null || \
   print -u2 -- "record-grant: could not append to $ledger — the grant is in force, but its source is not recorded"
 
 print -r -- "$new_max"

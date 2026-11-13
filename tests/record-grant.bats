@@ -489,3 +489,39 @@ grant() {
   arch="$(tr '\n' ' ' < "$REPO_ROOT/ARCHITECTURE.md" | tr -s ' ')"
   contains "$arch" 'The cap bounds the grants only: the one closing-sweep round the loop grants beyond its ceiling (#1434) may still follow a capped grant, once, as the safety net it is'
 }
+
+# --- #3076: the self-guided retry's ledger line --------------------------------
+
+@test "#3076 --guided marks the automatic grant's ledger line, and only that one" {
+  seed_status 5 false
+  run --separate-stderr zsh "$S" --work-dir "$W" --status "$ST" --add 3 --source automatic --guided
+  [ "$status" -eq 0 ]
+  [ "$output" = "8" ]
+  [ "$(jq -c . "$W/grants.jsonl")" = '{"source":"automatic","add":3,"ceiling":8,"original_max_rounds":5,"guided":true}' ]
+}
+
+@test "#3076 a second --guided grant in one run is refused with exit 4 and writes nothing" {
+  grant 3 automatic 5
+  [ "$status" -eq 0 ]
+  # the guided grant compounds off the first one's 8 and is cut to the cap of 10
+  run --separate-stderr zsh "$S" --work-dir "$W" --status "$ST" --add 3 --source automatic --guided
+  [ "$status" -eq 0 ]
+  [ "$output" = "10" ]
+  printf '{"status":"ESCALATE_NO_CONVERGENCE","rounds":6,"max_rounds":5,"effective_max_rounds":8,"closing_sweep_granted":false}\n' > "$ST"
+  run --separate-stderr zsh "$S" --work-dir "$W" --status "$ST" --add 3 --source automatic --guided
+  [ "$status" -eq 4 ]
+  [ -z "$output" ]
+  contains "$stderr" "no self-guided retry — this run already took its one"
+  [ "$(grep -c '' "$W/grants.jsonl")" -eq 2 ]
+  [ "$(cat "$W/.max-rounds")" = "10" ]
+}
+
+@test "#3076 --guided on a human grant is a usage error and writes nothing" {
+  seed_status 5 false
+  run --separate-stderr zsh "$S" --work-dir "$W" --status "$ST" --add 3 --guided
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  contains "$stderr" "--guided is for --source automatic only"
+  [ ! -e "$W/.max-rounds" ]
+  [ ! -e "$W/grants.jsonl" ]
+}

@@ -4541,7 +4541,7 @@ JSON
   clean_loop
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r 'keys_unsorted | join(",")')" = \
-    "status,rounds,max_rounds,effective_max_rounds,max_rounds_source,grants,promotion_phase,closing_sweep_granted,possible_false_trip_auto_continues,carry_unconfirmed,repo_type,review_skill,topic_review_skills,escalation_reasons,residue_replaced_reasons,history,round_changelists,final_changelist,next_ref" ]
+    "status,rounds,max_rounds,effective_max_rounds,max_rounds_source,grants,auto_guided_retry,promotion_phase,closing_sweep_granted,possible_false_trip_auto_continues,carry_unconfirmed,repo_type,review_skill,topic_review_skills,escalation_reasons,residue_replaced_reasons,history,round_changelists,final_changelist,next_ref" ]
 }
 
 @test "#1072 a plan whose topic_review_skills is missing or not an array of strings is an internal error, never exported" {
@@ -4793,6 +4793,46 @@ next_ref_table() {
   [ "$(echo "$output" | jq '.effective_max_rounds')" -eq 3 ]
   [ "$(echo "$output" | jq '.closing_sweep_granted')" = "true" ]
   [ "$(echo "$output" | jq -c '.grants')" = '{"human":0,"automatic":1}' ]
+}
+
+@test "#3076 END-TO-END: a stuck but falling run takes one self-guided retry, converges, and its record says so" {
+  WD="$BATS_TEST_TMPDIR/wd-guided"
+  local ST="$BATS_TEST_TMPDIR/guided-status.json" CNT="$BATS_TEST_TMPDIR/guided-round"
+  # round 1: three blockers; round 2: the same first one again, so it is carried
+  local THREE='[{"severity":"WARNING","dimension":"tests","file":"app.py","line":7,"title":"weak assert","description":"checks nothing","suggested_fix":"pin the line","reviewer":"r"},{"severity":"WARNING","dimension":"bugs","file":"app.py","line":200,"title":"b","description":"d","reviewer":"r"},{"severity":"WARNING","dimension":"bugs","file":"app.py","line":300,"title":"c","description":"d","reviewer":"r"}]'
+  local ONE='[{"severity":"WARNING","dimension":"tests","file":"app.py","line":7,"title":"weak assert","description":"checks nothing","suggested_fix":"pin the line","reviewer":"r"}]'
+  local REV="$BATS_TEST_TMPDIR/guided-review.sh"
+  printf '%s\n' '#!/usr/bin/env bash' \
+    "c=\$(cat '$CNT' 2>/dev/null || echo 0); c=\$((c + 1)); echo \"\$c\" > '$CNT'" \
+    "if [ \"\$c\" -eq 1 ]; then printf '%s' '$THREE' > \"\$REVIEW_FINDINGS\"; else printf '%s' '$ONE' > \"\$REVIEW_FINDINGS\"; fi" > "$REV"
+  chmod +x "$REV"
+  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 5 --status-file "$ST" \
+    --review-cmd "$REV" --fix-cmd 'true'
+  [ "$status" -eq 12 ] || { echo "status=$status"; echo "$output" | jq -c '{status, h: [.history[] | {blocking, non_converging}]}'; return 1; }
+  [ "$(jq -r '.auto_guided_retry' "$ST")" = "false" ]
+
+  local BE="$REPO_ROOT/development/skills/resolve-issue/scripts/build-escalation.zsh"
+  run zsh "$BE" --status "$ST" --format verdict --work-dir "$WD"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '{failures, eligible: .self_guided.eligible}' <<<"$output")" = '{"failures":["stuck"],"eligible":true}' ]
+
+  local RG="$REPO_ROOT/development/skills/resolve-issue/scripts/record-grant.zsh"
+  run --separate-stderr zsh "$RG" --work-dir "$WD" --status "$ST" --add 3 --source automatic --guided
+  [ "$status" -eq 0 ]
+  [ "$output" = "8" ]
+
+  resume_clean "$WD" 5
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
+  [ "$(echo "$output" | jq -r '.auto_guided_retry')" = "true" ]
+  # the loop's record carries it, with the retry's outcome
+  local rec
+  rec=$(tail -n 1 "$DEFAULT_SINK")
+  [ "$(jq -c '{outcome, g: .payload.auto_guided_retry}' <<<"$rec")" = '{"outcome":"success","g":true}' ]
+  # the retry is spent: the same stuck status, judged again, refuses a second one
+  run zsh "$BE" --status "$ST" --format verdict --work-dir "$WD"
+  [ "$(jq -c '{failures, refusals: .self_guided.refusals}' <<<"$output")" = '{"failures":["stuck"],"refusals":["already-retried"]}' ]
 }
 
 # ---- residue-shaped runs reach #2576's verdict, never a PR (#2580) ------------
