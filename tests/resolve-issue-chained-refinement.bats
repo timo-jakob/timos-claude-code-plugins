@@ -384,7 +384,7 @@ esc() {  # [jq update] -> a clean stop's escalation payload (#3077)
   local t; t="$(flat "$STEPS")"
   local needle
   for needle in \
-    'In a human-started run, attended and unattended behave alike, whatever `resolve_session` says (#2907), except for a step'"'"'s clean stop and `deferred` items (#3077).' \
+    'In a human-started run, attended and unattended behave alike, whatever `resolve_session` says (#2907), except for a step'"'"'s clean stop and `deferred` (#3077).' \
     '`scratch_dir` is the root'"'"'s own scratch directory, outside the repository, and every step of the run shares it.' \
     'Before each dispatch the root deletes the issue'"'"'s old verdict file, so it never reads a previous step'"'"'s result as the new one.' \
     '`start_at` is `"0a"` for a first run, a leaf refined `ready` at E1b included. It is `"1"` only for the issue step re-dispatched after a refinement'"'"'s `ready` on an issue whose own step already passed §0a: the single-issue entry, the E3 child and a blocker (#2941).' \
@@ -418,12 +418,12 @@ esc() {  # [jq update] -> a clean stop's escalation payload (#3077)
   local t issue
   t="$(section "$STEPS" 'The step model (#2940)' | tr '\n' ' ' | tr -s ' ')"
   contains "$t" 'A step resolves its session mode as an E3 child does: §0a'"'"'s `scripts/resolve-session.zsh` with the inferred mode `unattended`, and it stays autonomous whatever the line says, so no step ever asks.'
-  contains "$t" '**A step'"'"'s mode is `unattended` for every branch keyed on the mode**, even when the line says `attended`: §0a'"'"'s arms, §3.5'"'"'s extension and suggestion promotion, and the escalation'"'"'s automatic grant and clean stop. **The one exception is §0a'"'"'s kept-state arm without `--resume`:** a step moves any kept state aside as an attended run does, deleting nothing, and never runs `clean-stop.zsh clear`, so it never deletes state a human could still resume.'
+  contains "$t" '**A step'"'"'s mode is `unattended` for every branch keyed on the mode**, even when the line says `attended`: §0a'"'"'s arms, §3.5'"'"'s extension and suggestion promotion, and the escalation'"'"'s automatic grant and clean stop. **The one exception is §0a'"'"'s kept-state arm without `--resume`:** a step with a null `resume` moves kept state aside as an attended run does, deleting nothing, and never runs `clean-stop.zsh clear`, so it never deletes state a human could still resume.'
   contains "$t" 'It records `session_mode: unattended`, with the line'"'"'s source, or `inferred` when the line says `attended`, and quotes the line it set aside.'
   issue="$(flat "$RSTEP")"
   contains "$issue" 'Your mode is unattended whatever the line says, for every branch keyed on it, the escalation grant and the clean stop included: record session_mode unattended, with the line'"'"'s source, or inferred when the line says attended.'
   contains "$issue" 'Resolve the session mode as an E3 child does (inferred unattended).'
-  contains "$issue" 'But move any kept state aside without --resume, deleting nothing, as an attended run does.'
+  contains "$issue" 'Unless its resume is "clean_stop", move any kept state aside without --resume, deleting nothing, as an attended run does.'
   lacks "$issue" 'autonomous whatever the line says), but'
   # the record a step's clean stop writes is one the story-record builder accepts
   grep -q 'clean_stop needs an escalated, unattended run' "$REPO_ROOT/development/skills/resolve-issue/scripts/build-story-telemetry-record.zsh"
@@ -712,7 +712,7 @@ escalation_filter() {
   jq -n '{round_changelists: [
       {blocking: [{title: "old", file: "a", line: 1, dimension: "d", severity: "WARNING"}]},
       {blocking: [
-        {title: "carried", file: "b.zsh", line: 9, dimension: "tests", severity: "WARNING", non_converging: true, suggested_fix: "assert the exit"},
+        {title: "carried", file: "b.zsh", line: 9, dimension: "tests", priority: "WARNING", non_converging: true, suggested_fix: "assert the exit"},
         {title: "false trip", file: "c", line: 2, dimension: "d", severity: "WARNING", non_converging: true, possible_false_trip: true, suggested_fix: "x"},
         {title: "fresh", file: "e", line: 3, dimension: "d", priority: "CRITICAL", non_converging: false}]}]}' > "$D/status.json"
   jq -n '{converging: false, failures: ["trend", "stuck"], series: [1, 3], trend: "regressing"}' > "$D/conv.json"
@@ -723,15 +723,19 @@ escalation_filter() {
   [ "$(jq -r '.status, .trend, .work_dir, .status_file' <<< "$e" | tr '\n' ' ')" = "ESCALATE_NO_CONVERGENCE regressing /h/r/2940/work-dir /h/r/2940/status.json " ]
   # only the last round's carried blockers that are not flagged false trips
   [ "$(jq -r '[.carried_blockers[].title] | join(",")' <<< "$e")" = "carried" ]
+  [ "$(jq -r '.carried_blockers[0] | [.severity, .file, .line, .suggested_fix] | join(" ")' <<< "$e")" = "WARNING b.zsh 9 assert the exit" ]
   [ "$(jq -r '.proposal.recommend' <<< "$e")" = "guidance" ]
   [ "$(jq -r '.proposal.add' <<< "$e")" = "3" ]
   [ "$(jq -r '.proposal.guidance' <<< "$e")" = '- carried (`b.zsh:9`): assert the exit' ]
   check "$(v stopped "$(jq -cn --argjson e "$e" '{reason: "r", cause: "clean-stop", escalation: $e}')")"
-  # a passing verdict (the automatic grant hit its cap) recommends the grant;
-  # no suggested fix leaves no draft guidance
+  # a passing verdict (the automatic grant hit its cap) recommends the grant
+  # on BUDGET_EXHAUSTED only; no suggested fix leaves no draft guidance
   jq '.converging = true' "$D/conv.json" > "$D/conv2.json"
+  run --separate-stderr jq -n --slurpfile m "$D/marker.json" --slurpfile s "$D/status.json" --slurpfile c "$D/conv2.json" "$f"
+  [ "$(jq -r '.proposal.recommend' <<< "$output")" = "guidance" ]
+  jq '.status = "BUDGET_EXHAUSTED"' "$D/marker.json" > "$D/marker2.json"
   jq '(.round_changelists[-1].blocking[] | select(.title == "carried")) |= del(.suggested_fix)' "$D/status.json" > "$D/status2.json"
-  run --separate-stderr jq -n --slurpfile m "$D/marker.json" --slurpfile s "$D/status2.json" --slurpfile c "$D/conv2.json" "$f"
+  run --separate-stderr jq -n --slurpfile m "$D/marker2.json" --slurpfile s "$D/status2.json" --slurpfile c "$D/conv2.json" "$f"
   [ "$status" -eq 0 ]
   [ "$(jq -r '.proposal.recommend' <<< "$output")" = "grant" ]
   [ "$(jq -r '.proposal.guidance' <<< "$output")" = "null" ]
@@ -756,12 +760,17 @@ escalation_filter() {
     '`start_at: "0a"`, `after: null` and `resume: "clean_stop"`, and dispatch a fresh issue step.' \
     'so a second clean stop comes back here.' \
     'Only **Stop** ends the chain: the root then takes the `stopped` arm.' \
-    '`proposal.recommend` is the option a direct attended run recommends: `grant` only when the convergence verdict passes' \
+    '`proposal.recommend` is the option a direct attended run recommends: `grant` only on `BUDGET_EXHAUSTED` when the convergence verdict passes' \
     'It runs `clean-stop.zsh read --repo-dir <worktree> --issue <N> --mode attended`, since the root'"'"'s human made the grant, and its exit 3 or 4 ends the step `stopped` with cause `tooling`. It moves no kept state aside.' \
     'and `--max-rounds` set to the ceiling in `<work_dir>/.max-rounds`.' \
     'Its mode stays `unattended` for everything after, so a second failure takes the automatic grant or the clean stop again.' \
     '**The re-dispatched step resumes the kept clean stop** in place of a fresh run, as §0a'"'"'s `--resume` arm does.' \
-    '`proposal.guidance` drafts guidance from the carried blockers'"'"' suggested fixes, `null` when none has one.'
+    '`proposal.guidance` drafts guidance from the carried blockers'"'"' suggested fixes, `null` when none has one.' \
+    'Show `build-escalation.zsh --status <escalation.status_file> --format summary --grants <grants>`, where `grants` counts this issue'"'"'s grants in this run, starting at 0.' \
+    'A question the human asks is answered and the question re-asked, as step 3 says.' \
+    'Remove the `needs-human-decision` label the clean stop added, delete the step'"'"'s old verdict file, write a fresh handoff for the same issue with the same `scratch_dir`, `chained_from` and `parent_run_id`,' \
+    'It notes `resumed_from: clean_stop`, runs §0a'"'"'s precheck, checks out the marker'"'"'s `branch` from `origin`, runs §1b, skips §0b, §1, §2 and §3, and records `gate_verdict: READY`.' \
+    'Then it continues at the extension'"'"'s step 5 (`reference/interactive/extension-grant.md`), with the grant already recorded and any guidance already posted:'
   do
     contains "$t" "$needle"
   done
@@ -770,7 +779,7 @@ escalation_filter() {
   contains "$t" '**`stopped` with cause `clean-stop`, in an attended root (#3077)** → the extension on the step'"'"'s kept state (`reference/escalation.md`); only **Stop** takes the `stopped` arm below, as an unattended root does.'
   t="$(section "$STEPS" 'The step model (#2940)' | tr '\n' ' ' | tr -s ' ')"
   contains "$t" '`resume` is `null`, or `"clean_stop"` on a step an attended root re-dispatches to resume a granted clean stop (`reference/escalation.md`, #3077).'
-  contains "$t" 'attended and unattended behave alike, whatever `resolve_session` says (#2907), except for a step'"'"'s clean stop and `deferred` items (#3077).'
+  contains "$t" 'attended and unattended behave alike, whatever `resolve_session` says (#2907), except for a step'"'"'s clean stop and `deferred` (#3077).'
 }
 
 @test "#3077 an unattended root treats a step's clean stop as it always did" {
@@ -788,13 +797,14 @@ escalation_filter() {
   for needle in \
     '**A chain step hands its waived set to its root (#3077).**' \
     'A step of a human-started run never asks, so it never offers this phase.' \
-    '`suggestions`, the waived set step 1 derives from the blocking phase'"'"'s status file' \
+    '`suggestions`, the waived set step 1 derives from the blocking phase'"'"'s status file, or `[]` when `suggestions-enabled.zsh` prints `off`,' \
+    'On a clean stop it asks after the extension'"'"'s answer, and after a grant only about `suggested_follow_ups`: the re-dispatched step resumes on the same status file, so its verdict derives the suggestions again.' \
     'Both are `[]` when there are none, and a follow-up the run filed goes in `follow_ups`, never here.' \
     '**An attended root asks once per step.**' \
     'question with AskUserQuestion: **File all** · **File the suggested follow-ups only** · **File none**, with "Other" taking the numbers to file.' \
     'an `intent` question under ARCHITECTURE.md'"'"'s *Decision rights*, so it is asked and never decided for the human.' \
     '**An unattended root files every suggested follow-up** and no suggestion, which stays waived as in any unattended run.' \
-    '`chain-queue.zsh add --entry <new> --kind follow-up --after <the step'"'"'s entry>`' \
+    '`chain-queue.zsh add --entry <new> --kind follow-up --after <the entry that filed it>` (for an E3 child, its epic-kind entry), as the chain queue'"'"'s step 2 adds and stops on its exits,' \
     'Nothing in `deferred` is dropped without the human'"'"'s answer.'
   do
     contains "$t" "$needle"
@@ -822,6 +832,7 @@ escalation_filter() {
   local t; t="$(flat "$RSTEP")"
   contains "$t" 'A clean stop'"'"'s verdict also carries escalation, its payload, and a run whose review loop ran also carries deferred'
   contains "$t" 'They are how the root, not you, puts those choices to the human (#3077).'
+  contains "$t" 'the suggestions it waived because it ran unattended, and every follow-up it would otherwise name only in prose. Build them as reference/escalation.md and reference/promotion/gate.md say.'
   contains "$t" 'When its resume is "clean_stop", resume the kept clean stop the root granted more rounds on'
   contains "$t" 'Never ask the human anything'
   lacks "$t" 'AskUserQuestion'

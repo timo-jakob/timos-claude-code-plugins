@@ -119,15 +119,17 @@ itself never asks: its root does, when the root is attended.
         | select(.non_converging == true and .possible_false_trip != true)
         | {title, file, line, dimension, severity: (.severity // .priority), suggested_fix} ],
       work_dir: $m[0].work_dir, status_file: $m[0].status_file}
-    | .proposal = {recommend: (if $c[0].converging then "grant" else "guidance" end), add: 3,
+    | .proposal = {recommend: (if .status == "BUDGET_EXHAUSTED" and $c[0].converging
+        then "grant" else "guidance" end), add: 3,
         guidance: ([ .carried_blockers[] | select((.suggested_fix // "") | tostring | test("\\S"))
           | "- \(.title) (`\(.file):\(.line)`): \(.suggested_fix)" ]
           | if length == 0 then null else join("\n") end)}' > <scratch_dir>/step-<N>-escalation.json
   ```
 
   `trigger` is the marker's `convergence_failures`. `proposal.recommend` is the
-  option a direct attended run recommends: `grant` only when the convergence
-  verdict passes (the automatic grant hit its cap), `guidance` otherwise.
+  option a direct attended run recommends: `grant` only on `BUDGET_EXHAUSTED`
+  when the convergence verdict passes (the automatic grant hit its cap),
+  `guidance` otherwise.
   `proposal.guidance` drafts guidance from the carried blockers' suggested
   fixes, `null` when none has one.
 - **The root's mode decides what happens next.** The root resolves its own mode

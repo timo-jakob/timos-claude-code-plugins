@@ -46,8 +46,9 @@ says, in place of a fresh run.
 Resolve the session mode as an E3 child does (inferred unattended). Your mode
 is unattended whatever the line says, for every branch keyed on it, the
 escalation grant and the clean stop included: record session_mode unattended,
-with the line's source, or inferred when the line says attended. But move any
-kept state aside without --resume, deleting nothing, as an attended run does.
+with the line's source, or inferred when the line says attended. Unless its
+resume is "clean_stop", move any kept state aside without --resume, deleting
+nothing, as an attended run does.
 
 Skip §7's refine-issue --follow-up call: list the follow-ups only, since the
 root queues them (#2942). When this brief names BLOCKERS_FIRST=1, a §0a

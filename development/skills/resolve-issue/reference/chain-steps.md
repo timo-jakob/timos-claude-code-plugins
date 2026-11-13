@@ -19,16 +19,16 @@ see `reference/checkpoint.md` § The chain queue in a human-started run (#2942)
 The root keeps Step 0's classification and, for an epic, E1 to E5's control
 flow. Each child's run is still a step. In a human-started run, attended and
 unattended behave alike, whatever `resolve_session` says (#2907), except for a
-step's clean stop and `deferred` items (#3077). A step
+step's clean stop and `deferred` (#3077). A step
 resolves its session mode as an E3 child does: §0a's
 `scripts/resolve-session.zsh` with the inferred mode `unattended`, and it stays
 autonomous whatever the line says, so no step ever asks. **A step's mode is
 `unattended` for every branch keyed on the mode**, even when the line says
 `attended`: §0a's arms, §3.5's extension and suggestion promotion, and
 the escalation's automatic grant and clean stop. **The one exception is §0a's
-kept-state arm without `--resume`:** a step moves any kept state aside as an
-attended run does, deleting nothing, and never runs `clean-stop.zsh clear`,
-so it never deletes state a human could still resume. It records
+kept-state arm without `--resume`:** a step with a null `resume` moves kept
+state aside as an attended run does, deleting nothing, and never runs
+`clean-stop.zsh clear`, so it never deletes state a human could still resume. It records
 `session_mode: unattended`, with the line's source, or `inferred` when the line
 says `attended`, and quotes the line it set aside. An epic's walk mode does not
 reach a step.

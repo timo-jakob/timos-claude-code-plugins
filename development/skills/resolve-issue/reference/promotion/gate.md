@@ -134,7 +134,8 @@ orphaned.
 human-started run never asks, so it never offers this phase. Its verdict
 carries `deferred` instead, on any verdict of a run whose review loop ran:
 `suggestions`, the waived set step 1 derives from the blocking phase's status
-file, and `suggested_follow_ups`, each `{title, body}`, for every follow-up the
+file, or `[]` when `suggestions-enabled.zsh` prints `off`, and
+`suggested_follow_ups`, each `{title, body}`, for every follow-up the
 run would otherwise name only in prose without filing it. Both are `[]` when
 there are none, and a follow-up the run filed goes in `follow_ups`, never here.
 The root, which resolves its own mode once with `scripts/resolve-session.zsh
@@ -146,14 +147,19 @@ The root, which resolves its own mode once with `scripts/resolve-session.zsh
   question with AskUserQuestion: **File all** · **File the suggested follow-ups
   only** · **File none**, with "Other" taking the numbers to file. Filing work
   is a question of what to build, an `intent` question under ARCHITECTURE.md's
-  *Decision rights*, so it is asked and never decided for the human.
+  *Decision rights*, so it is asked and never decided for the human. On a
+  clean stop it asks after the extension's answer, and after a grant only
+  about `suggested_follow_ups`: the re-dispatched step resumes on the same
+  status file, so its verdict derives the suggestions again.
 - **An unattended root files every suggested follow-up** and no suggestion,
   which stays waived as in any unattended run.
 - **Each filed item** becomes an issue, `gh issue create --title <title>
   --body-file <file>`, whose body names the step's issue and its PR when there
   is one, and is queued like a listed follow-up: `chain-queue.zsh add --entry
-  <new> --kind follow-up --after <the step's entry>` with `--finding` the
-  suggestion's `{file, line, dimension, title}`, or for a suggested follow-up
+  <new> --kind follow-up --after <the entry that filed it>` (for an E3 child,
+  its epic-kind entry), as the chain queue's step 2 adds and stops on its exits,
+  with `--finding` the suggestion's `{file, line, dimension, title}`, or for a
+  suggested follow-up
   `{"file": "follow-up", "line": null, "dimension": "follow-up", "title":
   <its title>}`. Nothing in `deferred` is dropped without the human's answer.
 
