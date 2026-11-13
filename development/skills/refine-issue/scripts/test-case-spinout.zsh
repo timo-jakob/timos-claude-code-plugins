@@ -100,9 +100,15 @@ done < <(jq -r '(.test_cases // [])[] | select(.id and (.issue|type=="number")) 
 gh label create "$LABEL" --repo "$repo" --color "$LABEL_COLOR" --description "$LABEL_DESC" \
   >/dev/null 2>&1 || true
 
-# Render the managed body for one test case ($1=id $2=kind $3=tooling $4=shape).
+# Render the managed body for one test case ($1=id $2=kind $3=tooling $4=shape
+# $5=reconciled). A non-empty `reconciled` note (#3089) — the one line
+# resolve-issue §6 writes when it reconciles the entry's shape to the shipped
+# expectation — renders as its own line directly beneath the `## Shape` section,
+# so the note survives every re-render. Without it the body is exactly as before.
 render_body() {
-  local id="$1" kind="$2" tooling="$3" shape="$4"
+  local id="$1" kind="$2" tooling="$3" shape="$4" note="${5:-}"
+  local shape_section="${shape:-_(no shape recorded in the story-spec entry)_}"
+  [[ -n "$note" ]] && shape_section+=$'\n\n'"$note"
   cat <<EOF
 $MANAGED_MARKER
 <!-- test-case: story=$story id=$id -->
@@ -115,7 +121,7 @@ Parent story: #$story
 
 ## Shape
 
-${shape:-_(no shape recorded in the story-spec entry)_}
+$shape_section
 
 ---
 
@@ -143,7 +149,8 @@ if (( count > 0 )); then
     kind="$(jq -r ".test_cases[$idx].kind // empty" "$spec")"
     tooling="$(jq -r ".test_cases[$idx].tooling // empty" "$spec")"
     shape="$(jq -r ".test_cases[$idx].shape // empty" "$spec")"
-    body="$(render_body "$id" "$kind" "$tooling" "$shape")"
+    note="$(jq -r ".test_cases[$idx].reconciled | if type == \"string\" then . else empty end" "$spec")"
+    body="$(render_body "$id" "$kind" "$tooling" "$shape" "$note")"
     title="test-case: $id ($kind) — story #$story"
 
     linked="${prior_link[$id]:-}"
