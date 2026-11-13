@@ -657,13 +657,11 @@ escalation_filter() {
 }
 
 @test "#3077 the verdict check accepts a clean stop's escalation and a deferred set on an issue step" {
-  local d='{"suggestions": [{"file": "a.zsh", "line": 4, "dimension": "security", "title": "quote the path"}],
-    "suggested_follow_ups": [{"title": "split the helper", "body": "named in round 2"}]}'
+  local d='{"suggested_follow_ups": [{"title": "split the helper", "body": "named in round 2"}]}'
   check "$(v stopped "$(jq -cn --argjson e "$(esc)" --argjson d "$d" '{reason: "r", cause: "clean-stop", escalation: $e, deferred: $d}')")"
   check "$(v done "$(jq -cn --argjson d "$d" '{pr: 3010, deferred: $d}')")"
-  check "$(v done '{"pr": 3010, "deferred": {"suggestions": [], "suggested_follow_ups": []}}')"
+  check "$(v done '{"pr": 3010, "deferred": {"suggested_follow_ups": []}}')"
   check "$(v stopped "$(jq -cn --argjson e "$(esc '.trend = null | .proposal.guidance = null | .proposal.recommend = "grant" | .status = "ESCALATE_NO_CONVERGENCE"')" '{reason: "r", cause: "clean-stop", escalation: $e}')")"
-  check "$(v done '{"pr": 3010, "deferred": {"suggestions": [{"file": "a", "line": null, "dimension": "d", "title": "t"}], "suggested_follow_ups": []}}')"
 }
 
 @test "#3077 the verdict check refuses a clean stop without its payload, a misplaced or malformed payload, and a malformed deferred set" {
@@ -690,16 +688,19 @@ escalation_filter() {
     "$(clean '.work_dir = "work-dir"')" \
     "$(clean 'del(.status_file)')" \
     "$(v done '{"pr": 1, "deferred": []}')" \
+    "$(v done '{"pr": 1, "deferred": {}}')" \
     "$(v done '{"pr": 1, "deferred": {"suggestions": []}}')" \
-    "$(v done '{"pr": 1, "deferred": {"suggestions": [{"file": "a", "line": 1, "dimension": "d", "title": " "}], "suggested_follow_ups": []}}')" \
-    "$(v done '{"pr": 1, "deferred": {"suggestions": [{"file": "a", "line": "1", "dimension": "d", "title": "t"}], "suggested_follow_ups": []}}')" \
-    "$(v done '{"pr": 1, "deferred": {"suggestions": [], "suggested_follow_ups": [{"title": "t"}]}}')" \
-    "$(v done '{"pr": 1, "deferred": {"suggestions": [], "suggested_follow_ups": ["t"]}}')"
+    "$(v done '{"pr": 1, "deferred": {"suggestions": [], "suggested_follow_ups": []}}')" \
+    "$(v done '{"pr": 1, "deferred": {"suggestions": [{"file": "a", "line": 1, "dimension": "d", "title": "t"}], "suggested_follow_ups": []}}')" \
+    "$(v done '{"pr": 1, "deferred": {"suggested_follow_ups": [], "other": 1}}')" \
+    "$(v done '{"pr": 1, "deferred": {"suggested_follow_ups": [{"title": "t"}]}}')" \
+    "$(v done '{"pr": 1, "deferred": {"suggested_follow_ups": [{"title": " ", "body": "b"}]}}')" \
+    "$(v done '{"pr": 1, "deferred": {"suggested_follow_ups": ["t"]}}')"
   do
     refuse issue "$doc"
   done
   # a refinement step's verdict carries neither field
-  refuse refinement "$(v ready '{"risk": "normal", "auto_accepted": [], "deferred": {"suggestions": [], "suggested_follow_ups": []}}')"
+  refuse refinement "$(v ready '{"risk": "normal", "auto_accepted": [], "deferred": {"suggested_follow_ups": []}}')"
   refuse refinement "$(v stopped "$(jq -cn --argjson e "$(esc)" '{reason: "r", escalation: $e}')")"
 }
 
@@ -799,28 +800,36 @@ escalation_filter() {
   contains "$t" '`clean-stop` → the same, and the child joins `epic-clean-stop-triage.zsh`'"'"'s `--clean-stopped` list;'
 }
 
-@test "#3077 a step's deferred suggestions and follow-ups are offered once by an attended root, filed by an unattended one, never dropped" {
-  local t; t="$(flat "$SKILL_DIR/reference/promotion/gate.md")"
+@test "#3077 a step's deferred follow-ups are offered once by an attended root, filed by an unattended one, never dropped" {
+  local t; t="$(section "$SKILL_DIR/reference/chain-steps/deferred-follow-ups.md" "A step's deferred follow-ups (#3077)" | tr '\n' ' ' | tr -s ' ')"
+  [ -n "$t" ]
   local needle
   for needle in \
-    '**A chain step hands its waived set to its root (#3077).**' \
-    'A step of a human-started run never asks, so it never offers this phase.' \
-    '`suggestions`, the waived set step 1 derives from the blocking phase'"'"'s status file, or `[]` when `suggestions-enabled.zsh` prints `off`,' \
-    'On a clean stop it asks after the extension'"'"'s answer, Stop included, and after a grant only about the items its earlier list did not hold: the re-dispatched step resumes on the same status file, so its verdict derives the earlier items again.' \
-    'Both are `[]` when there are none, and a follow-up the run filed goes in `follow_ups`, never here.' \
+    'A step of a human-started run never asks.' \
+    'Its verdict carries `deferred` instead, on any verdict of a run whose review loop ran: `suggested_follow_ups`, each `{title, body}`, for every follow-up the run would otherwise name only in prose without filing it.' \
+    'A suggestion the run waived is not handed back: it stays waived.' \
+    'On a clean stop it asks after the extension'"'"'s answer, Stop included, and after a grant only about the items its earlier list did not hold: the re-dispatched step resumes on the same status file, so its verdict names the earlier items again.' \
+    'It is `[]` when there are none, and a follow-up the run filed goes in `follow_ups`, never here.' \
     'The root handles them by its root mode (`reference/chain-steps.md` § The step model (#2940)) before the verdict'"'"'s own arm, except on an attended clean stop:' \
     '**An attended root asks once per step.**' \
-    'question with AskUserQuestion: **File all** · **File the suggested follow-ups only** · **File none**, with "Other" taking the numbers to file.' \
+    'one question with AskUserQuestion: **File all** · **File none**, with "Other" taking the numbers to file.' \
     'an `intent` question under ARCHITECTURE.md'"'"'s *Decision rights*, so it is asked and never decided for the human.' \
-    '**An unattended root files every suggested follow-up** and no suggestion, which stays waived as in any unattended run.' \
+    '**An unattended root files every suggested follow-up.**' \
     '`chain-queue.zsh add --entry <new> --kind follow-up --after <the entry that filed it>` (for an E3 child, its epic-kind entry), as the chain queue'"'"'s step 2 adds and stops on its exits,' \
     'Nothing in `deferred` is dropped without the human'"'"'s answer.'
   do
     contains "$t" "$needle"
   done
+  # the dropped option and the suggestion half are gone
+  lacks "$t" 'File the suggested follow-ups only'
+  lacks "$t" 'suggestions-enabled.zsh'
+  # the section left the promotion gate, which no longer hands anything to a root
+  local g; g="$(flat "$SKILL_DIR/reference/promotion/gate.md")"
+  lacks "$g" 'A chain step hands its waived set to its root'
+  lacks "$g" 'File all'
   # the queued finding for a suggested follow-up is one chain-queue accepts
   local q="$REPO_ROOT/development/skills/resolve-issue/scripts/chain-queue.zsh" f
-  f="$(printf '%s' "$t" | sed -n 's/.*or for a suggested follow-up `\({"file": "follow-up", "line": null, "dimension": "follow-up", "title": \)<its title>}`.*/\1"split the helper"}/p')"
+  f="$(printf '%s' "$t" | sed -n 's/.*with `--finding` `\({"file": "follow-up", "line": null, "dimension": "follow-up", "title": \)<its title>}`.*/\1"split the helper"}/p')"
   [ -n "$f" ]
   jq -e . <<< "$f" >/dev/null
   mkdir -p "$D/repo"
@@ -833,21 +842,26 @@ escalation_filter() {
   [ "$status" -eq 0 ]
   # chain-steps.md routes the root there before every verdict arm
   t="$(flat "$STEPS")"
-  contains "$t" 'with its `deferred` items handled where `reference/promotion/gate.md` says (#3077):'
+  contains "$t" 'and has handled its `deferred` follow-ups (#3077): see `reference/chain-steps/deferred-follow-ups.md` § A step'"'"'s deferred follow-ups (#3077)'
+  # the section has one home: chain-steps.md routes there and no longer carries it
+  lacks "$t" '**An attended root asks once per step.**'
   t="$(flat "$SKILL_DIR/reference/promotion.md")"
-  contains "$t" 'A chain step of a human-started run is never interactive and never offers the phase: it returns its waived set in its verdict'"'"'s `deferred`'
+  contains "$t" 'A chain step of a human-started run is never interactive and never offers the phase: its waived suggestions stay waived, and its verdict'"'"'s `deferred` carries only the follow-ups it would otherwise name in prose (`reference/chain-steps/deferred-follow-ups.md` § A step'"'"'s deferred follow-ups (#3077)).'
 }
 
 @test "#3077 the resolve-step agent hands escalation and deferred back and never asks" {
   local t; t="$(flat "$RSTEP")"
   contains "$t" 'A clean stop'"'"'s verdict also carries escalation, its payload, and a run whose review loop ran also carries deferred'
   contains "$t" 'They are how the root, not you, puts those choices to the human (#3077).'
-  contains "$t" 'the suggestions it waived because it ran unattended, and every follow-up it would otherwise name only in prose. Build them as reference/escalation.md and reference/promotion/gate.md say.'
+  contains "$t" 'carries deferred: every follow-up it would otherwise name only in prose. A suggestion it waived stays waived and is not handed back. Build them as reference/escalation.md and reference/chain-steps.md say.'
+  lacks "$t" 'reference/promotion/gate.md'
   contains "$t" 'When its resume is "clean_stop", resume the kept clean stop the root granted more rounds on'
   contains "$t" 'Never ask the human anything'
   lacks "$t" 'AskUserQuestion'
   t="$(arch_section 'Step verdict contract (#2940)' | tr '\n' ' ' | tr -s ' ')"
   contains "$t" 'escalation, on a stopped verdict with cause clean-stop and on no other, is the clean stop'"'"'s payload'
   contains "$t" 'A refinement step'"'"'s verdict carries neither.'
-  contains "$t" 'An unattended root files every suggested follow-up and no suggestion.'
+  contains "$t" 'deferred, on any verdict of a run whose review loop ran, holds suggested_follow_ups ({title, body} each) and no other key: a suggestion the run waived stays waived and is not handed back.'
+  contains "$t" 'An unattended root files every suggested follow-up.'
+  lacks "$t" 'and no suggestion'
 }

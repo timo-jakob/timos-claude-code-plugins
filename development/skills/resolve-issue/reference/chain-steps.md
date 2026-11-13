@@ -95,9 +95,7 @@ jq -e -s --argjson n <N> --arg kind <issue|refinement> 'length == 1 and (.[0] | 
        else ("ready", "split", "questions-pending", "stopped") end))
   and (.follow_ups | type == "array" and all(type == "number" and . >= 1 and . == floor))
   and ((has("run_id") | not) or (.run_id | type == "string" or . == null))
-  and ((has("deferred") | not) or ($kind == "issue" and (.deferred | type == "object"
-    and (.suggestions | type == "array" and all(type == "object" and (.file | type == "string")
-    and (.line | type == "number" or . == null) and (.dimension | type == "string") and (.title | type == "string" and test("\\S"))))
+  and ((has("deferred") | not) or ($kind == "issue" and (.deferred | type == "object" and keys == ["suggested_follow_ups"]
     and (.suggested_follow_ups | type == "array" and all(type == "object" and (.title | type == "string" and test("\\S")) and (.body | type == "string"))))))
   and (if $kind == "issue" and .verdict == "stopped" and .cause == "clean-stop" then (.escalation | type == "object"
     and (.status | IN("BUDGET_EXHAUSTED", "ESCALATE_NO_CONVERGENCE")) and (.trigger | type == "array" and length > 0 and all(type == "string"))
@@ -203,8 +201,8 @@ The step ends with one of these verdicts:
 
 How the root handles each, once it has queued the verdict's `follow_ups` in the
 chain queue (#2942), which replaces §7's `refine-issue --follow-up` call in a
-human-started run, with its `deferred` items handled where
-`reference/promotion/gate.md` says (#3077):
+human-started run, and has handled its `deferred` follow-ups (#3077):
+see `reference/chain-steps/deferred-follow-ups.md` § A step's deferred follow-ups (#3077)
 
 - **`done`** → report the PR. In an epic, continue E3. Queue step 3 alone says
   when an entry, epic-kind or not, is marked `done` and `next` is taken.

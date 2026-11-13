@@ -68,9 +68,9 @@ Before you end your turn, write <scratch_dir>/step-<N>-verdict.json
 follow-up issue you filed in follow_ups and your run's run_id in run_id. A
 stopped verdict carries its cause: escalation, clean-stop, tooling or failed.
 A clean stop's verdict also carries escalation, its payload, and a run whose
-review loop ran also carries deferred: the suggestions it waived because it
-ran unattended, and every follow-up it would otherwise name only in prose.
-Build them as reference/escalation.md and reference/promotion/gate.md say. They
+review loop ran also carries deferred: every follow-up it would otherwise name
+only in prose. A suggestion it waived stays waived and is not handed back.
+Build them as reference/escalation.md and reference/chain-steps.md say. They
 are how the root, not you, puts those choices to the human (#3077).
 ```
 

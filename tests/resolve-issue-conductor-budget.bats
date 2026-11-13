@@ -403,9 +403,13 @@ _unreached_reference_files() {
   #
   # THIRTY-FOUR since #3082: reference/epic-tree.md gains *Same-epic siblings
   # in other repos (#3082)*, which step 0a points at.
+  #
+  # THIRTY-FIVE since #3127: reference/chain-steps/deferred-follow-ups.md
+  # carries *A step's deferred follow-ups (#3077)*, moved out of
+  # reference/promotion/gate.md, where it was a bold paragraph, not a heading.
   local n
   n="$(_ref_headings | grep -c .)"
-  [ "$n" -eq 34 ]
+  [ "$n" -eq 35 ]
 }
 
 # --- pointers resolve -------------------------------------------------------
@@ -468,9 +472,11 @@ _unreached_reference_files() {
   # shard reference/interactive/blockers-first.md (#2941), and 33 until
   # chain-steps.md's step model pointed at checkpoint.md's chain queue (#2942), and 34 until
   # §7 pointed at that chain queue for its human-started exception (#3036), and 35 until
-  # §6 pointed at checkpoint.md's test-case body reconciliation (#3079).
-  if [ "$rows" -ne 36 ]; then
-    printf 'the skill carries %s pointer(s), expected 36.\n' "$rows" >&2
+  # §6 pointed at checkpoint.md's test-case body reconciliation (#3079), and 36
+  # until chain-steps.md's issue step pointed at its deferred follow-ups shard,
+  # reference/chain-steps/deferred-follow-ups.md (#3127).
+  if [ "$rows" -ne 37 ]; then
+    printf 'the skill carries %s pointer(s), expected 37.\n' "$rows" >&2
     printf 'A pointer was added or removed — update this count in the same PR,\n' >&2
     printf 'and check the step that gained or lost one still reaches its procedure.\n' >&2
     _all_pointers >&2

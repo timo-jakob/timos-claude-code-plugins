@@ -46,7 +46,7 @@ before it ships, and a row whose text moved is updated here.
 | RS-11 | reference/checkpoint.md | `so ask the human before you discard them` | intent | human-owned: discarding a half-finished round's uncommitted changes loses data |
 | RS-12 | reference/checkpoint.md | `ask the human whether to delete it` | intent | human-owned: deleting an old run's local branch cannot be undone from this run |
 | RS-13 | reference/chain-steps.md | `**Only the root asks the human.**` · `The root asks the verdict's` · `neither with AskUserQuestion` | intent / gap | human-owned: a chained refinement's below-threshold intent and gap questions, which the root relays with AskUserQuestion; a step never asks (#2940) |
-| RS-14 | reference/promotion/gate.md | `question with AskUserQuestion: **File all**` | intent | human-owned: filing a chain step's waived suggestions and suggested follow-ups as new work decides what to build; an unattended root files only the suggested follow-ups (#3077) |
+| RS-14 | reference/chain-steps/deferred-follow-ups.md | `one question with AskUserQuestion: **File all**` | intent | human-owned: filing a chain step's suggested follow-ups as new work decides what to build; an unattended root files them all (#3077) |
 
 ## RS-06a — the fallback review panel default (#2909)
 
