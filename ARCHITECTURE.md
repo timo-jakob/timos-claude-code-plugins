@@ -6736,9 +6736,10 @@ convergence verdict fails, or the 2 × cap leaves no headroom) opens no PR. One
 failing verdict is still granted (#3076): when `stuck` is its only failure, the
 trend is falling, no Critical is open or carried and every carried blocker has a
 `suggested_fix`, the verdict's `self_guided.eligible` is `true`, and the run
-takes one self-guided retry. It posts `build-escalation.zsh --format guidance`'s
-comment (the carried blockers' own fixes and evidence, tagged automatic) and
-records `record-grant.zsh --add 3 --source automatic --guided`. The ledger's
+takes one self-guided retry. It records `record-grant.zsh --add 3 --source
+automatic --guided` and, only once that exits 0, posts `build-escalation.zsh
+--format guidance`'s comment (the carried blockers' own fixes and evidence,
+tagged automatic), rendered before the grant. The ledger's
 guided line makes it once per run: a second `stuck` is refused as
 `already-retried` (and `record-grant.zsh --guided` exits 4), and the run stops
 cleanly. It

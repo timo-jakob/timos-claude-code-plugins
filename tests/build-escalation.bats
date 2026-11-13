@@ -1453,13 +1453,16 @@ setup_wd() { WD="$BATS_TEST_TMPDIR/wd"; mkdir -p "$WD"; }
 @test "#3076 the retry refuses on a carried Critical" {
   setup_wd
   vstat ESCALATE_NO_CONVERGENCE '[9,1]' "$(carried 'Guard the index.' Critical)"
+  # the summary counts none, so only the carried-Critical clause can refuse
+  jq '.round_changelists[-1].summary = {critical: 0}' "$ST" > "$ST.tmp" && mv "$ST.tmp" "$ST"
   sg
   [ "$(jq -c '.self_guided | {eligible, refusals}' <<<"$output")" = '{"eligible":false,"refusals":["critical"]}' ]
 }
 
 @test "#3076 the retry refuses on a Critical the summary counts even when no carried blocker is one" {
   setup_wd
-  vstat ESCALATE_NO_CONVERGENCE '[9,2]' "$(jq -c '. + [{priority:"Critical",dimension:"bugs",file:"c.zsh",line:1,title:"fresh",non_converging:false}]' <<<"$(carried 'Pin it.')")"
+  vstat ESCALATE_NO_CONVERGENCE '[9,1]' "$(carried 'Pin it.')"
+  jq '.round_changelists[-1].summary = {critical: 1}' "$ST" > "$ST.tmp" && mv "$ST.tmp" "$ST"
   sg
   [ "$(jq -c '.self_guided.refusals' <<<"$output")" = '["critical"]' ]
 }
@@ -1525,6 +1528,8 @@ setup_wd() { WD="$BATS_TEST_TMPDIR/wd"; mkdir -p "$WD"; }
   echo "$output" | grep -qxF -- '   - Parked as #4242: re-judge the park before parking it again. Apply the suggested fix when an acceptance criterion of the story asks for this surface, or when the diff of the story removed behaviour that exists at its base; otherwise keep it parked and say why.'
   # only carried blockers are guidance: the fresh one is not
   [ "$(echo "$output" | grep -c -- 'not carried')" -eq 0 ]
+  # the cap can cut or refuse the grant, so the comment names no figure for it
+  [ "$(echo "$output" | grep -c -- '+3')" -eq 0 ]
   # an unparked carried blocker gets no park line
   : > "$WD/progress.md"
   run --separate-stderr zsh "$S" --status "$ST" --format guidance --work-dir "$WD"
@@ -1557,4 +1562,13 @@ setup_wd() { WD="$BATS_TEST_TMPDIR/wd"; mkdir -p "$WD"; }
   contains "$esc" 'Its exit 3 takes the clean stop with `--cap-reached`, and its exit 4 (the ledger already holds a guided grant) takes the clean stop.'
   contains "$esc" 'Every review-loop record the run emits after the retry carries `auto_guided_retry: true`, and its `outcome` is the retry'"'"'s outcome.'
   contains "$esc" 'On `"converging": true`, run `record-grant.zsh --work-dir <work-dir> --status <status.json> --add 3 --source automatic`.'
+  contains "$esc" 'It holds each carried blocker'"'"'s `suggested_fix` and evidence, tagged `<!-- review-loop-guidance-source: automatic -->`.'
+  contains "$esc" 'For a parked blocker it asks the fix pass to re-judge the park against the story'"'"'s acceptance criteria and its base behaviour.'
+  contains "$esc" 'Either way the guidance is never posted. 3. On its exit 0, post the file on the issue with `gh issue comment <N> --body-file`, as a human'"'"'s guidance is posted'
+  contains "$esc" 'Apply one fix pass with that comment as fix context, then resume exactly as the automatic grant above does.'
+  local arch
+  arch="$(tr '\n' ' ' < "$REPO_ROOT/ARCHITECTURE.md" | tr -s ' ')"
+  contains "$arch" 'One failing verdict is still granted (#3076): when `stuck` is its only failure, the trend is falling, no Critical is open or carried and every carried blocker has a `suggested_fix`, the verdict'"'"'s `self_guided.eligible` is `true`, and the run takes one self-guided retry.'
+  contains "$arch" 'It records `record-grant.zsh --add 3 --source automatic --guided` and, only once that exits 0, posts `build-escalation.zsh --format guidance`'"'"'s comment'
+  contains "$arch" 'a second `stuck` is refused as `already-retried` (and `record-grant.zsh --guided` exits 4), and the run stops cleanly.'
 }

@@ -42,11 +42,10 @@ stop. That holds only when `stuck` is the one failure, the trend is falling, no
 Critical is open or carried, and every carried blocker has a `suggested_fix`.
 Instead:
 
-1. Build the automatic guidance and post it on the issue, as a human's guidance
-   is posted (step 4 in `reference/interactive/extension.md`):
+1. Build the automatic guidance into a file, before the grant's ledger line
+   makes the verdict refuse it as `already-retried`:
    `build-escalation.zsh --status <status.json> --format guidance --work-dir
-   <work-dir>`, written to a file and posted with `gh issue comment <N>
-   --body-file`. It holds each carried blocker's `suggested_fix` and evidence,
+   <work-dir>`. It holds each carried blocker's `suggested_fix` and evidence,
    tagged `<!-- review-loop-guidance-source: automatic -->`. For a parked
    blocker it asks the fix pass to re-judge the park against the story's
    acceptance criteria and its base behaviour.
@@ -54,9 +53,11 @@ Instead:
    `record-grant.zsh --work-dir <work-dir> --status <status.json> --add 3
    --source automatic --guided`. Its exit 3 takes the clean stop with
    `--cap-reached`, and its exit 4 (the ledger already holds a guided grant)
-   takes the clean stop.
-3. Apply one fix pass with that comment as fix context, then resume exactly as
-   the automatic grant above does.
+   takes the clean stop. Either way the guidance is never posted.
+3. On its exit 0, post the file on the issue with `gh issue comment <N>
+   --body-file`, as a human's guidance is posted (step 4 in
+   `reference/interactive/extension.md`). Apply one fix pass with that comment
+   as fix context, then resume exactly as the automatic grant above does.
 
 The retry is once per run. A second `stuck` after it finds the guided line in
 the ledger and is refused as `already-retried`, so the run takes the clean stop

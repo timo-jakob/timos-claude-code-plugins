@@ -769,4 +769,7 @@ EOF
   run zsh "$S" --status "$ST"
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -c '.auto_guided_retry')" = 'false' ]
+  local arch
+  arch="$(tr '\n' ' ' < "$REPO_ROOT/ARCHITECTURE.md" | tr -s ' ')"
+  contains "$arch" '`auto_guided_retry` (#3076: copied from the status JSON, `false` when it has none; `true` on every record emitted after the run'"'"'s self-guided retry, so that record'"'"'s `outcome` is the retry'"'"'s outcome)'
 }

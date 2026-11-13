@@ -4833,6 +4833,9 @@ next_ref_table() {
   # the retry is spent: the same stuck status, judged again, refuses a second one
   run zsh "$BE" --status "$ST" --format verdict --work-dir "$WD"
   [ "$(jq -c '{failures, refusals: .self_guided.refusals}' <<<"$output")" = '{"failures":["stuck"],"refusals":["already-retried"]}' ]
+  local arch
+  arch="$(tr '\n' ' ' < "$REPO_ROOT/ARCHITECTURE.md" | tr -s ' ')"
+  contains "$arch" '`auto_guided_retry` (#3076) is an **always-present** boolean, `true` once the ledger holds a line `record-grant.zsh --guided` wrote (the run'"'"'s one self-guided retry), so every status after that retry says it ran'
 }
 
 # ---- residue-shaped runs reach #2576's verdict, never a PR (#2580) ------------

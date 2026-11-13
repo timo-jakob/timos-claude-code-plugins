@@ -520,7 +520,7 @@ if [[ "$fmt" == "guidance" ]]; then
     print -r -- "<!-- review-loop-guidance-source: automatic -->"
     print -r -- "## 🤖 Automatic guidance — self-guided retry"
     print -r --
-    print -r -- "_Posted by the pipeline, not by a human._ This unattended run's review loop exited \`${st}\` at round ${rounds} with its blockers falling ($(jq -r '.series | map(tostring) | join(" → ")' <<< "$verdict")), no Critical open, and every carried blocker holding a reviewer's suggested fix. So it grants itself **+3 rounds, once per run**, guided by the reviewers' own fixes below. A second stuck verdict after this retry stops the run cleanly."
+    print -r -- "_Posted by the pipeline, not by a human._ This unattended run's review loop exited \`${st}\` at round ${rounds} with its blockers falling ($(jq -r '.series | map(tostring) | join(" → ")' <<< "$verdict")), no Critical open, and every carried blocker holding a reviewer's suggested fix. So it grants itself more rounds **once per run**, guided by the reviewers' own fixes below. A second stuck verdict after this retry stops the run cleanly."
     print -r --
     print -r -- "**Carried blockers**"
     print -r --
