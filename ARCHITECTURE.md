@@ -5736,6 +5736,7 @@ conductor passes on unopened.
 | fix | `fix_applied` | bool, never null |
 | fix | `files_changed` | int ≥ 0, never null |
 | fix | `parked` | [`{issue, ac_check}`] — one per finding the pass parked: `issue` int ≥ 1, `ac_check` `checked` when the round's fix handoff names an `acceptance_criteria_file`, else `no-ac-file`; `[]` on `failed` (#3074) |
+| fix | `base_checks` | [`{base, at_base}`] — one per finding the pass checked against the story's base before parking (#3075): `base` the full 40-hex merge-base commit id it read, `at_base` `true` for a regression it restored and `false` for a finding it parked; exactly one `at_base: false` check per `parked` item; `[]` on `failed` |
 | decide | `decided_red`, `decided_green`, `malformed` | int ≥ 0 on `ok`; null on `failed` |
 | decide | `ran_commands_file` | absolute path in the work-dir on `ok`; null on `failed` |
 | risk | `risk_file` | absolute path in the work-dir on `ok`; null on `failed` |
@@ -5748,7 +5749,7 @@ The closed cause sets:
   `wrong-worktree-root`, `empty-excerpt`, `story-diff-empty`, `not-applicable`,
   `no-agent-tool`;
 - **fix:** `cannot-fix` — which carries `fix_applied: false`,
-  `files_changed: 0` and `parked: []`;
+  `files_changed: 0`, `parked: []` and `base_checks: []`;
 - **decide:** `wrong-worktree-root`;
 - **risk:** `wrong-worktree-root`, `assessment-failed`.
 

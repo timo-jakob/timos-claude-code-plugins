@@ -76,7 +76,7 @@ panel_verdict_na() {
 
 fix_verdict_ok() {
   jq -n '{ schema: "round-verdict/v1", kind: "fix", round: 2, outcome: "ok", cause: null,
-    fix_applied: true, files_changed: 3, parked: [] }'
+    fix_applied: true, files_changed: 3, parked: [], base_checks: [] }'
 }
 
 decide_verdict_ok() {
@@ -208,7 +208,7 @@ round_trip() {
 }
 
 @test "round-trip: fix verdict listing the findings it parked, with their AC check (#3074)" {
-  round_trip verdict "$(fix_verdict_ok | jq '.parked = [{issue: 3081, ac_check: "checked"}, {issue: 3082, ac_check: "no-ac-file"}]')" verdict-2-fix.json
+  round_trip verdict "$(fix_verdict_ok | jq '.parked = [{issue: 3081, ac_check: "checked"}, {issue: 3082, ac_check: "no-ac-file"}] | .base_checks = [.parked[] | {base: "4b825dc642cb6eb9a060e54bf8d69288fbee4904", at_base: false}]')" verdict-2-fix.json
 }
 
 @test "round-trip: fix verdict cannot-fix" {
@@ -610,20 +610,20 @@ round_trip() {
 }
 
 @test "rejects a parked item whose ac_check is outside its closed set (#3074)" {
-  write verdict "$(fix_verdict_ok | jq '.parked = [{issue: 3081, ac_check: "skipped"}]')"
+  write verdict "$(fix_verdict_ok | jq '.parked = [{issue: 3081, ac_check: "skipped"}] | .base_checks = [.parked[] | {base: "4b825dc642cb6eb9a060e54bf8d69288fbee4904", at_base: false}]')"
   rejected "parked item is not {issue, ac_check}"
 }
 
 @test "rejects a parked no-ac-file when the round's fix handoff names an acceptance-criteria file (#3074)" {
   write handoff "$(fix_handoff awaiting-fix)"
-  write verdict "$(fix_verdict_ok | jq '.parked = [{issue: 3081, ac_check: "no-ac-file"}]')"
+  write verdict "$(fix_verdict_ok | jq '.parked = [{issue: 3081, ac_check: "no-ac-file"}] | .base_checks = [.parked[] | {base: "4b825dc642cb6eb9a060e54bf8d69288fbee4904", at_base: false}]')"
   [ "$status" -eq 3 ]
   contains "$stderr" "ac_check is not checked, which handoff-2-fix.json implies"
 }
 
 @test "rejects a parked checked when the round's fix handoff carries a null acceptance_criteria_file (#3074)" {
   write handoff "$(fix_handoff awaiting-fix | jq '.acceptance_criteria_file = null')"
-  write verdict "$(fix_verdict_ok | jq '.parked = [{issue: 3081, ac_check: "checked"}]')"
+  write verdict "$(fix_verdict_ok | jq '.parked = [{issue: 3081, ac_check: "checked"}] | .base_checks = [.parked[] | {base: "4b825dc642cb6eb9a060e54bf8d69288fbee4904", at_base: false}]')"
   [ "$status" -eq 3 ]
   contains "$stderr" "ac_check is not no-ac-file, which handoff-2-fix.json implies"
   [ ! -f "$WD/verdict-2-fix.json" ]
@@ -631,7 +631,7 @@ round_trip() {
 
 @test "rejects a verdict whose parked items disagree, one checked and one no-ac-file (#3074)" {
   write handoff "$(fix_handoff awaiting-fix)"
-  write verdict "$(fix_verdict_ok | jq '.parked = [{issue: 3081, ac_check: "checked"}, {issue: 3082, ac_check: "no-ac-file"}]')"
+  write verdict "$(fix_verdict_ok | jq '.parked = [{issue: 3081, ac_check: "checked"}, {issue: 3082, ac_check: "no-ac-file"}] | .base_checks = [.parked[] | {base: "4b825dc642cb6eb9a060e54bf8d69288fbee4904", at_base: false}]')"
   [ "$status" -eq 3 ]
   contains "$stderr" "ac_check is not checked, which handoff-2-fix.json implies"
   [ ! -f "$WD/verdict-2-fix.json" ]
@@ -639,21 +639,62 @@ round_trip() {
 
 @test "writes a verdict whose every parked item is checked beside a handoff naming an acceptance-criteria file (#3074)" {
   write handoff "$(fix_handoff awaiting-fix)"
-  write verdict "$(fix_verdict_ok | jq '.parked = [{issue: 3081, ac_check: "checked"}, {issue: 3082, ac_check: "checked"}]')"
+  write verdict "$(fix_verdict_ok | jq '.parked = [{issue: 3081, ac_check: "checked"}, {issue: 3082, ac_check: "checked"}] | .base_checks = [.parked[] | {base: "4b825dc642cb6eb9a060e54bf8d69288fbee4904", at_base: false}]')"
   [ "$status" -eq 0 ]
   [ -f "$WD/verdict-2-fix.json" ]
 }
 
 @test "writes a verdict whose every parked item is no-ac-file beside a handoff with a null acceptance_criteria_file (#3074)" {
   write handoff "$(fix_handoff awaiting-fix | jq '.acceptance_criteria_file = null')"
-  write verdict "$(fix_verdict_ok | jq '.parked = [{issue: 3081, ac_check: "no-ac-file"}, {issue: 3082, ac_check: "no-ac-file"}]')"
+  write verdict "$(fix_verdict_ok | jq '.parked = [{issue: 3081, ac_check: "no-ac-file"}, {issue: 3082, ac_check: "no-ac-file"}] | .base_checks = [.parked[] | {base: "4b825dc642cb6eb9a060e54bf8d69288fbee4904", at_base: false}]')"
   [ "$status" -eq 0 ]
   [ -f "$WD/verdict-2-fix.json" ]
 }
 
 @test "rejects a cannot-fix verdict that parks a finding (#3074)" {
-  write verdict "$(fix_verdict_ok | jq '.outcome = "failed" | .cause = "cannot-fix" | .fix_applied = false | .files_changed = 0 | .parked = [{issue: 3081, ac_check: "checked"}]')"
+  write verdict "$(fix_verdict_ok | jq '.outcome = "failed" | .cause = "cannot-fix" | .fix_applied = false | .files_changed = 0 | .parked = [{issue: 3081, ac_check: "checked"}] | .base_checks = [.parked[] | {base: "4b825dc642cb6eb9a060e54bf8d69288fbee4904", at_base: false}]')"
   rejected "and park nothing"
+}
+
+@test "writes a verdict recording a restored regression beside a parked finding (#3075)" {
+  write verdict "$(fix_verdict_ok | jq '.parked = [{issue: 3081, ac_check: "checked"}] | .base_checks = [{base: "4b825dc642cb6eb9a060e54bf8d69288fbee4904", at_base: true}, {base: "4b825dc642cb6eb9a060e54bf8d69288fbee4904", at_base: false}]')"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '[.base_checks[].at_base]' "$WD/verdict-2-fix.json")" = '[true,false]' ]
+}
+
+@test "rejects a fix verdict without base_checks (#3075)" {
+  write verdict "$(fix_verdict_ok | jq 'del(.base_checks)')"
+  rejected "missing field: base_checks"
+}
+
+@test "rejects a base_checks that is not an array (#3075)" {
+  write verdict "$(fix_verdict_ok | jq '.base_checks = {}')"
+  rejected "base_checks is not an array"
+}
+
+@test "rejects a base check whose base is not a full commit id (#3075)" {
+  write verdict "$(fix_verdict_ok | jq '.base_checks = [{base: "4b825dc", at_base: true}]')"
+  rejected "base_checks item is not {base, at_base}"
+}
+
+@test "rejects a base check whose at_base is not a bool (#3075)" {
+  write verdict "$(fix_verdict_ok | jq '.base_checks = [{base: "4b825dc642cb6eb9a060e54bf8d69288fbee4904", at_base: "no"}]')"
+  rejected "base_checks item is not {base, at_base}"
+}
+
+@test "rejects a parked finding with no at_base false check (#3075)" {
+  write verdict "$(fix_verdict_ok | jq '.parked = [{issue: 3081, ac_check: "checked"}]')"
+  rejected "base_checks does not hold exactly one at_base false check per parked item"
+}
+
+@test "rejects an at_base false check with no parked finding (#3075)" {
+  write verdict "$(fix_verdict_ok | jq '.base_checks = [{base: "4b825dc642cb6eb9a060e54bf8d69288fbee4904", at_base: false}]')"
+  rejected "base_checks does not hold exactly one at_base false check per parked item"
+}
+
+@test "rejects a cannot-fix verdict that records a base check (#3075)" {
+  write verdict "$(fix_verdict_ok | jq '.outcome = "failed" | .cause = "cannot-fix" | .fix_applied = false | .files_changed = 0 | .base_checks = [{base: "4b825dc642cb6eb9a060e54bf8d69288fbee4904", at_base: true}]')"
+  rejected "and record no base check"
 }
 
 @test "rejects a cannot-fix verdict that claims a change" {
