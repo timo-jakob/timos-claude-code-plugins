@@ -28,9 +28,11 @@ arm, except on an attended clean stop:
   again.
 - **An unattended root files every suggested follow-up.**
 - **Each filed item** is read from the step's verdict file, never retyped, so
-  no shell expands its title. Item `<k>`'s title is
-  `jq -r --argjson i <k> '.deferred.suggested_follow_ups[$i].title' <verdict>`,
-  passed as one argument, and its finding is
+  no shell expands its title. `<k>` is the item's 0-based index, its list
+  number minus one. Item `<k>`'s title is
+  `jq -er --argjson i <k> '.deferred.suggested_follow_ups[$i].title' <verdict>`,
+  passed as one argument, which exits non-zero, so nothing is filed, when no
+  item has that index; its finding is
   `jq -c --argjson i <k> '.deferred.suggested_follow_ups[$i] |
   {file: "follow-up", line: null, dimension: "follow-up", title}' <verdict>`.
   It becomes an issue, `gh issue create --title <title> --body-file <file>`,

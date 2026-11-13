@@ -812,6 +812,9 @@ escalation_filter() {
     'On a clean stop it asks after the extension'"'"'s answer, Stop included.' \
     'On a grant it asks about this verdict'"'"'s items before it deletes the verdict file and re-dispatches, and asks about the re-dispatched step'"'"'s verdict only for the items not in that answered list: the step resumes on the same status file, so its verdict names the earlier items again.' \
     '**Each filed item** is read from the step'"'"'s verdict file, never retyped, so no shell expands its title.' \
+    '`<k>` is the item'"'"'s 0-based index, its list number minus one.' \
+    'passed as one argument, which exits non-zero, so nothing is filed, when no item has that index; its finding is' \
+    'It becomes an issue, `gh issue create --title <title> --body-file <file>`, whose body is the item'"'"'s `body`, read the same way, and names the step'"'"'s issue and its PR when there is one, and is queued like a listed follow-up:' \
     'It is `[]` when there are none, and a follow-up the run filed goes in `follow_ups`, never here.' \
     'The root handles them by its root mode (`reference/chain-steps.md` § The step model (#2940)) before the verdict'"'"'s own arm, except on an attended clean stop:' \
     '**An attended root asks once per step.**' \
@@ -845,12 +848,15 @@ escalation_filter() {
   [ "$status" -eq 0 ]
   # the title and finding are read from the verdict with jq, so a title with quotes and backticks survives
   local tf ff vf="$D/verdict.json" hostile='split the `helper` "now"'
-  tf="$(printf '%s' "$t" | sed -n 's/.*title is `jq -r --argjson i <k> '"'"'\([^'"'"']*\)'"'"' <verdict>`.*/\1/p')"
-  ff="$(printf '%s' "$t" | sed -n 's/.*its finding is `jq -c --argjson i <k> '"'"'\([^'"'"']*\)'"'"' <verdict>`.*/\1/p')"
+  tf="$(printf '%s' "$t" | sed -n 's/.*title is `jq -er --argjson i <k> '"'"'\([^'"'"']*\)'"'"' <verdict>`.*/\1/p')"
+  ff="$(printf '%s' "$t" | sed -n 's/.*; its finding is `jq -c --argjson i <k> '"'"'\([^'"'"']*\)'"'"' <verdict>`.*/\1/p')"
   [ -n "$tf" ]
   [ -n "$ff" ]
   jq -n --arg t "$hostile" '{deferred: {suggested_follow_ups: [{title: "a", body: "b"}, {title: $t, body: "c"}]}}' > "$vf"
   [ "$(jq -r --argjson i 1 "$tf" "$vf")" = "$hostile" ]
+  # an index past the end (a list number passed as written) stops before any issue is filed
+  run jq -er --argjson i 2 "$tf" "$vf"
+  [ "$status" -ne 0 ]
   f="$(jq -c --argjson i 1 "$ff" "$vf")"
   jq -e --arg t "$hostile" '. == {file: "follow-up", line: null, dimension: "follow-up", title: $t}' <<< "$f" >/dev/null
   run --separate-stderr zsh "$q" add --repo-dir "$D/repo" --issue 2940 --entry 3031 --kind follow-up --after 2940 --finding "$f"
