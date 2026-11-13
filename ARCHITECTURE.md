@@ -8360,7 +8360,10 @@ nothing) in two ways:
   **stale** block (provenance mismatch) or one that **contradicts** the prose
   (e.g. acceptance criteria the prose no longer supports, or
   `interface_surfaces` claiming `rest` when the prose describes a CLI-only
-  change) is a `NEEDS_REFINEMENT` reason, named as such. An **absent** block is
+  change) is a `NEEDS_REFINEMENT` reason, named as such. A `test_cases[]` entry
+  carrying a `reconciled` note (#3089) is not a contradiction: its `shape` is
+  the shipped behaviour, and the reconcile never rewrites the prose's statement
+  of the old expectation. An **absent** block is
   *not* a
   failure — most issues have never been refined, and the gate simply proposes
   one rather than demanding it.

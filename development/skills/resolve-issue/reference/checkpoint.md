@@ -297,8 +297,10 @@ note beneath each body's `## Shape` section, and writes the block back. It
 replaces only the fenced block, so the prose region and `provenance` stay
 byte-identical and `prose_sha256` still verifies. A `provisional` entry's
 `assumption` names the expectation to check first. An entry that already
-matches is left alone, so a re-run writes nothing. On a
-non-zero exit, re-run it once; if it fails again, name that issue and the
-shipped expectation in the PR's Summary and open the PR all the same. The
+matches is left alone, so a re-run writes nothing. An exit 2, or an exit 1
+naming an id the block lacks, means the map is wrong: correct it from the
+stderr message and run again. On any other non-zero exit, re-run it once; if
+it fails again, name every mapped case's test-case issue and its shipped
+expectation in the PR's Summary and open the PR all the same. The
 Summary also names every body this step updated: the `updated` entries the
 script prints.

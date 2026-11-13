@@ -73,7 +73,7 @@ EOF
     cat "$T/prose-head.md"
     printf '\n<details>\n<summary>machine-readable story spec (story-spec/v1)</summary>\n\n```json\n'
     jq . "$T/old-spec.json"
-    printf '```\n\n</details>\n'
+    printf '```\n\n</details>\n\nA closing paragraph after the block.\n'
   } > "$T/story.md"
 
   NOTE='Reconciled before close: the build found 403, not 401 (story #3089).'
@@ -106,6 +106,11 @@ spec_of() { zsh "$REPO_ROOT/development/skills/resolve-issue/scripts/read-story-
   # everything before the opening fence is byte-identical too
   local open; open="$(grep -n '^```json$' "$T/story.md" | cut -d: -f1)"
   cmp <(head -n "$open" "$T/story.md") <(head -n "$open" "$T/story-written.md")
+  # and everything from the closing fence to EOF (</details> and the trailer)
+  local close_old close_new
+  close_old="$(grep -n '^```$' "$T/story.md" | tail -n 1 | cut -d: -f1)"
+  close_new="$(grep -n '^```$' "$T/story-written.md" | tail -n 1 | cut -d: -f1)"
+  cmp <(tail -n "+$close_old" "$T/story.md") <(tail -n "+$close_new" "$T/story-written.md")
   # the summary (stdout's last line, after the spin-out's progress) names the updated case and its issue
   [ "$(jq -c '.updated' <<<"${lines[${#lines[@]}-1]}")" = '[{"id":"tc-error-bad-token","issue":501,"shape":"GET /jobs with an expired token -> 403"}]' ]
 }
@@ -144,6 +149,21 @@ EOF
   contains "$(cat "$T/spinout-argv")" ' --old-spec '
   [ "$(jq -r '.test_cases[0].shape' "$T/spinout-spec.json")" = "GET /jobs with an expired token -> 403" ]
   [ "$(jq -r '.test_cases[0].shape' "$T/spinout-old.json")" = "GET /jobs with an expired token -> 401" ]
+}
+
+@test "a mixed map updates the changed entry and leaves the matching one byte-for-byte alone" {
+  jq -n --arg note "$NOTE" '{
+    "tc-error-bad-token": {shape: "GET /jobs with an expired token -> 403", note: $note},
+    "tc-happy-list-jobs": {shape: "GET /jobs -> 200 [job_ref]", note: $note}}' > "$T/mixed.json"
+  reconcile --repo o/r --story 3089 --map "$T/mixed.json"
+  [ "$status" -eq 0 ]
+  local last="${lines[${#lines[@]}-1]}"
+  [ "$(jq -c '.unchanged' <<<"$last")" = '["tc-happy-list-jobs"]' ]
+  [ "$(jq -c '[.updated[].id]' <<<"$last")" = '["tc-error-bad-token"]' ]
+  local spec; spec="$(spec_of "$T/story-written.md")"
+  [ "$(jq -c '.test_cases[] | select(.id == "tc-happy-list-jobs")' <<<"$spec")" = "$(jq -c '.test_cases[] | select(.id == "tc-happy-list-jobs")' "$T/old-spec.json")" ]
+  [ "$(jq -r '.test_cases[] | select(.id == "tc-happy-list-jobs") | has("reconciled")' <<<"$spec")" = "false" ]
+  [ "$(jq -r '.test_cases[] | select(.id == "tc-error-bad-token") | .reconciled' <<<"$spec")" = "$NOTE" ]
 }
 
 @test "an entry that already matches the shipped expectation writes nothing" {

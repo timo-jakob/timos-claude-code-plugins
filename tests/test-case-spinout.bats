@@ -266,7 +266,8 @@ NEW_TWO='{"schema":"story-spec/v1","test_cases":[
   contains "$r" 'A `provisional` entry'"'"'s `assumption` names the expectation to check first.'
   contains "$r" '"note": "Reconciled before close: the build found <shipped behaviour>, not <the old expectation> (story #<N>)."'
   contains "$r" 'An entry that already matches is left alone, so a re-run writes nothing.'
-  contains "$r" 'On a non-zero exit, re-run it once; if it fails again, name that issue and the shipped expectation in the PR'"'"'s Summary and open the PR all the same.'
+  contains "$r" 'An exit 2, or an exit 1 naming an id the block lacks, means the map is wrong: correct it from the stderr message and run again.'
+  contains "$r" 'On any other non-zero exit, re-run it once; if it fails again, name every mapped case'"'"'s test-case issue and its shipped expectation in the PR'"'"'s Summary and open the PR all the same.'
   contains "$r" 'The Summary also names every body this step updated'
 }
 
@@ -298,6 +299,18 @@ NEW_TWO='{"schema":"story-spec/v1","test_cases":[
   local t; t="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/development/agents/issue-refiner.md")"
   contains "$t" '**Carry a reconciled test case forward unchanged** (#3089): when the issue body'"'"'s current `story-spec/v1` block gives a `test_cases[]` entry a `reconciled` note, copy that entry'"'"'s `shape` and `reconciled` into your draft exactly as they stand, even where the prose still states the old expectation, unless the human changes that case in this conversation. A case whose `shape` you change drops `reconciled`.'
   contains "$t" 'A case whose `shape` you change drops `reconciled`.'
+}
+
+# The refiner keeps a shape the prose contradicts, so the readiness gate must not
+# fail check 4 on it, or the gate and the refiner loop on the same block.
+@test "#3089 the readiness gate does not count a reconciled entry as a contradiction" {
+  local g a
+  g="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/development/agents/story-readiness.md")"
+  contains "$g" '**A reconciled `test_cases[]` entry is not a contradiction** (#3089). An entry carrying a non-empty `reconciled` note had its `shape` set to the shipped behaviour by resolve-issue §6, which never rewrites the prose, so a prose statement of the old expectation for that case never affects the verdict.'
+  contains "$g" '**Three things are exempt.**'
+  contains "$g" 'And a `test_cases[]` entry carrying a `reconciled` note (#3089): its `shape` is the shipped behaviour, so a prose statement of the old expectation is **not** a contradiction'
+  a="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/ARCHITECTURE.md")"
+  contains "$a" 'A `test_cases[]` entry carrying a `reconciled` note (#3089) is not a contradiction: its `shape` is the shipped behaviour, and the reconcile never rewrites the prose'"'"'s statement of the old expectation.'
 }
 
 RECONCILED='{"schema":"story-spec/v1","test_cases":[
