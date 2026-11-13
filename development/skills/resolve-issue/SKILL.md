@@ -1043,8 +1043,8 @@ plan (`jq -r '.[].issue' /tmp/acc-plan.json`) — so the feature and its accepta
 drift. With no linked test cases (planner exited 1), it's the single `Closes #<story>` as before.
 
 **Reconcile the test-case bodies before the PR opens (#3079).** When the same-PR test-case lifecycle ran, and before
-open-pr runs, compare each plan entry's `test-case` issue with the acceptance test written for it, and update a body
-the test contradicts: see `reference/checkpoint.md` § Reconciling the test-case bodies before the PR (#3079)
+open-pr runs, reconcile each expectation its test contradicts in the `story-spec/v1` entry; `test-case-spinout.zsh`
+re-renders the body: see `reference/checkpoint.md` § Reconciling the test-case bodies before the PR (#3079)
 
 **Docs pages in the PR body (#767).** When the user-docs step ran (Step 2's docs planner produced a non-empty plan and
 the machinery was present), the PR body's Summary **names the docs page(s) the PR added or updated** (from

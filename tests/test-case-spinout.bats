@@ -253,11 +253,13 @@ NEW_TWO='{"schema":"story-spec/v1","test_cases":[
   contains "$t" '`"provisional": {"assumption": "<the unverified behaviour>"}`, naming that behaviour in one sentence.'
 }
 
-@test "#3079 resolve-issue §6 reconciles a contradicted test-case body, with a one-line note, before the PR opens" {
+@test "#3079 resolve-issue §6 reconciles a contradicted test-case expectation, with a one-line note, before the PR opens" {
   local s t r
   s="$(awk '/^### 6\. /{f=1} f && /^### 7\. /{exit} f' "$REPO_ROOT/development/skills/resolve-issue/SKILL.md")"
   t="$(tr -s '[:space:]' ' ' <<<"$s")"
-  contains "$t" '**Reconcile the test-case bodies before the PR opens (#3079).** When the same-PR test-case lifecycle ran, and before open-pr runs, compare each plan entry'"'"'s `test-case` issue with the acceptance test written for it, and update a body the test contradicts: see `reference/checkpoint.md` § Reconciling the test-case bodies before the PR (#3079)'
+  contains "$t" '**Reconcile the test-case bodies before the PR opens (#3079).** When the same-PR test-case lifecycle ran, and before open-pr runs, reconcile each expectation its test contradicts in the `story-spec/v1` entry; `test-case-spinout.zsh` re-renders the body: see `reference/checkpoint.md` § Reconciling the test-case bodies before the PR (#3079)'
+  # #3124: the pointer names the reconcile's target (#3089), never a hand-edited body.
+  lacks "$t" 'update a body the test contradicts'
   # The procedure lives in the section §6 points at, so the conductor stays under its ceiling.
   s="$(awk '/^## Reconciling the test-case bodies before the PR \(#3079\)$/{f=1; print; next} f && /^## /{exit} f' "$REPO_ROOT/development/skills/resolve-issue/reference/checkpoint.md")"
   [ -n "$s" ] || { echo "checkpoint.md has no #3079 reconciliation section" >&2; return 1; }
