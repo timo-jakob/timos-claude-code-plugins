@@ -808,7 +808,10 @@ escalation_filter() {
     'A step of a human-started run never asks.' \
     'Its verdict carries `deferred` instead, on any verdict of a run whose review loop ran: `suggested_follow_ups`, each `{title, body}`, for every follow-up the run would otherwise name only in prose without filing it.' \
     'A suggestion the run waived is not handed back: it stays waived.' \
-    'On a clean stop it asks after the extension'"'"'s answer, Stop included, and after a grant only about the items its earlier list did not hold: the re-dispatched step resumes on the same status file, so its verdict names the earlier items again.' \
+    'The root mode is the one the root resolved before its first dispatch with `scripts/resolve-session.zsh --inferred attended`, never a step'"'"'s own mode.' \
+    'On a clean stop it asks after the extension'"'"'s answer, Stop included.' \
+    'On a grant it asks about this verdict'"'"'s items before it deletes the verdict file and re-dispatches, and asks about the re-dispatched step'"'"'s verdict only for the items not in that answered list: the step resumes on the same status file, so its verdict names the earlier items again.' \
+    '**Each filed item** is read from the step'"'"'s verdict file, never retyped, so no shell expands its title.' \
     'It is `[]` when there are none, and a follow-up the run filed goes in `follow_ups`, never here.' \
     'The root handles them by its root mode (`reference/chain-steps.md` § The step model (#2940)) before the verdict'"'"'s own arm, except on an attended clean stop:' \
     '**An attended root asks once per step.**' \
@@ -840,6 +843,21 @@ escalation_filter() {
   [ "$status" -eq 0 ]
   run --separate-stderr zsh "$q" add --repo-dir "$D/repo" --issue 2940 --entry 3030 --kind follow-up --after 2940 --finding "$f"
   [ "$status" -eq 0 ]
+  # the title and finding are read from the verdict with jq, so a title with quotes and backticks survives
+  local tf ff vf="$D/verdict.json" hostile='split the `helper` "now"'
+  tf="$(printf '%s' "$t" | sed -n 's/.*title is `jq -r --argjson i <k> '"'"'\([^'"'"']*\)'"'"' <verdict>`.*/\1/p')"
+  ff="$(printf '%s' "$t" | sed -n 's/.*its finding is `jq -c --argjson i <k> '"'"'\([^'"'"']*\)'"'"' <verdict>`.*/\1/p')"
+  [ -n "$tf" ]
+  [ -n "$ff" ]
+  jq -n --arg t "$hostile" '{deferred: {suggested_follow_ups: [{title: "a", body: "b"}, {title: $t, body: "c"}]}}' > "$vf"
+  [ "$(jq -r --argjson i 1 "$tf" "$vf")" = "$hostile" ]
+  f="$(jq -c --argjson i 1 "$ff" "$vf")"
+  jq -e --arg t "$hostile" '. == {file: "follow-up", line: null, dimension: "follow-up", title: $t}' <<< "$f" >/dev/null
+  run --separate-stderr zsh "$q" add --repo-dir "$D/repo" --issue 2940 --entry 3031 --kind follow-up --after 2940 --finding "$f"
+  [ "$status" -eq 0 ]
+  # a grant asks about the first list before escalation.md's step 3 deletes the verdict file
+  local e; e="$(flat "$REPO_ROOT/$ESC_REL")"
+  contains "$e" 'Ask about this verdict'"'"'s `deferred` follow-ups before the verdict file goes (`reference/chain-steps/deferred-follow-ups.md` § A step'"'"'s deferred follow-ups (#3077)). Remove the `needs-human-decision` label'
   # chain-steps.md routes the root there before every verdict arm
   t="$(flat "$STEPS")"
   contains "$t" 'and has handled its `deferred` follow-ups (#3077): see `reference/chain-steps/deferred-follow-ups.md` § A step'"'"'s deferred follow-ups (#3077)'
