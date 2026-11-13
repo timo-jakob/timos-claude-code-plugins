@@ -244,7 +244,7 @@ NEW_TWO='{"schema":"story-spec/v1","test_cases":[
 
 @test "#3079 the story-spec contract carries an optional provisional marker naming the assumption" {
   local t; t="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/ARCHITECTURE.md")"
-  contains "$t" 'and **optional (#3079)** `provisional` — `{ assumption }`, present when the expectation rests on third-party behaviour the refiner did not verify, naming that behaviour; absent or `null` when it was verified |'
+  contains "$t" 'and **optional (#3079)** `provisional` — `{ assumption }`, present when the expectation rests on third-party behaviour the refiner did not verify, naming that behaviour; absent or `null` when it was verified;'
 }
 
 @test "#3079 the refiner marks a test case provisional when it rests on unverified third-party behaviour" {
@@ -263,13 +263,89 @@ NEW_TWO='{"schema":"story-spec/v1","test_cases":[
   [ -n "$s" ] || { echo "checkpoint.md has no #3079 reconciliation section" >&2; return 1; }
   r="$(tr -s '[:space:]' ' ' <<<"$s")"
   contains "$r" 'Compare each plan entry'"'"'s `test-case` issue with the acceptance test written for it.'
-  contains "$r" 'Read the body with `gh issue view <issue> --json body -q .body`, change nothing else in it, and write it back with `gh issue edit <issue> --body-file <file>`.'
   contains "$r" 'A `provisional` entry'"'"'s `assumption` names the expectation to check first.'
-  contains "$r" 'whether or not the story-spec entry is `provisional`, update the body: rewrite that section to the expectation the shipped test asserts, and add one line beneath it:'
-  contains "$r" '`Reconciled before close: the build found <shipped behaviour>, not <the old expectation> (story #<N>).`'
-  contains "$r" 'A body that already matches is left alone, so a re-run changes nothing.'
-  contains "$r" 'Re-run a failed edit once; if it fails again, name that issue and the shipped expectation in the PR'"'"'s Summary and open the PR all the same.'
-  contains "$r" 'The Summary also names every body this step updated.'
-  contains "$r" 'This is the one edit a spin-out body takes outside `test-case-spinout.zsh`, and the story'"'"'s spec block is left as it is: the PR closes the story with its test cases, and a spin-out that regenerates the body of a story still open, its PR closed unmerged, is followed by the next resolve-issue run, whose §6 reconciles the body again.'
-  contains "$(tr -s '[:space:]' ' ' < "$REPO_ROOT/ARCHITECTURE.md")" 'Before that PR opens, a test-case issue whose expectation the build'"'"'s tests contradict, provisional or not, has its body updated to the shipped behaviour with a one-line note (#3079)'
+  contains "$r" '"note": "Reconciled before close: the build found <shipped behaviour>, not <the old expectation> (story #<N>)."'
+  contains "$r" 'An entry that already matches is left alone, so a re-run writes nothing.'
+  contains "$r" 'An exit 2, or an exit 1 naming an id the block lacks, means the map is wrong: correct it from the stderr message and run again.'
+  contains "$r" 'On any other non-zero exit, re-run it once; if it fails again, name every mapped case'"'"'s test-case issue and its shipped expectation in the PR'"'"'s Summary and open the PR all the same.'
+  contains "$r" 'The Summary also names every body this step updated'
+}
+
+# --- #3089: the story-spec block is the single source of a reconciled expectation
+
+@test "#3089 checkpoint.md reconciles the story-spec entry and never hand-edits a test-case body" {
+  local s r
+  s="$(awk '/^## Reconciling the test-case bodies before the PR \(#3079\)$/{f=1; print; next} f && /^## /{exit} f' "$REPO_ROOT/development/skills/resolve-issue/reference/checkpoint.md")"
+  [ -n "$s" ] || { echo "checkpoint.md has no reconciliation section" >&2; return 1; }
+  r="$(tr -s '[:space:]' ' ' <<<"$s")"
+  contains "$r" 'whether or not that entry is `provisional`, reconcile the entry in the story'"'"'s `story-spec/v1` block (#3089), the single source of truth for that expectation.'
+  contains "$r" 'Never edit a test-case body by hand: `test-case-spinout.zsh` generates it and regenerates it on every refine write-back.'
+  contains "$r" '"<skill-base-dir>/scripts/reconcile-test-case-spec.zsh" --repo "$REPO" --story <N> --map <map.json>'
+  contains "$r" 'For each mapped entry whose `shape` differs, it sets `shape` to the shipped expectation, removes `provisional` and sets `reconciled` to the note.'
+  contains "$r" 'It then re-renders the linked bodies with `test-case-spinout.zsh`, which prints the note beneath each body'"'"'s `## Shape` section, and writes the block back.'
+  contains "$r" 'so the prose region and `provenance` stay byte-identical and `prose_sha256` still verifies.'
+  lacks "$r" 'gh issue edit <issue>'
+  lacks "$r" 'the story'"'"'s spec block is left as it is'
+}
+
+@test "#3089 ARCHITECTURE.md records the optional reconciled field and the lifecycle's re-render" {
+  local t; t="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/ARCHITECTURE.md")"
+  contains "$t" 'and **optional (#3089)** `reconciled` — a string: the one-line `Reconciled before close: the build found <shipped behaviour>, not <the old expectation> (story #<N>).` note, which resolve-issue §6 writes when it reconciles the entry'"'"'s `shape` to the shipped expectation. test-case-spinout.zsh renders it beneath the body'"'"'s `## Shape` section, so the note survives every re-render. It is absent or `null` on an entry that was never reconciled |'
+  contains "$t" 'Before that PR opens, a test case whose expectation the build'"'"'s tests contradict, provisional or not, is reconciled to the shipped behaviour with a one-line note (#3079): the reconcile updates the story-spec block'"'"'s entry and re-renders the body through `test-case-spinout.zsh` (#3089)'
+  lacks "$t" 'has its body updated to the shipped behaviour'
+}
+
+@test "#3089 the refiner carries a reconciled test case forward unchanged" {
+  local t; t="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/development/agents/issue-refiner.md")"
+  contains "$t" '**Carry a reconciled test case forward unchanged** (#3089): when the issue body'"'"'s current `story-spec/v1` block gives a `test_cases[]` entry a `reconciled` note, copy that entry'"'"'s `shape` and `reconciled` into your draft exactly as they stand, even where the prose still states the old expectation, unless the human changes that case in this conversation. A case whose `shape` you change drops `reconciled`.'
+  contains "$t" 'A case whose `shape` you change drops `reconciled`.'
+}
+
+# The refiner keeps a shape the prose contradicts, so the readiness gate must not
+# fail check 4 on it, or the gate and the refiner loop on the same block.
+@test "#3089 the readiness gate does not count a reconciled entry as a contradiction" {
+  local g a
+  g="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/development/agents/story-readiness.md")"
+  contains "$g" '**A reconciled `test_cases[]` entry is not a contradiction** (#3089). An entry carrying a non-empty `reconciled` note had its `shape` set to the shipped behaviour by resolve-issue §6, which never rewrites the prose, so a prose statement of the old expectation for that case never affects the verdict.'
+  contains "$g" '**Three things are exempt.**'
+  contains "$g" 'And a `test_cases[]` entry carrying a `reconciled` note (#3089): its `shape` is the shipped behaviour, so a prose statement of the old expectation is **not** a contradiction'
+  a="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/ARCHITECTURE.md")"
+  contains "$a" 'A `test_cases[]` entry carrying a `reconciled` note (#3089) is not a contradiction: its `shape` is the shipped behaviour, and the reconcile never rewrites the prose'"'"'s statement of the old expectation.'
+}
+
+RECONCILED='{"schema":"story-spec/v1","test_cases":[
+  {"id":"tc-error-bad-token","kind":"error","shape":"GET /jobs expired token -> 403","tooling":"curl","issue":501,
+   "reconciled":"Reconciled before close: the build found 403, not 401 (story #3089)."},
+  {"id":"tc-happy-list","kind":"happy","shape":"GET /jobs -> 200","tooling":"curl","issue":502}]}'
+
+@test "#3089 a non-empty reconciled note renders as its own line directly beneath ## Shape" {
+  write spec.json "$RECONCILED"
+  spinout --repo o/r --story 3089 --spec "$BATS_TEST_TMPDIR/spec.json"
+  [ "$status" -eq 0 ]
+  local e; e="$(awk '/^=== edit #501 ===$/{f=1; next} /^=== edit /{f=0} f' "$EDIT_LOG")"
+  contains "$e" $'## Shape\n\nGET /jobs expired token -> 403\n\nReconciled before close: the build found 403, not 401 (story #3089).\n\n---\n'
+}
+
+@test "#3089 an entry without reconciled (absent, null or empty) renders exactly as before" {
+  write spec.json '{"schema":"story-spec/v1","test_cases":[
+    {"id":"a","kind":"happy","shape":"GET / -> 200","tooling":"curl","issue":601},
+    {"id":"b","kind":"happy","shape":"GET / -> 200","tooling":"curl","issue":602,"reconciled":null},
+    {"id":"c","kind":"happy","shape":"GET / -> 200","tooling":"curl","issue":603,"reconciled":""}]}'
+  spinout --repo o/r --story 3089 --spec "$BATS_TEST_TMPDIR/spec.json"
+  [ "$status" -eq 0 ]
+  local n; for n in 601 602 603; do
+    contains "$(awk -v h="=== edit #$n ===" '$0 == h {f=1; next} /^=== edit /{f=0} f' "$EDIT_LOG")" $'## Shape\n\nGET / -> 200\n\n---\n'
+  done
+  lacks "$(cat "$EDIT_LOG")" 'Reconciled before close'
+}
+
+@test "#3089 re-running the spin-out on a reconciled block yields a byte-identical body" {
+  write spec.json "$RECONCILED"
+  spinout --repo o/r --story 3089 --spec "$BATS_TEST_TMPDIR/spec.json"
+  [ "$status" -eq 0 ]
+  cp "$EDIT_LOG" "$BATS_TEST_TMPDIR/first.log"; : > "$EDIT_LOG"
+  spinout --repo o/r --story 3089 --spec "$BATS_TEST_TMPDIR/spec.json" --old-spec "$BATS_TEST_TMPDIR/spec.json"
+  [ "$status" -eq 0 ]
+  cmp "$BATS_TEST_TMPDIR/first.log" "$EDIT_LOG"
+  contains "$(cat "$EDIT_LOG")" 'Reconciled before close: the build found 403, not 401 (story #3089).'
 }

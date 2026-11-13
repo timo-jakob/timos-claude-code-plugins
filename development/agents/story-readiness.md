@@ -76,6 +76,12 @@ gh issue view <N> --repo <owner/name> --json number,title,body,state,labels,url
     **not** a contradiction, and never affects the verdict. An existing block may
     legitimately carry the field even though your own proposed block omits it.
 
+    **A reconciled `test_cases[]` entry is not a contradiction** (#3089). An
+    entry carrying a non-empty `reconciled` note had its `shape` set to the
+    shipped behaviour by resolve-issue §6, which never rewrites the prose, so a
+    prose statement of the old expectation for that case never affects the
+    verdict.
+
   A **stale or contradictory** block fails check 4 (below) and is a concrete
   refinement reason. An **absent** block is **not** a failure — most issues have
   never been refined; you simply *propose* one in your output (`story_spec`
@@ -239,14 +245,17 @@ that would unblock it.
    also fails when an **existing** `story-spec/v1` block is **stale** (provenance
    mismatch) or **contradicts** the prose (#574): the machine block must agree
    with the human-authoritative prose, or it can't be trusted. An **absent**
-   block never fails this check. **Two things are exempt.** **Persona-reference
+   block never fails this check. **Three things are exempt.** **Persona-reference
    problems** — an unknown id or a stale *persona* registry is an **advisory**,
    not a contradiction, and never fails this check (see the persona-validation
    bullet above, #668). And **`persona_derivations[]`** (#1361): it is an audit
    record of what `issue-refiner` derived, never a gate, so a `ref` that no
    longer resolves or a `basis` the prose no longer echoes is **not** staleness
    and **not** a contradiction, and never fails this check either (see the
-   validate bullet above).
+   validate bullet above). And a `test_cases[]` entry carrying a `reconciled`
+   note (#3089): its `shape` is the shipped behaviour, so a prose statement of
+   the old expectation is **not** a contradiction (see the validate bullet
+   above).
 5. **Outside-in testability — surface-touching stories only** (#670). When the
    story touches a runtime surface (`surface` is anything other than `none`), it
    must specify how that surface will be exercised **from the outside**, so the

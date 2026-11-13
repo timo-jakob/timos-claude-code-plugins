@@ -271,19 +271,36 @@ only as a count, with a pointer to the issue's *Decisions taken*.
 
 §6 points here when the same-PR test-case lifecycle ran, before open-pr runs.
 Compare each plan entry's `test-case` issue with the acceptance test written for
-it. When the test asserts a different expectation than the issue body's
-`## Shape` section states, whether or not the story-spec entry is `provisional`,
-update the body: rewrite that section to the expectation the shipped test
-asserts, and add one line beneath it:
-`Reconciled before close: the build found <shipped behaviour>, not <the old expectation> (story #<N>).`
-Read the body with `gh issue view <issue> --json body -q .body`, change nothing
-else in it, and write it back with `gh issue edit <issue> --body-file <file>`.
-This is the one edit a spin-out body takes outside `test-case-spinout.zsh`, and
-the story's spec block is left as it is: the PR closes the story with its test
-cases, and a spin-out that regenerates the body of a story still open, its PR
-closed unmerged, is followed by the next resolve-issue run, whose §6 reconciles
-the body again. A `provisional` entry's `assumption` names the expectation to check first. A
-body that already matches is left alone, so a re-run changes nothing. Re-run a
-failed edit once; if it fails again, name that issue and the shipped
-expectation in the PR's Summary and open the PR all the same. The Summary also
-names every body this step updated.
+it. When the test asserts a different expectation than the story-spec entry's
+`shape` states, whether or not that entry is `provisional`, reconcile the entry
+in the story's `story-spec/v1` block (#3089), the single source of truth for
+that expectation. Never edit a test-case body by hand: `test-case-spinout.zsh`
+generates it and regenerates it on every refine write-back. Only when a case is
+contradicted, write a map of every contradicted case to a scratch file outside
+the repository, each id naming the shipped expectation and its one-line note:
+
+```json
+{ "<test-case id>": { "shape": "<the expectation the shipped test asserts>",
+  "note": "Reconciled before close: the build found <shipped behaviour>, not <the old expectation> (story #<N>)." } }
+```
+
+and run:
+
+```bash
+"<skill-base-dir>/scripts/reconcile-test-case-spec.zsh" --repo "$REPO" --story <N> --map <map.json>
+```
+
+For each mapped entry whose `shape` differs, it sets `shape` to the shipped
+expectation, removes `provisional` and sets `reconciled` to the note. It then
+re-renders the linked bodies with `test-case-spinout.zsh`, which prints the
+note beneath each body's `## Shape` section, and writes the block back. It
+replaces only the fenced block, so the prose region and `provenance` stay
+byte-identical and `prose_sha256` still verifies. A `provisional` entry's
+`assumption` names the expectation to check first. An entry that already
+matches is left alone, so a re-run writes nothing. An exit 2, or an exit 1
+naming an id the block lacks, means the map is wrong: correct it from the
+stderr message and run again. On any other non-zero exit, re-run it once; if
+it fails again, name every mapped case's test-case issue and its shipped
+expectation in the PR's Summary and open the PR all the same. The
+Summary also names every body this step updated: the `updated` entries the
+script prints.

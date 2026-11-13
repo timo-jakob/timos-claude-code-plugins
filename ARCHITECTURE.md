@@ -8282,7 +8282,7 @@ One fenced `json` object inside the `<details>`. Shape:
 | `interface_surfaces` | string[] | runtime surfaces the story touches: `rest` \| `grpc` \| `web-ui` \| `cli` (the #242 taxonomy); `[]` when none |
 | `use_case` | object | `{ actor, goal, data_sketch }` — concrete enough to derive realistic test data |
 | `personas` | string[] | persona ids referencing the target repo's `personas/v1` registry (#665). **Advisory; may be `[]`** |
-| `test_cases` | object[] | outside-in cases: `id`, `kind` (`happy` \| `corner` \| `error`), `shape` (given/when/then or request→expected), `tooling` (`curl` \| `grpcurl` \| `playwright` \| `cli`), `issue` (the linked test-case issue number after spin-out #671, else `null`), and **optional (#3079)** `provisional` — `{ assumption }`, present when the expectation rests on third-party behaviour the refiner did not verify, naming that behaviour; absent or `null` when it was verified |
+| `test_cases` | object[] | outside-in cases: `id`, `kind` (`happy` \| `corner` \| `error`), `shape` (given/when/then or request→expected), `tooling` (`curl` \| `grpcurl` \| `playwright` \| `cli`), `issue` (the linked test-case issue number after spin-out #671, else `null`), and **optional (#3079)** `provisional` — `{ assumption }`, present when the expectation rests on third-party behaviour the refiner did not verify, naming that behaviour; absent or `null` when it was verified; and **optional (#3089)** `reconciled` — a string: the one-line `Reconciled before close: the build found <shipped behaviour>, not <the old expectation> (story #<N>).` note, which resolve-issue §6 writes when it reconciles the entry's `shape` to the shipped expectation. test-case-spinout.zsh renders it beneath the body's `## Shape` section, so the note survives every re-render. It is absent or `null` on an entry that was never reconciled |
 | `persona_derivations` | object[] | **Optional (#1361)** — which entries persona reasoning produced: `slice` (`corner-cases` \| `ux` \| `consistency`), `persona` (a `personas/v1` id, or `null`), `basis` (the persona field it came from, with the shape that made it a corner — e.g. `data_traits.site_name — unicode + ampersands`; for `ux`, the condition, e.g. `context — spotty 3G`; for `consistency`, the prior issues, e.g. `precedent — #1201, #1244`), `target` (`test_cases` \| `acceptance_criteria`), `ref` (a `test_cases[].id`, or the `acceptance_criteria` string verbatim). `[]` or absent when nothing was derived |
 | `provenance` | object | `{ generated_by, generated_at, prose_sha256 }` — as below |
 
@@ -8360,7 +8360,10 @@ nothing) in two ways:
   **stale** block (provenance mismatch) or one that **contradicts** the prose
   (e.g. acceptance criteria the prose no longer supports, or
   `interface_surfaces` claiming `rest` when the prose describes a CLI-only
-  change) is a `NEEDS_REFINEMENT` reason, named as such. An **absent** block is
+  change) is a `NEEDS_REFINEMENT` reason, named as such. A `test_cases[]` entry
+  carrying a `reconciled` note (#3089) is not a contradiction: its `shape` is
+  the shipped behaviour, and the reconcile never rewrites the prose's statement
+  of the old expectation. An **absent** block is
   *not* a
   failure — most issues have never been refined, and the gate simply proposes
   one rather than demanding it.
@@ -8447,10 +8450,13 @@ tests and feature can never drift apart.
   `playwright`→`web`, `cli`→`cli`), with representative data drawn from the
   block's `use_case` + referenced persona `data_traits`. The PR body then carries
   one `Closes #N` for the story **and** each linked test-case issue, so tests and
-  feature land and close together. Before that PR opens, a test-case issue
-  whose expectation the build's tests contradict, provisional or not, has its
-  body updated to the shipped behaviour with a one-line note (#3079), so a
-  closed test case never describes behaviour that does not exist. A story with no linked test cases falls back to
+  feature land and close together. Before that PR opens, a test case whose
+  expectation the build's tests contradict, provisional or not, is reconciled
+  to the shipped behaviour with a one-line note (#3079): the reconcile updates
+  the story-spec block's entry and re-renders the body through
+  `test-case-spinout.zsh` (#3089), so a closed test case never describes
+  behaviour that does not exist, and a later spin-out re-run cannot put the old
+  expectation back. A story with no linked test cases falls back to
   a feature-only PR. There is deliberately **no `blockedBy`** between a story and
   its test-case issues — same-PR closure makes ordering moot, so the dependency
   graph (#583) stays uncluttered by within-PR relationships.

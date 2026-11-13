@@ -663,7 +663,12 @@ Rules for the payload:
   repo that you recall rather than read in a spec, the code or its tests: give
   it `"provisional": {"assumption": "<the unverified behaviour>"}`, naming that
   behaviour in one sentence. Omit the field when every expectation rests on
-  something you read. **No
+  something you read. **Carry a reconciled test case forward unchanged**
+  (#3089): when the issue body's current `story-spec/v1` block gives a
+  `test_cases[]` entry a `reconciled` note, copy that entry's `shape` and
+  `reconciled` into your draft exactly as they stand, even where the prose
+  still states the old expectation, unless the human changes that case in this
+  conversation. A case whose `shape` you change drops `reconciled`. **No
   `dependencies` field** — dependencies are GitHub-native `blockedBy` (#583),
   never in the block. Set `provenance.generated_at`/`prose_sha256` to `null`:
   the **skill** stamps the timestamp and computes the hash over the

@@ -272,7 +272,7 @@ json_after() {
 # same rule in the same file. Pinning only the validate branch above let the two
 # drift: a model reading check 4 alone would fail a story on an orphaned ref.
 @test "contract: check 4's exception list names persona_derivations, not just persona references" {
-  file_has "$GATE" '**Two things are exempt.**'
+  file_has "$GATE" '**Three things are exempt.**'
   # The count and the non-failure are not enough on their own: both survive a
   # rewrite in which the SECOND exempt thing is something other than this field,
   # which is the same audit-record-back-into-a-gate promotion, at the site where
