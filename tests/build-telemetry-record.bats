@@ -71,7 +71,7 @@ EOF
   done
   # ...and exactly the payload keys it does own
   [ "$(echo "$output" | jq -c 'keys_unsorted | sort')" = \
-    '["convergence_assessment","escalation","findings_by_round","fixed","gate_by_round","grants","max_rounds","possible_false_trip_auto_continues","promotion_phase","rounds","skipped_dimensions_by_round","status","step_wall_s_by_round","waived"]' ]
+    '["auto_guided_retry","convergence_assessment","escalation","findings_by_round","fixed","gate_by_round","grants","max_rounds","possible_false_trip_auto_continues","promotion_phase","rounds","skipped_dimensions_by_round","status","step_wall_s_by_round","waived"]' ]
 }
 
 @test "#2197 step_wall_s_by_round is read from history[]: a timed round, and a pre-key line reads null" {
@@ -758,4 +758,18 @@ EOF
   run zsh "$S" --status "$ST"
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -c '.grants')" = '{"human":0,"automatic":0}' ]
+}
+
+@test "#3076 auto_guided_retry is copied from the status JSON, and an older status with no such key reads false" {
+  printf '%s\n' '{"status":"CONVERGED","rounds":5,"max_rounds":5,"auto_guided_retry":true}' > "$ST"
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c '.auto_guided_retry')" = 'true' ]
+  printf '%s\n' '{"status":"CONVERGED","rounds":2,"max_rounds":5}' > "$ST"
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c '.auto_guided_retry')" = 'false' ]
+  local arch
+  arch="$(tr '\n' ' ' < "$REPO_ROOT/ARCHITECTURE.md" | tr -s ' ')"
+  contains "$arch" '`auto_guided_retry` (#3076: copied from the status JSON, `false` when it has none; `true` on every record emitted after the run'"'"'s self-guided retry, so that record'"'"'s `outcome` is the retry'"'"'s outcome)'
 }

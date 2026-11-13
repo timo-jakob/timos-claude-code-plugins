@@ -107,6 +107,10 @@ jq -c '
       # `automatic` from a passing convergence verdict on an unattended run.
       # An older status JSON with no `grants` key reads as none of either.
       grants: {human: ($s.grants.human // 0), automatic: ($s.grants.automatic // 0)},
+      # the self-guided retry (#3076): true on every record the loop emitted
+      # after the run took it, so the record outcome is the retry outcome. An
+      # older status JSON with no such key reads false.
+      auto_guided_retry: ($s.auto_guided_retry // false),
       # promotion sub-loop marker (#995). A promotion pass is a SECOND full
       # invocation for one story, so counting its record alongside the phase-1
       # one inflates the per-record convergence rate and adds a second

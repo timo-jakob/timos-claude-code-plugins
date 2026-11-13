@@ -903,6 +903,16 @@ emit_and_exit() {
                            automatic: ([.[] | select(.source == "automatic")] | length)}' \
       "$work_dir/grants.jsonl" 2>/dev/null) || grants_json='{"human":0,"automatic":0}'
   fi
+  # auto_guided_retry (#3076) is ALWAYS present: true once the ledger holds the
+  # run's self-guided retry (a line record-grant.zsh --guided wrote), so every
+  # record the loop emits after that retry says it ran, and its outcome is that
+  # record's own. An absent or unreadable ledger reads false.
+  local auto_guided="false"
+  if [[ -s "$work_dir/grants.jsonl" ]]; then
+    auto_guided=$(jq -R 'fromjson? | select(type == "object" and .guided == true)' \
+      "$work_dir/grants.jsonl" 2>/dev/null | jq -s 'length > 0' 2>/dev/null) || auto_guided="false"
+    [[ "$auto_guided" == true ]] || auto_guided="false"
+  fi
   local next_ref=""
   case "$st" in
     AWAITING_FIX)           next_ref="reference/review-loop/exit-20-awaiting-fix.md" ;;
@@ -919,8 +929,10 @@ emit_and_exit() {
     --argjson granted "$granted_json" --argjson residue_replaced "$residue_replaced" \
     --argjson pftc "$pft_continues" --argjson cu "$carry_unconfirmed_json" \
     --argjson topics "$topic_review_skills" --argjson grants "$grants_json" \
+    --argjson guided "$auto_guided" \
     '{status:$status, rounds:$rounds, max_rounds:$max,
       effective_max_rounds:$effmax, max_rounds_source:$maxsrc, grants:$grants,
+      auto_guided_retry:$guided,
       promotion_phase:$promotion_phase, closing_sweep_granted:$granted,
       possible_false_trip_auto_continues:$pftc,
       carry_unconfirmed:$cu,

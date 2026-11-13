@@ -1271,7 +1271,7 @@ verdict() {
   run --separate-stderr zsh "$S" --status "$ST" --format json
   [ "$status" -eq 2 ]
   [ -z "$output" ]
-  contains "$stderr" "--format must be 'comment', 'summary', 'verdict' or 'clean-stop'"
+  contains "$stderr" "--format must be 'comment', 'summary', 'verdict', 'clean-stop' or 'guidance'"
 }
 
 @test "#2576 the extension recommends +3 only on a passing verdict, and the escalation shard grants automatically" {
@@ -1282,9 +1282,9 @@ verdict() {
   contains "$ext" '**The convergence verdict decides the recommendation (#2576).** Step 1'"'"'s summary ends'
   contains "$ext" 'In step 2, mark **Grant +3 rounds** on `BUDGET_EXHAUSTED` as recommended only when that line reads *passes*. When it fails, recommend no bare-rounds option, and name the failing conditions the line lists.'
   contains "$ext" 'A human grant is recorded with `record-grant.zsh --source human`, the default.'
-  contains "$esc" '**An unattended run first tries an automatic grant (#2576).** On a `BUDGET_EXHAUSTED` or `ESCALATE_NO_CONVERGENCE` exit in mode `unattended`, run `build-escalation.zsh --status <status.json> --format verdict` before any comment. On `"converging": true`, run `record-grant.zsh --work-dir <work-dir> --status <status.json> --add 3 --source automatic`.'
+  contains "$esc" '**An unattended run first tries an automatic grant (#2576).** On a `BUDGET_EXHAUSTED` or `ESCALATE_NO_CONVERGENCE` exit in mode `unattended`, run `build-escalation.zsh --status <status.json> --format verdict --work-dir <work-dir>` before any comment. On `"converging": true`, run `record-grant.zsh --work-dir <work-dir> --status <status.json> --add 3 --source automatic`.'
   contains "$esc" 'Then, exactly as a human grant does (step 5 in `reference/interactive/extension-grant.md`, with its amendments in `reference/interactive/extension-ceiling.md`: the run'"'"'s `loop_args` and `--carry-accounting`), apply one fix pass and take the next round'"'"'s boundary, resuming with `--max-rounds` set to the ceiling `record-grant.zsh` echoed, and never prompt. Another `BUDGET_EXHAUSTED` or `ESCALATE_NO_CONVERGENCE` comes back to this paragraph, never to the extension'"'"'s steps 1–2.'
-  contains "$esc" 'A failing verdict, and `record-grant.zsh`'"'"'s exit 3 (no headroom under its cap of 2 × the original `--max-rounds`), both take the clean stop in the next paragraph.'
+  contains "$esc" 'A failing verdict, and `record-grant.zsh`'"'"'s exit 3 (no headroom under its cap of 2 × the original `--max-rounds`), both take the clean stop below, unless the failing verdict buys the self-guided retry in the next paragraph.'
   contains "$esc" 'An attended run never takes this branch; it gets the interactive extension.'
   contains "$(tr '\n' ' ' < "$REPO_ROOT/development/skills/resolve-issue/SKILL.md" | tr -s ' ')" 'comment, and on an unattended run they first try the automatic grant (#2576); the others go straight to the typed comment.'
 }
@@ -1377,10 +1377,16 @@ verdict() {
   vstat BUDGET_EXHAUSTED '[2,4]'
   run --separate-stderr zsh "$S" --status "$ST" --cap-reached
   [ "$status" -eq 2 ]
-  contains "$stderr" "--cap-reached and --work-dir are for --format clean-stop only"
+  contains "$stderr" "--cap-reached is for --format clean-stop only"
+  run --separate-stderr zsh "$S" --status "$ST" --format verdict --cap-reached
+  [ "$status" -eq 2 ]
+  contains "$stderr" "--cap-reached is for --format clean-stop only"
   run --separate-stderr zsh "$S" --status "$ST" --format summary --work-dir /tmp/x
   [ "$status" -eq 2 ]
-  contains "$stderr" "--cap-reached and --work-dir are for --format clean-stop only"
+  contains "$stderr" "--work-dir is for --format clean-stop, verdict or guidance only"
+  run --separate-stderr zsh "$S" --status "$ST" --work-dir /tmp/x
+  [ "$status" -eq 2 ]
+  contains "$stderr" "--work-dir is for --format clean-stop, verdict or guidance only"
 }
 
 @test "#2579 clean-stop never posts the expanded home directory: a path under HOME is printed as ~/" {
@@ -1402,4 +1408,167 @@ verdict() {
   run --separate-stderr env 'HOME=/Users/a[b]' zsh "$S" --status "$ST" --format clean-stop --issue 77 \
     --work-dir /Users/ab/.claude/x
   echo "$output" | grep -qxF -- '_Kept review-loop state: `/Users/ab/.claude/x`._'
+}
+
+# --- #3076: the self-guided retry ---------------------------------------------
+#
+# A `stuck` verdict on an otherwise falling run with no Critical, whose every
+# carried blocker has a suggested_fix, buys one automatic +3 per run. The
+# verdict reads the run's grant ledger (once per run) from --work-dir.
+
+# carried <suggested_fix> [<priority>] -> one carried last-round blocker
+carried() {
+  jq -nc --arg fix "$1" --arg p "${2:-High}" \
+    '[{priority:$p, dimension:"tests", file:"b.zsh", line:3, title:"weak assert",
+       description:"the case checks nothing", suggested_fix:$fix, non_converging:true}]'
+}
+
+sg() {   # sg -> runs the verdict against the work-dir $WD
+  run --separate-stderr zsh "$S" --status "$ST" --format verdict --work-dir "$WD"
+  [ "$status" -eq 0 ] || { echo "verdict exited $status: $stderr"; return 1; }
+}
+
+setup_wd() { WD="$BATS_TEST_TMPDIR/wd"; mkdir -p "$WD"; }
+
+@test "#3076 the self-guided retry fires: stuck alone, falling, no Critical, every carried blocker with a suggested_fix" {
+  setup_wd
+  vstat ESCALATE_NO_CONVERGENCE '[9,1]' "$(carried 'Pin the exact output line.')"
+  sg
+  [ "$(jq -c '{converging, failures}' <<<"$output")" = '{"converging":false,"failures":["stuck"]}' ]
+  [ "$(jq -c '.self_guided' <<<"$output")" = '{"eligible":true,"refusals":[],"used":0}' ]
+}
+
+@test "#3076 the retry refuses when the trend is not falling" {
+  setup_wd
+  vstat ESCALATE_NO_CONVERGENCE '[1,1]' "$(carried 'Pin the exact output line.')"
+  sg
+  [ "$(jq -c '.failures' <<<"$output")" = '["trend","stuck"]' ]
+  [ "$(jq -c '.self_guided | {eligible, refusals}' <<<"$output")" = '{"eligible":false,"refusals":["trend"]}' ]
+  # a single round has no trend at all: refused the same way
+  vstat ESCALATE_NO_CONVERGENCE '[1]' "$(carried 'Pin the exact output line.')"
+  sg
+  [ "$(jq -c '.self_guided.refusals' <<<"$output")" = '["trend"]' ]
+}
+
+@test "#3076 the retry refuses on a carried Critical" {
+  setup_wd
+  vstat ESCALATE_NO_CONVERGENCE '[9,1]' "$(carried 'Guard the index.' Critical)"
+  # the summary counts none, so only the carried-Critical clause can refuse
+  jq '.round_changelists[-1].summary = {critical: 0}' "$ST" > "$ST.tmp" && mv "$ST.tmp" "$ST"
+  sg
+  [ "$(jq -c '.self_guided | {eligible, refusals}' <<<"$output")" = '{"eligible":false,"refusals":["critical"]}' ]
+}
+
+@test "#3076 the retry refuses on a Critical the summary counts even when no carried blocker is one" {
+  setup_wd
+  vstat ESCALATE_NO_CONVERGENCE '[9,1]' "$(carried 'Pin it.')"
+  jq '.round_changelists[-1].summary = {critical: 1}' "$ST" > "$ST.tmp" && mv "$ST.tmp" "$ST"
+  sg
+  [ "$(jq -c '.self_guided.refusals' <<<"$output")" = '["critical"]' ]
+}
+
+@test "#3076 the retry refuses when a carried blocker has no suggested_fix, a blank one included" {
+  setup_wd
+  vstat ESCALATE_NO_CONVERGENCE '[9,1]' "$(carried '')"
+  sg
+  [ "$(jq -c '.self_guided | {eligible, refusals}' <<<"$output")" = '{"eligible":false,"refusals":["no-suggested-fix"]}' ]
+  vstat ESCALATE_NO_CONVERGENCE '[9,1]' "$(carried '   ')"
+  sg
+  [ "$(jq -c '.self_guided.refusals' <<<"$output")" = '["no-suggested-fix"]' ]
+  # an absent key is the same as an empty one
+  vstat ESCALATE_NO_CONVERGENCE '[9,1]' '[{"priority":"Warning","dimension":"tests","file":"b.zsh","line":3,"title":"w","non_converging":true}]'
+  sg
+  [ "$(jq -c '.self_guided.refusals' <<<"$output")" = '["no-suggested-fix"]' ]
+}
+
+@test "#3076 the retry refuses a second time: a guided line in the ledger means the run already took it" {
+  setup_wd
+  vstat ESCALATE_NO_CONVERGENCE '[9,1]' "$(carried 'Pin the exact output line.')"
+  printf '%s\n' '{"source":"automatic","add":3,"ceiling":8,"original_max_rounds":5}' > "$WD/grants.jsonl"
+  sg
+  # an unguided automatic grant does not use the retry up
+  [ "$(jq -c '.self_guided' <<<"$output")" = '{"eligible":true,"refusals":[],"used":0}' ]
+  printf '%s\n' '{"source":"automatic","add":3,"ceiling":8,"original_max_rounds":5,"guided":true}' >> "$WD/grants.jsonl"
+  sg
+  [ "$(jq -c '.self_guided' <<<"$output")" = '{"eligible":false,"refusals":["already-retried"],"used":1}' ]
+}
+
+@test "#3076 the retry refuses without --work-dir, on an unstamped round, and when stuck is not a failure" {
+  vstat ESCALATE_NO_CONVERGENCE '[9,1]' "$(carried 'Pin it.')"
+  verdict
+  [ "$(jq -c '.self_guided' <<<"$output")" = '{"eligible":false,"refusals":["no-work-dir"],"used":null}' ]
+  setup_wd
+  vstat BUDGET_EXHAUSTED '[3,1]' '[{"priority":"Warning","dimension":"tests","file":"b.py","line":3,"title":"s","suggested_fix":"x"}]'
+  sg
+  [ "$(jq -c '.self_guided.refusals' <<<"$output")" = '["unstamped"]' ]
+  # a passing verdict needs no retry
+  vstat BUDGET_EXHAUSTED '[4,2]'
+  sg
+  [ "$(jq -c '.self_guided.refusals' <<<"$output")" = '["not-stuck"]' ]
+}
+
+@test "#3076 a flagged possible false trip is not a carried blocker, so its missing fix refuses nothing" {
+  setup_wd
+  vstat ESCALATE_NO_CONVERGENCE '[9,2]' "$(jq -c '. + [{priority:"Warning",dimension:"bugs",file:"d.zsh",line:8,title:"other",non_converging:true,possible_false_trip:true}]' <<<"$(carried 'Pin it.')")"
+  sg
+  [ "$(jq -c '.self_guided.eligible' <<<"$output")" = 'true' ]
+}
+
+@test "#3076 the guidance is assembled from the carried findings, marked automatic, and asks to re-judge a park" {
+  setup_wd
+  vstat ESCALATE_NO_CONVERGENCE '[9,2]' "$(jq -c '. + [{priority:"Warning",dimension:"bugs",file:"e.zsh",line:2,title:"new one",suggested_fix:"not carried",non_converging:false}]' <<<"$(carried 'Pin the exact output line.')")"
+  printf '%s\n' '- parked: weak assert -> #4242' > "$WD/progress.md"
+  run --separate-stderr zsh "$S" --status "$ST" --format guidance --work-dir "$WD"
+  [ "$status" -eq 0 ]
+  [ "$(sed -n 1p <<<"$output")" = '<!-- review-loop-guidance -->' ]
+  [ "$(sed -n 2p <<<"$output")" = '<!-- review-loop-guidance-source: automatic -->' ]
+  echo "$output" | grep -qxF -- '1. `b.zsh:3` [tests/Warning] weak assert'
+  echo "$output" | grep -qxF -- '   - Evidence: the case checks nothing'
+  echo "$output" | grep -qxF -- '   - Suggested fix: Pin the exact output line.'
+  echo "$output" | grep -qxF -- '   - Parked as #4242: re-judge the park before parking it again. Apply the suggested fix when an acceptance criterion of the story asks for this surface, or when the diff of the story removed behaviour that exists at its base; otherwise keep it parked and say why.'
+  # only carried blockers are guidance: the fresh one is not
+  [ "$(echo "$output" | grep -c -- 'not carried')" -eq 0 ]
+  # the cap can cut or refuse the grant, so the comment names no figure for it
+  [ "$(echo "$output" | grep -c -- '+3')" -eq 0 ]
+  # an unparked carried blocker gets no park line
+  : > "$WD/progress.md"
+  run --separate-stderr zsh "$S" --status "$ST" --format guidance --work-dir "$WD"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | grep -c -- 'Parked as')" -eq 0 ]
+}
+
+@test "#3076 the guidance refuses (exit 2) when the retry is not eligible, and without --work-dir" {
+  setup_wd
+  vstat ESCALATE_NO_CONVERGENCE '[9,1]' "$(carried '')"
+  run --separate-stderr zsh "$S" --status "$ST" --format guidance --work-dir "$WD"
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  contains "$stderr" "the self-guided retry is refused (no-suggested-fix), so there is no automatic guidance to post"
+  run --separate-stderr zsh "$S" --status "$ST" --format guidance
+  [ "$status" -eq 2 ]
+  contains "$stderr" "--format guidance needs --work-dir"
+}
+
+@test "#3076 the escalation shard grants the self-guided retry once, and a second stuck clean-stops" {
+  local esc
+  esc="$(tr '\n' ' ' < "$REPO_ROOT/development/skills/resolve-issue/reference/escalation.md" | tr -s ' ')"
+  contains "$esc" '**A stuck run with a falling trend gets one self-guided retry (#3076).** When the verdict fails and its `self_guided.eligible` is `true`, the run does not stop.'
+  contains "$esc" 'build-escalation.zsh --status <status.json> --format guidance --work-dir <work-dir>'
+  contains "$esc" 'record-grant.zsh --work-dir <work-dir> --status <status.json> --add 3 --source automatic --guided'
+  contains "$esc" 'A second `stuck` after it finds the guided line in the ledger and is refused as `already-retried`, so the run takes the clean stop below as it always did.'
+  contains "$esc" 'run `build-escalation.zsh --status <status.json> --format verdict --work-dir <work-dir>` before any comment.'
+  contains "$esc" 'When the verdict fails and its `self_guided.eligible` is `true`, the run does not stop.'
+  contains "$esc" 'That holds only when `stuck` is the one failure, the trend is falling, no Critical is open or carried, and every carried blocker has a `suggested_fix`.'
+  contains "$esc" 'Its exit 3 takes the clean stop with `--cap-reached`, and its exit 4 (the ledger already holds a guided grant) takes the clean stop.'
+  contains "$esc" 'Every review-loop record the run emits after the retry carries `auto_guided_retry: true`, and its `outcome` is the retry'"'"'s outcome.'
+  contains "$esc" 'On `"converging": true`, run `record-grant.zsh --work-dir <work-dir> --status <status.json> --add 3 --source automatic`.'
+  contains "$esc" 'It holds each carried blocker'"'"'s `suggested_fix` and evidence, tagged `<!-- review-loop-guidance-source: automatic -->`.'
+  contains "$esc" 'For a parked blocker it asks the fix pass to re-judge the park against the story'"'"'s acceptance criteria and its base behaviour.'
+  contains "$esc" 'Either way the guidance is never posted. 3. On its exit 0, post the file on the issue with `gh issue comment <N> --body-file`, as a human'"'"'s guidance is posted'
+  contains "$esc" 'Apply one fix pass with that comment as fix context, then resume exactly as the automatic grant above does.'
+  local arch
+  arch="$(tr '\n' ' ' < "$REPO_ROOT/ARCHITECTURE.md" | tr -s ' ')"
+  contains "$arch" 'One failing verdict is still granted (#3076): when `stuck` is its only failure, the trend is falling, no Critical is open or carried and every carried blocker has a `suggested_fix`, the verdict'"'"'s `self_guided.eligible` is `true`, and the run takes one self-guided retry.'
+  contains "$arch" 'It records `record-grant.zsh --add 3 --source automatic --guided` and, only once that exits 0, posts `build-escalation.zsh --format guidance`'"'"'s comment'
+  contains "$arch" 'a second `stuck` is refused as `already-retried` (and `record-grant.zsh --guided` exits 4), and the run stops cleanly.'
 }

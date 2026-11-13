@@ -22,8 +22,8 @@ takes the autonomous arm and never prompts.
 
 **An unattended run first tries an automatic grant (#2576).** On a
 `BUDGET_EXHAUSTED` or `ESCALATE_NO_CONVERGENCE` exit in mode `unattended`, run
-`build-escalation.zsh --status <status.json> --format verdict` before any
-comment. On `"converging": true`, run `record-grant.zsh --work-dir <work-dir>
+`build-escalation.zsh --status <status.json> --format verdict --work-dir
+<work-dir>` before any comment. On `"converging": true`, run `record-grant.zsh --work-dir <work-dir>
 --status <status.json> --add 3 --source automatic`. Then, exactly as a human
 grant does (step 5 in `reference/interactive/extension-grant.md`, with its
 amendments in `reference/interactive/extension-ceiling.md`: the run's
@@ -32,13 +32,41 @@ round's boundary, resuming with `--max-rounds` set to the ceiling
 `record-grant.zsh` echoed, and never prompt. Another `BUDGET_EXHAUSTED` or
 `ESCALATE_NO_CONVERGENCE` comes back to this paragraph, never to the extension's
 steps 1–2. A failing verdict, and `record-grant.zsh`'s exit 3 (no headroom under
-its cap of 2 × the original `--max-rounds`), both take the clean stop in the
-next paragraph. An attended run never takes this branch; it gets the interactive
-extension.
+its cap of 2 × the original `--max-rounds`), both take the clean stop below,
+unless the failing verdict buys the self-guided retry in the next paragraph. An
+attended run never takes this branch; it gets the interactive extension.
+
+**A stuck run with a falling trend gets one self-guided retry (#3076).** When
+the verdict fails and its `self_guided.eligible` is `true`, the run does not
+stop. That holds only when `stuck` is the one failure, the trend is falling, no
+Critical is open or carried, and every carried blocker has a `suggested_fix`.
+Instead:
+
+1. Build the automatic guidance into a file, before the grant's ledger line
+   makes the verdict refuse it as `already-retried`:
+   `build-escalation.zsh --status <status.json> --format guidance --work-dir
+   <work-dir>`. It holds each carried blocker's `suggested_fix` and evidence,
+   tagged `<!-- review-loop-guidance-source: automatic -->`. For a parked
+   blocker it asks the fix pass to re-judge the park against the story's
+   acceptance criteria and its base behaviour.
+2. Record the grant:
+   `record-grant.zsh --work-dir <work-dir> --status <status.json> --add 3
+   --source automatic --guided`. Its exit 3 takes the clean stop with
+   `--cap-reached`, and its exit 4 (the ledger already holds a guided grant)
+   takes the clean stop. Either way the guidance is never posted.
+3. On its exit 0, post the file on the issue with `gh issue comment <N>
+   --body-file`, as a human's guidance is posted (step 4 in
+   `reference/interactive/extension.md`). Apply one fix pass with that comment
+   as fix context, then resume exactly as the automatic grant above does.
+
+The retry is once per run. A second `stuck` after it finds the guided line in
+the ledger and is refused as `already-retried`, so the run takes the clean stop
+below as it always did. Every review-loop record the run emits after the retry
+carries `auto_guided_retry: true`, and its `outcome` is the retry's outcome.
 
 **An unattended run that cannot converge stops cleanly (#2579).** When that
-automatic grant is not taken — the verdict fails, or `record-grant.zsh` exits 3
-— a `BUDGET_EXHAUSTED` or `ESCALATE_NO_CONVERGENCE` exit in mode `unattended`
+automatic grant is not taken — the verdict fails with no self-guided retry left
+to take, or `record-grant.zsh` exits 3 — a `BUDGET_EXHAUSTED` or `ESCALATE_NO_CONVERGENCE` exit in mode `unattended`
 takes this clean stop instead of the terminal below. It ships nothing and keeps
 the run resumable:
 
