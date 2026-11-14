@@ -741,7 +741,7 @@ PY
 @test "#3128 the conductor's CONVERGED arm goes straight to §4 and offers no promotion" {
   local flat
   flat="$(LC_ALL=C tr -s '[:space:]' ' ' < "$CONDUCTOR")"
-  contains "$flat" '**`CONVERGED`** (exit 0) → proceed straight to **§4 (Version bump)**, in every session mode: the run waives every suggestion the loop logged and offers none of them to anyone (#3128).'
+  contains "$flat" '**`CONVERGED`** (exit 0) → proceed straight to **§4 (Version bump)**, in every session mode: the run waives every suggestion the loop logged and offers none of them to anyone (#3128). This holds on every path to `CONVERGED`, a granted round of the interactive extension included, and overrides any reference file that still offers the suggestion-promotion phase there: skip that offer and continue to §4.'
   lacks "$flat" 'reference/promotion'
   lacks "$flat" 'enable_suggestions'
   lacks "$flat" '--promote '

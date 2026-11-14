@@ -849,7 +849,10 @@ with a status JSON + code:
 
 - **`CONVERGED`** (exit 0) → proceed straight to **§4 (Version bump)**, in every
   session mode: the run waives every suggestion the loop logged and offers none
-  of them to anyone (#3128). **Keep the loop's status JSON**
+  of them to anyone (#3128). This holds on every path to `CONVERGED`, a granted
+  round of the interactive extension included, and overrides any reference file
+  that still offers the suggestion-promotion phase there: skip that offer and
+  continue to §4. **Keep the loop's status JSON**
   (`--status-file`) — step 6 feeds it to `build-dossier.zsh` so the **Review
   dossier** (per-round blockers found/fixed, dimensions reviewed, waived Low
   suggestions, reviewers) lands in the PR body, with a hidden JSON block the
