@@ -1208,6 +1208,13 @@ _mutate_anchor() {
   contains "$grant" '5. **If they granted rounds** (with or without guidance): **first apply one fix pass, then resume.**'
   contains "$grant" 'Resume only once that gate is green;'
   contains "$grant" 'The grant is not consumed twice: the restarted boundary is the same granted round.'
+  # the granted resume counts toward the step-6 soft cap
+  contains "$grant" 'ceiling raised by 3 — and increment `grants`.'
+  # a further budget or non-convergence stop goes back to step 1
+  contains "$grant" 'On another `BUDGET_EXHAUSTED` / `ESCALATE_NO_CONVERGENCE` → go back to step 1 with the new status.'
+  # AWAITING_FIX continues the round protocol and counts nothing twice
+  contains "$grant" 'On `AWAITING_FIX` (20) → continue the §3.5 round protocol'
+  contains "$grant" 'no grant bookkeeping; the grant was already counted.'
   # a conflict or ambiguity leaves the branch for the typed-comment terminal
   contains "$grant" 'On `ESCALATE_CONFLICT` / `ESCALATE_AMBIGUOUS` → leave this branch and take the typed-comment terminal below'
   # STALE_FINDINGS recovers, and the recovery leaves the grants count alone
