@@ -587,7 +587,8 @@ EOF
   demoted_status
   run zsh "$S" --status "$ST"
   [ "$status" -eq 0 ]
-  echo "$output" | grep -qxF -- "**Demoted by the risk threshold (\`corner_case_risk_threshold\` = \`0.05\`):** these findings cleared a reviewer's blocking bar, but each one's risk (probability × impact) is below the threshold, so the loop logged them as suggestions and did not fix them. Promote any of them if you disagree with its assessment."
+  echo "$output" | grep -qxF -- "**Demoted by the risk threshold (\`corner_case_risk_threshold\` = \`0.05\`):** these findings cleared a reviewer's blocking bar, but each one's risk (probability × impact) is below the threshold, so the loop logged them as suggestions and did not fix them."
+  [ "$(echo "$output" | grep -c '[Pp]romot')" -eq 0 ]
   echo "$output" | grep -qxF -- '| finding | round | p | impact | risk | why |'
   # one row per identity, the LATEST round's record winning
   [ "$(echo "$output" | grep -c -- '^| `mutation drops the check`')" -eq 1 ]
@@ -767,7 +768,7 @@ ext_demoted_status() {  # $1 = include the base-bar round (1) or not (0)
   ext_demoted_status 0
   run zsh "$S" --status "$ST"
   [ "$status" -eq 0 ]
-  echo "$output" | grep -qxF -- "**Demoted by the extension bar (effective threshold = \`0.10\`):** these findings cleared a reviewer's blocking bar, but each one's risk (probability × impact) is below the threshold, so the loop logged them as suggestions and did not fix them. Promote any of them if you disagree with its assessment."
+  echo "$output" | grep -qxF -- "**Demoted by the extension bar (effective threshold = \`0.10\`):** these findings cleared a reviewer's blocking bar, but each one's risk (probability × impact) is below the threshold, so the loop logged them as suggestions and did not fix them."
   echo "$output" | grep -qxF -- '| `stale cache never invalidated` — `app.py:2000` | 6 | 0.15 | 0.4 | 0.06 (extension bar, threshold 0.10) | rare input; a wrong message |'
   [ "$(echo "$output" | grep -c corner_case_risk_threshold)" -eq 0 ]
   [ "$(hidden_json | jq -c '.risk_demoted')" = \

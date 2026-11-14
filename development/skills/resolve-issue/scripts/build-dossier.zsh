@@ -327,8 +327,7 @@ section=$(jq -rn --argjson s "$status_json" --argjson d "$dossier" "$demoted_def
                 then "**Demoted by the risk threshold (`corner_case_risk_threshold` = `\($base | max_by(.seq) | .threshold | cell)`):** "
                 else "**Demoted by the extension bar (effective threshold = `\($dem | max_by(.seq) | .threshold | cell)`):** " end)
              + "these findings cleared a reviewer'"'"'s blocking bar, but each one'"'"'s risk (probability × impact) "
-             + "is below the threshold, so the loop logged them as suggestions and did not fix them. "
-             + "Promote any of them if you disagree with its assessment."),
+             + "is below the threshold, so the loop logged them as suggestions and did not fix them."),
             "",
             "| finding | round | p | impact | risk | why |",
             "|---|---|---|---|---|---|" ]
