@@ -7,7 +7,6 @@
 #   tc-happy-dir-sink-success                 #1720
 #   tc-happy-default-sink-parked-gate         #1721
 #   tc-happy-precheck-reject                  #1722
-#   tc-corner-promotion-and-resume-parented   #1723
 #   tc-corner-file-beats-dir                  #1724
 #   tc-corner-in-repo-dir-not-a-finding       #1725
 #   tc-corner-closed-issue-no-record          #1726
@@ -71,7 +70,6 @@ setup() {
   RUN="$SCRATCH/story-run-412.json"               # keyed by the issue, as documented
   STATE="$SCRATCH/story-state-412.json"
   WD="$SCRATCH/loop-wd"
-  PWD_="$SCRATCH/promotion-wd"
 }
 
 CLEAN_PANEL='printf "[]" > "$REVIEW_FINDINGS"'
@@ -159,32 +157,6 @@ run_id() { jq -r '.run_id' "$RUN"; }
   [ "$(jq -r '.payload.gate_verdict' "$DEFAULT_SINK")" = "null" ]
   [ "$(jq -c '.payload.review_loop_run_ids' "$DEFAULT_SINK")" = "[]" ]
   [ "$(jq -s '[.[] | select(.pipeline == "review-loop")] | length' "$DEFAULT_SINK")" -eq 0 ]
-}
-
-@test "tc-corner-promotion-and-resume-parented: escalate, grant, resume, promote — every loop record parented and listed" {
-  step0 412 --telemetry-dir "$TEL"
-  # blocking phase: escalates on budget
-  review_loop "$WD" --max-rounds 1 --review-cmd "$BLOCKER_PANEL" --fix-cmd true
-  [ "$status" -eq 13 ]
-  # the human grants more rounds; the fix lands; the resumed loop converges
-  printf 'def provision_tenant(slug):\n    return {"slug": slug, "plan": "trial"}\n' > "$R/tenants.py"
-  review_loop "$WD" --resume --max-rounds 3 --review-cmd "$RESUME_PANEL" --fix-cmd true
-  [ "$status" -eq 0 ]
-  # promotion sub-loop, fresh work-dir, same loop_args
-  printf '[{"file":"tenants.py","line":2,"dimension":"code_quality","title":"name the trial plan constant"}]' > "$SCRATCH/promoted.json"
-  review_loop "$PWD_" --promote "$SCRATCH/promoted.json" --review-cmd "$CLEAN_PANEL" --fix-cmd true
-  [ "$status" -eq 0 ]
-  ending '{"outcome":"pr-opened","dependency_precheck":"PROCEED","gate_verdict":"READY","risk":"normal","pr":413}' \
-    --loop-work-dir "$WD" --loop-work-dir "$PWD_"
-  [ "$status" -eq 0 ]
-  local loops
-  loops="$(jq -sc '[.[] | select(.pipeline == "review-loop")]' "$DIR_SINK")"
-  [ "$(jq 'length' <<<"$loops")" -eq 3 ]
-  [ "$(jq --arg id "$(run_id)" '[.[] | select(.parent_run_id == $id)] | length' <<<"$loops")" -eq 3 ]
-  [ "$(jq '[.[] | select(.payload.promotion_phase == true)] | length' <<<"$loops")" -eq 1 ]
-  [ "$(jq -c '[.[].run_id]' <<<"$loops")" \
-    = "$(jq -c 'select(.pipeline == "resolve-issue") | .payload.review_loop_run_ids' "$DIR_SINK")" ]
-  [ ! -e "$DEFAULT_SINK" ]
 }
 
 @test "tc-corner-file-beats-dir: flags on both sides of the issue ref -> every record in PATH" {

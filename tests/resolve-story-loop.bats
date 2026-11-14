@@ -1141,34 +1141,15 @@ EOF
   suggestion_loop
   [ "$status" -eq 0 ]
   # STRICT equality, not `jq -r … = "false"`: jq -r prints the boolean false and
-  # the STRING "false" identically, while the documented metric predicate
-  # (select(.payload.promotion_phase != true)) is a strict JSON comparison — so a
-  # --argjson -> --arg slip would keep every promotion record in both published
-  # rates with a type-blind suite still green
+  # the STRING "false" identically, so a --argjson -> --arg slip would type the
+  # key as a string with a type-blind suite still green
   echo "$output" | jq -e '.promotion_phase == false' >/dev/null
   [ "$(echo "$output" | jq 'has("promotion_phase")')" = "true" ]
 
-  # with it: the promotion sub-loop, which the documented metrics exclude
+  # with it: the promotion sub-loop
   suggestion_loop --promote "$P"
   [ "$status" -eq 12 ]
   echo "$output" | jq -e '.promotion_phase == true' >/dev/null
-}
-
-@test "#1033 promotion_phase reaches the telemetry payload, not just the status JSON" {
-  # the status JSON is only the carrier; the metric reads .payload.promotion_phase
-  P="$BATS_TEST_TMPDIR/phase-payload.json"
-  cat > "$P" <<'EOF'
-[{"file":"app.py","line":1,"dimension":"code_quality","title":"extract the magic number"}]
-EOF
-  T="$BATS_TEST_TMPDIR/phase.jsonl"
-  suggestion_loop --promote "$P" --telemetry-file "$T" --issue 995
-  [ "$status" -eq 12 ]
-  jq -e '.payload.promotion_phase == true' "$T" >/dev/null
-
-  T2="$BATS_TEST_TMPDIR/phase1.jsonl"
-  suggestion_loop --telemetry-file "$T2" --issue 995
-  [ "$status" -eq 0 ]
-  jq -e '.payload.promotion_phase == false' "$T2" >/dev/null
 }
 
 @test "a non-numeric --issue is a usage error, not a silently dropped record (#1004)" {
@@ -2097,7 +2078,7 @@ EOF
   [ "$(echo "$output" | jq '.round_changelists[0].summary.blocking')" -eq 1 ]
   [ "$(echo "$output" | jq -r '.round_changelists[0].blocking[0].priority')" = "High" ]
   # #995: the per-item stamp must survive INTO the loop's status JSON — that is
-  # the single link between the consolidator that writes it and the four
+  # the single link between the consolidator that writes it and the
   # surfaces that read it (all of whose tests otherwise run on hand-written
   # fixtures). A loop that reshaped or key-filtered the changelist would leave
   # every fixture-based test green while production rendered no label at all.
@@ -2107,7 +2088,7 @@ EOF
 
 @test "#1029 a reviewer-raised blocker in the same round is NOT stamped promoted" {
   # the stamp must mark the human's pick alone; stamping everything would make
-  # the label meaningless in all four surfaces
+  # the label meaningless in every surface
   P="$BATS_TEST_TMPDIR/promote-mixed.json"
   cat > "$P" <<'EOF'
 [{"file":"app.py","line":1,"dimension":"code_quality","title":"extract the magic number"}]
@@ -2269,9 +2250,8 @@ EOF
 }
 
 @test "#1033 an adopting --resume that CONVERGES still records promotion_phase true" {
-  # the sub-loop's SUCCESS record is the dangerous one: counted as phase-1 it
-  # would credit the story with a convergence it already had, in both published
-  # rates. Round 1 promotes and exhausts; the resume's panel finds nothing.
+  # the adopted promoted set must survive a resume that converges. Round 1
+  # promotes and exhausts; the resume's panel finds nothing.
   P="$BATS_TEST_TMPDIR/promote-adopt-converge.json"
   cat > "$P" <<'EOF'
 [{"file":"app.py","line":1,"dimension":"code_quality","title":"extract the magic number"}]
@@ -2297,8 +2277,8 @@ EOF
   contains "$stderr" "adopting the run's promoted set"
   [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
   echo "$output" | jq -e '.promotion_phase == true' >/dev/null
-  # ...and it reaches the payload, which is what the metric predicate reads
-  jq -es 'all(.[]; .payload.promotion_phase == true)' "$T" >/dev/null
+  # ...and never the payload, which no longer carries it (#3132)
+  jq -es 'all(.[]; .payload | has("promotion_phase") | not)' "$T" >/dev/null
 }
 
 # --- #1435: the fix-touched capture, and residue-shaped runs (#2580) ---------
@@ -4236,7 +4216,6 @@ JSON
   T="$BATS_TEST_TMPDIR/promote-parented.jsonl"
   suggestion_loop --promote "$P" --telemetry-file "$T" --parent-run-id "$PARENT" --issue 412
   [ "$status" -eq 12 ]
-  jq -e '.payload.promotion_phase == true' "$T" >/dev/null
   [ "$(jq -r '.parent_run_id' "$T")" = "$PARENT" ]
   [ "$(cat "$BATS_TEST_TMPDIR/wd/.telemetry-run-ids")" = "$(jq -r '.run_id' "$T")" ]
 }

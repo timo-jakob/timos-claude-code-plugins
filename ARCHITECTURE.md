@@ -4680,17 +4680,18 @@ reliable but the merging needs semantics:
   with **no** stamp gate (the `false_trip` precedent), so an absent flag simply
   counts 0 and a run without `--promote` stays byte-identical. The stamp is what
   makes a promoted item *readable* as such everywhere downstream, where it would
-  otherwise be indistinguishable from a reviewer-raised Warning: the per-round
-  `promoted` count in the telemetry payload, the `promoted:` term and the
+  otherwise be indistinguishable from a reviewer-raised Warning: the
+  `promoted:` term and the
   per-item `- promoted suggestion:` line in `progress.md`, the `Promoted`
   column plus `[<dimension>/Warning (promoted)]` bullets in the escalation.
   `build-dossier.zsh` no longer reads the stamp: the dossier dropped the
-  promotion phase (#3131). Both
+  promotion phase (#3131). `build-telemetry-record.zsh` no longer reads it
+  either: the payload dropped the count (#3132). Both
   the `promoted:` term and the `Promoted` column are rendered **only when there
   is one** (the column table-wide, since a column present in one row and absent
   in another is not a table) — which is what keeps a run without `--promote`
-  byte-identical to before the label existed. All
-  **three** read the stamp with the **identical** expression
+  byte-identical to before the label existed. `progress.md` and the
+  escalation read the stamp with the **identical** expression
   (`[ $blk[] | select(.promoted == true) ] | length`) — the same
   lockstep the stamped/carried/new/fixed derivation carries; change them
   together. The count is a
@@ -5270,9 +5271,8 @@ auto-continue above, `0` on every run that never did, counting *continuations*
 rather than identities — and `promotion_phase` (#995) is an **always-present**
 boolean — `true` exactly when the invocation **carried or adopted** a promoted
 set, i.e. when it is the promotion sub-loop (a `--resume` that omits `--promote`
-and re-adopts the work-dir's `.promote` records `true` too) — that
-`build-telemetry-record.zsh` copies into the payload so the documented
-convergence metrics can exclude a promotion pass.
+and re-adopts the work-dir's `.promote` records `true` too). Since #3132
+`build-telemetry-record.zsh` no longer copies it into the payload.
 One further exit-2 semantic, `STALE_FINDINGS` (#974), means the round was never
 really reviewed — its panel never ran, it read a tree that no longer exists, or
 it left a carried entry unaccounted for (#1583, below). In step mode it covers a
@@ -5844,11 +5844,11 @@ Rules that carry the contract's weight:
   is retryable rather than a
   tombstone — otherwise one transient `gh` error would orphan that run's facts
   permanently. The `payload.event` qualifier is load-bearing once **any stream
-  carries more than one enrichment kind**: the review-loop's
-  `suggestion_promotion` enrichment (#995) is also `kind: "enrichment"` on
-  `pipeline: "review-loop"` with `outcome: "success"`, so an unqualified "has a
-  success enrichment" test would read it as *this run's facts are already
-  settled* and orphan them for good. (The PR-facts pass additionally scopes
+  carries more than one enrichment kind**: the retired review-loop
+  `suggestion_promotion` enrichment (#995), which an older stream may still
+  hold, is also `kind: "enrichment"` on `pipeline: "review-loop"` with
+  `outcome: "success"`, so an unqualified "has a success enrichment" test would
+  read it as *this run's facts are already settled* and orphan them for good. (The PR-facts pass additionally scopes
   itself to runs carrying a `pr`, which no pipeline sets today — so read the
   collision as the general rule it is, not as a claim about that scoping.)
   `kind` says **that** a record is an enrichment; `payload.event` says **which**
@@ -5860,10 +5860,11 @@ Rules that carry the contract's weight:
   an enrichment without one is both unfindable by its own pass and invisible to
   every other pass's "already enriched?" test — the orphaning failure the
   qualifier exists to prevent, reached from the emitting side instead of the
-  querying one. Conventional values: `suggestion_promotion` (#995) and
-  `pr_outcome` (epic 3's PR-facts pass). The **validator does not enforce it**:
-  `payload` is open by design, and closing it for one key would make every
-  pipeline's payload the contract's business. So it is a rule each emitting pass
+  querying one. Conventional values: `pr_outcome` (epic 3's PR-facts pass), and
+  `suggestion_promotion` (#995) on older records, which no pass emits any more.
+  The **validator does not enforce it**: `payload` is open by design, and
+  closing it for one key would make every pipeline's payload the contract's
+  business. So it is a rule each emitting pass
   keeps, and each consuming query names its own event rather than matching
   `kind` alone.
 - **`pipeline` is an open identifier**, not a closed enum: any
@@ -6334,14 +6335,6 @@ or isn't readable), 3 internal (`jq` missing, a scratch-file or read failure
 while streaming, or a failure in the aggregation pass). See
 `docs/how-to/read-pipeline-telemetry.md` for the user-facing walkthrough.
 
-**The rollup is deliberately unfiltered on `payload.promotion_phase`.** A
-review-loop suggestion-promotion pass (#995) is a second terminal run, so its
-record is counted here like any other. Only the convergence-**rate** recipes
-under *Review-loop telemetry* exclude it with
-`select(.payload.promotion_phase != true)`; the mean-rounds and
-escalation-breakdown cuts there keep it, exactly as this rollup does. So a
-discrepancy against those cuts is never promotion filtering.
-
 ## Review-loop telemetry (#566)
 
 Raising autonomy safely needs evidence, so the loop appends **one `telemetry/v1`
@@ -6414,8 +6407,7 @@ read `outcome` when you want success/failure), `rounds`, `max_rounds`,
 automatic grants are told apart from human ones), `auto_guided_retry` (#3076:
 copied from the status JSON, `false` when it has none; `true` on every record
 emitted after the run's self-guided retry, so that record's `outcome` is the
-retry's outcome),
-`promotion_phase`, `possible_false_trip_auto_continues`, `findings_by_round`,
+retry's outcome), `possible_false_trip_auto_continues`, `findings_by_round`,
 `gate_by_round`, `step_wall_s_by_round`, `skipped_dimensions_by_round`,
 `convergence_assessment`, and `fixed`
 (blockers found and cleared) vs `waived` (Low suggestions logged).
@@ -6437,18 +6429,15 @@ history line that predates the key. It is how often the claude-plugin
 `contract` schedule actually skipped, joined to the findings on `round`.
 `possible_false_trip_auto_continues` (#1498) is copied from the status JSON with
 the same always-present reading stated there.
-`promotion_phase` (#995) is an always-present boolean copied from the status
-JSON — `true` exactly when the invocation carried **or adopted** a promoted set,
-i.e. when it is the promotion sub-loop (an adopting `--resume` counts) — and it is what the two documented rate metrics below
-exclude. Each `findings_by_round` entry
+The payload carries no `promotion_phase` and no per-round `promoted` count
+since #3132, and a status JSON that still holds `promotion_phase` builds the
+same payload as one without it. A record emitted before #3132 may carry both
+keys, and no recipe below reads them. Each `findings_by_round` entry
 (#969) carries the `round` number it describes (the key every per-round join
 uses), plus `by_severity` in the **user-facing vocabulary** —
 `Critical` / `Warning` / `Suggestion`, the same words the human reads in
 `progress.md` and the escalation (internally `Warning` = priority High,
-`Suggestion` = the Low bucket) — plus `promoted` (#995 — the round's
-human-promoted blockers, a **subset of `by_severity.Warning`** and never added
-to it, derived from the per-item `promoted: true` stamp with **no** stamp gate,
-so a changelist that predates the stamp simply counts 0), `by_dimension`,
+`Suggestion` = the Low bucket) — plus `by_dimension`,
 `by_class` (#1435 — the residue class histogram
 `{new_defect, incomplete_propagation, under_assertion}`, i.e. whether the round
 found fresh problems or re-read the last fix pass's own edits; `null`, **not**
@@ -6485,15 +6474,13 @@ RL='[.[] | select(.kind == "run" and .pipeline == "review-loop")]'
 # records that converged (failed ERROR runs stay in the denominator). NOT a first-pass rate: an extended loop (escalate → grant →
 # --resume) emits a record per terminal exit, so its post-grant CONVERGED
 # counts here too. SKIPPED (--no-review) records reviewed nothing, so the
-# expression drops them from the denominator, and so is a PROMOTION sub-loop
-# (#995): a second pass over ONE story, not a story of its own. Read the figure
-# as per-record, not per-loop.
+# expression drops them from the denominator. Read the figure as per-record,
+# not per-loop.
 # BOTH PR-opening terminals count as convergence (#1435). Residue is a
 # convergence, not an exception — the loop maps it to outcome: "success", and
 # counting only `CONVERGED` would leave residue records in the denominator and
 # out of the numerator, reporting every residue run as a failure to converge.
 jq -s "$RL"' | map(select(.payload.status != "SKIPPED"))
-  | map(select(.payload.promotion_phase != true))
   | if length == 0 then null else ([.[] | select(.payload.status == "CONVERGED" or .payload.status == "CONVERGED_WITH_RESIDUE")] | length) / length end' "$S"
 # mean rounds to converge — BOTH PR-opening terminals (#1435), because the
 # question is "how many rounds did it take to reach a PR", and a residue run
@@ -6506,18 +6493,6 @@ jq -s "$RL"' | [.[] | select(.payload.status == "CONVERGED" or .payload.status =
 # payload note above)
 jq -s "$RL"' | group_by(.payload.escalation) | map({(.[0].payload.escalation | tostring): length}) | add' "$S"
 ```
-
-A **promotion sub-loop** (#994) is a second full invocation with its own `.t0`
-and the same `--issue`, so an interactive story that promotes anything
-contributes an additional terminal record — a second multiplicity source, on top
-of the extended-loop case. Its own `.t0` is exactly why it cannot be absorbed by
-the `(repo, issue, ts)` grouping the extended-loop case relies on: a **new `ts`**
-makes it its own group, inflating the per-record rate *and* adding a second
-group for one story to the first-pass rate. Hence the one predicate both rate
-recipes carry, `select(.payload.promotion_phase != true)` (#995) — the sub-loop's
-rounds are polish on an already-converged story, not a story's convergence. The
-mean-rounds and escalation-breakdown cuts keep it: those describe *what the loop
-did*, and a promotion pass genuinely did those rounds.
 
 A true **first-pass** rate needs per-loop grouping, which the v1 envelope does
 not key directly — group by `(repo, issue, ts)` (which groups one loop
@@ -6536,7 +6511,6 @@ first-pass success — precisely what the metric must exclude.
 
 ```bash
 jq -s "$RL"' | map(select(.payload.status != "SKIPPED"))
-  | map(select(.payload.promotion_phase != true))
   | group_by([.repo, .issue, .ts]) | map(min_by(.wall_s))
   | if length == 0 then null else ([.[] | select(.payload.status == "CONVERGED" or .payload.status == "CONVERGED_WITH_RESIDUE")] | length) / length end' "$S"
 ```
@@ -6551,69 +6525,6 @@ interrupted.
 The cross-pipeline cut needs no payload at all — that is what the 4-value
 `outcome` enum buys — but it still needs the `kind` filter:
 `jq -s '[.[] | select(.kind == "run")] | group_by(.outcome) | map({(.[0].outcome): length}) | add' "$S"`.
-
-### The suggestion-promotion enrichment (#995)
-
-`waived` answers *how many Low findings did the loop log?* — it can never answer
-*did a human act on them?*, because the phase-1 run record is on disk before the
-prompt is ever shown. That fact is recorded as an **append-only enrichment**
-joined to the run, emitted by `resolve-issue`'s `reference/promotion/step-3-select.md` step 3 once the human's
-multi-select answer is known:
-
-```json
-{"schema":"telemetry/v1","kind":"enrichment","run_id":"review-loop-1753400000-8f3a",
- "parent_run_id":null,"ts":1753400420,"repo":"owner/name","repo_type":"shell",
- "pipeline":"review-loop","issue":995,"pr":null,"outcome":"success",
- "wall_s":null,"tokens":null,
- "payload":{"event":"suggestion_promotion","suggestions_offered":4,"suggestions_promoted":2}}
-```
-
-It uses `kind: "enrichment"` exactly as the contract already defines it — **no
-envelope key, no validator change and no new `kind`**; the contract above gains
-only the `payload.event` rule that a *second* enrichment kind makes load-bearing — with `--run-id` (the join key, hence
-required), **no** `--wall-s`, and an `outcome` describing *the enrichment event*.
-The `run_id` comes from the loop's `<work-dir>/.telemetry-run-id` sidecar, which
-every terminal exit clears and then rewrites from the record it emitted — so it
-holds the id of that exit's record, or **nothing** when the emission failed (a
-stale id would otherwise be joined to a superseded record, and the caller's
-"no id, no enrichment" guard would never fire); **an absent or empty
-sidecar means no enrichment at all**, never a minted id — that would validate
-cleanly and be permanently orphaned.
-
-**Emission gate: exactly when the promotion prompt was presented** (interactive,
-and at least one waived suggestion). A headless run, or one with nothing to
-offer, gets **no record**, keeping its sink identical to before the feature.
-Selecting *none* is a **settled** fact and does get one, with
-`suggestions_promoted: 0` — the single most informative datum for the question
-the enrichment exists to answer.
-
-**One owner per fact — never sum these three.** `waived` in a phase-1 run
-payload means **distinct Low findings this loop logged**, not *never acted on*. A
-promoted item therefore legitimately appears as `waived` in the phase-1 run
-record, again as `suggestions_promoted` in the promotion enrichment, and — once
-its fix lands — as `fixed` in the promotion sub-loop's own run record. These are
-three different facts about the same item and **must never be summed**. `waived`
-is the single owner of "distinct Low findings logged"; `suggestions_offered` owns
-"how many the human was shown", equals `waived` by construction (same cross-round
-union, same `[file, line, dimension, title]` identity) and is repeated on the
-enrichment only so the enrichment stands alone without a join.
- If they ever
-disagree, the phase-1 `waived` is authoritative and the difference is a bug
-signal — the sidecar names the exit's own record or nothing, so there is no
-join-to-a-superseded-record case to excuse it.
-
-`suggestions_promoted` owns **how many the human picked** — recorded at answer
-time, and therefore *before* the skill's step-4 matching classifies each key
-against the sub-loop's first panel. It is deliberately **not** a count of items
-that entered the sub-loop: every key can fall out `unmatched`/`unverified` and
-the run converges with nothing promoted, so a non-zero `suggestions_promoted`
-with no promotion-phase run record at all is a correct, expected pairing. Read it
-as *the human's answer*, never as work done — and never divide the promotion
-sub-loop's `fixed` by it.
-
-The metrics above need **no** filter for this record — `select(.kind == "run")`
-already excludes it — which is precisely why the one predicate they did gain
-(`promotion_phase`) is about the sub-loop's *run* record, not the enrichment.
 
 Records written **before** this retrofit are still `review-loop.jsonl` in the
 pre-contract shape (top-level `status` / `rounds`, no `pipeline`); they are not
@@ -6800,9 +6711,7 @@ directory; squash auto-merge folds them into one commit on `main`.
 
 So every review-loop record of a run carries `parent_run_id` = that run's
 `run_id`, **and** that `run_id` lists it. The join works from either end, and
-all of them land in one sink. The promotion enrichment is the one record outside
-that join: it carries no `parent_run_id`, and is reached through its loop
-record's `run_id`, as it always was.
+all of them land in one sink.
 
 **Envelope.** `issue` is the story; `pr` is the opened PR, else `null`. The
 `outcome` mapping:

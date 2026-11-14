@@ -71,7 +71,7 @@ EOF
   done
   # ...and exactly the payload keys it does own
   [ "$(echo "$output" | jq -c 'keys_unsorted | sort')" = \
-    '["auto_guided_retry","convergence_assessment","escalation","findings_by_round","fixed","gate_by_round","grants","max_rounds","possible_false_trip_auto_continues","promotion_phase","rounds","skipped_dimensions_by_round","status","step_wall_s_by_round","waived"]' ]
+    '["auto_guided_retry","convergence_assessment","escalation","findings_by_round","fixed","gate_by_round","grants","max_rounds","possible_false_trip_auto_continues","rounds","skipped_dimensions_by_round","status","step_wall_s_by_round","waived"]' ]
 }
 
 @test "#2197 step_wall_s_by_round is read from history[]: a timed round, and a pre-key line reads null" {
@@ -378,18 +378,6 @@ EOF
   zsh "$EMIT" --pipeline review-loop --outcome success --repo-dir "$R" \
     --issue 604 --ts 1720000006 --wall-s 1 --payload "$P" >/dev/null
 
-  # a PROMOTION sub-loop record (#995): a second pass over the SAME story, not a
-  # story of its own — the rate recipes exclude it via promotion_phase
-  cat > "$ST" <<'EOF'
-{"status":"CONVERGED","rounds":1,"max_rounds":5,"promotion_phase":true,"repo_type":"python","round_changelists":[],"final_changelist":{"blocking":[]}}
-EOF
-  zsh "$S" --status "$ST" > "$P"
-  # strict: jq -r prints the boolean true and the STRING "true" identically,
-  # while the documented predicate below is a strict JSON comparison
-  jq -e '.promotion_phase == true' "$P" >/dev/null
-  zsh "$EMIT" --pipeline review-loop --outcome success --repo-dir "$R" \
-    --issue 601 --ts 1720000008 --wall-s 30 --payload "$P" >/dev/null
-
   # a foreign pipeline sharing the sink must not skew review-loop's metrics
   printf '{}' > "$P"
   zsh "$EMIT" --pipeline refine-issue --outcome success --repo-dir "$R" \
@@ -403,52 +391,52 @@ EOF
   local RL='[.[] | select(.kind == "run" and .pipeline == "review-loop")]'
   # terminal-record convergence rate (SKIPPED excluded, guarded divisor)
   [ "$(jq -s "$RL"' | map(select(.payload.status != "SKIPPED"))
-    | map(select(.payload.promotion_phase != true))
     | if length == 0 then null else ([.[] | select(.payload.status == "CONVERGED")] | length) / length end' "$F")" = "0.5" ]
   # mean rounds to converge — CONVERGED records ONLY, never averaged over all
-  # (averaging every record would give 6/4; the doc forbids exactly that).
-  # DELIBERATELY unpredicated: the promotion pass's own CONVERGED record counts
-  # here, because it genuinely ran that round — (2 + 1) / 2. A predicate copied
-  # in from the rate recipes above would silently drop real rounds.
+  # (averaging every record would give 5/3; the doc forbids exactly that)
   [ "$(jq -s "$RL"' | [.[] | select(.payload.status == "CONVERGED")]
-    | if length == 0 then null else (map(.payload.rounds) | add) / length end' "$F")" = "1.5" ]
-  # ...and the promotion predicate is LOAD-BEARING, not decorative: without it
-  # the promotion pass counts as its own story and the rate moves
-  [ "$(jq -s "$RL"' | map(select(.payload.status != "SKIPPED"))
-    | if length == 0 then null else ([.[] | select(.payload.status == "CONVERGED")] | length) / length end' "$F")" = "0.6666666666666666" ]
-  # escalation breakdown — deliberately NOT predicated: a promotion pass
-  # genuinely did those rounds (ARCHITECTURE.md, Review-loop telemetry)
+    | if length == 0 then null else (map(.payload.rounds) | add) / length end' "$F")" = "2" ]
+  # escalation breakdown
   run jq -s "$RL"' | group_by(.payload.escalation) | map({(.[0].payload.escalation | tostring): length}) | add' "$F"
   echo "$output" | jq -e '.BUDGET_EXHAUSTED == 1' >/dev/null
   # the null bucket is the DANGEROUS half: it means "not an escalation", not
-  # "succeeded" — here the two CONVERGED records (phase-1 + the promotion pass)
-  # and the SKIPPED one
-  echo "$output" | jq -e '.["null"] == 3' >/dev/null
+  # "succeeded" — here the CONVERGED record and the SKIPPED one
+  echo "$output" | jq -e '.["null"] == 2' >/dev/null
   # the cross-pipeline enum groups the shared sink without reading any payload —
-  # 4 successes (3 review-loop: CONVERGED, SKIPPED, the promotion pass; plus 1
-  # refine-issue), the enrichment excluded
-  [ "$(jq -s '[.[] | select(.kind == "run")] | group_by(.outcome) | map({(.[0].outcome): length}) | add | .success' "$F")" -eq 4 ]
+  # 3 successes (2 review-loop: CONVERGED, SKIPPED; plus 1 refine-issue), the
+  # enrichment excluded
+  [ "$(jq -s '[.[] | select(.kind == "run")] | group_by(.outcome) | map({(.[0].outcome): length}) | add | .success' "$F")" -eq 3 ]
 }
 
-@test "ARCHITECTURE.md's rate recipes really carry the promotion predicate (doc-drift pin)" {
-  # The recipes ARE the deliverable — no script executes them, and the four
-  # copies in this file are hand-typed under a comment saying "if the doc
-  # changes, this test must change with it". That convention is unenforced in
-  # the doc->test direction: deleting the promotion predicate from ARCHITECTURE
-  # (or adding it to the mean-rounds cut, which the doc explicitly forbids)
-  # leaves every test here green while the published rates silently re-inflate.
-  # Same discipline the sibling suites apply to SKILL.md's fences.
+@test "#3132 a status JSON carrying promotion_phase and promoted items builds the same payload as one without" {
+  # The promotion phase is retired: the payload carries neither promotion_phase
+  # nor a per-round promoted count, so a status JSON that still holds them (a
+  # run from before the retirement) is read exactly like one that never did.
+  local with="$BATS_TEST_TMPDIR/with.json" without="$BATS_TEST_TMPDIR/without.json"
+  printf '%s' '{"status":"CONVERGED","rounds":2,"max_rounds":5,"promotion_phase":true,"round_changelists":[{"round":1,"blocking":[{"priority":"High","dimension":"bugs","file":"a.py","line":1,"title":"B","promoted":true}],"suggestions":[]},{"round":2,"blocking":[],"suggestions":[]}],"final_changelist":{"blocking":[]}}' > "$with"
+  jq -c 'del(.promotion_phase) | .round_changelists[].blocking[] |= del(.promoted)' "$with" > "$without"
+  run zsh "$S" --status "$with"
+  [ "$status" -eq 0 ]
+  local a="$output"
+  echo "$a" | jq -e 'has("promotion_phase") | not' >/dev/null
+  echo "$a" | jq -e '[.findings_by_round[] | has("promoted")] == [false, false]' >/dev/null
+  # the promoted blocker still counts as the Warning it is
+  echo "$a" | jq -e '.findings_by_round[0].by_severity.Warning == 1' >/dev/null
+  run zsh "$S" --status "$without"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$a" ]
+}
+
+@test "#3132 no telemetry recipe or key table names promotion_phase any more (doc-drift pin)" {
+  # The rate recipes ARE the deliverable — no script executes them, and the
+  # copies in this file are hand-typed. The promotion predicate left them with
+  # the payload key, so neither page may still filter on it or list it.
+  [ "$(grep -c 'payload.promotion_phase' "$REPO_ROOT/ARCHITECTURE.md")" -eq 0 ]
+  [ "$(grep -c 'promotion_phase' "$REPO_ROOT/docs/how-to/read-pipeline-telemetry.md")" -eq 0 ]
   local arch_flat
   arch_flat=$(tr '\n' ' ' < "$REPO_ROOT/ARCHITECTURE.md" | tr -s ' ')
-  # both RATE recipes carry it — two occurrences, not one
-  [ "$(grep -o 'map(select(.payload.promotion_phase != true))' "$REPO_ROOT/ARCHITECTURE.md" | grep -c .)" -eq 2 ]
-  contains "$arch_flat" 'map(select(.payload.status != "SKIPPED")) | map(select(.payload.promotion_phase != true))'
-  # ...and the mean-rounds cut deliberately does NOT: a promotion pass genuinely
-  # ran those rounds
-  local mean_recipe
-  mean_recipe=$(sed -n '/# mean rounds to converge/,/^# escalation breakdown/p' "$REPO_ROOT/ARCHITECTURE.md")
-  [ -n "$mean_recipe" ]
-  run ! grep -q 'promotion_phase' <<< "$mean_recipe"
+  contains "$arch_flat" 'map(select(.payload.status != "SKIPPED")) | if length == 0 then null'
+  contains "$arch_flat" 'map(select(.payload.status != "SKIPPED")) | group_by([.repo, .issue, .ts]) | map(min_by(.wall_s))'
 }
 
 @test "the documented rate one-liners yield null on a record-less stream, not a division error" {
@@ -456,7 +444,6 @@ EOF
   : > "$F"
   local RL='[.[] | select(.kind == "run" and .pipeline == "review-loop")]'
   run jq -s "$RL"' | map(select(.payload.status != "SKIPPED"))
-    | map(select(.payload.promotion_phase != true))
     | if length == 0 then null else ([.[] | select(.payload.status == "CONVERGED")] | length) / length end' "$F"
   [ "$status" -eq 0 ]
   [ "$output" = "null" ]
@@ -569,30 +556,16 @@ EOF
       --issue "$3" --ts "$4" --wall-s "$5" --payload "$P" >/dev/null
   }
 
-  emit_promo() {  # $1 issue · $2 ts · $3 wall — a promotion sub-loop's own record
-    cat > "$BATS_TEST_TMPDIR/fp-status.json" <<EOF
-{"status":"CONVERGED","rounds":1,"max_rounds":5,"promotion_phase":true,"repo_type":"python","round_changelists":[],"final_changelist":{"blocking":[]}}
-EOF
-    zsh "$S" --status "$BATS_TEST_TMPDIR/fp-status.json" > "$P"
-    jq -e '.promotion_phase == true' "$P" >/dev/null
-    zsh "$EMIT" --pipeline review-loop --outcome success --repo-dir "$R" \
-      --issue "$1" --ts "$2" --wall-s "$3" --payload "$P" >/dev/null
-  }
-
   emit CONVERGED        success   601 1720000000 10   # converged first pass
   emit BUDGET_EXHAUSTED escalated 602 1720000100 20   # never converged
   emit SKIPPED          success   604 1720000200 1    # reviewed nothing
   # issue 605: ONE extended loop -> two records, SAME ts, growing wall_s
   emit BUDGET_EXHAUSTED escalated 605 1720000300 5
   emit CONVERGED        success   605 1720000300 50
-  # 602's promotion pass: a FRESH invocation, so a NEW ts -> its own group. It
-  # must not become a fourth story that turns a never-converged one into a
-  # first-pass success.
-  emit_promo 602 1720000400 7
 
   local RL='[.[] | select(.kind == "run" and .pipeline == "review-loop")]'
   local GROUPED="$RL"' | map(select(.payload.status != "SKIPPED"))
-    | map(select(.payload.promotion_phase != true)) | group_by([.repo, .issue, .ts])'
+    | group_by([.repo, .issue, .ts])'
 
   # FIRST-PASS (min_by): 601 yes, 602 no, 605 no (it escalated first) -> 1/3
   [ "$(jq -s "$GROUPED"' | map(min_by(.wall_s))
@@ -603,13 +576,7 @@ EOF
   # the two really do disagree — that difference IS the extended loop
   [ "$(jq -s "$GROUPED"' | map(select(length > 1)) | length' "$F")" -eq 1 ]
   # and dropping the SKIPPED filter would silently change the denominator
-  [ "$(jq -s "$RL"' | group_by([.repo, .issue, .ts]) | length' "$F")" -eq 5 ]
-  # ...and so would dropping the promotion_phase predicate: the promotion pass
-  # forms its own (repo, issue, ts) group, so first-pass would read 2/4 and
-  # credit issue 602 — which never converged — with a first-pass success
-  local UNPRED="$RL"' | map(select(.payload.status != "SKIPPED")) | group_by([.repo, .issue, .ts])'
-  [ "$(jq -s "$UNPRED"' | map(min_by(.wall_s))
-    | if length == 0 then null else ([.[] | select(.payload.status == "CONVERGED")] | length) / length end' "$F")" = "0.5" ]
+  [ "$(jq -s "$RL"' | group_by([.repo, .issue, .ts]) | length' "$F")" -eq 4 ]
 }
 
 @test "the first-pass one-liner also yields null on a record-less stream" {
@@ -617,7 +584,6 @@ EOF
   : > "$F"
   run jq -s '[.[] | select(.kind == "run" and .pipeline == "review-loop")]
     | map(select(.payload.status != "SKIPPED"))
-    | map(select(.payload.promotion_phase != true))
     | group_by([.repo, .issue, .ts]) | map(min_by(.wall_s))
     | if length == 0 then null else ([.[] | select(.payload.status == "CONVERGED")] | length) / length end' "$F"
   [ "$status" -eq 0 ]

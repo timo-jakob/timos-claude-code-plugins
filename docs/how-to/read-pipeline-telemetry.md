@@ -96,13 +96,10 @@ record carries, and where its payload keys are listed. `issue`, `pr` and
 | acceptance stage (`acceptance`) | instrumented | you run `collect-acceptance-telemetry.zsh`: one record per completed `acceptance (<interface>)` check run attempt of the last 30 days | `null` | the run's PR | `null` | [acceptance](#acceptance) |
 | Approver (`approve`) | instrumented | you run `collect-approver-telemetry.zsh`: one record per posted Approver review carrying its findings block, on PRs updated in the last 30 days | `null` | the reviewed PR | `null` | [approve](#approve) |
 
-Two more record shapes share the sink without being pipelines of their own. The
+One more record shape shares the sink without being a pipeline of its own. The
 **story size pre-flight** (`story-preflight`) appends one record per size
 verdict a resolve-issue run reaches, parented to that run
-([keys](#story-preflight)). The **suggestion-promotion enrichment** is a
-`kind: "enrichment"` record on `pipeline: "review-loop"`, appended when a human
-was shown the promotion prompt, and joined to its loop record by `run_id`
-([keys](#review-loop-suggestion-promotion-enrichment)).
+([keys](#story-preflight)).
 
 Three things decide where you find these records:
 
@@ -140,9 +137,8 @@ sections of `ARCHITECTURE.md` named under each table.
 | `max_rounds` | integer | the round budget the loop ran under |
 | `grants` | object | `human` and `automatic`: how many round grants the run took from each source |
 | `auto_guided_retry` | boolean | `true` when the record was emitted after the run's one self-guided retry, so its `outcome` is that retry's |
-| `promotion_phase` | boolean | `true` when this run is the suggestion-promotion sub-loop |
 | `possible_false_trip_auto_continues` | integer | how often the loop auto-continued past a probable false trip |
-| `findings_by_round` | array of objects | per round: `round`, `by_severity` (`Critical` / `Warning` / `Suggestion`), `promoted`, `by_dimension`, `by_class`, `new`, `carried`, `fixed_from_prev`, `false_trips` |
+| `findings_by_round` | array of objects | per round: `round`, `by_severity` (`Critical` / `Warning` / `Suggestion`), `by_dimension`, `by_class`, `new`, `carried`, `fixed_from_prev`, `false_trips` |
 | `gate_by_round` | array of objects | per round: `round` and its test gate (`scope`, `attested`, `wall_s`, `slowest`, `jobs`), or `null` |
 | `step_wall_s_by_round` | array of objects | per round: `round` and the `panel` / `decide` / `risk` / `fix` seconds, or `null` |
 | `skipped_dimensions_by_round` | array of objects | per round: `round` and the review dimensions its panel left out, or `null` |
@@ -151,16 +147,6 @@ sections of `ARCHITECTURE.md` named under each table.
 | `waived` | integer | distinct Low suggestions the loop logged |
 
 Normative: `ARCHITECTURE.md`, *Review-loop telemetry*.
-
-### review-loop suggestion-promotion enrichment
-
-| Key | Type | Meaning |
-| --- | --- | --- |
-| `event` | string | always `suggestion_promotion` — which enrichment this is |
-| `suggestions_offered` | integer | suggestions the human was shown; equal to the loop record's `waived` |
-| `suggestions_promoted` | integer | how many the human picked — their answer, not work done |
-
-Normative: `ARCHITECTURE.md`, *The suggestion-promotion enrichment*.
 
 ### refine-issue
 
@@ -313,9 +299,9 @@ Four things newcomers get wrong:
   its review churn, go through the child runs.
 - **Filter on `pipeline` as well as `parent_run_id`.** A story run's size
   pre-flight records carry the same `parent_run_id` as its review loops.
-- **Filter on `kind == "run"`.** The promotion enrichment repeats its loop
-  record's `run_id` and carries no `parent_run_id`, so it is reached through the
-  loop record, never through the story.
+- **Filter on `kind == "run"`.** An enrichment record repeats the `run_id` of
+  the run it describes and carries no `parent_run_id`, so it is reached through
+  that run, never through the story.
 - **One loop can leave several records.** An extended loop (escalate → grant
   more rounds → resume) appends a record per ending, each with its own
   `run_id` and the same parent, and their `wall_s` spans overlap — count them,
@@ -370,9 +356,7 @@ escalated, or failed. A run that stops before the precheck, such as one on a
 closed issue or a mistyped invocation, appends nothing. Every review-loop **run**
 record the run spawned carries that record's `run_id` as its `parent_run_id`,
 and the story record lists them in `payload.review_loop_run_ids`, so the join
-works from either end. The one review-loop record outside that join is the
-suggestion-promotion enrichment, which is reached through its loop record's
-`run_id` instead:
+works from either end:
 
 ```bash
 S=~/.claude/telemetry/timo-jakob-timos-claude-code-plugins.jsonl   # your repo's slug
@@ -457,15 +441,6 @@ There's no cross-pipeline totals entry — every entry describes one pipeline,
 | `mean_rounds` | Average review/refinement rounds **per record**, not per logical loop — over records that actually recorded a round count. An extended review-loop run (escalate → grant more rounds → resume) contributes both its escalation's round count and its later convergence's, so this is not any one loop's round count. Only `review-loop` and `refine-issue` carry `payload.rounds`, so every other pipeline shows it withheld. |
 | `mean_wall_s` | Average wall-clock seconds **per record**, not per logical loop — the same reason as `mean_rounds`: this rollup does not group an extended loop's records back into one loop. What a second measures differs by pipeline: an epic run's span contains its children's, an acceptance record's is the CI job's duration, and an approve record's is the time from the Approver's first step to its posted review. A `review-loop` record emitted before #1976 under-reports `wall_s` by round 1's panel duration, because the loop's clock started after that panel; cut before/after comparisons, including the #1973 gate timings, on the record's `ts`. |
 | `escalation_rate` | `escalated` runs divided by total runs, for that pipeline. Pipelines whose outcome table never uses `escalated` — `refine-issue`, `story-preflight`, `acceptance` and `approve` — show `0` by construction, not as a measured result. |
-
-**These figures count *every* run record, including a review-loop
-suggestion-promotion pass.** That pass is a second, terminal run of its own, so
-it lands as its own record. Only `ARCHITECTURE.md`'s convergence-**rate**
-recipes exclude it (`select(.payload.promotion_phase != true)`), and this rollup
-prints no rate of that kind; its mean-rounds and escalation-breakdown cuts
-deliberately **keep** the pass, exactly as these figures do. So a discrepancy
-against those cuts is not promotion filtering — look to their other selections
-instead.
 
 **A measure you can't honestly compute is withheld, never guessed.** If no
 record in a group carries a rounds count, `mean_rounds` prints `-` in text and

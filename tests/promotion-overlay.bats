@@ -312,7 +312,7 @@ EOF
   # "left alone" now also means UNSTAMPED (#995): this is the only case where a
   # promote key actually MATCHES an already-blocking finding, so a regression
   # moving the stamp outside the still-Low filter would label reviewer-raised
-  # blockers as human-promoted in all four surfaces and pass everywhere else
+  # blockers as human-promoted in every surface and pass everywhere else
   [ "$(jq '[.blocking[] | has("promoted")] | any' <<<"$output")" = "false" ]
 }
 
