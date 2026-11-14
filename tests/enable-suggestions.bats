@@ -10,11 +10,10 @@
 #     switch_fable_to_opus, which fails towards ITS default of off.
 #   * ONE LINE, EXIT 0 — the conductor reads the verdict at the promotion gate;
 #     a non-zero exit or extra output would leave it guessing.
-#   * WIRING — the promotion reference tells the conductor to run the script at
-#     the gate and states what `off` does, OUTSIDE the byte-frozen moved block
-#     (verify-reference-move.zsh reds any edit inside it); the how-to is
-#     reachable from the nav. Since #3128 the conductor's CONVERGED arm no
-#     longer offers the phase, so it no longer names the setting.
+#   * WIRING — the how-to is reachable from the nav. Since #3128 the
+#     conductor's CONVERGED arm no longer offers the phase, so it no longer
+#     names the setting, and #3145 dropped the pin on the promotion reference
+#     the epic #3121 retires.
 #
 # Anchored by content, never by line number (#1189).
 
@@ -25,9 +24,6 @@ load assertions
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   S="$REPO_ROOT/development/skills/resolve-issue/scripts/suggestions-enabled.zsh"
-  # #2057 split promotion.md: the gate and its enable_suggestions amendment are
-  # in reference/promotion/gate.md.
-  PROMO="$REPO_ROOT/development/skills/resolve-issue/reference/promotion/gate.md"
   HOWTO="$REPO_ROOT/docs/how-to/turn-off-suggestion-prompts.md"
 }
 
@@ -77,17 +73,6 @@ run_s() {
 }
 
 # --- wiring -------------------------------------------------------------------
-
-@test "promotion.md tells the conductor to run the script at the gate, outside the moved block" {
-  # The amendment must sit BEFORE the frozen block opens, so it is read before
-  # the frozen gate text and never edits bytes verify-reference-move.zsh pins.
-  local before
-  before="$(awk '/^<!-- moved: suggestion-promotion -->$/{exit} {print}' "$PROMO")"
-  contains "$before" 'A third gate condition — the `enable_suggestions` setting.'
-  contains "$before" 'scripts/suggestions-enabled.zsh'
-  contains "$before" '**skip the phase entirely**, exactly as an autonomous run does'
-  contains "$before" 'emit **no** step 3 enrichment record'
-}
 
 @test "the how-to exists, shows the settings key, and is in the nav" {
   [ -f "$HOWTO" ]

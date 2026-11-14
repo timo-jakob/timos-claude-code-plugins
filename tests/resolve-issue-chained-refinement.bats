@@ -829,10 +829,6 @@ escalation_filter() {
   # the dropped option and the suggestion half are gone
   lacks "$t" 'File the suggested follow-ups only'
   lacks "$t" 'suggestions-enabled.zsh'
-  # the section left the promotion gate, which no longer hands anything to a root
-  local g; g="$(flat "$SKILL_DIR/reference/promotion/gate.md")"
-  lacks "$g" 'A chain step hands its waived set to its root'
-  lacks "$g" 'File all'
   # the queued finding for a suggested follow-up is one chain-queue accepts
   local q="$REPO_ROOT/development/skills/resolve-issue/scripts/chain-queue.zsh" f
   f="$(printf '%s' "$t" | sed -n 's/.*with `--finding` `\({"file": "follow-up", "line": null, "dimension": "follow-up", "title": \)<its title>}`.*/\1"split the helper"}/p')"
@@ -869,8 +865,6 @@ escalation_filter() {
   contains "$t" 'and has handled its `deferred` follow-ups (#3077): see `reference/chain-steps/deferred-follow-ups.md` § A step'"'"'s deferred follow-ups (#3077)'
   # the section has one home: chain-steps.md routes there and no longer carries it
   lacks "$t" '**An attended root asks once per step.**'
-  t="$(flat "$SKILL_DIR/reference/promotion.md")"
-  contains "$t" 'A chain step of a human-started run is never interactive and never offers the phase: its waived suggestions stay waived, and its verdict'"'"'s `deferred` carries only the follow-ups it would otherwise name in prose (`reference/chain-steps/deferred-follow-ups.md` § A step'"'"'s deferred follow-ups (#3077)).'
 }
 
 @test "#3077 the resolve-step agent hands escalation and deferred back and never asks" {
@@ -878,7 +872,6 @@ escalation_filter() {
   contains "$t" 'A clean stop'"'"'s verdict also carries escalation, its payload, and a run whose review loop ran also carries deferred'
   contains "$t" 'They are how the root, not you, puts those choices to the human (#3077).'
   contains "$t" 'carries deferred: every follow-up it would otherwise name only in prose. A suggestion it waived stays waived and is not handed back. Build them as reference/escalation.md and reference/chain-steps.md say.'
-  lacks "$t" 'reference/promotion/gate.md'
   contains "$t" 'When its resume is "clean_stop", resume the kept clean stop the root granted more rounds on'
   contains "$t" 'Never ask the human anything'
   lacks "$t" 'AskUserQuestion'

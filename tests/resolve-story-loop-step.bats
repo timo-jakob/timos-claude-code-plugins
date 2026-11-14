@@ -1238,10 +1238,9 @@ TID() { zsh "$REPO_ROOT/development/skills/resolve-issue/scripts/git-tree-id.zsh
   local base="$REPO_ROOT/development/skills/resolve-issue/reference"
   # the text AFTER a span's closing marker (the gap the notes live in)
   after() { awk -v m="<!-- /moved: $2 -->" 'f; $0 == m { f = 1 }' "$1"; }
-  local core step2 sub
+  local core step2
   core="$(after "$base/review-loop/core.md" round-protocol-head)"
   step2="$(after "$base/review-loop/step-2-invocation.md" round-protocol-step-2)"
-  sub="$(after "$base/promotion/step-4-sub-loop.md" suggestion-promotion-step-4)"
   contains "$core" 'step 1 also reads `T0=$(date +%s)` first,
 before the `T` mint, the gate and the panel'
   contains "$core" 'Later boundaries capture no `T0`.'
@@ -1257,13 +1256,9 @@ record'"'"'s `ts` and `wall_s` span round 1'"'"'s panel'
 `--resume`: a resume adopts `<work-dir>/.t0`, and the loop refuses the pair
 with exit 2.'
   contains "$step2" 'a resume adopts `<work-dir>/.t0`, and the loop refuses the pair'
-  contains "$sub" 'append `--t0 "$T0"` to the sub-loop'"'"'s round-1 fresh-start
-invocation only — never beside `--resume`'
-  contains "$sub" 'The capture is the sub-loop'"'"'s own, never the blocking
-phase'"'"'s `T0`, so its `ts` stays distinct from the blocking phase'"'"'s.'
   # nothing inside any moved span mentions --t0: the spans stay byte-frozen
   local spans
-  spans="$(cat "$base"/review-loop/*.md "$base"/promotion/*.md | awk '/^<!-- moved: /{f=1} /^<!-- \/moved: /{f=0} f')"
+  spans="$(cat "$base"/review-loop/*.md | awk '/^<!-- moved: /{f=1} /^<!-- \/moved: /{f=0} f')"
   [ -n "$spans" ]
   run grep -c -- '--t0' <<<"$spans"
   [ "$output" = "0" ]

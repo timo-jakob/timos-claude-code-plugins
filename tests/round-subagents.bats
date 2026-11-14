@@ -972,7 +972,7 @@ load_risk_pass() {
   local f t n
   for f in "$BRIEFS/decide.md" "$BRIEFS/risk.md" "$RL/risk-pass.md" "$SUBS" "$REF/checkpoint.md"; do
     t="$(squeeze < "$f")"
-    for n in 'promotion sub-loop' 'promoted item' 'promoted: true' 'reference/promotion.md' 'reference/promotion/'; do
+    for n in 'promotion sub-loop' 'promoted item' 'promoted: true'; do
       lacks "$t" "$n"
     done
   done

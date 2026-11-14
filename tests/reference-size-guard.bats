@@ -14,8 +14,8 @@
 #      times instead, so planting it back still reds.
 #
 # The covered set was an extendable list while the split was under way: #2055
-# review-loop.md, #2056 residue.md and #2057 promotion.md each appended their
-# index and directory. #2058 split interactive.md, the last file over the limit,
+# review-loop.md, #2056 residue.md and #2057 the suggestion-promotion reference
+# each appended their index and directory; #3121 retires the last of those. #2058 split interactive.md, the last file over the limit,
 # so the list became the whole tree: every file under reference/, searched
 # recursively, with no exemption list — a file added later is covered without
 # editing this guard. SPLIT still names each split file and its base commit, for
@@ -38,7 +38,6 @@ setup() {
   SPLIT=(
     review-loop.md:98e51ea59858a3cf247d10cc841ca5f31239f985
     residue.md:98e51ea59858a3cf247d10cc841ca5f31239f985
-    promotion.md:98e51ea59858a3cf247d10cc841ca5f31239f985
     interactive.md:98e51ea59858a3cf247d10cc841ca5f31239f985
   )
   # Base headings whose sections were retired on purpose, NAME|HEADING, each

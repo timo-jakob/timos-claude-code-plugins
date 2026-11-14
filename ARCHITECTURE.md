@@ -4665,7 +4665,7 @@ reliable but the merging needs semantics:
   finding ever blocks. `FILE` holds a JSON **array of identity keys**
   `{file, line, dimension, title}` — a human's explicit selection from the
   waived suggestions, made at convergence; the scripts stay non-interactive and
-  the interaction lives in `resolve-issue`'s `reference/promotion.md`. The overlay is applied
+  the interaction lives in `resolve-issue`. The overlay is applied
   **after dedup and before** the conflict / non-convergence classification, so a
   promoted item is raised `SUGGESTION→WARNING` (priority `High`, `blocking:
   true`) and then flows through every downstream rule **exactly like a
@@ -4711,8 +4711,8 @@ reliable but the merging needs semantics:
   at its current line; seeding a duplicate from the blocking phase's stale line
   would survive dedup and raise the same defect twice). Each key is classified
   against the fresh panel's **pre-seed** aggregate — never against the seeded
-  round, which matches by construction (resolve-issue `reference/promotion/step-4-sub-loop.md`,
-  "Suggestion promotion", step 4). Without
+  round, which matches by construction (resolve-issue's "Suggestion promotion",
+  step 4). Without
   `--promote`, or with an empty array, the emitted changelist is **byte-identical**
   to a run without the flag — which is what keeps autonomous/headless runs
   provably unchanged. Bad input is typed, and every refusal names the PROMOTE file rather
@@ -4884,10 +4884,9 @@ exit shards, the passes, `carry.md`, `subagents.md` and `briefs/<name>.md`, one
 per round subagent, which `development/agents/round-<name>.md` points at.
 `residue.md` is the second (#2056): `reference/residue/` now holds only
 `risk-threshold.md`, which the risk pass reads; issues #2600 and #2601 deleted
-the residue branch's other shards with the retired ending. `promotion.md` is the third
-(#2057): `reference/promotion/` holds `gate.md` (the gate and steps 1–2),
-`step-3-select.md`, `step-4-sub-loop.md` (steps 4–6), `step-7-terminal.md` and
-`step-8-status-files.md`. `interactive.md` is the fourth and last (#2058):
+the residue branch's other shards with the retired ending. The third split
+(#2057), of the suggestion-promotion reference, was retired by #3121 together
+with the phase it described. `interactive.md` is the fourth and last (#2058):
 `reference/interactive/` holds `remediation.md` (the §0a remediation),
 `extension.md` (the extension and steps 1–4), `extension-grant.md` (steps 5–7)
 and `extension-ceiling.md` (the #1226, #1576 and #1583 amendments to step 5). A
