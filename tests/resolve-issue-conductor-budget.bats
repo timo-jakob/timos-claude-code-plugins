@@ -211,9 +211,8 @@ _all_raw_pointer_count() {
 #
 # The scope, since #2055 split review-loop.md into shards under
 # reference/review-loop/ and left an INDEX at the old path (and #2056 did the
-# same for residue.md under reference/residue/, #2057 for promotion.md under
-# reference/promotion/, and #2058 for interactive.md under
-# reference/interactive/):
+# same for residue.md under reference/residue/, and #2058 for interactive.md
+# under reference/interactive/):
 #   - a top-level reference file is reached only by a pointer naming it;
 #   - each split directory in SPLIT_DIRS is ONE unit with its index. The
 #     conductor's pointers go straight to its shards, never to the index, and
@@ -227,10 +226,6 @@ _all_raw_pointer_count() {
 # That keeps an orphan shard (in no pointer, not in the index) red — which a
 # "the index exists" check alone would not.
 SPLIT_DIRS=(review-loop residue interactive)
-# #3128 took the conductor's one pointer into reference/promotion/ away, so that
-# directory and its index are unreachable on purpose until #3121's later child
-# deletes them. They are left out of the reachability sweep rather than judged.
-UNREACHABLE_UNTIL_DELETED=(promotion)
 _unreached_reference_files() {
   local dir="$1" targets rel f index top dir_part base block d
   targets="$(cat)"
@@ -238,9 +233,6 @@ _unreached_reference_files() {
     [ -n "$f" ] || continue
     rel="${f#"$dir/"}"
     top="${rel%%/*}"
-    for d in "${UNREACHABLE_UNTIL_DELETED[@]}"; do
-      { [ "$rel" = "$d.md" ] || [ "$top" = "$d" ]; } && continue 2
-    done
     for d in "${SPLIT_DIRS[@]}"; do
       if [ "$rel" = "$d.md" ]; then
         grep -q "^$d/" <<< "$targets" || printf '%s\n' "$rel"
@@ -340,9 +332,8 @@ _unreached_reference_files() {
   # round-boundary-wait.bats' section locator ambiguous.)
   #
   # EIGHT since #1226: the new reference/telemetry.md declares ONE `##` section,
-  # *Story telemetry (#1226)*. Its #1226 correction notes in
-  # reference/promotion/gate.md and reference/promotion/step-8-status-files.md,
-  # reference/interactive/remediation.md and
+  # *Story telemetry (#1226)*. Its #1226 correction notes in the promotion
+  # shards, reference/interactive/remediation.md and
   # reference/interactive/extension-ceiling.md, and review-loop.md are
   # PARAGRAPHS, for the reason above.
   #
@@ -364,7 +355,7 @@ _unreached_reference_files() {
   # risk-threshold.md, and its index carries only an `#` title.
   #
   # Still TEN after #2057 split promotion.md: its one `##` heading moved to
-  # reference/promotion/gate.md, and its index carries only an `#` title.
+  # the gate shard, and its index carries only an `#` title.
   #
   # Still TEN after #2058 split interactive.md: its two `##` headings moved to
   # reference/interactive/remediation.md and extension.md, and its index
@@ -412,11 +403,14 @@ _unreached_reference_files() {
   # in other repos (#3082)*, which step 0a points at.
   #
   # THIRTY-FIVE since #3127: reference/chain-steps/deferred-follow-ups.md
-  # carries *A step's deferred follow-ups (#3077)*, moved out of
-  # reference/promotion/gate.md, where it was a bold paragraph, not a heading.
+  # carries *A step's deferred follow-ups (#3077)*, moved out of the promotion
+  # gate shard, where it was a bold paragraph, not a heading.
+  #
+  # THIRTY-FOUR since #3146: the promotion gate shard was deleted, taking its
+  # one `##` heading.
   local n
   n="$(_ref_headings | grep -c .)"
-  [ "$n" -eq 35 ]
+  [ "$n" -eq 34 ]
 }
 
 # --- pointers resolve -------------------------------------------------------
@@ -482,7 +476,7 @@ _unreached_reference_files() {
   # §6 pointed at checkpoint.md's test-case body reconciliation (#3079), and 36
   # until chain-steps.md's issue step pointed at its deferred follow-ups shard,
   # reference/chain-steps/deferred-follow-ups.md (#3127), and 37 until §3.5 stopped
-  # pointing at reference/promotion/gate.md (#3128).
+  # pointing at the promotion gate shard (#3128).
   if [ "$rows" -ne 36 ]; then
     printf 'the skill carries %s pointer(s), expected 36.\n' "$rows" >&2
     printf 'A pointer was added or removed — update this count in the same PR,\n' >&2
@@ -742,7 +736,6 @@ PY
   local flat
   flat="$(LC_ALL=C tr -s '[:space:]' ' ' < "$CONDUCTOR")"
   contains "$flat" '**`CONVERGED`** (exit 0) → proceed straight to **§4 (Version bump)**, in every session mode: the run waives every suggestion the loop logged and offers none of them to anyone (#3128). This holds on every path to `CONVERGED`, a granted round of the interactive extension included, and overrides any reference file that still offers the suggestion-promotion phase there: skip that offer and continue to §4.'
-  lacks "$flat" 'reference/promotion'
   lacks "$flat" 'enable_suggestions'
   lacks "$flat" '--promote '
   lacks "$flat" 'promotion sub-loop'
@@ -767,12 +760,11 @@ PY
   lacks "$flat" 'turn-off-suggestion-prompts.md'
 }
 
-@test "#3128 non-vacuity: the reachability sweep still reds an orphan outside the exempt promotion directory" {
+@test "#3128 non-vacuity: the reachability sweep still reds an orphan" {
   local fake="$BATS_TEST_TMPDIR/ref-copy-3128" targets bad
   cp -R "$REF_DIR" "$fake"
   targets="$(_all_pointers | cut -f1 | sort -u)"
-  printf 'orphan\n' > "$fake/promotion-orphan.md"
-  printf 'orphan\n' > "$fake/promotion/orphan.md"
+  printf 'orphan\n' > "$fake/orphan.md"
   bad="$(printf '%s\n' "$targets" | _unreached_reference_files "$fake")"
-  [ "$bad" = 'promotion-orphan.md' ]
+  [ "$bad" = 'orphan.md' ]
 }

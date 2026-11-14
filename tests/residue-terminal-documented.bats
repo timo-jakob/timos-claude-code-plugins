@@ -27,11 +27,10 @@
 # roster: NOT_YET_MIGRATED (the sites later stories own, each of which must still
 # name the terminal until its own story migrates it and shrinks the list in the
 # same PR) and KEPT (the three sites that keep naming it, all inside byte-frozen
-# spans; #2601 deleted residue/branch.md and condition-2-removed.md, and #3129
-# dropped the promotion shards, which #3133 deletes). Every other markdown site
-# naming it is a stray, except ARCHITECTURE.md, whose telemetry recipes still
-# count historical records carrying the status, and reference/promotion/, which
-# is on its way out.
+# spans; #2601 deleted residue/branch.md and condition-2-removed.md, and #3146
+# deleted the promotion shards). Every other markdown site naming it is a
+# stray, except ARCHITECTURE.md, whose telemetry recipes still count historical
+# records carrying the status.
 
 bats_require_minimum_version 1.5.0
 load assertions
@@ -55,8 +54,8 @@ setup() {
   NOT_YET_MIGRATED=()
   # ...and the sites that keep naming it, all inside byte-frozen spans. #2601
   # shrank this set from seven by deleting residue/branch.md and
-  # condition-2-removed.md whole; #3129 dropped the two promotion shards, since
-  # #3133 deletes reference/promotion/ (#3121).
+  # condition-2-removed.md whole; #3146 deleted the two promotion shards that
+  # also named it.
   KEPT=(
     "development/skills/resolve-issue/reference/escalation.md"
     "development/skills/resolve-issue/reference/interactive/extension-grant.md"
@@ -148,13 +147,11 @@ _invariant_in_awaiting_fix_branch() {
   # again, or a new site that starts to, reds here. ARCHITECTURE.md is the one
   # stated exception: its telemetry recipes and legacy attribution still count
   # historical records carrying the status, and #2580's state-machine section
-  # names it to retire it. reference/promotion/ is the other: #3129 dropped its
-  # shards from KEPT, and #3133 deletes the directory (#3121).
+  # names it to retire it.
   local found want e
   found="$(all_markdown | sed "s#^#$REPO_ROOT/#" \
            | xargs grep -l 'CONVERGED_WITH_RESIDUE' 2>/dev/null \
-           | sed "s#^$REPO_ROOT/##" \
-           | grep -v '^development/skills/resolve-issue/reference/promotion/' | sort)"
+           | sed "s#^$REPO_ROOT/##" | sort)"
   want="$( { printf '%s\n' "${KEPT[@]}" ARCHITECTURE.md
              for e in "${NOT_YET_MIGRATED[@]}"; do printf '%s\n' "${e%%|*}"; done; } \
            | grep -E '\.md(\.tmpl)?$' | sort)"
@@ -778,7 +775,6 @@ _filing_path_mentions() {
 }
 
 @test "#2580 AC5 the migrated shards no longer route anything to the residue branch" {
-  grep -q 'continue to the version bump (§4). The waived suggestions still' <<< "$(flat "$RI_REF/promotion/gate.md")"
   grep -q 'the round that can open one (`CONVERGED`) is a full-scope round' <<< "$(flat "$RI_REF/review-loop/delta-rounds.md")"
   # the conductor no longer lists the residue branch's pointer, and says why
   # (#2601)
@@ -797,7 +793,6 @@ _filing_path_mentions() {
 
 @test "#2580 the rule sentences of the retirement are pinned where they are stated" {
   grep -qF '**Exit 14 is retired (#2580)** and is never reused.' "$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
-  grep -qF 'and continue to the version bump (§4). The waived suggestions still' <<< "$(flat "$RI_REF/promotion/gate.md")"
   local r; r="$(flat "$RI_REF/residue.md")"
   grep -qF 'The loop no longer emits that status and no `next_ref` names a residue shard: `CONVERGED` is the only review-loop ending that opens a PR.' <<< "$r"
   grep -qF '#2600 removed the filing path, and #2601 retired the branch itself and its condition-2 note.' <<< "$r"

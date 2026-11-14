@@ -372,15 +372,14 @@ _roster_hits() {
 
 # --- the two consuming sites point, and do not restate ----------------------
 
-@test "#1496 exactly two SKILL.md sites carry the pointer" {
-  # The promotion sub-loop's fix step, and the interactive extension's granted
-  # fix pass. A third would mean a consumer was added without being counted; a
-  # single one would mean the other lost its pointer to a rewrite. #3128 left
-  # the promotion sub-loop unreachable, but its file stays in the corpus until
-  # #3121's later child deletes it, so the count is unchanged until then.
+@test "#1496 exactly one SKILL.md site carries the pointer" {
+  # The interactive extension's granted fix pass. A second would mean a
+  # consumer was added without being counted; none would mean it lost its
+  # pointer to a rewrite. #3146 deleted the promotion sub-loop's fix step, the
+  # other consumer this count once held.
   local n
   n="$(_hits "$SKILL" "$POINTER")"
-  [ "$n" -eq 2 ]
+  [ "$n" -eq 1 ]
 }
 
 @test "#1496 the interactive extension points at the rule instead of restating it" {
@@ -476,7 +475,7 @@ _roster_hits() {
 
 # --- roster tripwire --------------------------------------------------------
 
-@test "#1496 exactly seven tracked markdown sites name the rule" {
+@test "#1496 exactly six tracked markdown sites name the rule" {
   # Derived, not transcribed. `docs/superpowers/` is vendored and restates
   # nothing of ours — the same exclusion the sibling sweeps use. SHIPPED
   # TEMPLATES are in scope: `approver-policy-core.md.tmpl` already restates
@@ -510,9 +509,10 @@ _roster_hits() {
   # #2055 split review-loop.md into shards, and its three mentions of the rule
   # fell into three of them: the rule block (exit-20-awaiting-fix.md), the fix
   # brief's pointer (briefs/fix.md) and the scope block's aside (scope-block.md).
-  # Five sites became seven with no new mention anywhere.
-  if [ "$n" -ne 7 ]; then
-    printf 'expected 7 markdown sites naming the rule, found %s:\n%s\n' "$n" "$hits" >&2
+  # Five sites became seven with no new mention anywhere. #3146 deleted the
+  # promotion sub-loop's shard, which held the seventh.
+  if [ "$n" -ne 6 ]; then
+    printf 'expected 6 markdown sites naming the rule, found %s:\n%s\n' "$n" "$hits" >&2
     return 1
   fi
   # …and they are the roster the story named, so a swap reds here too. -F
@@ -521,12 +521,9 @@ _roster_hits() {
   # names those files where the text now lives — the same sites, re-homed. The
   # conductor keeps the exit-code table and a pointer, neither of which states
   # the rule, so SKILL.md is legitimately no longer on it. #2055 split
-  # review-loop.md into the three shards below. #2057 split promotion.md, and
-  # its one mention fell into step-4-sub-loop.md, so the count is unchanged.
-  # #2058 split interactive.md, and its one mention fell into
-  # extension-grant.md (step 5), so the count is unchanged again. #3128 made
-  # reference/promotion/ unreachable and stopped naming its shard here; the
-  # shard still counts toward the 7 until #3121's later child deletes it.
+  # review-loop.md into the three shards below. #2058 split interactive.md, and
+  # its one mention fell into extension-grant.md (step 5), so the count is
+  # unchanged. #3146 deleted the promotion sub-loop's file and its mention.
   printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/review-loop/exit-20-awaiting-fix.md'
   printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/review-loop/briefs/fix.md'
   printf '%s\n' "$hits" | grep -qxF 'development/skills/resolve-issue/reference/review-loop/scope-block.md'
@@ -569,12 +566,12 @@ _roster_hits() {
 
 @test "#1496 non-vacuity: a consuming site that loses its pointer reds the count" {
   local F="$BATS_TEST_TMPDIR/skill-pointer-lost.md" n
-  # drop the FIRST pointer line only, leaving the other site intact
+  # drop the one pointer line
   awk 'BEGIN{dropped=0}
        dropped==0 && index($0, "A fix pass subtracts* (§3.5") > 0 { dropped=1; next }
        { print }' "$SKILL" > "$F"
   n="$(_hits "$F" "$POINTER")"
-  [ "$n" -eq 1 ]
+  [ "$n" -eq 0 ]
 }
 
 @test "#1496 non-vacuity: a FIFTH numbered rule reds the closure pin" {

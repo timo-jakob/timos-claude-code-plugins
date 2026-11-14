@@ -37,8 +37,6 @@ before it ships, and a row whose text moved is updated here.
 | RS-06a | reference/review-loop/subagents.md | `fires only when the fallback panel is NOT APPLICABLE or unavailable` | implementation | **default:** as above |
 | RS-06b | reference/review-loop/exit-2-stale-findings.md | `put it to the human as three options` | intent | human-owned: the fallback is NOT APPLICABLE or unavailable, so waiving or replacing panel review is risk acceptance |
 | RS-06b | reference/review-loop/subagents.md | `interactive, its three options, none taken without an explicit choice` | intent | human-owned: as above |
-| RS-07 | reference/promotion/step-3-select.md | `**Multi-select** which to promote` | intent | human-owned: promotion widens the story's scope, and it is opt-in by design (`enable_suggestions`) |
-| RS-07 | reference/promotion/gate.md | `` `AskUserQuestion` turns, and each `bash` invocation `` | intent | human-owned: as above |
 | RS-08 | reference/interactive/extension.md | `` Show all of it *before* the `AskUserQuestion` `` · `` **Offer the choice** with `AskUserQuestion` `` | intent | human-owned: more rounds cost tokens and accept risk; out of scope by design |
 | RS-08 | reference/escalation.md | `question with AskUserQuestion, marking` | intent | human-owned: as above; in a human-started run an attended root asks it on a step's clean stop, and a step never asks (#3077) |
 | RS-09 | SKILL.md | `without asking, in every session mode` · `RS-09 — the parked follow-up default (#2903)` | implementation | **default:** run `/development:refine-issue <n> --follow-up` for each parked follow-up in every session mode, as an unattended run already did; in a human-started chain (#2942), follow-ups are queued, refined in chained mode and resolved instead |

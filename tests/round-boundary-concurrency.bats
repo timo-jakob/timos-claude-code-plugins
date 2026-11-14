@@ -646,7 +646,7 @@ _roster_hits() {
 @test "#1497 AC3 EVERY flag placeholder in SKILL.md resolves to the one T" {
   # The sibling sweep (#982), derived rather than pinned to one block. SKILL.md
   # carries the pair at the canonical block, the two shell examples, the
-  # promotion sub-loop, the granted resume and the boundary's own step 5, and
+  # granted resume and the boundary's own step 5, and
   # each flag additionally alone wherever the prose names it — which is why the
   # occurrence count below is not twice the number of sites. A split spelled
   # `<panel-T>` at any of them teaches the invariant backwards at the moments
@@ -672,8 +672,9 @@ _roster_hits() {
   case "$n" in ''|*[!0-9]*)
     printf 'placeholder tripwire: grep produced no count\n' >&2; return 1 ;;
   esac
-  if [ "$n" -ne 18 ]; then
-    printf 'expected 18 flag-placeholder occurrences in SKILL.md, found %s\n' "$n" >&2
+  # #3146 deleted the promotion sub-loop's shard, which held two of them.
+  if [ "$n" -ne 16 ]; then
+    printf 'expected 16 flag-placeholder occurrences in SKILL.md, found %s\n' "$n" >&2
     return 1
   fi
 }
@@ -1059,7 +1060,7 @@ _roster_hits() {
   # never reaches its cause's recovery, and on an ALIAS refusal re-runs the
   # panel that recovery forbids in so many words.
   #
-  # Counted, not gated on one site: the count is what notices a sixth pointer
+  # Counted, not gated on one site: the count is what notices a fifth pointer
   # arriving bare. Deliberately NOT a zero-count ban on the bare "§3.5 step "
   # form — the round-1 template legitimately carries "§3.5 step 1".
   local n
@@ -1068,10 +1069,6 @@ _roster_hits() {
     printf 'expected 4 qualified Each-round step-2 pointers, found %s\n' "$n" >&2
     return 1
   fi
-  # …the fifth spells it with the hyphenated "step-2 refusal", which is the same
-  # qualification in the exit taxonomy's own vocabulary
-  n="$(_body_hits "$SKILL" '§3.5 Each round step-2')" || return 1
-  [ "$n" -eq 1 ]
 }
 
 @test "#1497 AC3 both shell examples carry the plugin-repo-only qualifier" {
@@ -1411,7 +1408,7 @@ _roster_hits() {
   printf '\n    --gate-attest <T> --findings-tree <T>\n' >> "$F"
   n="$(grep -oE -- '--(gate-attest|findings-tree) (<[^>]*>|"[^"]*")' "$F" \
     | grep -c . || true)"
-  [ "$n" -eq 20 ]
+  [ "$n" -eq 18 ]
 }
 
 @test "#1497 non-vacuity: a SECOND banner reds the uniqueness pin" {

@@ -69,7 +69,7 @@ resolve_issue_files() {
   # looking" failure this derivation exists to prevent, restored one indirection
   # later.)
   local -a ordered
-  ordered=(review-loop.md residue.md promotion.md escalation.md interactive.md checkpoint.md ask-branches.md sequential.md telemetry.md epic-telemetry.md epic-tree.md
+  ordered=(review-loop.md residue.md escalation.md interactive.md checkpoint.md ask-branches.md sequential.md telemetry.md epic-telemetry.md epic-tree.md
     readiness-cache.md chain-steps.md)
 
   # #2055 split review-loop.md into shards under reference/review-loop/ and left
@@ -87,11 +87,6 @@ resolve_issue_files() {
   # that index's read order, under the same discipline.
   local -a residue_shards
   residue_shards=(risk-threshold.md)
-  # #2057 split promotion.md the same way, into reference/promotion/. Its roster,
-  # in that index's read order, under the same discipline.
-  local -a promotion_shards
-  promotion_shards=(gate.md step-3-select.md step-4-sub-loop.md step-7-terminal.md
-    step-8-status-files.md)
   # #2058 split interactive.md the same way, into reference/interactive/. Its
   # roster, in that index's read order, under the same discipline.
   local -a interactive_shards
@@ -114,7 +109,6 @@ resolve_issue_files() {
 
   _shard_roster_agrees "$base" review-loop shards "${shards[@]}" || return 1
   _shard_roster_agrees "$base" residue residue_shards "${residue_shards[@]}" || return 1
-  _shard_roster_agrees "$base" promotion promotion_shards "${promotion_shards[@]}" || return 1
   _shard_roster_agrees "$base" interactive interactive_shards "${interactive_shards[@]}" || return 1
 
   printf '%s\n' "$base/SKILL.md"
@@ -125,8 +119,6 @@ resolve_issue_files() {
         for s in "${shards[@]}"; do printf '%s\n' "$base/reference/review-loop/$s"; done ;;
       residue.md)
         for s in "${residue_shards[@]}"; do printf '%s\n' "$base/reference/residue/$s"; done ;;
-      promotion.md)
-        for s in "${promotion_shards[@]}"; do printf '%s\n' "$base/reference/promotion/$s"; done ;;
       interactive.md)
         for s in "${interactive_shards[@]}"; do printf '%s\n' "$base/reference/interactive/$s"; done ;;
     esac

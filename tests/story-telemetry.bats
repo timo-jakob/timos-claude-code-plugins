@@ -915,7 +915,6 @@ advised() {
   done < <(git -C "$REPO_ROOT" ls-files 'development/skills/resolve-issue/reference/*.md')
   local -a expected=(
     development/skills/resolve-issue/reference/epic-telemetry.md
-    development/skills/resolve-issue/reference/promotion/step-8-status-files.md
     development/skills/resolve-issue/reference/review-loop/step-2-invocation.md
     development/skills/resolve-issue/reference/telemetry.md
   )
