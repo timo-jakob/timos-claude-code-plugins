@@ -758,6 +758,15 @@ PY
   [ "$n" -eq 1 ]
 }
 
+@test "#3128 the review-loop explanation says a converged run waives every suggestion with no prompt" {
+  local flat
+  flat="$(LC_ALL=C tr -s '[:space:]' ' ' < "$REPO_ROOT/docs/explanation/review-loop.md")"
+  contains "$flat" 'A converged run goes straight on to the version bump and the PR, with no prompt in between.'
+  lacks "$flat" 'multi-select any subset'
+  lacks "$flat" 'enable_suggestions'
+  lacks "$flat" 'turn-off-suggestion-prompts.md'
+}
+
 @test "#3128 non-vacuity: the reachability sweep still reds an orphan outside the exempt promotion directory" {
   local fake="$BATS_TEST_TMPDIR/ref-copy-3128" targets bad
   cp -R "$REF_DIR" "$fake"
