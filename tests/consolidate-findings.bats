@@ -793,27 +793,6 @@ EOF
   [ "$(echo "$output" | jq -r '.blocking[0].title')" = "unquoted path in the copy step" ]
 }
 
-@test "adjudicated: an item the human PROMOTED is never dropped (#1434 x #994)" {
-  # The drop runs after the promotion overlay, so a promoted item is WARNING by
-  # then and fails guard 2 structurally — no special case. Without that
-  # ordering, a human explicitly asking for a suggestion could have it silently
-  # deleted by the very list of waived suggestions it came from.
-  cat > "$F" <<'EOF'
-[{"severity":"SUGGESTION","dimension":"code_quality","file":"a.py","line":106,"title":"scope wording restated in three places","description":"d","reviewer":"r"}]
-EOF
-  cat > "$BATS_TEST_TMPDIR/adj.json" <<'EOF'
-[{"file":"a.py","line":106,"dimension":"code_quality","title":"scope wording restated in three places"}]
-EOF
-  cat > "$BATS_TEST_TMPDIR/prom.json" <<'EOF'
-[{"file":"a.py","line":106,"dimension":"code_quality","title":"scope wording restated in three places"}]
-EOF
-  con --round 2 --adjudicated "$BATS_TEST_TMPDIR/adj.json" --promote "$BATS_TEST_TMPDIR/prom.json"
-  [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq '.summary.adjudicated_dropped')" -eq 0 ]
-  [ "$(echo "$output" | jq '.summary.blocking')" -eq 1 ]
-  [ "$(echo "$output" | jq '.blocking[0].promoted')" = "true" ]
-}
-
 @test "adjudicated: the drop runs BEFORE conflict detection, so a dropped Low seeds no conflict (#1434)" {
   # The placement the engine argues for: a dropped item must not go on to pair
   # with a co-located one and resurrect as an `unresolved_conflict` escalation
@@ -925,8 +904,7 @@ EOF
   # normline's lossless recovery, on the adjudicated side. Without it a key
   # carrying "line": "100" is a non-number, which line_near treats as a
   # WILDCARD — silently widening "near line 100" to the whole file+dimension and
-  # over-dropping every title-matching Low in it. The promote side already has
-  # this guard; this is the adjudicated twin.
+  # over-dropping every title-matching Low in it.
   cat > "$BATS_TEST_TMPDIR/adj.json" <<'EOF'
 [{"file":"a.py","line":"100","dimension":"code_quality","title":"scope wording restated in three places"}]
 EOF
@@ -947,8 +925,7 @@ EOF
 }
 
 @test "adjudicated: a different FILE or DIMENSION is not dropped (#1434)" {
-  # The two equality conjuncts, each with its own negative — mirroring the
-  # promotion overlay's. Without them a waived code_quality suggestion in a.py
+  # The two equality conjuncts, each with its own negative. Without them a waived code_quality suggestion in a.py
   # suppresses an identically-titled finding in another file, or in another
   # dimension: cross-file and cross-dimension deletion of real findings.
   cat > "$F" <<'EOF'
@@ -1045,7 +1022,7 @@ EOF
 }
 
 @test "adjudicated: a mis-shaped file names the ADJUDICATED input, at exit 1 (#1434)" {
-  # The same failure taxonomy --promote has, for the same reason: an unchecked
+  # A typed failure that names its own input, because an unchecked
   # bad file aborts the MAIN jq and gets relabelled "invalid findings JSON",
   # sending the caller to an input that is perfectly fine.
   cat > "$F" <<'EOF'
@@ -1437,7 +1414,6 @@ EOF
   [ "$(echo "$output" | jq '.blocking | length')" -eq 1 ]
   [ "$(echo "$output" | jq -r '.blocking[0].priority')" = "High" ]
   [ "$(echo "$output" | jq -r '.blocking[0].decided')" = "green" ]
-  echo "$output" | jq -e '.blocking[0] | has("promoted") | not' >/dev/null
 }
 
 @test "#1584 a green-decided REVIEWER-WRITTEN blocker keeps its severity and its record" {
@@ -1459,7 +1435,6 @@ EOF
   [ "$(echo "$output" | jq -r '.blocking[0].severity')" = "WARNING" ]
   [ "$(echo "$output" | jq -r '.blocking[0].priority')" = "High" ]
   [ "$(echo "$output" | jq -r '.blocking[0].decided')" = "green" ]
-  echo "$output" | jq -e '.blocking[0] | has("promoted") | not' >/dev/null
   echo "$output" | jq -e '.blocking[0] | has("group_red") | not' >/dev/null
 }
 
@@ -1543,25 +1518,6 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq '.blocking | length')" -eq 1 ]
   [ "$(echo "$output" | jq -r '.blocking[0].decided')" = "red" ]
-}
-
-@test "#1584 decided survives the #994 promotion overlay, so a promoted tool verdict keeps its record" {
-  # The case where the audit trail matters most: a human promotes a waived
-  # tool-verdict suggestion. `promoted` and `decided` must coexist.
-  cat > "$F" <<'EOF'
-[{"severity":"SUGGESTION","dimension":"tests","file":"tests/y.bats","line":11,"title":"weak assertion on the exit status","description":"decides: zsh development/skills/resolve-issue/scripts/run-gate.zsh --tests-dir tests","reviewer":"claude-plugin-test-reviewer","decided":"green"}]
-EOF
-  cat > "$BATS_TEST_TMPDIR/promote.json" <<'EOF'
-[{"file":"tests/y.bats","line":11,"dimension":"tests","title":"weak assertion on the exit status"}]
-EOF
-  printf 'tests/y.bats\n' > "$BATS_TEST_TMPDIR/touched.txt"
-  con --promote "$BATS_TEST_TMPDIR/promote.json" --fix-touched "$BATS_TEST_TMPDIR/touched.txt"
-  [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq '.blocking | length')" -eq 1 ]
-  echo "$output" | jq -e '.blocking[0].promoted == true' >/dev/null
-  [ "$(echo "$output" | jq -r '.blocking[0].decided')" = "green" ]
-  # and the #1435 class stamp rides alongside it
-  [ "$(echo "$output" | jq -r '.blocking[0].class')" = "under_assertion" ]
 }
 
 # --- #1921: the risk demotion ------------------------------------------------
@@ -1687,27 +1643,24 @@ EOF
   [ "$(echo "$output" | jq '.non_converging')" = "true" ]
 }
 
-@test "#1921 AC3 never demoted: CRITICAL at p 0, a promoted item, and a tool-red item" {
+@test "#1921 AC3 never demoted: CRITICAL at p 0 and a tool-red item" {
   cat > "$F" <<'EOF'
 [
  {"severity":"CRITICAL","dimension":"security","file":"src/e.zsh","line":50,"title":"token written to the log","description":"d","reviewer":"s"},
- {"severity":"SUGGESTION","dimension":"code_quality","file":"src/f.zsh","line":60,"title":"rename the helper","description":"d","reviewer":"q"},
  {"severity":"WARNING","dimension":"contract","file":"docs/g.md","line":70,"title":"MD013 line too long","description":"decides: pre-commit run markdownlint","reviewer":"c","decided":"red"}
 ]
 EOF
-  echo '[{"file":"src/f.zsh","line":60,"dimension":"code_quality","title":"rename the helper"}]' > "$BATS_TEST_TMPDIR/promote.json"
   cat > "$BATS_TEST_TMPDIR/r.json" <<'EOF'
 [
  {"file":"src/e.zsh","line":50,"dimension":"security","title":"token written to the log","p":0,"p_why":"never reached","impact":0.1,"impact_why":"cosmetic"},
  {"file":"docs/g.md","line":70,"dimension":"contract","title":"MD013 line too long","p":0,"p_why":"lint only","impact":0.1,"impact_why":"cosmetic"}
 ]
 EOF
-  run -0 env corner_case_risk_threshold=1 zsh "$S" --findings "$F" --promote "$BATS_TEST_TMPDIR/promote.json" --risk "$BATS_TEST_TMPDIR/r.json"
-  [ "$(echo "$output" | jq '.summary.blocking')" -eq 3 ]
+  run -0 env corner_case_risk_threshold=1 zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/r.json"
+  [ "$(echo "$output" | jq '.summary.blocking')" -eq 2 ]
   [ "$(echo "$output" | jq '.summary.risk_demoted')" -eq 0 ]
   echo "$output" | jq -e '.blocking[] | select(.title == "token written to the log")
     | .severity == "CRITICAL" and .risk_assessment.risk_thousandths == 0 and (has("demoted") | not)' >/dev/null
-  echo "$output" | jq -e '.blocking[] | select(.title == "rename the helper") | .promoted == true and (has("demoted") | not)' >/dev/null
   echo "$output" | jq -e '.blocking[] | select(.title == "MD013 line too long")
     | .decided == "red" and .risk_assessment.risk_thousandths == 0 and (has("demoted") | not)' >/dev/null
 }
@@ -1837,25 +1790,6 @@ EOF
   [ "$(echo "$output" | jq '.summary.blocking')" -eq 0 ]
   [ "$(echo "$output" | jq '.summary.risk_demoted')" -eq 1 ]
   echo "$output" | jq -e '.suggestions[0].demoted == true' >/dev/null
-}
-
-@test "#1921 a finding the human promoted back stays blocking when the reviewer re-raises it at WARNING" {
-  # the promotion sub-loop: the human picked a demoted finding, the panel raises
-  # it again at its own bar, and the conductor assesses it low again — the pick
-  # must win, not the assessment
-  cat > "$F" <<'EOF'
-[{"severity":"WARNING","dimension":"tests","file":"tests/a.bats","line":10,"title":"mutation drops the trailing newline check","description":"d","reviewer":"t"}]
-EOF
-  printf '%s\n' '[{"file":"tests/a.bats","line":10,"dimension":"tests","title":"mutation drops the trailing newline check"}]' > "$BATS_TEST_TMPDIR/promote.json"
-  printf '%s\n' '[{"file":"tests/a.bats","line":10,"dimension":"tests","title":"mutation drops the trailing newline check","p":0.01,"p_why":"w","impact":0.1,"impact_why":"w"}]' > "$BATS_TEST_TMPDIR/r.json"
-  run -0 env corner_case_risk_threshold=0.05 zsh "$S" --findings "$F" --promote "$BATS_TEST_TMPDIR/promote.json" --risk "$BATS_TEST_TMPDIR/r.json"
-  [ "$(echo "$output" | jq '.summary.blocking')" -eq 1 ]
-  [ "$(echo "$output" | jq '.summary.risk_demoted')" -eq 0 ]
-  echo "$output" | jq -e '.blocking[0] | .promoted == true and .severity == "WARNING"' >/dev/null
-  echo "$output" | jq -e '.blocking[0] | (has("demoted") | not) and .risk_assessment.risk_thousandths == 1' >/dev/null
-  # control: without the pick the same assessment demotes it
-  run -0 env corner_case_risk_threshold=0.05 zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/r.json"
-  [ "$(echo "$output" | jq '.summary.risk_demoted')" -eq 1 ]
 }
 
 @test "#1921 a demoted finding is never dropped as an adjudicated re-raise" {
@@ -1996,7 +1930,7 @@ _ext_reading() {
   [ -z "$stderr" ]
 }
 
-@test "#2577 AC5 CRITICAL, decided red and human-promoted findings still block in an extension round at the highest bar" {
+@test "#2577 AC5 CRITICAL and decided red findings still block in an extension round at the highest bar" {
   cat > "$F" <<'EOF'
 [
  {"severity":"CRITICAL","dimension":"security","file":"src/e.zsh","line":50,"title":"token written to the log","description":"d","reviewer":"s"},
@@ -2004,7 +1938,6 @@ _ext_reading() {
  {"severity":"WARNING","dimension":"contract","file":"docs/g.md","line":70,"title":"MD013 line too long","description":"decides: pre-commit run markdownlint","reviewer":"c","decided":"red"}
 ]
 EOF
-  echo '[{"file":"src/f.zsh","line":60,"dimension":"code_quality","title":"rename the helper"}]' > "$BATS_TEST_TMPDIR/promote.json"
   cat > "$BATS_TEST_TMPDIR/r.json" <<'EOF'
 [
  {"file":"src/e.zsh","line":50,"dimension":"security","title":"token written to the log","p":0,"p_why":"never reached","impact":0.1,"impact_why":"cosmetic"},
@@ -2012,12 +1945,12 @@ EOF
  {"file":"docs/g.md","line":70,"dimension":"contract","title":"MD013 line too long","p":0,"p_why":"lint only","impact":0.1,"impact_why":"cosmetic"}
 ]
 EOF
-  run -0 env -u corner_case_risk_threshold extension_risk_threshold=1 zsh "$S" --findings "$F" --promote "$BATS_TEST_TMPDIR/promote.json" --risk "$BATS_TEST_TMPDIR/r.json" --extension
-  [ "$(echo "$output" | jq '.summary.blocking')" -eq 3 ]
-  [ "$(echo "$output" | jq '.summary.risk_demoted')" -eq 0 ]
+  run -0 env -u corner_case_risk_threshold extension_risk_threshold=1 zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/r.json" --extension
+  [ "$(echo "$output" | jq '.summary.blocking')" -eq 2 ]
+  [ "$(echo "$output" | jq '.summary.risk_demoted')" -eq 1 ]
   echo "$output" | jq -e '.blocking[] | select(.title == "token written to the log") | .severity == "CRITICAL" and .risk_assessment.bar == "extension" and .risk_assessment.threshold_thousandths == 1000 and (has("demoted") | not)' >/dev/null
-  # a WARNING the extension bar demotes (risk 0.060 < 1), raised back by the human's pick
-  echo "$output" | jq -e '.blocking[] | select(.title == "rename the helper") | .severity == "WARNING" and .promoted == true and .risk_assessment.risk_thousandths == 60 and .risk_assessment.bar == "extension" and (has("demoted") | not)' >/dev/null
+  # the control: a plain WARNING the extension bar does demote (risk 0.060 < 1)
+  echo "$output" | jq -e '.suggestions[] | select(.title == "rename the helper") | .severity == "SUGGESTION" and .demoted == true and .risk_assessment.risk_thousandths == 60 and .risk_assessment.bar == "extension"' >/dev/null
   echo "$output" | jq -e '.blocking[] | select(.title == "MD013 line too long") | .decided == "red" and .risk_assessment.bar == "extension" and (has("demoted") | not)' >/dev/null
 }
 
@@ -2041,6 +1974,43 @@ EOF
   run zsh "$S" --findings "$F" --extension yes
   [ "$status" -eq 2 ]
   contains "$output" "unexpected argument: yes"
+}
+
+# --- --promote is retired (#3135) ---------------------------------------------
+
+@test "#3135 --promote is refused like any other unknown option, at exit 2 with no changelist" {
+  # The #994 overlay is gone with the loop's --promote (#3134), so the flag is no
+  # longer parsed: it falls to the unknown-option arm, whatever its value. A
+  # VALID selection is the case that matters — it used to raise a Low to WARNING.
+  printf '%s\n' '[{"severity":"SUGGESTION","dimension":"code_quality","file":"src/f.zsh","line":60,"title":"rename the helper","description":"d","reviewer":"q"}]' > "$F"
+  printf '%s\n' '[{"file":"src/f.zsh","line":60,"dimension":"code_quality","title":"rename the helper"}]' > "$BATS_TEST_TMPDIR/promote.json"
+  run -2 zsh "$S" --findings "$F" --promote "$BATS_TEST_TMPDIR/promote.json"
+  [ "$output" = "unknown flag: --promote" ]
+  # flag first, and with no value at all: the same refusal, never a usage-value one
+  run -2 zsh "$S" --promote "$BATS_TEST_TMPDIR/promote.json" --findings "$F"
+  [ "$output" = "unknown flag: --promote" ]
+  run -2 zsh "$S" --findings "$F" --promote
+  [ "$output" = "unknown flag: --promote" ]
+  # control: the same findings without the flag consolidate, and the Low stays Low
+  run -0 zsh "$S" --findings "$F"
+  [ "$(echo "$output" | jq '.summary.blocking')" -eq 0 ]
+  [ "$(echo "$output" | jq '.suggestions | length')" -eq 1 ]
+  # --help no longer offers it
+  run -0 zsh "$S" --help
+  [ "$(printf '%s' "$output" | grep -c -e '--promote')" -eq 0 ]
+}
+
+@test "#3135 the agent and ARCHITECTURE.md no longer document the overlay (doc-drift pin)" {
+  local agent="$REPO_ROOT/development/agents/review-consolidator.md" arch="$REPO_ROOT/ARCHITECTURE.md" flat
+  # the agent forwards no --promote, carries no promoted stamp and has no stop rule for a sub-loop
+  [ "$(grep -c -e '--promote' -e 'promoted' -e 'promotion sub-loop' "$agent")" -eq 0 ]
+  flat="$(LC_ALL=C tr -s '[:space:]' ' ' < "$arch")"
+  contains "$flat" '- **No promotion overlay (#3135).** The consolidator accepts no `--promote`:'
+  contains "$flat" 'so `--promote` is refused like any other unknown option (exit 2, `unknown flag: --promote`) and no item carries `promoted`.'
+  contains "$flat" '**Never demoted:** a `CRITICAL` item and a tool-red item.'
+  lacks "$flat" '(`--promote FILE`, #994)'
+  lacks "$flat" 'Two promotion rules bound the merge'
+  lacks "$flat" 'a promoted item and a tool-red item'
 }
 
 # --- the --round / --prev / --findings usage contract (#1026) -----------------

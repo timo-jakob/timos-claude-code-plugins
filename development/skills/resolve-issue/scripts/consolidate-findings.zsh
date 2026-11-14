@@ -15,11 +15,10 @@
 #                     adjudicated_dropped},
 #     blocking[], suggestions[], conflicts[], non_converging, false_trips[],
 #     escalation_reasons[] }  (each blocking[] item also carries false_trip:bool,
-#     promoted:true when the overlay raised it — #995, and class:"…" when
-#     --fix-touched was given — #1435. decided:"red"|"green" rides on EVERY item,
-#     blocking[] AND suggestions[], when the round decided the claim the merged
-#     item is titled from — #1584. A "green" record does NOT imply the item is a
-#     suggestion: the group severity max, the #994 promotion overlay, and a
+#     and class:"…" when --fix-touched was given — #1435. decided:"red"|"green"
+#     rides on EVERY item, blocking[] AND suggestions[], when the round decided
+#     the claim the merged item is titled from — #1584. A "green" record does NOT
+#     imply the item is a suggestion: the group severity max and a
 #     reviewer-written WARNING/CRITICAL whose decides: claim came back green (the
 #     decided pass changes no severity on that malformed shape) each carry a
 #     green-decided finding into blocking[]. One key is INTERNAL and never part
@@ -38,21 +37,6 @@
 #     opposite directions (performance vs code_quality) become a `conflicts`
 #     item — surfaced, not silently ordered; a surviving conflict is an
 #     escalation reason.
-#   - Promotion overlay (#994): with --promote, a human-selected set of waived
-#     Low findings is raised SUGGESTION->WARNING *after* dedup and *before* the
-#     conflict / non-convergence classification, so a promoted item lands in
-#     `blocking` and flows through everything downstream exactly like a
-#     reviewer-raised Warning. Matching REUSES the #983 rules rather than exact
-#     key equality: candidates are GATHERED on [file, dimension] + line
-#     proximity, and the VERDICT is title-identity — exact normalized title, a
-#     shared significant token, or a tokenless side promotes; FULLY DISJOINT
-#     titles do not. Exact-line equality would silently un-promote an item the
-#     moment its own fix shifted the line, which is the one thing a promoted
-#     item must survive. A raised item is STAMPED promoted:true (#995) so every
-#     surface downstream can tell the human's pick from a reviewer-raised
-#     Warning; only Low items are eligible, so a reviewer-raised blocker a key
-#     matches is never stamped. Without --promote (or with an empty array) the
-#     output is byte-identical to a run without the flag — nothing is stamped.
 #   - Non-convergence (#606 + #983): candidates for "this blocked last round too"
 #     are GATHERED on [file, dimension] + line proximity (within LINEWIN lines; a
 #     missing line on either side is a wildcard). The VERDICT on a candidate is
@@ -91,9 +75,9 @@
 #          red is an observed tool verdict, not a restated opinion, and the
 #          decided pass contracts a reachable red-at-Low state (a `decides:`
 #          finding with no `proposed-severity:` line, recorded but not promoted).
-#     The drop runs AFTER the #994 promotion overlay and BEFORE the conflict /
-#     non-convergence classification, so a human-promoted item (now WARNING) is
-#     structurally ineligible by guard 2 rather than by a special case.
+#     The drop runs AFTER the risk demotion and BEFORE the conflict /
+#     non-convergence classification, so a dropped Low cannot go on to seed a
+#     conflict pair or a carried-blocker match.
 #     `summary.adjudicated_dropped` is ALWAYS present (0 without the flag), so a
 #     consumer never has to tell "no drops" from "an older changelist".
 #
@@ -105,7 +89,7 @@
 #       * `incomplete_propagation` — in the set, any other dimension.
 #     It is DERIVED here, never emitted by a review agent, so the #558 findings
 #     schema is untouched. The stamp is a direct per-item field — the same shape
-#     `false_trip` (#983) and `promoted` (#995) already use — so a consumer
+#     `false_trip` (#983) already uses — so a consumer
 #     detects an older, unstamped changelist with `[$blk[] | has("class")] | all`
 #     rather than reading a missing stamp as a class. Without the flag NO item
 #     carries `class` at all, which is what keeps a run that never passes it
@@ -135,7 +119,7 @@
 #     promoted Warning with a "green" record. An EMPTY normalized title is not a
 #     match key (every untitled finding normalizes to ""), so an untitled
 #     representative contributes only its own record — the same refusal the
-#     promote, adjudicated and cross-round title arms each make.
+#     adjudicated and cross-round title arms each make.
 #     `green` means NOT RED — the command ran clean, OR it could not be run at all
 #     (uninstalled, malformed, or it would have written into the tree, which the
 #     conductor settles the same way). Both leave the finding a logged suggestion,
@@ -152,17 +136,14 @@
 #     thousandths) is BELOW the threshold is demoted to a suggestion — severity
 #     SUGGESTION, priority Low, blocking false, `demoted: true` — so it is logged,
 #     never fixed, and never counts toward convergence. It never disappears.
-#     NEVER demoted, at any threshold or risk: a CRITICAL item, a human-promoted
-#     item (`promoted: true`), and an item a tool decided red (`decided: "red"`,
-#     or a red anywhere in its dedup group). A dedup group is demoted only when
+#     NEVER demoted, at any threshold or risk: a CRITICAL item, and an item a
+#     tool decided red (`decided: "red"`, or a red anywhere in its dedup group). A dedup group is demoted only when
 #     EVERY WARNING member has an assessment and the HIGHEST member risk is below
 #     the threshold; the item carries that member's assessment. An unassessed
 #     finding keeps its severity (a missing judgement never demotes anything).
-#     Placed straight after dedup, BEFORE the promotion overlay — which then
-#     raises a human pick again, clearing `demoted`, so the pick always wins — and
-#     before the adjudicated drop, which never selects a demoted item, and the
-#     conflict / non-convergence classification, so a demoted item never reads as
-#     a surviving blocker.
+#     Placed straight after dedup, before the adjudicated drop, which never
+#     selects a demoted item, and the conflict / non-convergence classification,
+#     so a demoted item never reads as a surviving blocker.
 #     `summary.risk_demoted` is present only when the demotion ran. With the
 #     threshold OFF or IGNORED, --risk is accepted and the file is never read, and
 #     no key above appears: the output is byte-identical to a run without it.
@@ -181,20 +162,16 @@
 #
 # Usage:
 #   consolidate-findings.zsh --findings FILE [--round N] [--prev FILE]
-#                            [--promote FILE] [--adjudicated FILE]
-#                            [--fix-touched FILE] [--risk FILE] [--extension]
+#                            [--adjudicated FILE] [--fix-touched FILE]
+#                            [--risk FILE] [--extension]
 #     --findings  aggregate findings JSON for THIS round (required)
 #     --round     round number (default 1)
 #     --prev      previous round's changelist JSON (this script's own output);
 #                 omitted on round 1
-#     --promote   JSON array of identity keys {file, line, dimension, title}
-#                 (#994) — the human-selected waived suggestions to raise to
-#                 blocking for this round. Omitted outside a promotion sub-loop.
-#     --adjudicated  JSON array of the same identity keys (#1434) — the Low
-#                 findings prior rounds already surfaced and waived. MAY be
-#                 empty (`[]`): an early round legitimately has nothing waived
-#                 yet, unlike --promote, where an empty selection is contracted
-#                 to skip the sub-loop entirely.
+#     --adjudicated  JSON array of identity keys {file, line, dimension, title}
+#                 (#1434) — the Low findings prior rounds already surfaced and
+#                 waived. MAY be empty (`[]`): an early round legitimately has
+#                 nothing waived yet.
 #     --fix-touched  the PREVIOUS round's fix-touched set (#1435) — repo-relative
 #                 paths, one per line, as resolve-story-loop.zsh writes to
 #                 `<work-dir>/fix-touched-<N-1>.txt`. Unlike every other file
@@ -209,12 +186,14 @@
 #                 effective extension bar described above.
 #
 # Exit codes: 0 ok · 2 usage error (including a malformed --risk while the
-#             threshold is on) · 1 internal (unreadable / invalid JSON)
+#             threshold is on, and any unknown option — `--promote`, the #994
+#             overlay retired by #3135, among them) · 1 internal (unreadable /
+#             invalid JSON)
 
 emulate -L zsh
 setopt nounset pipefail
 
-local usage="usage: consolidate-findings.zsh --findings FILE [--round N] [--prev FILE] [--promote FILE] [--adjudicated FILE] [--fix-touched FILE] [--risk FILE] [--extension]"
+local usage="usage: consolidate-findings.zsh --findings FILE [--round N] [--prev FILE] [--adjudicated FILE] [--fix-touched FILE] [--risk FILE] [--extension]"
 
 # A value flag with no value, or one whose value is the NEXT FLAG, is a caller
 # mistake that this script used to turn into the wrong failure. Under `nounset`
@@ -222,10 +201,10 @@ local usage="usage: consolidate-findings.zsh --findings FILE [--round N] [--prev
 # not set" and exit 1 — which this script's taxonomy reserves for *internal*
 # errors, so a usage mistake was indistinguishable from unreadable input. And
 # the unquoted `--prev $VAR` idiom with VAR unset collapses so the next flag
-# becomes the value: `--prev --promote` would swallow `--promote`, silently
-# consolidating with no overlay. resolve-story-loop.zsh has guarded exactly
-# this way since #971; a half-applied rule is the inconsistency the next caller
-# trips on, so it covers EVERY value flag here too (#994).
+# becomes the value: `--prev --adjudicated` would swallow `--adjudicated`,
+# silently consolidating with no adjudicated set. resolve-story-loop.zsh has
+# guarded exactly this way since #971; a half-applied rule is the inconsistency
+# the next caller trips on, so it covers EVERY value flag here too (#994).
 _need_val() {  # $1 = flag, $2 = remaining arg count, $3 = candidate value
   [[ $2 -ge 2 ]] || {
     print -u2 -- "consolidate-findings: $1 requires a value"; exit 2 }
@@ -233,19 +212,18 @@ _need_val() {  # $1 = flag, $2 = remaining arg count, $3 = candidate value
     print -u2 -- "consolidate-findings: $1 requires a value (got the flag $3)"; exit 2 }
   # An EXPLICIT empty value is the same mistake wearing a third hat — the
   # realistic `--flag "$VAR"` with VAR unset — and left alone it reads
-  # downstream as "flag omitted", exit 0: `--promote ""` would silently drop
-  # the whole promoted set and converge the sub-loop having promoted nothing.
+  # downstream as "flag omitted", exit 0: `--adjudicated ""` would silently
+  # drop the whole adjudicated set and re-list every waived suggestion.
   [[ -n "$3" ]] || {
     print -u2 -- "consolidate-findings: $1 requires a non-empty value"; exit 2 }
 }
 
-local findings="" round=1 prev="" promote="" adjudicated="" fix_touched="" risk_file="" extension=0
+local findings="" round=1 prev="" adjudicated="" fix_touched="" risk_file="" extension=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
   --findings) _need_val "$1" $# "${2:-}"; findings="$2"; shift 2 ;;
   --round) _need_val "$1" $# "${2:-}"; round="$2"; shift 2 ;;
   --prev) _need_val "$1" $# "${2:-}"; prev="$2"; shift 2 ;;
-  --promote) _need_val "$1" $# "${2:-}"; promote="$2"; shift 2 ;;
   --adjudicated) _need_val "$1" $# "${2:-}"; adjudicated="$2"; shift 2 ;;
   # the PATH must still be non-empty (`--fix-touched ""` is the same unset-VAR
   # slip _need_val exists for, and would silently drop the whole stamp); it is
@@ -275,73 +253,13 @@ if [[ -n "$prev" ]]; then
   prev_json=$(<"$prev")
 fi
 
-# The promoted set defaults to [] so the overlay is a provable no-op when the
-# flag is absent — the byte-identity guarantee the story rests on (#994). A
-# non-array (an object, a bare string, a truncated write) is refused rather
-# than iterated: `$promote[]` over a non-array would abort jq mid-program and
-# blank the changelist, turning a caller mistake into a silent empty round.
-local promote_json='[]'
-if [[ -n "$promote" ]]; then
-  # The `-s` guard comes FIRST, exactly as --findings and --prev do. jq exits 0
-  # with EMPTY output on an empty file, so without it the capture lands empty,
-  # survives to `--argjson promote ""`, and blows up in the final jq — which
-  # this script would then report as "invalid findings JSON", pointing the
-  # caller at the wrong file entirely.
-  # -s alone is TRUE for a directory, so `--promote <a dir>` would pass here and
-  # fail inside jq with "Is a directory", which the || below would relabel as a
-  # content problem — pointing the caller at the file's CONTENTS when the problem
-  # is that it is not a file at all.
-  [[ -f "$promote" && -s "$promote" ]] || {
-    print -u2 -- "consolidate-findings: --promote must be a non-empty regular file: $promote"; exit 1 }
-  # The ELEMENT shape is checked, not just the container. `["a title"]` or `[113]`
-  # — the shapes a hand-written or model-written selection most plausibly takes —
-  # pass a bare `type == "array"` test, then abort the MAIN jq at `.file` on a
-  # string ("Cannot index string with ..."), landing in the final `||` branch
-  # that blames the findings file. Worse, that abort is input-dependent: the
-  # overlay only evaluates $promote[] for Low items, so the same bad file passes
-  # silently on a round with no suggestions and explodes on the next one.
-  # jq's stderr is KEPT, not discarded: the promote file is written by a model
-  # from a multiSelect, so a syntax slip is the expected failure and jq's
-  # "parse error ... at line N, column M" is the one diagnostic that locates it.
-  # The script's own message says WHICH input is at fault; jq's says WHERE.
-  # the identity keys are required, not just object-ness: `[{}]` or a mis-keyed
-  # object would compare against empty strings, match nothing, and turn a
-  # caller mistake into a silent no-op round
-  # `has()` is true for a key whose value is null or "", and both are meaningless
-  # for `file`/`dimension`: they are compared for EQUALITY, so an empty one
-  # matches only a finding whose own field was missing. Require real values there.
-  # `title` is deliberately allowed to be an empty STRING — a genuinely untitled
-  # finding must stay promotable, and the tokenless-title path is safe now that
-  # the overlay raises at most one item per key. It must still be a string, so a
-  # `null` cannot reach the title rules.
-  promote_json=$(jq -c 'if (type == "array")
-                           and (all(.[]; type == "object"
-                                 and (.file | type == "string" and length > 0)
-                                 and (.dimension | type == "string" and length > 0)
-                                 and (.title | type == "string")))
-                        then . else error("promote input is not an array of identity-key objects") end' \
-    -- "$promote") || {
-    print -u2 -- "consolidate-findings: --promote file unreadable, or not a JSON array of objects with non-empty file and dimension and a string title: $promote"; exit 1 }
-  # jq runs the filter once per TOP-LEVEL value, so a file holding two
-  # concatenated arrays (a scratch file re-written with >> instead of >) passes
-  # the filter twice and captures two lines. --argjson then rejects it, again in
-  # the final jq and again blaming the findings file. `jq -c` emits exactly one
-  # line per value, so a newline in the capture is a reliable discriminator.
-  [[ "$promote_json" != *$'\n'* ]] || {
-    print -u2 -- "consolidate-findings: --promote file must hold exactly ONE JSON array: $promote"; exit 1 }
-  # belt and braces: a jq that somehow exits 0 with no output must not reach
-  # --argjson either (the failure mode above, arrived at by a different road)
-  [[ -n "$promote_json" ]] || {
-    print -u2 -- "consolidate-findings: --promote file yielded no JSON value: $promote"; exit 1 }
-fi
-
 # The adjudicated list (#1434) defaults to [] so the drop rule is a provable
-# no-op without the flag — the same byte-identity discipline --promote follows,
+# no-op without the flag — the byte-identity discipline every flag here follows,
 # and the reason `adjudicated_dropped` is the ONLY output difference a run
-# without the flag sees. Every refusal below mirrors --promote's, for the same
-# reasons (an unchecked bad file aborts the MAIN jq and gets relabelled "invalid
-# findings JSON", sending the caller to the wrong input) — with ONE deliberate
-# divergence: an EMPTY array is accepted here. Rounds 1-2 of a real run routinely
+# without the flag sees. Every refusal below is typed and names this file (an
+# unchecked bad file aborts the MAIN jq and gets relabelled "invalid findings
+# JSON", sending the caller to the wrong input) — and an EMPTY array is
+# accepted. Rounds 1-2 of a real run routinely
 # have nothing waived yet, so refusing `[]` would make the loop choose between
 # omitting the flag on some rounds and failing on others.
 local adjudicated_json='[]'
@@ -392,7 +310,7 @@ if [[ -n "$fix_touched" ]]; then
   # Normalised on the way IN, with the same `^\./` strip the findings side
   # applies (`normfile`), so a `./a.zsh` on one side and `a.zsh` on the other can
   # never disagree about membership — the drift that this repo has already paid
-  # for once between the promote and findings line rules. Blank lines are
+  # for once between two line rules (#994). Blank lines are
   # dropped (an empty path matches nothing and would only widen the set with
   # noise); `unique` makes membership a set test rather than a list scan.
   fix_touched_json=$(jq -R -s 'split("\n") | map(sub("^\\./"; "")) | map(select(length > 0)) | unique' \
@@ -482,9 +400,10 @@ def shares_token($a; $b): (($a | length) > 0) and (($b | length) > 0)
 def LINEWIN: 10;
 # One line-recovery rule for BOTH sides of the proximity test. The findings side
 # already recovered a digit-only STRING line losslessly; without the same rule on
-# the promote side a key carrying "line": "113" is a non-number, which line_near
-# treats as a WILDCARD — silently widening "near line 113" to "anywhere in this
-# file+dimension" and over-promoting every title-compatible Low in the file.
+# the adjudicated side a key carrying "line": "113" is a non-number, which
+# line_near treats as a WILDCARD — silently widening "near line 113" to
+# "anywhere in this file+dimension" and over-dropping every title-matching Low in
+# the file.
 def normline: if (. | type) == "number" then .
   elif ((. | type) == "string") and (test("^[0-9]+$")) then tonumber
   else null end;
@@ -503,9 +422,7 @@ def line_near($a;$b):
 # beside `decided`; the demotion is the only place a severity is ever LOWERED in
 # this program, so its exemptions are spelled out here rather than inherited:
 # CRITICAL never (severity must be WARNING), and an observed tool red never
-# (`decided` on the item, or `group_red` anywhere in its group). A human pick is
-# exempt by ORDER rather than by a test here: this runs before the promotion
-# overlay, which raises the picked item again afterwards. `$k.all` keeps a group
+# (`decided` on the item, or `group_red` anywhere in its group). `$k.all` keeps a group
 # with an unassessed blocking member blocking. The comparison is strict: a risk
 # EQUAL to the threshold stays blocking. A blocker that keeps a stamp BELOW its
 # own threshold was therefore kept by an exemption — which is how the residue
@@ -548,8 +465,8 @@ def nearest($c): sort_by(
     # (a plausible model-output malformation), anything else becomes null —
     # already a wildcard for line_near — so no downstream renderer can ever
     # interpolate a reviewer-crafted string line into markdown (#969). ONE rule,
-    # shared with the promote-key side via `normline`: two hand-inlined copies is
-    # exactly how the two sides drifted apart before #994.
+    # shared with the adjudicated-key side via `normline`: two hand-inlined
+    # copies is exactly how two sides drifted apart before #994.
     line: (.line | normline),
     title: (.title // ""),
     description: ((.description // "") | tostring),
@@ -564,8 +481,8 @@ def nearest($c): sort_by(
   # changelist — it is a record, never the mechanism: nothing here reads it to
   # raise a severity or make an item block (the #1921 risk demotion reads it
   # only to never lower a red). Carried through as a
-  # direct per-item field, the same shape `false_trip` (#983), `promoted` (#995)
-  # and `class` (#1435) already use.
+  # direct per-item field, the same shape `false_trip` (#983) and `class` (#1435)
+  # already use.
   #
   # Strictly additive and defaulted: only the two contracted values survive, and a
   # finding without the field (or with anything else in it — a reviewer-crafted
@@ -605,9 +522,9 @@ def nearest($c): sort_by(
     # AN EMPTY normalized title is NOT a match key. `title` defaults to "" on the
     # way in, so `normtitle` of every untitled finding is "" and a bare title
     # comparison is TRUE for every pair of untitled members — reinstating the
-    # cross-claim stamp on exactly that input class. The three other title-keyed
-    # sites here refuse an empty normtitle for the same reason (the promote exact
-    # arm, the adjudicated drop, the cross-round exact arm), so this one does too:
+    # cross-claim stamp on exactly that input class. The two other title-keyed
+    # sites here refuse an empty normtitle for the same reason (the adjudicated
+    # drop, the cross-round exact arm), so this one does too:
     # when the representative is untitled, fall back to object identity, which
     # still keeps the representative own record and nothing else.
     | ([ .[] | select(if ($rep.title | normtitle) == "" then (. == $rep)
@@ -664,96 +581,18 @@ def nearest($c): sort_by(
     | del(.reviewer)
   ) ) as $items
 
-# RISK DEMOTION (#1921) — applied HERE, straight after dedup and BEFORE the
-# promotion overlay, so a human pick always wins: a WARNING the human promoted
-# back and the reviewer then re-raised is demoted to Low first, and the overlay
-# below raises it again with `promoted: true` (clearing `demoted`), exactly as it
-# raises any other picked suggestion. Demoting AFTER the overlay could never see
-# that pick — the overlay only raises Low items, so a re-raised WARNING would
-# carry no `promoted` flag and be demoted, undoing the human. It stays before the
-# adjudicated drop too, which never selects a demoted item (see there).
+# RISK DEMOTION (#1921) — applied HERE, straight after dedup. It stays before
+# the adjudicated drop, which never selects a demoted item (see there).
 # `group_red` is still present here for the tool-red exemption; it is stripped
 # in the adjudication projection below. With the demotion off no item carries
 # `_risk`, so this map is the identity and the output is unchanged.
 | ( $items | map(riskstamp) ) as $items
 
-# PROMOTION OVERLAY (#994) — human-selected waived suggestions raised to blocking.
-# Placed here deliberately: AFTER dedup (so one promoted key cannot bump the same
-# finding twice, and the key matches the consolidated title the human was shown)
-# and BEFORE conflicts / non-convergence (so a promoted item participates in every
-# downstream classification exactly like a reviewer-raised Warning — including
-# escalating if it survives two rounds).
-#
-# Matching REUSES the #983 rules, not exact key equality: GATHER on
-# [file, dimension] + line proximity, then decide by title identity — exact
-# normalized title, a shared significant token, or a tokenless side promotes;
-# FULLY DISJOINT titles do not. That is what lets a promoted item survive its own
-# fix shifting the line, which exact `[file,line,dimension,title]` equality could
-# not: the first edit above it would silently drop it back to Low and the sub-loop
-# would "converge" without doing the work the human asked for.
-#
-# Only Low items are eligible — an item already blocking needs no raise, and
-# re-stamping it would let a promoted key perturb a reviewer-raised finding.
-#
-# ONE-TO-ONE, like the cross-round matcher below: each promote key raises AT MOST
-# ONE item — its nearest eligible candidate — and claims it, so a second key
-# cannot take the same item and, crucially, ONE key cannot fan out across several
-# neighbouring Lows. The verdict is deliberately lenient (a shared token, or a
-# tokenless side, matches), so an unbounded map would let a single selection
-# raise every title-compatible Low in the window: blocking work the human never
-# picked, any of which can escalate the run at round 2. With an empty $promote
-# the reduce returns its seed, hence byte-identical output.
-| ( $promote
-    | reduce .[] as $k ({ its: $items, claimed: [] };
-        .its as $cur | .claimed as $cl
-        # gather the candidates for this key: still-Low, not already claimed by an
-        # earlier key, same file + dimension, line within the window
-        | ( [ $cur | to_entries[]
-              | select(.value.priority == "Low")
-              # bind the index first: `$cl | index(.key)` would evaluate .key
-              # against $cl (an array), not against the entry
-              | select(.key as $i | ($cl | index($i)) == null)
-              | select((($k.file // "") | normfile) == .value.file
-                       and (($k.dimension // "") | tostring) == .value.dimension
-                       and line_near(($k.line | normline); .value.line)) ] ) as $g
-        | ( [ $g[] | select((($k.title // "") | normtitle) != ""
-                 and (($k.title // "") | normtitle) == (.value.title | normtitle)) ] ) as $exact
-        | (($k.title // "") | sigtokens) as $kt
-        # verdict, same three arms as the cross-round matcher: exact title, a
-        # tokenless side, or a shared significant token; disjoint titles never
-        | ( if ($exact | length) > 0 then $exact
-            elif ($kt | length) == 0 then $g
-            else [ $g[] | select(((.value.title | sigtokens) | length) == 0
-                     or shares_token($kt; (.value.title | sigtokens))) ] end ) as $elig
-        | if ($elig | length) == 0 then .
-          else ( $elig | sort_by(
-                   if ((.value.line | type) == "number")
-                      and ((($k.line | normline) | type) == "number")
-                   then (((.value.line) - ($k.line | normline)) | if . < 0 then -. else . end)
-                   else LINEWIN + 1 end) | .[0] ) as $best
-            | { its: ($cur | .[$best.key] |= (. + { severity: "WARNING",
-                        priority: prio("WARNING"), blocking: blocks("WARNING"),
-                        # the LABEL (#995): a promoted item is otherwise
-                        # indistinguishable from a reviewer-raised Warning
-                        # everywhere it is read afterwards. A direct per-item
-                        # flag with NO stamp gate (the #983 false_trip
-                        # precedent), so an absent flag simply counts 0.
-                        promoted: true }
-                        # a risk-demoted item the human picked is no longer
-                        # demoted (#1921); `del` of an absent key is a no-op
-                        # that keeps key order, so other raises are unchanged
-                        | del(.demoted))),
-                claimed: ($cl + [$best.key]) }
-          end)
-    | .its ) as $items
-
 # ADJUDICATED RE-RAISE DROP (#1434) — a Low that an earlier round already
 # surfaced and the human already let go. Placed HERE deliberately: after the
-# promotion overlay (so a human-promoted item is WARNING by now and fails guard 2
-# structurally — no special case, and no ordering hazard if the overlay changes)
-# and before conflicts / non-convergence (so a dropped item cannot go on to seed
-# a conflict pair or a carried-blocker match, which would resurrect through a
-# side door what the drop just removed).
+# risk demotion, and before conflicts / non-convergence (so a dropped item
+# cannot go on to seed a conflict pair or a carried-blocker match, which would
+# resurrect through a side door what the drop just removed).
 #
 # NB: no apostrophes in this block — the jq program is single-quoted.
 # The verdict uses the EXACT arm of the #983 matcher only. Its other two arms — a shared
@@ -763,8 +602,7 @@ def nearest($c): sort_by(
 # title counts, and an entry with an EMPTY normalized title matches nothing at
 # all rather than silencing every untitled finding in its file+dimension.
 #
-# Selection is by POSITION, the same idiom the promote overlay uses for its
-# claimed set: an identity-key rebuild would have to re-derive a key that dedup
+# Selection is by POSITION: an identity-key rebuild would have to re-derive a key that dedup
 # already made unique, and `index` on an ARRAY argument is a subsequence search
 # in jq, not a membership test — a trap this file must not set for its next
 # editor. Positions also leave `$items` itself untouched, which is what keeps a
@@ -935,8 +773,7 @@ def nearest($c): sort_by(
       false_trips: ($ftrips | length),
       # ALWAYS present (#1434) — 0 without --adjudicated. A consumer must never
       # have to tell "this round dropped nothing" from "this changelist predates
-      # the key", which is the same argument promotion_phase carries in the
-      # status JSON.
+      # the key".
       adjudicated_dropped: $adj_dropped
     } + ( if $riskon then { risk_demoted: ([ $items[] | select(.demoted == true) ] | length) }
           else {} end )),
@@ -952,7 +789,7 @@ def nearest($c): sort_by(
   }
 '
 
-jq -c --argjson round "$round" --argjson prev "$prev_json" --argjson promote "$promote_json" \
+jq -c --argjson round "$round" --argjson prev "$prev_json" \
   --argjson adjudicated "$adjudicated_json" \
   --argjson fixtouched "$fix_touched_json" --argjson has_touched "$has_touched" \
   --argjson riskon "$riskon" --argjson risk "$risk_json" \

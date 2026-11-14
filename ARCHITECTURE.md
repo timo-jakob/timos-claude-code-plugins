@@ -4661,81 +4661,40 @@ reliable but the merging needs semantics:
   surviving conflict and a non-converging (verified/ambiguous) blocker are both
   `escalation_reasons`; the count of auto-continued false trips rides in
   `summary.false_trips` + a top-level `false_trips[]`, never an escalation reason.
-- **The promotion overlay** (`--promote FILE`, #994) is the one way a `Low`
-  finding ever blocks. `FILE` holds a JSON **array of identity keys**
-  `{file, line, dimension, title}` — a human's explicit selection from the
-  waived suggestions, made at convergence; the scripts stay non-interactive and
-  the interaction lives in `resolve-issue`. The overlay is applied
-  **after dedup and before** the conflict / non-convergence classification, so a
-  promoted item is raised `SUGGESTION→WARNING` (priority `High`, `blocking:
-  true`) and then flows through every downstream rule **exactly like a
-  reviewer-raised Warning** — including escalating if it survives two rounds.
-  Matching **reuses the #983 rules rather than exact key equality**: candidates
-  are **gathered** on `file`+`dimension`+line proximity, and the **verdict** is
-  title identity — an exact normalized title, a shared significant token, or a
-  tokenless side promotes; **fully disjoint** titles do not. Exact-line equality
-  would un-promote an item the moment its own fix shifted the line, so the
-  sub-loop could "converge" without doing the work the human asked for.
-  A raised item is **stamped `promoted: true`** (#995) — a direct per-item flag
-  with **no** stamp gate (the `false_trip` precedent), so an absent flag simply
-  counts 0 and a run without `--promote` stays byte-identical. No surface
-  reads the stamp any more.
+- **No promotion overlay (#3135).** The consolidator accepts no `--promote`:
+  the #994 overlay, which raised a human-selected waived suggestion to
+  `WARNING` and stamped it `promoted: true` (#995), is retired with the loop's
+  own `--promote` (#3134), so `--promote` is refused like any other unknown
+  option (exit 2, `unknown flag: --promote`) and no item carries `promoted`. A
+  `Low` finding never blocks. The readers of the stamp went first:
   `build-dossier.zsh` no longer reads the stamp: the dossier dropped the
-  promotion phase (#3131). `build-telemetry-record.zsh` no longer reads it
-  either: the payload dropped the count (#3132). `progress.md` and the
-  escalation no longer read it either: they dropped the `promoted:` term, the
-  `- promoted suggestion:` line, the `Promoted` column and the `(promoted)`
-  bullet suffix (#3134), since the review loop no longer forwards an overlay.
-  The overlay is **one-to-one**: each promote key raises **at most one** item — its
-  nearest eligible candidate — and claims it, so neither can two keys take the
-  same item nor can one key fan out across several neighbouring Lows. That bound
-  matters because the verdict is deliberately lenient (a shared token, or a
-  tokenless side, matches): unbounded, one selection could raise every
-  title-compatible Low in the window as blocking work the human never picked.
-  The overlay only ever **raises a finding the round already reported** — it never
-  *injects* one, which is why a promotion sub-loop's first round is seeded with
-  **only those promoted keys the fresh panel did not itself raise and that were
-  then confirmed still present in the cited file** — a key that is confirmably
-  gone (`unmatched`) or unconfirmable (`unverified`) is never seeded (a key the
-  panel already raised needs no seed — the overlay raises the panel's own item,
-  at its current line; seeding a duplicate from the blocking phase's stale line
-  would survive dedup and raise the same defect twice). Each key is classified
-  against the fresh panel's **pre-seed** aggregate — never against the seeded
-  round, which matches by construction (resolve-issue's "Suggestion promotion",
-  step 4). Without
-  `--promote`, or with an empty array, the emitted changelist is **byte-identical**
-  to a run without the flag — which is what keeps autonomous/headless runs
-  provably unchanged. Bad input is typed, and every refusal names the PROMOTE file rather
-  than the findings file: unreadable, not an array, **not an array of objects each
-  carrying a non-empty `file` and `dimension` and a string `title`** (`line` is
-  the one optional member — absent or null is a deliberate wildcard within the
-  file+dimension), or holding **more than one** top-level JSON value all exit **1** with a stderr
-  diagnostic and **no changelist on stdout**; a missing, flag-shaped or empty
-  value exits **2** (the `_need_val` contract both scripts share, now applied to
-  the consolidator's `--findings`/`--round`/`--prev` too, with `--round`
+  promotion phase (#3131). The telemetry payload dropped its count (#3132), and
+  `progress.md` and the escalation dropped their promotion labels (#3134).
+- **Typed input.** A missing, flag-shaped or empty value exits **2** (the
+  `_need_val` contract the loop shares, applied to the consolidator's
+  `--findings`/`--round`/`--prev` and every other value flag, with `--round`
   additionally validated as an integer because it is interpolated as raw JSON).
-  The element-shape and single-value checks matter because both failures
-  otherwise abort the *main* jq program and surface as "invalid findings JSON",
-  sending the caller to the wrong input — and the element-shape one is
-  input-dependent, silent on a round with no Low findings.
+  A bad file input is refused at exit **1** with a stderr diagnostic that names
+  that input rather than the findings file, and with **no changelist on
+  stdout**: for `--adjudicated` that is unreadable, not an array, **not an array
+  of objects each carrying a non-empty `file` and `dimension` and a string
+  `title`** (`line` is the one optional member — absent or null is a deliberate
+  wildcard within the file+dimension), or holding **more than one** top-level
+  JSON value. The element-shape and single-value checks matter because both
+  failures otherwise abort the *main* jq program and surface as "invalid
+  findings JSON", sending the caller to the wrong input — and the element-shape
+  one is input-dependent, silent on a round with no Low findings.
 - **`review-consolidator`** (agent, opus) runs the engine, then adds the
   judgment the exact-key heuristics can't: merging findings that describe the
   same defect in different words / across dimensions, and confirming or demoting
   conflicts by reading the cited code. It never re-grades a reviewer's severity
-  and never invents or drops a finding. Two promotion rules bound the merge
-  (#995): a merged item **keeps `promoted: true` if any constituent carried it**
-  (the human asked for that defect; merging it into a co-described one must not
-  un-ask it), and it must **never end up both `Critical` and `promoted`** — in
-  either direction — because the `promoted` count is contracted above as a
-  subset of the round's Warnings, so such an item would make
-  `Warning − Promoted` negative for every reader. The two stay separate blocking
-  items instead; both get fixed either way.
+  and never invents or drops a finding.
 
 - **The adjudicated-re-raise drop** (`--adjudicated FILE`, #1434) is the one way a
   finding a reviewer *did* report never reaches the changelist. `FILE` holds a
-  JSON array of the same identity keys as `--promote` — the Low findings prior
-  rounds surfaced and the human waived — and **may be empty** (`[]`), unlike
-  `--promote`, because an early round legitimately has nothing waived yet. A
+  JSON array of identity keys `{file, line, dimension, title}` — the Low
+  findings prior rounds surfaced and the human waived — and **may be empty**
+  (`[]`), because an early round legitimately has nothing waived yet. A
   matching item is dropped from `suggestions[]` and counted in
   `summary.adjudicated_dropped` only when **every** guard below holds — and
   since #1584 there is one more than the three #1434 shipped: a finding the
@@ -4753,14 +4712,12 @@ reliable but the merging needs semantics:
   **Low**, so a re-raise at `WARNING`/`CRITICAL` is never suppressed; and the
   entry is still **valid**, which the *loop* enforces by removing every
   adjudication whose file appears in the round's `delta_files` before
-  consolidating. The drop runs **after** the #994 promotion overlay and
-  **before** the conflict / non-convergence classification — so a
-  human-promoted item is `WARNING` by then and fails guard 2 structurally
-  rather than by a special case, and a dropped item cannot go on to seed a
-  conflict pair or a carried-blocker match. Selection is by **position**, not by
+  consolidating. The drop runs **after** the #1921 risk demotion and
+  **before** the conflict / non-convergence classification, so a dropped item
+  cannot go on to seed a conflict pair or a carried-blocker match. Selection is by **position**, not by
   a rebuilt identity key: dedup has already made `[file, line, dimension]`
   unique, and jq's `index` on an *array* argument is a subsequence search, not a
-  membership test. Bad input is typed exactly like `--promote`'s and names the
+  membership test. Bad input is typed as *Typed input* above says and names the
   **adjudicated** file. `summary.adjudicated_dropped` is **always present** (0
   without the flag), so a consumer never has to tell "dropped nothing" from "an
   older changelist" — and that key is the *only* difference a run without the flag sees.
@@ -4768,19 +4725,18 @@ reliable but the merging needs semantics:
 Changelist shape: `{ round, summary{critical,high,low,blocking,conflicts,
 false_trips,adjudicated_dropped}, blocking[], suggestions[], conflicts[],
 non_converging, false_trips[], escalation_reasons[] }`, where each `blocking[]` item additionally
-carries `false_trip: bool` (#983), `class` when `--fix-touched` was given
-(#1435), and, when the overlay raised it,
-`promoted: true` (#995). With `corner_case_risk_threshold` on, or in an
+carries `false_trip: bool` (#983) and `class` when `--fix-touched` was given
+(#1435). With `corner_case_risk_threshold` on, or in an
 extension round (#2577), and `--risk` given, an assessed item also carries
 `risk_assessment` (with `bar: "extension"` in an extension round), a demoted one
 `demoted: true`, and the summary `risk_demoted` — see *Runtime setting:
 `corner_case_risk_threshold`* (#1921). A fourth stamp, **`decided: "red"|"green"` (#1584)**,
 rides on **every** item — `blocking[]` and `suggestions[]` alike — when the
 round decided the claim the merged item is titled from. A `green` record does
-**not** imply the item is a suggestion: the group severity max, the #994
-promotion overlay, and a reviewer-written `WARNING`/`CRITICAL` whose `decides:`
-claim came back green (the decided pass changes no severity on that malformed
-shape) each carry a green-decided finding into `blocking[]`. It records which
+**not** imply the item is a suggestion: the group severity max and a
+reviewer-written `WARNING`/`CRITICAL` whose `decides:` claim came back green
+(the decided pass changes no severity on that malformed shape) each carry a
+green-decided finding into `blocking[]`. It records which
 way the conductor's *decided pass* went, and it is a
 **record, not a mechanism** (nothing reads it to raise a severity, so a `red`
 whose severity was not rewritten stays a suggestion; the one reader that acts
@@ -4799,8 +4755,7 @@ being dropped. `green` means **not red**: the command ran clean, *or* could not 
 at all; which of the two lives in the conductor's `<work-dir>/decided-<R>.log`,
 never in the changelist. The `blocking` array (Critical first, then
 High) is what the loop must clear; `suggestions` ride into the dossier (#563) and
-never loop **unless a human promotes them** via `--promote` (#994), which moves
-the matched ones into `blocking` before any classification runs; `false_trips[]`
+never loop; `false_trips[]`
 are the auto-continued clear false trips (a subset of `blocking`,
 `non_converging: false`).
 
@@ -5121,7 +5076,7 @@ reader tells *no fix-touched information* from *the fix pass touched nothing* (a
 `class` and its `by class:` row, and nothing else: no verdict reads the set.
 
 **The class**, derived by `consolidate-findings.zsh --fix-touched` and stamped on
-each `blocking[]` item exactly as `false_trip` and `promoted` are:
+each `blocking[]` item exactly as `false_trip` is:
 `new_defect` (the file is **not** in the set), else `under_assertion`
 (`.dimension == "tests"`), else `incomplete_propagation`. It is **derived at
 consolidation time, never emitted by a review agent**, so the #558 findings
@@ -5370,7 +5325,8 @@ loop.
 
 **A converged run waives every suggestion (#3128)**: the conductor offers no
 promotion phase in any session mode, so it never hands the loop a `--promote`.
-Since #3134 the loop accepts no `--promote` at all: the argument is refused like
+Since #3134 the loop accepts no `--promote` at all, nor since #3135 the
+consolidator: the argument is refused by both like
 any other unknown flag (**exit 2**).
 
 **Gate attestation — one full-gate run per round (#981).** On `--resume` the
@@ -8679,13 +8635,11 @@ only inside the loop.
   - **Demotion.** A `WARNING` item below the threshold is demoted: `severity:
     "SUGGESTION"`, priority `Low`, `blocking: false`, `demoted: true`. It moves
     to `suggestions` and never blocks convergence.
-  - **Placement.** The demotion runs straight after dedup and before the
-    promotion overlay, so the overlay raises a human pick again (clearing
-    `demoted`) and the pick always wins. It also runs before the adjudicated
-    drop, which never selects a demoted item, and before conflict and
-    non-convergence classification. `summary.risk_demoted` appears only when
+  - **Placement.** The demotion runs straight after dedup, before the
+    adjudicated drop, which never selects a demoted item, and before conflict
+    and non-convergence classification. `summary.risk_demoted` appears only when
     the demotion ran.
-  - **Never demoted:** a `CRITICAL` item, a promoted item and a tool-red item.
+  - **Never demoted:** a `CRITICAL` item and a tool-red item.
     A dedup group is demoted only when every `WARNING` member was assessed and
     the highest member risk is below the threshold.
   - **Severity and impact are independent.** Severity decides only
@@ -8723,7 +8677,7 @@ only inside the loop.
     the risk pass in extension rounds, and the loop then validates `--risk` up
     front. Normal rounds with the base off are byte-identical.
   - **Same demotion, marked.** The exemptions are the demotion's own (`CRITICAL`,
-    promoted, tool-red). Every stamp records the effective `threshold` and
+    tool-red). Every stamp records the effective `threshold` and
     `threshold_thousandths` plus `bar: "extension"`; the progress block's count
     line then reads `demoted by the extension bar (effective threshold = V)`, and
     the dossier marks each such row and adds `bar` and `threshold` to its
