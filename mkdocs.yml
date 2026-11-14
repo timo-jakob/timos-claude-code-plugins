@@ -98,7 +98,6 @@ nav:
       - Adopt the API styleguide: how-to/adopt-the-api-styleguide.md
       - Read your pipeline telemetry: how-to/read-pipeline-telemetry.md
       - Switch fable agents to opus: how-to/switch-fable-agents-to-opus.md
-      - Turn off suggestion prompts: how-to/turn-off-suggestion-prompts.md
       - Set a corner-case risk threshold: how-to/set-a-corner-case-risk-threshold.md
       - Run epics strictly sequentially: how-to/run-epics-strictly-sequentially.md
       - Run resolve-issue unattended: how-to/run-resolve-issue-unattended.md

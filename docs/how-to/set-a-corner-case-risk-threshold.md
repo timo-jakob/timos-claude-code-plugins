@@ -105,9 +105,6 @@ A demoted finding never disappears:
   it after all. A finding that blocked in an earlier round before it was
   demoted is not offered; it appears only in the PR table.
 
-If you turned the promotion prompt off (`enable_suggestions`), the progress log
-and the PR table are the only places a demotion shows.
-
 ## A higher bar in extra rounds
 
 When a run spends its whole round budget and is granted more rounds — by you,
