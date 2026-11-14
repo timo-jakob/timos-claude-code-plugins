@@ -175,7 +175,7 @@ fi
 #     paragraph between them named the promotion sub-loop's own counter, and
 #     step 1 the progress table's Promoted column; both are verified by nothing.
 #   - `interactive-extension-steps-5-7` is now `interactive-extension-steps-6-7`.
-#     Step 5 passed `--promote` and offered the promotion phase throughout, and
+#     Step 5 passed the promotion flag and offered the phase throughout, and
 #     a column-0 sentinel inside its list item would break the list, so the
 #     whole step is verified by nothing.
 # The steps-2-4 / steps-6-7 seam is no longer checked: step 5 sits between them,
