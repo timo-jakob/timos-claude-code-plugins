@@ -1,16 +1,20 @@
 <!-- Shard of reference/interactive.md (#2058), read in its index's order:
      the interactive extension: its heading, its intro and steps 1-4. -->
+<!-- The second frozen chunk below starts at step 2, since step 1 left the
+     frozen text when #3121 edited it, so that chunk's
+     numbering cannot restart at 1 here. -->
+<!-- markdownlint-disable MD029 -->
 
 ## Interactive extension (#562-resume)
 
 > **Read the #1576 amendment in `reference/interactive/extension-ceiling.md`
 > BEFORE acting on step 5** (`reference/interactive/extension-grant.md`). The
-> grant is recorded to the work-dir by `record-grant.zsh` — a step the frozen
-> text of step 5 in `reference/interactive/extension-grant.md` does not mention
+> grant is recorded to the work-dir by `record-grant.zsh` — a step the text of
+> step 5 in `reference/interactive/extension-grant.md` does not mention
 > — and step 5's "buys only two" on a granted closing sweep is superseded there.
 >
 > **Read the #1226 amendment there too:** step 5's resume invocation also
-> carries the run's `loop_args`, which the frozen template in
+> carries the run's `loop_args`, which the template in
 > `reference/interactive/extension-grant.md` does not show.
 
 Whether a human is present is §0a's determination, read from
@@ -38,6 +42,7 @@ jump straight to the comment. The person who can grant "three more rounds" or
 supply the missing constraint is right here; offer that in-session first. (Every
 other exit — `ESCALATE_CONFLICT`, `ESCALATE_AMBIGUOUS` — and **every autonomous
 run** skip this branch entirely and go straight to the typed comment below.)
+<!-- /moved: interactive-extension -->
 
 Run this extension loop, tracking a `grants` counter **per loop** — where a
 "loop" is one `--work-dir` and its chain of `--resume` invocations. It starts at
@@ -45,10 +50,7 @@ Run this extension loop, tracking a `grants` counter **per loop** — where a
 `AWAITING_FIX` detour or a later escalation **of the same loop** resumes the
 existing count — **never reset it**, or the `--grants` figure shown to the human
 understates what was consumed and the step-6 soft cap can never fire across
-detours. The **promotion sub-loop (#994) is a different loop** — its own
-work-dir, its own ceiling — so it starts its own counter at 0; pass the **current
-loop's** count to `--grants`, and mention the other phase's total as prose
-alongside the summary so the human still sees the story's full cost:
+detours. Pass that count to `--grants`:
 
 1. **Summarize** the exit in the conversation — never make the human read a
    comment when they are right here:
@@ -60,8 +62,7 @@ alongside the summary so the human still sees the story's full cost:
 
    It prints the typed status, the remaining blockers (severity + dimension,
    with any **possible false trip** flagged), the round history, the
-   **per-round progress table** (Critical/Warning/Suggestion, a **Promoted**
-   column when any round has a promoted blocker (#995), new/carried,
+   **per-round progress table** (Critical/Warning/Suggestion, new/carried,
    fixed-since-prior), the **blocker-class histogram for the last two rounds**
    (#1435 — new_defect / incomplete_propagation / under_assertion, where a `–`
    cell means that round was never class-stamped rather than that it scored
@@ -74,6 +75,7 @@ alongside the summary so the human still sees the story's full cost:
    summary alone. It is the same data the comment would carry, so nothing
    drifts — never compose an ad-hoc summary instead.
 
+<!-- moved: interactive-extension-steps-2-4 -->
 2. **Offer the choice** with `AskUserQuestion` (one question), tailored to the
    exit type. The built-in **"Other"** option is the free-text channel — the
    human uses it to *ask you a question* ("why is that blocker stuck?", "show me
@@ -115,7 +117,7 @@ alongside the summary so the human still sees the story's full cost:
    in-session fix pass so the guidance becomes fix context (the readiness gate
    and escalation already read comments — reuse that, do not invent an env
    side-channel).
-<!-- /moved: interactive-extension -->
+<!-- /moved: interactive-extension-steps-2-4 -->
 
 **The convergence verdict decides the recommendation (#2576).** Step 1's summary
 ends with a **Convergence verdict** line, the same verdict the unattended

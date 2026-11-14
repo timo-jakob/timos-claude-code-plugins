@@ -336,16 +336,16 @@ _gap_text() {  # $1 = the reference/review-loop/ directory
 
 # --- the happy path, and that it is not vacuous ------------------------------
 
-@test "#1547 the real tree verifies, reporting all fifteen declared chunks" {
+@test "#1547 the real tree verifies, reporting all sixteen declared chunks" {
   _require_pre_move_commit
   run -0 zsh "$VERIFY" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
-  contains "$output" "all 15 declared chunks are byte-identical"
+  contains "$output" "all 16 declared chunks are byte-identical"
 }
 
 @test "#1547 --quiet suppresses the ok lines and the summary, leaving stdout empty" {
   # `--quiet` is what CI and the conductor invoke, and every other invocation in
   # the tree — here and in resolve-issue-conductor-budget.bats — reads only the
-  # status. So `--quiet) quiet=0 ;;` would make the flag a no-op, print fifteen
+  # status. So `--quiet) quiet=0 ;;` would make the flag a no-op, print sixteen
   # `ok` lines and the summary on every quiet run, and no test would notice.
   # Paired with the case above, which pins that they ARE printed without it.
   _require_pre_move_commit
@@ -370,7 +370,7 @@ _gap_text() {  # $1 = the reference/review-loop/ directory
   _require_pre_move_commit
   cd "$BATS_TEST_TMPDIR"
   run -0 zsh "$VERIFY" --base "$PRE_MOVE_SHA"
-  contains "$output" "all 15 declared chunks are byte-identical"
+  contains "$output" "all 16 declared chunks are byte-identical"
 }
 
 # --- per-chunk failures ------------------------------------------------------
@@ -879,8 +879,9 @@ PY
   # check, which is backwards on both counts.
 }
 
-@test "#1582 the split still verifies byte-identical, at fifteen chunks" {
-  # Fifteen since #2601 deleted the residue branch's last chunk with its shard;
+@test "#1582 the split still verifies byte-identical, at sixteen chunks" {
+  # Sixteen since #3121 re-cut the interactive-extension intro and its steps 2-4
+  # apart; fifteen after #2601 deleted the residue branch's last chunk with its shard;
   # sixteen after #2600 deleted the residue branch's three step chunks with their
   # shards; nineteen after #2058 re-cut the interactive-extension span into two across
   # reference/interactive/; eighteen after #2057 re-cut the suggestion-promotion
@@ -889,7 +890,7 @@ PY
   # tail into four.
   _require_pre_move_commit
   run -0 zsh "$VERIFY" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
-  contains "$output" "all 15 declared chunks are byte-identical"
+  contains "$output" "all 16 declared chunks are byte-identical"
   # every round-protocol chunk accounted for, IN its shard, so a row silently
   # dropped from the manifest cannot leave this green
   contains "$output" "ok   round-protocol-head"
@@ -1125,20 +1126,20 @@ _mutate_anchor() {
 
 # --- #2058: the interactive procedures, split across reference/interactive/ ----
 
-@test "#2058 interactive-remediation stays whole, and the extension span is re-cut into two, each IN its shard" {
+@test "#2058 interactive-remediation stays whole, and the extension span is re-cut into three, each IN its shard" {
   local v="$REPO_ROOT/development/skills/resolve-issue/scripts/verify-reference-move.zsh"
   local ref="$REPO_ROOT/development/skills/resolve-issue/reference"
   # interactive-remediation is still the FIRST manifest row (the short-row and
   # extra-tab cases mutate the first row), now naming its shard
   [ "$(grep -m1 -E '^"[a-z0-9-]+	' "$v" | cut -f1,2)" = "$(printf '"interactive-remediation\tinteractive/remediation.md')" ]
   # the outer bounds of the former single extension chunk, pinned in full: the
-  # first chunk keeps the old FIRST anchor, the second the old LAST anchor
+  # first chunk keeps the old FIRST anchor, the last chunk the old LAST anchor
   grep -qF -- "\"interactive-extension	interactive/extension.md	**Interactive extension (human present, \\\`BUDGET_EXHAUSTED\\\` /	" "$v"
-  grep -qF -- "\"interactive-extension-steps-5-7	interactive/extension-grant.md	5. **If they granted rounds**" "$v"
+  grep -qF -- "\"interactive-extension-steps-6-7	interactive/extension-grant.md	6. **Soft cap.**" "$v"
   grep -qF -- "	   later with \\\`/development:resolve-issue <N>\\\`." "$v"
   local n shard
   for n in interactive-remediation:remediation.md interactive-extension:extension.md \
-           interactive-extension-steps-5-7:extension-grant.md; do
+           interactive-extension-steps-2-4:extension.md interactive-extension-steps-6-7:extension-grant.md; do
     shard="${n#*:}"; n="${n%%:*}"
     grep -qF -- "\"$n	interactive/$shard	" "$v"
     [ "$(grep -rxF -- "<!-- moved: $n -->" "$ref" | wc -l | tr -d ' ')" -eq 1 ]
@@ -1157,23 +1158,45 @@ _mutate_anchor() {
   contains "$output" "ok   interactive-remediation — "
   contains "$output" "→ reference/interactive/remediation.md"
   contains "$output" "ok   interactive-extension — "
+  contains "$output" "ok   interactive-extension-steps-2-4 — "
   contains "$output" "→ reference/interactive/extension.md"
-  contains "$output" "ok   interactive-extension-steps-5-7 — "
+  contains "$output" "ok   interactive-extension-steps-6-7 — "
   contains "$output" "→ reference/interactive/extension-grant.md"
 }
 
-@test "#2058 the seam check FIRES on the extension seam when the first chunk's last anchor moves up" {
-  # The mutant moves interactive-extension's LAST anchor to the line above it,
-  # inside its own chunk, so the original line below falls out of the verified
-  # region while both chunks still byte-compare green.
-  _require_pre_move_commit
-  local m="$BATS_TEST_TMPDIR/verify-interactive-seam.zsh"
-  _mutate_anchor "$m" '   side-channel).' \
-    '   and escalation already read comments — reuse that, do not invent an env'
-  run zsh "$m" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
+# --- #3121: the promotion phase leaves three frozen spans ----------------------
+
+@test "#3121 the three re-cut spans carry no promotion text, and their old rows are gone" {
+  local v="$REPO_ROOT/development/skills/resolve-issue/scripts/verify-reference-move.zsh"
+  local ref="$REPO_ROOT/development/skills/resolve-issue/reference" f
+  for f in escalation.md interactive/extension.md interactive/extension-grant.md; do
+    run grep -niE -- 'promot' "$ref/$f"
+    [ "$status" -eq 1 ] || { printf '%s still mentions promotion:\n%s\n' "$f" "$output" >&2; return 1; }
+  done
+  # the retired sentinel name is gone from reference/, and its manifest row too
+  run grep -rnF -- 'interactive-extension-steps-5-7' "$ref"
   [ "$status" -eq 1 ]
-  contains "$stderr$output" "the seam interactive-extension → interactive-extension-steps-5-7 leaves original lines uncovered"
-  contains "$stderr$output" "side-channel)."
+  run grep -nF -- '"interactive-extension-steps-5-7	' "$v"
+  [ "$status" -eq 1 ]
+  # escalation-terminal now opens at its step 1, after the edited paragraph
+  grep -qF -- "\"escalation-terminal	escalation.md	1. **Push the branch as the bot**" "$v"
+  [ "$(grep -A1 -xF -- '<!-- moved: escalation-terminal -->' "$ref/escalation.md" | tail -1)" = \
+    '1. **Push the branch as the bot** (so the diff-so-far is linkable) but **create' ]
+  # the manifest records why, naming #3121, and the extension group left CUT_GROUPS
+  grep -qF -- '# Three spans were re-cut by #3121' "$v"
+  run grep -qF -- '"interactive-extension interactive-extension-steps' "$v"
+  [ "$status" -eq 1 ]
+}
+
+@test "#3121 a converged interactive extension continues to §4" {
+  local ref="$REPO_ROOT/development/skills/resolve-issue/reference" esc grant ext
+  esc="$(tr '\n' ' ' < "$ref/escalation.md" | tr -s ' ')"
+  contains "$esc" 'If the interactive extension ended in `CONVERGED`, skip the terminal below and continue to §4.'
+  grant="$(tr '\n' ' ' < "$ref/interactive/extension-grant.md" | tr -s ' ')"
+  contains "$grant" 'On `CONVERGED` (exit 0) → leave this branch and proceed to §4 (Version bump) / PR as normal.'
+  # one grants counter per loop, with no second counter for another phase
+  ext="$(tr '\n' ' ' < "$ref/interactive/extension.md" | tr -s ' ')"
+  contains "$ext" 'can never fire across detours. Pass that count to `--grants`:'
 }
 
 # --- #2057: the suggestion-promotion span, re-cut into five across reference/promotion/ ----
