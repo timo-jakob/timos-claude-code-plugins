@@ -91,7 +91,6 @@ it no longer stops the loop converging.
 Some findings are never demoted, however low their risk:
 
 - a **Critical** finding;
-- a suggestion you promoted yourself;
 - a finding a tool actually confirmed.
 
 A demoted finding never disappears:
@@ -100,10 +99,6 @@ A demoted finding never disappears:
   then one line per finding with its probability, impact and risk.
 - **PR body:** a **Demoted by the risk threshold** table above the waived
   suggestions lists each finding with its assessment and reasoning.
-- **Promotion prompt:** at convergence, the suggestion-promotion prompt offers
-  demoted findings back like any other suggestion. Pick one to have the loop fix
-  it after all. A finding that blocked in an earlier round before it was
-  demoted is not offered; it appears only in the PR table.
 
 ## A higher bar in extra rounds
 
