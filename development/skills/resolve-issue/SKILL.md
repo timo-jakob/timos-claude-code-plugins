@@ -959,13 +959,9 @@ since #2580 — append the **Review dossier** via
 `build-dossier.zsh` on the kept status JSON (#563) — appending its output
 **once**. Two hidden
 blocks in one body would leave the Approver reading only the first. (Once-only
-governs the *appended output*: an un-appended wrong-form run is discarded and
-re-run correctly — open-pr's recovery.) When the
-run **kept a promotion-phase status JSON** — one it wrote and did not discard —
-that single invocation merges both phases (#1064) by
-also taking the pair `--promotion-status <promotion-status.json> --promoted
-<promoted.json>`. Otherwise it is the plain `--status` invocation. Passing one
-promotion flag without the other is a usage error, not a fallback.
+governs the *appended output*: an un-appended run may be discarded and re-run
+— open-pr's recovery.) The dossier is always the plain
+`--status` invocation.
 
 The residue Summary duty (#1435) went with its terminal (#2580): a run that
 opens its PR has no open blocker left to disclose.

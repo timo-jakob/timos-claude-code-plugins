@@ -5,7 +5,7 @@
 #
 # ONE terminal state opens a PR and so reaches this script: `CONVERGED` (exit 0).
 # The residue terminal that once opened one with blockers still open is retired
-# (#2580), so a blocking phase that ran a round must have ended `CONVERGED` with
+# (#2580), so a loop that ran a round must have ended `CONVERGED` with
 # an empty final changelist, and the guards below refuse anything else (#2599):
 # the dossier never reports `open > 0` on a PR the loop opened.
 #
@@ -13,7 +13,7 @@
 #   1. a human-readable "## Review dossier" markdown section — per-round blockers
 #      found/fixed, dimensions reviewed, waived Low suggestions, reviewers, and
 #      the final consolidator state. Each dimension also carries `open` in the
-#      hidden block: the blockers still open in the BLOCKING phase's final
+#      hidden block: the blockers still open in the final
 #      changelist. The guard below refuses a non-zero count, so it is always 0;
 #      it stays because the Approver backstops read it (#2586, #2587); and
 #   2. a hidden JSON block  <!-- review-dossier: {…} -->  dimension-tagged with
@@ -22,43 +22,34 @@
 #      empty (clean) dimension lets the Approver lower that lens's residual-risk
 #      weight; the waived-Low list is context, not a finding.
 #
-# A suggestion-promotion phase (#994) is a SECOND, ordinary run of the same state
-# machine, so it leaves a second status JSON. The Approver parses exactly ONE
-# hidden block, so both phases are merged here into ONE section and ONE block
-# (#1064): rounds summed, `status`/`final` describing the promotion phase (the
-# run's terminal state), and a `promotion` object recording what the human picked
-# versus what the phase actually raised.
+# If the loop did not run (--no-review / no rounds), nothing is emitted (exit 0)
+# so the PR body is exactly as it is today.
 #
-# If the loop did not run (--no-review / no rounds in EITHER phase), nothing is
-# emitted (exit 0) so the PR body is exactly as it is today.
-#
-# Usage:  build-dossier.zsh --status FILE [--promotion-status FILE --promoted FILE]
+# Usage:  build-dossier.zsh --status FILE
 # Exit codes: 0 ok (may be empty) · 2 usage · 1 bad input (not a regular
-#             non-empty file, not exactly one JSON object / array, or a
-#             `--status` naming a non-PR-opening or non-terminal status — see
-#             the guard below). Every non-zero exit emits NOTHING on stdout.
+#             non-empty file, not exactly one JSON object, or a `--status`
+#             naming a non-PR-opening or non-terminal status — see the guard
+#             below). Every non-zero exit emits NOTHING on stdout.
 
 emulate -L zsh
 setopt nounset pipefail
 
-local status_file="" promotion_status_file="" promoted_file=""
-local -r USAGE="usage: build-dossier.zsh --status FILE [--promotion-status FILE --promoted FILE]"
+local status_file=""
+local -r USAGE="usage: build-dossier.zsh --status FILE"
 
-# `--status --promoted` must not silently swallow the next FLAG as this one's
-# value (the consolidate-findings precedent): a missing value is a usage error.
+# `--status --help` must not silently swallow the next FLAG as this one's value
+# (the consolidate-findings precedent): a missing value is a usage error.
 _need_val() {  # $1 = flag, $2 = remaining argc, $3 = candidate value
   [[ "$2" -ge 2 && "$3" != -* ]] || { print -r -u2 -- "build-dossier: $1 requires a value"; exit 2 }
   # the third arm of the cited precedent: an empty string is not flag-shaped, so
-  # `--promoted "$VAR"` with VAR unset would otherwise fall through to the
-  # atomic-pair check and name a flag the caller demonstrably DID pass.
+  # `--status "$VAR"` with VAR unset would otherwise fall through to the bare
+  # usage line and hide that the caller demonstrably DID pass the flag.
   [[ -n "$3" ]] || { print -r -u2 -- "build-dossier: $1 requires a non-empty value"; exit 2 }
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
   --status) _need_val "$1" $# "${2:-}"; status_file="$2"; shift 2 ;;
-  --promotion-status) _need_val "$1" $# "${2:-}"; promotion_status_file="$2"; shift 2 ;;
-  --promoted) _need_val "$1" $# "${2:-}"; promoted_file="$2"; shift 2 ;;
   -h|--help) print -r -- "$USAGE"; exit 0 ;;
   -*) print -r -u2 -- "unknown flag: $1"; exit 2 ;;
   *) print -r -u2 -- "unexpected argument: $1"; exit 2 ;;
@@ -66,22 +57,8 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$status_file" ]] || { print -r -u2 -- "$USAGE"; exit 2 }
 
-# --- the promotion flags are an ATOMIC PAIR ---------------------------------
-# Each alone is meaningless: a promotion status with no selection cannot report
-# what the human picked, and a selection with no promotion status has no phase
-# to describe. Silently ignoring the lone flag would ship a dossier that looks
-# complete while omitting the phase entirely — the exact failure #1064 exists to
-# close — so it is a usage error, not a fallback.
-if [[ -n "$promotion_status_file" && -z "$promoted_file" ]]; then
-  print -r -u2 -- "build-dossier: --promotion-status requires --promoted (they are an atomic pair)"; exit 2
-fi
-if [[ -n "$promoted_file" && -z "$promotion_status_file" ]]; then
-  print -r -u2 -- "build-dossier: --promoted requires --promotion-status (they are an atomic pair)"; exit 2
-fi
-
-# --- input validation, one shape for every status input ----------------------
-# Parity with the promotion inputs (#1064): `-s` alone let a file holding the
-# literal `null` through, whereupon `(.round_changelists // []) | length` is 0
+# --- input validation ---------------------------------------------------------
+# `-s` alone let a file holding the literal `null` through, whereupon `(.round_changelists // []) | length` is 0
 # and the script exited 0 having emitted NOTHING — the PR silently lost its
 # dossier with no diagnostic anywhere. `-s` is also true for a directory, which
 # would fail inside jq and be relabelled as a content problem. Require a regular
@@ -107,11 +84,11 @@ _read_status() {  # $1 = file, $2 = flag label; echoes the compact JSON
   print -r -- "$json"
 }
 
-local status_json="" promotion_status_json="null" promoted_json="[]"
+local status_json=""
 status_json=$(_read_status "$status_file" "--status") || exit $?
 
 # --- --status must be a CONVERGED run with nothing left open (#2599) --------
-# An ALLOW-list: when the blocking phase ran at least one round, its status must
+# An ALLOW-list: when the loop ran at least one round, its status must
 # be `CONVERGED`, the only ending that opens a PR (#2580). Anything else — an
 # escalation, `BUDGET_EXHAUSTED`, a non-ending such as `AWAITING_FIX` (the status
 # the loop writes most often, once per step-mode round), the retired
@@ -123,10 +100,9 @@ status_json=$(_read_status "$status_file" "--status") || exit $?
 #
 # The no-op shapes stay no-ops because they ran no round: `SKIPPED` (the
 # `--no-review` fast path), a zero-round status, and a status-less zero-round
-# file all reach the round count below and emit nothing. A zero-round `SKIPPED`
-# blocking status beside a real promotion phase still renders (#1064).
+# file all reach the round count below and emit nothing.
 #
-# Then the backstop the epic needs: `open` is counted from the blocking phase's
+# Then the backstop the epic needs: `open` is counted from the status's
 # final changelist whatever the status, and a count above 0 is refused, so no
 # dossier this script emits reports `open > 0` (#2586 and #2587 read it).
 _refuse_non_converged() {  # $1 = compact status JSON, $2 = flag label
@@ -170,88 +146,13 @@ _refuse_selected_final_gate() {  # $1 = compact status JSON, $2 = flag label
 }
 _refuse_selected_final_gate "$status_json" "--status"
 
-# The promotion operand's narrower cousin: NON-ENDINGS only. See the call site
-# below for why the escalating endings deliberately stay renderable here.
-_refuse_non_ending_promotion() {  # $1 = compact promotion status JSON
-  local st=""
-  st=$(print -r -- "$1" | jq -r '.status // empty' 2>/dev/null) || st=""
-  case "$st" in
-    AWAITING_FIX|STALE_FINDINGS|ERROR)
-      print -r -u2 -- "build-dossier: --promotion-status is not an ending (${st}) — the dossier would report the run exited a status the loop never terminates on. Pass the promotion phase's terminal status."
-      exit 1 ;;
-  esac
-}
-
-if [[ -n "$promotion_status_file" ]]; then
-  promotion_status_json=$(_read_status "$promotion_status_file" "--promotion-status") || exit $?
-  # Guarded NARROWLY, and the narrowness is the point. #1064 contracts this
-  # operand as renderable in a non-`CONVERGED` **ending** — the section says "and
-  # the phase exited **X**" precisely so a promotion phase that did not clear its
-  # picks is reported rather than hidden — so the escalating endings must stay
-  # through. Nothing in #1064 contracts a NON-ending, and one of those is the
-  # real hazard: `$terminal` is this operand whenever the pair is passed, so its
-  # status is what the opening sentence and the hidden block report. A stale
-  # `AWAITING_FIX` — the value the sub-loop overwrites its status file with every
-  # intermediate round, i.e. the most-written value here — would render "exited
-  # **AWAITING_FIX**", a status no run ends on.
-  _refuse_non_ending_promotion "$promotion_status_json"
-  _refuse_selected_final_gate "$promotion_status_json" "--promotion-status"
-  # the SELECTION file, same element-shape discipline as consolidate-findings'
-  # --promote: `["a title"]` or `[113]` pass a bare `type == "array"` test and
-  # then abort deep inside the main jq, blaming the wrong input.
-  [[ -f "$promoted_file" && -s "$promoted_file" ]] || {
-    print -r -u2 -- "build-dossier: --promoted must be a non-empty regular file: $promoted_file"; exit 1 }
-  # Same discipline as the LOOP's own --promote validator, `length > 0`
-  # included: selecting nothing is contracted to skip the sub-loop entirely, so
-  # an empty array means no phase ran and the pair should not have been passed.
-  # (The consolidator ENGINE is the lenient one — it tolerates `[]` as a
-  # provably no-op overlay; the loop refuses it at exit 2, this at exit 1.)
-  # Emitting `selected: 0` would assert in the durable audit record that a phase
-  # happened which by contract cannot have.
-  promoted_json=$(jq -c 'if (type == "array") and (length > 0)
-                            and (all(.[]; type == "object"
-                                  and (.file | type == "string" and length > 0)
-                                  and (.dimension | type == "string" and length > 0)
-                                  and (.title | type == "string")))
-                         then . else error("promoted input is not an array of identity-key objects") end' \
-    -- "$promoted_file") || {
-    print -r -u2 -- "build-dossier: --promoted file unreadable, or not a NON-EMPTY JSON array of objects with non-empty file and dimension and a string title: $promoted_file"; exit 1 }
-  [[ "$promoted_json" != *$'\n'* ]] || {
-    print -r -u2 -- "build-dossier: --promoted file must hold exactly ONE JSON array: $promoted_file"; exit 1 }
-  [[ -n "$promoted_json" ]] || {
-    print -r -u2 -- "build-dossier: --promoted file yielded no JSON value: $promoted_file"; exit 1 }
-fi
-
-# --- nothing to render when NEITHER phase ran --------------------------------
-# Summed across phases (#1064): gating on the blocking phase alone discarded a
-# real promotion phase's record whenever the blocking phase had zero rounds.
+# --- nothing to render when the loop ran no round ------------------------------
 local nrounds=""
-nrounds=$(jq -n --argjson s "$status_json" --argjson p "$promotion_status_json" \
-  '(($s.round_changelists // []) | length) + ((($p // {}).round_changelists // []) | length)') || {
+nrounds=$(jq -n --argjson s "$status_json" '($s.round_changelists // []) | length') || {
   print -r -u2 -- "build-dossier: could not count rounds"; exit 1 }
 [[ "$nrounds" -gt 0 ]] || exit 0
 
 # --- the machine-readable dossier object (dimension-tagged, #449 enum) -------
-#
-# THE PROMOTED-ITEM EXCLUSION (#1064). An item the human promoted and the
-# sub-loop fixed must not still read as "logged and deliberately not acted on".
-# The set to drop is taken from the ENGINE'S OWN VERDICT — the `promoted: true`
-# stamp the overlay writes on each item it raised (#995) — never from re-running
-# the match here, so the dossier and the overlay can never disagree about what
-# was promoted.
-#
-# Identity for the drop is [file, dimension, normalized title] — LINE-INSENSITIVE
-# (the promotion phase re-reports an item at its current line, which has drifted
-# from the line the blocking phase recorded) but requiring an EXACT normalized
-# title. That is deliberately STRICTER than the overlay's own verdict, which also
-# promotes on a shared significant token: an item whose title the panel REWORDED
-# between phases is fixed but stays listed as waived. The asymmetry is chosen for
-# its failure direction — the strict rule can only ever leave a fixed item listed
-# (conservative, visible, and contradicted by the promotion counts right above
-# it), whereas token-matching here could DROP a genuinely waived neighbour that
-# merely shares a word, hiding real un-actioned work. The overlay can afford
-# leniency because it is line-windowed and one-to-one; the dossier reconstructs
-# neither bound.
 #
 # THE RISK-DEMOTED SET (#1921). Findings the loop demoted below
 # corner_case_risk_threshold are Low items stamped `demoted: true`, so without a
@@ -259,20 +160,18 @@ nrounds=$(jq -n --argjson s "$status_json" --argjson p "$promotion_status_json" 
 # cleared a reviewer blocking bar and was set aside by a risk judgement. ONE
 # harvest, prepended to both programs below so the hidden block and the rendered
 # table can never list different findings. It walks EVERY item — blocking and
-# suggestions — of every round of both phases in order and follows each finding
-# the way the consolidator follows one across rounds: same file, dimension and
-# normalised title, with the line within LINEWIN (10) lines of the record it
-# continues (a null line on either side is a wildcard). So a fix pass that moves
-# a finding a few lines still continues its record, while two same-titled
-# findings further apart stay two records. Each record carries the finding as it
-# was LATEST seen (`priority`, `demoted`) and whether any occurrence was demoted
-# (`anydemoted`). The demoted set is the records whose latest occurrence is still
-# demoted — so a finding a later round kept blocking, or the human promoted back
-# and the sub-loop then fixed, is not listed as "not fixed". `seq` orders the
-# records across both phases (round numbers restart in a promotion phase) and is
-# dropped from the hidden block. With nothing demoted no record has
-# `anydemoted`, which keeps a run with the threshold off byte-identical. (No
-# apostrophes: the definition is single-quoted.)
+# suggestions — of every round in order and follows each finding the way the
+# consolidator follows one across rounds: same file, dimension and normalised
+# title, with the line within LINEWIN (10) lines of the record it continues (a
+# null line on either side is a wildcard). So a fix pass that moves a finding a
+# few lines still continues its record, while two same-titled findings further
+# apart stay two records. Each record carries the finding as it was LATEST seen
+# (`priority`, `demoted`) and whether any occurrence was demoted (`anydemoted`).
+# The demoted set is the records whose latest occurrence is still demoted — so a
+# finding a later round kept blocking is not listed as "not fixed". `seq` orders
+# the records and is dropped from the hidden block. With nothing demoted no
+# record has `anydemoted`, which keeps a run with the threshold off
+# byte-identical. (No apostrophes: the definition is single-quoted.)
 local demoted_def='
   def dem_lk: [(.file // ""), (.dimension // ""),
                ((.title // "") | tostring | ascii_downcase | gsub("\\s+"; " ")
@@ -294,8 +193,8 @@ local demoted_def='
         | { i: .key, d: (if ((.value.line | type) == "number") and (($it.line | type) == "number")
                          then ((.value.line - $it.line) | if . < 0 then -. else . end) else 11 end) } ]
     | sort_by(.d) | (.[0].i // null);
-  def dem_records($s; $p):
-    [ (($s.round_changelists // []) + ((($p // {}).round_changelists // [])))
+  def dem_records($s):
+    [ ($s.round_changelists // [])
       | to_entries[] | .key as $pass | .value | .round as $rn
       | ((.blocking // []), (.suggestions // []))[]
       | { item: ., round: $rn, pass: $pass } ]
@@ -315,80 +214,21 @@ local demoted_def='
             threshold: $it.risk_assessment.threshold,
             bar: $it.risk_assessment.bar } as $r
         | if $i == null then . + [$r] else .[$i] = $r end);
-  # the identities the promotion phase raised (`promoted: true`), line-insensitive
-  # like the #1064 exclusion: a demoted finding the human picked and the
-  # sub-loop fixed is not "not fixed", even when the fix moved it past the window
-  def dem_raised($p): [ (($p // {}).round_changelists // [])[] | .blocking[]?
-                        | select(.promoted == true) | dem_lk ];
-  def dem_picked($r): (.priority == "Low") and (.lk as $k | any($r[]; . == $k));
-  def demoted_set($s; $p):
-    dem_raised($p) as $r
-    | [ dem_records($s; $p)[] | select(.demoted) | select(dem_picked($r) | not) ];
+  def demoted_set($s): [ dem_records($s)[] | select(.demoted) ];
 '
 local dossier=""
-dossier=$(jq -cn --argjson s "$status_json" --argjson p "$promotion_status_json" \
-              --argjson sel "$promoted_json" "$demoted_def"'
-  def normtitle: ((. // "") | tostring | ascii_downcase | gsub("\\s+"; " ")
-    | sub("^ +"; "") | sub(" +$"; ""));
-  # a STRING key, not an array: jq index() on an array argument searches for a
-  # SUBSEQUENCE, so an array-valued identity would match by accident.
-  def identkey: [(.file // ""), (.dimension // ""), (.title | normtitle)] | tojson;
-  # the overlay title-verdict helpers, copied verbatim from consolidate-findings
-  # so the dossier attributes a raise to the same key the engine did
-  def sigtokens: ((. // "") | tostring | ascii_downcase | [ scan("[a-z0-9]+") ]
-    | map(select(length >= 4)) | unique);
-  def shares_token($a; $b): (($a | length) > 0) and (($b | length) > 0)
-    and ([ $a[] | select(. as $x | $b | index($x)) ] | length) > 0;
+dossier=$(jq -cn --argjson s "$status_json" "$demoted_def"'
   ["bugs","security","performance","code_quality","tests"] as $core
   | (($s.round_changelists // [])) as $brounds
-  | ((($p // {}).round_changelists // [])) as $prounds
-  # PROMOTION FIRST in the concatenation. This ordering decides exactly ONE case:
-  # an item both phases report at the SAME [file, line, dimension, title], where
-  # unique_by keeps the first of the group and the raised (blocking) view from
-  # the promotion phase therefore wins over the waived (Low) view. It does NOT
-  # handle the drifted-line case — there the two views land in different groups
-  # and never merge; the line-insensitive exclusion below is what resolves that.
   # (No apostrophes in these jq comments: the program is a single-quoted shell
   # string, so one would close it and hand the rest to the shell as code.)
-  | [ ($prounds[], $brounds[]) | (.blocking[]?, .suggestions[]?) ] as $allf
-  # the raised set: every identity the overlay actually stamped, deduped (a
-  # promoted item that survives two rounds is stamped in each)
-  # Same per-item expression as the four sibling copies (progress block,
-  # escalation table, telemetry payload, and the round-suffix read below) —
-  # change all five together (#995/#1064). THIS read is the one whose failure is
-  # silent: move the stamp and the waived-list exclusion simply stops firing, so
-  # a promoted-and-fixed item reappears as a waived suggestion.
-  | ([ $prounds[] | .blocking[]? | select(.promoted == true) | identkey ] | unique) as $raised
-  | (reduce $raised[] as $k ({}; . + { ($k): true })) as $raisedset
+  | [ $brounds[] | (.blocking[]?, .suggestions[]?) ] as $allf
   | ( [ $allf[] | {file, line, dimension, title,
                    priority: (.priority // "Low"),
                    reviewers: (.reviewers // [])} ]
       | unique_by([.file, .line, .dimension, .title]) ) as $u
-  # ONE exclusion, applied ONCE, upstream of BOTH the dimension counts and the
-  # waived list — so the rendered and machine-readable halves cannot disagree.
-  # Only Lows are dropped: the raised item itself must keep counting as blocking.
-  | [ $u[] | select((.priority == "Low") and ($raisedset[identkey] == true) | not) ] as $uv0
-  # CROSS-PHASE Low dedupe, by the same line-insensitive identity. unique_by
-  # above keys on the LINE, so an unpromoted waived Low that the promotion panel
-  # re-reports at a drifted line survives as two entries — listed twice in the
-  # waived list and counted twice in its dimension. Deduped here via a reduce
-  # rather than a second unique_by so the surviving ORDER is untouched: a plain
-  # unique_by would re-sort the waived list, changing the single-phase output
-  # that is otherwise byte-identical to before this merge existed.
-  # Gated on a promotion phase being present. The same drifted-line collision is
-  # reachable WITHIN one phase (a Low re-reported by a later round after a fix
-  # shifted it), where the pre-#1064 script listed both — so running this
-  # unconditionally would change single-phase output, which must stay
-  # byte-identical to before this merge existed. Cross-phase merging is the only
-  # duplication #1064 introduces, so it is the only one it removes.
-  | ( if $p == null then $uv0
-      else ( reduce $uv0[] as $x ({ seen: {}, out: [] };
-               ($x | identkey) as $k
-               | if ($x.priority == "Low") and (.seen[$k] == true) then .
-                 else { seen: (if $x.priority == "Low" then (.seen + { ($k): true }) else .seen end),
-                        out: (.out + [$x]) } end) | .out ) end ) as $uvraw
-  | dem_records($s; $p) as $recs
-  | demoted_set($s; $p) as $demmap
+  | dem_records($s) as $recs
+  | demoted_set($s) as $demmap
   # A finding that was demoted in ANY round (#1921) is counted ONCE, with the
   # priority and line of its LATEST occurrence, in both directions:
   # blocking-then-demoted counts as a suggestion and stays in waived_low, and
@@ -398,27 +238,21 @@ dossier=$(jq -cn --argjson s "$status_json" --argjson p "$promotion_status_json"
   # (file, line, dimension, title) and priority, and a deduped entry survives
   # only when no such record absorbed its exact identity (`ids`). A record never
   # demoted whose every identity was absorbed that way contributes its own
-  # entry too, so no finding is lost to a shared identity. A demoted Low the
-  # promotion phase raised is left out, as the #1064 exclusion leaves it out of
-  # $uvraw. A finding never demoted is left exactly as before, so with nothing
-  # demoted $uv is $uvraw.
-  | dem_raised($p) as $raisedlk
+  # entry too, so no finding is lost to a shared identity. A finding never
+  # demoted is left exactly as before, so with nothing demoted $uv is $u.
   | [ $recs[] | select(.anydemoted) ] as $drecs
   | [ $drecs[].ids[] ] as $claimed
-  | ( [ $uvraw[] | ([.file, .line, .dimension, .title] | tojson) as $id
+  | ( [ $u[] | ([.file, .line, .dimension, .title] | tojson) as $id
         | select(any($claimed[]; . == $id) | not) ]
       + [ $recs[] | select(.anydemoted
                            or (all(.ids[]; . as $i | any($claimed[]; . == $i)) and ($claimed | length) > 0))
-          | select(dem_picked($raisedlk) | not)
           | { file, line, dimension, title, priority, reviewers: [] } ] ) as $uv
   | (($core + ($uv | map(.dimension))) | unique) as $dims
-  | (if $p == null then $s else $p end) as $terminal
-  # Blockers still OPEN, per dimension, from the final changelist of the
-  # BLOCKING phase and never from `$terminal` (the promotion status whenever the
-  # pair is passed). The guard above refuses a non-zero count, so every emitted
-  # dossier carries `open: 0`; the key stays because the Approver backstops read
-  # it (#2586, #2587), and counting it here unconditionally keeps the hidden
-  # block honest even if that guard is ever bypassed.
+  # Blockers still OPEN, per dimension, from the final changelist. The guard
+  # above refuses a non-zero count, so every emitted dossier carries `open: 0`;
+  # the key stays because the Approver backstops read it (#2586, #2587), and
+  # counting it here unconditionally keeps the hidden block honest even if that
+  # guard is ever bypassed.
   | ($s.final_changelist.blocking // []) as $openblk
   | ( reduce $openblk[] as $b ({};
         ((($b.dimension // "") | tostring)) as $bd
@@ -431,9 +265,9 @@ dossier=$(jq -cn --argjson s "$status_json" --argjson p "$promotion_status_json"
           clean: ([ $uv[] | select(.dimension==$d) ] | length == 0)
         }}) ) as $dimmap
   | {
-      status: $terminal.status,
-      rounds: ((($s.rounds // ($brounds | length))) + (if $p == null then 0 else ($p.rounds // ($prounds | length)) end)),
-      repo_type: ($s.repo_type // ($p // {}).repo_type),
+      status: $s.status,
+      rounds: ($s.rounds // ($brounds | length)),
+      repo_type: $s.repo_type,
       dimensions: $dimmap,
       # a risk-demoted finding (#1921) STAYS in this machine-readable list, which
       # the Approver folds into its risk register: removing it would take a
@@ -441,14 +275,8 @@ dossier=$(jq -cn --argjson s "$status_json" --argjson p "$promotion_status_json"
       # rendered waived list below leaves it out, since the human reads it in
       # its own table; `risk_demoted` names which of these were demoted.
       waived_low: [ $uv[] | select(.priority=="Low") | {file, line, dimension, title} ],
-      # Reviewers come from the widest set, because BOTH the exclusion and the
-      # cross-phase dedupe drop whole findings — and a dropped copy may name a
-      # reviewer the surviving one does not (each round consolidates only its
-      # own reporters). Such a reviewer did review this change and must not
-      # vanish from the audit record. $allf is pre-dedupe and pre-exclusion; the
-      # $p == null arm keeps single-phase output byte-identical.
-      reviewers: ([ (if $p == null then $u else $allf end)[] | .reviewers[]? ] | unique),
-      final: ($terminal.final_changelist.summary // {})
+      reviewers: ([ $u[] | .reviewers[]? ] | unique),
+      final: ($s.final_changelist.summary // {})
     }
   # present only when non-empty (#1921), so a dossier with no demotion keeps
   # exactly its previous shape for every reader of the hidden block
@@ -456,41 +284,15 @@ dossier=$(jq -cn --argjson s "$status_json" --argjson p "$promotion_status_json"
   # threshold it was judged against; any other entry keeps its #1921 shape
   | if ($demmap | length) == 0 then . else . + { risk_demoted: [ $demmap[]
         | {file, line, dimension, title, round, p, impact, risk_thousandths}
-          + (if .bar == "extension" then {bar, threshold} else {} end) ] } end
-  | if $p == null then . else . + { promotion: {
-      rounds: ($p.rounds // ($prounds | length)),
-      status: $p.status,
-      selected: ($sel | length),
-      # How many of the human KEYS the engine raised — never how many distinct
-      # findings it stamped. Across rounds one key can be re-matched to a
-      # succession of different findings as the text it names moves (the overlay
-      # is one-to-one per ROUND, not per phase), so counting stamped identities
-      # can exceed `selected` and render the nonsense "selected 1, of which 2
-      # were raised". Bounded by construction: a key counts once, when some
-      # stamped identity shares its file and dimension. Deliberately ignoring the
-      # title here — the overlay raises on a shared token or a tokenless side, so
-      # the raised title legitimately differs from the key it came from.
-      promoted: ([ $sel[]
-                   | (.file // "") as $kf | (.dimension // "") as $kd
-                   | ((.title // "") | normtitle) as $kt
-                   | ((.title // "") | sigtokens) as $ktok
-                   | select([ $raised[] | fromjson
-                              | select(.[0] == $kf and .[1] == $kd
-                                  and (.[2] == $kt
-                                       or ($ktok | length) == 0
-                                       or ((.[2] | sigtokens) | length) == 0
-                                       or shares_token($ktok; (.[2] | sigtokens)))) ]
-                            | length > 0) ]
-                 | length)
-    } } end') || { print -r -u2 -- "build-dossier: could not build dossier"; exit 1 }
+          + (if .bar == "extension" then {bar, threshold} else {} end) ] } end') || {
+  print -r -u2 -- "build-dossier: could not build dossier"; exit 1 }
 
 # --- human-readable section --------------------------------------------------
 # BUFFERED, then printed once (#1064). Streaming this block straight to stdout
 # meant a jq failure part-way through shipped a TRUNCATED dossier at exit 0 — a
 # PR body carrying half a section and no hidden block, with nothing to signal it.
 local section=""
-section=$(jq -rn --argjson s "$status_json" --argjson p "$promotion_status_json" \
-                 --argjson d "$dossier" "$demoted_def"'
+section=$(jq -rn --argjson s "$status_json" --argjson d "$dossier" "$demoted_def"'
   # untrusted reviewer and conductor text in a table cell (#1921): newlines and
   # backticks stripped, pipes escaped — the same neutralisation the residue
   # builder applies to its dropped-finding rows
@@ -498,11 +300,7 @@ section=$(jq -rn --argjson s "$status_json" --argjson p "$promotion_status_json"
             | sub("^ +"; "") | sub(" +$"; "");
   def cell: safe | gsub("\\|"; "\\|");
   def linepart: if (.line | type) == "number" then ":\(.line)" else "" end;
-  # the second of the two build-dossier stamp reads — same per-item expression
-  # as the four sibling copies; change all five together (#995/#1064)
-  def roundline($r; $label): "- \($label)\($r.round): \($r.summary.blocking) blocking"
-    + (if (([ $r.blocking[]? | select(.promoted == true) ] | length) > 0)
-       then " (\([ $r.blocking[]? | select(.promoted == true) ] | length) promoted)" else "" end)
+  def roundline($r): "- Round \($r.round): \($r.summary.blocking) blocking"
     + (if ($r.summary.conflicts // 0) > 0 then ", \($r.summary.conflicts) conflict(s)" else "" end)
     + ", \($r.summary.low) suggestion(s) logged";
   [ "## Review dossier",
@@ -511,26 +309,15 @@ section=$(jq -rn --argjson s "$status_json" --argjson p "$promotion_status_json"
      + "before this PR was opened — CI is only spent on code the reviewer panel already converged on."),
     ""
   ]
-  + (if $p == null then [] else
-      [ ("A **suggestion-promotion phase** (#994) ran after convergence: the human selected "
-         + "**\($d.promotion.selected)** waived suggestion(s), of which **\($d.promotion.promoted)** "
-         + "were raised to blocking over \($d.promotion.rounds) round(s)"
-         # only a CONVERGED promotion phase actually cleared them; saying
-         # "cleared" next to an exited-BUDGET_EXHAUSTED line contradicts itself
-         + (if $d.promotion.status == "CONVERGED" then " and cleared."
-            else " and the phase exited **\($d.promotion.status)**." end)
-         + " Promoted-and-fixed items are excluded from the waived list below."),
-        "" ] end)
   + [ "**Per round**", "" ]
-  + [ ($s.round_changelists[]? | roundline(.; "Round ")) ]
-  + (if $p == null then [] else [ ($p.round_changelists[]? | roundline(.; "Promotion round ")) ] end)
+  + [ ($s.round_changelists[]? | roundline(.)) ]
   + [ "", "**Dimensions reviewed** (#449 lenses)", "" ]
   + [ ($d.dimensions | to_entries[] |
         if .value.clean then "- `\(.key)` — ✓ clean (reviewed, no findings)"
         else "- `\(.key)` — \(.value.blocking) blocking found & fixed, \(.value.suggestions) suggestion(s)" end) ]
   + [ "" ]
   # RISK-DEMOTED (#1921), above the waived list and never folded into it.
-  + ( [ demoted_set($s; $p)[] ] as $dem
+  + ( [ demoted_set($s)[] ] as $dem
       | if ($dem | length) == 0 then [] else
           # the heading names the base threshold from a base-bar record; when
           # every record is an extension-bar demotion (#2577) it names that bar
@@ -554,7 +341,7 @@ section=$(jq -rn --argjson s "$status_json" --argjson p "$promotion_status_json"
   # lists (#1921); waived_low carries each demoted finding under the latest
   # identity of its record, so that identity is the match. With nothing demoted the
   # filter keeps everything
-  + ( demoted_set($s; $p) as $dm
+  + ( demoted_set($s) as $dm
       | [ $dm[] | [.file, .line, .dimension, .title] | tojson ] as $dmids
       | [ $d.waived_low[] | ([.file, .line, .dimension, .title] | tojson) as $id
           | select(any($dmids[]; . == $id) | not) ] as $wl
