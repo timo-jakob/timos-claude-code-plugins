@@ -38,8 +38,7 @@ one shared parser (`scripts/risk-threshold-lib.zsh`):
   naming the value that `reference/residue/risk-threshold.md` prescribes for this state, once per run,
   whichever terminal the run reaches.
 - **On**: in step mode, everything below applies, every round, including the
-  promotion sub-loop's rounds and the closing sweep. Hook mode supplies no
-  assessment (see below).
+  closing sweep. Hook mode supplies no assessment (see below).
 
 **Extension rounds raise the bar (#2577).** A round is an **extension round**
 when the work-dir's grant ledger, `grants.jsonl`, is non-empty **and** the
@@ -142,9 +141,8 @@ resolve-story-loop.zsh … --resume --findings-file <…> \
   moves to `suggestions` with `demoted: true` and never blocks convergence. The
   comparison is in integer thousandths, and a risk exactly at the threshold
   stays blocking.
-- **Never demoted**, at any threshold or risk: a `CRITICAL` item, a
-  human-promoted item (`promoted: true`), and an item a tool decided red
-  (`decided: "red"`, or a red anywhere in its dedup group).
+- **Never demoted**, at any threshold or risk: a `CRITICAL` item and an item a
+  tool decided red (`decided: "red"`, or a red anywhere in its dedup group).
 - A dedup group is demoted only when every `WARNING` member was assessed and
   its **highest** member risk is below the threshold.
 
@@ -158,11 +156,3 @@ resolve-story-loop.zsh … --resume --findings-file <…> \
   `demoted`, the round line shows `demoted by risk D`, and it is not carried
   into the next round (*Carry accounting*).
 - The PR dossier lists it in its own table, above the waived suggestions.
-- The suggestion-promotion prompt offers it back like any other waived
-  suggestion — under `reference/promotion/gate.md`'s own derivation, which keeps a finding's
-  earliest occurrence, so a finding that blocked in an earlier round and was
-  demoted later is listed in the dossier table but not offered. With
-  `enable_suggestions` off there is no prompt, and the progress block and the
-  dossier table are the only records. A pick survives the sub-loop's own risk
-  pass: the consolidator demotes before its promotion overlay, which raises the
-  pick again.

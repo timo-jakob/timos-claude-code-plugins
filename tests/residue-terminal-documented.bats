@@ -26,10 +26,12 @@
 # story at a time, so this suite now holds two explicit lists instead of a
 # roster: NOT_YET_MIGRATED (the sites later stories own, each of which must still
 # name the terminal until its own story migrates it and shrinks the list in the
-# same PR) and KEPT (the five sites that keep naming it, all inside byte-frozen
-# spans; #2601 deleted residue/branch.md and condition-2-removed.md). Every other
-# markdown site naming it is a stray, except ARCHITECTURE.md, whose telemetry
-# recipes still count historical records carrying the status.
+# same PR) and KEPT (the three sites that keep naming it, all inside byte-frozen
+# spans; #2601 deleted residue/branch.md and condition-2-removed.md, and #3129
+# dropped the promotion shards, which #3133 deletes). Every other markdown site
+# naming it is a stray, except ARCHITECTURE.md, whose telemetry recipes still
+# count historical records carrying the status, and reference/promotion/, which
+# is on its way out.
 
 bats_require_minimum_version 1.5.0
 load assertions
@@ -53,12 +55,11 @@ setup() {
   NOT_YET_MIGRATED=()
   # ...and the sites that keep naming it, all inside byte-frozen spans. #2601
   # shrank this set from seven by deleting residue/branch.md and
-  # condition-2-removed.md whole.
+  # condition-2-removed.md whole; #3129 dropped the two promotion shards, since
+  # #3133 deletes reference/promotion/ (#3121).
   KEPT=(
     "development/skills/resolve-issue/reference/escalation.md"
     "development/skills/resolve-issue/reference/interactive/extension-grant.md"
-    "development/skills/resolve-issue/reference/promotion/step-4-sub-loop.md"
-    "development/skills/resolve-issue/reference/promotion/step-7-terminal.md"
     "development/skills/resolve-issue/reference/review-loop/exit-20-awaiting-fix.md"
   )
 }
@@ -131,8 +132,8 @@ _invariant_in_awaiting_fix_branch() {
   [ "${#NOT_YET_MIGRATED[@]}" -eq 0 ]
 }
 
-@test "the kept, not-migrated set names exactly the five remaining frozen sites" {
-  [ "${#KEPT[@]}" -eq 5 ]
+@test "the kept, not-migrated set names exactly the three remaining frozen sites" {
+  [ "${#KEPT[@]}" -eq 3 ]
   local f
   for f in "${KEPT[@]}"; do
     grep -q 'CONVERGED_WITH_RESIDUE' "$REPO_ROOT/$f" || {
@@ -147,11 +148,13 @@ _invariant_in_awaiting_fix_branch() {
   # again, or a new site that starts to, reds here. ARCHITECTURE.md is the one
   # stated exception: its telemetry recipes and legacy attribution still count
   # historical records carrying the status, and #2580's state-machine section
-  # names it to retire it.
+  # names it to retire it. reference/promotion/ is the other: #3129 dropped its
+  # shards from KEPT, and #3133 deletes the directory (#3121).
   local found want e
   found="$(all_markdown | sed "s#^#$REPO_ROOT/#" \
            | xargs grep -l 'CONVERGED_WITH_RESIDUE' 2>/dev/null \
-           | sed "s#^$REPO_ROOT/##" | sort)"
+           | sed "s#^$REPO_ROOT/##" \
+           | grep -v '^development/skills/resolve-issue/reference/promotion/' | sort)"
   want="$( { printf '%s\n' "${KEPT[@]}" ARCHITECTURE.md
              for e in "${NOT_YET_MIGRATED[@]}"; do printf '%s\n' "${e%%|*}"; done; } \
            | grep -E '\.md(\.tmpl)?$' | sort)"
@@ -750,7 +753,7 @@ _filing_path_mentions() {
     '**Assess afresh every round.** A finding re-raised in a later round is assessed again'
     '`<work-dir>/risk-<R>.json`'
     '--risk <work-dir>/risk-<R>.json'
-    '**Never demoted**, at any threshold or risk: a `CRITICAL` item, a human-promoted item (`promoted: true`), and an item a tool decided red'
+    '**Never demoted**, at any threshold or risk: a `CRITICAL` item and an item a tool decided red'
     'A dedup group is demoted only when every `WARNING` member was assessed and its **highest** member risk is below the threshold.'
     'A demoted finding never disappears.'
   )
@@ -768,8 +771,6 @@ _filing_path_mentions() {
 @test "#2580 AC4 AC5 every kept shard carries its retirement note outside the frozen span" {
   grep -q 'The exit-14 arm of step 5 is retired by #2580 and can no longer fire.' <<< "$(flat "$RI_REF/interactive/extension-grant.md")"
   grep -q 'The residue terminal is retired (#2580).\*\* The block above still sends a `CONVERGED_WITH_RESIDUE` exit to the residue branch; that can no longer happen.' <<< "$(flat "$RI_REF/escalation.md")"
-  grep -q 'the promotion phase only ever follows `CONVERGED`.' <<< "$(flat "$RI_REF/promotion/step-4-sub-loop.md")"
-  grep -q 'so the phase only ever follows `CONVERGED`, and the sub-loop.s exit 14 stays as unreachable as the block already says.' <<< "$(flat "$RI_REF/promotion/step-7-terminal.md")"
   grep -q 'only a \*\*zero-blocker\*\* delta round promotes the closing sweep' <<< "$(flat "$RI_REF/review-loop/exit-20-awaiting-fix.md")"
   # every note sits OUTSIDE its file's frozen span: the frozen text still matches
   # the pinned pre-move commit

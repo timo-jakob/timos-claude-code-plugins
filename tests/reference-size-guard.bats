@@ -180,29 +180,6 @@ home_problems_in() {
   done
 }
 
-@test "#2057 MUTATION: the guards cover reference/promotion/ — an oversized shard, an over-long index, a dropped heading" {
-  local fx="$BATS_TEST_TMPDIR/ref" h
-  cp -R "$REPO_ROOT/$REF_REL" "$fx"
-  [ -z "$(size_problems_in "$fx")" ]
-  [ -z "$(home_problems_in "$fx")" ]
-
-  head -c 20001 /dev/zero | tr '\0' 'x' > "$fx/promotion/planted.md"
-  run size_problems_in "$fx"
-  [ "$output" = 'promotion/planted.md is 20001 bytes (max 20000)' ]
-  rm -- "$fx/promotion/planted.md"
-
-  cp -- "$fx/promotion.md" "$fx/promotion.md.orig"
-  head -c 3001 /dev/zero | tr '\0' 'x' > "$fx/promotion.md"
-  run size_problems_in "$fx"
-  [ "$output" = 'index promotion.md is 3001 bytes (max 3000)' ]
-  mv -- "$fx/promotion.md.orig" "$fx/promotion.md"
-
-  h='## Suggestion promotion on convergence — human-curated, opt-in (#994)'
-  grep -vxF -- "$h" "$fx/promotion/gate.md" > "$fx/tmp" && mv -- "$fx/tmp" "$fx/promotion/gate.md"
-  run home_problems_in "$fx"
-  [ "$output" = "promotion.md heading appears 0 times across reference/ (want 1): $h" ]
-}
-
 @test "#2058 MUTATION: the guards cover reference/interactive/ — an oversized shard, an over-long index, a dropped heading" {
   local fx="$BATS_TEST_TMPDIR/ref" h
   cp -R "$REPO_ROOT/$REF_REL" "$fx"
