@@ -298,10 +298,8 @@ round_table=$(jq -r '
              then (((($rs[$i-1].blocking // []) | length) - $carried_priors) | if . < 0 then 0 else . end)
              else null end) as $fixed
           # human-promoted blockers (#995) — a SUBSET of the Warning column, not
-          # an addition to it. Same per-item expression as the four sibling
-          # copies (progress block, telemetry payload, and the two
-          # build-dossier reads: raised-set + round suffix, #1064), and no
-          # stamp gate: an unstamped round counts 0, never "–".
+          # an addition to it. Same per-item expression as the progress
+          # block, and no stamp gate: an unstamped round counts 0, never "–".
           | ([ $blk[] | select(.promoted == true) ] | length) as $promoted
           | "| \($r.round // ($i + 1)) | \($r.summary.critical // 0) | \($r.summary.high // 0) | \($r.summary.low // 0) |"
             + (if $anyprom then " \($promoted) |" else "" end)

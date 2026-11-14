@@ -4680,17 +4680,18 @@ reliable but the merging needs semantics:
   with **no** stamp gate (the `false_trip` precedent), so an absent flag simply
   counts 0 and a run without `--promote` stays byte-identical. The stamp is what
   makes a promoted item *readable* as such everywhere downstream, where it would
-  otherwise be indistinguishable from a reviewer-raised Warning: the per-round
-  `promoted` count in the telemetry payload, the `promoted:` term and the
+  otherwise be indistinguishable from a reviewer-raised Warning: the
+  `promoted:` term and the
   per-item `- promoted suggestion:` line in `progress.md`, the `Promoted`
   column plus `[<dimension>/Warning (promoted)]` bullets in the escalation.
   `build-dossier.zsh` no longer reads the stamp: the dossier dropped the
-  promotion phase (#3131). Both
+  promotion phase (#3131). `build-telemetry-record.zsh` no longer reads it
+  either: the payload dropped the count (#3132). Both
   the `promoted:` term and the `Promoted` column are rendered **only when there
   is one** (the column table-wide, since a column present in one row and absent
   in another is not a table) — which is what keeps a run without `--promote`
-  byte-identical to before the label existed. All
-  **three** read the stamp with the **identical** expression
+  byte-identical to before the label existed. `progress.md` and the
+  escalation read the stamp with the **identical** expression
   (`[ $blk[] | select(.promoted == true) ] | length`) — the same
   lockstep the stamped/carried/new/fixed derivation carries; change them
   together. The count is a

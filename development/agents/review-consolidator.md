@@ -106,14 +106,11 @@ and the fix-touched path. The engine returns the changelist with:
 - **promotion (#994/#995)** — an item the human promoted from a waived
   suggestion carries `promoted: true` (the overlay raises it to
   `WARNING`/`High` before any classification runs). Dropping the stamp makes it
-  indistinguishable from a reviewer-raised Warning, and all four surfaces that
-  read it — the telemetry payload's per-round `promoted` count, `progress.md`'s
-  `promoted:` term and `- promoted suggestion:` lines, the escalation's
-  `Promoted` column and `[<dimension>/Warning (promoted)]` bullets, and the PR
-  review dossier's `promotion.promoted` count plus its `(N promoted)` round
-  suffix (#1064) — then silently report 0. In the dossier the consequence is
-  worse than a zero: its waived-list **exclusion** stops firing, so an item the
-  human promoted and the loop fixed is re-listed as a waived suggestion.
+  indistinguishable from a reviewer-raised Warning, and the surfaces that
+  read it — `progress.md`'s
+  `promoted:` term and `- promoted suggestion:` lines, and the escalation's
+  `Promoted` column and `[<dimension>/Warning (promoted)]` bullets — then
+  silently report 0.
   Never add the stamp to an item **no constituent carried** either — only the
   engine's overlay decides what was promoted. (A merged item
   counts as carrying it when **any** constituent did — see the merge rule below;
@@ -144,8 +141,8 @@ flagging, never inventing or dropping a real finding**:
    `promoted: true`** — in either merge direction, since merging is symmetric:
    the
    promoted count is contracted everywhere as a **subset of the round's
-   Warnings** (the telemetry payload, `progress.md`, the escalation's Promoted
-   column all count `promoted == true` across the whole blocking array), so a
+   Warnings** (`progress.md` and the escalation's Promoted
+   column both count `promoted == true` across the whole blocking array), so a
    Critical carrying the stamp makes `Warning − Promoted` go negative for every
    downstream reader. The engine can never produce that — it stamps only Lows it
    raises to `WARNING` — so this merge is the only way it could happen. Leave
