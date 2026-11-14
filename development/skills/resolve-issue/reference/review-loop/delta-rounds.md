@@ -162,4 +162,4 @@ promotion earned.
 handed the issue text, so no reviewer could apply one. A fix-introduced gap on
 behaviour the acceptance criteria name is still caught at the full bar by the
 closing full sweep, before any PR opens, at the cost of at most one more round.
-A demoted finding stays reported, so the promotion phase can still raise it.
+A demoted finding stays reported and is logged in the dossier.

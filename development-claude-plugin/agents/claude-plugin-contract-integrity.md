@@ -105,7 +105,7 @@ author to confirm the target, never a `CRITICAL`.
 The bar bites only on drift whose consumer's wrong action you cannot state — naming a consumer is not enough.
 
 **Nothing here tells you not to report something.** Drift you cannot tie to a wrong action is still reported,
-as a `SUGGESTION` — the promotion path (#994) can still raise it. This bounds severity, not coverage.
+as a `SUGGESTION`, and logged in the dossier. This bounds severity, not coverage.
 
 ## The evidence rule (a tool's verdict needs the tool run)
 

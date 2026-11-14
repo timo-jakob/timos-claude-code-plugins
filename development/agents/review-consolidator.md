@@ -22,37 +22,24 @@ arithmetic in your head** (that is how an LLM miscounts). Run it:
 ```bash
 "<skill-base-dir>/../resolve-issue/scripts/consolidate-findings.zsh" \
   --findings <round-aggregate.json> --round <N> [--prev <prev-changelist.json>] \
-  [--promote <promoted.json>] [--adjudicated <adjudicated.json>] \
-  [--fix-touched <fix-touched-N-1.txt>]
+  [--adjudicated <adjudicated.json>] [--fix-touched <fix-touched-N-1.txt>]
 ```
 
-`--promote` (#994) carries a human-selected set of waived suggestions to raise to
-blocking for this round. It is a **caller-supplied overlay: forward it verbatim
-whenever your prompt gives you one, and never re-grade it** — running the engine
-without it during a promotion sub-loop silently drops those items back to Low and
-produces a changelist that disagrees with the loop's own. This is rule 3 ("Leave
-severities alone") applied to the one severity change the human, not a reviewer,
-asked for. **If your prompt indicates a promotion sub-loop — a promotion
-work-dir, or a statement that suggestions were promoted — but gives you no
-`--promote` path, stop and say so** rather than running the engine bare: a bare
-run demotes the promoted items back to Low and converges the phase without doing
-the work.
-
-`--adjudicated` (#1434) is the same kind of flag and takes the same rule: it
-carries the Low findings earlier rounds surfaced and the human waived, and the
-engine defaults it to `[]` when it is absent — so the drop below is a provable
-no-op on a bare run. **Forward the path your prompt gives you verbatim on every
-round ≥ 2, and never edit the file.** Without it the changelist re-lists every
+`--adjudicated` (#1434) is a caller-supplied flag: it carries the Low findings
+earlier rounds surfaced and the human waived, and the engine defaults it to `[]`
+when it is absent — so the drop below is a provable no-op on a bare run.
+**Forward the path your prompt gives you verbatim on every round ≥ 2, and never
+edit the file.** Without it the changelist re-lists every
 already-waived Low and reports `adjudicated_dropped: 0`, which you are then told
 to emit verbatim — so progress.md renders no drop line and the dossier's waived
 list disagrees with the loop's own changelist. **If your prompt names an
 adjudicated set but gives you no path, stop and say so.**
 
-`--fix-touched` (#1435) is a third flag of the same kind: it names the file
+`--fix-touched` (#1435) is a second flag of the same kind: it names the file
 listing what the PREVIOUS round's fix pass created or modified, and the engine
 uses it to stamp each blocking item with a derived `class`. **Forward it
-verbatim when your prompt gives you one, and never edit the file.** Unlike the
-two above, an EMPTY file is meaningful here — "the fix pass touched nothing
+verbatim when your prompt gives you one, and never edit the file.** Unlike
+`--adjudicated`, an EMPTY file is meaningful here — "the fix pass touched nothing
 reviewable", which makes every blocker a `new_defect` — so do not read an empty
 set as an absent flag. Without the flag no item carries `class` at all, which is
 what lets every downstream surface tell "nobody classified this round" from "it
@@ -99,22 +86,9 @@ and the fix-touched path. The engine returns the changelist with:
   **fully disjoint** => a **false trip** (`false_trip: true`,
   `non_converging: false`) that the loop AUTO-CONTINUES on (never an escalation).
   Each carries `matched_prior: {line, title}`. **Preserve `matched_prior`,
-  `possible_false_trip`, `false_trip`, AND `promoted` verbatim on any item that
-  carries them** — never re-derive the verdict, and never re-flag a
-  disjoint-title match as `non_converging` (that reintroduces the #976 false
-  escalation).
-- **promotion (#994/#995)** — an item the human promoted from a waived
-  suggestion carries `promoted: true` (the overlay raises it to
-  `WARNING`/`High` before any classification runs). Dropping the stamp makes it
-  indistinguishable from a reviewer-raised Warning, and the surfaces that
-  read it — `progress.md`'s
-  `promoted:` term and `- promoted suggestion:` lines, and the escalation's
-  `Promoted` column and `[<dimension>/Warning (promoted)]` bullets — then
-  silently report 0.
-  Never add the stamp to an item **no constituent carried** either — only the
-  engine's overlay decides what was promoted. (A merged item
-  counts as carrying it when **any** constituent did — see the merge rule below;
-  that is the scope of this rule, not an exception to it.)
+  `possible_false_trip` AND `false_trip` verbatim on any item that carries
+  them** — never re-derive the verdict, and never re-flag a disjoint-title match
+  as `non_converging` (that reintroduces the #976 false escalation).
 
 Take the engine's output as the source of truth for all of the above.
 
@@ -134,21 +108,8 @@ flagging, never inventing or dropping a real finding**:
    `false_trip`, and `file`/`line`, so the flag and the
    escalation's at-line/file-wide rendering stay paired with the match they
    describe (#913/#969/#983) — never OR the flags across constituents and never
-   drop them. `promoted` is the one flag that DOES carry across: a merged item
-   keeps `promoted: true` if **any** constituent carried it (#995), because the
-   human asked for that defect and merging it into a co-described one must not
-   un-ask it. **Never produce a merged item that is both `Critical` and
-   `promoted: true`** — in either merge direction, since merging is symmetric:
-   the
-   promoted count is contracted everywhere as a **subset of the round's
-   Warnings** (`progress.md` and the escalation's Promoted
-   column both count `promoted == true` across the whole blocking array), so a
-   Critical carrying the stamp makes `Warning − Promoted` go negative for every
-   downstream reader. The engine can never produce that — it stamps only Lows it
-   raises to `WARNING` — so this merge is the only way it could happen. Leave
-   the two as separate blocking items (both get fixed either way) and note the
-   relationship in their descriptions. Read the cited code (`Read`/`Grep`) when
-   you need to confirm they are truly the same issue before merging.
+   drop them. Read the cited code (`Read`/`Grep`) when you need to confirm they
+   are truly the same issue before merging.
 
    **`class` (#1435) follows `file`/`line`, and is never OR-ed or re-derived.**
    A merged item takes the `class` of the **same constituent** it takes
@@ -192,9 +153,7 @@ your judgment edits applied on top:
        identical but "possible_false_trip": true (no exact-title match). A false
        trip (#983) carries: "non_converging": false, "false_trip": true,
        "matched_prior": {…}, "possible_false_trip": true — it stays in blocking[]
-       (still needs fixing) but never escalates. A HUMAN-PROMOTED item (#995)
-       additionally carries "promoted": true, verbatim from the engine — it is
-       otherwise an ordinary High blocker. An item consolidated with
+       (still needs fixing) but never escalates. An item consolidated with
        --fix-touched (#1435) additionally carries "class": "new_defect" |
        "incomplete_propagation" | "under_assertion", verbatim from the engine;
        items in a round consolidated WITHOUT that flag carry none at all, and you

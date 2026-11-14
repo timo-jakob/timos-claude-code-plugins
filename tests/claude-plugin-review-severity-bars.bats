@@ -409,7 +409,9 @@ _assert_file() {  # _assert_file <path> <test-expr...>
   contains "$flat" 'treat it as touched and keep full severity'
   # the anti-suppression guarantee, which is what makes this a severity bound
   contains "$flat" '**Nothing here tells you not to report something.**'
-  contains "$flat" 'the promotion path (#994) can still raise it'
+  contains "$flat" 'as a `SUGGESTION`, and logged in the dossier.'
+  # the retired #994 promotion path may not be claimed back (#3150)
+  lacks "$flat" 'the promotion path (#994) can still raise it'
   contains "$flat" 'This bounds severity, not coverage.'
 }
 
@@ -551,7 +553,9 @@ _assert_file() {  # _assert_file <path> <test-expr...>
   lacks "$flat" 'The bar bites only on drift whose consumer you cannot name.'
   # the anti-suppression guarantee
   contains "$flat" '**Nothing here tells you not to report something.**'
-  contains "$flat" 'the promotion path (#994) can still raise it'
+  contains "$flat" 'as a `SUGGESTION`, and logged in the dossier.'
+  # the retired #994 promotion path may not be claimed back (#3150)
+  lacks "$flat" 'the promotion path (#994) can still raise it'
   contains "$flat" 'This bounds severity, not coverage.'
 }
 
@@ -648,7 +652,9 @@ _assert_file() {  # _assert_file <path> <test-expr...>
   contains "$flat" 'a concrete mutation of the source under test that the current suite would'
   contains "$flat" 'the concrete wrong action a named consumer takes'
   contains "$flat" "Each agent's Reporting Format then requires that falsifier"
-  contains "$flat" 'still raisable by the #994 promotion path'
+  contains "$flat" 'still reported and logged in the dossier, so no dimension loses coverage.'
+  # the retired #994 promotion path may not be claimed back (#3150)
+  lacks "$flat" 'raisable by the #994 promotion path'
   # each carrier and its bar name, driven off the same pairing the inventory
   # test uses, so one edit cannot move them apart
   for agent in claude-plugin-prose-logic:behavioural \
