@@ -2482,12 +2482,11 @@ _moved_needles() {
 }
 
 @test "#1504 the conductor keeps the §4 heading the frozen references resolve to" {
-  # `promotion/step-7-terminal.md` (2 occurrences, #2057) and `interactive/extension-grant.md` (1, #2058) cross-reference
-  # `§4 (Version bump)`, the first from INSIDE byte-frozen sentinel spans that
-  # cannot be edited. extension-grant.md's one sits in step 5, which left its
-  # frozen span with #3121 and still names the heading. Only §4's body moved; its
-  # heading is the anchor. A COUNT, not a
-  # floor — with `-ge 1` two of the three could vanish silently.
+  # `interactive/extension-grant.md` (1 occurrence, #2058) cross-references
+  # `§4 (Version bump)`. It sits in step 5, which left its frozen span with
+  # #3121 and still names the heading. Only §4's body moved; its heading is the
+  # anchor. A COUNT, not a floor — with `-ge 1` a second cross-reference could
+  # arrive uncounted.
   grep -qF -- '### 4. Version bump (plugin content only)' "$CONDUCTOR"
   # Over every reference file at any depth (#2055's review-loop shards too).
   local r files=0 hits n
@@ -2497,14 +2496,14 @@ _moved_needles() {
     [ "$n" -eq 0 ] || files=$(( files + 1 ))
   done <<< "$(_ref_files)"
   hits="$(_ref_files | while IFS= read -r r; do cat "$r"; done | grep -cF -- '§4 (Version bump)' || true)"
-  [ "$files" -eq 2 ] || {
-    printf '%s reference file(s) cross-reference §4 (Version bump), expected 2\n' "$files" >&2
-    printf '(promotion/step-7-terminal.md and interactive/extension-grant.md). The heading is their anchor — if the\n' >&2
+  [ "$files" -eq 1 ] || {
+    printf '%s reference file(s) cross-reference §4 (Version bump), expected 1\n' "$files" >&2
+    printf '(interactive/extension-grant.md). The heading is its anchor — if the\n' >&2
     printf 'set really changed, update this count in the same PR.\n' >&2
     return 1
   }
-  [ "$hits" -eq 3 ] || {
-    printf '%s cross-reference(s) to §4 (Version bump), expected 3\n' "$hits" >&2
+  [ "$hits" -eq 1 ] || {
+    printf '%s cross-reference(s) to §4 (Version bump), expected 1\n' "$hits" >&2
     return 1
   }
 }
