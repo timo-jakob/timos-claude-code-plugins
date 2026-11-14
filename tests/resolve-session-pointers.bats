@@ -125,19 +125,13 @@ flat() {
   contains "$(flat "$REF/review-loop/subagents.md")" "$POINTER"
 }
 
-@test "#2583 suggestion promotion points at the helper" {
-  contains "$(flat "$REF/promotion/gate.md")" "$POINTER"
-  contains "$(flat "$REF/promotion/step-3-select.md")" "$POINTER"
-  contains "$(flat "$REF/promotion.md")" "$POINTER"
-}
-
 @test "#2583 the escalation terminal points at the helper" {
   contains "$(flat "$REF/escalation.md")" "$POINTER"
 }
 
 @test "#2583 every pointer sits outside the byte-frozen spans" {
   local f inside
-  for f in "$REF"/escalation.md "$REF"/interactive/*.md "$REF"/promotion/*.md "$REF"/review-loop/exit-2-stale-findings.md; do
+  for f in "$REF"/escalation.md "$REF"/interactive/*.md "$REF"/review-loop/exit-2-stale-findings.md; do
     inside="$(awk '/^<!-- moved: /{m=1} /^<!-- \/moved: /{m=0} m && /resolve-session\.zsh/' "$f")"
     [ -z "$inside" ] || { echo "$f names the helper inside a moved span: $inside"; return 1; }
   done

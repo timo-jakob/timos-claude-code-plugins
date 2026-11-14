@@ -2,7 +2,7 @@
 # suggestions-enabled.zsh — read the `enable_suggestions` setting and print
 # `on` or `off`.
 #
-# Why: resolve-issue's suggestion-promotion phase (reference/promotion.md)
+# Why: resolve-issue's suggestion-promotion phase
 # stops a converged interactive run to ask which waived suggestions to promote.
 # A human who wants the run to carry straight on to the PR sets
 # `enable_suggestions` to a falsy value in the `env` block of their Claude Code
