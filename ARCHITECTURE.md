@@ -4678,24 +4678,14 @@ reliable but the merging needs semantics:
   sub-loop could "converge" without doing the work the human asked for.
   A raised item is **stamped `promoted: true`** (#995) — a direct per-item flag
   with **no** stamp gate (the `false_trip` precedent), so an absent flag simply
-  counts 0 and a run without `--promote` stays byte-identical. The stamp is what
-  makes a promoted item *readable* as such everywhere downstream, where it would
-  otherwise be indistinguishable from a reviewer-raised Warning: the
-  `promoted:` term and the
-  per-item `- promoted suggestion:` line in `progress.md`, the `Promoted`
-  column plus `[<dimension>/Warning (promoted)]` bullets in the escalation.
+  counts 0 and a run without `--promote` stays byte-identical. No surface
+  reads the stamp any more.
   `build-dossier.zsh` no longer reads the stamp: the dossier dropped the
   promotion phase (#3131). `build-telemetry-record.zsh` no longer reads it
-  either: the payload dropped the count (#3132). Both
-  the `promoted:` term and the `Promoted` column are rendered **only when there
-  is one** (the column table-wide, since a column present in one row and absent
-  in another is not a table) — which is what keeps a run without `--promote`
-  byte-identical to before the label existed. `progress.md` and the
-  escalation read the stamp with the **identical** expression
-  (`[ $blk[] | select(.promoted == true) ] | length`) — the same
-  lockstep the stamped/carried/new/fixed derivation carries; change them
-  together. The count is a
-  **subset of the Warning count**, never added to it.
+  either: the payload dropped the count (#3132). `progress.md` and the
+  escalation no longer read it either: they dropped the `promoted:` term, the
+  `- promoted suggestion:` line, the `Promoted` column and the `(promoted)`
+  bullet suffix (#3134), since the review loop no longer forwards an overlay.
   The overlay is **one-to-one**: each promote key raises **at most one** item — its
   nearest eligible candidate — and claims it, so neither can two keys take the
   same item nor can one key fan out across several neighbouring Lows. That bound
@@ -4773,8 +4763,7 @@ reliable but the merging needs semantics:
   membership test. Bad input is typed exactly like `--promote`'s and names the
   **adjudicated** file. `summary.adjudicated_dropped` is **always present** (0
   without the flag), so a consumer never has to tell "dropped nothing" from "an
-  older changelist" — the same argument `promotion_phase` carries in the status
-  JSON — and that key is the *only* difference a run without the flag sees.
+  older changelist" — and that key is the *only* difference a run without the flag sees.
 
 Changelist shape: `{ round, summary{critical,high,low,blocking,conflicts,
 false_trips,adjudicated_dropped}, blocking[], suggestions[], conflicts[],
@@ -4931,14 +4920,12 @@ them is **not** a supported pattern, because it hides every round from the user.
 Every round appends a block to `<work-dir>/progress.md`
 (`render-progress-block.zsh`), which per #969 carries judgment-grade counts:
 the severity split (critical/warning; the suggestions total is the Suggestion
-count), a `promoted: N` term inside that split plus one `- promoted suggestion:`
-line per human-promoted blocker — both rendered only when there is one (#995),
-new vs carried, fixed-since-prior, the cumulative blocking trend, and
+count), new vs carried, fixed-since-prior, the cumulative blocking trend, and
 a per-blocker *possible false trip* line whenever the consolidator flagged a
 carried match with no shared non-empty prior title (#913/#969), and an
 `- adjudicated re-raises dropped: N` line whenever a re-raise of an
 already-waived suggestion was suppressed (#1434, rendered only when N > 0, on the
-same direct-read/no-stamp-gate rule as the promoted term) — so the human can read "are we
+same direct-read/no-stamp-gate rule as the false-trip line) — so the human can read "are we
 actually clearing things?" straight off the tail. The per-round `history.jsonl`
 line carries `adjudicated_dropped` too, so that question is answerable from one
 file without opening every changelist.
@@ -4968,7 +4955,7 @@ tree" the normal case off plugin repos. A missing or blank `tree-<N-1>.txt` on a
 round ≥ 2, or a failure to compute or persist this round's identity, is a named
 stderr line and **exit 1**, never a silent fall back to the full diff. Four
 carries ride along, all per-**run** work-dir state (truncated on a fresh start
-beside `.findings-digest-*`, `.findings-empty-*` and `.promote`, adopted on
+beside `.findings-digest-*` and `.findings-empty-*`, adopted on
 `--resume`, and deliberately
 **not** under the repo-internal `.review/`, where writing every round would move
 the tree identity and defeat the #981 attestation this depends on):
@@ -5099,7 +5086,7 @@ offers rounds, guidance or a stop. Neither opens a PR.
 `CONVERGED` is still only ever declared on a full sweep. Exit code 14 is
 retired, never reused, so an old record or caller reading it still means only
 that. The status JSON keeps `residue_replaced_reasons`, always `[]` now, for the
-reason `promotion_phase` and `closing_sweep_granted` are always present. The
+reason `closing_sweep_granted` is always present. The
 rollup and the convergence-rate recipes below keep counting historical
 `CONVERGED_WITH_RESIDUE` records as a success, because those runs did open
 their PR. The fix-touched capture and its `class` stamp outlived the predicate
@@ -5232,7 +5219,7 @@ mode's non-terminal
 11 conflict; 12 no-convergence; 13 budget; 2 usage; 1 operational — e.g. a red
 gate after a fix, which emits status `ERROR`) alongside a machine-readable
 status JSON (`{status, rounds, max_rounds, effective_max_rounds,
-max_rounds_source, grants, auto_guided_retry, promotion_phase,
+max_rounds_source, grants, auto_guided_retry,
 closing_sweep_granted, possible_false_trip_auto_continues, carry_unconfirmed, repo_type,
 review_skill, topic_review_skills, escalation_reasons, residue_replaced_reasons, history,
 round_changelists, final_changelist, next_ref}`), where `next_ref` (#2055) is
@@ -5267,11 +5254,8 @@ self-guided retry), so every status after that retry says it ran — and
 `possible_false_trip_auto_continues` (#1498) is an
 **always-present** integer — how many rounds the run took on the all-ambiguous
 auto-continue above, `0` on every run that never did, counting *continuations*
-rather than identities — and `promotion_phase` (#995) is an **always-present**
-boolean — `true` exactly when the invocation **carried or adopted** a promoted
-set, i.e. when it is the promotion sub-loop (a `--resume` that omits `--promote`
-and re-adopts the work-dir's `.promote` records `true` too). Since #3132
-`build-telemetry-record.zsh` no longer copies it into the payload.
+rather than identities. Since #3134 the status JSON carries no
+`promotion_phase`: the promotion sub-loop it marked is retired.
 One further exit-2 semantic, `STALE_FINDINGS` (#974), means the round was never
 really reviewed — its panel never ran, it read a tree that no longer exists, or
 it left a carried entry unaccounted for (#1583, below). In step mode it covers a
@@ -5348,9 +5332,7 @@ panels report a failed round to their caller and write no sidecar, so
 sidecar *absence* proves nothing. `/development:resolve-issue` §3.5 step 2
 carries the consumer-side rule: the session never authors a **review round's**
 findings file. Every `[]` that reaches `--findings-file` is some panel's own
-output. (The promotion sub-loop's *seeded* round 1 is not a counter-example —
-it is never a `[]`, and every item in it was already reported by the blocking
-phase's own panel.) A missing aggregate is either recovered from the panel's
+output. A missing aggregate is either recovered from the panel's
 output, or the panel is re-run and its real aggregate written, or — when the
 panel reported FAILED, or NOT APPLICABLE on a full round — the run stops. A
 session that cannot establish what happened must not resolve the ambiguity by
@@ -5384,44 +5366,12 @@ never leaving the prior verdict to be misread) but non-terminal (no telemetry
 record, no progress `**Final:**` line; it does append a `**Refused (round N):**`
 line to `progress.md`), because the caller re-invokes with the round's real
 findings. `--no-review` yields `SKIPPED` — the fast path that bypasses the
-loop; combining it with `--promote` is refused as a usage error (**exit 2**),
-because nothing is consolidated for an overlay to reach and the fast path would
-otherwise stamp `promotion_phase: true` on a `SKIPPED` record from a promote
-file it never validated.
-
-**Suggestion promotion (#994).** `--promote FILE` is **pass-through in substance**: the
-loop never *interprets* the promoted set — it validates the file's shape up
-front, canonicalises the path, and forwards that path unchanged to
-`consolidate-findings.zsh` on **every** round (validated by the same
-`_need_val` as its siblings, so a missing/flag-shaped/empty value exits 2, plus
-an up-front file+shape check — one **non-empty** JSON array of correctly-keyed
-objects, a directory or an empty file refused — so a bad path or payload is a
-usage error before the round sink is touched rather than a bare mid-round exit 1
-that writes no status JSON. An empty array is refused there too: selecting
-nothing is contracted to skip the sub-loop entirely, so `[]` reaching the loop is
-a glue slip that would otherwise converge reporting success on a no-op overlay).
-The promote file's **PATH** (canonicalised, so it survives a cwd change between
-invocations) is recorded at `<work-dir>/.promote` on **every** invocation that
-carries `--promote`, and **re-adopted on `--resume` when the flag is absent**.
-The referenced file lives outside the repo and must still exist and still hold a
-one **non-empty** JSON array of correctly-keyed objects at adoption time — the
-same predicate the explicit flag gets, since both go through one validator. A
-vanished or malformed one is a **diagnosed exit 2 with no status JSON** (the
-up-front usage-error class above — not "typed" in the STALE_FINDINGS sense,
-which writes its own verdict), never a silent un-promotion. Persisting on every invocation (not
-just a fresh run) is what stops a re-pointed `--promote` leaving a stale path
-behind for the next resume to adopt — forwarding
-per round only covers rounds within ONE invocation, but step mode runs each
-round as its own invocation, so a resume that dropped the flag would consolidate
-with no overlay, demote the item back to Low, and exit **CONVERGED (0)**: the
-feature failing as a terminal *success*, which non-convergence detection cannot
-catch because the demoted item is no longer in `.blocking` to match against.
-Forwarding it on *every* round (not just round 1) is load-bearing: an overlay
-applied only once would drop the promoted item back to `Low` on round 2 and the
-loop would converge without doing the work.
+loop.
 
 **A converged run waives every suggestion (#3128)**: the conductor offers no
 promotion phase in any session mode, so it never hands the loop a `--promote`.
+Since #3134 the loop accepts no `--promote` at all: the argument is refused like
+any other unknown flag (**exit 2**).
 
 **Gate attestation — one full-gate run per round (#981).** On `--resume` the
 loop re-runs `--test-cmd` first to gate the previous round's in-session fix
@@ -7448,8 +7398,7 @@ non-converging blocker / the remaining blockers, severity rendered in the
 user-facing `Critical`/`Warning`/`Suggestion` vocabulary, with any
 `possible_false_trip` match flagged / the dispatch error), the round
 history one line each, a **per-round progress table** (#969) — Critical /
-Warning / Suggestion, a table-wide `Promoted` column rendered only when some
-round has a promoted blocker (#995), new / carried, fixed-since-prior, derived
+Warning / Suggestion, new / carried, fixed-since-prior, derived
 from `.round_changelists`; stamp-less cells degrade to `–` — a **convergence
 assessment** (the blocking series, whether the trend and the carried/false-trip
 split make another round likely to help), and **2–3 concrete options**

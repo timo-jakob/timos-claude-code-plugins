@@ -15,11 +15,8 @@
 # cumulative blocking trend (--history), a per-blocker possible-false-trip line
 # whenever the consolidator flagged an ESCALATING carried blocker whose matched
 # prior has a different title (#913/#969), a distinct "false trip
-# auto-continued" line for each identity-cleared false trip (#983), and — when
-# the human promoted a suggestion (#995) — a `promoted: N` term inside the
-# blockers line's severity parens plus one "- promoted suggestion:" line per
-# promoted blocker, so the human's own picks read differently from
-# reviewer-raised Warnings. Since #1434 it also carries an
+# auto-continued" line for each identity-cleared false trip (#983). Since #1434
+# it also carries an
 # `- adjudicated re-raises dropped: N` line whenever the consolidator suppressed
 # a re-raise of an already-waived suggestion — rendered only when N > 0, on the
 # same direct-read, no-stamp-gate rule, so a run with no adjudicated list is
@@ -44,10 +41,7 @@
 # per-item stamps to consult), so the converged round still reports what its fix
 # pass cleared. The #983 auto-continued false-trip line renders off the direct
 # per-item false_trip flag with NO stamp gate — an absent flag (a pre-#983
-# changelist) simply yields no line. The #995 promoted term and lines are the
-# same shape: a direct per-item `promoted` flag, NO stamp gate, and rendered
-# only when the count is non-zero — which is what keeps a run without
-# --promote byte-identical to before the label existed.
+# changelist) simply yields no line.
 #
 # Usage: render-progress-block.zsh --changelist FILE --round N --verdict TEXT
 #          [--prev FILE] [--history FILE] [--possible-false-trip-continued]
@@ -161,18 +155,6 @@ jq -r --arg ts "$(date +%H:%M:%S)" --argjson r "$round" --arg v "$verdict" \
   # no human grant), so they render distinctly from the escalating $ftrips above.
   # A direct flag, no $stamped gate: a pre-#983 changelist simply lacks it.
   | ([ $blk[] | select(.false_trip == true) ]) as $auto_ftrips
-  # human-promoted blockers (#995): the overlay raised them from Suggestion, so
-  # without a label they read as ordinary reviewer-raised Warnings. The rendered
-  # term is a SUBSET of the `warning:` count it sits beside, never added to it —
-  # stated here too because this is the surface where an additive misreading is
-  # most likely (the term sits inside the same severity parentheses). NB: no
-  # apostrophes in this block — the jq program is single-quoted. Same
-  # per-item expression as the escalation table,
-  # and — like $auto_ftrips — a
-  # direct flag with NO $stamped gate: an unstamped changelist simply counts 0
-  # and renders neither the term nor a line, keeping a no-promote run
-  # byte-identical.
-  | ([ $blk[] | select(.promoted == true) ]) as $promoted
   # residue classes (#1435): where the blockers of this round came from.
   # Rendered only when there ARE blockers AND every one carries the stamp — an
   # unstamped (pre-#1435, or fix-touched-less) round gets NO row rather than
@@ -192,8 +174,7 @@ jq -r --arg ts "$(date +%H:%M:%S)" --argjson r "$round" --arg v "$verdict" \
   | ([ (.suggestions // [])[] | select(.demoted == true) ]) as $demoted
   | "## Round \($r) — \(if (.summary.blocking // 0) == 0 then "no blockers" else "blockers remain" end) (\($ts))",
     ("- blockers: \(.summary.blocking // 0)"
-     + (if (.summary.blocking // 0) > 0 then " (critical: \(.summary.critical // 0), warning: \(.summary.high // 0)"
-        + (if ($promoted | length) > 0 then ", promoted: \($promoted | length)" else "" end) + ")" else "" end)
+     + (if (.summary.blocking // 0) > 0 then " (critical: \(.summary.critical // 0), warning: \(.summary.high // 0))" else "" end)
      + (if ($carried != null) and ((.summary.blocking // 0) > 0)
         then " (new: \(($blk | length) - $carried), carried: \($carried))" else "" end)
      + ", conflicts: \(.summary.conflicts // 0), suggestions: \(.summary.low // 0)"
@@ -230,7 +211,7 @@ jq -r --arg ts "$(date +%H:%M:%S)" --argjson r "$round" --arg v "$verdict" \
      else empty end),
     # adjudicated re-raises (#1434): suggestions an earlier round already
     # surfaced and the human already let go, dropped instead of re-logged.
-    # Rendered ONLY when non-zero — the same rule the promoted term follows, and
+    # Rendered ONLY when non-zero, which is
     # what keeps a run with no adjudicated list byte-identical to before the
     # count existed. A direct read with no stamp gate: a pre-#1434 changelist
     # simply has no key, `// 0` makes it zero, and no line renders.
@@ -247,8 +228,6 @@ jq -r --arg ts "$(date +%H:%M:%S)" --argjson r "$round" --arg v "$verdict" \
      else empty end),
     ($demoted[] | "- demoted suggestion: `\(.file | safe)\(if (.line | type) == "number" then ":\(.line)" else "" end)` [\(.dimension | dimlabel)] \"\(.title | safe)\""
        + " — p \(.risk_assessment.p) × impact \(.risk_assessment.impact) = risk \(.risk_assessment.risk) < \(.risk_assessment.threshold // "?" | safe)"),
-    ($promoted[] | "- promoted suggestion: `\(.file | safe)\(if (.line | type) == "number" then ":\(.line)" else "" end)` [\(.dimension | dimlabel)] \"\(.title | safe)\""
-       + " — raised from Suggestion by the human at convergence; blocking until cleared"),
     # ...and since #1498 the SAME set renders one of two ways, decided by the
     # loop rather than by the changelist: a round whose escalating set was
     # AUTO-CONTINUED (every match ambiguous, none Critical, none continued

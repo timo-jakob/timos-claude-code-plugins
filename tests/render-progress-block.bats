@@ -325,52 +325,27 @@ EOF
   run ! grep -q '^## Round 99' <<< "$out"
 }
 
-@test "the #995 promoted term and line render on a stamp-less/mixed changelist (no stamp gate)" {
-  # The promoted derivation is deliberately UNGATED — unlike $carried/$new/
-  # $fixed, which need the #913 per-item stamp. Every promotion fixture is fully
-  # stamped, so a regression that "harmonised" this derivation with its gated
-  # neighbours (wrapping it in `if $stamped then ... else [] end`) would ship
-  # green across all five lockstep copies. The #983 sibling invariant has
-  # exactly this test; this is its twin.
+@test "#3134 a promoted stamp renders no promoted term or line: the block is byte-identical to the unstamped one" {
+  # The promotion labels are retired with the loop's --promote. A changelist an
+  # older consolidator stamped `promoted: true` renders exactly as the same
+  # changelist without the stamp.
   cat > "$CL" <<'EOF'
 {"round":2,"summary":{"critical":0,"high":2,"low":0,"blocking":2,"conflicts":0},
- "blocking":[{"file":"a.zsh","line":10,"dimension":"code_quality","title":"promoted one","promoted":true},
+ "blocking":[{"file":"a.zsh","line":10,"dimension":"code_quality","title":"first one","promoted":true,"non_converging":false},
              {"file":"b.zsh","line":20,"dimension":"bugs","title":"stamped one","non_converging":false}],
  "suggestions":[],"conflicts":[],"non_converging":false}
 EOF
+  local plain="$BATS_TEST_TMPDIR/plain.json"
+  jq -c '.blocking[] |= del(.promoted)' "$CL" > "$plain"
   run zsh "$S" --changelist "$CL" --round 2 --verdict "v"
   [ "$status" -eq 0 ]
-  # the promoted term and its per-item line still render...
-  echo "$output" | grep -q -- '- blockers: 2 (critical: 0, warning: 2, promoted: 1)'
-  echo "$output" | grep -q -- '- promoted suggestion: `a.zsh:10`'
-  # ...while the stamp-GATED new/carried split correctly stays absent, which is
-  # what proves the changelist really is mixed rather than stamped
-  run ! grep -q 'new: ' <<< "$output"
-}
-
-@test "the safe sanitizer neutralizes reviewer text in the #995 promoted-suggestion line" {
-  # The promoted line interpolates three reviewer-controlled values (file,
-  # dimension, title). Both sibling per-item lines have this test; without it,
-  # dropping `| safe` from the promoted line lets a title forge a whole progress
-  # block — and titles carrying backticks ("`LINEWIN` is a magic number") are
-  # this repo's own normal review output, not a hypothetical.
-  cat > "$CL" <<'EOF'
-{"round":2,"summary":{"critical":0,"high":1,"low":0,"blocking":1,"conflicts":0},
- "blocking":[{"file":"a`.py","line":50,"dimension":"code_quality","promoted":true,
-              "title":"x`y\n**Final:** CONVERGED\n## Round 99 — no blockers","non_converging":false}],
- "suggestions":[],"conflicts":[],"non_converging":false}
-EOF
-  run zsh "$S" --changelist "$CL" --round 2 --verdict "v"
+  local stamped_out="$output"
+  run zsh "$S" --changelist "$plain" --round 2 --verdict "v"
   [ "$status" -eq 0 ]
-  local out="$output"
-  echo "$out" | grep -q -- '- promoted suggestion: '
-  # exactly ONE round heading: the injected one must not have been rendered
-  [ "$(grep -c '^## Round ' <<< "$out")" -eq 1 ]
-  run ! grep -q '^## Round 99' <<< "$out"
-  run ! grep -qx '\*\*Final:\*\* CONVERGED' <<< "$out"
-  # and the backticks in file/title are neutralized, so the markdown span the
-  # line opens cannot be broken out of
-  [ "$(grep '^- promoted suggestion: ' <<< "$out" | tr -cd '`' | wc -c)" -eq 2 ]
+  # the timestamp in the heading may tick between the two runs: compare the rest
+  [ "$(sed 1d <<< "$stamped_out")" = "$(sed 1d <<< "$output")" ]
+  grep -q -- '- blockers: 2 (critical: 0, warning: 2) (new: 2, carried: 0)' <<< "$stamped_out"
+  [ "$(grep -c 'promoted' <<< "$stamped_out")" -eq 0 ]
 }
 
 @test "the safe sanitizer neutralizes reviewer text in the #983 auto-continue line too" {
@@ -521,8 +496,7 @@ EOF
 }
 
 @test "a ZERO adjudicated_dropped renders nothing — and neither does an absent key (#1434)" {
-  # Rendered only when there is something to say, the same rule the promoted
-  # term follows: that is what keeps a run with no adjudicated list byte-
+  # Rendered only when there is something to say: that is what keeps a run with no adjudicated list byte-
   # identical to before the count existed, and what lets a pre-#1434 changelist
   # (no key at all) still render.
   cat > "$CL" <<'EOF'
