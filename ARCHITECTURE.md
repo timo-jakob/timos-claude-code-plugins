@@ -4786,7 +4786,7 @@ command block, which moved with it into `reference/review-loop/step-2-invocation
 classification and the Epic flow still carry their
 own procedure inline; carving those out is separate work.) The
 procedure behind each branch lives in
-`development/skills/resolve-issue/reference/{review-loop,residue,promotion,escalation,interactive}.md`
+`development/skills/resolve-issue/reference/{review-loop,residue,escalation,interactive}.md`
 and is read only when that branch is reached — the same file layout
 `development/skills/maintenance/reference/*.md` uses, but with the opposite
 load-bearing-ness: there the reference holds rationale and the happy path never
