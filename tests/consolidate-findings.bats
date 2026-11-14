@@ -2011,6 +2011,7 @@ EOF
   lacks "$flat" '(`--promote FILE`, #994)'
   lacks "$flat" 'Two promotion rules bound the merge'
   lacks "$flat" 'a promoted item and a tool-red item'
+  lacks "$flat" 'raisable by the #994 promotion path'
 }
 
 # --- the --round / --prev / --findings usage contract (#1026) -----------------

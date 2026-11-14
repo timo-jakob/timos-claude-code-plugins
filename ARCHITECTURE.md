@@ -3908,8 +3908,8 @@ body, so the bar is enforceable rather than advisory.
 The point is a **fixed point**: a bar phrased as a judgement ("assertions too weak",
 "misleads the next editor") has none, because every fix is a new artifact reviewable
 under the same bar — the generator epic #1431 was filed to close. The bars bound
-*severity only*: what they demote becomes a `SUGGESTION`, still reported and still
-raisable by the #994 promotion path, so no dimension loses coverage.
+*severity only*: what they demote becomes a `SUGGESTION`, still reported and logged
+in the dossier, so no dimension loses coverage.
 `tests/claude-plugin-review-severity-bars.bats` is the guard, and it asserts the
 bars are one convention rather than a set of ad-hoc rules — including against this
 section, so the two cannot drift apart. It derives the roster from the tree rather

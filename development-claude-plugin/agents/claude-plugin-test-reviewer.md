@@ -145,8 +145,7 @@ review at the full bar, so the closing full sweep still catches a fix-introduced
 any PR opens.
 
 **Nothing here tells you not to report something.** A concern you cannot express as a passing mutation is
-still reported, as a `SUGGESTION` — the promotion path (#994) can still raise it. This bounds severity, not
-coverage.
+still reported, as a `SUGGESTION`, and logged in the dossier. This bounds severity, not coverage.
 
 ## The evidence rule (a tool's verdict needs the tool run)
 
