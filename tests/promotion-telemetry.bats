@@ -5,7 +5,7 @@
 # `promotion_phase` marker that keeps the documented convergence metrics honest,
 # and the per-item `promoted: true` stamp that makes a promoted blocker readable
 # as such in every surface that consumes a changelist — the three this suite
-# covers, plus build-dossier.zsh's two reads (tests/build-dossier.bats, #1064).
+# covers (build-dossier.zsh stopped reading the stamp in #3131).
 #
 # One test per linked test-case issue, named in the title so a reader can trace
 # a case to its coverage: #1027 and #1029-#1033 and #1035-#1036 live here;
@@ -537,8 +537,8 @@ substitute_fence() {   # $1 = work-dir holding .telemetry-run-id · $2 = promote
   [ "$(jq -r 'has("promotion_phase")' <<<"$output")" = "true" ]
 }
 
-# --- #1029 happy: three of the FIVE lockstep copies agree on the count ------
-# (build-dossier.zsh holds the other two reads, covered by build-dossier.bats)
+# --- #1029 happy: the THREE lockstep copies agree on the count ------
+# (build-dossier.zsh no longer reads the stamp, #3131)
 
 @test "#1029 one changelist yields the SAME promoted count in all three surfaces" {
   # Two promoted + one reviewer-raised blocker. Each surface derives the count
