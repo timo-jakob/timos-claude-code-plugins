@@ -325,11 +325,8 @@
 # terminal exit's record, or NOTHING. A failed emission therefore leaves no id
 # rather than the previous exit's, which a reader would otherwise join to a
 # superseded record. Each loop's sidecar lives in its OWN --work-dir, so a
-# second loop against the same story (the promotion sub-loop, which takes a
-# fresh work-dir) never touches this one. The status JSON also carries `promotion_phase` (true exactly when this
-# invocation carried OR ADOPTED a promoted set — an adopting --resume counts),
-# which the payload builder copies through so the documented convergence-rate
-# metrics can exclude a promotion pass.
+# second loop against the same story, with a fresh work-dir, never touches
+# this one.
 # Beside that single-id sidecar, every successful emission also APPENDS its id to
 # `<work-dir>/.telemetry-run-ids` (#1226) — a ledger, one id per line, cleared
 # only on a fresh start. The sidecar answers "which record did THIS exit emit?"
@@ -466,14 +463,13 @@
 #       [--max-rounds N] [--status-file PATH] [--work-dir DIR] \
 #       [--issue N] [--telemetry-file PATH] [--telemetry-dir DIR] \
 #       [--parent-run-id ID] [--gate-attest TREE_ID] [--gate-summary FILE] \
-#       [--findings-tree TREE_ID] [--carry-accounting FILE] [--promote FILE] \
+#       [--findings-tree TREE_ID] [--carry-accounting FILE] \
 #       [--risk FILE] [--step-timings FILE] [--t0 EPOCH] \
 #       [--checkpoint attended|unattended]                              # step mode
 #   resolve-story-loop.zsh --repo PATH [--base REF] \
-#       --review-cmd CMD --fix-cmd CMD [--test-cmd CMD] \
-#       [--promote FILE] ...                                      # hook mode
+#       --review-cmd CMD --fix-cmd CMD [--test-cmd CMD] ...       # hook mode
 #   resolve-story-loop.zsh --no-review   # skip the loop entirely (fast path;
-#                                        # refused together with --promote,
+#                                        # refused together with
 #                                        # --carry-accounting (#1583),
 #                                        # --risk (#1921) or
 #                                        # --step-timings (#2197))
@@ -547,7 +543,7 @@ local TREE_ID="${self_dir}/git-tree-id.zsh"
 
 local repo="" base="origin/main" review_cmd="" fix_cmd="" test_cmd="" findings_file=""
 local max_rounds=$MAX_REVIEW_ROUNDS status_file="" work_dir="" no_review=0
-local issue="" telemetry_file="" resume=0 gate_attest="" findings_tree="" promote=""
+local issue="" telemetry_file="" resume=0 gate_attest="" findings_tree=""
 local carry_accounting="" parent_run_id="" telemetry_dir="" risk="" gate_summary=""
 local step_timings="" t0_given="" checkpoint_mode=""
 
@@ -612,18 +608,9 @@ while [[ $# -gt 0 ]]; do
   # UNCONFIRMED. Hook mode reads the same shape from the panel's
   # `<findings-path>.carry.json` sidecar instead. Consumed by _carry_account.
   --carry-accounting) _need_val "$1" $# "${2:-}"; carry_accounting="$2"; shift 2 ;;
-  # --promote (#994): pass-through in SUBSTANCE. The loop never *interprets* the
-  # promoted set — but it does validate the file's shape up front
-  # (_validate_promote) and canonicalise the path, then forwards that path to the
-  # consolidator on EVERY round of a promotion sub-loop, so a promoted item stays
-  # promoted across rounds instead of silently reverting to Low after round 1.
-  # Both of those are load-bearing: without the shape check a bad file fails
-  # mid-round as a bare exit 1 that writes no status JSON (#912), and without the
-  # canonicalisation the persisted state is cwd-relative.
-  --promote) _need_val "$1" $# "${2:-}"; promote="$2"; shift 2 ;;
   # --risk (#1921): the conductor's risk assessment of THIS round's CRITICAL and
-  # WARNING findings, forwarded to the consolidator for this round only — unlike
-  # --promote, it is never persisted, because every round is assessed afresh (a
+  # WARNING findings, forwarded to the consolidator for this round only — it is
+  # never persisted, because every round is assessed afresh (a
   # fix pass can change a finding's probability). Checked up front while the
   # threshold is on, so a malformed file refuses the round before any state is
   # written; with the threshold off or ignored it is forwarded unread — except
@@ -671,7 +658,6 @@ while [[ $# -gt 0 ]]; do
     print -r -- "  [--carry-accounting FILE]  # step mode, round >= 2 with a non-empty carry: per-reviewer"
     print -r -- "                             # confirmed / re_raised / unconfirmed per carried entry (#1583)."
     print -r -- "                             # Hook mode reads <findings-path>.carry.json instead."
-    print -r -- "  [--promote FILE]"
     print -r -- "  [--risk FILE]              # step mode: this round's risk assessment (#1921), read only"
     print -r -- "                             # while corner_case_risk_threshold is on, or in an extension round"
     print -r -- "                             # (extension_risk_threshold, #2577); demotes low-risk Warnings."
@@ -682,7 +668,7 @@ while [[ $# -gt 0 ]]; do
     print -r -- "  [--parent-run-id ID]       # the resolve-issue run this loop runs under (#1226)"
     print -r -- "  [--checkpoint MODE]        # attended|unattended: commit + push each consolidated round as a"
     print -r -- "                             # wip checkpoint (#2920); needs --issue"
-    print -r -- "  [--no-review]   # fast path; mutually exclusive with --promote, --carry-accounting and --risk"
+    print -r -- "  [--no-review]   # fast path; mutually exclusive with --carry-accounting and --risk"
     exit 0 ;;
   -*) print -u2 -- "unknown flag: $1"; exit 2 ;;
   *) print -u2 -- "unexpected argument: $1"; exit 2 ;;
@@ -730,8 +716,7 @@ topic_review_skills='[]'
 # break it: the --issue guards just below, the --no-review fast path (which
 # returns SKIPPED before any work-dir setup, and skips telemetry entirely when
 # --repo is not a directory), and every usage exit
-# down to _validate_promote's — which the promotion sub-loop's own invocation
-# hits. A caller then reads a foreign story's id and joins its enrichment onto
+# down to the input validators'. A caller then reads a foreign story's id and joins its enrichment onto
 # that run's record. The in-parse exits above (_need_val, unknown flag)
 # necessarily precede this and are not covered; they need a two-pass parse,
 # which is not worth it for a caller-visible failure the caller re-invokes past.
@@ -772,8 +757,7 @@ fi
 # --carry-accounting is step mode's channel (#1583); hook mode reads the panel's
 # <findings-path>.carry.json sidecar instead. Accepting the flag beside
 # --review-cmd and then ignoring it would tell the caller "no carry accounting
-# was supplied" for a file they did supply — the same shape of mistake the
-# --no-review/--promote pair refuses up front. The same holds beside
+# was supplied" for a file they did supply. The same holds beside
 # --no-review, which consolidates nothing and would ignore the file just as
 # silently.
 [[ -n "$carry_accounting" && ( -n "$review_cmd" || $no_review -eq 1 ) ]] && {
@@ -845,25 +829,15 @@ emit_and_exit() {
   # `residue_replaced_reasons` (#1435) recorded what the residue terminal took
   # the place of. That terminal is retired (#2580), so nothing replaces an
   # escalation any more and the key is always `[]`. It stays in the status JSON
-  # rather than disappearing, for the same reason `promotion_phase` and
-  # `closing_sweep_granted` are always present: a consumer must never have to
+  # rather than disappearing, for the same reason `closing_sweep_granted` is
+  # always present: a consumer must never have to
   # tell "no reasons" from "a status file predating the key".
   local residue_replaced='[]'
   local out
-  # promotion_phase (#995) is ALWAYS present — a plain boolean, true exactly
-  # when this invocation carried OR ADOPTED a promoted set, i.e. when it is the
-  # promotion sub-loop. It is derived AFTER the --resume adoption branch on
-  # purpose: a resume that drops --promote and re-adopts the work-dir's .promote
-  # is still the promotion sub-loop, and its (often CONVERGED) record must not
-  # be counted as a phase-1 story. build-telemetry-record.zsh copies it into the payload so the
-  # documented convergence metrics can exclude the second pass; always-present
-  # means a consumer never has to distinguish "false" from "an older status
-  # file that predates the key".
-  local promotion_phase='false'
-  [[ -n "$promote" ]] && promotion_phase='true'
-  # closing_sweep_granted (#1434) is ALWAYS present, for the same reason
-  # promotion_phase is: a consumer must never have to tell `false` from "a status
-  # file that predates the key". `max_rounds` deliberately keeps reporting the
+  # The status JSON carries no promotion_phase since #3134: the promotion
+  # sub-loop it marked is retired, and no invocation carries a promoted set.
+  # closing_sweep_granted (#1434) is ALWAYS present: a consumer must never have
+  # to tell `false` from "a status file that predates the key". `max_rounds` deliberately keeps reporting the
   # value the caller PASSED — the one-round grant is a fact about this run, not a
   # retune of the budget, and a mutated ceiling here would make every downstream
   # budget reader (the SKILL soft cap, the escalation summary) disagree with the
@@ -872,14 +846,14 @@ emit_and_exit() {
   (( closing_sweep_granted )) && granted_json='true'
   # possible_false_trip_auto_continues (#1498) is ALWAYS present — an integer,
   # 0 on every run that never auto-continued — for the same reason
-  # promotion_phase and closing_sweep_granted are: a consumer must never have to
+  # closing_sweep_granted is: a consumer must never have to
   # tell 0 from "a status file that predates the key". It counts CONTINUATIONS,
   # not identities, so a round that continues on three ambiguous matches adds 1.
   # It is deliberately NOT a budget field: `max_rounds` still reports the
   # caller's value and `closing_sweep_granted` keeps its meaning, because an
   # auto-continue takes the round the run already had rather than granting one.
   # effective_max_rounds / max_rounds_source (#1576) are ALWAYS present, for the
-  # same reason promotion_phase and closing_sweep_granted are. They report the
+  # same reason closing_sweep_granted is. They report the
   # ceiling actually in force and where it came from — `flag` or `work-dir` —
   # WITHOUT touching `max_rounds`, which keeps reporting the caller's value.
   # That split is deliberate and mirrors #1434: a mutated `max_rounds` would put
@@ -925,7 +899,7 @@ emit_and_exit() {
     --argjson effmax "$effective_max" --arg maxsrc "$max_rounds_source" \
     --arg repo_type "$repo_type" --arg review_skill "$review_skill" \
     --argjson final "$final" --argjson history "$history" --argjson esc "$esc" \
-    --argjson clists "$clists" --argjson promotion_phase "$promotion_phase" \
+    --argjson clists "$clists" \
     --argjson granted "$granted_json" --argjson residue_replaced "$residue_replaced" \
     --argjson pftc "$pft_continues" --argjson cu "$carry_unconfirmed_json" \
     --argjson topics "$topic_review_skills" --argjson grants "$grants_json" \
@@ -933,7 +907,7 @@ emit_and_exit() {
     '{status:$status, rounds:$rounds, max_rounds:$max,
       effective_max_rounds:$effmax, max_rounds_source:$maxsrc, grants:$grants,
       auto_guided_retry:$guided,
-      promotion_phase:$promotion_phase, closing_sweep_granted:$granted,
+      closing_sweep_granted:$granted,
       possible_false_trip_auto_continues:$pftc,
       carry_unconfirmed:$cu,
       repo_type:(if $repo_type=="" then null else $repo_type end),
@@ -1985,16 +1959,6 @@ max_rounds=$(( 10#$max_rounds ))
 local effective_max=$max_rounds
 local max_rounds_source="flag"
 
-# --promote with --no-review is a contradiction, not a fallback: nothing is
-# consolidated, so there is no overlay to apply — and the fast path reaches
-# emit_and_exit ABOVE _validate_promote, so the combination would stamp
-# promotion_phase:true on a SKIPPED record from a promote file that was never
-# even checked to exist. Refuse it where the sibling contradiction
-# (--findings-file with --review-cmd) is refused.
-if (( no_review )) && [[ -n "$promote" ]]; then
-  print -u2 -- "resolve-story-loop: --promote is meaningless with --no-review (nothing is consolidated)"; exit 2
-fi
-
 if (( no_review )); then
   emit_and_exit "SKIPPED" 0 0 "" "" "" "" ""
 fi
@@ -2108,60 +2072,7 @@ for _lp in "$status_file" "$findings_file" "$telemetry_file" "$carry_accounting"
   [[ "${_lp:A}" == "${repo:A}"/* ]] || continue
   loop_internal_files+=("${${_lp:A}#"${repo:A}"/}")
 done
-# --promote is an INPUT PATH, and the only one the loop used to forward blind.
-# Left unchecked, a typo survives parse and the run does a full round's setup —
-# per-round dispatch, scope refresh, truncating the round sink, consuming
-# --findings-file — before the consolidator rejects it; the loop maps that to a
-# BARE exit 1 that writes no status JSON, so --status-file keeps the previous
-# invocation's verdict (the #912 hazard every other refusal here is typed to
-# avoid). --repo and --findings-file are validated up front; so is this now.
-# ONE validator for the promote file, used by BOTH the explicit-flag path and the
-# resume-adoption path — two hand-written copies is how the two drift, and they
-# already did: the first spelling used `jq -e`, whose exit status reflects only
-# the LAST output value, so a file holding two concatenated arrays (written with
-# >> instead of >) emitted true,true and passed. `--slurp` makes jq see the whole
-# file as ONE value, so the count is checkable.
-#
-# Validating the SHAPE up front — not merely that a file exists — is the point:
-# every refusal the consolidator makes on this file would otherwise surface
-# mid-round as a BARE exit 1 that writes no status JSON, leaving --status-file
-# holding the previous invocation's verdict (#912). jq's own parse diagnostic is
-# kept (only the filter result is discarded): for a file a model wrote from a
-# multiSelect, "line N, column M" is what locates the slip.
-_validate_promote() {  # $1 = path, $2 = label for the diagnostic
-  [[ -f "$1" && -s "$1" ]] || {
-    print -u2 -- "resolve-story-loop: $2 must be a non-empty regular file: $1"; exit 2 }
-  # `type == "object"` alone accepts `[{}]` and mis-keyed objects (`path` for
-  # `file`, a missing `dimension`) — plausible slips for a file a model writes
-  # from a multiSelect. The consolidator would then compare against empty
-  # strings, match nothing, and the sub-loop would exit CONVERGED having done
-  # none of the work: the same terminal-SUCCESS failure the persistence
-  # machinery exists to prevent, reached by another road. Require the keys.
-  # Mirrors the consolidator's predicate exactly, so the two cannot drift:
-  # `file`/`dimension` must be non-empty (they are matched for equality, so an
-  # empty one is meaningless), `title` must be a string but MAY be empty (a
-  # genuinely untitled finding stays promotable, and the overlay caps a
-  # tokenless key at one item). A NON-EMPTY array is required on top: `[]` would
-  # run a provably no-op overlay every round and converge reporting success,
-  # when the contract is that selecting nothing skips the sub-loop entirely.
-  jq -e -s 'length == 1 and (.[0] | type == "array" and length > 0
-              and all(.[]; type == "object"
-                    and (.file | type == "string" and length > 0)
-                    and (.dimension | type == "string" and length > 0)
-                    and (.title | type == "string")))' \
-    -- "$1" >/dev/null || {
-    print -u2 -- "resolve-story-loop: $2 must be exactly ONE non-empty JSON array of objects with non-empty file and dimension and a string title: $1"; exit 2 }
-}
-
-if [[ -n "$promote" ]]; then
-  _validate_promote "$promote" "--promote"
-  # Persisted state must not be cwd-relative: step mode spans invocations whose
-  # cwd need not be stable, and a bare `promoted.json` would resolve differently
-  # (or, worse, resolve to a DIFFERENT same-named file) on the next one.
-  promote="${promote:A}"
-fi
-
-# --risk (#1921), validated here for the reason --promote is: the consolidator
+# --risk (#1921), validated up front: the consolidator
 # refuses a malformed assessment with exit 2, but mid-round that surfaces as a
 # BARE exit 1 after the round's setup has already run. Checked with the SAME
 # library the consolidator uses, so the refusal names the same entry in the same
@@ -2181,23 +2092,13 @@ if [[ -n "$risk" ]]; then
 fi
 
 local changelists_file="$work_dir/changelists.jsonl"
-# The promoted set is CROSS-INVOCATION state, so it lives in the work-dir like
-# every other piece (history, changelists, .t0, findings digests). Forwarding it
-# per round only covers rounds inside ONE invocation — but step mode, the
-# canonical wiring, runs each round as its own invocation. A --resume that
-# omitted --promote would consolidate with no overlay, drop the promoted item
-# back to Low, reach `.summary.blocking == 0` and exit CONVERGED (0): the
-# feature failing as a terminal SUCCESS, and one non-convergence detection
-# cannot catch, because the demoted item is no longer in `.blocking` to match
-# against $prevblk. So persist it on a fresh run and adopt it on resume.
-local promote_state="$work_dir/.promote"
 # On --resume we CONTINUE a prior run: the work-dir IS the state. Read the last
 # completed round from history, and re-use its persisted changelist file as the
 # prior round so non-convergence detection spans the extension. A fresh run
 # (no --resume) truncates both accumulators as before.
 local resume_round=0 resume_prev=""
 # Per-round iteration state (#1434), all of it per-RUN: truncated on a fresh
-# start beside .findings-digest-* / .promote, adopted on --resume.
+# start beside .findings-digest-*, adopted on --resume.
 local closing_sweep_file="$work_dir/.closing-sweep"
 # the identities this run has already spent its one all-ambiguous continuation
 # on (#1498) — per-run like the two above, truncated on a fresh start and
@@ -2422,27 +2323,6 @@ if (( resume )); then
     print -u2 -- "resolve-story-loop: --resume found a damaged $adjudicated_file — re-initialising to [] (no suggestion will be suppressed this run)"
     print -r -- '[]' > "$adjudicated_file" || {
       print -u2 -- "resolve-story-loop: could not re-initialise $adjudicated_file"; exit 1 } }
-  # adopt the run's promoted set when this invocation did not carry it: dropping
-  # --promote on a resume is a one-flag slip in a long command line, and its
-  # failure mode is a silent CONVERGED rather than an error. An explicit
-  # --promote still wins (a caller may legitimately re-point it), but it must
-  # then be usable — a stale path would otherwise fail per-round as a bare exit 1.
-  # `-e`, not `-s`: a ZERO-BYTE .promote is BROKEN state, not absent state. With
-  # `-s` it would be skipped silently, no overlay forwarded, and the sub-loop
-  # could reach CONVERGED — the very silent success the file exists to prevent,
-  # reached through the file itself.
-  if [[ -z "$promote" && -e "$promote_state" ]]; then
-    promote=$(<"$promote_state")
-    [[ -n "$promote" ]] || {
-      print -u2 -- "resolve-story-loop: $promote_state is empty — the promoted set was lost; re-pass --promote"; exit 2 }
-    # the recovered path names a file OUTSIDE the work-dir (the scratch dir the
-    # promote file lives in), so between rounds it can have been cleaned up OR
-    # rewritten badly — validate it through the SAME helper as an explicit
-    # --promote, and refuse loudly rather than forwarding a bad path that would
-    # fail mid-round as an untyped exit 1
-    _validate_promote "$promote" "--resume adopted promoted set from $promote_state"
-    print -u2 -- "resolve-story-loop: --resume adopting the run's promoted set from $promote_state ($promote)"
-  fi
 else
   : > "$history_file" || {
     print -u2 -- "resolve-story-loop: could not truncate $history_file for a fresh run"; exit 1 }
@@ -2452,10 +2332,6 @@ else
   # work-dir must not let a previous run's round-N digest veto this run's
   # round N+1
   rm -f -- "$work_dir"/.findings-digest-*(N) "$work_dir"/.findings-empty-*(N)
-  # the promoted set is per-run state too: record it for later --resume
-  # invocations, and clear a previous run's so a re-used work-dir cannot
-  # resurrect an overlay this run did not ask for
-  rm -f -- "$promote_state"
   # the iteration state (#1434) is per-run for exactly the same reason: a
   # re-used work-dir must not let a previous run's tree identity scope THIS
   # run's round 2 (a delta against a foreign tree is arbitrary), nor its waived
@@ -2493,20 +2369,6 @@ else
   # the terminal telemetry must report whole-loop wall clock, not the last
   # round's (#971)
   print -r -- "$t0" > "$work_dir/.t0"
-fi
-
-# Persist AFTER the resume/fresh branch, so an explicit --promote is recorded on
-# EVERY invocation that carries one — not just a fresh run. Writing it only on the
-# fresh branch left `.promote` stale the moment a --resume re-pointed the flag:
-# the NEXT resume that omitted it would adopt the SUPERSEDED set, and a promotion
-# first added on a resume was never persisted at all (so a later omitted-flag
-# resume ran with no overlay and could reach CONVERGED). The fresh branch above
-# clears the file, so a re-used work-dir still cannot resurrect a previous run's
-# set. Losing this state silently would degrade to a false CONVERGED, so a failed
-# write is fatal rather than swallowed.
-if [[ -n "$promote" ]]; then
-  print -r -- "$promote" > "$promote_state" || {
-    print -u2 -- "resolve-story-loop: could not persist the promoted set to $promote_state"; exit 1 }
 fi
 
 # Step mode gates the PREVIOUS round's in-session fix here (#971): the fix ran
@@ -3138,7 +3000,7 @@ while (( round <= effective_max )); do
       # downstream then multiplies: two scoped arrays, two changelist objects,
       # a two-line `blocking` capture that aborts the arithmetic, and a BLANK
       # status JSON emitted beside an exit code that claims a verdict. Same
-      # rule, same reason, as `_validate_promote`.
+      # rule, same reason, as the adjudicated-list check on --resume.
       jq -e -s 'length == 1 and (.[0] | type == "array")' -- "$findings_file" >/dev/null 2>&1 || {
         print -u2 -- "resolve-story-loop: --findings-file must hold exactly ONE JSON array: $findings_file"; exit 1 }
       # stale-findings guard (#974): the panel is the session's job, run between
@@ -3425,13 +3287,9 @@ while (( round <= effective_max )); do
   # (the adjudicated list was already invalidated above, before the panel read
   # it — see the block next to `delta_json`)
   changelist="$work_dir/changelist-$round.json"
-  # built as an array so --prev and --promote compose: the old if/else pair had
-  # no room for a second optional flag without a four-way branch, and a promoted
-  # set must reach the consolidator on the --prev rounds too (round 2+ is exactly
-  # where an un-forwarded overlay would drop the item back to Low).
+  # built as an array so the optional flags compose without a branch per pair
   consolidate_args=( --findings "$scoped" --round "$round" )
   [[ -n "$prev_changelist" ]] && consolidate_args+=( --prev "$prev_changelist" )
-  [[ -n "$promote" ]] && consolidate_args+=( --promote "$promote" )
   # this round's risk assessment (#1921) — this invocation's round only, since
   # step mode runs one round per invocation and each round is assessed afresh
   [[ -n "$risk" ]] && consolidate_args+=( --risk "$risk" )

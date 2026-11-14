@@ -1572,3 +1572,35 @@ setup_wd() { WD="$BATS_TEST_TMPDIR/wd"; mkdir -p "$WD"; }
   contains "$arch" 'It records `record-grant.zsh --add 3 --source automatic --guided` and, only once that exits 0, posts `build-escalation.zsh --format guidance`'"'"'s comment'
   contains "$arch" 'a second `stuck` is refused as `already-retried` (and `record-grant.zsh --guided` exits 4), and the run stops cleanly.'
 }
+
+@test "#3134 a promoted stamp adds no Promoted column and no (promoted) suffix: the escalation is byte-identical to the unstamped one" {
+  # The promotion labels are retired with the loop's --promote. A status file an
+  # older loop wrote with `promoted: true` items renders exactly as the same
+  # status file without the stamp, in both formats and on both blocker arms.
+  local plain="$BATS_TEST_TMPDIR/plain.json" st fmt a b
+  for st in ESCALATE_NO_CONVERGENCE BUDGET_EXHAUSTED; do
+    jq -n --arg st "$st" '{status:$st, rounds:2, max_rounds:2,
+      history:[{round:1,blocking:1,conflicts:0,non_converging:false},
+               {round:2,blocking:1,conflicts:0,non_converging:true}],
+      round_changelists:[{round:1,summary:{critical:0,high:1,low:0},
+          blocking:[{priority:"High",dimension:"code_quality",file:"a.py",line:3,title:"magic number",promoted:true,non_converging:false}]},
+        {round:2,summary:{critical:0,high:1,low:0},
+          blocking:[{priority:"High",dimension:"code_quality",file:"a.py",line:3,title:"magic number",promoted:true,non_converging:true,
+                     matched_prior:{line:3,title:"magic number"}}]}],
+      final_changelist:{blocking:[{priority:"High",dimension:"code_quality",file:"a.py",line:3,title:"magic number",promoted:true,non_converging:true,
+                     matched_prior:{line:3,title:"magic number"}}]}}' > "$ST"
+    jq '(.round_changelists[].blocking[], .final_changelist.blocking[]) |= del(.promoted)' "$ST" > "$plain"
+    for fmt in comment summary; do
+      run zsh "$S" --status "$ST" --issue 3134 --format "$fmt"
+      [ "$status" -eq 0 ]
+      a="$output"
+      run zsh "$S" --status "$plain" --issue 3134 --format "$fmt"
+      [ "$status" -eq 0 ]
+      b="$output"
+      [ "$a" = "$b" ]
+      [ "$(grep -ci 'promoted' <<< "$a")" -eq 0 ]
+      grep -qF -- '| Round | Critical | Warning | Suggestion | New | Carried | Fixed since prior |' <<< "$a"
+      grep -qF -- '`a.py:3` [code_quality/Warning] magic number' <<< "$a"
+    done
+  done
+}

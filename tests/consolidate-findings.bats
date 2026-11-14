@@ -2042,3 +2042,53 @@ EOF
   [ "$status" -eq 2 ]
   contains "$output" "unexpected argument: yes"
 }
+
+# --- the --round / --prev / --findings usage contract (#1026) -----------------
+# Moved here from tests/promotion-overlay.bats when #3134 deleted that file: the
+# cases test the consolidator's own flags, not the overlay. A half-applied guard
+# is the inconsistency the next caller trips on: these used to abort with zsh's
+# raw nounset error and exit 1, which this script's taxonomy reserves for
+# INTERNAL errors. One @test per flag, so a failure localizes.
+
+one_low_finding() {
+  printf '%s\n' '[{"severity":"SUGGESTION","dimension":"code_quality","file":"development/skills/resolve-issue/scripts/consolidate-findings.zsh","line":113,"title":"LINEWIN is a magic number","description":"extract a named constant","reviewer":"script-reviewer"}]' > "$F"
+}
+
+@test "#1026 the consolidator's --round requires a value (exit 2)" {
+  one_low_finding
+  run zsh "$S" --findings "$F" --round
+  [ "$status" -eq 2 ]
+  contains "$output" "--round requires a value"
+}
+
+@test "#1026 the consolidator's --prev requires a value (exit 2)" {
+  one_low_finding
+  run zsh "$S" --findings "$F" --prev
+  [ "$status" -eq 2 ]
+  contains "$output" "--prev requires a value"
+}
+
+@test "#1026 the consolidator's --findings requires a value (exit 2)" {
+  run zsh "$S" --findings
+  [ "$status" -eq 2 ]
+  contains "$output" "--findings requires a value"
+}
+
+@test "#1026 a junk --round is a usage error, not a misattributed internal one" {
+  # --round is interpolated as raw JSON, so an unvalidated value failed inside
+  # the final jq and was reported as "invalid findings JSON" with exit 1
+  one_low_finding
+  run --separate-stderr zsh "$S" --findings "$F" --round abc
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  contains "$stderr" "--round must be a non-negative integer"
+  lacks "$stderr" "invalid findings JSON"
+}
+
+@test "#1026 a leading-zero --round is normalised, not rejected" {
+  # legal shell, illegal JSON — it must not reach --argjson as `03`
+  one_low_finding
+  con --round 03
+  [ "$status" -eq 0 ]
+  [ "$(jq '.round' <<<"$output")" -eq 3 ]
+}
