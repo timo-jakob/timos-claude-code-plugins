@@ -21,7 +21,7 @@ dispatches nothing.
   line and PR Summary note. In step mode, an extension round (#2577) is the
   exception: dispatch it there whatever this threshold says, as *The risk pass*
   defines that round. **On**, in step mode: dispatch it every round, the
-  promotion sub-loop's rounds and the closing sweep included.
+  closing sweep included.
 - **Sequencing.**
   1. Dispatch the risk subagent only after reading an `ok` decide verdict for
      the round's latest decide dispatch.
@@ -32,8 +32,7 @@ dispatches nothing.
      the risk subagent before the next invocation that passes `--risk`.
 - **The handoff.** Write `handoff-<R>-risk.json` with `round-handoff.zsh
   write-handoff`: `aggregate_findings_file` the file the round passes as
-  `--findings-file` (*Risk pass, then consolidation* above; on a promotion
-  sub-loop's round 1, the seeded file, built in the work-dir),
+  `--findings-file` (*Risk pass, then consolidation* above),
   `worktree_root` as *What the conductor puts in a handoff* says for every kind,
   and `tree_id` the round's `T`.
 - **Clear before every risk dispatch.** Delete `<work-dir>/verdict-<R>-risk.json`

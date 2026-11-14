@@ -72,7 +72,7 @@ flat() {
 }
 
 @test "#2583 MUTATION: a deciding shard without the helper's name fails the sweep; the unmutated copy passes" {
-  local scratch="$BATS_TEST_TMPDIR/repo" rel="development/skills/resolve-issue/reference/promotion/gate.md"
+  local scratch="$BATS_TEST_TMPDIR/repo" rel="development/skills/resolve-issue/reference/interactive/extension.md"
   mkdir -p "$scratch/$(dirname "$rel")"
   git -C "$scratch" init -q
   cp "$REPO_ROOT/$rel" "$scratch/$rel"

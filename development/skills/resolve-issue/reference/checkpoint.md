@@ -33,9 +33,8 @@ the state a checkpoint keeps is one a later session can find.
   Maintenance App and records `last_round: 0`. Omit `--run-id` when `start`
   failed and there is no run id.
 - **Round k — every round the loop consolidates.** Pass `--checkpoint <mode>`
-  on every invocation of the blocking loop, round 1 and every `--resume` alike,
-  and never on the promotion sub-loop, whose work-dir is not the one the marker
-  keeps. After a round consolidates on a green gate, the loop commits
+  on every invocation of the blocking loop, round 1 and every `--resume` alike.
+  After a round consolidates on a green gate, the loop commits
   `wip(resolve-issue #<N>): round <k>`, pushes it and records `last_round: k`.
   A round whose gate is red never consolidates, so it commits nothing and the
   marker stays as it was.

@@ -72,9 +72,7 @@ succeeded.
 
 - **Risk pass, then consolidation.** Run the risk pass only after reading an
   `ok` decide verdict. Once the decide verdict is `ok`, pass the panel verdict's
-  `aggregate_findings_file` as `--findings-file`. On a promotion sub-loop's
-  round 1, pass instead the seeded file built from that decided aggregate
-  (`reference/promotion.md`). Open neither the aggregate,
+  `aggregate_findings_file` as `--findings-file`. Open neither the aggregate,
   `decides-ran-<R>.txt` nor `decides-retired.txt`.
 - **Narration.** Report the verdict's `decided_red`, `decided_green` and
   `malformed` counts and the `decided-<R>.log` path. Findings are named in

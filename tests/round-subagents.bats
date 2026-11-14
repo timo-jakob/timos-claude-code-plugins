@@ -30,9 +30,6 @@ setup() {
   RL="$REF/review-loop"
   SUBS="$RL/subagents.md"
   BRIEFS="$RL/briefs"
-  # #2057 split promotion.md: the notes after its frozen span are in
-  # reference/promotion/step-8-status-files.md, after the step-8 chunk.
-  PROMO="$REF/promotion/step-8-status-files.md"
   AGENTS="$REPO_ROOT/development/agents"
   HEADING='### Round subagents — the conductor reads only verdicts (#1935)'
 }
@@ -453,7 +450,8 @@ _background_wait_pins() {
   load_section
   contains "$section" "\`acceptance_criteria_file\` (#3074): \`acceptance-criteria.md\` in the handoff's work-dir, which the conductor composes once per run from the issue body it already fetched"
   contains "$section" "the body's acceptance criteria verbatim, followed by its \`story-spec/v1\` block when one exists"
-  contains "$section" "writes into each work-dir, the blocking loop's and each promotion sub-loop's, before that work-dir's first fix handoff of the run, replacing any copy an earlier run left"
+  contains "$section" "writes into the blocking loop's work-dir before its first fix handoff of the run, replacing any copy an earlier run left"
+  lacks "$section" "each promotion sub-loop's"
   contains "$section" 'With neither, as on a run on a bare branch, the field is `null` and any copy an earlier run left is deleted'
 }
 
@@ -498,40 +496,29 @@ _background_wait_pins() {
 
 # --- AC 13: everything else unchanged -----------------------------------------
 
-@test "AC13: the other exit codes keep their paths; promotion, residue and escalation stay in the conductor" {
+@test "AC13: the other exit codes keep their paths; residue and escalation stay in the conductor" {
   load_section
   contains "$section" 'Exit codes 0, 14, 10, 11, 12, 13, 2 and 1 take their existing paths, from the status JSON alone'
   contains "$section" 'a mid-run exit 2 on the CARRY-UNACCOUNTED, CADENCE or never-ran arm, which takes `#### Verdict recovery arms (#1937)`.'
   lacks "$section" 'reads per-entry lines the conductor no longer holds'
-  contains "$section" 'Promotion, residue and escalation stay in the conductor'
-}
-
-# --- AC 14: promotion.md pointer ----------------------------------------------
-
-@test "AC14: promotion.md, after its frozen span, points sub-loop rounds at the same subagents" {
-  local close_line after
-  close_line="$(grep -n '^<!-- /moved: suggestion-promotion-step-8 -->$' "$PROMO" | cut -d: -f1)"
-  [ -n "$close_line" ]
-  after="$(tail -n +"$((close_line + 1))" "$PROMO" | squeeze)"
-  contains "$after" "The sub-loop's rounds dispatch the same panel and fix subagents (#1935)."
-  contains "$after" '§ *Round subagents — the conductor reads only verdicts (#1935)*'
-  contains "$after" "the seeded file — not the verdict's path — is what that round passes as \`--findings-file\`"
+  contains "$section" 'Residue and escalation stay in the conductor, because each needs a human.'
+  lacks "$section" 'Promotion, residue and escalation'
+  lacks "$section" 'A promotion sub-loop'"'"'s rounds dispatch'
 }
 
 # --- AC 15: the structural criterion ------------------------------------------
 
-@test "AC15: the conductor reads only verdicts, status JSON and work-dir state, with two named exceptions" {
+@test "AC15: the conductor reads only verdicts, status JSON and work-dir state, with one named exception" {
   load_section
   contains "$section" 'The conductor reads only verdicts, status JSON and its work-dir state'
   contains "$section" "never reviewer output, a findings file's contents or a diff"
-  contains "$section" 'There are two named exceptions'
-  contains "$section" 'NOT APPLICABLE option (2)'
-  contains "$section" 'the promotion seed procedure with its step-7 verification'
+  contains "$section" 'There is one named exception, human-driven: NOT APPLICABLE option (2) on a full round (step 2)'
+  lacks "$section" 'the promotion seed procedure'
 }
 
 @test "AC15: neither the decided pass nor the risk pass is an exception (#1936, #2025)" {
   load_section
-  contains "$section" 'There are two named exceptions, both human-driven'
+  contains "$section" 'There is one named exception, human-driven'
   contains "$section" 'The risk pass (#1921) is not an exception: while `corner_case_risk_threshold` is on, the risk subagent assesses the aggregate and the conductor passes its verdict'"'"'s `risk_file` as `--risk` unopened; when the threshold is off or ignored, no risk subagent is dispatched.'
   lacks "$section" 'The risk pass (#1921) is the one exception that is not human-driven'
   lacks "$section" '#2025 moves it into a subagent.'
@@ -642,7 +629,7 @@ load_decided_pass() {
   load_decide_brief
   contains "$decide" 'Run the risk pass only after reading an `ok` decide verdict.'
   contains "$decide" 'Once the decide verdict is `ok`, pass the panel verdict'"'"'s `aggregate_findings_file` as `--findings-file`.'
-  contains "$decide" 'On a promotion sub-loop'"'"'s round 1, pass instead the seeded file built from that decided aggregate (`reference/promotion.md`).'
+  lacks "$decide" 'On a promotion sub-loop'"'"'s round 1'
   contains "$decide" 'Open neither the aggregate, `decides-ran-<R>.txt` nor `decides-retired.txt`.'
   lacks "$decide" 'except through the risk pass, as the structural criterion says'
   load_section
@@ -698,19 +685,6 @@ load_decided_pass() {
   local risk
   risk="$(section_of "$RL/risk-pass.md" '### The risk pass — assess every blocking finding before consolidating (#1921)' '### |## ' | squeeze)"
   contains "$risk" '**Assess the round'"'"'s blockers against `corner_case_risk_threshold` after the decided pass and before the step-2 invocation.**'
-}
-
-@test "#1936 AC13: promotion.md names the decide subagent alongside the panel and fix subagents" {
-  local close_line after
-  close_line="$(grep -n '^<!-- /moved: suggestion-promotion-step-8 -->$' "$PROMO" | cut -d: -f1)"
-  [ -n "$close_line" ]
-  after="$(tail -n +"$((close_line + 1))" "$PROMO" | squeeze)"
-  contains "$after" 'they are now dispatched as the **panel**, **decide**, **risk** and **fix** subagents'
-  contains "$after" 'On sub-loop round 1, `<pre-seed-round-1.json>` is the panel verdict'"'"'s `aggregate_findings_file`, `<promotion-work-dir>/findings-round-1.json` — inside the work-dir, not at a path of its own, so the decide handoff can name it'
-  contains "$after" 'The decide subagent runs over `<pre-seed-round-1.json>` first: build the seeded file (step 3) only after an `ok` decide verdict, from the decided file.'
-  contains "$after" 'The decide pass'"'"'s atomic rewrite is the one overwrite step 1 permits — it changes stamps and severities only, never a finding'"'"'s `file`, `dimension` or line, so step 2 classifies against a baseline that is still valid.'
-  load_section
-  contains "$section" 'A promotion sub-loop'"'"'s rounds dispatch the same panel, decide, risk and fix subagents'
 }
 
 # --- #1937: verdict recovery arms ---------------------------------------------
@@ -923,7 +897,7 @@ load_risk_pass() {
 @test "#2025 AC3: the threshold decides whether a risk subagent runs at all" {
   load_risk_brief
   contains "$riskb" '**Off** or **ignored**, or **hook mode**: dispatch no risk subagent and pass no `--risk`; ignored keeps its narration line and PR Summary note.'
-  contains "$riskb" '**On**, in step mode: dispatch it every round, the promotion sub-loop'"'"'s rounds and the closing sweep included.'
+  contains "$riskb" '**On**, in step mode: dispatch it every round, the closing sweep included.'
 }
 
 @test "#2025 AC4: the three-part sequencing rule" {
@@ -935,7 +909,7 @@ load_risk_pass() {
 
 @test "#2025 AC5: the risk handoff and the clear before every risk dispatch" {
   load_risk_brief
-  contains "$riskb" 'Write `handoff-<R>-risk.json` with `round-handoff.zsh write-handoff`: `aggregate_findings_file` the file the round passes as `--findings-file` (*Risk pass, then consolidation* above; on a promotion sub-loop'"'"'s round 1, the seeded file, built in the work-dir),'
+  contains "$riskb" 'Write `handoff-<R>-risk.json` with `round-handoff.zsh write-handoff`: `aggregate_findings_file` the file the round passes as `--findings-file` (*Risk pass, then consolidation* above), `worktree_root`'
   contains "$riskb" 'and `tree_id` the round'"'"'s `T`.'
   contains "$riskb" 'Delete `<work-dir>/verdict-<R>-risk.json` and `<work-dir>/risk-<R>.json`. A delete that fails is report-and-stop.'
 }
@@ -992,12 +966,19 @@ load_risk_pass() {
   lacks "$decide" 'except through the risk pass'
 }
 
-@test "#2025 AC13: promotion.md and the Round subagents section name the risk subagent for the sub-loop" {
-  local close_line after
-  close_line="$(grep -n '^<!-- /moved: suggestion-promotion-step-8 -->$' "$PROMO" | cut -d: -f1)"
-  [ -n "$close_line" ]
-  after="$(tail -n +"$((close_line + 1))" "$PROMO" | squeeze)"
-  contains "$after" '**panel**, **decide**, **risk** and **fix** subagents'
-  load_section
-  contains "$section" 'rounds dispatch the same panel, decide, risk and fix subagents'
+# --- #3129: the promotion sub-loop is gone from these shards ------------------
+
+@test "#3129 AC1: the review-loop shards and the checkpoint reference no longer mention the promotion sub-loop" {
+  local f t n
+  for f in "$BRIEFS/decide.md" "$BRIEFS/risk.md" "$RL/risk-pass.md" "$SUBS" "$REF/checkpoint.md"; do
+    t="$(squeeze < "$f")"
+    for n in 'promotion sub-loop' 'promoted item' 'promoted: true' 'reference/promotion.md' 'reference/promotion/'; do
+      lacks "$t" "$n"
+    done
+  done
+  lacks "$(squeeze < "$RL/risk-pass.md")" 'enable_suggestions'
+  # the two other mechanisms that share the word stay
+  contains "$(squeeze < "$SUBS")" '**zero** → the closing-sweep promotion (step 3).'
+  contains "$(squeeze < "$BRIEFS/decide.md")" 'the closing-sweep promotion and the findings-file recovery re-invokes'
+  contains "$(squeeze < "$RL/risk-pass.md")" 'That includes a finding the decided pass promoted: it is exempt from demotion'
 }

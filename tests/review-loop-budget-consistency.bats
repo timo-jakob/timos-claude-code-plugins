@@ -150,10 +150,10 @@ setup() {
   # DERIVED over the skill, transcribed only for the non-skill sites (#1503).
   # The move turned one skill file into six, and the two negative sweeps
   # ALL_SITES feeds are the ones that must cover ALL of them — a transcribed
-  # list that gained three of the six would leave reference/{residue,promotion,
-  # escalation}.md unswept, and reference/promotion.md already discusses
-  # --max-rounds, so it is a plausible carrier of a stale spelling. Deriving is
-  # also what makes a SEVENTH skill file join automatically.
+  # list that gained three of the six would leave the other reference files
+  # unswept, and any of them that discusses --max-rounds is a plausible carrier
+  # of a stale spelling. Deriving is also what makes a SEVENTH skill file join
+  # automatically.
   #
   # The producer's STATUS is observed, never read through `< <(...)`:
   # `resolve_issue_files` returns 1 and prints nothing when `reference/` and its
@@ -250,8 +250,8 @@ grep_site() {  # grep_site <file> <fixed-string>
   # transcribed list is how the skill half of a negative sweep goes quiet: naming
   # only reference/review-loop.md read a file with ZERO occurrences of the
   # constant and passed on ARCHITECTURE.md's copy alone, and naming it plus the
-  # conductor still left reference/promotion.md — which discusses the
-  # MAX_REVIEW_ROUNDS default — unswept. Deriving is what makes a seventh skill
+  # conductor still left the other reference files that discuss the
+  # MAX_REVIEW_ROUNDS default unswept. Deriving is what makes a seventh skill
   # file join without an edit here.
   run grep -Eho 'MAX_REVIEW_ROUNDS=[0-9]+' "${NEG_SITES[@]}"
   [ "$status" -eq 0 ]
@@ -390,9 +390,9 @@ grep_site() {  # grep_site <file> <fixed-string>
   [ "$SWEEP_GRANT" -eq 1 ]   # the word form below is spelled for this value
   local site
   for site in "${SWEEP_SITES[@]}"; do
-    # `closing full sweep` is INERT as a guard — it also matches the unrelated
-    # promotion prose at every site — so it stays only as a cheap presence
-    # check; the pins that do the work are below it.
+    # `closing full sweep` is INERT as a guard — it also matches unrelated
+    # prose at a site — so it stays only as a cheap presence check; the pins
+    # that do the work are below it.
     grep_site "$site" 'closing full sweep'
     grep_site "$site" 'exactly one round beyond'
   done

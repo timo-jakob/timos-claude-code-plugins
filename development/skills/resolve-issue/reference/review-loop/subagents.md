@@ -121,9 +121,9 @@ heading's body, since the subagent cannot load a skill. It also carries
 `acceptance_criteria_file` (#3074): `acceptance-criteria.md` in the handoff's
 work-dir, which the conductor composes once per run from the issue body it
 already fetched — the body's acceptance criteria verbatim, followed by its
-`story-spec/v1` block when one exists — and writes into each work-dir, the
-blocking loop's and each promotion sub-loop's, before that work-dir's first fix
-handoff of the run, replacing any copy an earlier run left. With neither, as on
+`story-spec/v1` block when one exists — and writes into the blocking loop's
+work-dir before its first fix handoff of the run, replacing any copy an earlier
+run left. With neither, as on
 a run on a bare branch, the field is `null` and any copy an earlier run left is
 deleted.
 
@@ -179,17 +179,14 @@ report-and-stop, never re-dispatched.
 their existing paths, from the status JSON alone — except a mid-run exit 2 on
 the CARRY-UNACCOUNTED, CADENCE or never-ran arm, which takes
 `#### Verdict recovery arms (#1937)`.
-Promotion, residue and
-escalation stay in the conductor, because each needs a human. A promotion
-sub-loop's rounds dispatch the same panel, decide, risk and fix subagents
-(`reference/promotion.md`).
+Residue and escalation
+stay in the conductor, because each needs a human.
 
 **The structural criterion.** The conductor reads only verdicts, status JSON and
 its work-dir state — never reviewer output, a findings file's contents or a
-diff. There are two named exceptions, both human-driven: NOT APPLICABLE option
-(2) on a full round (step 2), *"you read the story diff yourself"*, which only
-the human can choose; and the promotion seed procedure with its step-7
-verification (`reference/promotion.md`). The risk pass (#1921) is not an
+diff. There is one named exception, human-driven: NOT APPLICABLE option (2) on
+a full round (step 2), *"you read the story diff yourself"*, which only the
+human can choose. The risk pass (#1921) is not an
 exception: while `corner_case_risk_threshold` is on, the risk subagent assesses
 the aggregate and the conductor passes its verdict's `risk_file` as `--risk`
 unopened; when the threshold is off or ignored, no risk subagent is dispatched.
