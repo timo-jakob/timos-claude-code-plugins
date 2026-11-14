@@ -32,11 +32,14 @@ Then, for the interactive extension, in this order:
 Every `<!-- moved: … -->` block in those shards is byte-identical to the text it
 was carved out of; `scripts/verify-reference-move.zsh` proves that against the
 pinned pre-move commit. `interactive-remediation` sits whole in `remediation.md`;
-the frozen extension is cut into two such blocks, `interactive-extension` in
-`extension.md` and `interactive-extension-steps-5-7` in `extension-grant.md`.
+the frozen extension is cut into three such blocks, `interactive-extension` (its
+intro) and `interactive-extension-steps-2-4` in `extension.md`, and
+`interactive-extension-steps-6-7` in `extension-grant.md`.
 
 **Everything outside those blocks is outside that proof**: the shard headers,
-the opening notes of `remediation.md` and `extension.md`, the #1226 note after
+the opening notes of `remediation.md` and `extension.md`, the extension's
+`grants` paragraph with its step 1 and its step 5, which left the frozen text
+when #3121 removed the promotion phase from them, the #1226 note after
 `remediation.md`'s block, the `CLAUDE_PLUGIN_APPROVER=1` note that follows it
 (#2133), and the whole of `extension-ceiling.md`. Edit them
 knowing the byte check does not cover them.

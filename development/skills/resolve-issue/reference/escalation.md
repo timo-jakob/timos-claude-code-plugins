@@ -12,7 +12,9 @@ not converge takes the clean stop below instead of the terminal.
 
 Every `<!-- moved: … -->` block below is byte-identical to the text it was
 carved out of; `scripts/verify-reference-move.zsh` proves that against the
-pinned pre-move commit, and is what keeps this file honest.
+pinned pre-move commit, and is what keeps this file honest. The terminal's
+opening paragraph sits outside its block, and outside that proof: it left the
+frozen text when #3121 edited it.
 
 ## Escalation (any `ESCALATE_*` / `BUDGET_EXHAUSTED` status) — typed, no PR (#564)
 
@@ -204,14 +206,13 @@ Read the extension first when the run is interactive and the loop exited
 `BUDGET_EXHAUSTED` or `ESCALATE_NO_CONVERGENCE`:
 see `reference/interactive/extension.md` § Interactive extension (#562-resume)
 
-<!-- moved: escalation-terminal -->
-If the interactive extension ended in `CONVERGED`, skip the terminal below,
-offer the suggestion-promotion phase under its own gate (as above — once per
-story), and continue to §4. A `STALE_FINDINGS` exit never ends it — recover and resume as
+If the interactive extension ended in `CONVERGED`, skip the terminal below
+and continue to §4. A `STALE_FINDINGS` exit never ends it — recover and resume as
 step 5 says. If it ended in another **operational error**, it was already
 reported in-session (step 5) — stop, with **no** typed comment. Otherwise (a
 Stop / decline, or a `CONFLICT` / `AMBIGUOUS` exit):
 
+<!-- moved: escalation-terminal -->
 1. **Push the branch as the bot** (so the diff-so-far is linkable) but **create
    no PR object** — a draft would trigger CI and defeat the local loop. Use the
    `open-pr` token mint + `git push`, then stop before `gh pr create`.

@@ -165,6 +165,23 @@ fi
 # The only column-0 positions that are structurally safe are outside the list, so
 # the gap sits between `Each round:` and the list's first item.
 #
+# Three spans were re-cut by #3121, which removed the suggestion-promotion phase
+# from their text, so the lines it edited could no longer stay byte-frozen. Each
+# re-cut keeps every unchanged line it can verify at a markdown-safe cut:
+#   - `escalation-terminal` now starts at its step 1. Its opening paragraph,
+#     which offered the promotion phase on `CONVERGED`, is verified by nothing.
+#   - `interactive-extension` is cut into its intro (`interactive-extension`)
+#     and its steps 2-4 (`interactive-extension-steps-2-4`). The `grants`
+#     paragraph between them named the promotion sub-loop's own counter, and
+#     step 1 the progress table's Promoted column; both are verified by nothing.
+#   - `interactive-extension-steps-5-7` is now `interactive-extension-steps-6-7`.
+#     Step 5 passed `--promote` and offered the promotion phase throughout, and
+#     a column-0 sentinel inside its list item would break the list, so the
+#     whole step is verified by nothing.
+# The steps-2-4 / steps-6-7 seam is no longer checked: step 5 sits between them,
+# so the two are not adjacent in the pinned commit, and no CUT_GROUPS entry names
+# them any more.
+#
 # One anchor that looks obvious is UNUSABLE, recorded so nobody re-derives it:
 # `   **How to wait** (this section) governs the wait — it is not restated here.`
 # occurs TWICE in the pinned pre-move SKILL.md, and `extract_range` starts at the
@@ -196,11 +213,13 @@ MANIFEST=(
 "
 "escalation-head	escalation.md	A bad escalation costs a human an afternoon; a good one costs two minutes. On	tell the human the opposite of what happened.
 "
-"interactive-extension	interactive/extension.md	**Interactive extension (human present, \`BUDGET_EXHAUSTED\` /	   side-channel).
+"interactive-extension	interactive/extension.md	**Interactive extension (human present, \`BUDGET_EXHAUSTED\` /	run** skip this branch entirely and go straight to the typed comment below.)
 "
-"interactive-extension-steps-5-7	interactive/extension-grant.md	5. **If they granted rounds** (with or without guidance): **first apply one fix	   later with \`/development:resolve-issue <N>\`.
+"interactive-extension-steps-2-4	interactive/extension.md	2. **Offer the choice** with \`AskUserQuestion\` (one question), tailored to the	   side-channel).
 "
-"escalation-terminal	escalation.md	If the interactive extension ended in \`CONVERGED\`, skip the terminal below,	   the next run can converge. No PR exists until it does.
+"interactive-extension-steps-6-7	interactive/extension-grant.md	6. **Soft cap.** Before re-offering, if \`grants >= 5\` **or** the **last round	   later with \`/development:resolve-issue <N>\`.
+"
+"escalation-terminal	escalation.md	1. **Push the branch as the bot** (so the diff-so-far is linkable) but **create	   the next run can converge. No PR exists until it does.
 "
 )
 
@@ -546,8 +565,9 @@ fi
 # A frozen span re-cut into chunks across several shards: the former
 # `round-protocol-tail`, cut into four, one per step shard (#2055), and the
 # former `suggestion-promotion`, cut into five across reference/promotion/
-# (#2057), and the former `interactive-extension`, cut into two across
-# reference/interactive/ (#2058).
+# (#2057). The former `interactive-extension`, cut into two across
+# reference/interactive/ (#2058), was a group too until #3121 took step 5 out of
+# the frozen text, leaving no adjacent pair to check (see the manifest comment).
 # Each chunk is byte-checked on its own above, which proves nothing about the
 # SEAMS: move one chunk's last anchor up and its neighbour's first anchor stays
 # put, and the lines between them leave the verified region with every
@@ -564,7 +584,6 @@ fi
 typeset -a CUT_GROUPS=(
   "round-protocol-tail round-protocol-step-2 round-protocol-recover round-protocol-steps-3-4"
   "suggestion-promotion suggestion-promotion-step-3 suggestion-promotion-step-4 suggestion-promotion-step-7 suggestion-promotion-step-8"
-  "interactive-extension interactive-extension-steps-5-7"
 )
 typeset -a CUT_NAMES=(${=CUT_GROUPS})
 typeset -A cut_first cut_last

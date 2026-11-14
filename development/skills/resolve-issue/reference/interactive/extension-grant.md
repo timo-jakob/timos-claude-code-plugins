@@ -1,14 +1,14 @@
 <!-- Shard of reference/interactive.md (#2058), read in its index's order:
      steps 5-7 of the interactive extension: the grant, the soft cap, stop. -->
-<!-- The frozen chunk below continues the extension's numbered list at
-     item 5, so its numbering cannot restart at 1 here. -->
+<!-- This shard continues the extension's numbered list at item 5, and its
+     frozen chunk (steps 6-7) at item 6, so neither numbering can restart at 1
+     here. Step 5 left the frozen chunk when #3121 edited it. -->
 <!-- markdownlint-disable MD029 -->
 
 Whether a human is present is §0a's determination, read from
 `scripts/resolve-session.zsh`: `attended` takes the interactive arm, `unattended`
 takes the autonomous arm and never prompts.
 
-<!-- moved: interactive-extension-steps-5-7 -->
 5. **If they granted rounds** (with or without guidance): **first apply one fix
    pass, then resume.** The escalated round broke *before* its own fix pass ran
    (the loop's round order is review → decide → fix), so the tree still holds
@@ -59,34 +59,15 @@ takes the autonomous arm and never prompts.
    "<skill-base-dir>/scripts/resolve-story-loop.zsh" --repo <repo> --base <base> \
      --work-dir <same-work-dir> --resume --max-rounds <prev_max + 3> \
      --findings-file <findings-round-R.json> --test-cmd '<full gate>' \
-     [--gate-attest <T>] [--findings-tree <T>] \
-     [--promote <promoted.json>] --issue <N> \
+     [--gate-attest <T>] [--findings-tree <T>] --issue <N> \
      --status-file <status.json>
    ```
 
-   **`--promote` is required here whenever the escalating loop IS the promotion
-   sub-loop** (#994). The loop persists the promoted set in its work-dir and
-   re-adopts it if you omit the flag, so a slip degrades to a warning rather
-   than a silent un-promotion — but pass it explicitly anyway, so the command
-   you run and the overlay that is applied never diverge. The same applies to
-   the `STALE_FINDINGS` recovery re-invoke below.
-
-   On `CONVERGED` (exit 0) → leave this branch, offer the **suggestion-promotion
-   phase** under its own gate (unless this loop *is* the promotion sub-loop —
-   the phase runs once per story), then proceed to §4 (Version bump) / PR as
-   normal — **via the residue branch first when the BLOCKING phase ended
-   `CONVERGED_WITH_RESIDUE`** (its ordering is stated once, at the exit-14
-   bullet). That combination is ordinary, not exotic: a residue blocking phase,
-   a promotion sub-loop that escalates, a granted +3, and the sub-loop then
-   exits 0 here — and without the pointer the run opens its PR with the
-   remainder unfiled. **Every** path to `CONVERGED` passes that gate exactly
-   once; an
-   extended run is the one most likely to have accumulated waived suggestions,
-   so it is the last one that should skip the offer. On
+   On `CONVERGED` (exit 0) → leave this branch and proceed to
+   §4 (Version bump) / PR as normal. On
    `CONVERGED_WITH_RESIDUE` (exit 14, #1435) → leave this branch too, and take
-   the exit-14 bullet's ordering **verbatim**: the suggestion-promotion gate
-   first, then the **residue branch**, then §4. The ordering is stated once,
-   there — restating it here is how the two came to disagree, and the disagreement
+   the exit-14 bullet's ordering **verbatim**: the **residue branch**, then §4.
+   The ordering is stated once, there — restating it here is how the two came to disagree, and the disagreement
    is on the hot path, since residue replaces exactly the two exits this
    extension exists for. It is a convergence, not another
    escalation — do **not** re-summarize it, do **not** offer more rounds, and do
@@ -109,13 +90,12 @@ takes the autonomous arm and never prompts.
    re-invocation neither increments nor decrements `grants`, and never re-runs
    step 1's `build-escalation.zsh` summary on the `STALE_FINDINGS` status. On
    any **other operational error** (exit 1/2), the loop wrote
-   either **no** new status (on the blocking phase the file still holds the
-   *previous* escalation; on a promotion sub-loop it is absent, because that
-   phase deletes it before every invocation) or
+   either **no** new status (the file still holds the *previous* escalation) or
    a status `ERROR` (a red gate after a fix) — neither is a typed escalation, so
    never build a comment from the file: report the error in the conversation and
    stop.
 
+<!-- moved: interactive-extension-steps-6-7 -->
 6. **Soft cap.** Before re-offering, if `grants >= 5` **or** the **last round
    removed no blockers** — measured by the progress table's *Fixed since
    prior* column (prior blockers cleared: the prior round's blocking count
@@ -135,7 +115,7 @@ takes the autonomous arm and never prompts.
    to the typed-comment terminal below, exactly as an autonomous run does. The
    diff-so-far and any guidance are already on the issue; the human can resume
    later with `/development:resolve-issue <N>`.
-<!-- /moved: interactive-extension-steps-5-7 -->
+<!-- /moved: interactive-extension-steps-6-7 -->
 
 **The exit-14 arm of step 5 is retired by #2580 and can no longer fire.** The
 loop never emits `CONVERGED_WITH_RESIDUE` any more, so a resumed run ends
