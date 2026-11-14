@@ -111,21 +111,16 @@ jq -c '
       # after the run took it, so the record outcome is the retry outcome. An
       # older status JSON with no such key reads false.
       auto_guided_retry: ($s.auto_guided_retry // false),
-      # promotion sub-loop marker (#995). A promotion pass is a SECOND full
-      # invocation for one story, so counting its record alongside the phase-1
-      # one inflates the per-record convergence rate and adds a second
-      # (repo, issue, ts) group to the first-pass rate. The documented metrics
-      # exclude it with select(.payload.promotion_phase != true); an older
-      # status JSON with no such key reads false, i.e. a phase-1 record.
-      promotion_phase: ($s.promotion_phase // false),
+      # No promotion_phase and no per-round promoted count (#3132): the
+      # suggestion-promotion phase is retired, so a status JSON that still
+      # carries promotion_phase builds the same payload as one without it.
       # per-round severity counts use the USER-FACING vocabulary (#969):
       # Critical / Warning / Suggestion — the same words the human reads in
       # progress.md and the escalation — so on-screen and on-disk agree
       # (internally Warning == priority High, Suggestion == the Low bucket).
       # The stamped/carried/new/fixed derivation is one of THREE copies kept
       # in lockstep with render-progress-block.zsh and build-escalation.zsh;
-      # change all three together. build-dossier.zsh is NOT one of them — it
-      # shares only the per-item `promoted` expression (see below).
+      # change all three together. build-dossier.zsh is NOT one of them.
       # The #1435 `class` histogram below is a FOURTH member of that same
       # three-way lockstep (progress block, escalation histogram, this): one
       # derivation, three renderings, moved together or not at all.
@@ -144,13 +139,6 @@ jq -c '
           Warning:    ([ $blk[] | select(.priority=="High") ] | length),
           Suggestion: (($r.suggestions // []) | length)
         },
-        # human-promoted blockers this round (#995): a SUBSET of
-        # by_severity.Warning (the overlay raises a Low to WARNING), never a
-        # fourth severity to add to it. Same per-item expression as the four
-        # sibling copies — progress block, escalation table, and the two
-        # build-dossier reads: raised-set + round suffix (#1064); no stamp
-        # gate, so an unstamped changelist counts 0.
-        promoted: ([ $blk[] | select(.promoted == true) ] | length),
         by_dimension: ( reduce ($blk + ($r.suggestions // []))[] as $f
                           ({}; .[($f.dimension // "")] = ((.[($f.dimension // "")] // 0) + 1)) ),
         # residue class histogram (#1435): where the blockers of this round came
@@ -224,7 +212,7 @@ jq -c '
       # and is NOT a budget field: `max_rounds` above still reports the value
       # the caller passed. `// 0` keeps a status file predating the key reading
       # as a run that never auto-continued, the same always-present convention
-      # promotion_phase carries.
+      # auto_guided_retry carries.
       # (No apostrophes in this block: the jq program is single-quoted.)
       possible_false_trip_auto_continues: ($s.possible_false_trip_auto_continues // 0),
       # #1973: the gate that preceded each round, read from the per-round

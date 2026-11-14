@@ -68,13 +68,6 @@ builder_payload() {
     review-loop)
       printf '%s' '{"status":"CONVERGED","rounds":2,"max_rounds":3,"repo_type":"python","escalation_reasons":[],"round_changelists":[{"round":1,"blocking":[],"suggestions":[]}],"final_changelist":{"blocking":[]}}' > "$W/rl.json"
       out="$(zsh "$RI/scripts/build-telemetry-record.zsh" --status "$W/rl.json")" ;;
-    "review-loop suggestion-promotion enrichment")
-      # the payload is built inline by the promotion step, not by a builder
-      # script: run that step's own jq expression, read out of the file
-      local expr
-      expr="$(sed -n "s/.*'\({event:\"suggestion_promotion\"[^']*\)'.*/\1/p" "$RI/reference/promotion/step-3-select.md")"
-      [ -n "$expr" ] || { echo "the promotion step's payload expression was not found" >&2; return 1; }
-      out="$(jq -nc --argjson offered 2 --argjson promoted 1 "$expr")" ;;
     refine-issue)
       printf '%s' '{"rounds":3,"objections_raised":4,"objections_resolved":4,"outcome":"refined-ready","risk_classification":"low","size_preflight":{"verdict":"pass","triggers":[],"children_filed":0}}' > "$W/rf.json"
       out="$(zsh "$REPO_ROOT/development/skills/refine-issue/scripts/build-refine-telemetry-record.zsh" --state "$W/rf.json")" ;;
@@ -220,7 +213,6 @@ EPIC_ENUM_ROWS=(mode e1_classification e4 failure_cause)
 # a new table without a builder mapping reds rather than going unchecked.
 PAYLOAD_TABLES=(
   "review-loop"
-  "review-loop suggestion-promotion enrichment"
   "refine-issue"
   "resolve-issue, story mode"
   "resolve-issue, epic mode"
@@ -346,7 +338,7 @@ join_example_holds() {
   contains "$s" "These tables list every top-level \`payload\` key of each pipeline, so you can write a query without reading the emitting script."
   # one pointer per table, in PAYLOAD_TABLES order, each to a real ARCHITECTURE.md heading
   names="$(section '## Payload keys by pipeline' "$HOWTO" | sed -n 's/^Normative: `ARCHITECTURE.md`, \*\(.*\)\*\.$/\1/p')"
-  [ "$names" = "$(printf '%s\n' 'Review-loop telemetry' 'The suggestion-promotion enrichment' 'Refine-issue telemetry' 'Resolve-issue telemetry' 'Epic mode (#1227)' 'Story size pre-flight (#1437)' 'Maintenance telemetry (#1228)' 'Bootstrap telemetry (#1229)' 'Acceptance telemetry (#1230)' 'Approver telemetry (#1231)')" ]
+  [ "$names" = "$(printf '%s\n' 'Review-loop telemetry' 'Refine-issue telemetry' 'Resolve-issue telemetry' 'Epic mode (#1227)' 'Story size pre-flight (#1437)' 'Maintenance telemetry (#1228)' 'Bootstrap telemetry (#1229)' 'Acceptance telemetry (#1230)' 'Approver telemetry (#1231)')" ]
   while IFS= read -r n; do
     awk -v n="$n" '/^#+ / { sub(/^#+ /, ""); if (index($0, n) == 1) f = 1 } END { exit !f }' "$REPO_ROOT/ARCHITECTURE.md" || { echo "no ARCHITECTURE.md heading starts with: $n" >&2; return 1; }
   done <<<"$names"

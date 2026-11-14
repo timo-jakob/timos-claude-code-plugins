@@ -134,20 +134,10 @@ sink flags the run was given:
 jq -r '.loop_args[]' <scratch>/story-run-<N>.json
 ```
 
-That covers the blocking phase's first invocation and every `--resume`: each
-step-mode round, each granted extension, each `STALE_FINDINGS` recovery. It also
-covers the promotion sub-loop and each of its resumes. A missed invocation
-leaves that loop's record unparented and, under a sink flag, in the wrong file,
-and the emitter exits 0 either way, so nothing surfaces the loss.
-
-The promotion enrichment (`reference/promotion/step-3-select.md` step 3) emits through the
-emitter directly, not through the loop. Pass it the same `--telemetry-file` and
-`--telemetry-dir` the run was given — the sink flags in `loop_args`, or, when
-`start` failed, the ones from `args` — so it lands beside the record it
-enriches. Omit any sink flag `args` reported as `null`; never pass the string
-`null`. The emitter has no `null` guard of its own and would take it as a path.
-It stays joined to its loop record by that record's `run_id`, as before, and it
-carries no `--parent-run-id` of its own.
+That covers the loop's first invocation and every `--resume`: each step-mode
+round, each granted extension, each `STALE_FINDINGS` recovery. A missed
+invocation leaves that loop's record unparented and, under a sink flag, in the
+wrong file, and the emitter exits 0 either way, so nothing surfaces the loss.
 
 ### 3. Keep the run's facts as you go
 
@@ -210,8 +200,7 @@ emits nothing, so pick the row before writing the state, not after.
   --run-file <scratch>/story-run-<N>.json --state <scratch>/story-state-<N>.json \
   --repo-dir <the repo PATH the loop was given, never the owner/name identity> \
   --issue <N> [--repo-type <repo_type from §1b>] \
-  --loop-work-dir <blocking-phase work-dir> \
-  [--loop-work-dir <promotion work-dir>]
+  --loop-work-dir <the review loop's work-dir>
 ```
 
 - **Pass a `--loop-work-dir` for every loop work-dir this run used, and only

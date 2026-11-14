@@ -665,7 +665,7 @@ advised() {
 @test "every flag reference/telemetry.md passes to story-telemetry.zsh is one the script accepts" {
   # The skill runs these blocks verbatim; they are the only place its flags meet
   # the parser, so a misspelt flag there would exit 2 (or, if dropped, silently
-  # lose the promotion ids) on every real run with this suite still green.
+  # lose the loop ids) on every real run with this suite still green.
   local ref="$REPO_ROOT/development/skills/resolve-issue/reference/telemetry.md"
   local sub flags f
   for sub in start emit; do
@@ -862,13 +862,12 @@ advised() {
   # the other step-5 amendments in extension-ceiling.md.
   grep -qF "Every loop invocation carries the run's \`loop_args\` (#1226)" "$base/reference/review-loop/step-2-invocation.md"
   grep -qF "A granted resume carries the run's \`loop_args\` too (#1226)" "$base/reference/interactive/extension-ceiling.md"
-  grep -qF "Every sub-loop invocation also carries the run's \`loop_args\`" "$base/reference/promotion/step-8-status-files.md"
   grep -qF "the run's \`loop_args\` (Step 0) on every invocation" "$base/SKILL.md"
 }
 
 @test "the #1226 run-behaviour amendments stand beside their frozen spans" {
   # Each paragraph carries run behaviour the frozen span beside it does not say:
-  # the escalated record, a rung's own run file, the enrichment's sinks.
+  # the escalated record, a rung's own run file.
   local ref="$REPO_ROOT/development/skills/resolve-issue/reference" doc
   doc="$(tr -s '[:space:]' ' ' < "$ref/escalation.md")"
   contains "$doc" "**Before step 4's stop, emit the run's record (#1226).**"
@@ -878,12 +877,6 @@ advised() {
   contains "$doc" '**Each single-issue rung is its own telemetry run (#1226).**'
   contains "$doc" 'it calls `story-telemetry.zsh start` with its **own** run file, `<scratch>/story-run-<blocker>.json`, and the **same** sink flags the named issue'"'"'s run was given'
   contains "$doc" 'Its loops take **its** `loop_args`, never the named issue'"'"'s'
-  doc="$(tr -s '[:space:]' ' ' < "$ref/promotion/step-8-status-files.md")"
-  contains "$doc" "**The sub-loop and the enrichment now forward the run's sinks (#1226).**"
-  contains "$doc" '**The loop does have a `--telemetry-dir` now.**'
-  contains "$doc" '"the loop has no `--telemetry-dir` of its own, so the enrichment must not pass one either" is therefore reversed'
-  contains "$doc" 'and the two records share a sink'
-  contains "$doc" 'The enrichment itself takes **no** `--parent-run-id`'
 }
 
 @test "every Read-the-amendment pointer in resolve-issue reference pairs with an amendment paragraph" {
@@ -927,9 +920,6 @@ advised() {
     development/skills/resolve-issue/reference/telemetry.md
   )
   [ "$(printf '%s\n' "${found[@]}" | LC_ALL=C sort)" = "$(printf '%s\n' "${expected[@]}" | LC_ALL=C sort)" ]
-  # the promotion enrichment calls the emitter directly, which has no null guard
-  flat=$(tr -s '[:space:]' ' ' < "$REPO_ROOT/development/skills/resolve-issue/reference/promotion/step-8-status-files.md")
-  contains "$flat" "the loop was given, less any \`null\`, and the two records share a sink. Never pass the enrichment the string \`null\`"
 }
 
 # --- round-1 fix pass: the internal exits, ~user --------------------------------

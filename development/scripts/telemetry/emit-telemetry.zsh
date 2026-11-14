@@ -64,7 +64,8 @@
 #                 unmodified as `payload`. Omitted → {}.
 #                 On --kind enrichment the payload MUST carry a non-empty
 #                 `event` naming WHICH enrichment this is (conventionally
-#                 `suggestion_promotion` (#995) or `pr_outcome`). `kind` says
+#                 `pr_outcome`; older records may carry the retired
+#                 `suggestion_promotion`, #995). `kind` says
 #                 THAT a record is an enrichment; `event` says which one, and
 #                 consuming passes find their work by looking for runs that lack
 #                 a success enrichment OF THEIR OWN event — so an eventless
