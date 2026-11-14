@@ -1199,6 +1199,24 @@ _mutate_anchor() {
   contains "$ext" 'can never fire across detours. Pass that count to `--grants`:'
 }
 
+# --- #3130: step 5 left the frozen text, so its arms are pinned here -----------
+
+@test "#3130 extension step 5 keeps its fix-pass-first grant and each resume arm" {
+  local ref="$REPO_ROOT/development/skills/resolve-issue/reference" grant
+  grant="$(tr '\n' ' ' < "$ref/interactive/extension-grant.md" | tr -s ' ')"
+  # the grant: one fix pass before the resume, never a bare resume
+  contains "$grant" '5. **If they granted rounds** (with or without guidance): **first apply one fix pass, then resume.**'
+  contains "$grant" 'Resume only once that gate is green;'
+  contains "$grant" 'The grant is not consumed twice: the restarted boundary is the same granted round.'
+  # a conflict or ambiguity leaves the branch for the typed-comment terminal
+  contains "$grant" 'On `ESCALATE_CONFLICT` / `ESCALATE_AMBIGUOUS` → leave this branch and take the typed-comment terminal below'
+  # STALE_FINDINGS recovers, and the recovery leaves the grants count alone
+  contains "$grant" 'On `STALE_FINDINGS` (exit 2, #974) → **not terminal**'
+  contains "$grant" 'the recovery re-invocation neither increments nor decrements `grants`'
+  # any other operational error reports and stops, with no comment from the file
+  contains "$grant" 'never build a comment from the file: report the error in the conversation and stop.'
+}
+
 # --- #2057: the suggestion-promotion span, re-cut into five across reference/promotion/ ----
 
 @test "#2057 the suggestion-promotion span is re-cut into five chunks, each IN the shard its row names" {
