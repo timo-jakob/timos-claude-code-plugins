@@ -125,11 +125,10 @@ flat() {
   contains "$(flat "$REF/review-loop/subagents.md")" "$POINTER"
 }
 
-@test "#2583 suggestion promotion points at the helper, and the CONVERGED offer is attended-only" {
+@test "#2583 suggestion promotion points at the helper" {
   contains "$(flat "$REF/promotion/gate.md")" "$POINTER"
   contains "$(flat "$REF/promotion/step-3-select.md")" "$POINTER"
   contains "$(flat "$REF/promotion.md")" "$POINTER"
-  contains "$(flat "$RI/SKILL.md")" '**`CONVERGED`** (exit 0) → on an **interactive** run (mode `attended`, §0a'"'"'s `resolve-session.zsh`) with at least one waived'
 }
 
 @test "#2583 the escalation terminal points at the helper" {

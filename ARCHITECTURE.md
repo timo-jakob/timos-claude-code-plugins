@@ -5419,30 +5419,13 @@ per round only covers rounds within ONE invocation, but step mode runs each
 round as its own invocation, so a resume that dropped the flag would consolidate
 with no overlay, demote the item back to Low, and exit **CONVERGED (0)**: the
 feature failing as a terminal *success*, which non-convergence detection cannot
-catch because the demoted item is no longer in `.blocking` to match against. The
-promotion phase is a **second, ordinary invocation** of this same state machine
-with `--promote` set and its own `--work-dir` — same round protocol, same full
-gate every round, and **no `--max-rounds` override**, so it inherits
-`MAX_REVIEW_ROUNDS` and the identical +3-per-approval extension rather than
-introducing a second budget constant. Forwarding it on *every* round (not just
-round 1) is load-bearing: an overlay applied only once would drop the promoted
-item back to `Low` on round 2 and the phase would converge without doing the
-work.
+catch because the demoted item is no longer in `.blocking` to match against.
+Forwarding it on *every* round (not just round 1) is load-bearing: an overlay
+applied only once would drop the promoted item back to `Low` on round 2 and the
+loop would converge without doing the work.
 
-**The `enable_suggestions` setting turns the promotion offer off.** Whether the
-phase is offered at all is the conductor's decision, not the loop's: the loop
-only ever sees a `--promote` it was handed. The conductor offers it on an
-interactive run with a non-empty waived set **and** the `enable_suggestions`
-environment variable not off — read by `scripts/suggestions-enabled.zsh`, which
-prints `on` or `off`. The default is on, and the truthiness rule is the mirror
-of `switch_fable_to_opus`: `0` / `false` / `no` / `off` in any case are off;
-unset, `""` and every other value are on, so a typo keeps the prompt rather than
-silently waiving what a human meant to see. Off makes an interactive run behave
-like an autonomous one at this gate: no prompt, no `--promote`, no
-`suggestion_promotion` enrichment record, every suggestion waived, and the run
-continues to the PR without stopping. The loop's own behaviour is unchanged.
-User-facing docs: [how-to: turn off suggestion
-prompts](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/docs/how-to/turn-off-suggestion-prompts.md).
+**A converged run waives every suggestion (#3128)**: the conductor offers no
+promotion phase in any session mode, so it never hands the loop a `--promote`.
 
 **Gate attestation — one full-gate run per round (#981).** On `--resume` the
 loop re-runs `--test-cmd` first to gate the previous round's in-session fix

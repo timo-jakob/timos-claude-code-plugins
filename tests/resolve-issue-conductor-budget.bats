@@ -226,7 +226,11 @@ _all_raw_pointer_count() {
 #     `reference/<dir>/<sub>/`.
 # That keeps an orphan shard (in no pointer, not in the index) red — which a
 # "the index exists" check alone would not.
-SPLIT_DIRS=(review-loop residue promotion interactive)
+SPLIT_DIRS=(review-loop residue interactive)
+# #3128 took the conductor's one pointer into reference/promotion/ away, so that
+# directory and its index are unreachable on purpose until #3121's later child
+# deletes them. They are left out of the reachability sweep rather than judged.
+UNREACHABLE_UNTIL_DELETED=(promotion)
 _unreached_reference_files() {
   local dir="$1" targets rel f index top dir_part base block d
   targets="$(cat)"
@@ -234,6 +238,9 @@ _unreached_reference_files() {
     [ -n "$f" ] || continue
     rel="${f#"$dir/"}"
     top="${rel%%/*}"
+    for d in "${UNREACHABLE_UNTIL_DELETED[@]}"; do
+      { [ "$rel" = "$d.md" ] || [ "$top" = "$d" ]; } && continue 2
+    done
     for d in "${SPLIT_DIRS[@]}"; do
       if [ "$rel" = "$d.md" ]; then
         grep -q "^$d/" <<< "$targets" || printf '%s\n' "$rel"
@@ -474,9 +481,10 @@ _unreached_reference_files() {
   # §7 pointed at that chain queue for its human-started exception (#3036), and 35 until
   # §6 pointed at checkpoint.md's test-case body reconciliation (#3079), and 36
   # until chain-steps.md's issue step pointed at its deferred follow-ups shard,
-  # reference/chain-steps/deferred-follow-ups.md (#3127).
-  if [ "$rows" -ne 37 ]; then
-    printf 'the skill carries %s pointer(s), expected 37.\n' "$rows" >&2
+  # reference/chain-steps/deferred-follow-ups.md (#3127), and 37 until §3.5 stopped
+  # pointing at reference/promotion/gate.md (#3128).
+  if [ "$rows" -ne 36 ]; then
+    printf 'the skill carries %s pointer(s), expected 36.\n' "$rows" >&2
     printf 'A pointer was added or removed — update this count in the same PR,\n' >&2
     printf 'and check the step that gained or lost one still reaches its procedure.\n' >&2
     _all_pointers >&2
@@ -612,26 +620,6 @@ _unreached_reference_files() {
   printf '%s\n' "$bad" | grep -qxF -- 'residue.md'
 }
 
-@test "#2057 non-vacuity: the promotion directory is judged as one unit with its index" {
-  local fake="$BATS_TEST_TMPDIR/ref-copy-promotion" targets bad
-  cp -R "$REF_DIR" "$fake"
-  targets="$(_all_pointers | cut -f1 | sort -u)"
-  bad="$(printf '%s\n' "$targets" | _unreached_reference_files "$fake")"
-  [ -z "$bad" ]
-  # (a) an orphan promotion shard
-  printf 'orphan\n' > "$fake/promotion/orphan.md"
-  bad="$(printf '%s\n' "$targets" | _unreached_reference_files "$fake")"
-  [ "$bad" = 'promotion/orphan.md' ]
-  rm "$fake/promotion/orphan.md"
-  # (b) a shard the index stops listing, and no pointer names
-  sed '/`reference\/promotion\/step-7-terminal\.md`/d' "$REF_DIR/promotion.md" > "$fake/promotion.md"
-  bad="$(printf '%s\n' "$targets" | _unreached_reference_files "$fake")"
-  [ "$bad" = 'promotion/step-7-terminal.md' ]
-  # (c) nothing points into promotion/ at all: the index is unreached too
-  bad="$(printf '%s\n' "$targets" | grep -v '^promotion/' | _unreached_reference_files "$REF_DIR")"
-  printf '%s\n' "$bad" | grep -qxF -- 'promotion.md'
-}
-
 @test "#2058 non-vacuity: the interactive directory is judged as one unit with its index" {
   local fake="$BATS_TEST_TMPDIR/ref-copy-interactive" targets bad
   cp -R "$REF_DIR" "$fake"
@@ -650,38 +638,6 @@ _unreached_reference_files() {
   # (c) nothing points into interactive/ at all: the index is unreached too
   bad="$(printf '%s\n' "$targets" | grep -v '^interactive/' | _unreached_reference_files "$REF_DIR")"
   printf '%s\n' "$bad" | grep -qxF -- 'interactive.md'
-}
-
-# --- gate.md's own route (#2057) ---------------------------------------------
-#
-# SKILL.md points straight at reference/promotion/gate.md, whose frozen block
-# ends at step 2. The reachability sweep above counts a shard as reached when
-# the index lists it, so it cannot see the two unfrozen routes gate.md itself
-# carries: the read-on paragraph after the frozen block, and the #1226 pointer
-# before it. Both are matched on whitespace-squeezed text, so a reflow cannot
-# retire a pin.
-
-@test "#2057 gate.md's read-on paragraph names steps 3, 4, 7 and 8 in order, after the frozen block" {
-  local gate="$REF_DIR/promotion/gate.md" after rest p prev=-1
-  grep -qxF -- '<!-- /moved: suggestion-promotion -->' "$gate"
-  after="$(awk 'seen {print} /^<!-- \/moved: suggestion-promotion -->$/ {seen=1}' "$gate" | LC_ALL=C tr -s '[:space:]' ' ')"
-  contains "$after" '**Read on, in this order.**'
-  for p in step-3-select step-4-sub-loop step-7-terminal step-8-status-files; do
-    contains "$after" "\`reference/promotion/$p.md\`"
-    rest="${after%%"\`reference/promotion/$p.md\`"*}"
-    [ "${#rest}" -gt "$prev" ] || { echo "$p.md is out of order in the read-on paragraph" >&2; return 1; }
-    prev="${#rest}"
-  done
-}
-
-@test "#2057 gate.md's #1226 pointer sends the conductor to step 8 before steps 3 and 4" {
-  local gate="$REF_DIR/promotion/gate.md" before
-  grep -qxF -- '<!-- moved: suggestion-promotion -->' "$gate"
-  before="$(awk '/^<!-- moved: suggestion-promotion -->$/ {exit} {sub(/^> ?/, ""); print}' "$gate" | LC_ALL=C tr -s '[:space:]' ' ')"
-  contains "$before" 'Read the #1226 amendment in `reference/promotion/step-8-status-files.md` BEFORE acting on steps 3 and 4'
-  contains "$before" '(`reference/promotion/step-3-select.md` and `reference/promotion/step-4-sub-loop.md`)'
-  contains "$before" "The enrichment of step 3 passes the run's \`--telemetry-dir\` as well as its \`--telemetry-file\`"
-  contains "$before" "every sub-loop invocation of step 4 carries the run's \`loop_args\`"
 }
 
 # SKILL.md and escalation.md point straight at reference/interactive/
@@ -778,4 +734,45 @@ io.open(p, "w", encoding="utf-8").write(s)
 PY
   run zsh "$VERIFY" --base "$PRE_MOVE_SHA" --repo "$fake" --quiet
   [ "$status" -eq 1 ]
+}
+
+# --- #3128: a converged run goes straight to §4 -------------------------------
+
+@test "#3128 the conductor's CONVERGED arm goes straight to §4 and offers no promotion" {
+  local flat
+  flat="$(LC_ALL=C tr -s '[:space:]' ' ' < "$CONDUCTOR")"
+  contains "$flat" '**`CONVERGED`** (exit 0) → proceed straight to **§4 (Version bump)**, in every session mode: the run waives every suggestion the loop logged and offers none of them to anyone (#3128). This holds on every path to `CONVERGED`, a granted round of the interactive extension included, and overrides any reference file that still offers the suggestion-promotion phase there: skip that offer and continue to §4.'
+  lacks "$flat" 'reference/promotion'
+  lacks "$flat" 'enable_suggestions'
+  lacks "$flat" '--promote '
+  lacks "$flat" 'promotion sub-loop'
+}
+
+@test "#3128 ARCHITECTURE.md states once that a converged run waives every suggestion" {
+  local arch="$REPO_ROOT/ARCHITECTURE.md" flat n
+  flat="$(LC_ALL=C tr -s '[:space:]' ' ' < "$arch")"
+  contains "$flat" '**A converged run waives every suggestion (#3128)**: the conductor offers no promotion phase in any session mode, so it never hands the loop a `--promote`.'
+  lacks "$flat" 'enable_suggestions'
+  lacks "$flat" 'promotion phase is a **second, ordinary invocation**'
+  n="$(grep -c 'A converged run waives every suggestion' "$arch")"
+  [ "$n" -eq 1 ]
+}
+
+@test "#3128 the review-loop explanation says a converged run waives every suggestion with no prompt" {
+  local flat
+  flat="$(LC_ALL=C tr -s '[:space:]' ' ' < "$REPO_ROOT/docs/explanation/review-loop.md")"
+  contains "$flat" 'A converged run goes straight on to the version bump and the PR, with no prompt in between.'
+  lacks "$flat" 'multi-select any subset'
+  lacks "$flat" 'enable_suggestions'
+  lacks "$flat" 'turn-off-suggestion-prompts.md'
+}
+
+@test "#3128 non-vacuity: the reachability sweep still reds an orphan outside the exempt promotion directory" {
+  local fake="$BATS_TEST_TMPDIR/ref-copy-3128" targets bad
+  cp -R "$REF_DIR" "$fake"
+  targets="$(_all_pointers | cut -f1 | sort -u)"
+  printf 'orphan\n' > "$fake/promotion-orphan.md"
+  printf 'orphan\n' > "$fake/promotion/orphan.md"
+  bad="$(printf '%s\n' "$targets" | _unreached_reference_files "$fake")"
+  [ "$bad" = 'promotion-orphan.md' ]
 }

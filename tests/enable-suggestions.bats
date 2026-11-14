@@ -12,8 +12,9 @@
 #     a non-zero exit or extra output would leave it guessing.
 #   * WIRING — the promotion reference tells the conductor to run the script at
 #     the gate and states what `off` does, OUTSIDE the byte-frozen moved block
-#     (verify-reference-move.zsh reds any edit inside it); the conductor's
-#     CONVERGED arm names the setting; the how-to is reachable from the nav.
+#     (verify-reference-move.zsh reds any edit inside it); the how-to is
+#     reachable from the nav. Since #3128 the conductor's CONVERGED arm no
+#     longer offers the phase, so it no longer names the setting.
 #
 # Anchored by content, never by line number (#1189).
 
@@ -27,7 +28,6 @@ setup() {
   # #2057 split promotion.md: the gate and its enable_suggestions amendment are
   # in reference/promotion/gate.md.
   PROMO="$REPO_ROOT/development/skills/resolve-issue/reference/promotion/gate.md"
-  CONDUCTOR="$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
   HOWTO="$REPO_ROOT/docs/how-to/turn-off-suggestion-prompts.md"
 }
 
@@ -87,10 +87,6 @@ run_s() {
   contains "$before" 'scripts/suggestions-enabled.zsh'
   contains "$before" '**skip the phase entirely**, exactly as an autonomous run does'
   contains "$before" 'emit **no** step 3 enrichment record'
-}
-
-@test "the conductor's CONVERGED arm names the setting" {
-  grep -qF 'gate also reads the `enable_suggestions` setting, and skips the phase when off' "$CONDUCTOR"
 }
 
 @test "the how-to exists, shows the settings key, and is in the nav" {
