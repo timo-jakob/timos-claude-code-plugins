@@ -8,7 +8,7 @@
 # maintainer who starts a long run and leaves has no way to say "nobody is
 # here", so the run stops at the first prompt and waits. `resolve_session`, set
 # in the `env` block of their Claude Code settings exactly as
-# `enable_suggestions` is, says it explicitly. §0a's human-present
+# `switch_fable_to_opus` is, says it explicitly. §0a's human-present
 # determination runs this script instead of judging the variable itself, so the
 # parsing rule has one statement and one test suite.
 #
