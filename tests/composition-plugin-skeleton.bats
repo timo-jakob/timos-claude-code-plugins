@@ -1882,7 +1882,7 @@ YAML
   local agent="$PLUGIN_DIR/agents/composition-manifest-reviewer.md" flat format
   flat="$(tr -s '[:space:]' ' ' <"$agent")"
   # the rule itself, under the severity table
-  contains "$flat" 'An observation below the blocking bar is not reported. `SUGGESTION` is reserved for the two lanes of ARCHITECTURE.md *Terminating severity bars*: a tool-verdict claim capped by the evidence rule, and a scope-bounded follow-up under *Scope-bounded severity*.'
+  contains "$flat" 'Never raise a finding above its row. You may file one lower only under the scope-bounded rule in *Reviewing thoroughness* or the evidence rule below. An observation below the blocking bar is not reported. `SUGGESTION` is reserved for the two lanes of ARCHITECTURE.md *Terminating severity bars*: a tool-verdict claim capped by the evidence rule, and a scope-bounded follow-up under *Scope-bounded severity*.'
   # the scope-bounded bullet states the follow-up lane, not a spin-off, and
   # keeps both carve-outs
   contains "$flat" 'whose only correct fix expands the change beyond that scope, is reported at **SUGGESTION** with a Description line `follow-up: <the defect, in one line>`, and it never blocks a round. A plain out-of-diff observation below the bar is not reported.'
