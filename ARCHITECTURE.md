@@ -3798,7 +3798,7 @@ deterministic manifest check (bump presence, needless bumps, `plugin.json` ↔
 `X.Y.Z` well-formedness), runs on every round at script cost, emits its findings
 at their real severity, and accounts for its own carried entries — re-raising
 or confirming each, never `unconfirmed`. The agent keeps only what needs
-judgment, bump size and stale descriptions, as `manifest_bump`: it runs on every
+judgment, bump size, as `manifest_bump`: it runs on every
 full round (round 1 and every closing sweep) and, on a delta round, only when
 the split-carry map holds `manifest_bump` —
 `development/skills/resolve-issue/reference/review-loop/carry.md`'s *Carry-driven
@@ -3905,8 +3905,8 @@ only in the claude-plugin panel so far. Its reviewers that carry a bar do so in 
 `## The <name> bar (severity rule — this bounds you)`
 — today `claude-plugin-prose-logic` (the *behavioural* bar, the original),
 `claude-plugin-contract-integrity` (the *consumer* bar) and
-`claude-plugin-test-reviewer` (the *mutation* bar). Each states a three-row
-severity table and one bolded, **falsifiable** rule that a finding may not carry
+`claude-plugin-test-reviewer` (the *mutation* bar). Each states a two-row
+(`CRITICAL`, `WARNING`) severity table and one bolded, **falsifiable** rule that a finding may not carry
 `>= WARNING` unless it names the rule's own falsifier: the concrete wrong action a
 model would take, the concrete wrong action a named consumer takes because of the
 drift, or a concrete mutation of the source under test that the current suite would

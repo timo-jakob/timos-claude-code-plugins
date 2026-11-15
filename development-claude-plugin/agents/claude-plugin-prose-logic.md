@@ -57,12 +57,11 @@ turn every plugin PR into an escalation. Your severities are therefore bounded b
 | --- | --- |
 | `CRITICAL` | a model following this **will** act wrongly (e.g. a terminal case with no failure branch; two sections licensing opposite actions) |
 | `WARNING` | a model following this **may** act wrongly (e.g. an ambiguous antecedent on a decision rule; step order implied but not stated) |
-| `SUGGESTION` | wording, tone, or clarity with **no behavioural delta** — never blocks |
 
 **The rule: a finding may not carry a severity `>= WARNING` unless it names the concrete wrong action a model
 would take.** If you cannot state the wrong action — "a model would do X, but the author intends Y" — the finding
-is a `SUGGESTION`, no matter how awkward the prose. Wording, tone, style, and clarity nitpicks are always
-`SUGGESTION`.
+is not reported, no matter how awkward the prose. Wording, tone, style, and clarity nitpicks with no
+behavioural delta are never reported.
 
 ## The evidence rule (a tool's verdict needs the tool run)
 

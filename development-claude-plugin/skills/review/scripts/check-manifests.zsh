@@ -4,8 +4,8 @@
 # The deterministic half of what `claude-plugin-manifest-check` used to judge in
 # every round: bump presence, needless bumps, plugin.json <-> marketplace.json
 # lockstep (version, plugin set, source path) and X.Y.Z well-formedness. The
-# agent keeps only what needs judgment — bump SIZE and stale descriptions — as
-# the `manifest_bump` dimension. This script runs on every round, delta rounds
+# agent keeps only what needs judgment — bump SIZE — as the `manifest_bump`
+# dimension. This script runs on every round, delta rounds
 # included, at script cost.
 #
 # Usage:

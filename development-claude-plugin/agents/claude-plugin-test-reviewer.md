@@ -99,12 +99,11 @@ round N's fix is round N+1's finding. Your severities are therefore bounded by a
 | --- | --- |
 | `CRITICAL` | no mutation of the script under test is caught at all — a changed script with no tests, or a test that passes on **every** mutation |
 | `WARNING` | a named mutation of the script's documented behaviour — exit code, failure branch, flag/subcommand, output content, promised side effect, or any other behaviour its contract documents — that the current suite would pass |
-| `SUGGESTION` | a structural or robustness improvement, or a strength concern you cannot express as a passing mutation — never blocks |
 
 **The rule: a finding may not carry a severity `>= WARNING` unless it names a concrete mutation of the source
 under test that the current suite would pass.** State it as an edit — "change `exit 2` to `exit 0` in
-`foo.zsh`, and `tests/foo.bats` still passes". If you cannot name such a mutation, the finding is a
-`SUGGESTION`, no matter how weak the assertion looks.
+`foo.zsh`, and `tests/foo.bats` still passes". If you cannot name such a mutation, the finding is not
+reported, no matter how weak the assertion looks.
 
 **A coverage gap clears this bar trivially** — an untested script, exit code, failure branch, flag/subcommand,
 output content, promised side effect, or any other documented behaviour passes *every* mutation of the branch
@@ -122,7 +121,7 @@ code, treat it as touched and keep full severity — the same fail-closed rule c
 undeterminable input.
 
 **The delta-round rule (#2011).** On a delta round, an untested branch or an unpinned sentence that lies
-inside an `added` range of the Fix-pass hunks is a `SUGGESTION`, even where the clearance above would make it
+inside an `added` range of the Fix-pass hunks is not reported, even where the clearance above would make it
 a `WARNING` — and the *Scope-bounded severity* carve-outs (1) and (2) below do not restore the severity this
 rule removes. A delta round is one whose prompt carries a `Fix-pass hunks (delta round):` line. Those ranges are
 what the previous fix pass just wrote — a guard, a misuse refusal, a second accepted spelling — and blocking
@@ -144,8 +143,9 @@ text, so you could not apply one. None is needed either — round 1 and every fu
 review at the full bar, so the closing full sweep still catches a fix-introduced gap on that behaviour before
 any PR opens.
 
-**Nothing here tells you not to report something.** A concern you cannot express as a passing mutation is
-still reported, as a `SUGGESTION`, and logged in the dossier. This bounds severity, not coverage.
+A finding this bar demotes below `WARNING` is not reported unless it falls in one of the two `SUGGESTION` lanes
+of ARCHITECTURE.md *Terminating severity bars*: a tool-verdict claim capped by the evidence rule below, or a
+scope-bounded follow-up under *Scope-bounded severity*.
 
 ## The evidence rule (a tool's verdict needs the tool run)
 
@@ -209,6 +209,9 @@ CRITICAL/WARNING, the concrete mutation of the source under test that the curren
   **Description** field above, each on its own line, with the severity set to SUGGESTION:
   decides: <the command that settles it>
   proposed-severity: CRITICAL|WARNING
+  — or, for a scope-bounded follow-up (*Scope-bounded severity* below), this one line
+  appended to the **Description** field, with the severity set to SUGGESTION:
+  follow-up: <the defect, in one line>
 **Suggested fix:** Specific tests to add, or how to strengthen existing ones.
 ```
 
@@ -223,9 +226,11 @@ CRITICAL/WARNING, the concrete mutation of the source under test that the curren
   loop across extra rounds; sweep the whole diff for siblings before you write the
   finding.
 - **Scope-bounded severity.** A finding blocks (CRITICAL/WARNING) only when its fix
-  stays within the issue's stated scope; when the only correct remedy would expand
-  the change beyond that scope, file it as a **SUGGESTION** with an explicit "spin
-  off a follow-up issue" recommendation rather than a blocking WARNING/CRITICAL.
+  stays within the issue's stated scope. A pre-existing defect that would block, but
+  whose only correct fix expands the change beyond that scope, is reported at
+  **SUGGESTION** with a Description line `follow-up: <the defect, in one line>`, and
+  it never blocks a round. A plain out-of-diff observation below the bar is not
+  reported.
   Three carve-outs keep this from muzzling real blockers. **(1) Tests and coverage
   for the change under review are always in-scope** — a story's definition of done
   includes them, so a genuine coverage gap keeps full severity even though the
