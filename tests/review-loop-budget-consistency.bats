@@ -555,14 +555,15 @@ grep_site() {  # grep_site <file> <fixed-string>
     # per-entry accounting from this file and refuses a carried round without
     # it, so a panel that never says to write it is not wired up
     grep_site "$REPO_ROOT/$panel" '$REVIEW_FINDINGS.carry.json'
-    # (b) the two-carry injection duty. The descriptor tokens alone do NOT
+    # (b) the carry injection duty. The descriptor tokens alone do NOT
     # pin it: they also occur in the maintainer-facing narrative that
-    # introduces the duty, and kubernetes' prompt binds {FIX VERIFICATION} /
-    # {ADJUDICATED} instead — so deleting both prompt lines from all six would
-    # leave every token needle matching. Pin the PROMPT LINES themselves, which
-    # are byte-identical across all six.
+    # introduces the duty, and kubernetes' prompt binds {FIX VERIFICATION}
+    # instead — so deleting the prompt line from all six would leave every
+    # token needle matching. Pin the PROMPT LINE itself, which is
+    # byte-identical across all six. The per-panel `adjudicated_path` needle
+    # is retired (#3157): children 1 to 10 of #3122 remove that prompt line
+    # from each panel, since a reviewer reports no plain suggestion to waive.
     grep_site "$REPO_ROOT/$panel" 'fix_verification_path'
-    grep_site "$REPO_ROOT/$panel" 'adjudicated_path'
     grep_site "$REPO_ROOT/$panel" "the previous round's blockers. Confirm each one actually landed"
     # ...and the prompt-template line ends with the triple the conductor
     # assembles into the loop's --carry-accounting file (#1583)

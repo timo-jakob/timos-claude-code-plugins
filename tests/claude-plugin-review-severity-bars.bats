@@ -652,7 +652,10 @@ _assert_file() {  # _assert_file <path> <test-expr...>
   contains "$flat" 'a concrete mutation of the source under test that the current suite would'
   contains "$flat" 'the concrete wrong action a named consumer takes'
   contains "$flat" "Each agent's Reporting Format then requires that falsifier"
-  contains "$flat" 'still reported and logged in the dossier, so no dimension loses coverage.'
+  # #3157 rewrote the coverage guarantee: a bar-demoted finding is no longer
+  # reported unless it falls in one of the two SUGGESTION lanes
+  contains "$flat" 'a finding a bar demotes below `WARNING` — the delta-round rule below included — is not reported unless it falls in one of the two lanes.'
+  lacks "$flat" 'still reported and logged in the dossier, so no dimension loses coverage.'
   # the retired #994 promotion path may not be claimed back (#3150)
   lacks "$flat" 'raisable by the #994 promotion path'
   # each carrier and its bar name, driven off the same pairing the inventory
