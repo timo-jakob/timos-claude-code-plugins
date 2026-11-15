@@ -367,10 +367,16 @@ round on work the story never asked for. That is where the run leaves them,
 attended or not. A converged run goes straight on to the version bump and the
 PR, with no prompt in between.
 
+This is the contract the loop is moving to, and two parts of it have not
+shipped yet. The dossier has no *Suggested follow-ups* section until #3170
+lands, so until then such a defect appears in the dossier's **Waived
+suggestions** list. The reviewers still report below-the-bar observations as
+suggestions until #3158–#3167 land.
+
 Earlier versions logged every below-the-bar observation as a suggestion and
 stopped an attended run at this point to offer each one for promotion to
 blocking. Over a month of runs nobody promoted anything, so the offer was
-removed, and reviewers now leave out the observations it existed to sort.
+removed, and the reviewers will leave out the observations it existed to sort.
 
 ## When you stop, or a run is unattended
 

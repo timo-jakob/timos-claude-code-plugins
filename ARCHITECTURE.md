@@ -3840,7 +3840,9 @@ never mentioned that lives in code the story never touched), **is reported at
 That line sits in the same position and style as the evidence rule's
 `decides:` line (*Terminating severity bars* below), so the consolidator detects
 both lanes the same way. Such a finding never blocks a round, and the dossier
-lists it under *Suggested follow-ups*. A plain out-of-diff observation below the
+lists it under *Suggested follow-ups*. That dossier section is not built yet: #3170
+adds it to `build-dossier.zsh`, and until then the finding appears in the
+dossier's **Waived suggestions** list. A plain out-of-diff observation below the
 bar is not reported at all. Nothing blocking-grade is lost, because the defect
 rides into the dossier under *Suggested follow-ups* as a non-blocking Low; only
 an observation that would not block anyway is dropped. A scope-expanding remedy
@@ -3888,8 +3890,8 @@ and `claude-plugin-script-reviewer`; extending it to the remaining review-panel
 dimensions (bugs, security, performance, code-quality, resilience, and the
 claude-plugin prose-logic/contract/manifest reviewers) is tracked follow-up (#987), not yet
 done — no shared convention file or prompt-injection carries it. It is honoured mechanically
-downstream: `SUGGESTION → Low`, a Low carrying a `follow-up:` line is kept, and Low
-never blocks a round (see the consolidator below).
+downstream: `SUGGESTION → Low`, and Low never blocks a round (see the consolidator
+below, whose Low filter keeps a Low carrying a `follow-up:` line once #3169 lands).
 
 Reviewers also **enumerate every instance of a repeating pattern in one round**
 rather than one exemplar per round; the fix pass sibling-sweeps to match (both in
@@ -3920,12 +3922,18 @@ observation below the bar is not reported.** `SUGGESTION` survives in two
 reviewer lanes only: the evidence-capped severity of a tool-verdict claim that
 carries `decides:` / `proposed-severity:` (#1584, the evidence rule below), which
 the decided pass can still raise on a real red; and a scope-bounded defect that
-carries a `follow-up:` line (*Scope-bounded severity* above). The bars bound
+carries a `follow-up:` line (*Scope-bounded severity* above). That rule holds
+for every panel's reviewers, whether or not they carry a bar. The bars bound
 *severity only*: a finding a bar demotes below `WARNING` — the delta-round rule
 below included — is not reported unless it falls in one of the two lanes.
+**The reviewers do not follow this contract yet.** The reviewer agents still
+report a below-the-bar finding as a `SUGGESTION`, and the `development-react`
+panel still fixes one check at `SUGGESTION` (above), until children #3158–#3167
+of #3122 rewrite them.
 `tests/claude-plugin-review-severity-bars.bats` is the guard, and it asserts the
 bars are one convention rather than a set of ad-hoc rules — including against this
-section, so the two cannot drift apart. It derives the roster from the tree rather
+section. Until those children land it still pins the agents to the earlier
+report-as-`SUGGESTION` wording. It derives the roster from the tree rather
 than transcribing it, which is why no count is stated here: a fourth reviewer given
 a bar reds that test rather than silently leaving this paragraph stale. Giving the
 remaining panel reviewers a bar is not done; it belongs to epic #1431, which filed

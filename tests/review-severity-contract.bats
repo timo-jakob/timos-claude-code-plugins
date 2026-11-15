@@ -43,6 +43,10 @@ consolidator_bullet() {
   contains "$flat" '**A reviewer reports only what blocks: `CRITICAL` or `WARNING`. A plain observation below the bar is not reported.**'
   contains "$flat" '`SUGGESTION` survives in two reviewer lanes only: the evidence-capped severity of a tool-verdict claim that carries `decides:` / `proposed-severity:` (#1584, the evidence rule below), which the decided pass can still raise on a real red; and a scope-bounded defect that carries a `follow-up:` line (*Scope-bounded severity* above).'
   contains "$flat" 'a finding a bar demotes below `WARNING` — the delta-round rule below included — is not reported unless it falls in one of the two lanes.'
+  # the contract is staged: the reviewers follow it once #3158–#3167 land
+  contains "$flat" "That rule holds for every panel's reviewers, whether or not they carry a bar."
+  contains "$flat" '**The reviewers do not follow this contract yet.** The reviewer agents still report a below-the-bar finding as a `SUGGESTION`, and the `development-react` panel still fixes one check at `SUGGESTION` (above), until children #3158–#3167 of #3122 rewrite them.'
+  contains "$flat" 'Until those children land it still pins the agents to the earlier report-as-`SUGGESTION` wording.'
   # the delta-round rule demotes below the bar, not to a reported SUGGESTION
   contains "$flat" 'demotes an untested branch or an unpinned sentence below the bar when it lies inside a range the previous fix pass **added**'
   lacks "$flat" 'still reported and logged in the dossier, so no dimension loses coverage.'
@@ -56,6 +60,9 @@ consolidator_bullet() {
   contains "$flat" '**A pre-existing defect that would block, but whose only correct fix expands the change beyond the story scope**'
   contains "$flat" '**is reported at `SUGGESTION` with a Description line `follow-up: <the defect, in one line>`.**'
   contains "$flat" 'Such a finding never blocks a round, and the dossier lists it under *Suggested follow-ups*.'
+  # the dossier section is staged: #3170 adds it
+  contains "$flat" 'That dossier section is not built yet: #3170 adds it to `build-dossier.zsh`, and until then the finding appears in the dossier'"'"'s **Waived suggestions** list.'
+  contains "$flat" 'whose Low filter keeps a Low carrying a `follow-up:` line once #3169 lands'
   contains "$flat" 'A plain out-of-diff observation below the bar is not reported at all.'
   contains "$flat" 'Nothing blocking-grade is lost, because the defect rides into the dossier under *Suggested follow-ups* as a non-blocking Low; only an observation that would not block anyway is dropped.'
   # the three carve-outs are unchanged
@@ -73,7 +80,7 @@ consolidator_bullet() {
   flat="$(consolidator_bullet | flatten)"
   [ -n "$flat" ]
   contains "$flat" '`WARNING→High`, `SUGGESTION→Low`'
-  contains "$flat" '`consolidate-findings.zsh` discards a reviewer-emitted Low with neither `decides:` nor `follow-up:`, keeps one that carries either line (never as a blocker), and never discards a risk-demoted item (`demoted: true`), which the consolidator writes itself'
+  contains "$flat" '`consolidate-findings.zsh` discards a reviewer-emitted Low with neither `decides:` nor `follow-up:`, keeps one that carries either line (never as a blocker), and never discards a risk-demoted item (`demoted: true`), which the consolidator writes itself — child 12 of #3122 (#3169) implements it'
   contains "$flat" 'a scope-bounded defect a reviewer reported in the `follow-up:` lane per *Scope-bounded severity* above rides into the dossier without ever forcing a round'
   lacks "$flat" 'reviewer downgraded to `SUGGESTION` per *Scope-bounded severity*'
 }
@@ -84,6 +91,11 @@ consolidator_bullet() {
   [ -n "$flat" ]
   contains "$flat" 'A reviewer reports blockers (Critical + Warning), evidence-capped tool claims and scope-bounded follow-ups only'
   contains "$flat" '## Suggested follow-ups'
+  contains "$flat" 'A reviewer reports blockers, evidence-capped tool claims and scope-bounded follow-ups only; a plain observation below the bar is not reported at all.'
+  contains "$flat" 'is reported with a one-line `follow-up:` note, so the PR'"'"'s review dossier lists it under *Suggested follow-ups* rather than spending a round on work the story never asked for.'
+  # the two staged parts name the children that ship them
+  contains "$flat" 'The dossier has no *Suggested follow-ups* section until #3170 lands, so until then such a defect appears in the dossier'"'"'s **Waived suggestions** list.'
+  contains "$flat" 'The reviewers still report below-the-bar observations as suggestions until #3158–#3167 land.'
   # the risk-demoted paragraph stays
   contains "$flat" 'is **demoted to a suggestion**: logged in the round'
   # the retired reviewer-output wording, one needle per rewritten passage
