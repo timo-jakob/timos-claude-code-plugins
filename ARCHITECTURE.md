@@ -3926,14 +3926,14 @@ carries a `follow-up:` line (*Scope-bounded severity* above). That rule holds
 for every panel's reviewers, whether or not they carry a bar. The bars bound
 *severity only*: a finding a bar demotes below `WARNING` — the delta-round rule
 below included — is not reported unless it falls in one of the two lanes.
-**The reviewers do not follow this contract yet.** The reviewer agents still
+**Only the reviewers #3158 rewrote follow this contract yet**, in the
+claude-plugin panel. The other reviewer agents still
 report a below-the-bar finding as a `SUGGESTION`, and the `development-react`
-panel still fixes one check at `SUGGESTION` (above), until children #3158–#3167
+panel still fixes one check at `SUGGESTION` (above), until children #3159–#3167
 of #3122 rewrite them.
 `tests/claude-plugin-review-severity-bars.bats` is the guard, and it asserts the
 bars are one convention rather than a set of ad-hoc rules — including against this
-section. Until those children land it still pins the agents to the earlier
-report-as-`SUGGESTION` wording. It derives the roster from the tree rather
+section. It derives the roster from the tree rather
 than transcribing it, which is why no count is stated here: a fourth reviewer given
 a bar reds that test rather than silently leaving this paragraph stale. Giving the
 remaining panel reviewers a bar is not done; it belongs to epic #1431, which filed

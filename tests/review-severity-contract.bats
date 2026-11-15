@@ -43,10 +43,11 @@ consolidator_bullet() {
   contains "$flat" '**A reviewer reports only what blocks: `CRITICAL` or `WARNING`. A plain observation below the bar is not reported.**'
   contains "$flat" '`SUGGESTION` survives in two reviewer lanes only: the evidence-capped severity of a tool-verdict claim that carries `decides:` / `proposed-severity:` (#1584, the evidence rule below), which the decided pass can still raise on a real red; and a scope-bounded defect that carries a `follow-up:` line (*Scope-bounded severity* above).'
   contains "$flat" 'a finding a bar demotes below `WARNING` — the delta-round rule below included — is not reported unless it falls in one of the two lanes.'
-  # the contract is staged: the reviewers follow it once #3158–#3167 land
+  # the contract is staged: #3158 landed it for the claude-plugin panel, and
+  # the other reviewers follow it once #3159–#3167 land
   contains "$flat" "That rule holds for every panel's reviewers, whether or not they carry a bar."
-  contains "$flat" '**The reviewers do not follow this contract yet.** The reviewer agents still report a below-the-bar finding as a `SUGGESTION`, and the `development-react` panel still fixes one check at `SUGGESTION` (above), until children #3158–#3167 of #3122 rewrite them.'
-  contains "$flat" 'Until those children land it still pins the agents to the earlier report-as-`SUGGESTION` wording.'
+  contains "$flat" '**Only the reviewers #3158 rewrote follow this contract yet**, in the claude-plugin panel. The other reviewer agents still report a below-the-bar finding as a `SUGGESTION`, and the `development-react` panel still fixes one check at `SUGGESTION` (above), until children #3159–#3167 of #3122 rewrite them.'
+  lacks "$flat" 'still pins the agents to the earlier report-as-'
   # the delta-round rule demotes below the bar, not to a reported SUGGESTION
   contains "$flat" 'demotes an untested branch or an unpinned sentence below the bar when it lies inside a range the previous fix pass **added**'
   lacks "$flat" 'still reported and logged in the dossier, so no dimension loses coverage.'
@@ -95,7 +96,8 @@ consolidator_bullet() {
   contains "$flat" 'is reported with a one-line `follow-up:` note, so the PR'"'"'s review dossier lists it under *Suggested follow-ups* rather than spending a round on work the story never asked for.'
   # the two staged parts name the children that ship them
   contains "$flat" 'The dossier has no *Suggested follow-ups* section until #3170 lands, so until then such a defect appears in the dossier'"'"'s **Waived suggestions** list.'
-  contains "$flat" 'The reviewers still report below-the-bar observations as suggestions until #3158–#3167 land.'
+  contains "$flat" 'The claude-plugin panel'"'"'s reviewers follow it since #3158; the other panels'"'"' reviewers still report below-the-bar observations as suggestions until #3159–#3167 land.'
+  lacks "$flat" 'suggestions until #3158–#3167 land.'
   # the risk-demoted paragraph stays
   contains "$flat" 'is **demoted to a suggestion**: logged in the round'
   # the retired reviewer-output wording, one needle per rewritten passage
