@@ -392,6 +392,15 @@ _assert_file() {  # _assert_file <path> <test-expr...>
     _assert_file "$agent" contains "$flat" 'whose only correct fix expands the change beyond that scope, is reported at **SUGGESTION** with a Description line `follow-up: <the defect, in one line>`, and it never blocks a round. A plain out-of-diff observation below the bar is not reported.'
     _assert_file "$agent" lacks "$flat" 'spin off a follow-up issue'
   done
+  # the script reviewer's two carve-outs stay as they were; the test reviewer's
+  # three are pinned by the #982 scope-bounding test below
+  agent="$AGENT_DIR/claude-plugin-script-reviewer.md"
+  _load_agent "$agent"
+  _assert_file "$agent" contains "$flat" 'Two carve-outs keep this from muzzling real blockers.'
+  _assert_file "$agent" contains "$flat" '**(1) A defect the change under review *introduces* is always in-scope**'
+  _assert_file "$agent" contains "$flat" 'treat it as introduced and keep full severity (fail closed)'
+  _assert_file "$agent" contains "$flat" "**(2) When the issue's stated scope is not provided in your prompt**"
+  _assert_file "$agent" contains "$flat" 'never demote on a scope you inferred from the diff or branch name'
   # the other three carry no such rule, so no follow-up: slot either; each
   # keeps its decides: slot (the positive control for the lacks)
   for name in claude-plugin-contract-integrity claude-plugin-manifest-check claude-plugin-prose-logic; do
