@@ -1878,6 +1878,42 @@ YAML
   contains "$flat" 'review its source, the manifest, never the output'
 }
 
+@test "the manifest reviewer reports only what blocks, plus the two SUGGESTION lanes (#3159)" {
+  local agent="$PLUGIN_DIR/agents/composition-manifest-reviewer.md" flat format
+  flat="$(tr -s '[:space:]' ' ' <"$agent")"
+  # the rule itself, under the severity table
+  contains "$flat" 'An observation below the blocking bar is not reported. `SUGGESTION` is reserved for the two lanes of ARCHITECTURE.md *Terminating severity bars*: a tool-verdict claim capped by the evidence rule, and a scope-bounded follow-up under *Scope-bounded severity*.'
+  # the scope-bounded bullet states the follow-up lane, not a spin-off, and
+  # keeps both carve-outs
+  contains "$flat" 'whose only correct fix expands the change beyond that scope, is reported at **SUGGESTION** with a Description line `follow-up: <the defect, in one line>`, and it never blocks a round. A plain out-of-diff observation below the bar is not reported.'
+  lacks "$flat" 'spin off a follow-up issue'
+  contains "$flat" 'Two carve-outs keep this from muzzling real blockers.'
+  contains "$flat" '**(1) A defect the change under review *introduces* is always in-scope**'
+  contains "$flat" 'treat it as introduced and keep full severity (fail closed)'
+  contains "$flat" "**(2) When the issue's stated scope is not provided in your prompt**"
+  contains "$flat" 'never demote on a scope you inferred from the diff or branch name'
+  # the Reporting Format, the file's last section: the follow-up: line sits
+  # next to the decides: lines, and the severity guide lists no tier of its own
+  format="$(awk '/^## Reporting Format$/ { f = 1; next } f' "$agent" | tr -s '[:space:]' ' ')"
+  [ -n "$format" ]
+  contains "$format" 'decides: <the command that settles it> proposed-severity: CRITICAL|WARNING — or, for a scope-bounded follow-up (*Scope-bounded severity* above), this one line appended to the **Description** field, with the severity set to SUGGESTION: follow-up: <the defect, in one line>'
+  contains "$format" '**Severity guide:** the table under *Your Mission* is the whole of it.'
+  lacks "$format" '**SUGGESTION:**'
+}
+
+@test "the composition panel's report lists only capped claims and follow-ups below WARNING (#3159)" {
+  local panel="$PLUGIN_DIR/skills/review/SKILL.md" section
+  # the report template holds its own `## ` lines, so capture Step 3 up to
+  # Step 4 rather than stopping at the first of them
+  section="$(awk '/^## Step 3: Synthesize the Review/ { f = 1; next } /^## Step 4: / { f = 0 } f' "$panel")"
+  [ -n "$section" ]
+  contains "$section" '## Suggested follow-ups and capped claims'
+  contains "$section" 'Only the SUGGESTION findings that carry a `follow-up:` or `decides:` line'
+  contains "$section" '(Y critical, Z warnings, W capped or follow-up suggestions)'
+  run -1 grep -qx '## Suggestions' <<<"$section"
+  lacks "$section" 'W suggestions)'
+}
+
 @test "the script-tests workflow records the composition tree (#1744)" {
   # the per-plugin path lines are kept as documentation of which tree matters to
   # which suite (the `**` catch-all is what actually triggers it), so this one
