@@ -103,6 +103,10 @@
 #  47. delete the template line's `kind "added" … "changed" …` definitions
 #  48. delete its "a definition that states no such rule ignores this line" tail
 #
+# #3158 retired the severity tables' `SUGGESTION` row and the "Nothing here
+# tells you not to report something" paragraph (a finding below the bar is not
+# reported), so the needles mutations 18 and 19 bit on are absence checks now.
+#
 # A caveat worth keeping, because it bit twice while building this control: the
 # clauses above are re-wrapped across source lines, so a line-oriented
 # `perl -pi` substitution silently matches NOTHING and the suite stays green —
@@ -308,14 +312,17 @@ _assert_file() {  # _assert_file <path> <test-expr...>
     contains "$flat" 'bar (severity rule — this bounds you)'
     contains "$flat" 'Your severities are therefore bounded by a falsifiable rule'
     contains "$flat" '**The rule: a finding may not carry a severity `>= WARNING` unless it names'
-    # exactly three severity rows — deleting one is caught by the per-agent
-    # needles, ADDING a fourth (e.g. a `BLOCKER` tier) would otherwise pass
+    # exactly two severity rows (#3158 removed the `SUGGESTION` row: a finding
+    # below the bar is not reported) — deleting one is caught by the per-agent
+    # needles, ADDING a third (e.g. a `BLOCKER` tier, or the retired
+    # `SUGGESTION` row) would otherwise pass
     _load_table "$agent"
     # `|| true`: grep -c exits 1 on a zero count while still printing 0, and an
     # errexit abort here would bypass the _assert_file diagnostic in exactly the
     # case (every row deleted) where naming the agent matters most
     rows="$(printf '%s\n' "$table" | grep -c '^| `' || true)"
-    _assert_file "$agent" [ "$rows" -eq 3 ]
+    _assert_file "$agent" [ "$rows" -eq 2 ]
+    _assert_file "$agent" lacks "$table" '| `SUGGESTION` |'
   done
 }
 
@@ -368,7 +375,69 @@ _assert_file() {  # _assert_file <path> <test-expr...>
   # proves the scope is REAL, not the whole file: this agent has a section after
   # Reporting Format, and the round-2 helper silently ran to EOF past it
   lacks "$section_flat" 'Reviewing thoroughness'
-  lacks "$section_flat" 'Scope-bounded severity'
+  # the bullet's own text, not its name: since #3158 the format names the rule
+  # it points the `follow-up:` line at
+  lacks "$section_flat" 'Three carve-outs keep this from muzzling real blockers'
+}
+
+@test "only the two reviewers that carry Scope-bounded severity show the follow-up: line (#3158)" {
+  local agent name
+  # the two carriers: the line sits in the Reporting Format, next to the
+  # decides: lines, and the bullet states the follow-up lane, not a spin-off
+  for name in claude-plugin-script-reviewer claude-plugin-test-reviewer; do
+    agent="$AGENT_DIR/$name.md"
+    _load_section "$agent" "Reporting Format"
+    _assert_file "$agent" contains "$section_flat" 'decides: <the command that settles it> proposed-severity: CRITICAL|WARNING — or, for a scope-bounded follow-up (*Scope-bounded severity* below), this one line appended to the **Description** field, with the severity set to SUGGESTION: follow-up: <the defect, in one line>'
+    _load_agent "$agent"
+    _assert_file "$agent" contains "$flat" 'whose only correct fix expands the change beyond that scope, is reported at **SUGGESTION** with a Description line `follow-up: <the defect, in one line>`, and it never blocks a round. A plain out-of-diff observation below the bar is not reported.'
+    _assert_file "$agent" lacks "$flat" 'spin off a follow-up issue'
+  done
+  # the script reviewer's two carve-outs stay as they were; the test reviewer's
+  # three are pinned by the #982 scope-bounding test below
+  agent="$AGENT_DIR/claude-plugin-script-reviewer.md"
+  _load_agent "$agent"
+  _assert_file "$agent" contains "$flat" 'Two carve-outs keep this from muzzling real blockers.'
+  _assert_file "$agent" contains "$flat" '**(1) A defect the change under review *introduces* is always in-scope**'
+  _assert_file "$agent" contains "$flat" 'treat it as introduced and keep full severity (fail closed)'
+  _assert_file "$agent" contains "$flat" "**(2) When the issue's stated scope is not provided in your prompt**"
+  _assert_file "$agent" contains "$flat" 'never demote on a scope you inferred from the diff or branch name'
+  # the other three carry no such rule, so no follow-up: slot either; each
+  # keeps its decides: slot (the positive control for the lacks)
+  for name in claude-plugin-contract-integrity claude-plugin-manifest-check claude-plugin-prose-logic; do
+    agent="$AGENT_DIR/$name.md"
+    _load_agent "$agent"
+    _assert_file "$agent" contains "$flat" 'decides: <the command that settles it>'
+    _assert_file "$agent" lacks "$flat" 'follow-up: <the defect, in one line>'
+  done
+}
+
+@test "the script reviewer's severity guide drops the plain SUGGESTION tier (#3158)" {
+  local agent="$AGENT_DIR/claude-plugin-script-reviewer.md"
+  _load_agent "$agent"
+  contains "$flat" '- **WARNING:** Incorrect behaviour under realistic inputs or failure of a documented contract'
+  lacks "$flat" '**SUGGESTION:** Defensive hardening with no current misbehaviour'
+  contains "$flat" 'Defensive hardening with no current misbehaviour is not reported. `SUGGESTION` is reserved for the two lanes of ARCHITECTURE.md *Terminating severity bars*'
+}
+
+@test "the claude-plugin review skill's report lists only capped claims and follow-ups below WARNING (#3158)" {
+  local skill="$REPO_ROOT/development-claude-plugin/skills/review/SKILL.md"
+  # the report template holds its own `## ` lines, so capture Step 3 up to
+  # Step 4 rather than through _load_section, which stops at the first of them
+  section="$(awk '/^## Step 3: Synthesize the Review/ { f = 1; next } /^## Step 4: / { f = 0 } f' "$skill")"
+  [ -n "$section" ]
+  contains "$section" '## Suggested follow-ups and capped claims'
+  contains "$section" 'Only the SUGGESTION findings that carry a `follow-up:` or `decides:` line'
+  contains "$section" '(Y critical, Z warnings, W capped or follow-up suggestions)'
+  run -1 grep -qx '## Suggestions' <<<"$section"
+  lacks "$section" 'W suggestions)'
+  # Step 1 keeps the Self-check waivers line and drops the Already-waived one
+  _load_section "$skill" "Step 1: Plan the round, then run its script and launch its agents in parallel"
+  contains "$section" 'Self-check waivers (round 1): {self_check_path}'
+  lacks "$section" 'Already waived'
+  lacks "$section" 'adjudicated'
+  _load_agent "$skill"
+  lacks "$flat" 'REVIEW_ADJUDICATED'
+  lacks "$flat" 'adjudicated_path'
 }
 
 @test "contract-integrity's Reporting Format demands the consumer's wrong action (#1433)" {
@@ -389,9 +458,10 @@ _assert_file() {  # _assert_file <path> <test-expr...>
   contains "$frontmatter_flat" 'severity is bounded by an explicit mutation bar'
   # the falsifier itself
   contains "$flat" 'unless it names a concrete mutation of the source under test that the current suite would pass'
-  # the fallback, pinned on wording unique to THIS agent — a bare "is a
-  # `SUGGESTION`" also occurs elsewhere and would not prove the rule demotes
-  contains "$flat" 'the finding is a `SUGGESTION`, no matter how weak the assertion looks'
+  # the fallback, pinned on wording unique to THIS agent — a bare "is not
+  # reported" also occurs elsewhere and would not prove the rule drops it (#3158)
+  contains "$flat" 'the finding is not reported, no matter how weak the assertion looks'
+  lacks "$flat" 'the finding is a `SUGGESTION`, no matter how weak the assertion looks'
   # the rejected bar, named as rejected — deleting the name would leave the
   # section without the thing it exists to exclude
   contains "$flat" 'whose bar is *"these assertions are too weak"* never terminates'
@@ -400,19 +470,19 @@ _assert_file() {  # _assert_file <path> <test-expr...>
   contains "$flat" 'no mutation of the script under test is caught at all'
   contains "$flat" 'a test that passes on **every** mutation'
   contains "$flat" 'exit code, failure branch, flag/subcommand, output content, promised side effect, or any other behaviour its contract documents'
-  contains "$flat" 'a strength concern you cannot express as a passing mutation — never blocks'
   # the carve-out that keeps real coverage gaps blocking, and its tier split
   contains "$flat" 'A coverage gap clears this bar trivially'
   contains "$flat" '`CRITICAL` for a changed script with no tests at all, `WARNING` for an individual untested branch'
   # coverage is bounded by scope, not by this bar — with the fail-closed tail
   contains "$flat" 'the *Scope-bounded severity* rule below still applies'
   contains "$flat" 'treat it as touched and keep full severity'
-  # the anti-suppression guarantee, which is what makes this a severity bound
-  contains "$flat" '**Nothing here tells you not to report something.**'
-  contains "$flat" 'as a `SUGGESTION`, and logged in the dossier.'
+  # a bar-demoted finding is not reported outside the two SUGGESTION lanes
+  # (#3158); the retired anti-suppression paragraph is gone
+  contains "$flat" 'A finding this bar demotes below `WARNING` is not reported unless it falls in one of the two `SUGGESTION` lanes of ARCHITECTURE.md *Terminating severity bars*: a tool-verdict claim capped by the evidence rule below, or a scope-bounded follow-up under *Scope-bounded severity*.'
+  lacks "$flat" '**Nothing here tells you not to report something.**'
+  lacks "$flat" 'as a `SUGGESTION`, and logged in the dossier.'
   # the retired #994 promotion path may not be claimed back (#3150)
   lacks "$flat" 'the promotion path (#994) can still raise it'
-  contains "$flat" 'This bounds severity, not coverage.'
 }
 
 @test "claude-plugin-test-reviewer's mutation bar states the delta-round rule (#2011)" {
@@ -420,7 +490,8 @@ _assert_file() {  # _assert_file <path> <test-expr...>
   # in another section would not bound the severities the table sets.
   _load_section "$TEST_REVIEWER" "The mutation bar (severity rule — this bounds you)"
   # the rule itself — what is demoted, where, and to what
-  contains "$section_flat" '**The delta-round rule (#2011).** On a delta round, an untested branch or an unpinned sentence that lies inside an `added` range of the Fix-pass hunks is a `SUGGESTION`'
+  contains "$section_flat" '**The delta-round rule (#2011).** On a delta round, an untested branch or an unpinned sentence that lies inside an `added` range of the Fix-pass hunks is not reported'
+  lacks "$section_flat" 'inside an `added` range of the Fix-pass hunks is a `SUGGESTION`'
   # what makes a round a delta round for the reviewer: the prompt line, not a guess
   contains "$section_flat" 'A delta round is one whose prompt carries a `Fix-pass hunks (delta round):` line.'
   # the fix-introduced-sentence test
@@ -463,7 +534,7 @@ _assert_file() {  # _assert_file <path> <test-expr...>
   contains "$section" 'Self-check waivers (round 1): {self_check_path} — the writer'"'"'s pre-review self-check'
   contains "$section" 'A waived item is a gap the writer chose to accept; judge it at your own bar, and do not raise it only because it is listed.'
   # the introduction names it as a round-1 path under the same non-null test
-  contains "$section_flat" 'On round 1 the plan may carry a third path, `self_check_path` (#2014)'
+  contains "$section_flat" 'On round 1 the plan may carry a second path, `self_check_path` (#2014)'
   contains "$section_flat" 'Add the `Self-check waivers (round 1):` line only when the plan names a **non-null** `self_check_path`, the same test: a standalone run and every round from 2 on carry none.'
 }
 
@@ -517,12 +588,13 @@ _assert_file() {  # _assert_file <path> <test-expr...>
   # the falsifier itself
   contains "$flat" 'unless it names the concrete wrong action a consumer — human or model — takes because of the drift'
   # the fallback, on wording unique to THIS agent (see the note above)
-  contains "$flat" 'the finding is a `SUGGESTION`, however untidy the inconsistency'
+  contains "$flat" 'the finding is not reported, however untidy the inconsistency'
+  lacks "$flat" 'the finding is a `SUGGESTION`, however untidy the inconsistency'
   # every row on its own OPERATIVE clause
   contains "$flat" 'following the artifact **will** fail or produce a wrong result'
   contains "$flat" 'a reference the artifact tells a model to *execute* does not resolve, or the drift breaks the consumer outright'
   contains "$flat" 'a named consumer **may** take a concrete wrong action because of the drift'
-  contains "$flat" 'inconsistency with no named consumer who acts wrongly — never blocks'
+  lacks "$flat" 'inconsistency with no named consumer who acts wrongly — never blocks'
   # the clause that stops the rejected bar re-entering wearing the word
   # "action". It must be a TASK test: a naming test is satisfied by the
   # Reporting Format's own mandatory File: header and so excludes nothing.
@@ -551,12 +623,20 @@ _assert_file() {  # _assert_file <path> <test-expr...>
   # paragraph above rejects
   contains "$flat" "whose consumer's wrong action you cannot state — naming a consumer is not enough"
   lacks "$flat" 'The bar bites only on drift whose consumer you cannot name.'
-  # the anti-suppression guarantee
-  contains "$flat" '**Nothing here tells you not to report something.**'
-  contains "$flat" 'as a `SUGGESTION`, and logged in the dossier.'
+  # the other not-reported branches (#3158): a naming-test finding, a
+  # planned target, and a target whose absence cannot be confirmed
+  contains "$flat" 'file is named, that finding is not reported.'
+  contains "$flat" 'reference is deliberate, not drift — it is not reported, **whatever the target is for**.'
+  contains "$flat" 'generated, or lives outside the repo — it is not reported, never a `CRITICAL`.'
+  lacks "$flat" 'a `SUGGESTION` recommending the follow-up that lands it'
+  lacks "$flat" 'a `SUGGESTION` asking the author to confirm the target'
+  # a bar-demoted finding is not reported outside the two SUGGESTION lanes
+  # (#3158); the retired anti-suppression paragraph is gone
+  contains "$flat" 'A finding this bar demotes below `WARNING` is not reported unless it falls in one of the two `SUGGESTION` lanes of ARCHITECTURE.md *Terminating severity bars*; the one this agent carries is a tool-verdict claim capped by the evidence rule below.'
+  lacks "$flat" '**Nothing here tells you not to report something.**'
+  lacks "$flat" 'as a `SUGGESTION`, and logged in the dossier.'
   # the retired #994 promotion path may not be claimed back (#3150)
   lacks "$flat" 'the promotion path (#994) can still raise it'
-  contains "$flat" 'This bounds severity, not coverage.'
 }
 
 @test "neither new bar's operative rows re-admit its rejected predicate (#1433)" {
@@ -566,7 +646,7 @@ _assert_file() {  # _assert_file <path> <test-expr...>
   # control first, so the `lacks` can only ever run against real rows.
   _load_table "$CONTRACT"
   contains "$table" '| `CRITICAL` |'
-  contains "$table" '| `SUGGESTION` |'
+  lacks "$table" '| `SUGGESTION` |'
   lacks "$table" 'misleads the next editor'
   # the short token too, so a PARAPHRASE ("misleads a future editor of the file")
   # cannot re-admit the rejected bar past a literal-substring guard. Safe: no
@@ -575,7 +655,7 @@ _assert_file() {  # _assert_file <path> <test-expr...>
 
   _load_table "$TEST_REVIEWER"
   contains "$table" '| `CRITICAL` |'
-  contains "$table" '| `SUGGESTION` |'
+  lacks "$table" '| `SUGGESTION` |'
   lacks "$table" 'too weak'
   # same, for "the assertions are visibly weak"; no operative row says "weak"
   lacks "$table" 'weak'
@@ -599,7 +679,15 @@ _assert_file() {  # _assert_file <path> <test-expr...>
   contains "$flat" 'unless it names the concrete wrong action a model would take'
   contains "$flat" 'a model following this **will** act wrongly'
   contains "$flat" 'a model following this **may** act wrongly'
-  contains "$flat" 'wording, tone, or clarity with **no behavioural delta** — never blocks'
+  # #3158: the SUGGESTION row is gone, and a finding with no wrong action is
+  # not reported
+  lacks "$flat" 'wording, tone, or clarity with **no behavioural delta** — never blocks'
+  contains "$flat" 'the finding is not reported, no matter how awkward the prose.'
+  contains "$flat" 'Wording, tone, style, and clarity nitpicks with no behavioural delta are never reported.'
+  lacks "$flat" 'nitpicks are always `SUGGESTION`'
+  _load_table "$PROSE_LOGIC"
+  contains "$table" '| `CRITICAL` |'
+  lacks "$table" '| `SUGGESTION` |'
 }
 
 @test "the test reviewer keeps its #982 scope-bounding intact (#1433)" {
@@ -641,7 +729,8 @@ _assert_file() {  # _assert_file <path> <test-expr...>
 
   # the shape it documents must be the shape the agents carry
   contains "$flat" '`## The <name> bar (severity rule — this bounds you)`'
-  contains "$flat" 'three-row'
+  contains "$flat" 'two-row'
+  lacks "$flat" 'three-row'
   # the phrase, not the bare token: "a rule that is *not* falsifiable" would
   # satisfy `contains "$flat" 'falsifiable'`
   contains "$flat" 'one bolded, **falsifiable** rule'
@@ -656,6 +745,11 @@ _assert_file() {  # _assert_file <path> <test-expr...>
   # reported unless it falls in one of the two SUGGESTION lanes
   contains "$flat" 'a finding a bar demotes below `WARNING` — the delta-round rule below included — is not reported unless it falls in one of the two lanes.'
   lacks "$flat" 'still reported and logged in the dossier, so no dimension loses coverage.'
+  # #3158 rewrote this panel's agents, so the section may no longer say they
+  # (or this guard) still hold the earlier wording
+  contains "$flat" '**Only the reviewers #3158 rewrote follow this contract yet**, in the claude-plugin panel.'
+  lacks "$flat" 'still pins the agents to the earlier report-as-'
+  lacks "$flat" '**The reviewers do not follow this contract yet.**'
   # the retired #994 promotion path may not be claimed back (#3150)
   lacks "$flat" 'raisable by the #994 promotion path'
   # each carrier and its bar name, driven off the same pairing the inventory

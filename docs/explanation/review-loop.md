@@ -370,8 +370,9 @@ PR, with no prompt in between.
 This is the contract the loop is moving to, and two parts of it have not
 shipped yet. The dossier has no *Suggested follow-ups* section until #3170
 lands, so until then such a defect appears in the dossier's **Waived
-suggestions** list. The reviewers still report below-the-bar observations as
-suggestions until #3158–#3167 land.
+suggestions** list. The claude-plugin panel's reviewers follow it since #3158;
+the other panels' reviewers still report below-the-bar observations as
+suggestions until #3159–#3167 land.
 
 Earlier versions logged every below-the-bar observation as a suggestion and
 stopped an attended run at this point to offer each one for promotion to

@@ -109,6 +109,9 @@ For each finding, report:
   **Description** field above, each on its own line, with the severity set to SUGGESTION:
   decides: <the command that settles it>
   proposed-severity: CRITICAL|WARNING
+  — or, for a scope-bounded follow-up (*Scope-bounded severity* below), this one line
+  appended to the **Description** field, with the severity set to SUGGESTION:
+  follow-up: <the defect, in one line>
 **Suggested fix:** Concrete code-level change.
 ```
 
@@ -116,7 +119,10 @@ For each finding, report:
 
 - **CRITICAL:** Wrong exit status, data loss, or a corrupting/destructive action on a reachable path
 - **WARNING:** Incorrect behaviour under realistic inputs or failure of a documented contract
-- **SUGGESTION:** Defensive hardening with no current misbehaviour
+
+Defensive hardening with no current misbehaviour is not reported. `SUGGESTION` is reserved for the two lanes of
+ARCHITECTURE.md *Terminating severity bars*: a tool-verdict claim capped by the evidence rule, and a
+scope-bounded follow-up under *Scope-bounded severity* below.
 
 ## Reviewing thoroughness (#982)
 
@@ -130,9 +136,11 @@ For each finding, report:
   per round drags the review loop across extra rounds; sweep the whole diff for
   siblings before you write the finding.
 - **Scope-bounded severity.** A finding blocks (CRITICAL/WARNING) only when its fix
-  stays within the issue's stated scope; when the only correct remedy would expand
-  the change beyond that scope, file it as a **SUGGESTION** with an explicit "spin
-  off a follow-up issue" recommendation rather than a blocking WARNING/CRITICAL.
+  stays within the issue's stated scope. A pre-existing defect that would block, but
+  whose only correct fix expands the change beyond that scope, is reported at
+  **SUGGESTION** with a Description line `follow-up: <the defect, in one line>`, and
+  it never blocks a round. A plain out-of-diff observation below the bar is not
+  reported.
   Two carve-outs keep this from muzzling real blockers. **(1) A defect the change
   under review *introduces* is always in-scope**, wherever its remedy lands —
   adjusting or reverting the change is by definition in-scope; scope-bounding

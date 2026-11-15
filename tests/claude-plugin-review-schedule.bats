@@ -171,18 +171,22 @@ NO_CONTRACT="manifest prose_logic script_quality tests"
     contains "$(sed -n '/^## What You Do Not Report/,/^## What You Look For/p' "$AGENT")" "$moved"
   done
   contains "$(cat "$AGENT")" '- **WARNING:** Bump size clearly wrong for the change'
-  contains "$(cat "$AGENT")" '- **SUGGESTION:** Stale descriptions'
+  # #3158: a stale description never reaches the blocking bar, so the check is gone
+  lacks "$(cat "$AGENT")" '- **SUGGESTION:** Stale descriptions'
+  lacks "$(cat "$AGENT")" '### Stale descriptions'
+  contains "$(cat "$AGENT")" 'Nothing below `WARNING` is reported, except a tool-verdict claim the evidence rule caps at `SUGGESTION`.'
   lacks "$(cat "$AGENT")" '- **CRITICAL:**'
   lacks "$(cat "$AGENT")" '### Lockstep'
   lacks "$(cat "$AGENT")" '### Bump presence'
 }
 
-@test "the bump-size agent is handed each bump's base version, and without it reports no bump size above SUGGESTION" {
+@test "the bump-size agent is handed each bump's base version, and without it reports no bump-size finding" {
   contains "$(cat "$SKILL")" '**The `Version increments:` line goes to `claude-plugin-manifest-check` alone.**'
   contains "$(cat "$SKILL")" '`git show <base>:<plugin>/.claude-plugin/plugin.json` in the script'"'"'s `--repo` and `--base`, and list'
   contains "$(cat "$SKILL")" 'Version increments (claude-plugin-manifest-check only): {increments} — each bumped plugin'"'"'s version at the base and in this tree, as <plugin>: <base version> -> <new version>.'
   contains "$(cat "$AGENT")" 'Size each bump against the prompt'"'"'s `Version increments:` line'
-  contains "$(cat "$AGENT")" '**Without that line, report no bump-size finding above SUGGESTION**'
+  contains "$(cat "$AGENT")" '**Without that line, report no bump-size finding**'
+  lacks "$(cat "$AGENT")" 'report no bump-size finding above SUGGESTION'
 }
 
 @test "review-loop.md states Carry-driven dispatch (#2008) and the planned-dimension row" {
