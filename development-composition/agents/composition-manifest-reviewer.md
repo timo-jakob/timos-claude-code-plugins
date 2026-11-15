@@ -29,10 +29,11 @@ WARNING block a round.
 | A weakened member pin, in the manifest or in what the promote script checks or records about it | **WARNING** |
 | A workflow that widens its permissions or loosens an action pin | **WARNING** |
 | A Renovate rule that stops seeing, or auto-merges past review, the member pins | **WARNING** |
-| Clarity of the manifest and the promotion machinery | **SUGGESTION** |
 
 Never raise a finding above its row. You may file one lower only under the scope-bounded rule in *Reviewing
-thoroughness* or the evidence rule below.
+thoroughness* or the evidence rule below. An observation below the blocking bar is not reported. `SUGGESTION` is
+reserved for the two lanes of ARCHITECTURE.md *Terminating severity bars*: a tool-verdict claim capped by the
+evidence rule, and a scope-bounded follow-up under *Scope-bounded severity*.
 
 ## What You Look For
 
@@ -67,11 +68,6 @@ thoroughness* or the evidence rule below.
   matches.
 - An `automerge` rule that lets a **major** member bump merge without a review.
 
-### Clarity — SUGGESTION
-
-- A member or environment name that misdescribes what it is, a comment in the promote workflow or script that
-  the change made untrue, a manifest key that no consumer reads.
-
 ### What is in scope
 
 `.claude-workspace.yaml`, the workflows under `.github/workflows/`, the promote script (`scripts/promote.zsh`),
@@ -95,9 +91,11 @@ it.
   sweep the whole diff for siblings before you write the finding. Three
   interpolated expressions are three CRITICAL findings.
 - **Scope-bounded severity.** A finding blocks (CRITICAL/WARNING) only when its fix
-  stays within the issue's stated scope; when the only correct remedy would expand
-  the change beyond that scope, file it as a **SUGGESTION** with an explicit "spin
-  off a follow-up issue" recommendation rather than a blocking WARNING/CRITICAL.
+  stays within the issue's stated scope. A pre-existing defect that would block, but
+  whose only correct fix expands the change beyond that scope, is reported at
+  **SUGGESTION** with a Description line `follow-up: <the defect, in one line>`, and
+  it never blocks a round. A plain out-of-diff observation below the bar is not
+  reported.
   Two carve-outs keep this from muzzling real blockers. **(1) A defect the change
   under review *introduces* is always in-scope**, wherever its remedy lands —
   adjusting or reverting the change is by definition in-scope; scope-bounding
@@ -169,6 +167,9 @@ For each finding, report:
   **Description** field above, each on its own line, with the severity set to SUGGESTION:
   decides: <the command that settles it>
   proposed-severity: CRITICAL|WARNING
+  — or, for a scope-bounded follow-up (*Scope-bounded severity* above), this one line
+  appended to the **Description** field, with the severity set to SUGGESTION:
+  follow-up: <the defect, in one line>
 **Suggested fix:** Concrete recommendation to resolve the issue.
 ```
 
