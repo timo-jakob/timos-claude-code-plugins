@@ -3832,14 +3832,22 @@ gap (#1148).
 
 Reviewers that carry the rule (below) assign severity **relative to the story's
 stated scope**, not in the abstract. A finding is `CRITICAL`/`WARNING` (blocking)
-only when its remedy stays within what the issue asked to change. When the only
-correct fix would **expand the change beyond that scope** (a subsystem to
-refactor, or a guard the issue never mentioned that lives in code the story never
-touched), the reviewer files it as a **`SUGGESTION`** with an explicit "spin off a
-follow-up issue" recommendation — never as a blocking `WARNING`/`CRITICAL`.
-Nothing is lost (the observation still rides into the dossier as a suggestion):
-a scope-expanding remedy is meant to no longer force a round of work the story
-never authorized — the #976 round-1 overreach that round 2 then reverted. **This
+only when its remedy stays within what the issue asked to change. **A
+pre-existing defect that would block, but whose only correct fix expands the
+change beyond the story scope** (a subsystem to refactor, or a guard the issue
+never mentioned that lives in code the story never touched), **is reported at
+`SUGGESTION` with a Description line `follow-up: <the defect, in one line>`.**
+That line sits in the same position and style as the evidence rule's
+`decides:` line (*Terminating severity bars* below), so the consolidator detects
+both lanes the same way. Such a finding never blocks a round, and the dossier
+lists it under *Suggested follow-ups*. That dossier section is not built yet: #3170
+adds it to `build-dossier.zsh`, and until then the finding appears in the
+dossier's **Waived suggestions** list. A plain out-of-diff observation below the
+bar is not reported at all. Nothing blocking-grade is lost, because the defect
+rides into the dossier under *Suggested follow-ups* as a non-blocking Low; only
+an observation that would not block anyway is dropped. A scope-expanding remedy
+no longer forces a round of work the story never authorized — the #976 round-1
+overreach that round 2 then reverted. **This
 ISSUE-scope demotion only activates when the reviewer is actually given the
 issue's stated scope.** Under today's panel wiring the reviewer receives only a
 review scope (a file list), not the issue text, so carve-out (3) below fires and
@@ -3883,7 +3891,7 @@ dimensions (bugs, security, performance, code-quality, resilience, and the
 claude-plugin prose-logic/contract/manifest reviewers) is tracked follow-up (#987), not yet
 done — no shared convention file or prompt-injection carries it. It is honoured mechanically
 downstream: `SUGGESTION → Low`, and Low never blocks a round (see the consolidator
-below).
+below, whose Low filter keeps a Low carrying a `follow-up:` line once #3169 lands).
 
 Reviewers also **enumerate every instance of a repeating pattern in one round**
 rather than one exemplar per round; the fix pass sibling-sweeps to match (both in
@@ -3907,12 +3915,25 @@ body, so the bar is enforceable rather than advisory.
 
 The point is a **fixed point**: a bar phrased as a judgement ("assertions too weak",
 "misleads the next editor") has none, because every fix is a new artifact reviewable
-under the same bar — the generator epic #1431 was filed to close. The bars bound
-*severity only*: what they demote becomes a `SUGGESTION`, still reported and logged
-in the dossier, so no dimension loses coverage.
+under the same bar — the generator epic #1431 was filed to close.
+
+**A reviewer reports only what blocks: `CRITICAL` or `WARNING`. A plain
+observation below the bar is not reported.** `SUGGESTION` survives in two
+reviewer lanes only: the evidence-capped severity of a tool-verdict claim that
+carries `decides:` / `proposed-severity:` (#1584, the evidence rule below), which
+the decided pass can still raise on a real red; and a scope-bounded defect that
+carries a `follow-up:` line (*Scope-bounded severity* above). That rule holds
+for every panel's reviewers, whether or not they carry a bar. The bars bound
+*severity only*: a finding a bar demotes below `WARNING` — the delta-round rule
+below included — is not reported unless it falls in one of the two lanes.
+**The reviewers do not follow this contract yet.** The reviewer agents still
+report a below-the-bar finding as a `SUGGESTION`, and the `development-react`
+panel still fixes one check at `SUGGESTION` (above), until children #3158–#3167
+of #3122 rewrite them.
 `tests/claude-plugin-review-severity-bars.bats` is the guard, and it asserts the
 bars are one convention rather than a set of ad-hoc rules — including against this
-section, so the two cannot drift apart. It derives the roster from the tree rather
+section. Until those children land it still pins the agents to the earlier
+report-as-`SUGGESTION` wording. It derives the roster from the tree rather
 than transcribing it, which is why no count is stated here: a fourth reviewer given
 a bar reds that test rather than silently leaving this paragraph stale. Giving the
 remaining panel reviewers a bar is not done; it belongs to epic #1431, which filed
@@ -3920,7 +3941,7 @@ this convention, not to #987, which tracks extending the *scope-bounding* rule
 above.
 
 **The mutation bar carries a delta-round rule (#2011).** On a delta round the
-test reviewer demotes an untested branch or an unpinned sentence to `SUGGESTION`
+test reviewer demotes an untested branch or an unpinned sentence below the bar
 when it lies inside a range the previous fix pass **added**, and keeps full
 severity inside a range that rewrote or removed prior-tree lines. That is the
 treadmill the bar exists to stop, re-entering through coverage: each guard a fix
@@ -4625,9 +4646,14 @@ reliable but the merging needs semantics:
 - **`consolidate-findings.zsh`** is the deterministic engine (jq), fully
   bats-tested. It applies the **severity map** `CRITICAL→Critical`,
   `WARNING→High`, `SUGGESTION→Low`; **blocking = Critical + High** (Low is logged
-  in `suggestions` and never triggers a round — so a scope-bounded finding a
-  reviewer downgraded to `SUGGESTION` per *Scope-bounded severity* above rides
-  into the dossier without ever forcing a round); **dedup** by `file`+`line`+
+  in `suggestions` and never triggers a round — so a scope-bounded defect a
+  reviewer reported in the `follow-up:` lane per *Scope-bounded severity* above
+  rides into the dossier without ever forcing a round); a **Low filter**:
+  `consolidate-findings.zsh` discards a reviewer-emitted Low with neither
+  `decides:` nor `follow-up:`, keeps one that carries either line (never as a
+  blocker), and never discards a risk-demoted item (`demoted: true`), which the
+  consolidator writes itself — child 12 of #3122 (#3169) implements it; **dedup**
+  by `file`+`line`+
   `dimension` (most-detailed description kept, reviewers unioned, `agreement`
   counted, highest severity carried); a **conflict** item for co-located
   `performance`-vs-`code_quality` recommendations; and **non-convergence** —

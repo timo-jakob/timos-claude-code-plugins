@@ -31,10 +31,12 @@ carries.
    background process; the *suite* is the one thing that does run in the
    background, because it is a deterministic test run rather than a model-driven
    step.
-2. **Consolidate** — and this is what waits for the suite. Findings are
-   de-duplicated and split into **blockers** (Critical + Warning) and
-   **Suggestions**. Only blockers drive the loop; suggestions are logged and not
-   looped on (see [Promoting a suggestion](#promoting-a-suggestion)).
+2. **Consolidate** — and this is what waits for the suite. A reviewer reports
+   blockers (Critical + Warning), evidence-capped tool claims and scope-bounded
+   follow-ups only; a plain observation below the bar is not reported. Findings
+   are de-duplicated, and only blockers drive the loop. The two non-blocking
+   kinds are logged and not looped on (see
+   [Suggested follow-ups](#suggested-follow-ups)).
 3. **Fix** — if there are blockers, an implementor pass fixes them, and the next
    round's boundary re-tests what it wrote. A suite that comes back red discards
    that round's findings and restarts the boundary; a fix that cannot be made
@@ -48,7 +50,7 @@ had both come back wrong on real rounds. Such a finding is therefore capped at
 **Suggestion**, and names the command that would settle it. Between the panel and
 consolidation the driver **runs** those commands against the same tree the panel
 read, and only a genuine red raises the finding to the severity its reviewer
-proposed; a green leaves it a logged suggestion. That keeps the reviewers
+proposed; a green leaves it a logged, non-blocking tool claim. That keeps the reviewers
 read-only while putting execution in the one step that already runs tools on the
 minted tree. The line it draws is *observation vs. execution*, not subject
 matter — a defect read straight out of the files keeps its full severity.
@@ -127,21 +129,19 @@ independent repeat of it. Three kinds of round:
 - **Round 1 — the full sweep.** Scoped to the whole story diff against the base
   branch. Nothing has happened yet to iterate on.
 - **Intermediate rounds — the delta.** Scoped to what the *previous round's fix
-  pass actually changed*. Two things ride along: the previous round's blockers,
-  so the panel verifies the fixes it asked for actually landed — each carried
+  pass actually changed*. The previous round's blockers ride along, so the
+  panel verifies the fixes it asked for actually landed — each carried
   blocker is shown only to the reviewer of its own dimension, its one owner,
   which reports it as confirmed, re-raised (it saw the defect still present,
   and says where) or unconfirmed; a reviewer that cannot find a fix
   reports it as unconfirmed rather than re-raising it, and the loop refuses a
   round in which a carried blocker's owner neither confirmed nor re-raised it
-  rather than letting it drop out of the carry; and the list of
-  suggestions earlier rounds already surfaced and you already let go, which a
-  reviewer must not re-raise. An already-waived suggestion re-raised at
-  Suggestion level is dropped and counted, never silently — and one a tool
-  actually decided red is never dropped at all — but the same finding
-  re-raised as a **Warning or Critical** is never suppressed, and neither is a
-  suggestion in a file the last fix pass touched, because there it may be a new
-  observation about new code.
+  rather than letting it drop out of the carry. Nothing below the bar rides
+  along: a reviewer reports no plain observation, so there is no list of
+  let-go observations for a later round to re-raise. A defect that blocks is
+  reported as a **Warning or Critical** in whatever round sees it, and an
+  evidence-capped tool claim or a scope-bounded follow-up an earlier round
+  logged stays logged without blocking.
 - **The closing full sweep — a converging run always ends on a full sweep.**
   Delta scoping buys convergence, but on its own it could hide a defect that
   exists only in the *interaction* between rounds. So the loop can never
@@ -161,8 +161,8 @@ weighed and let go, so re-litigation is free and a nitpick in the implementer's
 own review response is indistinguishable from a defect in shipped behaviour.
 
 The loop repeats until it **converges** — a **full-sweep** round with **zero
-blockers**. Suggestions remaining is still converged, and the run waives them
-(below).
+blockers**. Logged tool claims and follow-ups remaining is still converged,
+since neither blocks (below).
 
 ## Watching it run
 
@@ -355,19 +355,28 @@ converging** — do not dead-end. Instead the run pauses and talks to you:
    already stands at 5 + 5×3 = 20 rounds, and a run that needs anywhere near
    that many should be split, which is exactly what the warning tells you.
 
-## Promoting a suggestion
+## Suggested follow-ups
 
-Suggestions never block, so by the time a run converges every one the panel
-raised has been **waived**: logged in the round's progress and in the PR's
-review dossier, and never acted on. That is where the run leaves them, attended
-or not. A converged run goes straight on to the version bump and the PR, with no
-prompt in between.
+A reviewer reports blockers, evidence-capped tool claims and scope-bounded
+follow-ups only; a plain observation below the bar is not reported at all. The
+two non-blocking kinds never block: a tool claim the driver's run left green
+stays logged, and a pre-existing defect whose only fix would widen the story
+beyond its scope is reported with a one-line `follow-up:` note, so the PR's
+review dossier lists it under *Suggested follow-ups* rather than spending a
+round on work the story never asked for. That is where the run leaves them,
+attended or not. A converged run goes straight on to the version bump and the
+PR, with no prompt in between.
 
-Earlier versions stopped an attended run at this point and offered every waived
-suggestion for promotion to blocking, resolved through a second pass of the
-loop. Over a month of runs nobody promoted anything, so the offer was removed:
-the project prefers to move forward rather than re-open what a converged run
-already let go.
+This is the contract the loop is moving to, and two parts of it have not
+shipped yet. The dossier has no *Suggested follow-ups* section until #3170
+lands, so until then such a defect appears in the dossier's **Waived
+suggestions** list. The reviewers still report below-the-bar observations as
+suggestions until #3158–#3167 land.
+
+Earlier versions logged every below-the-bar observation as a suggestion and
+stopped an attended run at this point to offer each one for promotion to
+blocking. Over a month of runs nobody promoted anything, so the offer was
+removed, and the reviewers will leave out the observations it existed to sort.
 
 ## When you stop, or a run is unattended
 
