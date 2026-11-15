@@ -186,8 +186,8 @@
 #                 effective extension bar described above.
 #
 # Exit codes: 0 ok · 2 usage error (including a malformed --risk while the
-#             threshold is on, and any unknown option — `--promote`, the #994
-#             overlay retired by #3135, among them) · 1 internal (unreadable /
+#             threshold is on, and any unknown option — the #994 overlay's
+#             flag, retired by #3135, among them) · 1 internal (unreadable /
 #             invalid JSON)
 
 emulate -L zsh
