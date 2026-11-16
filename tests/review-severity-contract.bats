@@ -281,7 +281,7 @@ go_format() {
   local flat
   flat="$(flatten <"$REPO_ROOT/development-java/agents/java-code-quality.md")"
   [ -n "$flat" ]
-  contains "$flat" 'Style or idiom alone — naming, a missing `final`, missing Javadoc, magic numbers, mixed paradigms or date/time APIs — is below the bar and not reported, unless it misleads a caller or harms maintainability at a cost you can name.'
+  contains "$flat" 'Style, idiom or tidiness alone — naming, a missing `final`, missing Javadoc, magic numbers, mixed paradigms or date/time APIs, unused code or imports, commented-out code, boolean positional arguments, broader-than-needed visibility, a small repeated pattern, package-layout inconsistency — is below the bar and not reported, unless it misleads a caller or harms maintainability at a cost you can name.'
 }
 
 @test "#3161 java-test-reviewer and java-performance-reviewer do not report their named sub-bar items" {
