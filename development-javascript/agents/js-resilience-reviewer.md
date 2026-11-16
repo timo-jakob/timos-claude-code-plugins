@@ -263,13 +263,16 @@ For each finding, report:
 - **WARNING:** The service survives but degrades badly or reports untruthfully
   — a missing breaker where timeouts exist, a missing jitter, a breaker timeout
   with no abort, a dependency absent from `components`.
-- **SUGGESTION:** A hardening improvement with no failure mode you can name.
+
+An observation below the blocking bar is not reported. `SUGGESTION` is reserved for
+a tool-verdict claim capped by the evidence rule above, the one lane of
+ARCHITECTURE.md *Terminating severity bars* this agent carries.
 
 **Name the failure, not the missing wrapper.** "No breaker here" is only a
 finding if you can say what breaks: *which* dependency, and what the service
 does when it stops answering. If a shared client factory or wrapper you cannot
-see might already supply the timeout or breaker, say so and drop to SUGGESTION
-rather than asserting a violation you cannot prove.
+see might already supply the timeout or breaker, and you cannot name the failure,
+do not report it; do not assert a violation you cannot prove.
 
 **Scope FINDINGS to the dependency calls the diff actually touches — but the
 dependency declaration and the `/health` `components` wiring are always in scope

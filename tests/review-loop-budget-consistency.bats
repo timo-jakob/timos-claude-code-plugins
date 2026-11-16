@@ -593,7 +593,7 @@ grep_site() {  # grep_site <file> <fixed-string>
     # the Already-waived prompt line goes panel by panel with children 1 to 10
     # of #3122; a panel whose child has landed lacks it
     case "$panel" in
-      development-claude-plugin/*|development-composition/*|development-go/*|development-java/*)  # #3158-#3161
+      development-claude-plugin/*|development-composition/*|development-go/*|development-java/*|development-javascript/*)  # #3158-#3162
         run -1 grep -Fq -e 'Already waived (round >= 2)' -- "$REPO_ROOT/$panel"
         run -1 grep -Fq -e 'adjudicated_path' -- "$REPO_ROOT/$panel"
         run -1 grep -Fq -e 'REVIEW_ADJUDICATED' -- "$REPO_ROOT/$panel" ;;

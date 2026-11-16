@@ -67,9 +67,11 @@ Do not report a micro-optimisation with no measurable cost; a memoisation sugges
   loop across extra rounds; sweep the whole diff for siblings before you write the
   finding.
 - **Scope-bounded severity.** A finding blocks (CRITICAL/WARNING) only when its fix
-  stays within the issue's stated scope; when the only correct remedy would expand
-  the change beyond that scope, file it as a **SUGGESTION** with an explicit "spin
-  off a follow-up issue" recommendation rather than a blocking WARNING/CRITICAL.
+  stays within the issue's stated scope. A pre-existing defect that would block, but
+  whose only correct fix expands the change beyond that scope, is reported at
+  **SUGGESTION** with a Description line `follow-up: <the defect, in one line>`, and
+  it never blocks a round. A plain out-of-diff observation below the bar is not
+  reported.
   Two carve-outs keep this from muzzling real blockers. **(1) A defect the change
   under review *introduces* is always in-scope**, wherever its remedy lands —
   adjusting or reverting the change is by definition in-scope; scope-bounding
@@ -141,6 +143,9 @@ For each finding, report:
   **Description** field above, each on its own line, with the severity set to SUGGESTION:
   decides: <the command that settles it>
   proposed-severity: CRITICAL|WARNING
+  — or, for a scope-bounded follow-up (*Scope-bounded severity* above), this one line
+  appended to the **Description** field, with the severity set to SUGGESTION:
+  follow-up: <the defect, in one line>
 **Suggested fix:** Concrete code change and the expected improvement.
 ```
 
@@ -150,4 +155,10 @@ For each finding, report:
   order of magnitude under realistic load
 - **WARNING:** A measurable cost on a common path — N+1 I/O, sequential independent awaits, a quadratic loop over
   realistic input sizes
-- **SUGGESTION:** An optimisation worth making, with no user-visible cost today
+
+An observation below the blocking bar is not reported. `SUGGESTION` is reserved for the two lanes of ARCHITECTURE.md
+*Terminating severity bars*: a tool-verdict claim capped by the evidence rule above, and a scope-bounded follow-up
+under *Scope-bounded severity* above.
+
+An optimisation with no hot path or load condition you can name, and no user-visible cost today, is speculation,
+below the bar and not reported.

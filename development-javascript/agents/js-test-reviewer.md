@@ -77,9 +77,11 @@ coverage, weak test patterns, and opportunities to improve test quality and reli
   loop across extra rounds; sweep the whole diff for siblings before you write the
   finding.
 - **Scope-bounded severity.** A finding blocks (CRITICAL/WARNING) only when its fix
-  stays within the issue's stated scope; when the only correct remedy would expand
-  the change beyond that scope, file it as a **SUGGESTION** with an explicit "spin
-  off a follow-up issue" recommendation rather than a blocking WARNING/CRITICAL.
+  stays within the issue's stated scope. A pre-existing defect that would block, but
+  whose only correct fix expands the change beyond that scope, is reported at
+  **SUGGESTION** with a Description line `follow-up: <the defect, in one line>`, and
+  it never blocks a round. A plain out-of-diff observation below the bar is not
+  reported.
   Three carve-outs keep this from muzzling real blockers. **(1) Tests and coverage
   for the change under review are always in-scope** — a story's definition of done
   includes them, so a genuine coverage gap keeps full severity even though the
@@ -160,6 +162,9 @@ For each finding, report:
   **Description** field above, each on its own line, with the severity set to SUGGESTION:
   decides: <the command that settles it>
   proposed-severity: CRITICAL|WARNING
+  — or, for a scope-bounded follow-up (*Scope-bounded severity* above), this one line
+  appended to the **Description** field, with the severity set to SUGGESTION:
+  follow-up: <the defect, in one line>
 **Suggested fix:** Specific tests to add, or how to improve existing tests.
 ```
 
@@ -168,4 +173,11 @@ For each finding, report:
 - **CRITICAL:** Critical business logic completely untested, or tests that provide false confidence (always pass —
   an unawaited `rejects`, an assertion that can never run)
 - **WARNING:** Significant coverage gap or test quality issue that reduces confidence in the test suite
-- **SUGGESTION:** Improvement that would strengthen test quality or coverage
+
+An observation below the blocking bar is not reported. `SUGGESTION` is reserved for the two lanes of ARCHITECTURE.md
+*Terminating severity bars*: a tool-verdict claim capped by the evidence rule above, and a scope-bounded follow-up
+under *Scope-bounded severity* above.
+
+The structure checks above — duplicated setup a shared fixture or helper would remove, a snapshot no reviewer reads,
+a test that leans on implementation details — are below the bar and not reported, unless you can name the
+regression or the flakiness they let through.
