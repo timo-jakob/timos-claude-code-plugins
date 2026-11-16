@@ -129,13 +129,21 @@ go_format() {
 }
 
 @test "#3160 the six Go reviewers drop plain SUGGESTION and keep only their SUGGESTION lanes" {
-  local a f flat format
+  local a f flat format n want
   for a in go-bug-hunter go-code-quality go-performance-reviewer go-resilience-reviewer go-security-reviewer go-test-reviewer; do
     f="$REPO_ROOT/development-go/agents/$a.md"
     flat="$(flatten <"$f")"
     format="$(go_format "$f")"
     [ -n "$format" ]
     lacks "$format" '**SUGGESTION:**'
+    # Whole-file invariant: SUGGESTION appears only on the lines of its lanes
+    # (evidence rule, template title, severity-set line(s), the reserved-for
+    # sentence, and go-test-reviewer's scope-bounded follow-up). Any new
+    # SUGGESTION route, however spelled, moves this count.
+    want=6
+    [ "$a" = go-test-reviewer ] && want=8
+    n="$(grep -c SUGGESTION "$f")"
+    [ "$n" -eq "$want" ]
     contains "$format" 'An observation below the blocking bar is not reported.'
     contains "$format" '### [CRITICAL|WARNING|SUGGESTION] Title'
     contains "$format" 'decides: <the command that settles it> proposed-severity: CRITICAL|WARNING'
@@ -155,6 +163,14 @@ go_format() {
   [ -n "$flat" ]
   contains "$flat" 'If a wrapper you cannot see might already supply the timeout or breaker, and you cannot name the failure, do not report it; do not assert a violation you cannot prove.'
   lacks "$flat" 'drop to SUGGESTION'
+}
+
+@test "#3160 go-security-reviewer does not report a trusted-input or unreachable sink" {
+  local flat
+  flat="$(flatten <"$REPO_ROOT/development-go/agents/go-security-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'If input is trusted or the sink is unreachable, do not report it. Only a finding with a plausible path from untrusted input to the sink is a WARNING or CRITICAL.'
+  lacks "$flat" 'say so and downgrade'
 }
 
 @test "#3160 go-test-reviewer's Scope-bounded severity reports the follow-up lane and keeps its three carve-outs" {
