@@ -130,4 +130,6 @@ For each finding, report:
 
 - **CRITICAL:** Directly exploitable vulnerability that could compromise user data or app integrity
 - **WARNING:** Security weakness that increases attack surface or violates best practices
-- **SUGGESTION:** Hardening measure that improves security posture
+
+An observation below the blocking bar is not reported. `SUGGESTION` is reserved for a tool-verdict claim capped by
+the evidence rule above, the one lane of ARCHITECTURE.md *Terminating severity bars* this agent carries.

@@ -49,7 +49,7 @@
     {
       "name": "development-java",
       "description": "Java/Gradle maintenance plugin — full-maintenance tier mirroring development-python. Dispatches per-tool agents (Spotless, SonarCloud, CodeQL/Scorecard, semgrep, Dependabot/Snyk PRs, Gradle major upgrades) in worktrees, with a JaCoCo coverage pre-flight; ships the java-approver reviewer + /development-java:approve. JDK runtime upgrades land in a later slice (#308).",
-      "version": "1.21.0",
+      "version": "1.22.0",
       "author": {
         "name": "Timo Jakob"
       },
