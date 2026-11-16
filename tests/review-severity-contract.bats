@@ -170,8 +170,17 @@ go_format() {
   flat="$(flatten <"$REPO_ROOT/development-go/agents/go-security-reviewer.md")"
   [ -n "$flat" ]
   contains "$flat" 'If input is trusted or the sink is unreachable, do not report it.'
+  contains "$flat" 'Exploitable under specific conditions you can name. Hardening with no attack path you can name is below the bar and not reported.'
+  contains "$flat" '`MinVersion` missing on a `tls.Config` is **pinning/hardening, not exposure**, and is not reported'
   lacks "$flat" 'say so and downgrade'
   lacks "$flat" 'Only a finding with a plausible path from untrusted input'
+}
+
+@test "#3160 go-code-quality does not report style or idiom alone" {
+  local flat
+  flat="$(flatten <"$REPO_ROOT/development-go/agents/go-code-quality.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'Style or idiom alone is below the bar and not reported, unless it misleads a caller or harms maintainability at a cost you can name.'
 }
 
 @test "#3160 go-test-reviewer's Scope-bounded severity reports the follow-up lane and keeps its three carve-outs" {

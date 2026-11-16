@@ -166,7 +166,9 @@ For each finding, report:
 **Severity guide:**
 
 - **CRITICAL:** Reserve for design problems that will force a breaking change
-  later, or that actively mislead callers. Style alone is never CRITICAL.
+  later, or that actively mislead callers. Style or idiom alone is below the
+  bar and not reported, unless it misleads a caller or harms maintainability at
+  a cost you can name.
 - **WARNING:** Meaningfully harms maintainability or the caller's experience.
 
 An observation below the blocking bar is not reported. `SUGGESTION` is reserved for
