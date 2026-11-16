@@ -323,3 +323,98 @@ go_format() {
   run -1 grep -qx '## Suggestions' <<<"$section"
   lacks "$section" 'W suggestions)'
 }
+
+# The JavaScript panel (#3162): the six read-only reviewers report only what
+# blocks. go_format captures any reviewer's Reporting Format to EOF, so it
+# serves here too. Five of the six state a Scope-bounded severity rule and so
+# carry the follow-up: lane; js-resilience-reviewer states none.
+
+@test "#3162 the six JavaScript reviewers drop plain SUGGESTION and keep only their SUGGESTION lanes" {
+  local a f flat format n want
+  for a in js-bug-hunter js-code-quality js-performance-reviewer js-resilience-reviewer js-security-reviewer js-test-reviewer; do
+    f="$REPO_ROOT/development-javascript/agents/$a.md"
+    flat="$(flatten <"$f")"
+    format="$(go_format "$f")"
+    [ -n "$format" ]
+    lacks "$format" '**SUGGESTION:**'
+    # Whole-file invariant: SUGGESTION appears only on the lines of its lanes
+    # (evidence rule, template title, the decides: slot, the reserved-for
+    # sentence, and in the five scoped agents the follow-up: slot and the
+    # Scope-bounded severity bullet). Any new SUGGESTION route moves this count.
+    want=8
+    [ "$a" = js-resilience-reviewer ] && want=6
+    n="$(grep -c SUGGESTION "$f")"
+    [ "$n" -eq "$want" ]
+    contains "$format" 'An observation below the blocking bar is not reported.'
+    contains "$format" '### [CRITICAL|WARNING|SUGGESTION] Title'
+    contains "$format" 'decides: <the command that settles it> proposed-severity: CRITICAL|WARNING'
+    if [ "$a" = js-resilience-reviewer ]; then
+      contains "$format" '`SUGGESTION` is reserved for a tool-verdict claim capped by the evidence rule above, the one lane of ARCHITECTURE.md *Terminating severity bars* this agent carries.'
+      lacks "$flat" 'follow-up:'
+    else
+      contains "$format" '`SUGGESTION` is reserved for the two lanes of ARCHITECTURE.md *Terminating severity bars*: a tool-verdict claim capped by the evidence rule above, and a scope-bounded follow-up under *Scope-bounded severity* above.'
+      contains "$format" 'decides: <the command that settles it> proposed-severity: CRITICAL|WARNING — or, for a scope-bounded follow-up (*Scope-bounded severity* above), this one line appended to the **Description** field, with the severity set to SUGGESTION: follow-up: <the defect, in one line>'
+    fi
+  done
+}
+
+@test "#3162 the five scoped JavaScript reviewers report the follow-up lane and keep their carve-outs" {
+  local a flat
+  for a in js-bug-hunter js-code-quality js-performance-reviewer js-security-reviewer js-test-reviewer; do
+    flat="$(flatten <"$REPO_ROOT/development-javascript/agents/$a.md")"
+    [ -n "$flat" ]
+    contains "$flat" 'A finding blocks (CRITICAL/WARNING) only when its fix stays within the issue'"'"'s stated scope. A pre-existing defect that would block, but whose only correct fix expands the change beyond that scope, is reported at **SUGGESTION** with a Description line `follow-up: <the defect, in one line>`, and it never blocks a round. A plain out-of-diff observation below the bar is not reported.'
+    lacks "$flat" 'spin off a follow-up issue'
+    if [ "$a" = js-test-reviewer ]; then
+      contains "$flat" 'Three carve-outs keep this from muzzling real blockers. **(1) Tests and coverage for the change under review are always in-scope**'
+      contains "$flat" '**(2) A defect the change under review *introduces* is always in-scope**'
+      contains "$flat" "**(3) When the issue's stated scope is not provided in your prompt**"
+    else
+      contains "$flat" 'Two carve-outs keep this from muzzling real blockers. **(1) A defect the change under review *introduces* is always in-scope**'
+      contains "$flat" "**(2) When the issue's stated scope is not provided in your prompt**"
+    fi
+  done
+}
+
+@test "#3162 js-resilience-reviewer does not report a violation it cannot prove" {
+  local flat
+  flat="$(flatten <"$REPO_ROOT/development-javascript/agents/js-resilience-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'If a shared client factory or wrapper you cannot see might already supply the timeout or breaker, and you cannot name the failure, do not report it; do not assert a violation you cannot prove.'
+  lacks "$flat" 'drop to SUGGESTION'
+}
+
+@test "#3162 the JavaScript reviewers do not report their named sub-bar items" {
+  local flat
+  flat="$(flatten <"$REPO_ROOT/development-javascript/agents/js-code-quality.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'Style, idiom or tidiness alone — naming, magic numbers, nesting an early return would flatten, a comment that restates the code, `let` where `const` applies, `.then` chains in otherwise `async` code, mixed module or export styles — is below the bar and not reported, unless it misleads a caller or harms maintainability at a cost you can name.'
+  flat="$(flatten <"$REPO_ROOT/development-javascript/agents/js-performance-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'An optimisation with no hot path or load condition you can name, and no user-visible cost today, is speculation, below the bar and not reported.'
+  flat="$(flatten <"$REPO_ROOT/development-javascript/agents/js-security-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'Hardening that only adds a new layer, with no attack path you can name, is below the bar and not reported.'
+  flat="$(flatten <"$REPO_ROOT/development-javascript/agents/js-test-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'The structure checks above — duplicated setup a shared fixture or helper would remove, a snapshot no reviewer reads, a test that leans on implementation details — are below the bar and not reported, unless you can name the regression or the flakiness they let through.'
+}
+
+@test "#3162 the JavaScript panel carries no waived list and reports only capped claims and follow-ups below WARNING" {
+  local panel="$REPO_ROOT/development-javascript/skills/review/SKILL.md" section
+  [ -f "$panel" ]
+  run -1 grep -Fq -e 'Already waived' -- "$panel"
+  run -1 grep -Fq -e 'adjudicated_path' -- "$panel"
+  run -1 grep -Fq -e 'REVIEW_ADJUDICATED' -- "$panel"
+  run -1 grep -Fq -e '--adjudicated' -- "$panel"
+  grep -Fq -e 'also carries `fix_verification_path`, and the reviewers must be told about it.' -- "$panel"
+  # the report template holds its own `## ` lines, so capture Step 3 up to
+  # Step 4 rather than stopping at the first of them
+  section="$(awk '/^## Step 3: Synthesize the Review/ { f = 1; next } /^## Step 4: / { f = 0 } f' "$panel")"
+  [ -n "$section" ]
+  contains "$section" '## Suggested follow-ups and capped claims'
+  contains "$section" 'Only the SUGGESTION findings that carry a `follow-up:` or `decides:` line'
+  contains "$section" '(Y critical, Z warnings, W capped or follow-up suggestions)'
+  run -1 grep -qx '## Suggestions' <<<"$section"
+  lacks "$section" 'W suggestions)'
+}
