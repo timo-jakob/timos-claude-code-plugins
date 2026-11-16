@@ -141,6 +141,11 @@ An observation below the blocking bar is not reported. `SUGGESTION` is reserved 
 *Terminating severity bars*: a tool-verdict claim capped by the evidence rule above, and a scope-bounded follow-up
 under *Scope-bounded severity* below.
 
+The structure and debuggability checks above — assertion messages, `assertTrue` on a complex condition,
+Arrange-Act-Assert layout, test names, several behaviours in one test method, `@ParameterizedTest`/`@Nested`
+grouping, duplicated setup, an expensive fixture rebuilt per test — are below the bar and not reported, unless you
+can name the regression or the flakiness they let through.
+
 ## Reviewing thoroughness (#982)
 
 - **Enumerate every instance of a pattern — never one exemplar.** When you find a

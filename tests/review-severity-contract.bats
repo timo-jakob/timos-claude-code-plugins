@@ -268,6 +268,32 @@ go_format() {
   lacks "$flat" 'drop to SUGGESTION'
 }
 
+@test "#3161 java-security-reviewer does not report hardening with no attack path" {
+  local flat
+  flat="$(flatten <"$REPO_ROOT/development-java/agents/java-security-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" '**WARNING:** Exploitable under specific conditions, or a defense-in-depth gap: a control the change removes or weakens.'
+  contains "$flat" 'Hardening that only adds a new layer, with no attack path you can name, is below the bar and not reported.'
+  lacks "$flat" 'violates best practices'
+}
+
+@test "#3161 java-code-quality does not report style or idiom alone" {
+  local flat
+  flat="$(flatten <"$REPO_ROOT/development-java/agents/java-code-quality.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'Style or idiom alone — naming, a missing `final`, missing Javadoc, magic numbers, mixed paradigms or date/time APIs — is below the bar and not reported, unless it misleads a caller or harms maintainability at a cost you can name.'
+}
+
+@test "#3161 java-test-reviewer and java-performance-reviewer do not report their named sub-bar items" {
+  local flat
+  flat="$(flatten <"$REPO_ROOT/development-java/agents/java-test-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'The structure and debuggability checks above — assertion messages, `assertTrue` on a complex condition, Arrange-Act-Assert layout, test names, several behaviours in one test method, `@ParameterizedTest`/`@Nested` grouping, duplicated setup, an expensive fixture rebuilt per test — are below the bar and not reported, unless you can name the regression or the flakiness they let through.'
+  flat="$(flatten <"$REPO_ROOT/development-java/agents/java-performance-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'An allocation or micro-optimisation finding — autoboxing, `+` concatenation in a loop, a missing initial capacity — with no hot path or load condition you can name is speculation, below the bar and not reported.'
+}
+
 @test "#3161 java-test-reviewer's Scope-bounded severity reports the follow-up lane and keeps its three carve-outs" {
   local flat
   flat="$(flatten <"$REPO_ROOT/development-java/agents/java-test-reviewer.md")"

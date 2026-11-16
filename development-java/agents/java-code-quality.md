@@ -141,3 +141,7 @@ For each finding, report:
 
 An observation below the blocking bar is not reported. `SUGGESTION` is reserved for a tool-verdict claim capped by
 the evidence rule above, the one lane of ARCHITECTURE.md *Terminating severity bars* this agent carries.
+
+Style or idiom alone — naming, a missing `final`, missing Javadoc, magic numbers, mixed paradigms or date/time
+APIs — is below the bar and not reported, unless it misleads a caller or harms maintainability at a cost you can
+name.
