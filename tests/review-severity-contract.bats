@@ -169,8 +169,9 @@ go_format() {
   local flat
   flat="$(flatten <"$REPO_ROOT/development-go/agents/go-security-reviewer.md")"
   [ -n "$flat" ]
-  contains "$flat" 'If input is trusted or the sink is unreachable, do not report it. Only a finding with a plausible path from untrusted input to the sink is a WARNING or CRITICAL.'
+  contains "$flat" 'If input is trusted or the sink is unreachable, do not report it.'
   lacks "$flat" 'say so and downgrade'
+  lacks "$flat" 'Only a finding with a plausible path from untrusted input'
 }
 
 @test "#3160 go-test-reviewer's Scope-bounded severity reports the follow-up lane and keeps its three carve-outs" {

@@ -171,5 +171,4 @@ ARCHITECTURE.md *Terminating severity bars* this agent carries.
 
 **Reachability matters.** `gosec` already runs mechanically in this family's
 pipeline, so restating a rule ID without an attack path adds noise. If input is
-trusted or the sink is unreachable, do not report it. Only a finding with a
-plausible path from untrusted input to the sink is a WARNING or CRITICAL.
+trusted or the sink is unreachable, do not report it.
