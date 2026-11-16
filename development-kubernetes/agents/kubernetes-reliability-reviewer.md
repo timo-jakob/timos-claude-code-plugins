@@ -166,4 +166,10 @@ in nitpicks:
 - **WARNING** — a real defect with a bounded blast radius: one workload
   degraded, one namespace exposed, one app unsyncable.
 
-An observation below the blocking bar is not reported.
+Every item in *What to look for*, `Resources` and `Rollout` included, is at
+least a `WARNING` when it holds: each one degrades a workload or takes a
+serving path down.
+
+An observation below the blocking bar is not reported. `SUGGESTION` is reserved
+for a tool-verdict claim capped by the evidence rule above, the one lane of
+ARCHITECTURE.md *Terminating severity bars* this agent carries.

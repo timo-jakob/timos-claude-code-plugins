@@ -569,6 +569,17 @@ rstep() {
       contains "$body" '- **CRITICAL** — the rendered manifest takes the platform'
       contains "$body" '- **WARNING** — a real defect with a bounded blast radius'
       contains "$flat" 'An observation below the blocking bar is not reported.'
+      contains "$flat" '`SUGGESTION` is reserved for a tool-verdict claim capped by the evidence rule above, the one lane of ARCHITECTURE.md *Terminating severity bars* this agent carries.'
+      # every checklist item is sorted onto a rung or named below the bar
+      case "$base" in
+      argocd-advisor)
+        contains "$flat" '`targetRevision: HEAD` is a `WARNING`'
+        contains "$flat" 'Orphans left by `automated` without `prune` are below the bar.'
+        ;;
+      kubernetes-reliability-reviewer)
+        contains "$flat" '`Resources` and `Rollout` included, is at least a `WARNING` when it holds'
+        ;;
+      esac
       contains "$flat" 'decides: <the command that settles it>'
       lacks "$flat" 'follow-up:'
       lacks "$flat" 'Scope-bounded severity'

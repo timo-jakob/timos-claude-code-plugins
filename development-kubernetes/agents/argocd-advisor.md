@@ -151,4 +151,11 @@ in nitpicks:
 - **WARNING** — a real defect with a bounded blast radius: one workload
   degraded, one namespace exposed, one app unsyncable.
 
-An observation below the blocking bar is not reported.
+Of the items above, `targetRevision: HEAD` is a `WARNING`: that app's deployed
+state cannot be reproduced or rolled back. So are `prune` deleting a resource a
+human created and `selfHeal` on an app someone must patch during an incident.
+Orphans left by `automated` without `prune` are below the bar.
+
+An observation below the blocking bar is not reported. `SUGGESTION` is reserved
+for a tool-verdict claim capped by the evidence rule above, the one lane of
+ARCHITECTURE.md *Terminating severity bars* this agent carries.
