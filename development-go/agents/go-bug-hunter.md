@@ -30,7 +30,8 @@ resources, or data corruption.
   and `time.NewTimer` + `Stop` (or `context.WithTimeout`) is the fix. From
   **Go 1.23** timers and tickers become collectable as soon as they are
   unreachable, even unstopped, so the same code is at worst minor per-iteration
-  allocation — a performance nit, never a leak. Read the module's `go`
+  allocation — a performance nit, never a leak, so it is below the bar and not
+  reported. Read the module's `go`
   directive and say which semantics you assumed. (The change is itself gated on
   `go.mod` naming 1.23.0+, so an old directive keeps the old behaviour even on
   a new toolchain.)
@@ -182,7 +183,10 @@ For each finding, report:
   state in production. A `concurrent map write` fatal and a nil-map write both
   land here — they take the process down.
 - **WARNING:** Likely to cause incorrect behavior under certain conditions.
-- **SUGGESTION:** Defensive improvement that prevents future bugs.
+
+An observation below the blocking bar is not reported. `SUGGESTION` is reserved for
+a tool-verdict claim capped by the evidence rule above, the one lane of
+ARCHITECTURE.md *Terminating severity bars* this agent carries.
 
 Report what the code actually does, not what a linter might flag: `errcheck`
 and `go vet` already run mechanically in this family's pipeline, so a bare

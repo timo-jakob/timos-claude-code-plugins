@@ -166,12 +166,16 @@ For each finding, report:
 **Severity guide:**
 
 - **CRITICAL:** Reserve for design problems that will force a breaking change
-  later, or that actively mislead callers. Style alone is never CRITICAL.
+  later, or that actively mislead callers. Style or idiom alone is below the
+  bar and not reported, unless it misleads a caller or harms maintainability at
+  a cost you can name.
 - **WARNING:** Meaningfully harms maintainability or the caller's experience.
-- **SUGGESTION:** A genuine improvement worth making.
+
+An observation below the blocking bar is not reported. `SUGGESTION` is reserved for
+a tool-verdict claim capped by the evidence rule above, the one lane of
+ARCHITECTURE.md *Terminating severity bars* this agent carries.
 
 **Do not re-report what the formatter owns.** `gofumpt` and `golangci-lint`
 already run mechanically in this family's pipeline — spacing, import order, and
-mechanical lint are settled before you look. Judge design and readability, and
-prefer a handful of findings that change how the code reads over an exhaustive
-list of nits.
+mechanical lint are settled before you look. Judge design and readability. A
+nit that does not change how the code reads is below the bar and not reported.

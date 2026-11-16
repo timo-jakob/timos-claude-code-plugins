@@ -120,3 +120,109 @@ consolidator_bullet() {
   n="$(grep -cF "grep_site \"\$REPO_ROOT/\$panel\" 'adjudicated_path'" "$f" || true)"
   [ "$n" -eq 0 ]
 }
+
+# The Go panel (#3160): the six read-only reviewers report only what blocks.
+# Each reviewer's Reporting Format is the file's last section, so the capture
+# runs from its heading to EOF.
+go_format() {
+  awk '/^## Reporting Format$/ { f = 1; next } f' "$1" | flatten
+}
+
+@test "#3160 the six Go reviewers drop plain SUGGESTION and keep only their SUGGESTION lanes" {
+  local a f flat format n want
+  for a in go-bug-hunter go-code-quality go-performance-reviewer go-resilience-reviewer go-security-reviewer go-test-reviewer; do
+    f="$REPO_ROOT/development-go/agents/$a.md"
+    flat="$(flatten <"$f")"
+    format="$(go_format "$f")"
+    [ -n "$format" ]
+    lacks "$format" '**SUGGESTION:**'
+    # Whole-file invariant: SUGGESTION appears only on the lines of its lanes
+    # (evidence rule, template title, severity-set line(s), the reserved-for
+    # sentence, and go-test-reviewer's scope-bounded follow-up). Any new
+    # SUGGESTION route, however spelled, moves this count.
+    want=6
+    [ "$a" = go-test-reviewer ] && want=8
+    n="$(grep -c SUGGESTION "$f")"
+    [ "$n" -eq "$want" ]
+    contains "$format" 'An observation below the blocking bar is not reported.'
+    contains "$format" '### [CRITICAL|WARNING|SUGGESTION] Title'
+    contains "$format" 'decides: <the command that settles it> proposed-severity: CRITICAL|WARNING'
+    if [ "$a" = go-test-reviewer ]; then
+      contains "$format" '`SUGGESTION` is reserved for the two lanes of ARCHITECTURE.md *Terminating severity bars*: a tool-verdict claim capped by the evidence rule above, and a scope-bounded follow-up under *Scope-bounded severity* below.'
+      contains "$format" 'decides: <the command that settles it> proposed-severity: CRITICAL|WARNING — or, for a scope-bounded follow-up (*Scope-bounded severity* below), this one line appended to the **Description** field, with the severity set to SUGGESTION: follow-up: <the defect, in one line>'
+    else
+      contains "$format" '`SUGGESTION` is reserved for a tool-verdict claim capped by the evidence rule above, the one lane of ARCHITECTURE.md *Terminating severity bars* this agent carries.'
+      lacks "$flat" 'follow-up:'
+    fi
+  done
+}
+
+@test "#3160 go-resilience-reviewer does not report a violation it cannot prove" {
+  local flat
+  flat="$(flatten <"$REPO_ROOT/development-go/agents/go-resilience-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'If a wrapper you cannot see might already supply the timeout or breaker, and you cannot name the failure, do not report it; do not assert a violation you cannot prove.'
+  lacks "$flat" 'drop to SUGGESTION'
+}
+
+@test "#3160 go-security-reviewer does not report a trusted-input or unreachable sink" {
+  local flat
+  flat="$(flatten <"$REPO_ROOT/development-go/agents/go-security-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'If input is trusted or the sink is unreachable, do not report it.'
+  contains "$flat" 'Exploitable under specific conditions, or a defense-in-depth gap: a control the change removes or weakens.'
+  contains "$flat" 'Hardening that only adds a new layer, with no attack path you can name, is below the bar and not reported.'
+  contains "$flat" 'In a module whose `go` directive is 1.22 or later this is **pinning/hardening, not exposure**, and is not reported'
+  contains "$flat" 'In a module whose `go` directive is below 1.22, a server `tls.Config` without `MinVersion` still accepts TLS 1.0/1.1: report it.'
+  lacks "$flat" 'say so and downgrade'
+  lacks "$flat" 'Only a finding with a plausible path from untrusted input'
+}
+
+@test "#3160 go-code-quality does not report style or idiom alone" {
+  local flat
+  flat="$(flatten <"$REPO_ROOT/development-go/agents/go-code-quality.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'Style or idiom alone is below the bar and not reported, unless it misleads a caller or harms maintainability at a cost you can name.'
+  contains "$flat" 'A nit that does not change how the code reads is below the bar and not reported.'
+}
+
+@test "#3160 go-test-reviewer, go-bug-hunter and go-performance-reviewer do not report their named sub-bar items" {
+  local flat
+  flat="$(flatten <"$REPO_ROOT/development-go/agents/go-test-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'The debuggability and speed checks above — `t.Helper()`, the case name in `t.Errorf`, `t.Run` subtests, `t.Parallel()` for speed, `-coverpkg` — are below the bar and not reported, unless you can name the regression or the flakiness they let through.'
+  flat="$(flatten <"$REPO_ROOT/development-go/agents/go-bug-hunter.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'a performance nit, never a leak, so it is below the bar and not reported.'
+  flat="$(flatten <"$REPO_ROOT/development-go/agents/go-performance-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'an allocation finding is speculation, below the bar and not reported.'
+}
+
+@test "#3160 go-test-reviewer's Scope-bounded severity reports the follow-up lane and keeps its three carve-outs" {
+  local flat
+  flat="$(flatten <"$REPO_ROOT/development-go/agents/go-test-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'A finding blocks (CRITICAL/WARNING) only when its fix stays within the issue'"'"'s stated scope. A pre-existing defect that would block, but whose only correct fix expands the change beyond that scope, is reported at **SUGGESTION** with a Description line `follow-up: <the defect, in one line>`, and it never blocks a round. A plain out-of-diff observation below the bar is not reported.'
+  lacks "$flat" 'spin off a follow-up issue'
+  contains "$flat" 'Three carve-outs keep this from muzzling real blockers. **(1) Tests and coverage for the change under review are always in-scope**'
+  contains "$flat" '**(2) A defect the change under review *introduces* is always in-scope**'
+  contains "$flat" "**(3) When the issue's stated scope is not provided in your prompt**"
+}
+
+@test "#3160 the Go panel carries no waived list and reports only capped claims and follow-ups below WARNING" {
+  local panel="$REPO_ROOT/development-go/skills/review/SKILL.md" section
+  [ -f "$panel" ]
+  run -1 grep -Fq -e 'Already waived' -- "$panel"
+  run -1 grep -Fq -e 'adjudicated_path' -- "$panel"
+  run -1 grep -Fq -e 'REVIEW_ADJUDICATED' -- "$panel"
+  # the report template holds its own `## ` lines, so capture Step 3 up to
+  # Step 4 rather than stopping at the first of them
+  section="$(awk '/^## Step 3: Synthesize the Review/ { f = 1; next } /^## Step 4: / { f = 0 } f' "$panel")"
+  [ -n "$section" ]
+  contains "$section" '## Suggested follow-ups and capped claims'
+  contains "$section" 'Only the SUGGESTION findings that carry a `follow-up:` or `decides:` line'
+  contains "$section" '(Y critical, Z warnings, W capped or follow-up suggestions)'
+  run -1 grep -qx '## Suggestions' <<<"$section"
+  lacks "$section" 'W suggestions)'
+}
