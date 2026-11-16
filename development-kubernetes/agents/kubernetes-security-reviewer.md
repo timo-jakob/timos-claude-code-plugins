@@ -154,6 +154,11 @@ in nitpicks:
 - **WARNING** — a real defect with a bounded blast radius: one workload
   degraded, one namespace exposed, one app unsyncable.
 
+Every item in *What to look for* is at least a `WARNING` when it holds.
+Cluster-scoped RBAC wildcards, `escalate`, `bind`, `impersonate`,
+`privileged: true` and `hostNetwork`, `hostPID` or `hostIPC` are `CRITICAL`:
+each grants cluster-wide privilege.
+
 An observation below the blocking bar is not reported. `SUGGESTION` is reserved
 for a tool-verdict claim capped by the evidence rule above, the one lane of
 ARCHITECTURE.md *Terminating severity bars* this agent carries.

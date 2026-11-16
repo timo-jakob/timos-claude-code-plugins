@@ -576,6 +576,13 @@ rstep() {
         contains "$flat" '`targetRevision: HEAD` is a `WARNING`'
         contains "$flat" 'Orphans left by `automated` without `prune` are below the bar.'
         contains "$flat" 'So are plain `prune: true` and `selfHeal: true`'
+        contains "$flat" 'an AppProject permitting `*` source repos or any destination is `CRITICAL`'
+        contains "$flat" 'A dangling app-of-apps child path and a sync wave that starts a workload before its CRD, secret or namespace exists are each a `WARNING`'
+        contains "$flat" 'A skipped check is stated in your prose report, never as a finding: it carries no severity.'
+        ;;
+      kubernetes-security-reviewer)
+        contains "$flat" 'Every item in *What to look for* is at least a `WARNING` when it holds.'
+        contains "$flat" '`privileged: true` and `hostNetwork`, `hostPID` or `hostIPC` are `CRITICAL`'
         ;;
       kubernetes-reliability-reviewer)
         contains "$flat" '`Resources` and `Rollout` included, is at least a `WARNING` when it holds'
