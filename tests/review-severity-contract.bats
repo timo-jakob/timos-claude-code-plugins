@@ -170,8 +170,10 @@ go_format() {
   flat="$(flatten <"$REPO_ROOT/development-go/agents/go-security-reviewer.md")"
   [ -n "$flat" ]
   contains "$flat" 'If input is trusted or the sink is unreachable, do not report it.'
-  contains "$flat" 'Exploitable under specific conditions you can name. Hardening with no attack path you can name is below the bar and not reported.'
-  contains "$flat" '`MinVersion` missing on a `tls.Config` is **pinning/hardening, not exposure**, and is not reported'
+  contains "$flat" 'Exploitable under specific conditions, or a defense-in-depth gap: a control the change removes or weakens.'
+  contains "$flat" 'Hardening that only adds a new layer, with no attack path you can name, is below the bar and not reported.'
+  contains "$flat" 'In a module whose `go` directive is 1.22 or later this is **pinning/hardening, not exposure**, and is not reported'
+  contains "$flat" 'In a module whose `go` directive is below 1.22, a server `tls.Config` without `MinVersion` still accepts TLS 1.0/1.1: report it.'
   lacks "$flat" 'say so and downgrade'
   lacks "$flat" 'Only a finding with a plausible path from untrusted input'
 }

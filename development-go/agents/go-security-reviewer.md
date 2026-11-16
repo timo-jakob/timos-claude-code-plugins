@@ -65,10 +65,13 @@ and leaked secrets — reasoning about reachability, not just pattern presence.
 - `math/rand` (including `math/rand/v2`) used for tokens, session IDs, nonces,
   or password salts — `crypto/rand` is the only correct source.
 - `tls.Config{InsecureSkipVerify: true}` outside a clearly-marked test.
-- `MinVersion` missing on a `tls.Config` is **pinning/hardening, not
-  exposure**, and is not reported: since Go 1.22 both client and server default to a TLS 1.2
+- `MinVersion` missing on a `tls.Config`. In a module whose `go` directive is
+  1.22 or later this is **pinning/hardening, not exposure**, and is not
+  reported: since Go 1.22 both client and server default to a TLS 1.2
   minimum, so its absence does not leave TLS 1.0/1.1 negotiable. Claiming
-  otherwise is a finding a maintainer can refute in one link.
+  otherwise is a finding a maintainer can refute in one link. In a module
+  whose `go` directive is below 1.22, a server `tls.Config` without
+  `MinVersion` still accepts TLS 1.0/1.1: report it.
 - Password hashing with a raw digest instead of bcrypt/scrypt/argon2.
 - Non-constant-time comparison of secrets (`==` on tokens/HMACs instead of
   `crypto/subtle.ConstantTimeCompare`).
@@ -163,8 +166,9 @@ For each finding, report:
 
 - **CRITICAL:** Remotely exploitable, or leaks credentials/data. There must be
   a plausible path from untrusted input to the sink — say what it is.
-- **WARNING:** Exploitable under specific conditions you can name. Hardening
-  with no attack path you can name is below the bar and not reported.
+- **WARNING:** Exploitable under specific conditions, or a defense-in-depth
+  gap: a control the change removes or weakens. Hardening that only adds a new
+  layer, with no attack path you can name, is below the bar and not reported.
 
 An observation below the blocking bar is not reported. `SUGGESTION` is reserved for
 a tool-verdict claim capped by the evidence rule above, the one lane of
