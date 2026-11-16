@@ -152,9 +152,10 @@ in nitpicks:
   degraded, one namespace exposed, one app unsyncable.
 
 Of the items above, `targetRevision: HEAD` is a `WARNING`: that app's deployed
-state cannot be reproduced or rolled back. So are `prune` deleting a resource a
-human created and `selfHeal` on an app someone must patch during an incident.
-Orphans left by `automated` without `prune` are below the bar.
+state cannot be reproduced or rolled back. Orphans left by `automated` without
+`prune` are below the bar. So are plain `prune: true` and `selfHeal: true`: a
+manifest cannot show which resource a human created or which app someone must
+patch during an incident.
 
 An observation below the blocking bar is not reported. `SUGGESTION` is reserved
 for a tool-verdict claim capped by the evidence rule above, the one lane of

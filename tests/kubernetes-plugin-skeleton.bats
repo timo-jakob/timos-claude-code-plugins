@@ -575,6 +575,7 @@ rstep() {
       argocd-advisor)
         contains "$flat" '`targetRevision: HEAD` is a `WARNING`'
         contains "$flat" 'Orphans left by `automated` without `prune` are below the bar.'
+        contains "$flat" 'So are plain `prune: true` and `selfHeal: true`'
         ;;
       kubernetes-reliability-reviewer)
         contains "$flat" '`Resources` and `Rollout` included, is at least a `WARNING` when it holds'
