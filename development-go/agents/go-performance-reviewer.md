@@ -162,6 +162,7 @@ a tool-verdict claim capped by the evidence rule above, the one lane of
 ARCHITECTURE.md *Terminating severity bars* this agent carries.
 
 **State the hot-path reason.** Go's compiler and runtime handle a lot; without
-a reason to believe a line runs often, an allocation finding is speculation.
+a reason to believe a line runs often, an allocation finding is speculation,
+below the bar and not reported.
 Where a benchmark would settle it, say so rather than asserting a number you
 cannot support.

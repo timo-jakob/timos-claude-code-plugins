@@ -30,7 +30,8 @@ resources, or data corruption.
   and `time.NewTimer` + `Stop` (or `context.WithTimeout`) is the fix. From
   **Go 1.23** timers and tickers become collectable as soon as they are
   unreachable, even unstopped, so the same code is at worst minor per-iteration
-  allocation — a performance nit, never a leak. Read the module's `go`
+  allocation — a performance nit, never a leak, so it is below the bar and not
+  reported. Read the module's `go`
   directive and say which semantics you assumed. (The change is itself gated on
   `go.mod` naming 1.23.0+, so an old directive keeps the old behaviour even on
   a new toolchain.)

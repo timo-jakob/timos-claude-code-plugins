@@ -181,6 +181,20 @@ go_format() {
   flat="$(flatten <"$REPO_ROOT/development-go/agents/go-code-quality.md")"
   [ -n "$flat" ]
   contains "$flat" 'Style or idiom alone is below the bar and not reported, unless it misleads a caller or harms maintainability at a cost you can name.'
+  contains "$flat" 'A nit that does not change how the code reads is below the bar and not reported.'
+}
+
+@test "#3160 go-test-reviewer, go-bug-hunter and go-performance-reviewer do not report their named sub-bar items" {
+  local flat
+  flat="$(flatten <"$REPO_ROOT/development-go/agents/go-test-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'The debuggability and speed checks above — `t.Helper()`, the case name in `t.Errorf`, `t.Run` subtests, `t.Parallel()` for speed, `-coverpkg` — are below the bar and not reported, unless you can name the regression or the flakiness they let through.'
+  flat="$(flatten <"$REPO_ROOT/development-go/agents/go-bug-hunter.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'a performance nit, never a leak, so it is below the bar and not reported.'
+  flat="$(flatten <"$REPO_ROOT/development-go/agents/go-performance-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'an allocation finding is speculation, below the bar and not reported.'
 }
 
 @test "#3160 go-test-reviewer's Scope-bounded severity reports the follow-up lane and keeps its three carve-outs" {

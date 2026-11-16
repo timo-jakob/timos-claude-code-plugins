@@ -177,6 +177,5 @@ ARCHITECTURE.md *Terminating severity bars* this agent carries.
 
 **Do not re-report what the formatter owns.** `gofumpt` and `golangci-lint`
 already run mechanically in this family's pipeline — spacing, import order, and
-mechanical lint are settled before you look. Judge design and readability, and
-prefer a handful of findings that change how the code reads over an exhaustive
-list of nits.
+mechanical lint are settled before you look. Judge design and readability. A
+nit that does not change how the code reads is below the bar and not reported.

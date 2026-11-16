@@ -168,6 +168,11 @@ the two lanes of ARCHITECTURE.md *Terminating severity bars*: a tool-verdict cla
 capped by the evidence rule above, and a scope-bounded follow-up under
 *Scope-bounded severity* below.
 
+The debuggability and speed checks above — `t.Helper()`, the case name in
+`t.Errorf`, `t.Run` subtests, `t.Parallel()` for speed, `-coverpkg` — are below
+the bar and not reported, unless you can name the regression or the flakiness
+they let through.
+
 **Name the regression each gap would let through.** "No test for X" is weak;
 "no test covers the nil-map write in `Store.Put`, so a regression there panics
 in production and CI stays green" is actionable. Coverage percentage is not the
