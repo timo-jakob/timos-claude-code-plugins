@@ -562,6 +562,16 @@ rstep() {
       contains "$body" '### [CRITICAL|WARNING|SUGGESTION] One-line title'
       contains "$body" '**File:**'
       contains "$body" '**Severity guide**'
+      # #3163: the guide keeps only the blocking rungs; plain hygiene findings
+      # are no longer reported, and SUGGESTION survives only for the evidence
+      # rule's capped tool-verdict claim (decides: / proposed-severity:)
+      lacks "$body" '**SUGGESTION** — hygiene and clarity'
+      contains "$body" '- **CRITICAL** — the rendered manifest takes the platform'
+      contains "$body" '- **WARNING** — a real defect with a bounded blast radius'
+      contains "$flat" 'An observation below the blocking bar is not reported.'
+      contains "$flat" 'decides: <the command that settles it>'
+      lacks "$flat" 'follow-up:'
+      lacks "$flat" 'Scope-bounded severity'
       # the source-path rule, without which the loop's diff filter discards
       # every finding the agent reports — pinned past the bolded heading, since
       # the three copies are hand-maintained and narrowing any one of them
@@ -1300,4 +1310,25 @@ rstep() {
            'development-kubernetes/**' '.github/workflows/script-tests.yml'; do
     contains "$paths" "      - '$p'"
   done
+}
+
+@test "#3163 the review skill carries no waived-suggestion list" {
+  # the Already-waived prompt line and every adjudicated-path instruction are
+  # gone; the round-2 prompt binds the one fix-verification carry only
+  local flat
+  [ -f "$REVIEW_SKILL" ]
+  flat="$(tr -s '[:space:]' ' ' <"$REVIEW_SKILL")"
+  [ -n "$flat" ]
+  lacks "$flat" 'Already waived (round >= 2)'
+  lacks "$flat" '{ADJUDICATED}'
+  lacks "$flat" 'adjudicated_path'
+  lacks "$flat" 'REVIEW_ADJUDICATED'
+  lacks "$flat" '--adjudicated'
+  lacks "$flat" 're-litigating what the human already waived'
+  contains "$flat" 'also carries `fix_verification_path`, and the reviewers must be told about it.'
+  contains "$flat" 'Bind the one extra placeholder below'
+  contains "$flat" '(up to eight on a loop-driven round ≥ 2)'
+  contains "$flat" 'Fix verification (round >= 2): {FIX VERIFICATION}'
+  # the severity tag of the JSON layer stays, for the evidence-capped lane
+  contains "$flat" 'severity (the CRITICAL|WARNING|SUGGESTION tag from the prose)'
 }

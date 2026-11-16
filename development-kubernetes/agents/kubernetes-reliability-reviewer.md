@@ -165,4 +165,5 @@ in nitpicks:
   down, or grants cluster-wide privilege.
 - **WARNING** — a real defect with a bounded blast radius: one workload
   degraded, one namespace exposed, one app unsyncable.
-- **SUGGESTION** — hygiene and clarity. Never blocks a round.
+
+An observation below the blocking bar is not reported.
