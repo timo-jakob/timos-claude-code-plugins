@@ -226,3 +226,100 @@ go_format() {
   run -1 grep -qx '## Suggestions' <<<"$section"
   lacks "$section" 'W suggestions)'
 }
+
+# The Java panel (#3161): the six read-only reviewers report only what blocks.
+# go_format captures any reviewer's Reporting Format to EOF, so it serves here
+# too; java-test-reviewer's Reviewing thoroughness section follows it.
+
+@test "#3161 the six Java reviewers drop plain SUGGESTION and keep only their SUGGESTION lanes" {
+  local a f flat format n want
+  for a in java-bug-hunter java-code-quality java-performance-reviewer java-resilience-reviewer java-security-reviewer java-test-reviewer; do
+    f="$REPO_ROOT/development-java/agents/$a.md"
+    flat="$(flatten <"$f")"
+    format="$(go_format "$f")"
+    [ -n "$format" ]
+    lacks "$format" '**SUGGESTION:**'
+    # Whole-file invariant: SUGGESTION appears only on the lines of its lanes
+    # (evidence rule, template title, severity-set line(s), the reserved-for
+    # sentence, and java-test-reviewer's scope-bounded follow-up). Any new
+    # SUGGESTION route, however spelled, moves this count.
+    want=6
+    [ "$a" = java-test-reviewer ] && want=8
+    n="$(grep -c SUGGESTION "$f")"
+    [ "$n" -eq "$want" ]
+    contains "$format" 'An observation below the blocking bar is not reported.'
+    contains "$format" '### [CRITICAL|WARNING|SUGGESTION] Title'
+    contains "$format" 'decides: <the command that settles it> proposed-severity: CRITICAL|WARNING'
+    if [ "$a" = java-test-reviewer ]; then
+      contains "$format" '`SUGGESTION` is reserved for the two lanes of ARCHITECTURE.md *Terminating severity bars*: a tool-verdict claim capped by the evidence rule above, and a scope-bounded follow-up under *Scope-bounded severity* below.'
+      contains "$format" 'decides: <the command that settles it> proposed-severity: CRITICAL|WARNING — or, for a scope-bounded follow-up (*Scope-bounded severity* below), this one line appended to the **Description** field, with the severity set to SUGGESTION: follow-up: <the defect, in one line>'
+    else
+      contains "$format" '`SUGGESTION` is reserved for a tool-verdict claim capped by the evidence rule above, the one lane of ARCHITECTURE.md *Terminating severity bars* this agent carries.'
+      lacks "$flat" 'follow-up:'
+    fi
+  done
+}
+
+@test "#3161 java-resilience-reviewer does not report a violation it cannot prove" {
+  local flat
+  flat="$(flatten <"$REPO_ROOT/development-java/agents/java-resilience-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'If a wrapper or a config class you cannot see might already supply the timeout or breaker, and you cannot name the failure, do not report it; do not assert a violation you cannot prove.'
+  lacks "$flat" 'drop to SUGGESTION'
+}
+
+@test "#3161 java-security-reviewer does not report hardening with no attack path" {
+  local flat
+  flat="$(flatten <"$REPO_ROOT/development-java/agents/java-security-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" '**WARNING:** Exploitable under specific conditions, or a defense-in-depth gap: a control the change removes or weakens.'
+  contains "$flat" 'Hardening that only adds a new layer, with no attack path you can name, is below the bar and not reported.'
+  lacks "$flat" 'violates best practices'
+}
+
+@test "#3161 java-code-quality does not report style or idiom alone" {
+  local flat
+  flat="$(flatten <"$REPO_ROOT/development-java/agents/java-code-quality.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'Style, idiom or tidiness alone — naming, a missing `final`, missing Javadoc, magic numbers, mixed paradigms or date/time APIs, unused code or imports, commented-out code, boolean positional arguments, broader-than-needed visibility, a small repeated pattern, package-layout inconsistency — is below the bar and not reported, unless it misleads a caller or harms maintainability at a cost you can name.'
+}
+
+@test "#3161 java-test-reviewer and java-performance-reviewer do not report their named sub-bar items" {
+  local flat
+  flat="$(flatten <"$REPO_ROOT/development-java/agents/java-test-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'The structure and debuggability checks above — assertion messages, `assertTrue` on a complex condition, Arrange-Act-Assert layout, test names, several behaviours in one test method, `@ParameterizedTest`/`@Nested` grouping, duplicated setup, an expensive fixture rebuilt per test — are below the bar and not reported, unless you can name the regression or the flakiness they let through.'
+  flat="$(flatten <"$REPO_ROOT/development-java/agents/java-performance-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'An allocation or micro-optimisation finding — autoboxing, `+` concatenation in a loop, a missing initial capacity — with no hot path or load condition you can name is speculation, below the bar and not reported.'
+}
+
+@test "#3161 java-test-reviewer's Scope-bounded severity reports the follow-up lane and keeps its three carve-outs" {
+  local flat
+  flat="$(flatten <"$REPO_ROOT/development-java/agents/java-test-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'A finding blocks (CRITICAL/WARNING) only when its fix stays within the issue'"'"'s stated scope. A pre-existing defect that would block, but whose only correct fix expands the change beyond that scope, is reported at **SUGGESTION** with a Description line `follow-up: <the defect, in one line>`, and it never blocks a round. A plain out-of-diff observation below the bar is not reported.'
+  lacks "$flat" 'spin off a follow-up issue'
+  contains "$flat" 'Three carve-outs keep this from muzzling real blockers. **(1) Tests and coverage for the change under review are always in-scope**'
+  contains "$flat" '**(2) A defect the change under review *introduces* is always in-scope**'
+  contains "$flat" "**(3) When the issue's stated scope is not provided in your prompt**"
+}
+
+@test "#3161 the Java panel carries no waived list and reports only capped claims and follow-ups below WARNING" {
+  local panel="$REPO_ROOT/development-java/skills/review/SKILL.md" section
+  [ -f "$panel" ]
+  run -1 grep -Fq -e 'Already waived' -- "$panel"
+  run -1 grep -Fq -e 'adjudicated_path' -- "$panel"
+  run -1 grep -Fq -e 'REVIEW_ADJUDICATED' -- "$panel"
+  run -1 grep -Fq -e '--adjudicated' -- "$panel"
+  grep -Fq -e 'also carries `fix_verification_path`, and the reviewers must be told about it.' -- "$panel"
+  # the report template holds its own `## ` lines, so capture Step 3 up to
+  # Step 4 rather than stopping at the first of them
+  section="$(awk '/^## Step 3: Synthesize the Review/ { f = 1; next } /^## Step 4: / { f = 0 } f' "$panel")"
+  [ -n "$section" ]
+  contains "$section" '## Suggested follow-ups and capped claims'
+  contains "$section" 'Only the SUGGESTION findings that carry a `follow-up:` or `decides:` line'
+  contains "$section" '(Y critical, Z warnings, W capped or follow-up suggestions)'
+  run -1 grep -qx '## Suggestions' <<<"$section"
+  lacks "$section" 'W suggestions)'
+}

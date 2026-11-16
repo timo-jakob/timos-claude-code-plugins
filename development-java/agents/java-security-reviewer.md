@@ -129,5 +129,8 @@ For each finding, report:
 **Severity guide:**
 
 - **CRITICAL:** Directly exploitable vulnerability that could compromise user data or app integrity
-- **WARNING:** Security weakness that increases attack surface or violates best practices
-- **SUGGESTION:** Hardening measure that improves security posture
+- **WARNING:** Exploitable under specific conditions, or a defense-in-depth gap: a control the change removes or
+  weakens. Hardening that only adds a new layer, with no attack path you can name, is below the bar and not reported.
+
+An observation below the blocking bar is not reported. `SUGGESTION` is reserved for a tool-verdict claim capped by
+the evidence rule above, the one lane of ARCHITECTURE.md *Terminating severity bars* this agent carries.

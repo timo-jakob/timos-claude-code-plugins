@@ -123,4 +123,9 @@ that trigger it.
 
 - **CRITICAL:** Memory leak, unbounded growth, or issue causing visible user impact
 - **WARNING:** Measurable inefficiency that degrades performance under load
-- **SUGGESTION:** Optimization opportunity that improves resource usage
+
+An observation below the blocking bar is not reported. `SUGGESTION` is reserved for a tool-verdict claim capped by
+the evidence rule above, the one lane of ARCHITECTURE.md *Terminating severity bars* this agent carries.
+
+An allocation or micro-optimisation finding — autoboxing, `+` concatenation in a loop, a missing initial capacity —
+with no hot path or load condition you can name is speculation, below the bar and not reported.
