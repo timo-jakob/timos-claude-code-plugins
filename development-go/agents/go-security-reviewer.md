@@ -164,7 +164,10 @@ For each finding, report:
 - **CRITICAL:** Remotely exploitable, or leaks credentials/data. There must be
   a plausible path from untrusted input to the sink — say what it is.
 - **WARNING:** Exploitable under specific conditions, or a defense-in-depth gap.
-- **SUGGESTION:** Hardening that reduces future risk.
+
+An observation below the blocking bar is not reported. `SUGGESTION` is reserved for
+a tool-verdict claim capped by the evidence rule above, the one lane of
+ARCHITECTURE.md *Terminating severity bars* this agent carries.
 
 **Reachability matters.** `gosec` already runs mechanically in this family's
 pipeline, so restating a rule ID without an attack path adds noise. If input is

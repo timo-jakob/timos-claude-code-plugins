@@ -168,7 +168,10 @@ For each finding, report:
 - **CRITICAL:** Reserve for design problems that will force a breaking change
   later, or that actively mislead callers. Style alone is never CRITICAL.
 - **WARNING:** Meaningfully harms maintainability or the caller's experience.
-- **SUGGESTION:** A genuine improvement worth making.
+
+An observation below the blocking bar is not reported. `SUGGESTION` is reserved for
+a tool-verdict claim capped by the evidence rule above, the one lane of
+ARCHITECTURE.md *Terminating severity bars* this agent carries.
 
 **Do not re-report what the formatter owns.** `gofumpt` and `golangci-lint`
 already run mechanically in this family's pipeline — spacing, import order, and

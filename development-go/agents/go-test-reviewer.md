@@ -151,6 +151,9 @@ For each finding, report:
   **Description** field above, each on its own line, with the severity set to SUGGESTION:
   decides: <the command that settles it>
   proposed-severity: CRITICAL|WARNING
+  — or, for a scope-bounded follow-up (*Scope-bounded severity* below), this one line
+  appended to the **Description** field, with the severity set to SUGGESTION:
+  follow-up: <the defect, in one line>
 **Suggested fix:** Concrete test to add or assertion to strengthen.
 ```
 
@@ -159,7 +162,11 @@ For each finding, report:
 - **CRITICAL:** A test that cannot fail, or an untested path whose breakage
   would reach production silently.
 - **WARNING:** A real gap or a genuinely flaky construct.
-- **SUGGESTION:** Would strengthen the suite.
+
+An observation below the blocking bar is not reported. `SUGGESTION` is reserved for
+the two lanes of ARCHITECTURE.md *Terminating severity bars*: a tool-verdict claim
+capped by the evidence rule above, and a scope-bounded follow-up under
+*Scope-bounded severity* below.
 
 **Name the regression each gap would let through.** "No test for X" is weak;
 "no test covers the nil-map write in `Store.Put`, so a regression there panics
@@ -178,9 +185,11 @@ when the code breaks.
   loop across extra rounds; sweep the whole diff for siblings before you write the
   finding.
 - **Scope-bounded severity.** A finding blocks (CRITICAL/WARNING) only when its fix
-  stays within the issue's stated scope; when the only correct remedy would expand
-  the change beyond that scope, file it as a **SUGGESTION** with an explicit "spin
-  off a follow-up issue" recommendation rather than a blocking WARNING/CRITICAL.
+  stays within the issue's stated scope. A pre-existing defect that would block, but
+  whose only correct fix expands the change beyond that scope, is reported at
+  **SUGGESTION** with a Description line `follow-up: <the defect, in one line>`, and
+  it never blocks a round. A plain out-of-diff observation below the bar is not
+  reported.
   Three carve-outs keep this from muzzling real blockers. **(1) Tests and coverage
   for the change under review are always in-scope** — a story's definition of done
   includes them, so a genuine coverage gap keeps full severity even though the

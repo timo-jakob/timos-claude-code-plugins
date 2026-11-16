@@ -156,7 +156,10 @@ For each finding, report:
 - **CRITICAL:** Will degrade or exhaust the service under normal production
   load (unbounded growth, a contention point every request crosses).
 - **WARNING:** Measurable inefficiency on a real hot path.
-- **SUGGESTION:** Worth doing when the code is next touched.
+
+An observation below the blocking bar is not reported. `SUGGESTION` is reserved for
+a tool-verdict claim capped by the evidence rule above, the one lane of
+ARCHITECTURE.md *Terminating severity bars* this agent carries.
 
 **State the hot-path reason.** Go's compiler and runtime handle a lot; without
 a reason to believe a line runs often, an allocation finding is speculation.
