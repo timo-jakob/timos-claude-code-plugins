@@ -394,6 +394,7 @@ go_format() {
   contains "$flat" 'An optimisation with no hot path or load condition you can name, and no user-visible cost today, is speculation, below the bar and not reported.'
   flat="$(flatten <"$REPO_ROOT/development-javascript/agents/js-security-reviewer.md")"
   [ -n "$flat" ]
+  contains "$flat" '**WARNING:** A weakness that becomes exploitable under plausible conditions, or a missing defence in depth on a sensitive path: a control the change removes or weakens.'
   contains "$flat" 'Hardening that only adds a new layer, with no attack path you can name, is below the bar and not reported.'
   flat="$(flatten <"$REPO_ROOT/development-javascript/agents/js-test-reviewer.md")"
   [ -n "$flat" ]
