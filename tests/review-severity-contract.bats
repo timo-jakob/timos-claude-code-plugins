@@ -571,6 +571,8 @@ go_format() {
   contains "$format" 'An observation below the blocking bar — a modernization opportunity with no compile failure under Swift 6 and no deprecation diagnostic behind it, such as `guard let x = x` rebinding, `#selector` or `@objc` style, Objective-C idioms in pure Swift, `NSError` bridging, untyped `throws`, `any` where `some` would do, `if`/`switch` expressions or ownership modifiers — is not reported, even where a checklist heading above lists it.'
   contains "$format" 'In review mode, a CRITICAL or WARNING finding that claims a compile failure or a deprecation diagnostic is reported only with that diagnostic quoted in its Description, from a build you ran without editing any file (`swift build -Xswiftc -swift-version -Xswiftc 6`, or the project'"'"'s `xcodebuild build SWIFT_VERSION=6`); a compiler claim you could not check is not reported.'
   lacks "$format" 'Deprecated pattern with a clear modern replacement'
+  # a build that never ran must not read as a clean review
+  contains "$format" 'If you could not run that build at all, or it failed for a reason other than Swift 6 diagnostics, say so in your report: name the command and the error, and state that the Swift 6 Compliance dimension was not verified. Still emit `[]`.'
   # the word is gone from the whole file, migrate mode included
   run -1 grep -qi suggestion "$f"
   grep -qx '## Migrate mode (#447)' "$f"
@@ -638,4 +640,8 @@ go_format() {
   contains "$section" '(Y critical, Z warnings, W follow-ups, V tool claims)'
   run -1 grep -qx '## Suggestions' <<<"$section"
   lacks "$section" 'W suggestions)'
+  # an unverified dimension is listed apart, never counted as reviewed
+  section="$(flatten <<<"$section")"
+  contains "$section" '- **Areas reviewed:** Bugs, Security, Performance, Swift 6 Compliance, Code Quality, Tests, Resilience — minus any dimension listed under the next line'
+  contains "$section" '- **Not verified:** every dimension whose agent reported it could not verify it (for Swift 6 Compliance, a build it could not run, or one that failed for a reason other than Swift 6 diagnostics), with the command and error it named; such a dimension is never counted under Areas reviewed'
 }

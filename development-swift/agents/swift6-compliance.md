@@ -95,6 +95,10 @@ only with that diagnostic quoted in its Description, from a build you ran withou
 (`swift build -Xswiftc -swift-version -Xswiftc 6`, or the project's `xcodebuild build SWIFT_VERSION=6`); a compiler
 claim you could not check is not reported.
 
+If you could not run that build at all, or it failed for a reason other than Swift 6 diagnostics, say so in your
+report: name the command and the error, and state that the Swift 6 Compliance dimension was not verified. Still emit
+`[]`.
+
 ## Migrate mode (#447)
 
 Active only when your prompt sets `mode: migrate`. You run in a

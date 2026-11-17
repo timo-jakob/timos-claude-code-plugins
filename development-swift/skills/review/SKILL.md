@@ -173,7 +173,11 @@ Brief summary of what was reviewed and overall code health assessment.
   reviewer's — confirmed, else re-raised when that re-raise is in the findings
   file, else unconfirmed; reproduce each reviewer's per-entry
   lines under this line — they are the source of the accounting records)
-- **Areas reviewed:** Bugs, Security, Performance, Swift 6 Compliance, Code Quality, Tests, Resilience
+- **Areas reviewed:** Bugs, Security, Performance, Swift 6 Compliance, Code Quality, Tests, Resilience — minus
+  any dimension listed under the next line
+- **Not verified:** every dimension whose agent reported it could not verify it (for Swift 6 Compliance, a build
+  it could not run, or one that failed for a reason other than Swift 6 diagnostics), with the command and error it
+  named; such a dimension is never counted under Areas reviewed
 
 ## Verdict
 One-paragraph overall assessment with the most important action items.
