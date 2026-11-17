@@ -122,4 +122,10 @@ that trigger it.
 
 - **CRITICAL:** Event-loop stall, unbounded growth, or issue causing visible user impact
 - **WARNING:** Measurable inefficiency that degrades performance under load
-- **SUGGESTION:** Optimization opportunity that improves resource usage
+
+An observation below the blocking bar is not reported. `SUGGESTION` is reserved for a tool-verdict claim capped by
+the evidence rule above, the one lane of ARCHITECTURE.md *Terminating severity bars* this agent carries.
+
+An allocation or micro-optimisation finding — `+=` string concatenation in a loop, a list comprehension where a
+generator would do, a list membership test on a small collection — with no hot path or load condition you can name
+is speculation, below the bar and not reported.
