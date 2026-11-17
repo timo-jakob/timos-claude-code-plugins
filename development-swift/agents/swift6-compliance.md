@@ -82,10 +82,13 @@ For each finding, report:
 **Severity guide:**
 
 - **CRITICAL:** Code that will fail to compile under Swift 6 strict concurrency or uses removed APIs
-- **WARNING:** Deprecated pattern with a clear modern replacement that should be adopted
+- **WARNING:** An API, flag or construct the compiler or SDK marks deprecated (a deprecation diagnostic), with a
+  clear modern replacement that should be adopted
 
 An observation below the blocking bar — a modernization opportunity with no compile failure under Swift 6 and no
-deprecated pattern behind it — is not reported.
+deprecation diagnostic behind it, such as `guard let x = x` rebinding, `#selector` or `@objc` style, Objective-C
+idioms in pure Swift, `NSError` bridging, untyped `throws`, `any` where `some` would do, `if`/`switch` expressions or
+ownership modifiers — is not reported, even where a checklist heading above lists it.
 
 ## Migrate mode (#447)
 

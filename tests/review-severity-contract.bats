@@ -43,10 +43,11 @@ consolidator_bullet() {
   contains "$flat" '**A reviewer reports only what blocks: `CRITICAL` or `WARNING`. A plain observation below the bar is not reported.**'
   contains "$flat" '`SUGGESTION` survives in two reviewer lanes only: the evidence-capped severity of a tool-verdict claim that carries `decides:` / `proposed-severity:` (#1584, the evidence rule below), which the decided pass can still raise on a real red; and a scope-bounded defect that carries a `follow-up:` line (*Scope-bounded severity* above).'
   contains "$flat" 'a finding a bar demotes below `WARNING` — the delta-round rule below included — is not reported unless it falls in one of the two lanes.'
-  # the contract is staged: #3158 landed it for the claude-plugin panel, and
-  # the other reviewers follow it once #3159–#3167 land
+  # every panel's reviewers follow the contract since #3167, the last of
+  # #3158–#3167, so the staging sentence is gone
   contains "$flat" "That rule holds for every panel's reviewers, whether or not they carry a bar."
-  contains "$flat" '**Only the reviewers #3158 rewrote follow this contract yet**, in the claude-plugin panel. The other reviewer agents still report a below-the-bar finding as a `SUGGESTION` until children #3159–#3167 of #3122 rewrite them.'
+  lacks "$flat" 'follow this contract yet'
+  lacks "$flat" 'until children #3159–#3167'
   # the development-react panel no longer fixes a check at SUGGESTION (#3166)
   lacks "$flat" 'panel still fixes one check at `SUGGESTION`'
   lacks "$flat" 'still pins the agents to the earlier report-as-'
@@ -96,10 +97,11 @@ consolidator_bullet() {
   contains "$flat" '## Suggested follow-ups'
   contains "$flat" 'A reviewer reports blockers, evidence-capped tool claims and scope-bounded follow-ups only; a plain observation below the bar is not reported at all.'
   contains "$flat" 'is reported with a one-line `follow-up:` note, so the PR'"'"'s review dossier lists it under *Suggested follow-ups* rather than spending a round on work the story never asked for.'
-  # the two staged parts name the children that ship them
-  contains "$flat" 'The dossier has no *Suggested follow-ups* section until #3170 lands, so until then such a defect appears in the dossier'"'"'s **Waived suggestions** list.'
-  contains "$flat" 'The claude-plugin panel'"'"'s reviewers follow it since #3158; the other panels'"'"' reviewers still report below-the-bar observations as suggestions until #3159–#3167 land.'
-  lacks "$flat" 'suggestions until #3158–#3167 land.'
+  # the one staged part names the child that ships it; every panel's
+  # reviewers follow the contract since #3167
+  contains "$flat" 'This is the contract the loop is moving to, and one part of it has not shipped yet. The dossier has no *Suggested follow-ups* section until #3170 lands, so until then such a defect appears in the dossier'"'"'s **Waived suggestions** list.'
+  lacks "$flat" 'reviewers still report below-the-bar observations as suggestions'
+  lacks "$flat" 'two parts of it have not shipped yet'
   # the risk-demoted paragraph stays
   contains "$flat" 'is **demoted to a suggestion**: logged in the round'
   # the retired reviewer-output wording, one needle per rewritten passage
@@ -565,7 +567,9 @@ go_format() {
   [ -n "$format" ]
   contains "$format" '### [CRITICAL|WARNING] Title'
   lacks "$format" 'SUGGESTION'
-  contains "$format" 'An observation below the blocking bar — a modernization opportunity with no compile failure under Swift 6 and no deprecated pattern behind it — is not reported.'
+  contains "$format" '**WARNING:** An API, flag or construct the compiler or SDK marks deprecated (a deprecation diagnostic), with a clear modern replacement that should be adopted'
+  contains "$format" 'An observation below the blocking bar — a modernization opportunity with no compile failure under Swift 6 and no deprecation diagnostic behind it, such as `guard let x = x` rebinding, `#selector` or `@objc` style, Objective-C idioms in pure Swift, `NSError` bridging, untyped `throws`, `any` where `some` would do, `if`/`switch` expressions or ownership modifiers — is not reported, even where a checklist heading above lists it.'
+  lacks "$format" 'Deprecated pattern with a clear modern replacement'
   # the word is gone from the whole file, migrate mode included
   run -1 grep -qi suggestion "$f"
   grep -qx '## Migrate mode (#447)' "$f"

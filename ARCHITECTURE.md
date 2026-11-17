@@ -3607,7 +3607,9 @@ same reason: from round 2 on the loop's dispatch descriptor carries
 forward both into each agent's launch prompt — the previous round's blockers to
 verify (the only way a fix that silently did not land gets re-raised, since a
 delta round cannot re-derive it) and the already-waived suggestions the panel
-must not re-litigate. Each panel also states that when it DOES verify a
+must not re-litigate. That second half is pending #3168: since #3158–#3167 no
+panel forwards `adjudicated_path`, and #3168 drops the key from the descriptor
+and this duty. Each panel also states that when it DOES verify a
 non-empty carry it **reports how many carried entries it confirmed**, how many
 it re-raised and how many it left unconfirmed — on ANY
 round whose `fix_verification_path` holds entries, and whatever it writes to the
@@ -3925,10 +3927,6 @@ carries a `follow-up:` line (*Scope-bounded severity* above). That rule holds
 for every panel's reviewers, whether or not they carry a bar. The bars bound
 *severity only*: a finding a bar demotes below `WARNING` — the delta-round rule
 below included — is not reported unless it falls in one of the two lanes.
-**Only the reviewers #3158 rewrote follow this contract yet**, in the
-claude-plugin panel. The other reviewer agents still
-report a below-the-bar finding as a `SUGGESTION` until children #3159–#3167
-of #3122 rewrite them.
 `tests/claude-plugin-review-severity-bars.bats` is the guard, and it asserts the
 bars are one convention rather than a set of ad-hoc rules — including against this
 section. It derives the roster from the tree rather
