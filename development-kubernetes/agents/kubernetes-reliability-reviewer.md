@@ -56,8 +56,11 @@ false WARNING here blocks the round on a service that already survives a drain.
 
 ## Judgement
 
-A single replica in a demonstration overlay is fine; a single replica in a
-production overlay is a finding. Read the overlay before reporting.
+A single replica or a missing `PodDisruptionBudget` in a demonstration overlay
+is fine; in a production overlay it is a finding. Read the overlay before
+reporting. A missing `PodDisruptionBudget` is a finding only for a long-running
+serving workload, a `Deployment` or `StatefulSet` behind a `Service`, never for
+a `Job` or `CronJob`.
 
 ## The evidence rule (a tool's verdict needs the tool run)
 
@@ -165,4 +168,11 @@ in nitpicks:
   down, or grants cluster-wide privilege.
 - **WARNING** — a real defect with a bounded blast radius: one workload
   degraded, one namespace exposed, one app unsyncable.
-- **SUGGESTION** — hygiene and clarity. Never blocks a round.
+
+Every item in *What to look for*, `Resources` and `Rollout` included, is at
+least a `WARNING` when it holds: each one degrades a workload or takes a
+serving path down.
+
+An observation below the blocking bar is not reported. `SUGGESTION` is reserved
+for a tool-verdict claim capped by the evidence rule above, the one lane of
+ARCHITECTURE.md *Terminating severity bars* this agent carries.

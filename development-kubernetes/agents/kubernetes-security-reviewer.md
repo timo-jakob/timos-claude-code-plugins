@@ -153,4 +153,16 @@ in nitpicks:
   down, or grants cluster-wide privilege.
 - **WARNING** — a real defect with a bounded blast radius: one workload
   degraded, one namespace exposed, one app unsyncable.
-- **SUGGESTION** — hygiene and clarity. Never blocks a round.
+
+Every item in *What to look for* is at least a `WARNING` when it holds.
+Cluster-scoped RBAC wildcards, `escalate`, `bind`, `impersonate`,
+`privileged: true` and `hostNetwork`, `hostPID` or `hostIPC` are `CRITICAL`:
+each grants cluster-wide privilege. A setting the workload's own job requires
+is not a finding: an added capability the process needs, such as
+`NET_BIND_SERVICE` to bind a port below 1024, a writable root filesystem for an
+application that writes to it, and a read-only `hostPath` mount on a node-level
+`DaemonSet`, such as a log collector. Read the workload before reporting.
+
+An observation below the blocking bar is not reported. `SUGGESTION` is reserved
+for a tool-verdict claim capped by the evidence rule above, the one lane of
+ARCHITECTURE.md *Terminating severity bars* this agent carries.

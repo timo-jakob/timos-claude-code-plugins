@@ -535,7 +535,7 @@ rstep() {
   # which never blocks: a whole review dimension permanently non-blocking, in
   # silence. tests/resilience-review-dimension.bats pins exactly this for the
   # four service panels.
-  local f base full body flat fm
+  local f base full body flat fm n
   local -a files=()
   while IFS= read -r f; do files+=("$f"); done < <(find "$PLUGIN_DIR/agents" -name '*.md' | sort)
   [ "${#files[@]}" -eq 5 ]
@@ -562,6 +562,43 @@ rstep() {
       contains "$body" '### [CRITICAL|WARNING|SUGGESTION] One-line title'
       contains "$body" '**File:**'
       contains "$body" '**Severity guide**'
+      # #3163: the guide keeps only the blocking rungs; plain hygiene findings
+      # are no longer reported, and SUGGESTION survives only for the evidence
+      # rule's capped tool-verdict claim (decides: / proposed-severity:)
+      lacks "$body" '- **SUGGESTION** —'
+      # any reworded SUGGESTION route moves the count: the evidence rule and its
+      # two follow-up lines, the template title and severity line, the reserve
+      n="$(grep -ci suggestion "$f")"
+      [ "$n" -eq 6 ]
+      contains "$body" '- **CRITICAL** — the rendered manifest takes the platform'
+      contains "$body" '- **WARNING** — a real defect with a bounded blast radius'
+      contains "$flat" 'An observation below the blocking bar is not reported.'
+      contains "$flat" '`SUGGESTION` is reserved for a tool-verdict claim capped by the evidence rule above, the one lane of ARCHITECTURE.md *Terminating severity bars* this agent carries.'
+      # every checklist item is sorted onto a rung or named below the bar
+      case "$base" in
+      argocd-advisor)
+        contains "$flat" '`targetRevision: HEAD` is a `WARNING`'
+        contains "$flat" 'Orphans left by `automated` without `prune` are below the bar.'
+        contains "$flat" 'So are plain `prune: true` and `selfHeal: true`'
+        contains "$flat" 'an AppProject permitting `*` source repos or any destination is `CRITICAL`'
+        contains "$flat" 'A dangling app-of-apps child path and a sync wave that starts a workload before its CRD, secret or namespace exists are each a `WARNING`'
+        contains "$flat" 'A skipped check is stated in your prose report, never as a finding: it carries no severity.'
+        contains "$flat" 'An `Application` deploying a demonstration or development environment that is meant to follow the branch tip is not a finding; read its destination before reporting.'
+        ;;
+      kubernetes-security-reviewer)
+        contains "$flat" 'Every item in *What to look for* is at least a `WARNING` when it holds.'
+        contains "$flat" '`privileged: true` and `hostNetwork`, `hostPID` or `hostIPC` are `CRITICAL`'
+        contains "$flat" 'A setting the workload'"'"'s own job requires is not a finding: an added capability the process needs, such as `NET_BIND_SERVICE` to bind a port below 1024, a writable root filesystem for an application that writes to it, and a read-only `hostPath` mount on a node-level `DaemonSet`, such as a log collector. Read the workload before reporting.'
+        ;;
+      kubernetes-reliability-reviewer)
+        contains "$flat" '`Resources` and `Rollout` included, is at least a `WARNING` when it holds'
+        contains "$flat" 'A single replica or a missing `PodDisruptionBudget` in a demonstration overlay is fine; in a production overlay it is a finding. Read the overlay before reporting.'
+        contains "$flat" 'A missing `PodDisruptionBudget` is a finding only for a long-running serving workload, a `Deployment` or `StatefulSet` behind a `Service`, never for a `Job` or `CronJob`.'
+        ;;
+      esac
+      contains "$flat" 'decides: <the command that settles it>'
+      lacks "$flat" 'follow-up:'
+      lacks "$flat" 'Scope-bounded severity'
       # the source-path rule, without which the loop's diff filter discards
       # every finding the agent reports — pinned past the bolded heading, since
       # the three copies are hand-maintained and narrowing any one of them
@@ -1300,4 +1337,25 @@ rstep() {
            'development-kubernetes/**' '.github/workflows/script-tests.yml'; do
     contains "$paths" "      - '$p'"
   done
+}
+
+@test "#3163 the review skill carries no waived-suggestion list" {
+  # the Already-waived prompt line and every adjudicated-path instruction are
+  # gone; the round-2 prompt binds the one fix-verification carry only
+  local flat
+  [ -f "$REVIEW_SKILL" ]
+  flat="$(tr -s '[:space:]' ' ' <"$REVIEW_SKILL")"
+  [ -n "$flat" ]
+  lacks "$flat" 'Already waived (round >= 2)'
+  lacks "$flat" '{ADJUDICATED}'
+  lacks "$flat" 'adjudicated_path'
+  lacks "$flat" 'REVIEW_ADJUDICATED'
+  lacks "$flat" '--adjudicated'
+  lacks "$flat" 're-litigating what the human already waived'
+  contains "$flat" 'also carries `fix_verification_path`, and the reviewers must be told about it.'
+  contains "$flat" 'Bind the one extra placeholder below'
+  contains "$flat" '(up to eight on a loop-driven round ≥ 2)'
+  contains "$flat" 'Fix verification (round >= 2): {FIX VERIFICATION}'
+  # the severity tag of the JSON layer stays, for the evidence-capped lane
+  contains "$flat" 'severity (the CRITICAL|WARNING|SUGGESTION tag from the prose)'
 }

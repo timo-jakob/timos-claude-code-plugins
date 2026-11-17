@@ -150,4 +150,21 @@ in nitpicks:
   down, or grants cluster-wide privilege.
 - **WARNING** — a real defect with a bounded blast radius: one workload
   degraded, one namespace exposed, one app unsyncable.
-- **SUGGESTION** — hygiene and clarity. Never blocks a round.
+
+Of the items above, an AppProject permitting `*` source repos or any
+destination is `CRITICAL`: it grants cluster-wide deployment privilege. A
+dangling app-of-apps child path and a sync wave that starts a workload before
+its CRD, secret or namespace exists are each a `WARNING`: one app unsyncable.
+`targetRevision: HEAD` is a `WARNING`: that app's deployed state cannot be
+reproduced or rolled back. An `Application` deploying a demonstration or
+development environment that is meant to follow the branch tip is not a
+finding; read its destination before reporting. Orphans left by `automated` without `prune` are
+below the bar. So are plain `prune: true` and `selfHeal: true`: a manifest
+cannot show which resource a human created or which app someone must patch
+during an incident.
+
+An observation below the blocking bar is not reported. A skipped check is
+stated in your prose report, never as a finding: it carries no severity.
+`SUGGESTION` is reserved
+for a tool-verdict claim capped by the evidence rule above, the one lane of
+ARCHITECTURE.md *Terminating severity bars* this agent carries.
