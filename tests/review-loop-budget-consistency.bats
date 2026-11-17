@@ -1059,7 +1059,12 @@ _outside_moved_spans() {  # $1 = file
   # ...and step 1 agrees with carry.md's one-owner rule (#2010) instead of the
   # retired union-of-reviewers count
   printf '%s' "$flat" | grep -Fq -e 'carried entry has exactly one owner, the reviewer of its own dimension**: split the carry with `review-dispatch.zsh split-carry`'
+  # ...the dispatch asks each owner to account for its own carried entries,
+  # since Step 2 refuses an unaccounted one
+  printf '%s' "$flat" | grep -Fq -e '**And tell each owner to account for every carried entry of its own dimension** — on any round whose carry is non-empty, whatever it writes to the findings file, `[]` or otherwise.'
+  printf '%s' "$flat" | grep -Fq -e 'Step 2 refuses a round that does not account for every carried entry, so asking for the accounting belongs to the dispatch, not to the recovery.'
   printf '%s' "$flat" | grep -Fq -e "**The owner's report alone decides an entry's outcome** — never a union across reviewers"
+  printf '%s' "$flat" | grep -Fq -e 'an entry its owner neither confirmed nor re-raised is refused as CARRY-UNACCOUNTED.'
   run -1 grep -Fq -e 'the round'"'"'s count is their UNION' <<< "$flat"
   run -1 grep -Fq -e 'confirmed when **at least one** reviewer says so' <<< "$flat"
   flat="$(tr '\n' ' ' < "$d/briefs/panel.md" | tr -s ' ')"
