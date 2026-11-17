@@ -81,11 +81,13 @@
 # read their presence in the `unset` as tested. The `review-dispatch.zsh` twin
 # runs work-tree-sensitive commands, so its GIT_WORK_TREE arm does discriminate.
 #
-# The #1582 ADJACENCY arm is driven too, in both directions — the head's last
-# anchor MOVED INWARD (which migrates original conductor prose out of the
-# verified head) and the head row REMOVED from the manifest. Since #3168 retired
-# the tail, the head's last anchor is paired with round step 1's first line
-# rather than with a tail anchor. Both use a `sed`-mutated copy of the script,
+# The #1582 ADJACENCY arm is driven too, in all three of its failure outcomes —
+# the head's last anchor MOVED INWARD (which migrates original conductor prose
+# out of the verified head), the head row REMOVED from the manifest, and (#3168)
+# a STEP1_FIRST that no longer matches the pinned commit, which reaches the
+# `awk_rc` capture's `not both present, in order` arm. Since #3168 retired the
+# tail, the head's last anchor is paired with round step 1's first line rather
+# than with a tail anchor. All three use a `sed`-mutated copy of the script,
 # because the anchors are read out of the MANIFEST: an earlier cut hardcoded them
 # as literals and compared them against the pinned, immutable `$pre`, which made
 # the whole assertion a constant that could never fire on the one edit it exists
@@ -121,16 +123,9 @@
 #     reads it anyway), or a mutated copy. Without them a failed or partial walk
 #     leaves the undeclared/duplicated-sentinel invariant vacuous rather than
 #     satisfied — it passes by having stopped looking.
-#   * two arms of the ADJACENCY block: `FAIL: the head's last anchor and round
-#     step 1's first line are not both present` (its `awk_rc` capture — the
-#     anchor-moved-inward case rewrites the head anchor to a line that IS
-#     present in the pinned commit, so that mutant reaches the
-#     `no longer adjacent` arm instead and never this one), and the
-#     `(( ${#mrow_tabs} >= 3 )) || continue` malformed-row skip #1588 added
-#     there (both malformed-row mutants corrupt a row other than the head's).
-#     Deleting the `awk_rc` capture is the costly one: an `awk` exiting
-#     3 then leaves `between` empty, the `[[ -n "$between" ]]` arm passes, and
-#     the adjacency invariant reports success having located neither anchor.
+#   * the ADJACENCY block's `(( ${#mrow_tabs} >= 3 )) || continue`
+#     malformed-row skip #1588 added there (both malformed-row mutants corrupt
+#     a row other than the head's).
 # Every one of them is worth driving; none is driven here, and this block is the
 # only place that says so. Named rather than counted, for the reason the header
 # above gives about numerals.
@@ -1382,4 +1377,21 @@ _mutate_anchor() {
   run zsh "$mutant" --base "$PRE_MOVE_SHA" --repo "$fake"
   [ "$status" -eq 1 ]
   contains "$stderr$output" "the manifest no longer declares round-protocol-head"
+}
+
+@test "#3168 the adjacency invariant FAILS when round step 1's first line is not in the pinned commit" {
+  # The third arm: the awk finds the head's last anchor but never reaches
+  # STEP1_FIRST, so it exits 3 with nothing printed. Without the `awk_rc`
+  # capture that empty `between` would read as "adjacent" and the invariant
+  # would pass having located neither end of the gap.
+  _require_pre_move_commit
+  local mutant="$BATS_TEST_TMPDIR/verify-step1-missing.zsh"
+  sed "s|^typeset -r STEP1_FIRST=.*\$|typeset -r STEP1_FIRST='no such line in the pinned commit'|" \
+    "$VERIFY" > "$mutant"
+  run -0 grep -qxF "typeset -r STEP1_FIRST='no such line in the pinned commit'" "$mutant"
+
+  run zsh "$mutant" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
+  [ "$status" -eq 1 ]
+  contains "$stderr$output" "are not both present, in order"
+  lacks "$stderr$output" "no longer adjacent"
 }
