@@ -321,3 +321,57 @@ agent_section() {
   contains "$v" 'Judge the re-run per finding, not by its exit code'
   contains "$v" '**revert whatever you edited for it — HCL *or* test**'
 }
+
+@test "#3164 both reviewers drop plain SUGGESTION and keep only the evidence-capped lane" {
+  local a f flat body n
+  for a in opentofu-module-advisor opentofu-security-reviewer; do
+    f="$AGENTS/$a.md"
+    body="$(cat "$f")"
+    flat="$(tr -s '[:space:]' ' ' <"$f")"
+    [ -n "$flat" ]
+    # the hygiene rung is gone, by its text and by its bullet shape
+    lacks "$body" '**SUGGESTION** — hygiene and clarity'
+    lacks "$body" '- **SUGGESTION** —'
+    contains "$body" '- **CRITICAL** —'
+    contains "$body" '- **WARNING** — a real defect with a bounded blast radius'
+    contains "$flat" 'Every item in *What to look for* is at least a `WARNING` when it holds; the cases the `CRITICAL` bullet names are `CRITICAL`.'
+    contains "$flat" 'An observation below the blocking bar is not reported.'
+    contains "$flat" '`SUGGESTION` is reserved for a tool-verdict claim capped by the evidence rule above, the one lane of ARCHITECTURE.md *Terminating severity bars* this agent carries.'
+    # the template header and the capped lane's two lines stay; a reworded
+    # SUGGESTION route moves the count (evidence rule x3, template x2, reserve)
+    contains "$body" '### [CRITICAL|WARNING|SUGGESTION] One-line title'
+    contains "$flat" 'decides: <the command that settles it>'
+    contains "$flat" 'proposed-severity: CRITICAL|WARNING'
+    n="$(grep -ci suggestion "$f")"
+    [ "$n" -eq 6 ]
+    # the panel stays outside the scope-bounded follow-up: lane
+    lacks "$flat" 'follow-up:'
+    lacks "$flat" 'Scope-bounded severity'
+  done
+}
+
+@test "#3164 the module advisor drops the two checks only the removed rung graded" {
+  local s
+  s="$(agent_section opentofu-module-advisor 'What to look for')"
+  [ -n "$s" ]
+  lacks "$s" 'an output exposing a whole resource object where callers need one attribute'
+  lacks "$s" 'outputs and variables with no `description`'
+  # the bullet keeps its two other clauses
+  contains "$s" 'an output removed or renamed while callers still read it'
+  contains "$s" 'a module reaching into another'"'"'s resources by data lookup instead of taking an input'
+  # neither check reappears at WARNING
+  lacks "$(cat "$AGENTS/opentofu-module-advisor.md")" 'a missing `description`'
+}
+
+@test "#3164 the review skill carries no waived-suggestion list" {
+  local flat
+  flat="$(tr -s '[:space:]' ' ' <"$SKILL")"
+  [ -n "$flat" ]
+  lacks "$flat" 'Already waived (round >= 2)'
+  lacks "$flat" '{ADJUDICATED}'
+  lacks "$flat" 'adjudicated_path'
+  lacks "$flat" 'REVIEW_ADJUDICATED'
+  contains "$(section 'Step 2')" 'also carries `fix_verification_path`. Bind the one carry line below, the Fix verification line, filling it only when the plan names a **non-null** path for it'
+  contains "$(section 'Step 2')" 'plus the Fix verification line when its carry path is **non-null**'
+  contains "$flat" 'Fix verification (round >= 2): {FIX VERIFICATION}'
+}
