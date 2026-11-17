@@ -586,7 +586,7 @@ $victim" ]
     'retire every `decides:` command this pass ran' \
     'the one exception to the skip rule above' \
     'stamp it even when no severity' \
-    'fourth adjudication guard' \
+    'Low filter keep the item' \
     'chose not to run' \
     'two kinds of edit to that file, and no others' \
     'One other writer touches the same file, and it is not this pass' \

@@ -1275,7 +1275,7 @@ with exit 2.'
 @test "#3134 step mode: --promote is an unknown option, refused before any round work" {
   P="$BATS_TEST_TMPDIR/promote.json"
   printf '%s' '[{"file":"app.py","line":1,"dimension":"code_quality","title":"extract the magic number"}]' > "$P"
-  printf '%s' '[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":"extract the magic number","description":"d","reviewer":"q"}]' > "$F"
+  printf '%s' '[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":"extract the magic number","description":"follow-up: d","reviewer":"q"}]' > "$F"
   step --promote "$P"
   [ "$status" -eq 2 ]
   [ "$output" = "unknown flag: --promote" ]
@@ -1291,7 +1291,7 @@ with exit 2.'
   P="$BATS_TEST_TMPDIR/promote.json"
   printf '%s' '[{"file":"app.py","line":1,"dimension":"code_quality","title":"extract the magic number"}]' > "$P"
   printf '%s\n' "$P" > "$WD/.promote"
-  printf '%s' '[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":"extract the magic number","description":"d","reviewer":"q"}]' > "$F"
+  printf '%s' '[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":"extract the magic number","description":"follow-up: d","reviewer":"q"}]' > "$F"
   step
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
@@ -1557,7 +1557,7 @@ with exit 2.'
   seed_awaiting
   echo "print(2)" > "$R/fixed.py"
   mkdir -p "$WD/.findings-empty-2"
-  local SUGG_ONLY='[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":9,"title":"rename the temp variable","description":"d","reviewer":"r"}]'
+  local SUGG_ONLY='[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":9,"title":"rename the temp variable","description":"follow-up: d","reviewer":"r"}]'
   printf '%s' "$SUGG_ONLY" > "$F"
   run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
     zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" --resume
@@ -1581,7 +1581,7 @@ with exit 2.'
   # consumed as the sweep's own findings and converge on a panel that never ran.
   seed_awaiting                                  # round 1: one blocker
   echo "print(2)" > "$R/fixed.py"                # the in-session fix
-  local SUGG_ONLY='[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":9,"title":"rename the temp variable","description":"d","reviewer":"r"}]'
+  local SUGG_ONLY='[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":9,"title":"rename the temp variable","description":"follow-up: d","reviewer":"r"}]'
   printf '%s' "$SUGG_ONLY" > "$F"
   # plant a marker for the round to CLEAR, so the absence asserted below is a
   # real discriminator rather than a fact about a file that never existed —
@@ -1635,7 +1635,7 @@ with exit 2.'
   [ "$status" -eq 0 ]
   # a fresh, non-identical findings file, and NO tree change: round 2's delta is
   # empty and round 1 left no blockers to verify
-  printf '%s' '[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":3,"title":"n","description":"d","reviewer":"r"}]' > "$F"
+  printf '%s' '[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":3,"title":"n","description":"follow-up: d","reviewer":"r"}]' > "$F"
   run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
     zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" --resume --max-rounds 3
   [ "$status" -eq 2 ]
@@ -1732,8 +1732,8 @@ EOF
   contains "$stderr" "is not a JSON array"
   # ...and "before anything consumes it" is the half the title claims: moving
   # the guard below the dispatch/consume block keeps the exit code and the
-  # wording identical while the round has already re-planned, rewritten
-  # adjudicated.json and truncated the dispatch sink.
+  # wording identical while the round has already re-planned and truncated
+  # the dispatch sink.
   [ ! -e "$WD/changelist-2.json" ]
   [ ! -e "$R/.review/findings-round-2.json" ]
   [ ! -e "$WD/.findings-digest-2" ]
@@ -1752,8 +1752,8 @@ EOF
   contains "$stderr" "is not a JSON array"
   # ...and "before anything consumes it" is the half the title claims: moving
   # the guard below the dispatch/consume block keeps the exit code and the
-  # wording identical while the round has already re-planned, rewritten
-  # adjudicated.json and truncated the dispatch sink.
+  # wording identical while the round has already re-planned and truncated
+  # the dispatch sink.
   [ ! -e "$WD/changelist-2.json" ]
   [ ! -e "$R/.review/findings-round-2.json" ]
   [ ! -e "$WD/.findings-digest-2" ]
@@ -1773,77 +1773,51 @@ EOF
   contains "$stderr" "is not a JSON array"
   # ...and "before anything consumes it" is the half the title claims: moving
   # the guard below the dispatch/consume block keeps the exit code and the
-  # wording identical while the round has already re-planned, rewritten
-  # adjudicated.json and truncated the dispatch sink.
+  # wording identical while the round has already re-planned and truncated
+  # the dispatch sink.
   [ ! -e "$WD/changelist-2.json" ]
   [ ! -e "$R/.review/findings-round-2.json" ]
   [ ! -e "$WD/.findings-digest-2" ]
   [ -s "$F" ]
 }
 
-@test "#1434 step mode: nothing is adjudicated when the round aborts inside the kill window" {
-  # The adjudicated append is deliberately the round's LAST write, after the
-  # history line: anything committed between the changelist append and the
-  # history line is state the --resume orphan repair lets a re-run inherit, and
-  # a round that re-ran would find its OWN suggestions already adjudicated and
-  # drop them — unrecoverably on the closing sweep, whose delta is `[]` so the
-  # invalidation cannot restore them.
-  #
-  # The carry write is a real `|| exit 1` inside that window, so a directory at
-  # its path aborts the round there. Any placement of the append above the carry
-  # write reds this test.
+@test "#3169 step mode: a round builds no adjudicated.json, and its history line has no drop count" {
   seed_awaiting
   echo "print(2)" > "$R/fixed.py"
-  local SUGG_ONLY='[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":9,"title":"rename the temp variable","description":"d","reviewer":"r"}]'
-  printf '%s' "$SUGG_ONLY" > "$F"
-  mkdir -p "$WD/verify-3.json"
-  step --resume
-  [ "$status" -eq 1 ]
-  contains "$output" "could not write the round 3 fix-verification carry"
-  [ "$(jq 'length' "$WD/adjudicated.json")" -eq 0 ]
-  # ...and the abort really did land INSIDE the window, rather than before it:
-  # changelists is exactly one line ahead of history, which is the skew the
-  # --resume orphan repair reads as "round 2 re-runs"
-  [ "$(jq -s 'length' "$WD/changelists.jsonl")" -eq 2 ]
-  [ "$(jq -s 'length' "$WD/history.jsonl")" -eq 1 ]
-}
-
-@test "#1434 step mode: nothing is adjudicated when the round aborts at the CLOSING end of the kill window" {
-  # The test above pins the append below the CARRY write, which is one statement
-  # past the window's START. The contract is stronger: the append is the round's
-  # LAST write, below the HISTORY line. Without this sibling the whole block
-  # could be moved to just above the history append — squarely inside the
-  # window — and the suite would stay green.
-  seed_awaiting
-  echo "print(2)" > "$R/fixed.py"
-  local SUGG_ONLY='[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":9,"title":"rename the temp variable","description":"d","reviewer":"r"}]'
-  printf '%s' "$SUGG_ONLY" > "$F"
-  chmod 444 "$WD/history.jsonl"      # the append at the window's closing edge fails
-  # tests/Dockerfile runs the suite as root, where `chmod 444` is no barrier at
-  # all: root appends to a read-only file regardless, the round completes, and
-  # the failure path this test exists for never executes (#1360). The EFFECT
-  # test rather than a uid test, for the same reasons the sibling gives.
-  if [ -w "$WD/history.jsonl" ]; then skip "running as a user that bypasses file permissions"; fi
-  step --resume
-  [ "$status" -eq 1 ]
-  contains "$output" "could not append the round 2 history line"
-  [ "$(jq 'length' "$WD/adjudicated.json")" -eq 0 ]
-  [ "$(jq -s 'length' "$WD/changelists.jsonl")" -eq 2 ]
-  [ "$(jq -s 'length' "$WD/history.jsonl")" -eq 1 ]
-}
-
-@test "#1434 step mode: a round that COMPLETES does adjudicate its suggestions — the control for the two aborts above" {
-  # Without this, both abort tests are satisfied by a loop that never adjudicates
-  # anything at all.
-  seed_awaiting
-  echo "print(2)" > "$R/fixed.py"
-  local SUGG_ONLY='[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":9,"title":"rename the temp variable","description":"d","reviewer":"r"}]'
+  local SUGG_ONLY='[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":9,"title":"rename the temp variable","description":"follow-up: rename the temp variable","reviewer":"r"}]'
   printf '%s' "$SUGG_ONLY" > "$F"
   step --resume
   [ "$status" -eq 20 ]
-  [ "$(jq 'length' "$WD/adjudicated.json")" -eq 1 ]
-  [ "$(jq -r '.[0].title' "$WD/adjudicated.json")" = "rename the temp variable" ]
+  # non-vacuity: round 2 completed and logged its lane suggestion
   [ "$(jq -s 'length' "$WD/history.jsonl")" -eq 2 ]
+  [ "$(jq '.summary.low' "$WD/changelist-2.json")" -eq 1 ]
+  [ ! -e "$WD/adjudicated.json" ]
+  jq -es 'all(.[]; has("adjudicated_dropped") | not)' "$WD/history.jsonl" >/dev/null
+  jq -e '.summary | has("adjudicated_dropped") | not' "$WD/changelist-2.json" >/dev/null
+}
+
+@test "#3169 step mode: a leftover adjudicated.json is ignored on --resume, never read, re-initialised or deleted" {
+  # An older run's work-dir may still hold the list. A damaged one is no longer
+  # re-initialised, and a well-formed one naming this round's suggestion
+  # suppresses nothing: the file is simply not the loop's any more.
+  local leftover i=0
+  for leftover in '{"blocking":' \
+                  '[{"file":"app.py","line":9,"dimension":"code_quality","title":"rename the temp variable"}]'; do
+    i=$(( i + 1 ))
+    seed_awaiting
+    printf '%s' "$leftover" > "$WD/adjudicated.json"
+    cp "$WD/adjudicated.json" "$BATS_TEST_TMPDIR/leftover-$i.json"
+    echo "print($i)" > "$R/fixed-$i.py"
+    printf '%s' '[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":9,"title":"rename the temp variable","description":"follow-up: rename the temp variable","reviewer":"r"}]' > "$F"
+    run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
+      zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" --resume --max-rounds 3
+    [ "leftover $i: $status" = "leftover $i: 20" ]
+    lacks "$stderr" "re-initialising"
+    lacks "$stderr" "adjudicated"
+    cmp "$BATS_TEST_TMPDIR/leftover-$i.json" "$WD/adjudicated.json"
+    [ "leftover $i: $(jq '.summary.low' "$WD/changelist-2.json")" = "leftover $i: 1" ]
+    rm -rf "$WD"; mkdir -p "$WD"
+  done
 }
 
 @test "#3168 step mode: the loop never hands the waived list to the plan, on round 1 or round 2" {
@@ -1869,8 +1843,8 @@ EOF
   grep -q -- '^plan .*--round 1' "$log"
   grep -q -- '^plan .*--round 2 .*--fix-verification ' "$log"
   run -1 grep -qF -- '--adjudicated' "$log"
-  # the list is still the consolidator's work-dir state until #3169
-  [ -f "$WD/adjudicated.json" ]
+  # ...and since #3169 there is no list for anyone
+  [ ! -e "$WD/adjudicated.json" ]
 }
 
 @test "#1434 step mode: a .closing-sweep marker just TWO rounds out is refused — the boundary, not just the far case" {
@@ -1888,37 +1862,6 @@ EOF
   contains "$stderr" "beyond the one-round grant"
   [ "$(echo "$output" | jq '.closing_sweep_granted')" = "false" ]
   [ "$(echo "$output" | jq '.max_rounds')" -eq 3 ]
-}
-
-@test "#1434 step mode: a failed adjudicated append WARNS and the round still stands" {
-  # The append is deliberately non-fatal. An `exit 1` there would land between
-  # the round's history line and the closing-sweep record, on an ordinary I/O
-  # failure rather than a kill: the round would be complete and consistent on
-  # disk with the sweep it just earned never written, and every later --resume
-  # would plan a delta round against an unmoved tree and refuse it forever.
-  #
-  # A DIRECTORY at the temp path, so the redirection fails whatever the uid.
-  seed_awaiting
-  echo "print(2)" > "$R/fixed.py"
-  mkdir -p "$WD/.adjudicated-appended.json"
-  local SUGG_ONLY='[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":9,"title":"rename the temp variable","description":"d","reviewer":"r"}]'
-  printf '%s' "$SUGG_ONLY" > "$F"
-  # --separate-stderr, not the `step` helper: the warning must land on STDERR,
-  # and stdout must stay exactly the one-line status JSON. Merged streams would
-  # pass either way, and a consumer piping this round's stdout to jq would then
-  # get a parse error on a round the loop says survived.
-  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
-    zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" --resume
-  [ "$status" -eq 20 ]
-  contains "$stderr" "could not record round 2's suggestions as adjudicated"
-  contains "$stderr" "the round STANDS"
-  [ "$(printf '%s' "$output" | grep -c '')" -eq 1 ]
-  # nothing was recorded...
-  [ "$(jq 'length' "$WD/adjudicated.json")" -eq 0 ]
-  # ...and these are the assertions that fail under a reverted `exit 1`: the
-  # round completed, and the sweep it earned is on disk
-  [ "$(cat "$WD/.closing-sweep")" = "3" ]
-  [ "$(jq -s 'length' "$WD/history.jsonl")" -eq 2 ]
 }
 
 @test "#1434 step mode: a well-formed .closing-sweep marker BEYOND the one-round grant is refused" {
@@ -1949,61 +1892,6 @@ EOF
   [ "$status" -eq 20 ]
   [ "$(echo "$output" | jq '.closing_sweep_granted')" = "true" ]
   [ "$(echo "$output" | jq '.max_rounds')" -eq 3 ]
-}
-
-@test "#1434 step mode: a DAMAGED adjudicated.json is re-initialised on resume, never fatal" {
-  # It is persistent state, so a truncated file would abort the invalidation jq
-  # as a bare exit 1 that writes no status JSON — and every later --resume would
-  # die at the same point with the work-dir bricked. Re-initialising costs at
-  # most one already-waived suggestion logged again.
-  # EIGHT shapes, one per way the predicate can fail. Three container arms:
-  # unparseable, a well-formed NON-array, a multi-value file (a `>>` instead of
-  # a `>`). Five element arms: an element that is not an object, one missing
-  # `dimension`, and then one ISOLATING each field conjunct — an empty `file`,
-  # an empty `dimension`, a non-string `title`. The isolating three matter
-  # because the over-determined shapes leave each conjunct individually
-  # deletable: with only `[{"file":"a.py"}]` in the list, dropping the `title`
-  # conjunct stays green (dimension still refuses it) while
-  # `[{...,"title":42}]` starts being adopted — and an adopted bad entry is
-  # forwarded to the consolidator, which refuses it as the loop's BARE exit 1
-  # that writes no status JSON. Since this file is PERSISTENT state, every
-  # later --resume then dies at the same point with the work-dir bricked.
-  local bad i=0
-  for bad in '{"blocking":' '{"a":1}' '[]
-[]' '[{"file":"a.py"}]' '["foo"]' \
-             '[{"file":"","dimension":"code_quality","title":"t"}]' \
-             '[{"file":"a.py","dimension":"","title":"t"}]' \
-             '[{"file":"a.py","dimension":"code_quality","title":42}]'; do
-    i=$(( i + 1 ))
-    seed_awaiting
-    printf '%s' "$bad" > "$WD/adjudicated.json"
-    # a DISTINCT path per iteration: git-tree-id is content-based, so rewriting
-    # the same bytes moves nothing and every iteration after the first would
-    # take the empty-delta verification path instead of the ordinary delta path
-    # the first one establishes
-    echo "print($i)" > "$R/fixed-$i.py"
-    distinct_blocker 2 > "$F"
-    run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
-      zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" --resume --max-rounds 3
-    [ "shape $bad: $status" = "shape $bad: 20" ]
-    contains "shape $bad: $stderr" "re-initialising to []"
-    # ...and the round really ran on a usable list
-    [ "shape $bad: $(jq 'type' "$WD/adjudicated.json")" = "shape $bad: \"array\"" ]
-    [ "shape $bad: $([ -s "$WD/changelist-2.json" ] && echo yes)" = "shape $bad: yes" ]
-    rm -rf "$WD"; mkdir -p "$WD"
-  done
-
-  # the positive control: without it the whole loop is satisfied by a guard
-  # that re-initialises unconditionally
-  seed_awaiting
-  printf '%s' '[{"file":"app.py","dimension":"code_quality","title":"keep me"}]' > "$WD/adjudicated.json"
-  echo "print(99)" > "$R/fixed-keep.py"
-  distinct_blocker 2 > "$F"
-  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
-    zsh "$S" --repo "$R" --base main --work-dir "$WD" --findings-file "$F" --resume --max-rounds 3
-  [ "$status" -eq 20 ]
-  lacks "$stderr" "re-initialising to []"
-  [ "$(jq -r 'map(select(.title == "keep me")) | length' "$WD/adjudicated.json")" -eq 1 ]
 }
 
 @test "#1434 step mode: an unreadable .closing-sweep marker is ignored, never a silent grant" {
@@ -2043,7 +1931,6 @@ EOF
   # everything the next round needs is on disk, written by the invocation that
   # has already exited — that IS the step-mode contract
   [ -s "$WD/tree-1.txt" ]
-  [ -s "$WD/adjudicated.json" ]
   local t1; t1="$(cat "$WD/tree-1.txt")"
 
   echo "print(2)" > "$R/fixed.py"

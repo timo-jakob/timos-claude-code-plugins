@@ -209,8 +209,8 @@ _require_pre_move_commit() {
 # review-loop prose has quoted the sentinels inline inside backticks, in the
 # sentence explaining the gap. A substring search then returns that prose line
 # for a bound, and every comparison built on it is made against the wrong line.
-# (`extract_chunk` and the stray-sentinel sweep match at column 0 for the same
-# reason.)
+# (`extract_chunk` and the stray-sentinel sweep match a WHOLE line for the same
+# reason — leading blanks allowed since #3169, nothing else.)
 _gap_line() {  # [-x] $1 = file, $2 = fixed-string needle
   local mode=-F
   if [ "$1" = "-x" ]; then mode=-xF; shift; fi
@@ -332,10 +332,10 @@ _gap_text() {  # $1 = the reference/review-loop/ directory
 
 # --- the happy path, and that it is not vacuous ------------------------------
 
-@test "#1547 the real tree verifies, reporting all ten declared chunks" {
+@test "#1547 the real tree verifies, reporting all eleven declared chunks" {
   _require_pre_move_commit
   run -0 zsh "$VERIFY" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
-  contains "$output" "all 10 declared chunks are byte-identical"
+  contains "$output" "all 11 declared chunks are byte-identical"
 }
 
 @test "#1547 --quiet suppresses the ok lines and the summary, leaving stdout empty" {
@@ -366,7 +366,7 @@ _gap_text() {  # $1 = the reference/review-loop/ directory
   _require_pre_move_commit
   cd "$BATS_TEST_TMPDIR"
   run -0 zsh "$VERIFY" --base "$PRE_MOVE_SHA"
-  contains "$output" "all 10 declared chunks are byte-identical"
+  contains "$output" "all 11 declared chunks are byte-identical"
 }
 
 # --- per-chunk failures ------------------------------------------------------
@@ -793,26 +793,37 @@ PY
   # #2055 re-cut the tail into four chunks (tail, step-2, recover, steps-3-4) and
   # #3168 retired the first, so step-2's FIRST anchor now opens what is left of
   # the old tail span and the steps-3-4 row's LAST anchor is its end — pinned in
-  # full. The seams between the three are the script's own seam check's job.
+  # full. #3169 cut steps-3-4 around step 3's narration paragraph, so
+  # step-3-head now opens step 3. The seams between them are the script's own
+  # seam and gapped-seam checks' job.
   grep -qF -- "\"round-protocol-step-2	review-loop/step-2-invocation.md	2. **One loop invocation.**	" "$v"
   grep -qF -- "	   is how the two statements of it came to disagree once already." "$v"
   grep -qF -- "\"round-protocol-steps-3-4	review-loop/exit-20-awaiting-fix.md	" "$v"
+  grep -qF -- "\"round-protocol-step-3-head	review-loop/exit-20-awaiting-fix.md	3. **On \\\`AWAITING_FIX\\\` (exit 20)**" "$v"
 
   # sentinels: every round-protocol chunk present exactly once across
-  # reference/, at column 0 (whole-line match), IN the shard its manifest row
-  # names — `extract_chunk` and the stray-sentinel sweep both match at column 0,
-  # so an indented one would be invisible.
+  # reference/, as a whole line (leading blanks allowed, #3169), IN the shard
+  # its manifest row names — `extract_chunk` and the stray-sentinel sweep both
+  # match that way.
   local n shard
   for n in round-protocol-head:core.md \
            round-protocol-step-2:step-2-invocation.md \
            round-protocol-recover:exit-2-stale-findings.md \
+           round-protocol-step-3-head:exit-20-awaiting-fix.md \
            round-protocol-steps-3-4:exit-20-awaiting-fix.md; do
     shard="${n#*:}"; n="${n%%:*}"
-    [ "$(grep -rxF -- "<!-- moved: $n -->" "$ref" | wc -l | tr -d ' ')" -eq 1 ]
-    [ "$(grep -rxF -- "<!-- /moved: $n -->" "$ref" | wc -l | tr -d ' ')" -eq 1 ]
-    [ "$(grep -cxF -- "<!-- moved: $n -->" "$ref/review-loop/$shard")" -eq 1 ]
-    [ "$(grep -cxF -- "<!-- /moved: $n -->" "$ref/review-loop/$shard")" -eq 1 ]
+    [ "$(grep -rxE -- " *<!-- moved: $n -->" "$ref" | wc -l | tr -d ' ')" -eq 1 ]
+    [ "$(grep -rxE -- " *<!-- /moved: $n -->" "$ref" | wc -l | tr -d ' ')" -eq 1 ]
+    [ "$(grep -cxE -- " *<!-- moved: $n -->" "$ref/review-loop/$shard")" -eq 1 ]
+    [ "$(grep -cxE -- " *<!-- /moved: $n -->" "$ref/review-loop/$shard")" -eq 1 ]
   done
+  # #3169: the cut inside step 3's list item is the INDENTED pair, and the
+  # outer sentinels stay at column 0, where other suites anchor on them
+  local x20="$ref/review-loop/exit-20-awaiting-fix.md"
+  [ "$(grep -cxF -- '   <!-- /moved: round-protocol-step-3-head -->' "$x20")" -eq 1 ]
+  [ "$(grep -cxF -- '   <!-- moved: round-protocol-steps-3-4 -->' "$x20")" -eq 1 ]
+  [ "$(grep -cxF -- '<!-- moved: round-protocol-step-3-head -->' "$x20")" -eq 1 ]
+  [ "$(grep -cxF -- '<!-- /moved: round-protocol-steps-3-4 -->' "$x20")" -eq 1 ]
   # ...and neither old sentinel survives anywhere in reference/, nor the tail's
   # #3168 retired: step 1 carries no moved: sentinel at all
   run grep -rqE -- '^<!-- /?moved: round-protocol-tail -->$' "$ref"
@@ -822,10 +833,11 @@ PY
   # ...and the index's preamble says step 1 is outside the byte proof now
   local flat_idx
   flat_idx="$(tr '\n' ' ' < "$ref/review-loop.md" | tr -s ' ')"
-  contains "$flat_idx" 'the whole of `step-1-panel.md`, the notes after each moved block'
-  contains "$flat_idx" 'cut into four such blocks: `round-protocol-head` in `core.md`, then `round-protocol-step-2`'
-  # ...nor does a CUT_GROUPS entry still name it
-  grep -qF -- '  "round-protocol-step-2 round-protocol-recover round-protocol-steps-3-4"' "$v"
+  contains "$flat_idx" "the whole of \`step-1-panel.md\`, step 3's narration paragraph, the notes after each moved block"
+  contains "$flat_idx" 'cut into five such blocks: `round-protocol-head` in `core.md`, then `round-protocol-step-2`'
+  # ...nor does a CUT_GROUPS entry still name it, and the group ends where the
+  # #3169 gap begins
+  grep -qF -- '  "round-protocol-step-2 round-protocol-recover round-protocol-step-3-head"' "$v"
   run grep -qE -- '^  "round-protocol-tail ' "$v"
   [ "$status" -ne 0 ]
   run grep -rxF -- '<!-- moved: round-protocol -->' "$ref"
@@ -889,8 +901,9 @@ PY
   # check, which is backwards on both counts.
 }
 
-@test "#1582 the split still verifies byte-identical, at ten chunks" {
-  # Ten since #3168 retired the round-protocol tail; eleven after #3146 deleted the five suggestion-promotion chunks with their
+@test "#1582 the split still verifies byte-identical, at eleven chunks" {
+  # Eleven since #3169 cut steps-3-4 around step 3's narration paragraph; ten
+  # after #3168 retired the round-protocol tail; eleven after #3146 deleted the five suggestion-promotion chunks with their
   # shards; sixteen after #3121 re-cut the interactive-extension intro and its steps 2-4
   # apart; fifteen after #2601 deleted the residue branch's last chunk with its shard;
   # sixteen after #2600 deleted the residue branch's three step chunks with their
@@ -901,7 +914,7 @@ PY
   # tail into four.
   _require_pre_move_commit
   run -0 zsh "$VERIFY" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
-  contains "$output" "all 10 declared chunks are byte-identical"
+  contains "$output" "all 11 declared chunks are byte-identical"
   # every round-protocol chunk accounted for, IN its shard, so a row silently
   # dropped from the manifest cannot leave this green
   contains "$output" "ok   round-protocol-head"
@@ -909,6 +922,7 @@ PY
   lacks "$output" "round-protocol-tail"
   contains "$output" "ok   round-protocol-step-2"
   contains "$output" "ok   round-protocol-recover"
+  contains "$output" "ok   round-protocol-step-3-head"
   contains "$output" "ok   round-protocol-steps-3-4"
 }
 
@@ -1040,7 +1054,7 @@ PY
   contains "$stderr$output" "actually read. The stderr names both identities and the files that moved."
 }
 
-@test "#2055 the seam check FIRES on the recover → steps-3-4 seam" {
+@test "#2055 the seam check FIRES on the recover → step-3-head seam" {
   _require_pre_move_commit
   local mutant="$BATS_TEST_TMPDIR/verify-seam-gap-3.zsh"
   sed 's|	   dispatch \\`findings_path\\`) needs no digest tool and always applies\.$|	   the escalation is phantom — ignore it (don'"'"'t post or extend on it) and|' \
@@ -1048,7 +1062,7 @@ PY
   run -0 grep -qF "	   the escalation is phantom — ignore it (don't post or extend on it) and" "$mutant"
   run zsh "$mutant" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
   [ "$status" -eq 1 ]
-  contains "$stderr$output" "the seam round-protocol-recover → round-protocol-steps-3-4 leaves original lines uncovered"
+  contains "$stderr$output" "the seam round-protocol-recover → round-protocol-step-3-head leaves original lines uncovered"
 }
 
 @test "#2055 the seam check FIRES when consecutive tail chunks' anchors are out of order" {
@@ -1077,6 +1091,83 @@ PY
   run zsh "$mutant" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
   [ "$status" -eq 1 ]
   contains "$stderr$output" "the manifest no longer declares both round-protocol-step-2 and round-protocol-recover, so their seam cannot be checked"
+}
+
+# --- #3169: the gapped seam around step 3's narration paragraph --------------
+
+@test "#3169 the gapped seam FIRES when step-3-head's last anchor moves up" {
+  _require_pre_move_commit
+  local mutant="$BATS_TEST_TMPDIR/verify-gap-up.zsh"
+  _mutate_anchor "$mutant" '   claim true rather than merely well-formed.' \
+    "   declares it against the whole story diff — which is what makes the dossier's"
+  run zsh "$mutant" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
+  [ "$status" -eq 1 ]
+  contains "$stderr$output" "the gapped seam round-protocol-step-3-head → round-protocol-steps-3-4 no longer holds exactly its paragraph"
+  # ...and it names the stranded original line
+  contains "$stderr$output" "   claim true rather than merely well-formed."
+}
+
+@test "#3169 the gapped seam FIRES when steps-3-4's first anchor moves down" {
+  _require_pre_move_commit
+  local mutant="$BATS_TEST_TMPDIR/verify-gap-down.zsh"
+  OLD="   **That row is this round's fix-pass trigger (#1496).** Sum the last two" \
+  NEW="   is noise. When the totals give" \
+    perl -pe 'BEGIN { $o = $ENV{OLD}; $n = $ENV{NEW} } s/\t\Q$o\E\t/\t$n\t/' "$VERIFY" > "$mutant"
+  grep -qF -- "	   is noise. When the totals give	" "$mutant"
+  run zsh "$mutant" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
+  [ "$status" -eq 1 ]
+  contains "$stderr$output" "the gapped seam round-protocol-step-3-head → round-protocol-steps-3-4 no longer holds exactly its paragraph"
+  contains "$stderr$output" "**That row is this round's fix-pass trigger (#1496).**"
+}
+
+@test "#3169 the gapped seam FIRES when its two chunks' anchors are out of order" {
+  # step-3-head's LAST anchor rewritten to a line that follows steps-3-4's FIRST
+  # anchor in the pinned commit: the gap awk never finds the second anchor after
+  # the first, and must say so rather than pass on an empty gap.
+  _require_pre_move_commit
+  local mutant="$BATS_TEST_TMPDIR/verify-gap-order.zsh"
+  _mutate_anchor "$mutant" '   claim true rather than merely well-formed.' '   is noise. When the totals give'
+  run zsh "$mutant" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
+  [ "$status" -eq 1 ]
+  contains "$stderr$output" "the gapped seam round-protocol-step-3-head → round-protocol-steps-3-4 is not in order"
+  lacks "$stderr$output" "no longer holds exactly its paragraph"
+}
+
+@test "#3169 the gapped seam FAILS when the manifest stops declaring step-3-head" {
+  _require_pre_move_commit
+  local mutant="$BATS_TEST_TMPDIR/verify-gap-norow.zsh"
+  sed 's|^"round-protocol-step-3-head	|"round-protocol-renamed	|' "$VERIFY" > "$mutant"
+  run ! grep -qF '"round-protocol-step-3-head	' "$mutant"
+  run zsh "$mutant" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
+  [ "$status" -eq 1 ]
+  contains "$stderr$output" "the manifest no longer declares both round-protocol-step-3-head and round-protocol-steps-3-4, so their gapped seam cannot be checked"
+}
+
+@test "#3169 an INDENTED undeclared sentinel is swept like a column-0 one" {
+  # extract_chunk accepts leading blanks, so a sweep that saw only column-0
+  # openers would leave an indented chunk unverified with the script exiting 0.
+  _require_pre_move_commit
+  local fake; fake="$(_fake_tree indented)"
+  {
+    printf '\n   <!-- moved: indented-undeclared -->\n'
+    printf '   prose that no manifest row covers.\n'
+    printf '   <!-- /moved: indented-undeclared -->\n'
+  } >> "$fake/development/skills/resolve-issue/reference/residue.md"
+  run -1 zsh "$VERIFY" --base "$PRE_MOVE_SHA" --repo "$fake"
+  contains "$output" "indented-undeclared"
+  contains "$output" "does not verify"
+}
+
+@test "#3169 the indented pair really bounds the chunks: an edit inside step-3-head still fails" {
+  # Non-vacuity for the indented cut: the gap paragraph is unverified, but the
+  # chunk above it is not, so a byte changed just above the indented closer reds.
+  _require_pre_move_commit
+  local fake; fake="$(_fake_tree indented-edit)"
+  local x20="$fake/development/skills/resolve-issue/reference/review-loop/exit-20-awaiting-fix.md"
+  perl -0pi -e 's/   claim true rather than merely well-formed\.\n/   claim true rather than merely well formed.\n/' "$x20"
+  grep -qxF '   claim true rather than merely well formed.' "$x20"
+  run -1 zsh "$VERIFY" --base "$PRE_MOVE_SHA" --repo "$fake"
+  contains "$output" "FAIL round-protocol-step-3-head"
 }
 
 # --- #2056/#2600/#2601: the residue branch, retired --------------------------

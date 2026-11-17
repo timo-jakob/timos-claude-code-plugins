@@ -34,16 +34,18 @@ each at most 20,000 bytes (#2055). Read order:
 
 Every `<!-- moved: … -->` block in those shards is byte-identical to the text it
 was carved out of; `scripts/verify-reference-move.zsh` proves that against the
-pinned pre-move commit. The round protocol's frozen span is cut into four such
+pinned pre-move commit. The round protocol's frozen span is cut into five such
 blocks: `round-protocol-head` in `core.md`, then `round-protocol-step-2`,
-`round-protocol-recover` and `round-protocol-steps-3-4` across the step shards.
+`round-protocol-recover`, `round-protocol-step-3-head` and
+`round-protocol-steps-3-4` across the step shards.
 Round step 1 (`step-1-panel.md`) was the `round-protocol-tail` block until #3168
-edited it; it is one list item with no place for a sentinel inside it, so none
-of it stays frozen.
+edited it, so none of it stays frozen. An indented sentinel pair cuts step 3's
+narration paragraph out of the frozen text (#3169).
 
 **Everything outside those blocks is outside that proof** — new prose the gate
 does not check. That is the whole of `scope-block.md` (#1582's reviewer-path
 rule, which the gate guards only by asserting that no original line migrated into
-it), the whole of `step-1-panel.md`, the notes after each moved block, and
-every shard from `delta-rounds.md` on. Those rules had to correct or extend what a byte-frozen span says. Edit them
-knowing the byte check does not cover them.
+it), the whole of `step-1-panel.md`, step 3's narration paragraph, the notes
+after each moved block, and every shard from `delta-rounds.md` on. Those rules
+had to correct or extend what a byte-frozen span says. Edit them knowing the
+byte check does not cover them.

@@ -1,10 +1,12 @@
 <!-- Shard of reference/review-loop.md (#2055), read in its index's order:
      round steps 3–4: AWAITING_FIX (exit 20), the fix pass, and terminal statuses. -->
-<!-- The frozen chunk below continues the round protocol's numbered list at
-     item 3, so its numbering cannot restart at 1 here. -->
+<!-- The frozen chunks below continue the round protocol's numbered list at
+     item 3, so its numbering cannot restart at 1 here. Step 3's narration
+     paragraph sits between two indented sentinels and outside both chunks: #3169
+     edited it, and a column-0 sentinel inside the list item would end the list. -->
 <!-- markdownlint-disable MD029 -->
 
-<!-- moved: round-protocol-steps-3-4 -->
+<!-- moved: round-protocol-step-3-head -->
 3. **On `AWAITING_FIX` (exit 20)** — the round is over and the run continues.
 
    **The cadence, and it is an invariant, not a preference: a round's findings
@@ -90,19 +92,20 @@
    declares it against the whole story diff — which is what makes the dossier's
    claim true rather than merely well-formed.
 
+   <!-- /moved: round-protocol-step-3-head -->
+
    Otherwise blockers remain and budget is left:
    **narrate the round in the conversation** (round number; the
-   Critical/Warning/Suggestion counts — plus, on a promotion sub-loop round, the
-   `promoted` count and each `- promoted suggestion:` line; blockers found, new
-   vs carried;
+   Critical/Warning/Suggestion counts; blockers found, new vs carried;
    fixed-since-prior and the cumulative blocking trend from round 2 on; the
    dimensions they came from; what you fix next — the same block the loop
-   just appended to progress.md, which carries these where applicable, plus an
-   `- adjudicated re-raises dropped: N` line when the consolidator suppressed a
-   re-raise of an already-waived suggestion, #1434, and a `- by class:` row —
-   new_defect / incomplete_propagation / under_assertion, #1435 — whenever the
-   round's blockers are class-stamped, which is what says whether the round found
-   fresh problems or re-read the last fix pass's own edits).
+   just appended to progress.md, which carries these where applicable, plus a
+   `- by class:` row — new_defect / incomplete_propagation / under_assertion,
+   #1435 — whenever the round's blockers are class-stamped, which is what says
+   whether the round found fresh problems or re-read the last fix pass's own
+   edits).
+
+   <!-- moved: round-protocol-steps-3-4 -->
 
    **That row is this round's fix-pass trigger (#1496).** Sum the last two
    rounds' `- by class:` cells — the **literal** last two, the same window
@@ -288,8 +291,8 @@ fix-touched set as an input to the **residue decision**; it no longer is one.
 The residue terminal takes **two** conditions — 1 (the last two rounds are both
 zero-CRITICAL) and 3 (the declaring round ran as a full sweep). Condition 2
 could never fail: `scope-findings` already confines findings to the story diff.
-The fix-touched set still drives the per-blocker `class`, the `by class:` row
-and the waived-suggestion exemption. Only the residue predicate stopped reading it.
+The fix-touched set still drives the per-blocker `class` and the `by class:`
+row. Only the residue predicate stopped reading it.
 
 **Every fix pass also applies the loaded profile's fix-pass rule (#1805).**
 Step 3's fix pass sits inside the byte-frozen span, so this is recorded here:

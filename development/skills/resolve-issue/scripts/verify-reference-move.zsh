@@ -23,8 +23,9 @@
 # chunk moved verbatim", never as "nothing was lost". (Conservation is tracked
 # separately; see #1548.) Nor does it prove anything about text sitting BETWEEN
 # two chunks of a SPLIT span — the #1582 gap inside `round-protocol`, which since
-# #3168 runs on through the whole of round step 1 — which is verified by
-# nothing; see the manifest comment below.
+# #3168 runs on through the whole of round step 1, and the #3169 gap holding
+# step 3's narration paragraph — which is verified by nothing; see the manifest
+# comment below.
 #
 # Normalisation, stated so the claim is honest: leading and trailing BLANK or
 # WHITESPACE-ONLY lines are stripped from BOTH sides before comparison (they are
@@ -55,8 +56,9 @@
 #      vacuous rather than satisfied), the round-protocol head closer not
 #      appearing exactly once, in core.md, or the head's last anchor or
 #      round-protocol-step-2's first anchor no longer adjacent to round step 1 in
-#      the pinned commit (#1582, #3168), or a re-cut span's seam leaving an
-#      original line uncovered or out of order (#2055).
+#      the pinned commit (#1582, #3168), a re-cut span's seam leaving an
+#      original line uncovered or out of order (#2055), or a gapped seam whose
+#      gap is no longer exactly the paragraph it was opened for (#3169).
 #      Chunk differences and sweep failures are counted and reported separately
 #      — they are different defects — but both land here.
 #   2  usage error
@@ -195,6 +197,21 @@ fi
 # so the two are not adjacent in the pinned commit, and no CUT_GROUPS entry names
 # them any more.
 #
+# #3169 cut `round-protocol-steps-3-4` around ONE paragraph of round step 3, the
+# narration paragraph that begins `Otherwise blockers remain and budget is
+# left:`. Dropping the waived-suggestion carry edited it, and step 3 is one list
+# item of some 240 lines, so retiring the whole step (as #3168 did for step 1)
+# would have left all of it verified by nothing. The cut instead puts an
+# INDENTED sentinel pair at the paragraph boundaries inside the list item: an
+# HTML comment indented to the item's content column is part of the item, so
+# the list is unbroken, which a column-0 one is not (see the markdown note
+# above). `extract_chunk` and the stray-sentinel sweep therefore accept leading
+# blanks before a sentinel. The chunk before the paragraph is
+# `round-protocol-step-3-head`, and the one after it keeps the name
+# `round-protocol-steps-3-4`, so its column-0 closer, which other suites anchor
+# on, stays where it was. The paragraph between them is verified by nothing, and
+# the gapped-seam check below pins that gap to exactly that paragraph.
+#
 # One anchor that looks obvious is UNUSABLE, recorded so nobody re-derives it:
 # `   **How to wait** (this section) governs the wait — it is not restated here.`
 # occurs TWICE in the pinned pre-move SKILL.md, and `extract_range` starts at the
@@ -210,7 +227,9 @@ MANIFEST=(
 "
 "round-protocol-recover	review-loop/exit-2-stale-findings.md	   **Recover by cause, then re-invoke** — the round is not lost. One arm below	   dispatch \`findings_path\`) needs no digest tool and always applies.
 "
-"round-protocol-steps-3-4	review-loop/exit-20-awaiting-fix.md	3. **On \`AWAITING_FIX\` (exit 20)** — the round is over and the run continues.	   is how the two statements of it came to disagree once already.
+"round-protocol-step-3-head	review-loop/exit-20-awaiting-fix.md	3. **On \`AWAITING_FIX\` (exit 20)** — the round is over and the run continues.	   claim true rather than merely well-formed.
+"
+"round-protocol-steps-3-4	review-loop/exit-20-awaiting-fix.md	   **That row is this round's fix-pass trigger (#1496).** Sum the last two	   is how the two statements of it came to disagree once already.
 "
 "escalation-head	escalation.md	A bad escalation costs a human an afternoon; a good one costs two minutes. On	tell the human the opposite of what happened.
 "
@@ -243,13 +262,16 @@ extract_range() {
   ' <<< "$text"
 }
 
-# Extract the body between the sentinels of one chunk in a reference file.
+# Extract the body between the sentinels of one chunk in a reference file. A
+# sentinel may be indented with blanks (#3169, see the manifest comment): the
+# whole line, minus its leading blanks, must be the sentinel.
 extract_chunk() {
   local file="$1" name="$2"
   awk -v n="$name" '
-    $0 == "<!-- moved: " n " -->"  { inside = 1; next }
-    $0 == "<!-- /moved: " n " -->" { inside = 0; found = 1; exit }
-    inside                         { print }
+    { t = $0; sub(/^ +/, "", t) }
+    t == "<!-- moved: " n " -->"  { inside = 1; next }
+    t == "<!-- /moved: " n " -->" { inside = 0; found = 1; exit }
+    inside                        { print }
     END { if (!found) exit 3 }
   ' "$file"
 }
@@ -406,7 +428,9 @@ typeset -a sentinels stray dupes
 # sed/sort failure being reported as `(grep exit N)`, naming a command that
 # succeeded.
 typeset sentinel_hits sentinels_raw grep_rc
-sentinel_hits=$(grep -rhoE '^<!-- moved: .+ -->$' "$REF_DIR")
+# Leading blanks are allowed, as `extract_chunk` allows them (#3169): a sweep
+# that saw only column-0 openers would leave an indented chunk unverified.
+sentinel_hits=$(grep -rhoE '^ *<!-- moved: .+ -->$' "$REF_DIR")
 grep_rc=$?
 if (( grep_rc >= 2 )); then
   # COUNTED and continued, like every other sweep arm — not a mid-run `exit 1`.
@@ -418,7 +442,7 @@ if (( grep_rc >= 2 )); then
   (( sweep_failures++ ))
   sentinel_hits=""
 fi
-sentinels_raw=$(print -r -- "$sentinel_hits" | sed -E 's/^<!-- moved: (.*) -->$/\1/' | sort) || {
+sentinels_raw=$(print -r -- "$sentinel_hits" | sed -E 's/^ *<!-- moved: (.*) -->$/\1/' | sort) || {
   print -u2 -- "FAIL: could not normalise the sentinel sweep output"
   (( sweep_failures++ ))
   sentinels_raw=""
@@ -560,7 +584,10 @@ fi
 # A frozen span re-cut into chunks across several shards: the former
 # `round-protocol-tail`, cut into four, one per step shard (#2055), of which
 # #3168 retired the first (round step 1), leaving three; the retired tail ->
-# step-2 seam is replaced by the step-2 adjacency check above. The former
+# step-2 seam is replaced by the step-2 adjacency check above. #3169 cut the
+# last of them around a paragraph, so the group ends at
+# `round-protocol-step-3-head`, and its seam to `round-protocol-steps-3-4` is
+# the gapped seam checked after this loop. The former
 # `suggestion-promotion`, cut into five (#2057), left the manifest when #3121
 # deleted its shards. The former `interactive-extension`, cut into two across
 # reference/interactive/ (#2058), was a group too until #3121 took step 5 out of
@@ -581,7 +608,7 @@ fi
 # its chunks in source order. A later split that re-cuts a span appends its
 # group here.
 typeset -a CUT_GROUPS=(
-  "round-protocol-step-2 round-protocol-recover round-protocol-steps-3-4"
+  "round-protocol-step-2 round-protocol-recover round-protocol-step-3-head"
 )
 typeset -a CUT_NAMES=(${=CUT_GROUPS})
 typeset -A cut_first cut_last
@@ -626,6 +653,51 @@ for cgroup in "${CUT_GROUPS[@]}"; do
     fi
   done
 done
+
+# --- a gapped seam holds exactly the paragraph it was opened for (#3169) -----
+# `round-protocol-step-3-head` and `round-protocol-steps-3-4` are not adjacent:
+# step 3's narration paragraph sits between them, verified by nothing. The
+# hazard is the seam check's own: move the head's LAST anchor up, or the next
+# chunk's FIRST anchor down, and more original lines join the unverified gap with
+# every comparison green. So the non-blank lines between the two anchors in the
+# pinned commit must begin with GAP_FIRST and end with GAP_LAST, the first and
+# last lines of that paragraph. The pinned commit is immutable, so the gap moves
+# only when a manifest anchor does, and the anchors are read out of the
+# manifest, so the assertion moves with the edit it exists to catch. The two
+# constants are the paragraph's own bounds, which no manifest edit can move.
+typeset -r GAP_PREV=round-protocol-step-3-head GAP_NEXT=round-protocol-steps-3-4
+typeset -r GAP_FIRST='   Otherwise blockers remain and budget is left:'
+typeset -r GAP_LAST="   fresh problems or re-read the last fix pass's own edits)."
+typeset gap_prev_last="" gap_next_first="" gap_text
+for mrow in "${MANIFEST[@]}"; do
+  mrow="${mrow%$'\n'}"
+  typeset mrow_tabs="${mrow//[^$'\t']/}"
+  (( ${#mrow_tabs} >= 3 )) || continue
+  case "${mrow%%$'\t'*}" in
+    "$GAP_PREV") gap_prev_last="${${${mrow#*$'\t'}#*$'\t'}#*$'\t'}" ;;
+    "$GAP_NEXT") gap_next_first="${${mrow#*$'\t'}#*$'\t'}"; gap_next_first="${gap_next_first%%$'\t'*}" ;;
+  esac
+done
+if [[ -z "$gap_prev_last" || -z "$gap_next_first" ]]; then
+  print -u2 -- "FAIL: the manifest no longer declares both $GAP_PREV and $GAP_NEXT, so their gapped seam cannot be checked"
+  (( sweep_failures++ ))
+else
+  awk_rc=0
+  gap_text=$(awk -v h="$gap_prev_last" -v t="$gap_next_first" '
+    !seen && $0 == h { seen = 1; next }
+    seen && $0 == t  { done = 1; exit }
+    seen && $0 ~ /[^[:space:]]/ { print }
+    END { if (!seen || !done) exit 3 }
+  ' <<< "$pre") || awk_rc=$?
+  if (( awk_rc )); then
+    print -u2 -- "FAIL: the gapped seam $GAP_PREV → $GAP_NEXT is not in order in ${base}:${SKILL_REL} — last <<${gap_prev_last}>>, first <<${gap_next_first}>>"
+    (( sweep_failures++ ))
+  elif [[ "${gap_text%%$'\n'*}" != "$GAP_FIRST" || "${gap_text##*$'\n'}" != "$GAP_LAST" ]]; then
+    print -u2 -- "FAIL: the gapped seam $GAP_PREV → $GAP_NEXT no longer holds exactly its paragraph in ${base}:${SKILL_REL} — original lines between the two chunks:"
+    print -u2 -- "$gap_text"
+    (( sweep_failures++ ))
+  fi
+fi
 
 # An EMPTIED MANIFEST (a bad merge, a botched edit to the multi-line array
 # literal) would otherwise leave every counter at 0 and print "all 0 declared

@@ -527,8 +527,7 @@ _filing_path_mentions() {
 
 @test "#1571 the fix-touched capture and its class consumer are DELIBERATELY untouched" {
   # Removing the predicate's read is not a licence to delete the capture: the
-  # `class` stamp, the progress histogram and the waived-suggestion exemption all
-  # still depend on it. This is the guard against an over-eager cleanup.
+  # `class` stamp and the progress histogram still depend on it. This is the guard against an over-eager cleanup.
   local t; t="$(flat "$SCRIPTS/resolve-story-loop.zsh")"
   grep -q '_capture_fix_touched' <<< "$t" || {
     echo "the fix-touched capture is gone — the class stamp has no input"; return 1; }
