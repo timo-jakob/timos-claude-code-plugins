@@ -121,4 +121,6 @@ For each finding, report:
 
 - **CRITICAL:** Will cause crashes, data loss, or security issues in production
 - **WARNING:** Likely to cause incorrect behavior under certain conditions
-- **SUGGESTION:** Defensive improvement that prevents future bugs
+
+An observation below the blocking bar is not reported. `SUGGESTION` is reserved for a tool-verdict claim capped by
+the evidence rule above, the one lane of ARCHITECTURE.md *Terminating severity bars* this agent carries.

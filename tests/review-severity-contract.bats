@@ -522,3 +522,115 @@ go_format() {
   run -1 grep -qx '## Suggestions' <<<"$section"
   lacks "$section" 'W suggestions)'
 }
+
+# The Swift panel (#3167): the six evidence-rule reviewers report only what
+# blocks, and swift6-compliance, which carries no evidence rule, has no
+# SUGGESTION slot at all. go_format captures a reviewer's Reporting Format to
+# EOF, so test-reviewer's Reviewing thoroughness section is inside it.
+
+@test "#3167 the six Swift evidence-rule reviewers drop plain SUGGESTION and keep only their SUGGESTION lanes" {
+  local a f flat format n want
+  for a in bug-hunter code-quality performance-reviewer security-reviewer swift-resilience-reviewer test-reviewer; do
+    f="$REPO_ROOT/development-swift/agents/$a.md"
+    flat="$(flatten <"$f")"
+    format="$(go_format "$f")"
+    [ -n "$format" ]
+    lacks "$format" '**SUGGESTION:**'
+    lacks "$format" 'as a suggestion'
+    lacks "$format" 'as a `SUGGESTION`'
+    # Whole-file invariant: the word appears, in any case, only in its lanes
+    # (evidence rule, template title, severity-set line(s), the reserved-for
+    # sentence, and test-reviewer's scope-bounded follow-up). The count is of
+    # occurrences, not lines, so a new mention on an existing line moves it.
+    want=6
+    [ "$a" = test-reviewer ] && want=8
+    n="$(grep -oi suggestion "$f" | wc -l | tr -d ' ')"
+    [ "$n" -eq "$want" ]
+    contains "$format" 'An observation below the blocking bar is not reported.'
+    contains "$format" '### [CRITICAL|WARNING|SUGGESTION] Title'
+    contains "$format" 'decides: <the command that settles it> proposed-severity: CRITICAL|WARNING'
+    if [ "$a" = test-reviewer ]; then
+      contains "$format" '`SUGGESTION` is reserved for the two lanes of ARCHITECTURE.md *Terminating severity bars*: a tool-verdict claim capped by the evidence rule above, and a scope-bounded follow-up under *Scope-bounded severity* below.'
+      contains "$format" 'decides: <the command that settles it> proposed-severity: CRITICAL|WARNING — or, for a scope-bounded follow-up (*Scope-bounded severity* below), this one line appended to the **Description** field, with the severity set to SUGGESTION: follow-up: <the defect, in one line>'
+    else
+      contains "$format" '`SUGGESTION` is reserved for a tool-verdict claim capped by the evidence rule above, the one lane of ARCHITECTURE.md *Terminating severity bars* this agent carries.'
+      lacks "$flat" 'follow-up:'
+    fi
+  done
+}
+
+@test "#3167 swift6-compliance reports CRITICAL and WARNING only, and its migrate mode carries no SUGGESTION" {
+  local f="$REPO_ROOT/development-swift/agents/swift6-compliance.md" format
+  format="$(awk '/^## Reporting Format$/ { f = 1; next } f && /^## / { exit } f' "$f" | flatten)"
+  [ -n "$format" ]
+  contains "$format" '### [CRITICAL|WARNING] Title'
+  lacks "$format" 'SUGGESTION'
+  contains "$format" 'An observation below the blocking bar — a modernization opportunity with no compile failure under Swift 6 and no deprecated pattern behind it — is not reported.'
+  # the word is gone from the whole file, migrate mode included
+  run -1 grep -qi suggestion "$f"
+  grep -qx '## Migrate mode (#447)' "$f"
+}
+
+@test "#3167 swift-resilience-reviewer does not report a violation it cannot prove" {
+  local flat
+  flat="$(flatten <"$REPO_ROOT/development-swift/agents/swift-resilience-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'When a client type you cannot see might already supply the timeout or breaker, and you cannot name the failure, do not report it; do not assert a violation you cannot prove.'
+  lacks "$flat" 'drop to SUGGESTION'
+  lacks "$flat" 'A hardening improvement with no failure mode you can name.'
+}
+
+@test "#3167 swift security-reviewer does not report hardening with no attack path" {
+  local flat
+  flat="$(flatten <"$REPO_ROOT/development-swift/agents/security-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" '**WARNING:** Exploitable under specific conditions, or a defense-in-depth gap: a control the change removes or weakens. Hardening that only adds a new layer, with no attack path you can name, is below the bar and not reported.'
+  lacks "$flat" 'violates best practices'
+}
+
+@test "#3167 the Swift code-quality, performance and test reviewers do not report their named sub-bar items" {
+  local flat
+  flat="$(flatten <"$REPO_ROOT/development-swift/agents/code-quality.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'Style, idiom or tidiness alone — naming and API Design Guidelines conventions, abbreviations, magic numbers, missing documentation comments, a missing default parameter value, broader-than-needed access control, unused code or imports, commented-out code, a small repeated pattern, mixed coding or file-organization styles — is below the bar and not reported, unless it misleads a caller or harms maintainability at a cost you can name.'
+  flat="$(flatten <"$REPO_ROOT/development-swift/agents/performance-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'An allocation or micro-optimisation finding — a class where a struct would do, string interpolation, `filter` + `first` instead of `first(where:)`, an `any Protocol` existential, `AnyPublisher` type erasure — with no hot path or load condition you can name is speculation, below the bar and not reported.'
+  flat="$(flatten <"$REPO_ROOT/development-swift/agents/test-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'The structure, debuggability and framework checks above — assertion messages, `XCTAssertTrue` on a complex condition, Arrange-Act-Assert layout, test names, several behaviours in one test, duplicated setup, test grouping, a move from XCTest to Swift Testing, `@Test(arguments:)` or trait opportunities — are below the bar and not reported, unless you can name the regression or the flakiness they let through.'
+}
+
+@test "#3167 Swift test-reviewer's Scope-bounded severity reports the follow-up lane and keeps its three carve-outs" {
+  local flat
+  flat="$(flatten <"$REPO_ROOT/development-swift/agents/test-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'A finding blocks (CRITICAL/WARNING) only when its fix stays within the issue'"'"'s stated scope. A pre-existing defect that would block, but whose only correct fix expands the change beyond that scope, is reported at **SUGGESTION** with a Description line `follow-up: <the defect, in one line>`, and it never blocks a round. A plain out-of-diff observation below the bar is not reported.'
+  lacks "$flat" 'spin off a follow-up issue'
+  contains "$flat" 'Three carve-outs keep this from muzzling real blockers. **(1) Tests and coverage for the change under review are always in-scope**'
+  contains "$flat" '**(2) A defect the change under review *introduces* is always in-scope**'
+  contains "$flat" "**(3) When the issue's stated scope is not provided in your prompt**"
+}
+
+@test "#3167 the Swift panel carries no waived list and reports follow-ups and tool claims under their own headings" {
+  local panel="$REPO_ROOT/development-swift/skills/review/SKILL.md" section
+  [ -f "$panel" ]
+  run -1 grep -Fq -e 'Already waived' -- "$panel"
+  run -1 grep -Fq -e 'adjudicated_path' -- "$panel"
+  run -1 grep -Fq -e 'REVIEW_ADJUDICATED' -- "$panel"
+  run -1 grep -Fq -e '--adjudicated' -- "$panel"
+  run -1 grep -Fq -e 'carries the waived' -- "$panel"
+  run -1 grep -Fq -e 'what the human already waived' -- "$panel"
+  grep -Fq -e 'also carries `fix_verification_path`, and the reviewers must be told about it.' -- "$panel"
+  # the report template holds its own `## ` lines, so capture Step 3 up to
+  # Step 4 rather than stopping at the first of them
+  section="$(awk '/^## Step 3: Synthesize the Review/ { f = 1; next } /^## Step 4: / { f = 0 } f' "$panel")"
+  [ -n "$section" ]
+  grep -qx '## Suggested follow-ups' <<<"$section"
+  grep -qx '## Unverified tool claims' <<<"$section"
+  contains "$section" 'Only the SUGGESTION findings that carry a `follow-up:` line'
+  contains "$section" 'Only the SUGGESTION findings that carry `decides:` / `proposed-severity:` lines'
+  contains "$section" '(Y critical, Z warnings, W follow-ups, V tool claims)'
+  run -1 grep -qx '## Suggestions' <<<"$section"
+  lacks "$section" 'W suggestions)'
+}

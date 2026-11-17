@@ -130,4 +130,10 @@ For each finding, report:
 
 - **CRITICAL:** Memory leak, main thread hang, or issue causing visible user impact
 - **WARNING:** Measurable inefficiency that degrades performance under load
-- **SUGGESTION:** Optimization opportunity that improves resource usage
+
+An observation below the blocking bar is not reported. `SUGGESTION` is reserved for a tool-verdict claim capped by
+the evidence rule above, the one lane of ARCHITECTURE.md *Terminating severity bars* this agent carries.
+
+An allocation or micro-optimisation finding — a class where a struct would do, string interpolation, `filter` +
+`first` instead of `first(where:)`, an `any Protocol` existential, `AnyPublisher` type erasure — with no hot path or
+load condition you can name is speculation, below the bar and not reported.

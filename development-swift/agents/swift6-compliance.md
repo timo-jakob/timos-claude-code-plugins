@@ -72,7 +72,7 @@ features, and migration away from deprecated patterns.
 For each finding, report:
 
 ```text
-### [CRITICAL|WARNING|SUGGESTION] Title
+### [CRITICAL|WARNING] Title
 
 **File:** path/to/file.swift:lineNumber
 **Description:** What the compliance issue is, which Swift version introduced the modern alternative, and why adoption matters.
@@ -83,7 +83,9 @@ For each finding, report:
 
 - **CRITICAL:** Code that will fail to compile under Swift 6 strict concurrency or uses removed APIs
 - **WARNING:** Deprecated pattern with a clear modern replacement that should be adopted
-- **SUGGESTION:** Modernization opportunity that improves clarity, safety, or performance
+
+An observation below the blocking bar — a modernization opportunity with no compile failure under Swift 6 and no
+deprecated pattern behind it — is not reported.
 
 ## Migrate mode (#447)
 
