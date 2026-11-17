@@ -4824,8 +4824,9 @@ the whole of `reference/`**. The #1582 re-cut split `round-protocol` into a head
 and a tail to open a gap for the reviewer-path rule, and the text in that gap is
 verified by nothing: the gate proves only that no *original* line migrated into
 it, by asserting the two anchors stay adjacent in the pinned commit. Since #3168
-retired the tail, the gap runs on through the whole of round step 1, and the
-head's last anchor is held adjacent to step 1's first line instead. The
+retired the tail, the gap runs on through the whole of round step 1, and its
+two edges are held instead: the head's last anchor adjacent to step 1's first
+line, and step 2's first anchor adjacent to step 1's last. The
 carve-out is owed by the **shape of the claim**, not by which file the claim is
 about: it belongs wherever a statement would otherwise read as covering a
 gap-containing file **as a whole** — the `reference/review-loop.md` index's

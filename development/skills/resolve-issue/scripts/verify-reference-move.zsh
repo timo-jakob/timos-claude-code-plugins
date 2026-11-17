@@ -53,9 +53,10 @@
 #      sweep failed: an undeclared/duplicated sentinel, the sweep could not be
 #      RUN at all (#1588 — grep or its normalisation failed, so the invariant is
 #      vacuous rather than satisfied), the round-protocol head closer not
-#      appearing exactly once, in core.md, or the head's last anchor no longer
-#      adjacent to round step 1 in the pinned commit (#1582, #3168), or a re-cut span's
-#      seam leaving an original line uncovered or out of order (#2055).
+#      appearing exactly once, in core.md, or the head's last anchor or
+#      round-protocol-step-2's first anchor no longer adjacent to round step 1 in
+#      the pinned commit (#1582, #3168), or a re-cut span's seam leaving an
+#      original line uncovered or out of order (#2055).
 #      Chunk differences and sweep failures are counted and reported separately
 #      — they are different defects — but both land here.
 #   2  usage error
@@ -151,10 +152,9 @@ fi
 #
 # `round-protocol` is SPLIT into head + tail (#1582). The reviewer path rule had
 # to land in the round protocol, and the whole span was byte-frozen, so the span
-# was re-cut to open a gap for it. The gap holds ONLY new prose: the head ends at
-# `Each round:` and the tail resumes at step 1's own first line, so 224 + 788 of
-# the original 1 013 lines stay verified and the only original line in the gap is
-# the blank separator between them (which `strip_blanks` would discard anyway).
+# was re-cut to open a gap for it. Until #3168 the gap held ONLY new prose: the
+# head ends at `Each round:` and the tail resumed at step 1's own first line, so
+# the only original line in the gap was the blank separator between them.
 #
 # The cost is still real and is recorded rather than hidden: text sitting in that
 # gap is verified by NOTHING, so an edit to the new rule passes this gate in
@@ -166,9 +166,10 @@ fi
 # ONE numbered list item, so no column-0 sentinel can sit inside it (see the
 # markdown note below). No part of it could stay byte-frozen, so its row and
 # sentinels are gone and the whole of step 1 is verified by NOTHING. With no
-# tail anchor to pair with, the adjacency assertion now pairs the head's last
-# anchor with step 1's first line in the pinned commit (below), which still
-# stops original prose leaving the head's verified region unnoticed.
+# tail anchor to pair with, two adjacency assertions below guard the gap's two
+# edges in the pinned commit: the head's last anchor must sit next to step 1's
+# first line, and round-protocol-step-2's first anchor next to step 1's last
+# line, so no original prose leaves either neighbour's verified region unnoticed.
 #
 # The cut is where it is because of MARKDOWN, not preference. `extract_chunk`
 # matches a sentinel as a whole line at column 0, and a column-0 HTML comment
@@ -518,10 +519,48 @@ else
   fi
 fi
 
+# The same hazard on the gap's other edge: move round-protocol-step-2's FIRST
+# anchor down (with its opener) and step 2's opening lines leave the verified
+# region with every comparison green. Before #3168 the tail -> step-2 seam below
+# caught that; with the tail retired, step-2's first anchor is required to sit
+# directly below round step 1's last line in the pinned commit (the retired tail
+# row's last anchor), modulo blank lines. The step-2 anchor is read out of the
+# manifest, so the assertion moves with the edit it exists to catch.
+typeset -r STEP1_LAST='     Critical nobody reported.'
+typeset step2_first=""
+for mrow in "${MANIFEST[@]}"; do
+  mrow="${mrow%$'\n'}"
+  typeset mrow_tabs="${mrow//[^$'\t']/}"
+  (( ${#mrow_tabs} >= 3 )) || continue
+  [[ "${mrow%%$'\t'*}" == round-protocol-step-2 ]] || continue
+  step2_first="${${mrow#*$'\t'}#*$'\t'}"; step2_first="${step2_first%%$'\t'*}"
+done
+if [[ -z "$step2_first" ]]; then
+  print -u2 -- "FAIL: the manifest no longer declares round-protocol-step-2, so its first anchor cannot be checked"
+  (( sweep_failures++ ))
+else
+  awk_rc=0
+  between=$(awk -v h="$STEP1_LAST" -v t="$step2_first" '
+    !seen && $0 == h { seen = 1; next }
+    seen && $0 == t  { done = 1; exit }
+    seen && $0 ~ /[^[:space:]]/ { print }
+    END { if (!seen || !done) exit 3 }
+  ' <<< "$pre") || awk_rc=$?
+  if (( awk_rc )); then
+    print -u2 -- "FAIL: round step 1's last line and round-protocol-step-2's first anchor are not both present, in order, in ${base}:${SKILL_REL} — step-2-first <<${step2_first}>>"
+    (( sweep_failures++ ))
+  elif [[ -n "$between" ]]; then
+    print -u2 -- "FAIL: round-protocol-step-2's first anchor is no longer adjacent to round step 1 in ${base}:${SKILL_REL} — original prose now sits between them, outside every verified chunk:"
+    print -u2 -- "$between"
+    (( sweep_failures++ ))
+  fi
+fi
+
 # --- each re-cut span covers its source with no gap and no overlap -----------
 # A frozen span re-cut into chunks across several shards: the former
 # `round-protocol-tail`, cut into four, one per step shard (#2055), of which
-# #3168 retired the first (round step 1), leaving three. The former
+# #3168 retired the first (round step 1), leaving three; the retired tail ->
+# step-2 seam is replaced by the step-2 adjacency check above. The former
 # `suggestion-promotion`, cut into five (#2057), left the manifest when #3121
 # deleted its shards. The former `interactive-extension`, cut into two across
 # reference/interactive/ (#2058), was a group too until #3121 took step 5 out of

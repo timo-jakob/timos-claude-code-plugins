@@ -834,7 +834,7 @@ PY
   [ "$status" -ne 0 ]
 }
 
-@test "#1582 the unverified gap holds NEW prose only — the head's last anchor stays adjacent to step 1" {
+@test "#1582 the unverified gap starts where the head ends — the head's last anchor stays adjacent to step 1" {
   # What the split actually promises is not a gap SIZE but that no ORIGINAL
   # conductor line entered the gap: in the pre-move file the head's last anchor
   # and the tail's first anchor are adjacent modulo blank lines, so everything
@@ -1393,5 +1393,33 @@ _mutate_anchor() {
   run zsh "$mutant" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
   [ "$status" -eq 1 ]
   contains "$stderr$output" "are not both present, in order"
+  lacks "$stderr$output" "no longer adjacent"
+}
+
+@test "#3168 the step-2 adjacency invariant FIRES when step 2's first anchor is moved down" {
+  # The gap's other edge: moving round-protocol-step-2's first anchor down
+  # strands step 2's opening lines outside every verified chunk.
+  _require_pre_move_commit
+  local mutant="$BATS_TEST_TMPDIR/verify-step2-moved.zsh"
+  sed 's|step-2-invocation.md	2\. \*\*One loop invocation\.\*\*	|step-2-invocation.md	     [--findings-tree <T>]	|' \
+    "$VERIFY" > "$mutant"
+  run -0 grep -qF 'step-2-invocation.md	     [--findings-tree <T>]	' "$mutant"
+
+  run zsh "$mutant" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
+  [ "$status" -eq 1 ]
+  contains "$stderr$output" "round-protocol-step-2's first anchor is no longer adjacent to round step 1"
+  contains "$stderr$output" "2. **One loop invocation.**"
+}
+
+@test "#3168 the step-2 adjacency invariant FAILS when round step 1's last line is not in the pinned commit" {
+  _require_pre_move_commit
+  local mutant="$BATS_TEST_TMPDIR/verify-step1-last-missing.zsh"
+  sed "s|^typeset -r STEP1_LAST=.*\$|typeset -r STEP1_LAST='no such line in the pinned commit'|" \
+    "$VERIFY" > "$mutant"
+  run -0 grep -qxF "typeset -r STEP1_LAST='no such line in the pinned commit'" "$mutant"
+
+  run zsh "$mutant" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
+  [ "$status" -eq 1 ]
+  contains "$stderr$output" "round step 1's last line and round-protocol-step-2's first anchor are not both present, in order"
   lacks "$stderr$output" "no longer adjacent"
 }

@@ -1070,3 +1070,17 @@ _outside_moved_spans() {  # $1 = file
   flat="$(tr '\n' ' ' < "$d/briefs/panel.md" | tr -s ' ')"
   printf '%s' "$flat" | grep -Fq -e 'From round 2 on, add `--prior-tree <delta_base>` and `--fix-verification <work_dir>/verify-<round>.json`.'
 }
+
+@test "#3168 round step 1's rules stay pinned now that no byte gate freezes them" {
+  local flat
+  flat="$(tr '\n' ' ' < "$REPO_ROOT/development/skills/resolve-issue/reference/review-loop/step-1-panel.md" | tr -s ' ')"
+  printf '%s' "$flat" | grep -Fq -e '**A non-zero `plan` exit is never a scope.**'
+  printf '%s' "$flat" | grep -Fq -e '**exit 2** is your own malformed invocation'
+  printf '%s' "$flat" | grep -Fq -e '**exit 1** is an internal failure'
+  printf '%s' "$flat" | grep -Fq -e '**exit 3** prints a **typed error object** on stdout'
+  printf '%s' "$flat" | grep -Fq -e '**Pass `--final` in exactly two cases, and never otherwise:**'
+  printf '%s' "$flat" | grep -Fq -e '**Never synthesize a prior tree** — computing one from the current tree yields an empty delta and a panel that reviews nothing.'
+  printf '%s' "$flat" | grep -Fq -e '**Read the carry before you plan ANY round ≥ 2**, not only when the delta turns out to be empty.'
+  printf '%s' "$flat" | grep -Fq -e '**A `"full"` plan with `scope_empty: true` is not a round to review either, and it is a different problem.**'
+  printf '%s' "$flat" | grep -Fq -e '**A `"delta"` plan with `scope_empty: true` is not a round to review.**'
+}
