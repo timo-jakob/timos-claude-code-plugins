@@ -138,7 +138,7 @@ jobs:
 
       # --- GO-START --------------------------------------------------------
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: "stable"
       # -race is the blessed default: Go's race detector is the primary defence
@@ -179,7 +179,7 @@ jobs:
 
       # --- JAVA-START ------------------------------------------------------
       - name: Setup JDK
-        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: "temurin"
           java-version: "{{JAVA_VERSION}}"
@@ -327,7 +327,7 @@ jobs:
         # The 40-hex commit pin trips semgrep's SonarQube-docs-API-key
         # detector; it's a git SHA, not a credential.
         # nosemgrep: generic.secrets.security.detected-sonarqube-docs-api-key.detected-sonarqube-docs-api-key
-        uses: SonarSource/sonarqube-scan-action@e805d875275f728fac1885b413934be6d7c63f65 # v8.4.1
+        uses: SonarSource/sonarqube-scan-action@59202af334b4ba7b5db01b701b8e79f8b3bef0f4 # v8.5
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: https://sonarcloud.io
@@ -641,7 +641,7 @@ jobs:
             type=semver,pattern={{major}}
 
       - name: Login to GHCR
-        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -745,7 +745,7 @@ jobs:
       # pre-commit builds the golangci-lint hook with the `go` on PATH, and
       # golangci-lint refuses a module whose go.mod targets a newer Go than it
       # was built with — so build it with go.mod's Go, not the runner's (#2621).
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
       # pre-commit/action keys its hook cache on .pre-commit-config.yaml alone,
