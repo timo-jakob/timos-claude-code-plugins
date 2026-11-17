@@ -6,7 +6,6 @@ subagent dispatch (#2113).** A `round-panel`, `round-fix`, `round-decide` or
 `round-risk` dispatch that launched in the background is waited on in-turn, as
 *A background round dispatch* (Round subagents) says — not by ending the turn.
 
-<!-- moved: round-protocol-tail -->
 1. **Review panel, in-session.** Get the dispatch plan (`review-dispatch.zsh
    plan`, §#560) and spawn the reviewers of the skill it names in
    `review_skill` via the **Agent tool** (one agent per dimension, visible to
@@ -17,10 +16,9 @@ subagent dispatch (#2113).** A `round-panel`, `round-fix`, `round-decide` or
    **How to wait** (this section) governs the wait — it is not restated here.
 
    **From round 2 on, `plan` needs flags — and it refuses a round ≥ 2 that
-   names neither `--prior-tree` nor `--final` (#1434).** The two carry flags are
-   optional to the parser, but they are not alike. `--adjudicated` is genuinely
-   optional and a `null` path is benign. Omitting `--fix-verification` on a
-   round ≥ 2 is **not**: the descriptor reports a `null` path and every panel
+   names neither `--prior-tree` nor `--final` (#1434).** The carry flag is
+   optional to the parser, but omitting `--fix-verification` on a
+   round ≥ 2 is **not** harmless: the descriptor reports a `null` path and every panel
    then refuses the round outright — writing no findings file and naming the
    flag — so the omission costs a full panel run before the round can be
    re-planned.
@@ -40,15 +38,14 @@ subagent dispatch (#2113).** A `round-panel`, `round-fix`, `round-decide` or
      --repo <repo> --base <base> --round <R> \
      --prior-tree "$(cat <work-dir>/tree-$((R-1)).txt)" \
      [--final] \
-     --fix-verification <work-dir>/verify-<R>.json \
-     --adjudicated <work-dir>/adjudicated.json
+     --fix-verification <work-dir>/verify-<R>.json
    ```
 
-   The work-dir files above are written **by the loop**. Three are **normally**
+   The work-dir files above are written **by the loop**. Two are **normally**
    on disk
    before every round ≥ 2: `tree-<N>.txt` (the working-tree identity round N's
-   reviewers saw), `verify-<N>.json` (round N-1's blockers, written at the end
-   of round N-1) and `adjudicated.json`. The fourth, `.closing-sweep`, is
+   reviewers saw) and `verify-<N>.json` (round N-1's blockers, written at the end
+   of round N-1). The third, `.closing-sweep`, is
    absent until a zero-blocker delta round promotes a sweep — and then
    **persists for the rest of the run**, since a sweep that finds blockers does
    not end it. So read its **content**, never its mere existence: it means
@@ -186,8 +183,8 @@ subagent dispatch (#2113).** A `round-panel`, `round-fix`, `round-decide` or
 
    - **`fix_verification_path`** — the previous round's blockers. Each
      reviewer's first job is to confirm those fixes actually landed, before
-     looking for anything new. **Say what to do when one did not:** a fix that
-     did not land, or that the reviewer cannot confirm landed, must be
+     looking for anything new. **Say what to do when one did not:** a fix the
+     reviewer observed did not land must be
      **re-raised at its original severity**, citing the carried entry, *even
      when its file is outside this round's delta* — a delta round cannot
      re-derive it, so silence here converges the run with the blocker unfixed.
@@ -203,21 +200,3 @@ subagent dispatch (#2113).** A `round-panel`, `round-fix`, `round-decide` or
      contributes zero confirmations — it does **not** fail the round on its own,
      since the entry may be outside its dimension. What fails the round is a
      carried entry that no reviewer confirmed **and** no reviewer re-raised.
-   - **`adjudicated_path`** — suggestions earlier rounds already surfaced and
-     the human already waived. **Do not re-raise them as Suggestions — except
-     in a file the PREVIOUS ROUND'S FIX PASS touched**, where new code has just
-     been written and a same-titled observation may be genuinely new. Key it on
-     the fix pass, not on the round's scope: on a **delta** round the two are
-     the same set, and on a **closing full sweep that NO fix pass
-     preceded** (the zero-blocker promotion) the fix-touched set is empty — so
-     there, withhold every waived suggestion. On a sweep the RESIDUE promotion
-     earned, a fix pass did run, so the exemption applies as on any round.
-     That exemption is an *instruction*, not a footnote: in
-     step mode the panel reads `adjudicated.json` as the previous round left it,
-     before the loop drops the entries whose file the fix pass touched, so a
-     reviewer that withholds one there kills a finding nothing downstream can
-     restore. And if one is genuinely *blocking* on this round's code, raise it
-     at `CRITICAL`/`WARNING` and say what changed — a re-raise above Suggestion
-     level is never suppressed, and withholding it would converge the run with a
-     Critical nobody reported.
-<!-- /moved: round-protocol-tail -->

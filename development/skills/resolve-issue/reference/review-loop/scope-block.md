@@ -2,7 +2,7 @@
      the #1582 reviewer scope block, descriptor confirmation and antecedent probe. -->
 
 **Build each reviewer's scope block from the plan's `scope_abs[]`, never from
-`changed_files` alone (#1582).** This governs step 1 below, whose frozen text
+`changed_files` alone (#1582).** This governs step 1 below, whose text
 says only "scoped to the plan's `changed_files`" — that names the right SET,
 and this names the tree those names resolve against. The set is unchanged: apply
 the **same `--work-dir` subtraction** step 1 states, to the absolute list, by
@@ -37,7 +37,7 @@ cwd test gets backwards:
 - **`worktree_root` is NOT the implementation worktree** → re-plan against the
   implementation worktree. Re-run the **same** `plan` invocation with only
   `--repo` changed — every other flag unchanged (`--round`, `--prior-tree`,
-  `--fix-verification`, `--adjudicated`, and `--final` where it applied). A bare
+  `--fix-verification`, and `--final` where it applied). A bare
   `plan --repo <worktree>` defaults `--round` to 1, so `scope_mode` comes back
   `"full"` at exit 0 with no error anywhere — the round ≥ 2 guard cannot fire on
   a round of 1 — and the panel reviews the whole story diff on an iteration

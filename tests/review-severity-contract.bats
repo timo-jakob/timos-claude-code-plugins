@@ -114,12 +114,12 @@ consolidator_bullet() {
   lacks "$flat" 'every one the panel raised has been **waived**'
 }
 
-@test "#3157 the per-panel adjudicated_path needle is retired; the panel-duties one stays" {
+@test "#3157 the per-panel adjudicated_path needle is retired; #3168 retired the panel-duties one" {
   local f="$REPO_ROOT/tests/review-loop-budget-consistency.bats" n
   [ -f "$f" ]
-  # the ARCHITECTURE.md panel-duties needle stays until #3168
-  n="$(grep -cF "grep_site \"\$ARCH_PANEL_DUTIES\" 'adjudicated_path'" "$f")"
-  [ "$n" -eq 1 ]
+  # #3168 dropped the ARCHITECTURE.md panel-duties needle with the duty
+  n="$(grep -cF "grep_site \"\$ARCH_PANEL_DUTIES\" 'adjudicated_path'" "$f" || true)"
+  [ "$n" -eq 0 ]
   # the per-panel prompt-line needle is gone
   n="$(grep -cF "grep_site \"\$REPO_ROOT/\$panel\" 'adjudicated_path'" "$f" || true)"
   [ "$n" -eq 0 ]

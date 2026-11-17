@@ -51,13 +51,11 @@
 # report; the empty-chunk refusal; a missing reference file; a chunk whose
 # sentinel PAIR is gone (`no <!-- moved: NAME --> block`); the stray-sentinel
 # sweep including a digit-bearing name; the duplicate-sentinel check; the
-# separate reporting of chunk failures vs sentinel problems; and (#1582) the
-# split-span sweep arms it drives — a split sentinel in the WRONG SHARD (the
-# halves-out-of-order case until #2055 split review-loop.md), a split sentinel
-# MISSING, and a split sentinel DUPLICATED (the last of which the stray sweep
-# cannot see, since it greps only the opening form) — and (#2055) both arms of
-# the tail re-cut's SEAM check, an anchor that leaves original lines uncovered
-# and seam anchors out of order — plus the inherited
+# separate reporting of chunk failures vs sentinel problems; and (#1582, #3168)
+# the head-closer arms it drives — the closer in the WRONG SHARD, MISSING, and
+# DUPLICATED (the last of which the stray sweep cannot see, since it greps only
+# the opening form) — and (#2055) both arms of the re-cut's SEAM check, an anchor
+# that leaves original lines uncovered and seam anchors out of order — plus the inherited
 # GIT_DIR/GIT_WORK_TREE scrub, driven under both names together and under
 # GIT_DIR alone; and (#1588) BOTH halves of the malformed-manifest-row guard —
 # a row whose REF_FILE field is removed (too few fields, refused), and a row
@@ -83,10 +81,11 @@
 # read their presence in the `unset` as tested. The `review-dispatch.zsh` twin
 # runs work-tree-sensitive commands, so its GIT_WORK_TREE arm does discriminate.
 #
-# The #1582 split-anchor ADJACENCY arm is driven too, in both directions — an
-# anchor MOVED INWARD (which migrates original conductor prose into the
-# unverified gap while every per-chunk byte comparison still passes) and a split
-# row REMOVED from the manifest. Both use a `sed`-mutated copy of the script,
+# The #1582 ADJACENCY arm is driven too, in both directions — the head's last
+# anchor MOVED INWARD (which migrates original conductor prose out of the
+# verified head) and the head row REMOVED from the manifest. Since #3168 retired
+# the tail, the head's last anchor is paired with round step 1's first line
+# rather than with a tail anchor. Both use a `sed`-mutated copy of the script,
 # because the anchors are read out of the MANIFEST: an earlier cut hardcoded them
 # as literals and compared them against the pinned, immutable `$pre`, which made
 # the whole assertion a constant that could never fire on the one edit it exists
@@ -122,14 +121,14 @@
 #     reads it anyway), or a mutated copy. Without them a failed or partial walk
 #     leaves the undeclared/duplicated-sentinel invariant vacuous rather than
 #     satisfied — it passes by having stopped looking.
-#   * two arms of the split-span ADJACENCY block: `FAIL: the split anchors named
-#     by the manifest are not both present in <base>:<path>` (its `awk_rc`
-#     capture — the anchor-moved-inward case rewrites the head anchor to a line
-#     that IS present in the pinned commit, so that mutant reaches the
+#   * two arms of the ADJACENCY block: `FAIL: the head's last anchor and round
+#     step 1's first line are not both present` (its `awk_rc` capture — the
+#     anchor-moved-inward case rewrites the head anchor to a line that IS
+#     present in the pinned commit, so that mutant reaches the
 #     `no longer adjacent` arm instead and never this one), and the
 #     `(( ${#mrow_tabs} >= 3 )) || continue` malformed-row skip #1588 added
-#     there (both malformed-row mutants corrupt a row this block's `case`
-#     ignores). Deleting the `awk_rc` capture is the costly one: an `awk` exiting
+#     there (both malformed-row mutants corrupt a row other than the head's).
+#     Deleting the `awk_rc` capture is the costly one: an `awk` exiting
 #     3 then leaves `between` empty, the `[[ -n "$between" ]]` arm passes, and
 #     the adjacency invariant reports success having located neither anchor.
 # Every one of them is worth driving; none is driven here, and this block is the
@@ -208,7 +207,8 @@ _require_pre_move_commit() {
 # whole-file greps, so the entire reviewer-path rule could be relocated BELOW
 # the protocol it governs — out of the unverified gap and past step 1 — with
 # every one of them still matching. Bracketing a representative needle between
-# the head-close and tail-open sentinels is what pins it in place.
+# the head-close sentinel and round step 1's first line is what pins it in place
+# (the tail-open sentinel until #3168 retired the tail).
 # `-x` matches the needle as a WHOLE LINE. The two sentinels need it — not
 # because of anything in THIS file, but because of the files being grepped:
 # review-loop prose has quoted the sentinels inline inside backticks, in the
@@ -242,14 +242,15 @@ _gap_line() {  # [-x] $1 = file, $2 = fixed-string needle
 # Since #2055 split review-loop.md into shards, the gap spans THREE files in
 # read order: whatever follows the head-close in `core.md`, the whole of
 # `scope-block.md` (which must carry no sentinel at all — it is gap, not chunk),
-# and whatever precedes the tail-open in `step-1-panel.md`. The concatenation
-# is the gap the single-file version bracketed.
+# and whatever precedes round step 1's first line in `step-1-panel.md` (the
+# tail-open sentinel until #3168). Step 1 itself is unverified too since then,
+# but it is the protocol, not the gap prose these needles pin, so it stays out.
 _gap_text() {  # $1 = the reference/review-loop/ directory
   [ "$#" -eq 1 ] || { printf '_gap_text: needs the review-loop shard directory\n' >&2; return 2; }
   local core="$1/core.md" scope="$1/scope-block.md" step1="$1/step-1-panel.md"
   local hc to
   hc="$(_gap_line -x "$core" '<!-- /moved: round-protocol-head -->')" || return 1
-  to="$(_gap_line -x "$step1" '<!-- moved: round-protocol-tail -->')" || return 1
+  to="$(_gap_line -x "$step1" '1. **Review panel, in-session.** Get the dispatch plan (`review-dispatch.zsh')" || return 1
   # The middle shard is gap ONLY if no chunk lives in it: a sentinel there would
   # make part of the "gap" byte-verified text, and the needles below would then
   # prove nothing about the unverified prose.
@@ -257,11 +258,11 @@ _gap_text() {  # $1 = the reference/review-loop/ directory
     printf '_gap_text: %s carries a moved sentinel, so it is not gap prose\n' "$scope" >&2
     return 1
   fi
-  # Greater than ONE, not merely positive: with the tail-open on line 1 the
-  # `sed` range `1,0p` selects exactly ONE line — the tail sentinel itself — and
-  # every caller's `[ -n "$flat" ]` would pass over text that is not gap.
+  # Greater than ONE, not merely positive: with step 1 on line 1 the `sed`
+  # range `1,0p` selects exactly ONE line — step 1's own first line — and every
+  # caller's `[ -n "$flat" ]` would pass over text that is not gap.
   [ "$to" -gt 1 ] || {
-    printf '_gap_text: the tail opener is the first line of %s\n' "$step1" >&2
+    printf '_gap_text: round step 1 is the first line of %s\n' "$step1" >&2
     return 1
   }
   # The blockquote marker is stripped while the text is still LINE-ORIENTED, and
@@ -336,16 +337,16 @@ _gap_text() {  # $1 = the reference/review-loop/ directory
 
 # --- the happy path, and that it is not vacuous ------------------------------
 
-@test "#1547 the real tree verifies, reporting all eleven declared chunks" {
+@test "#1547 the real tree verifies, reporting all ten declared chunks" {
   _require_pre_move_commit
   run -0 zsh "$VERIFY" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
-  contains "$output" "all 11 declared chunks are byte-identical"
+  contains "$output" "all 10 declared chunks are byte-identical"
 }
 
 @test "#1547 --quiet suppresses the ok lines and the summary, leaving stdout empty" {
   # `--quiet` is what CI and the conductor invoke, and every other invocation in
   # the tree — here and in resolve-issue-conductor-budget.bats — reads only the
-  # status. So `--quiet) quiet=0 ;;` would make the flag a no-op, print eleven
+  # status. So `--quiet) quiet=0 ;;` would make the flag a no-op, print ten
   # `ok` lines and the summary on every quiet run, and no test would notice.
   # Paired with the case above, which pins that they ARE printed without it.
   _require_pre_move_commit
@@ -370,7 +371,7 @@ _gap_text() {  # $1 = the reference/review-loop/ directory
   _require_pre_move_commit
   cd "$BATS_TEST_TMPDIR"
   run -0 zsh "$VERIFY" --base "$PRE_MOVE_SHA"
-  contains "$output" "all 11 declared chunks are byte-identical"
+  contains "$output" "all 10 declared chunks are byte-identical"
 }
 
 # --- per-chunk failures ------------------------------------------------------
@@ -564,10 +565,10 @@ PY
   printf '%s' "$flat" | grep -qF -- '`changed_files` alone (#1582)'
   # It names the frozen instruction it governs. Anchored on the NEW sentence, not
   # on the quoted fragment: `scoped to the plan's `changed_files`` also occurs
-  # inside the byte-frozen tail chunk, where it can never be removed — so a
-  # whole-file grep for it can only ever match and would prove nothing. Grepping
-  # the gap alone removes that hazard outright: the tail chunk is not in it.
-  printf '%s' "$flat" | grep -qF -- 'This governs step 1 below, whose frozen text'
+  # in step 1 itself (the byte-frozen tail chunk until #3168) — so a whole-file
+  # grep for it would match there and prove nothing. Grepping the gap alone
+  # removes that hazard outright: step 1 is not in it.
+  printf '%s' "$flat" | grep -qF -- 'This governs step 1 below, whose text says only'
 }
 
 @test "#1582 BOTH forms of the verbatim reviewer sentence are stated" {
@@ -776,30 +777,29 @@ PY
   printf '%s' "$flat" | grep -qF -- 'it is immune on full rounds only'
 }
 
-@test "#1582 the round-protocol span is re-cut into head + tail, and the old name is gone" {
+@test "#1582 the round-protocol span is re-cut, its tail retired by #3168, and the old name is gone" {
   local v="$REPO_ROOT/development/skills/resolve-issue/scripts/verify-reference-move.zsh"
   local ref="$REPO_ROOT/development/skills/resolve-issue/reference"
 
-  # manifest: the head row and the tail row, each naming the SHARD it lives in
-  # since #2055 split review-loop.md, and no surviving `round-protocol` row.
-  # The row test is anchored on the TAB that follows the name, so
-  # `round-protocol-head` cannot satisfy a search for `round-protocol`.
+  # manifest: the head row, naming the SHARD it lives in since #2055 split
+  # review-loop.md, no tail row since #3168 retired it, and no surviving
+  # `round-protocol` row. The row test is anchored on the TAB that follows the
+  # name, so `round-protocol-head` cannot satisfy a search for `round-protocol`.
   grep -qF -- "\"round-protocol-head	review-loop/core.md	" "$v"
-  grep -qF -- "\"round-protocol-tail	review-loop/step-1-panel.md	" "$v"
+  run grep -qF -- "\"round-protocol-tail	" "$v"
+  [ "$status" -ne 0 ]
   run grep -qF -- "\"round-protocol	" "$v"
   [ "$status" -ne 0 ]
 
-  # The ANCHORS, in full — not just the row prefixes. The gap is defined entirely
-  # by the head's LAST_LINE and the tail's FIRST_LINE, so pinning only the
-  # prefixes would let both anchors be moved (shrinking a chunk and silently
-  # enlarging the unverified gap) with every assertion here still green.
+  # The ANCHORS, in full — not just the row prefixes. The head's LAST_LINE bounds
+  # the verified head, so pinning only the prefix would let it be moved
+  # (shrinking the chunk) with every assertion here still green.
   grep -qF -- "	**The round boundary is concurrent — one minted tree, two readers (#1497).**	Each round:" "$v"
-  # #2055 re-cut the tail into four chunks (tail, step-2, recover, steps-3-4),
-  # so the tail row's FIRST anchor still opens the old tail span and the
-  # steps-3-4 row's LAST anchor is the old tail's end — the outer bounds of the
-  # former single tail, pinned in full. The seams between the four are the
-  # script's own seam check's job, driven by the two seam cases below.
-  grep -qF -- "	1. **Review panel, in-session.** Get the dispatch plan (\\\`review-dispatch.zsh	     Critical nobody reported." "$v"
+  # #2055 re-cut the tail into four chunks (tail, step-2, recover, steps-3-4) and
+  # #3168 retired the first, so step-2's FIRST anchor now opens what is left of
+  # the old tail span and the steps-3-4 row's LAST anchor is its end — pinned in
+  # full. The seams between the three are the script's own seam check's job.
+  grep -qF -- "\"round-protocol-step-2	review-loop/step-2-invocation.md	2. **One loop invocation.**	" "$v"
   grep -qF -- "	   is how the two statements of it came to disagree once already." "$v"
   grep -qF -- "\"round-protocol-steps-3-4	review-loop/exit-20-awaiting-fix.md	" "$v"
 
@@ -808,7 +808,7 @@ PY
   # names — `extract_chunk` and the stray-sentinel sweep both match at column 0,
   # so an indented one would be invisible.
   local n shard
-  for n in round-protocol-head:core.md round-protocol-tail:step-1-panel.md \
+  for n in round-protocol-head:core.md \
            round-protocol-step-2:step-2-invocation.md \
            round-protocol-recover:exit-2-stale-findings.md \
            round-protocol-steps-3-4:exit-20-awaiting-fix.md; do
@@ -818,14 +818,28 @@ PY
     [ "$(grep -cxF -- "<!-- moved: $n -->" "$ref/review-loop/$shard")" -eq 1 ]
     [ "$(grep -cxF -- "<!-- /moved: $n -->" "$ref/review-loop/$shard")" -eq 1 ]
   done
-  # ...and neither old sentinel survives anywhere in reference/
+  # ...and neither old sentinel survives anywhere in reference/, nor the tail's
+  # #3168 retired: step 1 carries no moved: sentinel at all
+  run grep -rqE -- '^<!-- /?moved: round-protocol-tail -->$' "$ref"
+  [ "$status" -ne 0 ]
+  run grep -qE -- '^<!-- /?moved: ' "$ref/review-loop/step-1-panel.md"
+  [ "$status" -ne 0 ]
+  # ...and the index's preamble says step 1 is outside the byte proof now
+  local flat_idx
+  flat_idx="$(tr '\n' ' ' < "$ref/review-loop.md" | tr -s ' ')"
+  contains "$flat_idx" 'the whole of `step-1-panel.md`, the notes after each moved block'
+  contains "$flat_idx" 'cut into four such blocks: `round-protocol-head` in `core.md`, then `round-protocol-step-2`'
+  # ...nor does a CUT_GROUPS entry still name it
+  grep -qF -- '  "round-protocol-step-2 round-protocol-recover round-protocol-steps-3-4"' "$v"
+  run grep -qE -- '^  "round-protocol-tail ' "$v"
+  [ "$status" -ne 0 ]
   run grep -rxF -- '<!-- moved: round-protocol -->' "$ref"
   [ "$status" -ne 0 ]
   run grep -rxF -- '<!-- /moved: round-protocol -->' "$ref"
   [ "$status" -ne 0 ]
 }
 
-@test "#1582 the unverified gap holds NEW prose only — the split anchors stay adjacent" {
+@test "#1582 the unverified gap holds NEW prose only — the head's last anchor stays adjacent to step 1" {
   # What the split actually promises is not a gap SIZE but that no ORIGINAL
   # conductor line entered the gap: in the pre-move file the head's last anchor
   # and the tail's first anchor are adjacent modulo blank lines, so everything
@@ -849,9 +863,10 @@ PY
   step1_at="$(_gap_line "$idx" '3. `reference/review-loop/step-1-panel.md`')"
   [ "$core_at" -lt "$scope_at" ]
   [ "$scope_at" -lt "$step1_at" ]
-  # ...and each bounding sentinel is in its own shard
+  # ...and each bound is in its own shard: the head's closer, and round step 1's
+  # first line (the tail-open sentinel until #3168 retired the tail)
   _gap_line -x "$f/core.md" '<!-- /moved: round-protocol-head -->' >/dev/null
-  _gap_line -x "$f/step-1-panel.md" '<!-- moved: round-protocol-tail -->' >/dev/null
+  _gap_line -x "$f/step-1-panel.md" '1. **Review panel, in-session.** Get the dispatch plan (`review-dispatch.zsh' >/dev/null
   # non-vacuous: the gap really does hold the rule
   local flat
   flat="$(_gap_text "$f")"
@@ -873,14 +888,14 @@ PY
   # really ENFORCES the invariant rather than merely documenting it is driven
   # behaviourally, by the two cases `#1582 the adjacency invariant FIRES when a
   # manifest anchor is moved inward` and `#1582 the adjacency invariant FIRES
-  # when the manifest stops declaring a split row` — each running a mutated copy
+  # when the manifest stops declaring the head row` — each running a mutated copy
   # and asserting it exits 1. A `grep` for the sentence was redundant beside
   # those, not merely weak: it red on a harmless reword and passed on a gutted
   # check, which is backwards on both counts.
 }
 
-@test "#1582 the split still verifies byte-identical, at eleven chunks" {
-  # Eleven since #3146 deleted the five suggestion-promotion chunks with their
+@test "#1582 the split still verifies byte-identical, at ten chunks" {
+  # Ten since #3168 retired the round-protocol tail; eleven after #3146 deleted the five suggestion-promotion chunks with their
   # shards; sixteen after #3121 re-cut the interactive-extension intro and its steps 2-4
   # apart; fifteen after #2601 deleted the residue branch's last chunk with its shard;
   # sixteen after #2600 deleted the residue branch's three step chunks with their
@@ -891,13 +906,12 @@ PY
   # tail into four.
   _require_pre_move_commit
   run -0 zsh "$VERIFY" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
-  contains "$output" "all 11 declared chunks are byte-identical"
+  contains "$output" "all 10 declared chunks are byte-identical"
   # every round-protocol chunk accounted for, IN its shard, so a row silently
   # dropped from the manifest cannot leave this green
   contains "$output" "ok   round-protocol-head"
   contains "$output" "→ reference/review-loop/core.md"
-  contains "$output" "ok   round-protocol-tail"
-  contains "$output" "→ reference/review-loop/step-1-panel.md"
+  lacks "$output" "round-protocol-tail"
   contains "$output" "ok   round-protocol-step-2"
   contains "$output" "ok   round-protocol-recover"
   contains "$output" "ok   round-protocol-steps-3-4"
@@ -922,73 +936,65 @@ PY
   grep -qF -- 'verified by NOTHING' "$v"
 }
 
-# --- #1582: the split-span sweep arms, DRIVEN (not merely re-derived) --------
+# --- #1582: the head-closer sweep arms, DRIVEN (not merely re-derived) -------
 # The bats-side arithmetic in the case that recomputes the anchor adjacency from the pinned commit proves the tree
 # is currently sound; it does not prove the SCRIPT would notice if it stopped
 # being. These three drive the script's own fail-closed arms against a mutated
 # copy of the reference tree, so deleting any of them reds here.
 
-@test "#1582 the sweep FAILS when a split sentinel sits in the wrong shard" {
-  # Was "the split halves are out of order" until #2055 split review-loop.md:
-  # the halves now live in different shards, which have no line order between
-  # them, so the shard a sentinel sits in is what says which half it is. The
-  # equivalent mutation is the tail block moved out of step-1-panel.md into
-  # core.md, below the head — still exactly one of each sentinel across
-  # reference/, so only the wrong-shard arm can catch it.
+@test "#3168 the sweep FAILS when the head block moves out of core.md — a chunk failure AND a sweep failure" {
+  # Was "a split sentinel sits in the wrong shard" until #3168 retired the tail:
+  # the head block moved out of core.md into step-1-panel.md — still exactly one
+  # closer across reference/, so only the wrong-shard arm can catch it.
   _require_pre_move_commit
-  local fake; fake="$(_fake_tree splitswap)"
+  local fake; fake="$(_fake_tree headblockswap)"
   local d="$fake/development/skills/resolve-issue/reference/review-loop"
-  python3 - "$d/step-1-panel.md" "$d/core.md" <<'PY'
+  python3 - "$d/core.md" "$d/step-1-panel.md" <<'PY'
 import io, sys
 src, dst = sys.argv[1], sys.argv[2]
 lines = io.open(src, encoding="utf-8").read().split("\n")
-o = lines.index("<!-- moved: round-protocol-tail -->")
-c = lines.index("<!-- /moved: round-protocol-tail -->")
+o = lines.index("<!-- moved: round-protocol-head -->")
+c = lines.index("<!-- /moved: round-protocol-head -->")
 block = lines[o:c + 1]
 io.open(src, "w", encoding="utf-8").write("\n".join(lines[:o] + lines[c + 1:]))
 with io.open(dst, "a", encoding="utf-8") as out:
     out.write("\n" + "\n".join(block) + "\n")
 PY
   # the mutation must have applied, or this case proves nothing
-  run -0 grep -qxF -- '<!-- moved: round-protocol-tail -->' "$d/core.md"
-  run ! grep -qxF -- '<!-- moved: round-protocol-tail -->' "$d/step-1-panel.md"
+  run -0 grep -qxF -- '<!-- /moved: round-protocol-head -->' "$d/step-1-panel.md"
+  run ! grep -qxF -- '<!-- /moved: round-protocol-head -->' "$d/core.md"
 
   run zsh "$VERIFY" --base "$PRE_MOVE_SHA" --repo "$fake"
   [ "$status" -eq 1 ]
-  contains "$stderr$output" "the round-protocol split sentinels are in the wrong shards"
-  contains "$stderr$output" "want review-loop/step-1-panel.md"
+  contains "$stderr$output" "the round-protocol head closer is in the wrong shard"
+  contains "$stderr$output" "want review-loop/core.md"
 
   # BOTH summaries, because this fixture drives BOTH counters (#1588). Moving
-  # the block leaves step-1-panel.md with no tail block for `extract_chunk` to
-  # find, so chunk_failures is 1 alongside sweep_failures 1 — measured, not
-  # reasoned. This is the CO-OCCURRENCE arm of the separation the script's
-  # exit-code table promises ("counted and reported separately … but both land
-  # here"); the two single-defect directions are pinned by the chunk-only and
-  # sweep-only cases above. Without it, chaining the sweep summary onto the
-  # chunk summary as an `elif` leaves every case green while a both-defect run
-  # tells the operator only about chunks — the mis-attribution the separate
-  # reporting exists to prevent, inverted.
+  # the block leaves core.md with no head block for `extract_chunk` to find, so
+  # chunk_failures is 1 alongside sweep_failures 1. This is the CO-OCCURRENCE
+  # arm of the separation the script's exit-code table promises ("counted and
+  # reported separately … but both land here"); without it, chaining the sweep
+  # summary onto the chunk summary as an `elif` leaves every case green while a
+  # both-defect run tells the operator only about chunks.
   contains "$stderr$output" "did not move verbatim"
   contains "$stderr$output" "1 sentinel/split-span problem"
 }
 
-@test "#1582 the sweep FAILS when a split sentinel is missing" {
+@test "#3168 the sweep FAILS when the head closer is missing" {
   _require_pre_move_commit
-  local fake; fake="$(_fake_tree splitgone)"
-  # the tail opener's shard since #2055 split review-loop.md
-  local f="$fake/development/skills/resolve-issue/reference/review-loop/step-1-panel.md"
-  # drop the tail opener; the manifest still declares round-protocol-tail
-  grep -vxF -- '<!-- moved: round-protocol-tail -->' "$f" > "$f.new"
+  local fake; fake="$(_fake_tree headgone)"
+  local f="$fake/development/skills/resolve-issue/reference/review-loop/core.md"
+  grep -vxF -- '<!-- /moved: round-protocol-head -->' "$f" > "$f.new"
   mv "$f.new" "$f"
-  run ! grep -rqxF -- '<!-- moved: round-protocol-tail -->' "$fake/development/skills/resolve-issue/reference"
+  run ! grep -rqxF -- '<!-- /moved: round-protocol-head -->' "$fake/development/skills/resolve-issue/reference"
 
   run zsh "$VERIFY" --base "$PRE_MOVE_SHA" --repo "$fake"
   [ "$status" -eq 1 ]
-  contains "$stderr$output" "must appear exactly once each"
-  contains "$stderr$output" "tail-open: 0"
+  contains "$stderr$output" "must appear exactly once across reference/"
+  contains "$stderr$output" "head-close: 0"
 }
 
-@test "#1582 the sweep FAILS when a split sentinel is DUPLICATED" {
+@test "#1582 the sweep FAILS when the head closer is DUPLICATED" {
   # The one the stray-sentinel sweep cannot see: it greps only the OPENING form,
   # so a duplicated `/moved:` closer is invisible to it. Before the array-capture
   # fix this assigned a multi-line string to a `typeset -i`.
@@ -1001,7 +1007,7 @@ PY
 
   run zsh "$VERIFY" --base "$PRE_MOVE_SHA" --repo "$fake"
   [ "$status" -eq 1 ]
-  contains "$stderr$output" "must appear exactly once each"
+  contains "$stderr$output" "must appear exactly once across reference/"
   contains "$stderr$output" "head-close: 2"
 }
 
@@ -1016,33 +1022,15 @@ PY
 
   run zsh "$VERIFY" --base "$PRE_MOVE_SHA" --repo "$fake"
   [ "$status" -eq 1 ]
-  contains "$stderr$output" "the round-protocol split sentinels are in the wrong shards"
+  contains "$stderr$output" "the round-protocol head closer is in the wrong shard"
 }
 
-# --- #2055: the seam check over the tail's four-way re-cut, DRIVEN -------------
-# The tail is cut into four chunks, each byte-checked alone; the seams between
-# them are what `verify-reference-move.zsh`'s seam block asserts. Both cases run
+# --- #2055: the seam check over the tail's re-cut, DRIVEN ----------------------
+# The tail was cut into four chunks, of which #3168 retired the first; each of
+# the three left is byte-checked alone, and the seams between them are what
+# `verify-reference-move.zsh`'s seam block asserts. The cases run
 # a sed-mutated copy of the SCRIPT, the same technique as the adjacency cases
 # below, because the seam anchors are read out of the MANIFEST.
-
-@test "#2055 the seam check FIRES when a tail chunk's anchor leaves an original line uncovered" {
-  # Moving the tail row's LAST anchor up (to a line inside its own chunk) drops
-  # every line below it out of the verified region while step-2's first anchor
-  # stays put — the seam hazard.
-  _require_pre_move_commit
-  local mutant="$BATS_TEST_TMPDIR/verify-seam-gap.zsh"
-  sed 's|	     Critical nobody reported\.$|	     That exemption is an *instruction*, not a footnote: in|' \
-    "$VERIFY" > "$mutant"
-  # the mutation must have applied (`run !`, since a bare `!` is inert in bats, #829)
-  run ! grep -qF '	     Critical nobody reported.' "$mutant"
-  run -0 grep -qF '	     That exemption is an *instruction*, not a footnote: in' "$mutant"
-
-  run zsh "$mutant" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
-  [ "$status" -eq 1 ]
-  contains "$stderr$output" "the seam round-protocol-tail → round-protocol-step-2 leaves original lines uncovered"
-  # ...and it names the stranded original prose
-  contains "$stderr$output" "Critical nobody reported."
-}
 
 @test "#2055 the seam check FIRES on the step-2 → recover seam" {
   _require_pre_move_commit
@@ -1053,6 +1041,8 @@ PY
   run zsh "$mutant" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
   [ "$status" -eq 1 ]
   contains "$stderr$output" "the seam round-protocol-step-2 → round-protocol-recover leaves original lines uncovered"
+  # ...and it names the stranded original prose
+  contains "$stderr$output" "actually read. The stderr names both identities and the files that moved."
 }
 
 @test "#2055 the seam check FIRES on the recover → steps-3-4 seam" {
@@ -1067,18 +1057,19 @@ PY
 }
 
 @test "#2055 the seam check FIRES when consecutive tail chunks' anchors are out of order" {
-  # Rewriting step-2's FIRST anchor to a line that precedes the tail's last
+  # Rewriting recover's FIRST anchor to a line that precedes step-2's last
   # anchor in the pinned commit is overlap: the seam awk never reaches it after
   # the earlier chunk's end, and must say so rather than pass on an empty seam.
+  # (The tail → step-2 seam until #3168 retired the tail.)
   _require_pre_move_commit
   local mutant="$BATS_TEST_TMPDIR/verify-seam-order.zsh"
-  sed 's|	2\. \*\*One loop invocation\.\*\*	|	Each round:	|' "$VERIFY" > "$mutant"
-  run ! grep -qF '	2. **One loop invocation.**	' "$mutant"
-  run -0 grep -qF '"round-protocol-step-2	review-loop/step-2-invocation.md	Each round:	' "$mutant"
+  sed 's|^"round-protocol-recover	review-loop/exit-2-stale-findings.md	[^	]*	|"round-protocol-recover	review-loop/exit-2-stale-findings.md	2. **One loop invocation.**	|' \
+    "$VERIFY" > "$mutant"
+  run -0 grep -qF '"round-protocol-recover	review-loop/exit-2-stale-findings.md	2. **One loop invocation.**	' "$mutant"
 
   run zsh "$mutant" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
   [ "$status" -eq 1 ]
-  contains "$stderr$output" "the seam round-protocol-tail → round-protocol-step-2 is not in order"
+  contains "$stderr$output" "the seam round-protocol-step-2 → round-protocol-recover is not in order"
   lacks "$stderr$output" "leaves original lines uncovered"
 }
 
@@ -1356,7 +1347,7 @@ _mutate_anchor() {
 @test "#1582 the adjacency invariant FIRES when a manifest anchor is moved inward" {
   # THE case the whole check exists for, and the one an earlier cut of it could
   # not reach: moving the head row's LAST anchor to an earlier line migrates
-  # original conductor prose into the unverified gap while every per-chunk byte
+  # original conductor prose out of the verified head while every per-chunk byte
   # comparison still passes. It is only catchable because both anchors are read
   # out of the MANIFEST — an assertion built from literals against the pinned
   # (immutable) `$pre` is a constant and can never fire.
@@ -1373,22 +1364,22 @@ _mutate_anchor() {
 
   run zsh "$mutant" --base "$PRE_MOVE_SHA" --repo "$fake"
   [ "$status" -eq 1 ]
-  contains "$stderr$output" "no longer adjacent"
+  contains "$stderr$output" "the head's last anchor is no longer adjacent to round step 1"
 }
 
-@test "#1582 the adjacency invariant FIRES when the manifest stops declaring a split row" {
-  # The other way the check can be defeated: drop a split row, and the anchors it
-  # supplied vanish. Reported as its own named failure rather than silently
-  # skipping the invariant.
+@test "#1582 the adjacency invariant FIRES when the manifest stops declaring the head row" {
+  # The other way the check can be defeated: drop the head row, and the anchor
+  # it supplied vanishes. Reported as its own named failure rather than silently
+  # skipping the invariant. (The tail row until #3168 retired it.)
   _require_pre_move_commit
   local fake; fake="$(_fake_tree adjacency-norow)"
   local mutant="$BATS_TEST_TMPDIR/verify-row-dropped.zsh"
-  # rename the tail row so `round-protocol-tail` no longer resolves in the loop,
+  # rename the head row so `round-protocol-head` no longer resolves in the loop,
   # while leaving a syntactically valid manifest
-  sed 's|^"round-protocol-tail	|"round-protocol-renamed	|' "$VERIFY" > "$mutant"
-  run ! grep -qF '"round-protocol-tail	' "$mutant"
+  sed 's|^"round-protocol-head	|"round-protocol-renamed	|' "$VERIFY" > "$mutant"
+  run ! grep -qF '"round-protocol-head	' "$mutant"
 
   run zsh "$mutant" --base "$PRE_MOVE_SHA" --repo "$fake"
   [ "$status" -eq 1 ]
-  contains "$stderr$output" "no longer declares both round-protocol split rows"
+  contains "$stderr$output" "the manifest no longer declares round-protocol-head"
 }

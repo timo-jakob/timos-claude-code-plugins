@@ -17,7 +17,7 @@ Otherwise:
   the reviewers of `review_skill` **and** of every `topic_review_skills` entry,
   in one message, each scoped exactly as step 1 scopes the language panel — the
   same `changed_files`, the same `worktree_root` rail and opener, the same
-  `fix_verification_path` and `adjudicated_path`. A topic panel is never given
+  `fix_verification_path`. A topic panel is never given
   a narrower or wider scope, and never planned by a second `plan` call. Wait for
   **all** of them before step 2.
 - **Join their #558 arrays into the one round findings file.** Concatenate every

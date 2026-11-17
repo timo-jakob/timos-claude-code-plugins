@@ -345,13 +345,17 @@ fallback_review() {
     --fix-cmd 'echo "print(2)" > "$REVIEW_REPO/fixed.py"'
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | grep '^{' | jq -r '.status')" = "CONVERGED" ]
-  run grep -F -- '--round 1 ' "$BATS_TEST_TMPDIR/plan.log"
+  # line 1 is the startup repo-type probe, run before any round: it ends at
+  # `--round 1` and never carries --fallback, so the per-round reads skip it
+  local probe; probe="$(head -n 1 "$BATS_TEST_TMPDIR/plan.log")"
+  [ "${probe% --round 1}" != "$probe" ]
+  run grep -E -- '--round 1( |$)' <(tail -n +2 "$BATS_TEST_TMPDIR/plan.log")
   # round 1: the repo-type plan, then the one --fallback re-plan
   lacks " ${lines[0]} " " --fallback "
   contains " ${lines[1]} " " --fallback "
   [ "${#lines[@]}" -eq 2 ]
   # rounds 2 and 3 plan with --fallback from the start
-  run grep -E -- '--round [23] ' "$BATS_TEST_TMPDIR/plan.log"
+  run grep -E -- '--round [23]( |$)' <(tail -n +2 "$BATS_TEST_TMPDIR/plan.log")
   [ "${#lines[@]}" -ge 2 ]
   local l; for l in "${lines[@]}"; do contains " $l " " --fallback "; done
 }
@@ -369,7 +373,10 @@ fallback_review() {
     zsh "$S" --repo "$R" --base main --work-dir "$BATS_TEST_TMPDIR/wd" --resume --max-rounds 3 \
     --review-cmd "$(fallback_review)" --fix-cmd 'true'
   [ "$status" -eq 0 ]
-  run grep -E -- '--round [0-9]+ ' "$BATS_TEST_TMPDIR/plan.log"
+  # skip line 1, the startup repo-type probe, which precedes every round
+  local probe; probe="$(head -n 1 "$BATS_TEST_TMPDIR/plan.log")"
+  [ "${probe% --round 1}" != "$probe" ]
+  run grep -E -- '--round [0-9]+( |$)' <(tail -n +2 "$BATS_TEST_TMPDIR/plan.log")
   [ "${#lines[@]}" -ge 1 ]
   local l; for l in "${lines[@]}"; do contains " $l " " --fallback "; done
 }
@@ -1538,8 +1545,8 @@ seed_exhausted_wd() {
   [ "$(jq 'length' "$WD/verify-2.json")" -eq 1 ]
   [ "$(jq -r '.[0].title' "$WD/verify-seen-r2.json")" = "T" ]
   # ...and round 1 was handed NOTHING — the documented asymmetry a hook is told
-  # to code against (REVIEW_FIX_VERIFICATION is empty on round 1;
-  # REVIEW_ADJUDICATED is always a path). Snapshot the VARIABLE, not the file it
+  # to code against (REVIEW_FIX_VERIFICATION is empty on round 1). Snapshot
+  # the VARIABLE, not the file it
   # names: a `cp` that quietly fails proves nothing either way.
   [ ! -s "$WD/verify-path-r1.txt" ]
   [ -s "$WD/verify-path-r2.txt" ]
@@ -1599,7 +1606,7 @@ seed_exhausted_wd() {
   run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
     R1="$r1" R2="$r2" SNAP="$WD" \
     zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 4 \
-    --review-cmd 'cp "$REVIEW_ADJUDICATED" "$SNAP/adj-seen-r$REVIEW_ROUND.json"; if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" "$R1" > "$REVIEW_FINDINGS"; elif [ "$REVIEW_ROUND" = 2 ]; then printf "%s" "$R2" > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
+    --review-cmd 'printf "%s" "${REVIEW_ADJUDICATED-UNSET}" > "$SNAP/adj-var-r$REVIEW_ROUND.txt"; if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" "$R1" > "$REVIEW_FINDINGS"; elif [ "$REVIEW_ROUND" = 2 ]; then printf "%s" "$R2" > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
     --fix-cmd 'echo "x = 2" > "$REVIEW_REPO/helper.py"'
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
@@ -1613,12 +1620,10 @@ seed_exhausted_wd() {
   # the list itself is work-dir state, never written under .review/
   [ -s "$WD/adjudicated.json" ]
   [ ! -e "$R/.review/adjudicated.json" ]
-  # REVIEW_ADJUDICATED really reaches the panel, and really carries the waived
-  # item by round 2 — without this the export could be deleted and every panel
-  # would run blind to the list, re-raising everything the human let go
-  [ "$(jq 'length' "$WD/adj-seen-r1.json")" -eq 0 ]
-  [ "$(jq -r '.[0].title' "$WD/adj-seen-r2.json")" = "rename the temp variable" ]
-  [ "$(jq -r '.[0].file' "$WD/adj-seen-r2.json")" = "app.py" ]
+  # #3168: the list is the consolidator's alone — the panel is never handed it,
+  # so REVIEW_ADJUDICATED is unset in the review command on every round
+  [ "$(cat "$WD/adj-var-r1.txt")" = "UNSET" ]
+  [ "$(cat "$WD/adj-var-r2.txt")" = "UNSET" ]
 }
 
 @test "#1434 the adjudication is invalidated on the CLOSING SWEEP too, not just delta rounds" {
@@ -1701,17 +1706,15 @@ seed_exhausted_wd() {
   run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
     R1="$r1" R2="$r2" SNAP="$WD" \
     zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 4 \
-    --review-cmd 'cp "$REVIEW_ADJUDICATED" "$SNAP/adj-seen-r$REVIEW_ROUND.json"; if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" "$R1" > "$REVIEW_FINDINGS"; elif [ "$REVIEW_ROUND" = 2 ]; then printf "%s" "$R2" > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
+    --review-cmd 'printf "%s" "${REVIEW_ADJUDICATED-UNSET}" > "$SNAP/adj-var-r$REVIEW_ROUND.txt"; if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" "$R1" > "$REVIEW_FINDINGS"; elif [ "$REVIEW_ROUND" = 2 ]; then printf "%s" "$R2" > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
     --fix-cmd 'echo "print(99)" > "$REVIEW_REPO/app.py"'
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
   [ "$(echo "$output" | jq '.round_changelists[1].summary.adjudicated_dropped')" -eq 0 ]
   [ "$(echo "$output" | jq '.round_changelists[1].summary.low')" -eq 1 ]
-  # ...and the invalidation ran BEFORE the panel, not merely before the
-  # consolidator: the PANEL is what is told "do not re-raise these", so a
-  # suggestion it withholds never reaches the consolidator at all. Asserting
-  # only the consolidator's count passes under either placement.
-  [ "$(jq 'length' "$WD/adj-seen-r2.json")" -eq 0 ]
+  # ...and the panel was never handed the list (#3168): only the consolidator
+  # reads it, so REVIEW_ADJUDICATED is unset in the review command
+  [ "$(cat "$WD/adj-var-r2.txt")" = "UNSET" ]
 }
 
 @test "#1434 a fresh run that cannot truncate history.jsonl aborts, rather than appending onto a foreign run" {

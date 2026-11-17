@@ -146,7 +146,8 @@ tree_id() {  # echo the current working-tree identity of $R
   # #2011: the hunk list is null exactly when delta_files is — no --prior-tree
   [ "$(echo "$output" | jq -r .delta_hunks)" = "null" ]
   [ "$(echo "$output" | jq -r .fix_verification_path)" = "null" ]
-  [ "$(echo "$output" | jq -r .adjudicated_path)" = "null" ]
+  # #3168: the descriptor carries no adjudicated_path key at all
+  [ "$(echo "$output" | jq -r 'has("adjudicated_path")')" = "false" ]
   # unchanged from before #1434: the whole story diff
   [ "$(echo "$output" | jq -c '.changed_files')" = '["app.py"]' ]
 }
@@ -162,7 +163,7 @@ tree_id() {  # echo the current working-tree identity of $R
   mkdir -p "$R/src"
   echo "print(3)" > "$R/src/nested.py"
   plan '{"languages":["python"]}' --round 3 --prior-tree "$t1" \
-    --fix-verification /tmp/verify-3.json --adjudicated /tmp/adjudicated.json
+    --fix-verification /tmp/verify-3.json
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r .scope_mode)" = "delta" ]
   [ "$(echo "$output" | jq -r .scope_empty)" = "false" ]
@@ -172,9 +173,18 @@ tree_id() {  # echo the current working-tree identity of $R
   # app.py is the independent-repeat behaviour this story removes.
   [ "$(echo "$output" | jq -c '.changed_files')" = '["helper.py","src/nested.py"]' ]
   [ "$(echo "$output" | jq -c '.delta_files')" = '["helper.py","src/nested.py"]' ]
-  # the two carries are echoed through for the panel
+  # the carry is echoed through for the panel, and no waived list is (#3168)
   [ "$(echo "$output" | jq -r .fix_verification_path)" = "/tmp/verify-3.json" ]
-  [ "$(echo "$output" | jq -r .adjudicated_path)" = "/tmp/adjudicated.json" ]
+  [ "$(echo "$output" | jq -r 'has("adjudicated_path")')" = "false" ]
+}
+
+@test "plan: #3168 --adjudicated is refused as an unknown flag, with no descriptor" {
+  echo "print(1)" > "$R/app.py"
+  plan '{"languages":["python"]}' --round 1 --adjudicated /tmp/adjudicated.json
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -qF -- 'plan: unknown flag: --adjudicated'
+  # usage errors print no descriptor: nothing on the output parses as one
+  run ! jq -e 'has("review_skill")' <<<"$output"
 }
 
 @test "plan: #1434 --final makes a late round a FULL sweep, and still reports the delta" {
@@ -1623,13 +1633,13 @@ EOF
 @test "plan: #1177 every value-taking plan flag checks its value" {
   # one flag proving the pattern would let the others keep the raw abort — so
   # the list must be the WHOLE flag set, and #1434 added three more to it
-  # (--prior-tree, --fix-verification, --adjudicated). Without them, deleting
-  # need_value from any of the three re-introduces the exact #1177 regression
+  # (--prior-tree, --fix-verification, and --adjudicated, which #3168 removed).
+  # Without them, deleting need_value from any of them re-introduces the #1177 regression
   # (a nounset abort at exit 1 where the contract documents exit 2) with the
   # whole suite green.
   local flag
   for flag in --repo --base --round --findings-path \
-              --prior-tree --fix-verification --adjudicated --self-check; do
+              --prior-tree --fix-verification --self-check; do
     run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
       zsh "$S" plan "$flag"
     [ "$status" -eq 2 ]
@@ -2572,7 +2582,7 @@ EOF
   plan '{"languages":["python"]}' --round 1
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r 'keys_unsorted | join(",")')" = \
-    "repo_type,review_skill,topic_review_skills,round,base,findings_path,changed_files,worktree_root,original_root,scope_abs,scope_mode,scope_empty,prior_tree,delta_files,delta_hunks,skippable_dimensions,fix_verification_path,adjudicated_path,self_check_path" ]
+    "repo_type,review_skill,topic_review_skills,round,base,findings_path,changed_files,worktree_root,original_root,scope_abs,scope_mode,scope_empty,prior_tree,delta_files,delta_hunks,skippable_dimensions,fix_verification_path,self_check_path" ]
 }
 
 @test "#2014 plan echoes --self-check as self_check_path, the last key, null when absent" {
@@ -2586,7 +2596,7 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r .self_check_path)" = "$R/.review/self-check.json" ]
   [ "$(echo "$output" | jq -r 'keys_unsorted | .[-2:] | join(",")')" = \
-    "adjudicated_path,self_check_path" ]
+    "fix_verification_path,self_check_path" ]
   # echoed, never read: the file does not exist and the plan still succeeds
   [ ! -e "$R/.review/self-check.json" ]
 }

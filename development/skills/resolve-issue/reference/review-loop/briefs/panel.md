@@ -16,9 +16,8 @@ instead; a `carry-redispatch` handoff runs steps 1–5 with the changes *Carry
 modes* names.
 
 1. **Plan.** Run `review-dispatch.zsh plan --repo <worktree_root> --base <base>
-   --round <round>`. From round 2 on, add `--prior-tree <delta_base>`,
-   `--fix-verification <work_dir>/verify-<round>.json` and `--adjudicated
-   <work_dir>/adjudicated.json`. On round 1, add `--self-check
+   --round <round>`. From round 2 on, add `--prior-tree <delta_base>` and
+   `--fix-verification <work_dir>/verify-<round>.json`. On round 1, add `--self-check
    <worktree_root>/.review/self-check.json` when that file exists. Step
    1's round-1 "no flags beyond the round" predates #2014 and does not override
    that. On round 1, first `rm -f <work_dir>/.fallback-engaged`, which an

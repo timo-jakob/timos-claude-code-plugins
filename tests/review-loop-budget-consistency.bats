@@ -484,14 +484,16 @@ grep_site() {  # grep_site <file> <fixed-string>
   # Fragments unique to the sentence each one pins — the bare descriptor tokens
   # recur in the same section's JSON sample, so they are presence checks only.
   grep_site "$ARCH_PANEL_DUTIES" 'a second injection duty'
-  grep_site "$ARCH_PANEL_DUTIES" "forward both into each agent's launch prompt"
+  grep_site "$ARCH_PANEL_DUTIES" "forward it into each agent's launch prompt"
   grep_site "$ARCH_PANEL_DUTIES" 'All ten panels (`claude-plugin`'
   grep_site "$ARCH_PANEL_DUTIES" 'carry **both rules**'
   grep_site "$ARCH_PANEL_DUTIES" 'never a licence to'
   grep_site "$ARCH_PANEL_DUTIES" 'fix_verification_path'
-  grep_site "$ARCH_PANEL_DUTIES" 'adjudicated_path'
-  # ...which no panel forwards since #3158-#3167; the duty says so until #3168
-  grep_site "$ARCH_PANEL_DUTIES" 'That second half is pending #3168'
+  # #3168: the descriptor hands the panel no waived-suggestion list, and the
+  # duty no longer names the key (absence pinned, not just the needle dropped)
+  grep_site "$ARCH_PANEL_DUTIES" 'The descriptor hands the panel no waived-suggestion list (#3168).'
+  run -1 grep -Fq -e 'adjudicated_path' -- "$ARCH_PANEL_DUTIES"
+  run -1 grep -Fq -e 'That second half is pending #3168' -- "$ARCH_PANEL_DUTIES"
   # ...including the two qualifications it declares mandatory, so deleting them
   # from the contract doc cannot pass either
   # Each ARCH needle is UNIQUE to the panel-duties section. `CONVERGED
@@ -905,8 +907,8 @@ _outside_moved_spans() {  # $1 = file
   # a broken enumeration (a failed cd, a pathspec typo) must not read as clean:
   # a floor on the swept set, and the one file the story is about must be in it
   [ "${#swept[@]}" -ge 50 ]
-  # #2055 split review-loop.md: the rule now lives in the carry.md shard, and
-  # the retired spelling the frozen span still carries in step-1-panel.md
+  # #2055 split review-loop.md: the rule now lives in the carry.md shard; #3168
+  # took step-1-panel.md out of the frozen text and dropped its retired spelling
   printf '%s\n' "${swept[@]}" | grep -qx 'development/skills/resolve-issue/reference/review-loop/carry.md'
   printf '%s\n' "${swept[@]}" | grep -qx 'development/skills/resolve-issue/reference/review-loop/step-1-panel.md'
   if [ "${#found[@]}" -ne 0 ]; then
@@ -922,12 +924,13 @@ _outside_moved_spans() {  # $1 = file
   # the frozen-span exclusion is itself controlled: the same spelling INSIDE a
   # span is not found, so the exclusion is real rather than a no-op.
   local scratch="$BATS_TEST_TMPDIR/control.md"
-  # #2055: the shard whose frozen span still carries 'cannot confirm landed',
-  # so the first assertion proves the span exclusion hides a REAL occurrence
-  # (the precondition below pins that it is there).
-  cp "$REPO_ROOT/development/skills/resolve-issue/reference/review-loop/step-1-panel.md" "$scratch"
-  grep -Fq -e 'cannot confirm landed' -- "$scratch"
-  run -1 grep -Fq -e 'cannot confirm landed' <<< "$(_outside_moved_spans "$scratch")"
+  # The shard whose frozen span still carries 'it could not confirm' (step-1's
+  # 'cannot confirm landed' until #3168 unfroze and fixed it), so the first
+  # assertion proves the span exclusion hides a REAL occurrence (the
+  # precondition below pins that it is there).
+  cp "$REPO_ROOT/development/skills/resolve-issue/reference/review-loop/exit-2-stale-findings.md" "$scratch"
+  grep -Fq -e 'it could not confirm' -- "$scratch"
+  run -1 grep -Fq -e 'it could not confirm' <<< "$(_outside_moved_spans "$scratch")"
   printf '\n<!-- moved: control -->\nor re-raises what it could not confirm.\n<!-- /moved: control -->\n' >> "$scratch"
   run -1 grep -Fq -e 're-raises what it could not confirm' <<< "$(_outside_moved_spans "$scratch")"
   printf '\nor that the reviewer cannot confirm landed, must be re-raised\n' >> "$scratch"
@@ -1027,4 +1030,28 @@ _outside_moved_spans() {  # $1 = file
   run zsh "$LOOP" --help
   [ "$status" -eq 0 ]
   printf '%s\n' "$output" | grep -Fq -- "[$flag FILE]"
+}
+
+@test "#3168 the four review-loop shards hand the panel no waived-suggestion list" {
+  local d="$REPO_ROOT/development/skills/resolve-issue/reference/review-loop" f flat
+  for f in step-1-panel.md briefs/panel.md topic-panels.md scope-block.md; do
+    [ -s "$d/$f" ]
+    run -1 grep -Fq -e 'adjudicated_path' -- "$d/$f"
+    run -1 grep -Fq -e '--adjudicated' -- "$d/$f"
+    run -1 grep -Fq -e 'adjudicated.json' -- "$d/$f"
+    run -1 grep -Fq -e 'REVIEW_ADJUDICATED' -- "$d/$f"
+    # the do-not-re-raise-waived instruction, in the spellings it had
+    flat="$(tr '\n' ' ' < "$d/$f" | tr -s ' ')"
+    run -1 grep -Fq -e 'Do not re-raise them as Suggestions' <<< "$flat"
+    run -1 grep -Fq -e 'withhold every waived suggestion' <<< "$flat"
+    run -1 grep -Fq -e 'the human already waived' <<< "$flat"
+  done
+  # ...and the plan invocations that remain still pass the fix-verification carry
+  flat="$(tr '\n' ' ' < "$d/step-1-panel.md" | tr -s ' ')"
+  printf '%s' "$flat" | grep -Fq -e '--fix-verification <work-dir>/verify-<R>.json'
+  # step 1's carry bullet keeps the observed-not-landed re-raise, with no
+  # cannot-confirm clause (#1583's three outcomes govern, in carry.md)
+  printf '%s' "$flat" | grep -Fq -e 'a fix the reviewer observed did not land must be **re-raised at its original severity**'
+  flat="$(tr '\n' ' ' < "$d/briefs/panel.md" | tr -s ' ')"
+  printf '%s' "$flat" | grep -Fq -e 'From round 2 on, add `--prior-tree <delta_base>` and `--fix-verification <work_dir>/verify-<round>.json`.'
 }

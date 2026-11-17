@@ -35,8 +35,10 @@
 #     i.e. exactly what the fix pass was told to fix, passed as
 #     `--fix-verification` and exported as REVIEW_FIX_VERIFICATION;
 #   * `<work-dir>/adjudicated.json` — the Low findings prior rounds surfaced and
-#     the human let go, passed as `--adjudicated` and exported as
-#     REVIEW_ADJUDICATED ("do not re-raise these"). Every entry whose file the
+#     the human let go, passed to the consolidator as `--adjudicated`. Since
+#     #3168 it is NOT handed to the panel: no `--adjudicated` to
+#     `review-dispatch.zsh plan` and no REVIEW_ADJUDICATED export, because no
+#     panel reads the waived list any more. Every entry whose file the
 #     last fix pass touched is REMOVED before the round consolidates, so a
 #     suggestion legitimately re-raised because the fix was incomplete is never
 #     suppressed;
@@ -364,12 +366,10 @@
 #                 $REVIEW_REPO, $REVIEW_BASE (the loop's --base, #2008), and —
 #                 since #1434 — $REVIEW_SCOPE_MODE ("full" |
 #                 "delta"), $REVIEW_FIX_VERIFICATION (round >= 2: the previous
-#                 round's blockers, to verify the fix actually landed) and
-#                 $REVIEW_ADJUDICATED (already-waived suggestions the panel must
-#                 not re-raise). $REVIEW_FIX_VERIFICATION is EMPTY on round 1,
-#                 which has nothing to verify; $REVIEW_ADJUDICATED is ALWAYS a
-#                 path — the file simply holds `[]` until something is waived —
-#                 so test its CONTENTS, never its presence. Since #2010
+#                 round's blockers, to verify the fix actually landed).
+#                 $REVIEW_FIX_VERIFICATION is EMPTY on round 1, which has
+#                 nothing to verify. No REVIEW_ADJUDICATED is exported since
+#                 #3168: no panel reads the waived list. Since #2010
 #                 $REVIEW_FIX_VERIFICATION_BY_DIMENSION is the
 #                 `review-dispatch.zsh split-carry` map of that carry,
 #                 {dimension: path}, `{}` when nothing is carried: each
@@ -2639,8 +2639,7 @@ _run_review_hook() {
            REVIEW_REPO="$repo" REVIEW_BASE="$base" REVIEW_SCOPE_MODE="$scope_mode" \
            REVIEW_FIX_VERIFICATION="$fix_verification" \
            REVIEW_FIX_VERIFICATION_BY_DIMENSION="$carry_by_dim" \
-           REVIEW_SKIPPABLE_DIMENSIONS="$skippable_json" \
-           REVIEW_ADJUDICATED="$adjudicated_file"; eval "$review_cmd" ) || {
+           REVIEW_SKIPPABLE_DIMENSIONS="$skippable_json"; eval "$review_cmd" ) || {
     print -u2 -- "resolve-story-loop: --review-cmd failed at round $round"; exit 1 }
 }
 # The fallback review panel (#2909), hook mode only. A full round over a
@@ -2745,7 +2744,6 @@ while (( round <= effective_max )); do
   [[ -n "$prior_tree" ]] && plan_args+=( --prior-tree "$prior_tree" )
   (( is_final )) && plan_args+=( --final )
   [[ -n "$fix_verification" ]] && plan_args+=( --fix-verification "$fix_verification" )
-  plan_args+=( --adjudicated "$adjudicated_file" )
   rp=$("$DISPATCH" "${plan_args[@]}"); rc=$?
   if (( rc == 3 )); then
     # a fix pass changed what detection sees (e.g. added a second supported
@@ -2921,13 +2919,9 @@ while (( round <= effective_max )); do
   # the cost of that is one logged Low where the cost of erring the other way is
   # a real finding silently deleted.
   #
-  # It runs HERE — before the panel, not just before the consolidator — because
-  # the panel is told "do not re-raise these" via REVIEW_ADJUDICATED. A
-  # suggestion the panel withholds never reaches the consolidator at all, so an
-  # invalidation that ran only downstream would protect nothing on the path that
-  # actually suppresses. (In step mode the panel runs between invocations and
-  # reads the file as the PREVIOUS round left it; making that exact too needs
-  # the session to invalidate before it spawns its panel — a follow-up.)
+  # Only the consolidator reads the list since #3168 (the panel is no longer
+  # handed it), so the invalidation need only land before consolidation; it
+  # stays here, where delta_json is first known.
   if [[ "$delta_json" != "[]" && "$delta_json" != "null" ]]; then
     adj_tmp="$work_dir/.adjudicated-invalidated.json"
     # bind the entry FIRST: inside `$d | index(...)` the input is $d, so a bare
@@ -3148,11 +3142,9 @@ while (( round <= effective_max )); do
       fi
     fi
   else
-    # #1434 adds three: the round's scope mode, the previous round's blockers to
-    # verify, and the already-waived suggestions the panel must not re-raise.
-    # REVIEW_FIX_VERIFICATION is an empty string on round 1 (nothing to verify);
-    # REVIEW_ADJUDICATED is always a path, holding `[]` until something is
-    # waived — so a hook must read its CONTENTS, not test for emptiness.
+    # #1434 adds the round's scope mode and the previous round's blockers to
+    # verify. REVIEW_FIX_VERIFICATION is an empty string on round 1 (nothing to
+    # verify). The waived list is not exported to the panel (#3168).
     # A stale `<findings-path>.carry.json` (#1583) from a previous round must
     # never be read as THIS round's accounting — clear it before the panel runs,
     # so only what this round's panel writes is consulted.
