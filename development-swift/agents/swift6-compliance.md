@@ -90,6 +90,11 @@ deprecation diagnostic behind it, such as `guard let x = x` rebinding, `#selecto
 idioms in pure Swift, `NSError` bridging, untyped `throws`, `any` where `some` would do, `if`/`switch` expressions or
 ownership modifiers — is not reported, even where a checklist heading above lists it.
 
+In review mode, a CRITICAL or WARNING finding that claims a compile failure or a deprecation diagnostic is reported
+only with that diagnostic quoted in its Description, from a build you ran without editing any file
+(`swift build -Xswiftc -swift-version -Xswiftc 6`, or the project's `xcodebuild build`); a compiler claim you could not
+check is not reported.
+
 ## Migrate mode (#447)
 
 Active only when your prompt sets `mode: migrate`. You run in a

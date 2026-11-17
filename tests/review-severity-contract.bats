@@ -569,6 +569,7 @@ go_format() {
   lacks "$format" 'SUGGESTION'
   contains "$format" '**WARNING:** An API, flag or construct the compiler or SDK marks deprecated (a deprecation diagnostic), with a clear modern replacement that should be adopted'
   contains "$format" 'An observation below the blocking bar — a modernization opportunity with no compile failure under Swift 6 and no deprecation diagnostic behind it, such as `guard let x = x` rebinding, `#selector` or `@objc` style, Objective-C idioms in pure Swift, `NSError` bridging, untyped `throws`, `any` where `some` would do, `if`/`switch` expressions or ownership modifiers — is not reported, even where a checklist heading above lists it.'
+  contains "$format" 'In review mode, a CRITICAL or WARNING finding that claims a compile failure or a deprecation diagnostic is reported only with that diagnostic quoted in its Description, from a build you ran without editing any file (`swift build -Xswiftc -swift-version -Xswiftc 6`, or the project'"'"'s `xcodebuild build`); a compiler claim you could not check is not reported.'
   lacks "$format" 'Deprecated pattern with a clear modern replacement'
   # the word is gone from the whole file, migrate mode included
   run -1 grep -qi suggestion "$f"
