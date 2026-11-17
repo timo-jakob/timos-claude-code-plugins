@@ -137,4 +137,11 @@ For each finding, report:
 
 - **CRITICAL:** Severe design issue (God object, major SOLID violation) actively harming development velocity
 - **WARNING:** Quality issue that will cause increasing maintenance burden over time
-- **SUGGESTION:** Improvement that would make the code more idiomatic or readable
+
+An observation below the blocking bar is not reported. `SUGGESTION` is reserved for a tool-verdict claim capped by
+the evidence rule above, the one lane of ARCHITECTURE.md *Terminating severity bars* this agent carries.
+
+Style, idiom or tidiness alone — PEP 8 naming, abbreviations, magic numbers, missing type hints or docstrings,
+mixed `os.path` and `pathlib` or formatting styles, unused code or imports, commented-out code, boolean positional
+arguments, a missing `__all__`, a small repeated pattern, module-layout inconsistency — is below the bar and not
+reported, unless it misleads a caller or harms maintainability at a cost you can name.
