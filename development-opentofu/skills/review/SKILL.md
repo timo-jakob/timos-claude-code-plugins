@@ -173,8 +173,7 @@ against one dimension's file.
 
 **A `null` or unreadable carry on a round ≥ 2 is a caller slip, not an empty
 carry.** Read it from the plan's `fix_verification_path` **or, in hook mode,
-from `$REVIEW_FIX_VERIFICATION`** (`$REVIEW_ADJUDICATED` carries the waived
-list). Only when **neither** names a readable carry: do not write `[]` and do not
+from `$REVIEW_FIX_VERIFICATION`**. Only when **neither** names a readable carry: do not write `[]` and do not
 write a findings file at all — report that the carry path was absent or
 unreadable and that the round could not be verified, naming
 `--fix-verification` as what to fix, with the detail in
@@ -225,16 +224,16 @@ passing `{CHANGED FILES}` as `none — standalone run`; a reviewer that read the
 changed-file rule as absolute in that mode would withhold every finding it has.
 
 When the **review loop** drives this panel from round 2 on, its dispatch plan
-also carries `fix_verification_path` and `adjudicated_path`. Bind the two carry
-lines below, filling each only when the plan names a **non-null** path for it —
-that one test covers a standalone run (no descriptor at all) and round 1 alike.
+also carries `fix_verification_path`. Bind the one carry line below, the Fix
+verification line, filling it only when the plan names a **non-null** path for
+it — that one test covers a standalone run (no descriptor at all) and round 1 alike.
 The Fix verification line carries the path the split-carry map (above) gives the
 agent's **own** dimension, never `fix_verification_path` itself, and is added
 only when the map holds that dimension (#2010).
 
 For each agent, use its name as the `subagent_type` and pass the prompt below,
-substituting **all seven** placeholders, plus one line per **non-null** carry
-path: `{SCOPE}` (the scope above), `{DIMENSION}` and `{AGENT NAME}` from the
+substituting **all seven** placeholders, plus the Fix verification line when its
+carry path is **non-null**: `{SCOPE}` (the scope above), `{DIMENSION}` and `{AGENT NAME}` from the
 table, `{ROUND}` (the review round; `1` for a standalone run), `{REPO}` (the
 **source repository root**), `{CHANGED FILES}` (the changed OpenTofu sources,
 deletions marked, or the literal `none — standalone run`), and `{GATE}` (the
@@ -252,7 +251,6 @@ so the reviewer definitions stay pure prose:
     Changed source files in scope: {CHANGED FILES}
     Pre-dispatch gate: {GATE} — a "degraded" verdict means the roots listed as source-only were NOT validated: say so wherever a finding depends on it, and never claim tofu validate passed for them.
     Fix verification (round >= 2): {FIX VERIFICATION} — the previous round's blockers. Confirm each one actually landed BEFORE looking for anything new. For each carried entry report ONE of confirmed / re-raised / unconfirmed, as one line keyed by the carry's own spelling — carried entry "<title>" (<file>, <dimension>): confirmed at <file:line> | re-raised (see finding) | unconfirmed — re-raising ONLY what you observed still present, at its ORIGINAL severity, citing the carried entry and the file:line plus the unchanged text in the findings file, even when its file is outside this round's scope; never re-raise on the absence of a fix. A re-raise is a finding whose file, dimension and title are the carried entry's own spelling (title verbatim) and whose line is the carried line or null, with what you observed in its description — under a different title it is not matched to the carry and the round is refused. Every entry in that file is of your own dimension ("{DIMENSION}", which the identity includes) and is yours alone to account for: no other reviewer is shown it. End your report with the triple: carried: confirmed N / re-raised M / unconfirmed K of TOTAL, where TOTAL is the number of entries in that file.
-    Already waived (round >= 2): {ADJUDICATED} — suggestions earlier rounds surfaced and the human waived. Do not re-raise them as Suggestions, EXCEPT in a file the PREVIOUS ROUND'S FIX PASS touched (on a delta round that is this round's scope; on a closing full sweep that NO fix pass preceded the set is empty, so withhold them — but on a sweep the residue promotion earned, a fix pass did run, so the exemption applies as on any round). A genuinely blocking re-raise at CRITICAL/WARNING is always allowed.
 
     Analyze the OpenTofu sources in scope following your instructions. Report every finding using the prose reporting format defined in your agent definition.
 

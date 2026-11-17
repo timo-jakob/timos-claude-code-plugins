@@ -24,10 +24,8 @@ you did not see.
   infrastructure on different days — the IaC equivalent of an irreproducible
   build.
 - **Module boundaries and output contracts** — an output removed or renamed
-  while callers still read it, an output exposing a whole resource object where
-  callers need one attribute, a module reaching into another's resources by
-  data lookup instead of taking an input, outputs and variables with no
-  `description`.
+  while callers still read it, a module reaching into another's resources by
+  data lookup instead of taking an input.
 - **Variable validation and typing** — a variable with no `type`, or typed
   `any`, a constrained input (a CIDR, an environment name, a count) with no
   `validation` block, a nullable input the module then dereferences.
@@ -159,5 +157,10 @@ in nitpicks:
 - **WARNING** — a real defect with a bounded blast radius: an unpinned or
   open-ended provider or module version, a stateful resource with no
   `prevent_destroy`, an untyped or unvalidated input a caller can get wrong.
-- **SUGGESTION** — hygiene and clarity: a missing `description`, an output
-  broader than callers need. Never blocks a round.
+
+Every item in *What to look for* is at least a `WARNING` when it holds; the
+cases the `CRITICAL` bullet names are `CRITICAL`.
+
+An observation below the blocking bar is not reported. `SUGGESTION` is reserved
+for a tool-verdict claim capped by the evidence rule above, the one lane of
+ARCHITECTURE.md *Terminating severity bars* this agent carries.

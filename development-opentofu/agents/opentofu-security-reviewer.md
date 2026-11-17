@@ -190,4 +190,14 @@ in nitpicks:
 - **WARNING** — a real defect with a bounded blast radius: one resource
   exposed, one store unencrypted, one secret-bearing output not marked
   sensitive, state the repo owns with no encryption at rest.
-- **SUGGESTION** — hygiene and clarity. Never blocks a round.
+
+Every item in *What to look for* is at least a `WARNING` when it holds; the
+cases the `CRITICAL` bullet names are `CRITICAL`.
+
+An observation below the blocking bar is not reported. `SUGGESTION` is reserved
+for a tool-verdict claim capped by the evidence rule above, the one lane of
+ARCHITECTURE.md *Terminating severity bars* this agent carries.
+
+That bar is the review panel's alone. When the maintenance pipeline dispatches
+you, every finding you were handed gets its `actions_requiring_review` entry,
+whatever its severity.
