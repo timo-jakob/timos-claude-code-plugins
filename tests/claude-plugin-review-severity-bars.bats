@@ -745,9 +745,9 @@ _assert_file() {  # _assert_file <path> <test-expr...>
   # reported unless it falls in one of the two SUGGESTION lanes
   contains "$flat" 'a finding a bar demotes below `WARNING` — the delta-round rule below included — is not reported unless it falls in one of the two lanes.'
   lacks "$flat" 'still reported and logged in the dossier, so no dimension loses coverage.'
-  # #3158 rewrote this panel's agents, so the section may no longer say they
-  # (or this guard) still hold the earlier wording
-  contains "$flat" '**Only the reviewers #3158 rewrote follow this contract yet**, in the claude-plugin panel.'
+  # #3158–#3167 rewrote every panel's agents, so the section may no longer say
+  # they (or this guard) still hold the earlier wording
+  lacks "$flat" 'follow this contract yet'
   lacks "$flat" 'still pins the agents to the earlier report-as-'
   lacks "$flat" '**The reviewers do not follow this contract yet.**'
   # the retired #994 promotion path may not be claimed back (#3150)

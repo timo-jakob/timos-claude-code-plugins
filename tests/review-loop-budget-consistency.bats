@@ -490,6 +490,8 @@ grep_site() {  # grep_site <file> <fixed-string>
   grep_site "$ARCH_PANEL_DUTIES" 'never a licence to'
   grep_site "$ARCH_PANEL_DUTIES" 'fix_verification_path'
   grep_site "$ARCH_PANEL_DUTIES" 'adjudicated_path'
+  # ...which no panel forwards since #3158-#3167; the duty says so until #3168
+  grep_site "$ARCH_PANEL_DUTIES" 'That second half is pending #3168'
   # ...including the two qualifications it declares mandatory, so deleting them
   # from the contract doc cannot pass either
   # Each ARCH needle is UNIQUE to the panel-duties section. `CONVERGED
@@ -590,15 +592,12 @@ grep_site() {  # grep_site <file> <fixed-string>
       development-kubernetes/*|development-opentofu/*) ;;
       *) grep_site "$REPO_ROOT/$panel" 'Fix verification (round >= 2): {own_fix_verification_path}' ;;
     esac
-    # the Already-waived prompt line goes panel by panel with children 1 to 10
-    # of #3122; a panel whose child has landed lacks it
-    case "$panel" in
-      development-claude-plugin/*|development-composition/*|development-go/*|development-java/*|development-javascript/*|development-kubernetes/*|development-opentofu/*|development-python/*|development-react/*)  # #3158-#3166
-        run -1 grep -Fq -e 'Already waived (round >= 2)' -- "$REPO_ROOT/$panel"
-        run -1 grep -Fq -e 'adjudicated_path' -- "$REPO_ROOT/$panel"
-        run -1 grep -Fq -e 'REVIEW_ADJUDICATED' -- "$REPO_ROOT/$panel" ;;
-      *) grep_site "$REPO_ROOT/$panel" 'suggestions earlier rounds surfaced and the human waived' ;;
-    esac
+    # the Already-waived prompt line went panel by panel with children 1 to 10
+    # of #3122 (#3158-#3167); every panel has dropped it, so none carries it
+    run -1 grep -Fq -e 'Already waived (round >= 2)' -- "$REPO_ROOT/$panel"
+    run -1 grep -Fq -e 'adjudicated_path' -- "$REPO_ROOT/$panel"
+    run -1 grep -Fq -e 'REVIEW_ADJUDICATED' -- "$REPO_ROOT/$panel"
+    run -1 grep -Fq -e 'suggestions earlier rounds surfaced and the human waived' -- "$REPO_ROOT/$panel"
   done
   # the Metrics bullet of the five report-writing panels (kubernetes and
   # opentofu have no Metrics section — kubernetes' Step 3 paragraph is pinned by
@@ -654,9 +653,8 @@ grep_site() {  # grep_site <file> <fixed-string>
     cur="$(awk -v s="$ln" 'NR>=s{print} NR>s && /^\*\*That `\[\]` is the DELTA-round rule/{exit}' "$f" \
            | tr -d '*`' | tr -s '[:space:]' ' ')"
     [ -n "$cur" ] || { printf 'empty delta-carry block in %s\n' "$f" >&2; return 1; }
-    # the waived-list aside goes panel by panel with children 1 to 10 of #3122
-    # (the claude-plugin panel's, #3158, first), so compare without it until
-    # every panel has dropped it
+    # the waived-list aside went panel by panel with children 1 to 10 of #3122
+    # (#3158-#3167), so compare without it
     cur="${cur// (\$REVIEW_ADJUDICATED carries the waived list)/}"
     # a duplicated line is invisible to a fragment set but not to this
     if [ -z "$ref" ]; then ref="$cur"; else

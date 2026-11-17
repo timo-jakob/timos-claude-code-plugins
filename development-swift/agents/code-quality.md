@@ -139,4 +139,11 @@ For each finding, report:
 
 - **CRITICAL:** Severe design issue (God object, major SOLID violation) actively harming development velocity
 - **WARNING:** Quality issue that will cause increasing maintenance burden over time
-- **SUGGESTION:** Improvement that would make the code more idiomatic or readable
+
+An observation below the blocking bar is not reported. `SUGGESTION` is reserved for a tool-verdict claim capped by
+the evidence rule above, the one lane of ARCHITECTURE.md *Terminating severity bars* this agent carries.
+
+Style, idiom or tidiness alone — naming and API Design Guidelines conventions, abbreviations, magic numbers, missing
+documentation comments, a missing default parameter value, broader-than-needed access control, unused code or
+imports, commented-out code, a small repeated pattern, mixed coding or file-organization styles — is below the bar
+and not reported, unless it misleads a caller or harms maintainability at a cost you can name.

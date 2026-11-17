@@ -43,10 +43,11 @@ consolidator_bullet() {
   contains "$flat" '**A reviewer reports only what blocks: `CRITICAL` or `WARNING`. A plain observation below the bar is not reported.**'
   contains "$flat" '`SUGGESTION` survives in two reviewer lanes only: the evidence-capped severity of a tool-verdict claim that carries `decides:` / `proposed-severity:` (#1584, the evidence rule below), which the decided pass can still raise on a real red; and a scope-bounded defect that carries a `follow-up:` line (*Scope-bounded severity* above).'
   contains "$flat" 'a finding a bar demotes below `WARNING` — the delta-round rule below included — is not reported unless it falls in one of the two lanes.'
-  # the contract is staged: #3158 landed it for the claude-plugin panel, and
-  # the other reviewers follow it once #3159–#3167 land
+  # every panel's reviewers follow the contract since #3167, the last of
+  # #3158–#3167, so the staging sentence is gone
   contains "$flat" "That rule holds for every panel's reviewers, whether or not they carry a bar."
-  contains "$flat" '**Only the reviewers #3158 rewrote follow this contract yet**, in the claude-plugin panel. The other reviewer agents still report a below-the-bar finding as a `SUGGESTION` until children #3159–#3167 of #3122 rewrite them.'
+  lacks "$flat" 'follow this contract yet'
+  lacks "$flat" 'until children #3159–#3167'
   # the development-react panel no longer fixes a check at SUGGESTION (#3166)
   lacks "$flat" 'panel still fixes one check at `SUGGESTION`'
   lacks "$flat" 'still pins the agents to the earlier report-as-'
@@ -96,10 +97,11 @@ consolidator_bullet() {
   contains "$flat" '## Suggested follow-ups'
   contains "$flat" 'A reviewer reports blockers, evidence-capped tool claims and scope-bounded follow-ups only; a plain observation below the bar is not reported at all.'
   contains "$flat" 'is reported with a one-line `follow-up:` note, so the PR'"'"'s review dossier lists it under *Suggested follow-ups* rather than spending a round on work the story never asked for.'
-  # the two staged parts name the children that ship them
-  contains "$flat" 'The dossier has no *Suggested follow-ups* section until #3170 lands, so until then such a defect appears in the dossier'"'"'s **Waived suggestions** list.'
-  contains "$flat" 'The claude-plugin panel'"'"'s reviewers follow it since #3158; the other panels'"'"' reviewers still report below-the-bar observations as suggestions until #3159–#3167 land.'
-  lacks "$flat" 'suggestions until #3158–#3167 land.'
+  # the one staged part names the child that ships it; every panel's
+  # reviewers follow the contract since #3167
+  contains "$flat" 'This is the contract the loop is moving to, and one part of it has not shipped yet. The dossier has no *Suggested follow-ups* section until #3170 lands, so until then such a defect appears in the dossier'"'"'s **Waived suggestions** list.'
+  lacks "$flat" 'reviewers still report below-the-bar observations as suggestions'
+  lacks "$flat" 'two parts of it have not shipped yet'
   # the risk-demoted paragraph stays
   contains "$flat" 'is **demoted to a suggestion**: logged in the round'
   # the retired reviewer-output wording, one needle per rewritten passage
@@ -521,4 +523,125 @@ go_format() {
   contains "$section" '(Y critical, Z warnings, W capped or follow-up suggestions)'
   run -1 grep -qx '## Suggestions' <<<"$section"
   lacks "$section" 'W suggestions)'
+}
+
+# The Swift panel (#3167): the six evidence-rule reviewers report only what
+# blocks, and swift6-compliance, which carries no evidence rule, has no
+# SUGGESTION slot at all. go_format captures a reviewer's Reporting Format to
+# EOF, so test-reviewer's Reviewing thoroughness section is inside it.
+
+@test "#3167 the six Swift evidence-rule reviewers drop plain SUGGESTION and keep only their SUGGESTION lanes" {
+  local a f flat format n want
+  for a in bug-hunter code-quality performance-reviewer security-reviewer swift-resilience-reviewer test-reviewer; do
+    f="$REPO_ROOT/development-swift/agents/$a.md"
+    flat="$(flatten <"$f")"
+    format="$(go_format "$f")"
+    [ -n "$format" ]
+    lacks "$format" '**SUGGESTION:**'
+    lacks "$format" 'as a suggestion'
+    lacks "$format" 'as a `SUGGESTION`'
+    # Whole-file invariant: the word appears, in any case, only in its lanes
+    # (evidence rule, template title, severity-set line(s), the reserved-for
+    # sentence, and test-reviewer's scope-bounded follow-up). The count is of
+    # occurrences, not lines, so a new mention on an existing line moves it.
+    want=6
+    [ "$a" = test-reviewer ] && want=8
+    n="$(grep -oi suggestion "$f" | wc -l | tr -d ' ')"
+    [ "$n" -eq "$want" ]
+    contains "$format" 'An observation below the blocking bar is not reported.'
+    contains "$format" '### [CRITICAL|WARNING|SUGGESTION] Title'
+    contains "$format" 'decides: <the command that settles it> proposed-severity: CRITICAL|WARNING'
+    if [ "$a" = test-reviewer ]; then
+      contains "$format" '`SUGGESTION` is reserved for the two lanes of ARCHITECTURE.md *Terminating severity bars*: a tool-verdict claim capped by the evidence rule above, and a scope-bounded follow-up under *Scope-bounded severity* below.'
+      contains "$format" 'decides: <the command that settles it> proposed-severity: CRITICAL|WARNING — or, for a scope-bounded follow-up (*Scope-bounded severity* below), this one line appended to the **Description** field, with the severity set to SUGGESTION: follow-up: <the defect, in one line>'
+    else
+      contains "$format" '`SUGGESTION` is reserved for a tool-verdict claim capped by the evidence rule above, the one lane of ARCHITECTURE.md *Terminating severity bars* this agent carries.'
+      lacks "$flat" 'follow-up:'
+    fi
+  done
+}
+
+@test "#3167 swift6-compliance reports CRITICAL and WARNING only, and its migrate mode carries no SUGGESTION" {
+  local f="$REPO_ROOT/development-swift/agents/swift6-compliance.md" format
+  format="$(awk '/^## Reporting Format$/ { f = 1; next } f && /^## / { exit } f' "$f" | flatten)"
+  [ -n "$format" ]
+  contains "$format" '### [CRITICAL|WARNING] Title'
+  lacks "$format" 'SUGGESTION'
+  contains "$format" '**WARNING:** An API, flag or construct the compiler or SDK marks deprecated (a deprecation diagnostic), with a clear modern replacement that should be adopted'
+  contains "$format" 'An observation below the blocking bar — a modernization opportunity with no compile failure under Swift 6 and no deprecation diagnostic behind it, such as `guard let x = x` rebinding, `#selector` or `@objc` style, Objective-C idioms in pure Swift, `NSError` bridging, untyped `throws`, `any` where `some` would do, `if`/`switch` expressions or ownership modifiers — is not reported, even where a checklist heading above lists it.'
+  contains "$format" 'In review mode, a CRITICAL or WARNING finding that claims a compile failure or a deprecation diagnostic is reported only with that diagnostic quoted in its Description, from a build you ran without editing any file (`swift build -Xswiftc -swift-version -Xswiftc 6`, or the project'"'"'s `xcodebuild build SWIFT_VERSION=6`); a compiler claim you could not check is not reported.'
+  lacks "$format" 'Deprecated pattern with a clear modern replacement'
+  # a build that never ran must not read as a clean review
+  contains "$format" 'If you could not run that build at all, or it failed for a reason other than Swift 6 diagnostics, say so in your report: name the command and the error, and state that the Swift 6 Compliance dimension was not verified. Still emit `[]`.'
+  # the word is gone from the whole file, migrate mode included
+  run -1 grep -qi suggestion "$f"
+  grep -qx '## Migrate mode (#447)' "$f"
+}
+
+@test "#3167 swift-resilience-reviewer does not report a violation it cannot prove" {
+  local flat
+  flat="$(flatten <"$REPO_ROOT/development-swift/agents/swift-resilience-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'When a client type you cannot see might already supply the timeout or breaker, and you cannot name the failure, do not report it; do not assert a violation you cannot prove.'
+  lacks "$flat" 'drop to SUGGESTION'
+  lacks "$flat" 'A hardening improvement with no failure mode you can name.'
+}
+
+@test "#3167 swift security-reviewer does not report hardening with no attack path" {
+  local flat
+  flat="$(flatten <"$REPO_ROOT/development-swift/agents/security-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" '**WARNING:** Exploitable under specific conditions, or a defense-in-depth gap: a control the change removes or weakens. Hardening that only adds a new layer, with no attack path you can name, is below the bar and not reported.'
+  lacks "$flat" 'violates best practices'
+}
+
+@test "#3167 the Swift code-quality, performance and test reviewers do not report their named sub-bar items" {
+  local flat
+  flat="$(flatten <"$REPO_ROOT/development-swift/agents/code-quality.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'Style, idiom or tidiness alone — naming and API Design Guidelines conventions, abbreviations, magic numbers, missing documentation comments, a missing default parameter value, broader-than-needed access control, unused code or imports, commented-out code, a small repeated pattern, mixed coding or file-organization styles — is below the bar and not reported, unless it misleads a caller or harms maintainability at a cost you can name.'
+  flat="$(flatten <"$REPO_ROOT/development-swift/agents/performance-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'An allocation or micro-optimisation finding — a class where a struct would do, string interpolation, `filter` + `first` instead of `first(where:)`, an `any Protocol` existential, `AnyPublisher` type erasure — with no hot path or load condition you can name is speculation, below the bar and not reported.'
+  flat="$(flatten <"$REPO_ROOT/development-swift/agents/test-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'The structure, debuggability and framework checks above — assertion messages, `XCTAssertTrue` on a complex condition, Arrange-Act-Assert layout, test names, several behaviours in one test, duplicated setup, test grouping, a move from XCTest to Swift Testing, `@Test(arguments:)` or trait opportunities — are below the bar and not reported, unless you can name the regression or the flakiness they let through.'
+}
+
+@test "#3167 Swift test-reviewer's Scope-bounded severity reports the follow-up lane and keeps its three carve-outs" {
+  local flat
+  flat="$(flatten <"$REPO_ROOT/development-swift/agents/test-reviewer.md")"
+  [ -n "$flat" ]
+  contains "$flat" 'A finding blocks (CRITICAL/WARNING) only when its fix stays within the issue'"'"'s stated scope. A pre-existing defect that would block, but whose only correct fix expands the change beyond that scope, is reported at **SUGGESTION** with a Description line `follow-up: <the defect, in one line>`, and it never blocks a round. A plain out-of-diff observation below the bar is not reported.'
+  lacks "$flat" 'spin off a follow-up issue'
+  contains "$flat" 'Three carve-outs keep this from muzzling real blockers. **(1) Tests and coverage for the change under review are always in-scope**'
+  contains "$flat" '**(2) A defect the change under review *introduces* is always in-scope**'
+  contains "$flat" "**(3) When the issue's stated scope is not provided in your prompt**"
+}
+
+@test "#3167 the Swift panel carries no waived list and reports follow-ups and tool claims under their own headings" {
+  local panel="$REPO_ROOT/development-swift/skills/review/SKILL.md" section
+  [ -f "$panel" ]
+  run -1 grep -Fq -e 'Already waived' -- "$panel"
+  run -1 grep -Fq -e 'adjudicated_path' -- "$panel"
+  run -1 grep -Fq -e 'REVIEW_ADJUDICATED' -- "$panel"
+  run -1 grep -Fq -e '--adjudicated' -- "$panel"
+  run -1 grep -Fq -e 'carries the waived' -- "$panel"
+  run -1 grep -Fq -e 'what the human already waived' -- "$panel"
+  grep -Fq -e 'also carries `fix_verification_path`, and the reviewers must be told about it.' -- "$panel"
+  # the report template holds its own `## ` lines, so capture Step 3 up to
+  # Step 4 rather than stopping at the first of them
+  section="$(awk '/^## Step 3: Synthesize the Review/ { f = 1; next } /^## Step 4: / { f = 0 } f' "$panel")"
+  [ -n "$section" ]
+  grep -qx '## Suggested follow-ups' <<<"$section"
+  grep -qx '## Unverified tool claims' <<<"$section"
+  contains "$section" 'Only the SUGGESTION findings that carry a `follow-up:` line'
+  contains "$section" 'Only the SUGGESTION findings that carry `decides:` / `proposed-severity:` lines'
+  contains "$section" '(Y critical, Z warnings, W follow-ups, V tool claims)'
+  run -1 grep -qx '## Suggestions' <<<"$section"
+  lacks "$section" 'W suggestions)'
+  # an unverified dimension is listed apart, never counted as reviewed
+  section="$(flatten <<<"$section")"
+  contains "$section" '- **Areas reviewed:** Bugs, Security, Performance, Swift 6 Compliance, Code Quality, Tests, Resilience — minus any dimension listed under the next line'
+  contains "$section" '- **Not verified:** every dimension whose agent reported it could not verify it (for Swift 6 Compliance, a build it could not run, or one that failed for a reason other than Swift 6 diagnostics), with the command and error it named; such a dimension is never counted under Areas reviewed'
 }
