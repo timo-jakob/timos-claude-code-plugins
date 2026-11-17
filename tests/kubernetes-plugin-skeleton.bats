@@ -535,7 +535,7 @@ rstep() {
   # which never blocks: a whole review dimension permanently non-blocking, in
   # silence. tests/resilience-review-dimension.bats pins exactly this for the
   # four service panels.
-  local f base full body flat fm
+  local f base full body flat fm n
   local -a files=()
   while IFS= read -r f; do files+=("$f"); done < <(find "$PLUGIN_DIR/agents" -name '*.md' | sort)
   [ "${#files[@]}" -eq 5 ]
@@ -565,7 +565,11 @@ rstep() {
       # #3163: the guide keeps only the blocking rungs; plain hygiene findings
       # are no longer reported, and SUGGESTION survives only for the evidence
       # rule's capped tool-verdict claim (decides: / proposed-severity:)
-      lacks "$body" '**SUGGESTION** — hygiene and clarity'
+      lacks "$body" '- **SUGGESTION** —'
+      # any reworded SUGGESTION route moves the count: the evidence rule and its
+      # two follow-up lines, the template title and severity line, the reserve
+      n="$(grep -ci suggestion "$f")"
+      [ "$n" -eq 6 ]
       contains "$body" '- **CRITICAL** — the rendered manifest takes the platform'
       contains "$body" '- **WARNING** — a real defect with a bounded blast radius'
       contains "$flat" 'An observation below the blocking bar is not reported.'
@@ -579,13 +583,17 @@ rstep() {
         contains "$flat" 'an AppProject permitting `*` source repos or any destination is `CRITICAL`'
         contains "$flat" 'A dangling app-of-apps child path and a sync wave that starts a workload before its CRD, secret or namespace exists are each a `WARNING`'
         contains "$flat" 'A skipped check is stated in your prose report, never as a finding: it carries no severity.'
+        contains "$flat" 'An `Application` deploying a demonstration or development environment that is meant to follow the branch tip is not a finding; read its destination before reporting.'
         ;;
       kubernetes-security-reviewer)
         contains "$flat" 'Every item in *What to look for* is at least a `WARNING` when it holds.'
         contains "$flat" '`privileged: true` and `hostNetwork`, `hostPID` or `hostIPC` are `CRITICAL`'
+        contains "$flat" 'A setting the workload'"'"'s own job requires is not a finding: an added capability the process needs, such as `NET_BIND_SERVICE` to bind a port below 1024, a writable root filesystem for an application that writes to it, and a read-only `hostPath` mount on a node-level `DaemonSet`, such as a log collector. Read the workload before reporting.'
         ;;
       kubernetes-reliability-reviewer)
         contains "$flat" '`Resources` and `Rollout` included, is at least a `WARNING` when it holds'
+        contains "$flat" 'A single replica or a missing `PodDisruptionBudget` in a demonstration overlay is fine; in a production overlay it is a finding. Read the overlay before reporting.'
+        contains "$flat" 'A missing `PodDisruptionBudget` is a finding only for a long-running serving workload, a `Deployment` or `StatefulSet` behind a `Service`, never for a `Job` or `CronJob`.'
         ;;
       esac
       contains "$flat" 'decides: <the command that settles it>'

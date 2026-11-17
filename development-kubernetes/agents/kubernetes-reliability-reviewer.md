@@ -56,8 +56,11 @@ false WARNING here blocks the round on a service that already survives a drain.
 
 ## Judgement
 
-A single replica in a demonstration overlay is fine; a single replica in a
-production overlay is a finding. Read the overlay before reporting.
+A single replica or a missing `PodDisruptionBudget` in a demonstration overlay
+is fine; in a production overlay it is a finding. Read the overlay before
+reporting. A missing `PodDisruptionBudget` is a finding only for a long-running
+serving workload, a `Deployment` or `StatefulSet` behind a `Service`, never for
+a `Job` or `CronJob`.
 
 ## The evidence rule (a tool's verdict needs the tool run)
 

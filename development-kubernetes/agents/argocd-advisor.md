@@ -156,7 +156,9 @@ destination is `CRITICAL`: it grants cluster-wide deployment privilege. A
 dangling app-of-apps child path and a sync wave that starts a workload before
 its CRD, secret or namespace exists are each a `WARNING`: one app unsyncable.
 `targetRevision: HEAD` is a `WARNING`: that app's deployed state cannot be
-reproduced or rolled back. Orphans left by `automated` without `prune` are
+reproduced or rolled back. An `Application` deploying a demonstration or
+development environment that is meant to follow the branch tip is not a
+finding; read its destination before reporting. Orphans left by `automated` without `prune` are
 below the bar. So are plain `prune: true` and `selfHeal: true`: a manifest
 cannot show which resource a human created or which app someone must patch
 during an incident.
