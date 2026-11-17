@@ -92,8 +92,8 @@ ownership modifiers — is not reported, even where a checklist heading above li
 
 In review mode, a CRITICAL or WARNING finding that claims a compile failure or a deprecation diagnostic is reported
 only with that diagnostic quoted in its Description, from a build you ran without editing any file
-(`swift build -Xswiftc -swift-version -Xswiftc 6`, or the project's `xcodebuild build`); a compiler claim you could not
-check is not reported.
+(`swift build -Xswiftc -swift-version -Xswiftc 6`, or the project's `xcodebuild build SWIFT_VERSION=6`); a compiler
+claim you could not check is not reported.
 
 ## Migrate mode (#447)
 
