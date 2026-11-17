@@ -432,13 +432,16 @@ go_format() {
     format="$(go_format "$f")"
     [ -n "$format" ]
     lacks "$format" '**SUGGESTION:**'
-    # Whole-file invariant: SUGGESTION appears only on the lines of its lanes
+    lacks "$format" 'as a suggestion'
+    lacks "$format" 'as a `SUGGESTION`'
+    # Whole-file invariant: the word appears, in any case, only in its lanes
     # (evidence rule, template title, severity-set line(s), the reserved-for
-    # sentence, and python-test-reviewer's scope-bounded follow-up). Any new
-    # SUGGESTION route, however spelled, moves this count.
+    # sentence, and python-test-reviewer's scope-bounded follow-up). The count
+    # is of occurrences, not lines, so a new mention on an existing line, or a
+    # lowercase one, moves it.
     want=6
     [ "$a" = python-test-reviewer ] && want=8
-    n="$(grep -c SUGGESTION "$f")"
+    n="$(grep -oi suggestion "$f" | wc -l | tr -d ' ')"
     [ "$n" -eq "$want" ]
     contains "$format" 'An observation below the blocking bar is not reported.'
     contains "$format" '### [CRITICAL|WARNING|SUGGESTION] Title'
