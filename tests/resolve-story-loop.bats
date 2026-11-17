@@ -1352,7 +1352,7 @@ seed_exhausted_wd() {
   run -1 grep -q '^\.loop-wd/' "$BATS_TEST_TMPDIR/wdscope-r3.txt"
 }
 
-# ---- delta scoping, the closing full sweep, and the adjudicated list (#1434)
+# ---- delta scoping and the closing full sweep (#1434)
 #
 # A fix hook that does NOT touch the tree leaves an empty delta, which the loop
 # promotes back to a full sweep — so these tests use hooks that really edit
@@ -1470,29 +1470,34 @@ seed_exhausted_wd() {
   grep -q -- '- by class: new_defect 1, incomplete_propagation 0, under_assertion 0' "$WD/progress.md"
 }
 
-@test "#1434 a malformed suggestion never reaches adjudicated.json — the work-dir cannot be bricked" {
-  WD="$BATS_TEST_TMPDIR/wd-adj-normalise"
-  # The consolidator TOLERATES a non-string title and a missing dimension on a
-  # reviewer's finding, but its own --adjudicated validator refuses both. An
-  # unnormalised append would persist them, and every later round (and every
-  # later --resume) would die on the consolidator's refusal as a bare exit 1.
-  local r1='[{"severity":"CRITICAL","dimension":"bugs","file":"helper.py","line":1,"title":"unquoted path in the copy step","description":"d","reviewer":"r"},{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":42,"description":"d","reviewer":"r"},{"severity":"SUGGESTION","file":"app.py","line":2,"title":"no dimension at all","description":"d","reviewer":"r"}]'
-  echo "print(1)" > "$R/helper.py"
+@test "#3169 the loop builds no waived-suggestion list: no adjudicated.json, no history key" {
+  WD="$BATS_TEST_TMPDIR/wd-no-adjudicated"
+  # round 1 raises a blocker, a follow-up: Low and a plain Low; round 2 re-raises
+  # the follow-up: Low. The plain Low is discarded by the consolidator, and the
+  # re-raised one is logged again rather than suppressed as already waived.
+  local r1='[{"severity":"CRITICAL","dimension":"bugs","file":"helper.py","line":1,"title":"unquoted path in the copy step","description":"d","reviewer":"r"},{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":"rename the temp variable","description":"follow-up: rename the temp variable","reviewer":"r"},{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":30,"title":"a plain nit","description":"d","reviewer":"r"}]'
+  local r2='[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":"rename the temp variable","description":"follow-up: rename the temp variable","reviewer":"r2"}]'
+  echo "print(1)" > "$R/helper.py"     # so the fix pass EDITS rather than creates
   run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
-    R1="$r1" \
+    R1="$r1" R2="$r2" SNAP="$WD" \
     zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 4 \
-    --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" "$R1" > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
+    --review-cmd 'printf "%s" "${REVIEW_ADJUDICATED-UNSET}" > "$SNAP/adj-var-r$REVIEW_ROUND.txt"; if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" "$R1" > "$REVIEW_FINDINGS"; elif [ "$REVIEW_ROUND" = 2 ]; then printf "%s" "$R2" > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
     --fix-cmd 'echo "x = 2" > "$REVIEW_REPO/helper.py"'
-  # the run reached its verdict rather than dying on round 2's consolidator
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
-  # every persisted entry satisfies the consolidator's own --adjudicated
-  # predicate, and the dimension-less one was dropped rather than stored empty
-  jq -e 'all(.[]; (.file | type == "string" and length > 0)
-                  and (.dimension | type == "string" and length > 0)
-                  and (.title | type == "string"))' "$WD/adjudicated.json" >/dev/null
-  [ "$(jq 'length' "$WD/adjudicated.json")" -eq 1 ]
-  [ "$(jq -r '.[0].title' "$WD/adjudicated.json")" = "42" ]
+  # the plain Low never reached a changelist; the lane Low did, both rounds
+  [ "$(echo "$output" | jq '.round_changelists[0].summary.low')" -eq 1 ]
+  [ "$(echo "$output" | jq '.round_changelists[1].summary.low')" -eq 1 ]
+  echo "$output" | jq -e '[.round_changelists[].summary | has("adjudicated_dropped")] | any | not' >/dev/null
+  # no list is built, in the work-dir or under .review/
+  [ ! -e "$WD/adjudicated.json" ]
+  [ ! -e "$R/.review/adjudicated.json" ]
+  # the per-round history line carries no drop count, and progress.md no line
+  jq -es 'length >= 2 and all(.[]; has("adjudicated_dropped") | not)' "$WD/history.jsonl" >/dev/null
+  run -1 grep -q -- 'adjudicated' "$WD/progress.md"
+  # #3168: the panel is never handed a list either
+  [ "$(cat "$WD/adj-var-r1.txt")" = "UNSET" ]
+  [ "$(cat "$WD/adj-var-r2.txt")" = "UNSET" ]
 }
 
 @test "#1434 a zero-blocker delta round at the ceiling is granted the closing sweep, once" {
@@ -1595,61 +1600,6 @@ seed_exhausted_wd() {
   run -1 grep -q '^## Round 2' "$WD/progress.md"
 }
 
-@test "#1434 the adjudicated list suppresses a re-raised suggestion, and says so" {
-  WD="$BATS_TEST_TMPDIR/wd-adjudicated"
-  # round 1 raises a blocker AND a suggestion; the fix pass edits helper.py
-  # (never app.py, where the suggestion lives, so the adjudication stays valid);
-  # round 2 re-raises the very same suggestion and nothing else.
-  local r1='[{"severity":"CRITICAL","dimension":"bugs","file":"helper.py","line":1,"title":"unquoted path in the copy step","description":"d","reviewer":"r"},{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":"rename the temp variable","description":"d","reviewer":"r"}]'
-  local r2='[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":"rename the temp variable","description":"d2","reviewer":"r2"}]'
-  echo "print(1)" > "$R/helper.py"     # so the fix pass EDITS rather than creates
-  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
-    R1="$r1" R2="$r2" SNAP="$WD" \
-    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 4 \
-    --review-cmd 'printf "%s" "${REVIEW_ADJUDICATED-UNSET}" > "$SNAP/adj-var-r$REVIEW_ROUND.txt"; if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" "$R1" > "$REVIEW_FINDINGS"; elif [ "$REVIEW_ROUND" = 2 ]; then printf "%s" "$R2" > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
-    --fix-cmd 'echo "x = 2" > "$REVIEW_REPO/helper.py"'
-  [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
-  # round 1 waived the suggestion; round 2 re-raised it and was dropped
-  [ "$(echo "$output" | jq '.round_changelists[0].summary.adjudicated_dropped')" -eq 0 ]
-  [ "$(echo "$output" | jq '.round_changelists[1].summary.adjudicated_dropped')" -eq 1 ]
-  [ "$(echo "$output" | jq '.round_changelists[1].summary.low')" -eq 0 ]
-  # the count rides the per-round history line and the progress tail
-  [ "$(echo "$output" | jq '.history[1].adjudicated_dropped')" -eq 1 ]
-  grep -q -- '- adjudicated re-raises dropped: 1' "$WD/progress.md"
-  # the list itself is work-dir state, never written under .review/
-  [ -s "$WD/adjudicated.json" ]
-  [ ! -e "$R/.review/adjudicated.json" ]
-  # #3168: the list is the consolidator's alone — the panel is never handed it,
-  # so REVIEW_ADJUDICATED is unset in the review command on every round
-  [ "$(cat "$WD/adj-var-r1.txt")" = "UNSET" ]
-  [ "$(cat "$WD/adj-var-r2.txt")" = "UNSET" ]
-}
-
-@test "#1434 the adjudication is invalidated on the CLOSING SWEEP too, not just delta rounds" {
-  WD="$BATS_TEST_TMPDIR/wd-adjudicated-sweep"
-  # Round 2 is a clean DELTA round, so it promotes round 3 to the closing full
-  # sweep. delta_files must still be computed on that full round — it is the
-  # only thing that re-opens an adjudication whose file the last fix pass
-  # touched — so gating --prior-tree on `is_final` would leave the safety-net
-  # round suppressing a suggestion it should have re-raised.
-  local r1='[{"severity":"CRITICAL","dimension":"bugs","file":"helper.py","line":1,"title":"unquoted path in the copy step","description":"d","reviewer":"r"},{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":"rename the temp variable","description":"d","reviewer":"r"}]'
-  local r3='[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":"rename the temp variable","description":"d3","reviewer":"r3"}]'
-  echo "print(1)" > "$R/helper.py"
-  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
-    R1="$r1" R3="$r3" \
-    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 4 \
-    --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" "$R1" > "$REVIEW_FINDINGS"; elif [ "$REVIEW_ROUND" = 3 ]; then printf "%s" "$R3" > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
-    --fix-cmd 'echo "print(99)" > "$REVIEW_REPO/app.py"'
-  [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
-  [ "$(echo "$output" | jq '.rounds')" -eq 3 ]
-  # round 3 IS the closing sweep, and the round-1 fix pass edited app.py, so the
-  # waived suggestion there was re-opened rather than suppressed
-  [ "$(echo "$output" | jq '.round_changelists[2].summary.adjudicated_dropped')" -eq 0 ]
-  [ "$(echo "$output" | jq '.round_changelists[2].summary.low')" -eq 1 ]
-}
-
 @test "#1434 a delta of ONLY work-dir state is empty for the panel, however the descriptor reads it" {
   WD="$R/.loop-wd"   # deliberately INSIDE the repo
   # The descriptor's scope_empty is FALSE here — the loop's own history,
@@ -1694,27 +1644,6 @@ seed_exhausted_wd() {
     --review-cmd 'printf "[]" > "$REVIEW_FINDINGS"' --fix-cmd 'true'
   [ "$status" -eq 1 ]
   contains "$stderr" "could not persist the round 1 tree identity"
-}
-
-@test "#1434 an adjudication is INVALIDATED when the fix pass touches its file" {
-  WD="$BATS_TEST_TMPDIR/wd-adjudicated-invalidated"
-  # Same shape as above, except the fix pass edits app.py — the very file the
-  # waived suggestion is about. A suggestion re-raised there is plausibly a NEW
-  # observation about NEW code, so it must survive.
-  local r1='[{"severity":"CRITICAL","dimension":"bugs","file":"app.py","line":1,"title":"unquoted path in the copy step","description":"d","reviewer":"r"},{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":"rename the temp variable","description":"d","reviewer":"r"}]'
-  local r2='[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":"rename the temp variable","description":"d2","reviewer":"r2"}]'
-  run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
-    R1="$r1" R2="$r2" SNAP="$WD" \
-    zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 4 \
-    --review-cmd 'printf "%s" "${REVIEW_ADJUDICATED-UNSET}" > "$SNAP/adj-var-r$REVIEW_ROUND.txt"; if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" "$R1" > "$REVIEW_FINDINGS"; elif [ "$REVIEW_ROUND" = 2 ]; then printf "%s" "$R2" > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; fi' \
-    --fix-cmd 'echo "print(99)" > "$REVIEW_REPO/app.py"'
-  [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
-  [ "$(echo "$output" | jq '.round_changelists[1].summary.adjudicated_dropped')" -eq 0 ]
-  [ "$(echo "$output" | jq '.round_changelists[1].summary.low')" -eq 1 ]
-  # ...and the panel was never handed the list (#3168): only the consolidator
-  # reads it, so REVIEW_ADJUDICATED is unset in the review command
-  [ "$(cat "$WD/adj-var-r2.txt")" = "UNSET" ]
 }
 
 @test "#1434 a fresh run that cannot truncate history.jsonl aborts, rather than appending onto a foreign run" {
@@ -1767,22 +1696,24 @@ seed_exhausted_wd() {
   WD="$BATS_TEST_TMPDIR/wd-fresh-truncate"
   mkdir -p "$WD"
   # a previous run's leavings: a foreign tree identity (a delta against which is
-  # arbitrary), foreign waived suggestions, and a closing-sweep grant this run
-  # never earned
+  # arbitrary), a closing-sweep grant this run never earned, and an older run's
+  # waived-suggestion list, which #3169 retired
   printf 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n' > "$WD/tree-1.txt"
   printf '[{"file":"app.py","line":1,"dimension":"code_quality","title":"rename the temp variable"}]' > "$WD/adjudicated.json"
+  cp "$WD/adjudicated.json" "$BATS_TEST_TMPDIR/leftover.json"
   printf '[{"file":"x"}]' > "$WD/verify-2.json"
   printf '9\n' > "$WD/.closing-sweep"
-  # a suggestion the STALE list would have suppressed must survive a fresh run
-  local r1='[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":"rename the temp variable","description":"d","reviewer":"r"}]'
+  # a lane suggestion the leftover list names must survive: the list is never read
+  local r1='[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":"rename the temp variable","description":"follow-up: rename the temp variable","reviewer":"r"}]'
   run env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON='{"languages":["python"]}' \
     R1="$r1" \
     zsh "$S" --repo "$R" --base main --work-dir "$WD" --max-rounds 3 \
     --review-cmd 'printf "%s" "$R1" > "$REVIEW_FINDINGS"' --fix-cmd 'true'
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.status')" = "CONVERGED" ]
-  [ "$(echo "$output" | jq '.round_changelists[0].summary.adjudicated_dropped')" -eq 0 ]
   [ "$(echo "$output" | jq '.round_changelists[0].summary.low')" -eq 1 ]
+  # the leftover list is ignored: neither read nor deleted, byte for byte
+  cmp "$BATS_TEST_TMPDIR/leftover.json" "$WD/adjudicated.json"
   [ ! -e "$WD/.closing-sweep" ]
   [ "$(echo "$output" | jq '.closing_sweep_granted')" = "false" ]
   # the stale verify-2.json was truncated, and the one now on disk is THIS
@@ -2026,7 +1957,7 @@ seed_exhausted_wd() {
 
 # a reviewer panel that raises the same waived Low finding every round
 suggestion_loop() {
-  loop --review-cmd 'printf "%s" '"'"'[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":"extract the magic number","description":"d","reviewer":"q"}]'"'"' > "$REVIEW_FINDINGS"' \
+  loop --review-cmd 'printf "%s" '"'"'[{"severity":"SUGGESTION","dimension":"code_quality","file":"app.py","line":1,"title":"extract the magic number","description":"follow-up: d","reviewer":"q"}]'"'"' > "$REVIEW_FINDINGS"' \
        --fix-cmd 'true' "$@"
 }
 
@@ -2273,10 +2204,10 @@ lib.zsh" ]
   # the five pre-existing keys are all still there...
   jq -es 'all(.[]; has("round") and has("blocking") and has("conflicts")
                    and has("non_converging") and has("false_trips"))' "$H" >/dev/null
-  # ...alongside the SIXTH key sibling #1434 legitimately mirrors onto the same
-  # line, which is exactly why this is a negative on the residue keys and NOT a
-  # closed-key-set assertion (#1463)
-  jq -es 'all(.[]; has("adjudicated_dropped"))' "$H" >/dev/null
+  # ...alongside the key sibling #1973 legitimately adds to the same line, which
+  # is exactly why this is a negative on the residue keys and NOT a closed-key-set
+  # assertion (#1463). (#1434's drop count left the line with #3169.)
+  jq -es 'all(.[]; has("gate") and (has("adjudicated_dropped") | not))' "$H" >/dev/null
   # ...and nothing residue-derived joined them. A REGEX FAMILY over the key
   # names, not a guess-list of four literals: a fifth spelling (`residue_class`,
   # `fix_touched_files`, `by_class`) would slip straight through a closed list,
@@ -2292,7 +2223,7 @@ lib.zsh" ]
   local k
   for k in class fix_touched fix-touched residue_class residue_blocking by_class; do
     jq -nc --arg k "$k" '{round:1, blocking:0, conflicts:0, non_converging:false,
-                          false_trips:0, adjudicated_dropped:0} + {($k): 1}' > "$probe"
+                          false_trips:0, gate:null} + {($k): 1}' > "$probe"
     # the family assertion must FAIL on a probe carrying the key — asserted on
     # jq's own exit rather than through `run !`, so the message names the key
     jq -es 'all(.[]; [keys[] | select(test("residue|fix.?touched|class"))] | length == 0)' \
@@ -2301,7 +2232,7 @@ lib.zsh" ]
   # ...and it does NOT red on the six legitimate keys, so it is a filter and not
   # a blanket refusal
   jq -nc '{round:1, blocking:0, conflicts:0, non_converging:false,
-           false_trips:0, adjudicated_dropped:0}' > "$probe"
+           false_trips:0, gate:null}' > "$probe"
   jq -es 'all(.[]; [keys[] | select(test("residue|fix.?touched|class"))] | length == 0)' "$probe" >/dev/null
 }
 
@@ -3098,7 +3029,7 @@ pft_review() {  # $1 = round-3 findings (default: none)
   # the six legitimate keys are all still there...
   jq -es 'all(.[]; has("round") and has("blocking") and has("conflicts")
                    and has("non_converging") and has("false_trips")
-                   and has("adjudicated_dropped"))' "$H" >/dev/null
+                   and has("gate"))' "$H" >/dev/null
   # ...and nothing #1498-derived joined them. A REGEX FAMILY over the key names
   # rather than a guess-list of literals, for the reason #1435 records: a fifth
   # spelling would slip straight through a closed list. Still not a closed KEY
@@ -3112,14 +3043,14 @@ pft_review() {  # $1 = round-3 findings (default: none)
   local k
   for k in possible_false_trip_auto_continues auto_continued continued possible_false_trips; do
     jq -nc --arg k "$k" '{round:1, blocking:0, conflicts:0, non_converging:false,
-                          false_trips:0, adjudicated_dropped:0} + {($k): 1}' > "$probe"
+                          false_trips:0, gate:null} + {($k): 1}' > "$probe"
     jq -es 'all(.[]; [keys[] | select(test("continu|auto|possible"))] | length == 0)' \
       "$probe" >/dev/null && { echo "family missed the key: $k"; return 1; }
   done
   # ...and it does not red on the six legitimate keys, so it filters rather than
   # refusing everything
   jq -nc '{round:1, blocking:0, conflicts:0, non_converging:false,
-           false_trips:0, adjudicated_dropped:0}' > "$probe"
+           false_trips:0, gate:null}' > "$probe"
   jq -es 'all(.[]; [keys[] | select(test("continu|auto|possible"))] | length == 0)' "$probe" >/dev/null
 }
 

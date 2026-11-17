@@ -3890,7 +3890,7 @@ dimensions (bugs, security, performance, code-quality, resilience, and the
 claude-plugin prose-logic/contract/manifest reviewers) is tracked follow-up (#987), not yet
 done — no shared convention file or prompt-injection carries it. It is honoured mechanically
 downstream: `SUGGESTION → Low`, and Low never blocks a round (see the consolidator
-below, whose Low filter keeps a Low carrying a `follow-up:` line once #3169 lands).
+below, whose Low filter keeps a Low carrying a `follow-up:` line, #3169).
 
 Reviewers also **enumerate every instance of a repeating pattern in one round**
 rather than one exemplar per round; the fix pass sibling-sweeps to match (both in
@@ -4354,11 +4354,11 @@ cannot mint a second artifact path for the same round:
   and the delta goes through the **same** normalisation and the same `.review/` +
   `.claude/telemetry/` exclusions (#909) as the full scope — one file-listing
   path, never a second. `delta_files` is computed whenever `--prior-tree` is
-  given, **including on a full round**, so the adjudication invalidation the
-  loop drives from it runs under one uniform rule rather than a mode test. On a
-  closing sweep or a re-planned verification-only round the delta is empty by
-  construction — no fix pass ran between them — so the invalidation is a no-op
-  there, which is the correct outcome, not a reason to skip the computation.
+  given, **including on a full round**, under one uniform rule rather than a
+  mode test. (Until #3169 the loop invalidated its waived-suggestion carry
+  against it; that carry is gone, and the field stays part of the descriptor.)
+  On a closing sweep or a re-planned verification-only round the delta is empty
+  by construction — no fix pass ran between them.
   `delta_hunks` (#2011) is that same delta at line granularity, `null` exactly
   when `delta_files` is: an array of `{file, kind, start, end}` new-side line
   ranges (1-based, inclusive) from a zero-context diff of the same two trees,
@@ -4387,8 +4387,8 @@ cannot mint a second artifact path for the same round:
   untouched either way. `--fix-verification` is **echoed through** as
   `fix_verification_path` — this script never reads the file, so one descriptor
   value carries everything a round's panel needs. `plan` takes no
-  `--adjudicated` and emits no `adjudicated_path` key (#3168): no panel reads
-  the waived-suggestion list, so the flag is refused as unknown (exit 2).
+  waived-suggestion flag and emits no path for that list (#3168): no panel
+  reads it, so the flag is refused as unknown (exit 2).
   `--self-check` (#2014) is echoed through the same way as `self_check_path`,
   the descriptor's **last** key (under `--fallback`, `fallback_for` and
   `review_mode` follow it), `null` when absent and never read: the path of
@@ -4697,54 +4697,29 @@ reliable but the merging needs semantics:
   additionally validated as an integer because it is interpolated as raw JSON).
   A bad file input is refused at exit **1** with a stderr diagnostic that names
   that input rather than the findings file, and with **no changelist on
-  stdout**: for `--adjudicated` that is unreadable, not an array, **not an array
-  of objects each carrying a non-empty `file` and `dimension` and a string
-  `title`** (`line` is the one optional member — absent or null is a deliberate
-  wildcard within the file+dimension), or holding **more than one** top-level
-  JSON value. The element-shape and single-value checks matter because both
-  failures otherwise abort the *main* jq program and surface as "invalid
-  findings JSON", sending the caller to the wrong input — and the element-shape
-  one is input-dependent, silent on a round with no Low findings.
+  stdout**, so a bad `--fix-touched` or `--prev` never surfaces as "invalid
+  findings JSON" and sends the caller to the wrong input.
 - **`review-consolidator`** (agent, opus) runs the engine, then adds the
   judgment the exact-key heuristics can't: merging findings that describe the
   same defect in different words / across dimensions, and confirming or demoting
   conflicts by reading the cited code. It never re-grades a reviewer's severity
   and never invents or drops a finding.
 
-- **The adjudicated-re-raise drop** (`--adjudicated FILE`, #1434) is the one way a
-  finding a reviewer *did* report never reaches the changelist. `FILE` holds a
-  JSON array of identity keys `{file, line, dimension, title}` — the Low
-  findings prior rounds surfaced and the human waived — and **may be empty**
-  (`[]`), because an early round legitimately has nothing waived yet. A
-  matching item is dropped from `suggestions[]` and counted in
-  `summary.adjudicated_dropped` only when **every** guard below holds — and
-  since #1584 there is one more than the three #1434 shipped: a finding the
-  conductor's *decided pass* marked **red**, on its own stamp or anywhere in its
-  dedup group, is never dropped, because a red is an observed tool verdict
-  rather than a restated opinion; and since #1921 a risk-demoted item is never
-  dropped either, because it is logged as a suggestion on purpose. The rest: it
-  matches
-  under the **reused #983 matcher** (gather on `file`+`dimension`+line
-  proximity) on the **exact normalized-title arm ONLY** — never the
-  shared-token or tokenless arms, which exist to fail *toward* the human on a
-  possible survivor and would here delete real findings on a single shared word,
-  and an entry whose normalized title is empty matches nothing rather than
-  silencing every untitled finding in its file; the incoming finding is itself
-  **Low**, so a re-raise at `WARNING`/`CRITICAL` is never suppressed; and the
-  entry is still **valid**, which the *loop* enforces by removing every
-  adjudication whose file appears in the round's `delta_files` before
-  consolidating. The drop runs **after** the #1921 risk demotion and
-  **before** the conflict / non-convergence classification, so a dropped item
-  cannot go on to seed a conflict pair or a carried-blocker match. Selection is by **position**, not by
-  a rebuilt identity key: dedup has already made `[file, line, dimension]`
-  unique, and jq's `index` on an *array* argument is a subsequence search, not a
-  membership test. Bad input is typed as *Typed input* above says and names the
-  **adjudicated** file. `summary.adjudicated_dropped` is **always present** (0
-  without the flag), so a consumer never has to tell "dropped nothing" from "an
-  older changelist" — and that key is the *only* difference a run without the flag sees.
+- **The Low filter's mechanics** (#3169). The rule is the *Low filter* above;
+  this is how the engine applies it. A Low is in a lane when **any** member of
+  its dedup group has a description line that begins with `decides:` or
+  `follow-up:` (leading blanks allowed, never mid-line) — every member is read,
+  because dedup keeps only the longest description — or when the item carries a
+  `decided` record or a red anywhere in its group. The filter runs **after** the
+  #1921 risk demotion, so a `demoted: true` item is exempt, and **before** the
+  conflict / non-convergence classification, so a discarded Low cannot go on to
+  seed a conflict pair or a carried-blocker match. No summary key counts the
+  discards, and `summary.low` counts the kept Lows only. The consolidator takes
+  no waived-suggestion flag any more: the round-to-round carry of waived Lows
+  (#1434) went with it, and the flag is refused as unknown (exit 2).
 
 Changelist shape: `{ round, summary{critical,high,low,blocking,conflicts,
-false_trips,adjudicated_dropped}, blocking[], suggestions[], conflicts[],
+false_trips}, blocking[], suggestions[], conflicts[],
 non_converging, false_trips[], escalation_reasons[] }`, where each `blocking[]` item additionally
 carries `false_trip: bool` (#983) and `class` when `--fix-touched` was given
 (#1435). With `corner_case_risk_threshold` on, or in an
@@ -4769,12 +4744,12 @@ key omits the title, so a bare harvest would stamp one claim's verdict onto a
 different claim at the same location — and among those `red` beats `green` beats
 absent. An **empty** normalized title is not a match key (every untitled finding
 normalizes to `""`), so an untitled representative contributes only its own
-record. The adjudication drop's fourth guard is deliberately **not** same-claim:
+record. The Low filter's tool-verdict test is deliberately **not** same-claim:
 it consults the unrestricted group verdict, so a red-decided member that is
-neither the representative nor same-titled still protects the merged item from
-being dropped. `green` means **not red**: the command ran clean, *or* could not be run
-at all; which of the two lives in the conductor's `<work-dir>/decided-<R>.log`,
-never in the changelist. The `blocking` array (Critical first, then
+neither the representative nor same-titled still keeps the merged item.
+`green` means **not red**: the command ran clean, *or* could not be run at all;
+which of the two lives in the conductor's `<work-dir>/decided-<R>.log`, never in
+the changelist. The `blocking` array (Critical first, then
 High) is what the loop must clear; `suggestions` ride into the dossier (#563) and
 never loop; `false_trips[]`
 are the auto-continued clear false trips (a subset of `blocking`,
@@ -4901,13 +4876,8 @@ Every round appends a block to `<work-dir>/progress.md`
 the severity split (critical/warning; the suggestions total is the Suggestion
 count), new vs carried, fixed-since-prior, the cumulative blocking trend, and
 a per-blocker *possible false trip* line whenever the consolidator flagged a
-carried match with no shared non-empty prior title (#913/#969), and an
-`- adjudicated re-raises dropped: N` line whenever a re-raise of an
-already-waived suggestion was suppressed (#1434, rendered only when N > 0, on the
-same direct-read/no-stamp-gate rule as the false-trip line) — so the human can read "are we
-actually clearing things?" straight off the tail. The per-round `history.jsonl`
-line carries `adjudicated_dropped` too, so that question is answerable from one
-file without opening every changelist.
+carried match with no shared non-empty prior title (#913/#969) — so the human
+can read "are we actually clearing things?" straight off the tail.
 
 **One work-dir file the CONDUCTOR writes, not the loop (#1584):**
 `<work-dir>/decided-<R>.log`. The *decided pass* appends one entry per
@@ -4946,11 +4916,7 @@ the **end** of round N-1 rather than the start of round N — in step mode the
 round's panel runs between invocations, so a file first created at round N's
 start would be written after the reviewers meant to read it had finished; the
 round-start build survives only as the fallback for an older work-dir),
-`adjudicated.json` (the waived Lows, passed to the consolidator as
-`--adjudicated` and, since #3168, never handed to the panel, invalidated per
-round against `delta_files`, and appended
-to only **after** the round consolidates so a round can never drop its own
-findings), `.closing-sweep`, and `.max-rounds` (plus, transiently,
+`.closing-sweep`, and `.max-rounds` (plus, transiently,
 `.max-rounds.tmp.*` — `record-grant.zsh`'s atomic-rename staging, swept by the
 same fresh-run clear) (#1576 — the ceiling a **human**
 grant bought, written by `record-grant.zsh` at the interactive extension's step
@@ -5126,8 +5092,9 @@ and nothing here restates the rule.
 
 `history.jsonl`'s per-round line carries no residue-derived key — no `class`,
 no `fix_touched`, no residue counter — and none is added now that the terminal is
-gone. (It legitimately carries #1434's `adjudicated_dropped` as a sixth key
-and #1973's `gate` as a seventh.)
+gone. (It carries #1973's `gate` as its sixth key. #1434's count of dropped
+waived suggestions went with that carry in #3169, and a line an older run wrote
+with it is neither required nor refused.)
 
 **The cadence guard (#1435 §10).** A round's per-blocker `class` — and the audit
 record built on it — is only as true as the fix-touched set it reads, and that
@@ -8661,7 +8628,7 @@ only inside the loop.
     "SUGGESTION"`, priority `Low`, `blocking: false`, `demoted: true`. It moves
     to `suggestions` and never blocks convergence.
   - **Placement.** The demotion runs straight after dedup, before the
-    adjudicated drop, which never selects a demoted item, and before conflict
+    Low filter, which never discards a demoted item, and before conflict
     and non-convergence classification. `summary.risk_demoted` appears only when
     the demotion ran.
   - **Never demoted:** a `CRITICAL` item and a tool-red item.

@@ -11,8 +11,7 @@
 #
 # Input: the round's aggregate findings JSON (issue #558 schema — a flat array
 # of finding objects). Output on stdout: one changelist JSON:
-#   { round, summary{critical,high,low,blocking,conflicts,false_trips,
-#                     adjudicated_dropped},
+#   { round, summary{critical,high,low,blocking,conflicts,false_trips},
 #     blocking[], suggestions[], conflicts[], non_converging, false_trips[],
 #     escalation_reasons[] }  (each blocking[] item also carries false_trip:bool,
 #     and class:"…" when --fix-touched was given — #1435. decided:"red"|"green"
@@ -21,11 +20,11 @@
 #     imply the item is a suggestion: the group severity max and a
 #     reviewer-written WARNING/CRITICAL whose decides: claim came back green (the
 #     decided pass changes no severity on that malformed shape) each carry a
-#     green-decided finding into blocking[]. One key is INTERNAL and never part
-#     of this shape: `group_red`, GUARD 4's unrestricted group verdict, minted in
-#     the dedup map and stripped in the same projection that applies the
-#     adjudication drop — if you see it in a changelist, that strip was moved or
-#     bypassed)
+#     green-decided finding into blocking[]. Two keys are INTERNAL and never
+#     part of this shape: `group_red`, the unrestricted group verdict, and
+#     `_lane`, the group's lane test (the Low filter below), both minted in the
+#     dedup map and stripped in the same projection that applies the Low filter —
+#     if you see either in a changelist, that strip was moved or bypassed)
 #
 # Rules (per #561):
 #   - Severity map: CRITICAL->Critical, WARNING->High, SUGGESTION->Low.
@@ -53,33 +52,22 @@
 #     reason; false_trips are counted in the summary and surfaced for the loop to
 #     record.
 #
-#   - Adjudicated re-raises (#1434): with --adjudicated, a Low finding that
-#     re-states a suggestion an EARLIER round already surfaced and waived is
-#     dropped instead of being logged again. EVERY guard below is required —
-#     narrow on purpose, because the cost of over-dropping is a real defect
-#     silently deleted, while the cost of under-dropping is one more logged
-#     suggestion that never blocked anything:
-#       1. the #983 matcher, reused — gather on [file, dimension] + line
-#          proximity (LINEWIN, a null line a wildcard), verdict on the
-#          `normtitle` EXACT arm ONLY. Never the shared-token or tokenless arms:
-#          those exist to fail TOWARD the human on a possible survivor, and the
-#          same leniency here would delete findings on a single shared word;
-#       2. the incoming finding is itself Low — a re-raise at WARNING or
-#          CRITICAL is never suppressed, whatever an earlier round waived;
-#       3. the entry is still valid, which the LOOP enforces by removing every
-#          adjudication whose file appears in the round's `delta_files` before
-#          calling this — the attested-tree delta, deliberately NOT the narrower
-#          fix-touched set this script also takes as `--fix-touched`;
-#       4. the finding was not decided RED by the conductor's decided pass
-#          (#1584) — neither on its own stamp nor anywhere in its dedup group. A
-#          red is an observed tool verdict, not a restated opinion, and the
-#          decided pass contracts a reachable red-at-Low state (a `decides:`
-#          finding with no `proposed-severity:` line, recorded but not promoted).
-#     The drop runs AFTER the risk demotion and BEFORE the conflict /
-#     non-convergence classification, so a dropped Low cannot go on to seed a
-#     conflict pair or a carried-blocker match.
-#     `summary.adjudicated_dropped` is ALWAYS present (0 without the flag), so a
-#     consumer never has to tell "no drops" from "an older changelist".
+#   - Low filter (#3169, the rule ARCHITECTURE.md states for #3157): a
+#     reviewer-emitted Low with neither a `decides:` nor a `follow-up:` line is
+#     DISCARDED — it appears in neither `suggestions[]` nor `blocking[]`, and no
+#     summary key counts it, so a plain suggestion costs nothing downstream. A
+#     Low is KEPT, in `suggestions[]` and never blocking, when it is in a lane:
+#       * any member of its dedup group has a description line that begins with
+#         `decides:` or `follow-up:` (leading blanks allowed, matched at the
+#         start of a line, never mid-line) — every member is read, because dedup
+#         keeps only the longest description and can strip the line;
+#       * or the item carries a `decided` record, or a red sits anywhere in its
+#         dedup group (`group_red`) — an observed tool verdict is never deleted.
+#     A risk-demoted item (`demoted: true`) is never discarded: the consolidator
+#     writes that Low itself, on purpose. The filter runs AFTER dedup and the
+#     risk demotion and BEFORE the conflict / non-convergence classification, so
+#     a discarded Low cannot go on to seed a conflict pair or a carried-blocker
+#     match. `summary.low` counts the kept Lows only.
 #
 #   - Residue class (#1435): with --fix-touched, every `blocking[]` item is
 #     stamped with a `class` derived from ONE question — is the finding's file
@@ -119,7 +107,7 @@
 #     promoted Warning with a "green" record. An EMPTY normalized title is not a
 #     match key (every untitled finding normalizes to ""), so an untitled
 #     representative contributes only its own record — the same refusal the
-#     adjudicated and cross-round title arms each make.
+#     cross-round title arm makes.
 #     `green` means NOT RED — the command ran clean, OR it could not be run at all
 #     (uninstalled, malformed, or it would have written into the tree, which the
 #     conductor settles the same way). Both leave the finding a logged suggestion,
@@ -141,9 +129,9 @@
 #     EVERY WARNING member has an assessment and the HIGHEST member risk is below
 #     the threshold; the item carries that member's assessment. An unassessed
 #     finding keeps its severity (a missing judgement never demotes anything).
-#     Placed straight after dedup, before the adjudicated drop, which never
-#     selects a demoted item, and the conflict / non-convergence classification,
-#     so a demoted item never reads as a surviving blocker.
+#     Placed straight after dedup, before the Low filter, which never discards a
+#     demoted item, and the conflict / non-convergence classification, so a
+#     demoted item never reads as a surviving blocker.
 #     `summary.risk_demoted` is present only when the demotion ran. With the
 #     threshold OFF or IGNORED, --risk is accepted and the file is never read, and
 #     no key above appears: the output is byte-identical to a run without it.
@@ -162,16 +150,11 @@
 #
 # Usage:
 #   consolidate-findings.zsh --findings FILE [--round N] [--prev FILE]
-#                            [--adjudicated FILE] [--fix-touched FILE]
-#                            [--risk FILE] [--extension]
+#                            [--fix-touched FILE] [--risk FILE] [--extension]
 #     --findings  aggregate findings JSON for THIS round (required)
 #     --round     round number (default 1)
 #     --prev      previous round's changelist JSON (this script's own output);
 #                 omitted on round 1
-#     --adjudicated  JSON array of identity keys {file, line, dimension, title}
-#                 (#1434) — the Low findings prior rounds already surfaced and
-#                 waived. MAY be empty (`[]`): an early round legitimately has
-#                 nothing waived yet.
 #     --fix-touched  the PREVIOUS round's fix-touched set (#1435) — repo-relative
 #                 paths, one per line, as resolve-story-loop.zsh writes to
 #                 `<work-dir>/fix-touched-<N-1>.txt`. Unlike every other file
@@ -187,13 +170,14 @@
 #
 # Exit codes: 0 ok · 2 usage error (including a malformed --risk while the
 #             threshold is on, and any unknown option — the #994 overlay's
-#             flag, retired by #3135, among them) · 1 internal (unreadable /
+#             flag, retired by #3135, and the waived-suggestion carry's,
+#             retired by #3169, among them) · 1 internal (unreadable /
 #             invalid JSON)
 
 emulate -L zsh
 setopt nounset pipefail
 
-local usage="usage: consolidate-findings.zsh --findings FILE [--round N] [--prev FILE] [--adjudicated FILE] [--fix-touched FILE] [--risk FILE] [--extension]"
+local usage="usage: consolidate-findings.zsh --findings FILE [--round N] [--prev FILE] [--fix-touched FILE] [--risk FILE] [--extension]"
 
 # A value flag with no value, or one whose value is the NEXT FLAG, is a caller
 # mistake that this script used to turn into the wrong failure. Under `nounset`
@@ -201,8 +185,8 @@ local usage="usage: consolidate-findings.zsh --findings FILE [--round N] [--prev
 # not set" and exit 1 — which this script's taxonomy reserves for *internal*
 # errors, so a usage mistake was indistinguishable from unreadable input. And
 # the unquoted `--prev $VAR` idiom with VAR unset collapses so the next flag
-# becomes the value: `--prev --adjudicated` would swallow `--adjudicated`,
-# silently consolidating with no adjudicated set. resolve-story-loop.zsh has
+# becomes the value: `--prev --fix-touched` would swallow `--fix-touched`,
+# silently consolidating with no fix-touched set. resolve-story-loop.zsh has
 # guarded exactly this way since #971; a half-applied rule is the inconsistency
 # the next caller trips on, so it covers EVERY value flag here too (#994).
 _need_val() {  # $1 = flag, $2 = remaining arg count, $3 = candidate value
@@ -212,19 +196,18 @@ _need_val() {  # $1 = flag, $2 = remaining arg count, $3 = candidate value
     print -u2 -- "consolidate-findings: $1 requires a value (got the flag $3)"; exit 2 }
   # An EXPLICIT empty value is the same mistake wearing a third hat — the
   # realistic `--flag "$VAR"` with VAR unset — and left alone it reads
-  # downstream as "flag omitted", exit 0: `--adjudicated ""` would silently
-  # drop the whole adjudicated set and re-list every waived suggestion.
+  # downstream as "flag omitted", exit 0: `--fix-touched ""` would silently
+  # drop the whole fix-touched set and stamp no blocker with its class.
   [[ -n "$3" ]] || {
     print -u2 -- "consolidate-findings: $1 requires a non-empty value"; exit 2 }
 }
 
-local findings="" round=1 prev="" adjudicated="" fix_touched="" risk_file="" extension=0
+local findings="" round=1 prev="" fix_touched="" risk_file="" extension=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
   --findings) _need_val "$1" $# "${2:-}"; findings="$2"; shift 2 ;;
   --round) _need_val "$1" $# "${2:-}"; round="$2"; shift 2 ;;
   --prev) _need_val "$1" $# "${2:-}"; prev="$2"; shift 2 ;;
-  --adjudicated) _need_val "$1" $# "${2:-}"; adjudicated="$2"; shift 2 ;;
   # the PATH must still be non-empty (`--fix-touched ""` is the same unset-VAR
   # slip _need_val exists for, and would silently drop the whole stamp); it is
   # the file's CONTENTS that may legitimately be empty — see below
@@ -253,47 +236,10 @@ if [[ -n "$prev" ]]; then
   prev_json=$(<"$prev")
 fi
 
-# The adjudicated list (#1434) defaults to [] so the drop rule is a provable
-# no-op without the flag — the byte-identity discipline every flag here follows,
-# and the reason `adjudicated_dropped` is the ONLY output difference a run
-# without the flag sees. Every refusal below is typed and names this file (an
-# unchecked bad file aborts the MAIN jq and gets relabelled "invalid findings
-# JSON", sending the caller to the wrong input) — and an EMPTY array is
-# accepted. Rounds 1-2 of a real run routinely
-# have nothing waived yet, so refusing `[]` would make the loop choose between
-# omitting the flag on some rounds and failing on others.
-local adjudicated_json='[]'
-if [[ -n "$adjudicated" ]]; then
-  # `-s` alone is true for a directory, which would fail inside jq with "Is a
-  # directory" and be relabelled a content problem
-  [[ -f "$adjudicated" && -s "$adjudicated" ]] || {
-    print -u2 -- "consolidate-findings: --adjudicated must be a non-empty regular file: $adjudicated"; exit 1 }
-  # element shape, not just container: `["a title"]` would pass a bare
-  # `type == "array"` test and then abort the main jq at `.file` on a string.
-  # `file`/`dimension` are compared for EQUALITY so an empty one is meaningless;
-  # `title` must be a string but may be empty (the exact arm below refuses to
-  # match on an empty normalized title anyway, so such an entry is inert rather
-  # than a file-wide suppressor); `line` is the one optional member.
-  adjudicated_json=$(jq -c 'if (type == "array")
-                              and (all(.[]; type == "object"
-                                    and (.file | type == "string" and length > 0)
-                                    and (.dimension | type == "string" and length > 0)
-                                    and (.title | type == "string")))
-                           then . else error("adjudicated input is not an array of identity-key objects") end' \
-    -- "$adjudicated") || {
-    print -u2 -- "consolidate-findings: --adjudicated file unreadable, or not a JSON array of objects with non-empty file and dimension and a string title: $adjudicated"; exit 1 }
-  # a file holding two concatenated arrays (>> instead of >) makes jq emit two
-  # lines, which --argjson would reject inside the MAIN jq and blame on findings
-  [[ "$adjudicated_json" != *$'\n'* ]] || {
-    print -u2 -- "consolidate-findings: --adjudicated file must hold exactly ONE JSON array: $adjudicated"; exit 1 }
-  [[ -n "$adjudicated_json" ]] || {
-    print -u2 -- "consolidate-findings: --adjudicated file yielded no JSON value: $adjudicated"; exit 1 }
-fi
-
 # The fix-touched set (#1435): repo-relative paths, one per line. `has_touched`
 # is what gates the stamp, NOT the array's emptiness — the two are different
-# facts and conflating them would be the exact "no drops vs an older changelist"
-# ambiguity `adjudicated_dropped` exists to avoid. An EMPTY set means "the fix
+# facts, and conflating them would make "no class" ambiguous between "nobody
+# asked" and "the fix touched nothing". An EMPTY set means "the fix
 # pass touched nothing reviewable", so every blocker is a `new_defect`; an
 # ABSENT flag means "nobody asked", so no item is stamped at all.
 local fix_touched_json='[]' has_touched='false'
@@ -398,12 +344,11 @@ def shares_token($a; $b): (($a | length) > 0) and (($b | length) > 0)
 # below): exact => verified survivor, shared token => ambiguous, disjoint => false
 # trip.
 def LINEWIN: 10;
-# One line-recovery rule for BOTH sides of the proximity test. The findings side
-# already recovered a digit-only STRING line losslessly; without the same rule on
-# the adjudicated side a key carrying "line": "113" is a non-number, which
-# line_near treats as a WILDCARD — silently widening "near line 113" to
-# "anywhere in this file+dimension" and over-dropping every title-matching Low in
-# the file.
+# One line-recovery rule for every line this program compares: a digit-only
+# STRING line is recovered losslessly, anything else becomes null. The findings
+# side and the --risk side (#1921) both use it, so a "line": "113" on one side
+# can never miss a 113 on the other — two hand-inlined copies is how two sides
+# drifted apart before #994.
 def normline: if (. | type) == "number" then .
   elif ((. | type) == "string") and (test("^[0-9]+$")) then tonumber
   else null end;
@@ -465,8 +410,7 @@ def nearest($c): sort_by(
     # (a plausible model-output malformation), anything else becomes null —
     # already a wildcard for line_near — so no downstream renderer can ever
     # interpolate a reviewer-crafted string line into markdown (#969). ONE rule,
-    # shared with the adjudicated-key side via `normline`: two hand-inlined
-    # copies is exactly how two sides drifted apart before #994.
+    # shared with the --risk side via `normline`.
     line: (.line | normline),
     title: (.title // ""),
     description: ((.description // "") | tostring),
@@ -523,24 +467,29 @@ def nearest($c): sort_by(
     # way in, so `normtitle` of every untitled finding is "" and a bare title
     # comparison is TRUE for every pair of untitled members — reinstating the
     # cross-claim stamp on exactly that input class. The two other title-keyed
-    # sites here refuse an empty normtitle for the same reason (the adjudicated
-    # drop, the cross-round exact arm), so this one does too:
+    # site here refuses an empty normtitle for the same reason (the cross-round
+    # exact arm), so this one does too:
     # when the representative is untitled, fall back to object identity, which
     # still keeps the representative own record and nothing else.
     | ([ .[] | select(if ($rep.title | normtitle) == "" then (. == $rep)
                       else (.title | normtitle) == ($rep.title | normtitle) end)
              | .decided // empty ]) as $dec
-    # The UNRESTRICTED group verdict, for GUARD 4 only (#1584). The stamp above is
-    # deliberately same-claim, but the adjudication drop must not be: a red-decided
-    # Low that is NOT the representative and carries a different title loses its
-    # record at the harvest, so a guard reading only the emitted `.decided` would
-    # drop the merged item — deleting an observed tool verdict with
-    # `summary.adjudicated_dropped` as its only trace. Carried as an internal key
-    # and deleted in the SAME projection that applies the drop (see the strip
-    # comment below, which argues why a lone `del` positioned after that block is
-    # the shape to avoid), so it never reaches the output and a run that passes no
-    # flags stays byte-identical.
+    # The UNRESTRICTED group verdict (#1584), read by the risk demotion and the
+    # Low filter. The stamp above is deliberately same-claim, but neither reader
+    # may be: a red-decided Low that is NOT the representative and carries a
+    # different title loses its record at the harvest, so a filter reading only
+    # the emitted `.decided` would discard the merged item — deleting an observed
+    # tool verdict with no trace at all. Carried as an internal key and deleted in
+    # the SAME projection that applies the Low filter (see the strip comment
+    # below), so it never reaches the output.
     | ([ .[] | .decided // empty ]) as $anydec
+    # The LANE test (#3169), read by the Low filter. A member is in a lane when a
+    # line of its description begins with `decides:` or `follow-up:` (leading
+    # blanks allowed). EVERY member is read, not only the representative: dedup
+    # keeps the longest description, which may well be the member without the
+    # line. Internal (`_lane`), stripped beside `group_red`.
+    | ([ .[] | .description | select(test("(^|\n)[ \t]*(decides|follow-up):")) ]
+       | length > 0) as $lane
     # RISK (#1921) — the group view of the conductor assessment, gathered HERE
     # because the members are only visible inside the dedup group. Only the
     # blocking members count: the conductor assesses CRITICAL and WARNING
@@ -577,84 +526,44 @@ def nearest($c): sort_by(
         else . end )
     | ( if ($anydec | index("red")) != null then . + { group_red: true }
         else . end )
+    | ( if $lane then . + { _lane: true } else . end )
     | ( if $rk != null then . + { _risk: $rk } else . end )
     | del(.reviewer)
   ) ) as $items
 
 # RISK DEMOTION (#1921) — applied HERE, straight after dedup. It stays before
-# the adjudicated drop, which never selects a demoted item (see there).
-# `group_red` is still present here for the tool-red exemption; it is stripped
-# in the adjudication projection below. With the demotion off no item carries
-# `_risk`, so this map is the identity and the output is unchanged.
+# the Low filter, which never discards a demoted item (see there). `group_red`
+# is still present here for the tool-red exemption; it is stripped in the Low
+# filter projection below. With the demotion off no item carries `_risk`, so
+# this map is the identity and the output is unchanged.
 | ( $items | map(riskstamp) ) as $items
 
-# ADJUDICATED RE-RAISE DROP (#1434) — a Low that an earlier round already
-# surfaced and the human already let go. Placed HERE deliberately: after the
-# risk demotion, and before conflicts / non-convergence (so a dropped item
-# cannot go on to seed a conflict pair or a carried-blocker match, which would
-# resurrect through a side door what the drop just removed).
+# LOW FILTER (#3169) — a reviewer-emitted Low with neither a `decides:` nor a
+# `follow-up:` line is discarded here. Placed HERE deliberately: after the risk
+# demotion, so a `demoted: true` item can be exempted, and before conflicts /
+# non-convergence, so a discarded item cannot go on to seed a conflict pair or a
+# carried-blocker match, which would resurrect through a side door what the
+# filter just removed.
 #
 # NB: no apostrophes in this block — the jq program is single-quoted.
-# The verdict uses the EXACT arm of the #983 matcher only. Its other two arms — a shared
-# significant token, and a tokenless side — exist to fail TOWARD the human when a
-# blocker MIGHT be a reworded survivor. Suppression is the opposite direction:
-# here a false match deletes a genuine new finding, so only an exact normalized
-# title counts, and an entry with an EMPTY normalized title matches nothing at
-# all rather than silencing every untitled finding in its file+dimension.
+# An item is KEPT when it is not Low, when the risk demotion wrote it
+# (`demoted`), when its group is in a lane (`_lane`), or when it carries a tool
+# verdict: a `decided` record, or a red anywhere in its group (`group_red`). The
+# last two are tested apart from the lane on purpose. Dedup keeps the `decided`
+# stamp of one claim only, and the decided pass may record a red on a `decides:` finding
+# without changing its severity, so the red-at-Low item is an observed verdict
+# that must never vanish, even if a malformed member lost its line.
 #
-# Selection is by POSITION: an identity-key rebuild would have to re-derive a key that dedup
-# already made unique, and `index` on an ARRAY argument is a subsequence search
-# in jq, not a membership test — a trap this file must not set for its next
-# editor. Positions also leave `$items` itself untouched, which is what keeps a
-# run without the flag byte-identical apart from the new count.
-| ( [ $items | to_entries[]
-      | select(.value.priority == "Low")
-      | .value as $it
-      # GUARD 4 (#1584): never drop a finding a tool actually decided RED.
-      # Guard 2 (Low only) was sufficient while Low meant "a reviewer opinion an
-      # earlier round waived". It no longer is: the decided pass contracts a
-      # reachable red-at-Low state — a `decides:` finding with no
-      # `proposed-severity:` line, where the verdict is recorded and no severity
-      # changes. A red is an observed tool verdict, not a restated opinion, and
-      # dropping it would leave `summary.adjudicated_dropped` as its only trace —
-      # exactly the "real defect silently deleted" this block calls its worst
-      # outcome.
-      #
-      # `group_red` is what this guard actually rests on. `.decided` is the
-      # SAME-CLAIM stamp and `$dec` is a subset of `$anydec`, so every
-      # `decided: "red"` is by construction also a `group_red` — the first
-      # conjunct can never change the outcome, and is kept only as
-      # defence-in-depth should the harvest above ever be widened or narrowed.
-      # What it is NOT is a second case the other misses: testing the STAMP
-      # ALONE is the broken version, because a red-decided member that is
-      # neither the representative nor same-titled leaves no `.decided` on the
-      # merged item at all, and the item would be dropped with its red.
-      # Both absent keys are null, and null is neither "red" nor true, so an
-      # undecided finding is unaffected and a flagless run stays byte-identical.
-      | select($it.decided != "red" and $it.group_red != true)
-      # GUARD 5 (#1921): never drop a risk-demoted item. It cleared a blocking
-      # bar this round and is logged as a suggestion ON PURPOSE; dropping it as
-      # a re-raise of an earlier waived suggestion would make it disappear.
-      | select($it.demoted != true)
-      | select([ $adjudicated[]
-                 | select((($it.title | normtitle) != "")
-                     and (((.title // "") | normtitle) == ($it.title | normtitle))
-                     and (((.file // "") | normfile) == $it.file)
-                     and (((.dimension // "") | tostring) == $it.dimension)
-                     and line_near((.line | normline); $it.line)) ] | length > 0)
-      | .key ] ) as $adj_idx
-| ( $adj_idx | length ) as $adj_dropped
-# `group_red` is internal to GUARD 4 and is stripped IN THE SAME projection that
-# rebuilds `$items` after the drop — not in a separate step below it. The
-# invariant "this key never reaches a consumer" would otherwise be enforced only
-# by the POSITION of a lone `del`, and the natural next extension of this block
-# (surfacing the dropped items, the way #983 surfaced `false_trips[]`) would be
-# written above it and would emit the key. `del` of an absent key is a no-op that
-# preserves key order, so this is byte-identity-safe for every run that carried
-# no `decided` at all.
-| ( [ $items | to_entries[]
-      | select(.key as $i | ($adj_idx | index($i)) == null)
-      | .value | del(.group_red) ] ) as $items
+# `group_red` and `_lane` are internal and are stripped IN THE SAME projection
+# that applies the filter, not in a separate step below it. The invariant "these
+# keys never reach a consumer" would otherwise be enforced only by the POSITION
+# of a lone `del`, and the natural next extension of this block would be written
+# above it and emit them. `del` of an absent key is a no-op that preserves key
+# order.
+| ( [ $items[]
+      | select((.priority != "Low") or (.demoted == true) or (._lane == true)
+               or (.decided != null) or (.group_red == true))
+      | del(.group_red, ._lane) ] ) as $items
 
 # conflicts: co-located, opposite-direction dimensions (performance vs code_quality)
 | ( $items | group_by([.file, (.line|tostring)]) | map(
@@ -743,9 +652,9 @@ def nearest($c): sort_by(
 # round. NB: no apostrophes in this block — the jq program is single-quoted.
 # The item is bound FIRST for the membership test: inside `$fixtouched | index(g)`
 # the input to `g` is $fixtouched (the ARRAY), so a bare `.file` there would index
-# an array with an array and answer the wrong question entirely — the same trap
-# the adjudicated block above documents. `index` on a STRING argument is the
-# membership lookup we want; `$it.file` is already `normfile`d, and the set was
+# an array with an array and answer the wrong question entirely: `index` on an
+# ARRAY argument is a subsequence search in jq, not a membership test. `index` on
+# a STRING argument is the membership lookup we want; `$it.file` is already `normfile`d, and the set was
 # normalised the same way on the way in, so the two sides cannot disagree.
 | ( if $has_touched
     then [ $blocking[] | . as $it
@@ -770,11 +679,7 @@ def nearest($c): sort_by(
       low: ($low | length),
       blocking: ($blocking | length),
       conflicts: ($conflicts | length),
-      false_trips: ($ftrips | length),
-      # ALWAYS present (#1434) — 0 without --adjudicated. A consumer must never
-      # have to tell "this round dropped nothing" from "this changelist predates
-      # the key".
-      adjudicated_dropped: $adj_dropped
+      false_trips: ($ftrips | length)
     } + ( if $riskon then { risk_demoted: ([ $items[] | select(.demoted == true) ] | length) }
           else {} end )),
     blocking: $blocking,
@@ -790,7 +695,6 @@ def nearest($c): sort_by(
 '
 
 jq -c --argjson round "$round" --argjson prev "$prev_json" \
-  --argjson adjudicated "$adjudicated_json" \
   --argjson fixtouched "$fix_touched_json" --argjson has_touched "$has_touched" \
   --argjson riskon "$riskon" --argjson risk "$risk_json" \
   --arg thr_raw "$thr_raw" --argjson thr_milli "$thr_milli" --argjson extbar "$extbar" \

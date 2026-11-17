@@ -221,12 +221,13 @@ line: a malformed finding has one too (shape 2 wrote it *and* a severity above
 mutate a severity the reviewer chose, which those bullets forbid. **The stamp is
 not inert either**, and on every red where the rewrite does not apply it is the
 only edit there is to make. A `red` record — on the finding itself, or anywhere in its
-dedup group — is the consolidator's **fourth adjudication guard**:
-`--adjudicated` never drops a red-decided Low. That is the whole protection for
-the red-at-`SUGGESTION` shapes above, where the stamp is the *only* edit this
-pass makes to the finding. So on a red, **stamp it even when no severity
-changes** — skipping the stamp there hands a waived-suggestion re-raise back to
-the drop, and it vanishes with `summary.adjudicated_dropped` as its only trace.
+dedup group — makes the consolidator's **Low filter keep the item** (#3169)
+whatever its description lines say, and it is the changelist's only record that
+a tool reported a defect. For the red-at-`SUGGESTION` shapes above the stamp is
+the *only* edit this pass makes to the finding. So on a red, **stamp it even
+when no severity changes** — skipping the stamp there leaves a red the tool
+reported logged as an ordinary suggestion, and discarded outright when no
+member of its dedup group starts a description line with `decides:`.
 
 **Never promote on reasoning.** If you **chose not to run** the command — as
 opposed to running it and finding it could not launch, which is step 5 and does

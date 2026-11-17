@@ -66,7 +66,9 @@ consolidator_bullet() {
   contains "$flat" 'Such a finding never blocks a round, and the dossier lists it under *Suggested follow-ups*.'
   # the dossier section is staged: #3170 adds it
   contains "$flat" 'That dossier section is not built yet: #3170 adds it to `build-dossier.zsh`, and until then the finding appears in the dossier'"'"'s **Waived suggestions** list.'
-  contains "$flat" 'whose Low filter keeps a Low carrying a `follow-up:` line once #3169 lands'
+  # #3169 landed the Low filter, so the staging clause is gone
+  contains "$flat" 'whose Low filter keeps a Low carrying a `follow-up:` line, #3169)'
+  lacks "$flat" 'once #3169 lands'
   contains "$flat" 'A plain out-of-diff observation below the bar is not reported at all.'
   contains "$flat" 'Nothing blocking-grade is lost, because the defect rides into the dossier under *Suggested follow-ups* as a non-blocking Low; only an observation that would not block anyway is dropped.'
   # the three carve-outs are unchanged

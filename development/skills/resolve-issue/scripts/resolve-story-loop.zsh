@@ -30,18 +30,14 @@
 # scoped to exactly what the last fix pass changed. This is deliberately
 # INDEPENDENT of `--gate-attest` — that flag is optional, session-supplied and
 # produced only by run-gate.zsh on plugin repos, so leaning on it would make
-# "no prior tree" the normal case off plugin repos. Four carries ride along:
+# "no prior tree" the normal case off plugin repos. Three carries ride along:
 #   * `<work-dir>/verify-<N>.json` — the previous round's `.blocking` array,
 #     i.e. exactly what the fix pass was told to fix, passed as
 #     `--fix-verification` and exported as REVIEW_FIX_VERIFICATION;
-#   * `<work-dir>/adjudicated.json` — the Low findings prior rounds surfaced and
-#     the human let go, passed to the consolidator as `--adjudicated`. Since
-#     #3168 it is NOT handed to the panel: no `--adjudicated` to
-#     `review-dispatch.zsh plan` and no REVIEW_ADJUDICATED export, because no
-#     panel reads the waived list any more. Every entry whose file the
-#     last fix pass touched is REMOVED before the round consolidates, so a
-#     suggestion legitimately re-raised because the fix was incomplete is never
-#     suppressed;
+#   (The waived-suggestion carry is gone (#3169): the consolidator discards a
+#   Low with neither a `decides:` nor a `follow-up:` line, so there is no waived
+#   suggestion left to carry. A file an older run left in the work-dir for it is
+#   ignored, never read and never deleted.)
 #   * `<work-dir>/.closing-sweep` — the round number of the CLOSING FULL SWEEP;
 #   * `<work-dir>/.max-rounds` (plus, transiently, `.max-rounds.tmp.*` — the
 #     writer's atomic-rename staging, swept by the same fresh-run clear)
@@ -368,8 +364,7 @@
 #                 "delta"), $REVIEW_FIX_VERIFICATION (round >= 2: the previous
 #                 round's blockers, to verify the fix actually landed).
 #                 $REVIEW_FIX_VERIFICATION is EMPTY on round 1, which has
-#                 nothing to verify. No REVIEW_ADJUDICATED is exported since
-#                 #3168: no panel reads the waived list. Since #2010
+#                 nothing to verify. Since #2010
 #                 $REVIEW_FIX_VERIFICATION_BY_DIMENSION is the
 #                 `review-dispatch.zsh split-carry` map of that carry,
 #                 {dimension: path}, `{}` when nothing is carried: each
@@ -1085,7 +1080,7 @@ emit_ambiguous() {
   local carrier="$work_dir/dispatch-error.json"
   jq -nc --argjson e "$err_json" --argjson r "$rounds" \
     '{escalation_reasons:["ambiguous_dispatch"], dispatch_error:$e,
-      summary:{critical:0,high:0,low:0,blocking:0,conflicts:0,false_trips:0,adjudicated_dropped:0}, blocking:[], suggestions:[],
+      summary:{critical:0,high:0,low:0,blocking:0,conflicts:0,false_trips:0}, blocking:[], suggestions:[],
       conflicts:[], non_converging:false, false_trips:[], round:$r}' > "$carrier"
   emit_and_exit "ESCALATE_AMBIGUOUS" "$rounds" 10 "$rtype" "$rskill" "$carrier" "$history_file" "$changelists_file"
 }
@@ -2104,7 +2099,6 @@ local closing_sweep_file="$work_dir/.closing-sweep"
 # on (#1498) — per-run like the two above, truncated on a fresh start and
 # adopted on --resume, because step mode runs each round as its own invocation
 local pft_marker="$work_dir/.possible-false-trip-continued"
-local adjudicated_file="$work_dir/adjudicated.json"
 # the ceiling a human grant bought (#1576), written by record-grant.zsh at the
 # interactive extension's step 5 and adopted below — per-run like the markers
 # above, so a re-used work-dir cannot fund a run that never earned the rounds
@@ -2299,30 +2293,6 @@ if (( resume )); then
       risk_validate_file "resolve-story-loop" "$risk" || exit 2
     fi
   fi
-  # an older work-dir (or one whose file was cleaned up) simply starts empty
-  [[ -f "$adjudicated_file" && -s "$adjudicated_file" ]] || print -r -- '[]' > "$adjudicated_file" || {
-    print -u2 -- "resolve-story-loop: could not initialise $adjudicated_file"; exit 1 }
-  # ...and a non-empty one is adopted only if it still holds ONE JSON array.
-  # This is PERSISTENT state: a truncated or hand-edited file would abort the
-  # invalidation jq (or the consolidator's own --adjudicated refusal) as a BARE
-  # exit 1 that writes no status JSON, and every later --resume would die at the
-  # same point with the work-dir bricked. Re-initialise rather than refuse — the
-  # cost is at most one already-waived suggestion logged again, which is the
-  # harmless direction the whole drop rule is built on.
-  # The predicate must match what the DOWNSTREAM refusals check, not merely the
-  # container: `["foo"]` passes an array test and then aborts the invalidation
-  # jq on `$e.file`, and `[{"file":"a.zsh"}]` passes both and is refused by the
-  # consolidator's own --adjudicated validator. Either way the loop dies as a
-  # BARE exit 1 that writes no status JSON, and because this file is PERSISTENT
-  # state every later --resume dies at the same point. So mirror the
-  # consolidator's element predicate exactly.
-  jq -e -s 'length == 1 and (.[0] | type == "array" and all(.[]; type == "object"
-              and (.file | type == "string" and length > 0)
-              and (.dimension | type == "string" and length > 0)
-              and (.title | type == "string")))' -- "$adjudicated_file" >/dev/null 2>&1 || {
-    print -u2 -- "resolve-story-loop: --resume found a damaged $adjudicated_file — re-initialising to [] (no suggestion will be suppressed this run)"
-    print -r -- '[]' > "$adjudicated_file" || {
-      print -u2 -- "resolve-story-loop: could not re-initialise $adjudicated_file"; exit 1 } }
 else
   : > "$history_file" || {
     print -u2 -- "resolve-story-loop: could not truncate $history_file for a fresh run"; exit 1 }
@@ -2334,9 +2304,8 @@ else
   rm -f -- "$work_dir"/.findings-digest-*(N) "$work_dir"/.findings-empty-*(N)
   # the iteration state (#1434) is per-run for exactly the same reason: a
   # re-used work-dir must not let a previous run's tree identity scope THIS
-  # run's round 2 (a delta against a foreign tree is arbitrary), nor its waived
-  # suggestions suppress this run's findings, nor its closing-sweep marker grant
-  # a round this run never earned. `(N)` so an empty glob is not an error.
+  # run's round 2 (a delta against a foreign tree is arbitrary), nor its
+  # closing-sweep marker grant a round this run never earned. `(N)` so an empty glob is not an error.
   # DIAGNOSED, not silent — the same argument the telemetry-sidecar clear above
   # makes: a silent failure leaves the previous run's state in place, which is
   # the exact condition this clear exists to prevent, with nothing to notice it.
@@ -2360,8 +2329,6 @@ else
     "$pft_marker" "$max_rounds_file" "$work_dir"/.max-rounds.tmp.*(N) "$work_dir"/fix-touched-*.txt(N) "$work_dir"/fix-base-*.txt(N) \
     "$work_dir"/gate-[0-9]*.json(N) "$work_dir/.selected-attest" "$work_dir/grants.jsonl" 2>&1) || \
     print -ru2 -- "resolve-story-loop: could not clear the previous run's iteration state in $work_dir (${rm_state_err}) — a foreign fix-verification carry, closing-sweep marker, possible-false-trip marker, max-rounds sidecar (.max-rounds, .max-rounds.tmp.*), grant ledger, fix-touched set or gate record may be adopted (#1434, #1435, #1498, #1576, #1973, #2576)"
-  print -r -- '[]' > "$adjudicated_file" || {
-    print -u2 -- "resolve-story-loop: could not initialise $adjudicated_file"; exit 1 }
   # (the telemetry run-id sidecar is cleared far earlier — see the #995 note
   # above the --no-review fast path, which must run before every exit that can
   # precede this setup)
@@ -2615,13 +2582,13 @@ local fix_base_tree=""
 local digest="" prev_digest_file=""
 local prev_findings_empty=0
 local blocking=0 conflict=0 nonconv=0 nconf=0 verdict="" ftrips=0
-local adj_dropped=0 gate_rec='null' skippable_json='[]' skipped_rec='[]' carry_dims='[]'
+local gate_rec='null' skippable_json='[]' skipped_rec='[]' carry_dims='[]'
 local step_rec=''
 local cur_tree="" prior_tree="" prior_tree_file="" fix_verification=""
-local scope_mode="" replanned_scope_mode="" delta_json="" carried=0
+local scope_mode="" replanned_scope_mode="" carried=0
 local is_final=0 is_closing_sweep=0 is_empty_delta=0 empty_delta_note=""
 local round_scope_empty=0 round_findings_empty=0 rc_empty=0
-local skip_fix=0 pft_continued_round=0 adj_tmp=""
+local skip_fix=0 pft_continued_round=0
 local -a consolidate_args=() plan_args=()
 # One --review-cmd run (#2909: called a second time, in the same round, when the
 # fallback panel engages). Reads the round's locals by zsh's dynamic scope.
@@ -2892,13 +2859,9 @@ while (( round <= effective_max )); do
       refuse_stale_findings "the round $round delta against the previous round is EMPTY and the previous round left no blockers to verify — nothing has changed since it, so no reviewer would see anything — and with an empty carry there is nothing to fix either. The previous round found nothing, so its closing full sweep should have been queued in $closing_sweep_file: restore that marker (its content is round $round), or re-invoke under the --max-rounds it was written under, rather than ending the run on a delta round. Do NOT invent a code change just to move the tree."
     fi
   fi
-  # delta_files is read AFTER any re-plan, so the invalidation below always uses
-  # the descriptor the round actually ran with. It is present on a full round too
-  # whenever a prior tree was given — which is exactly the closing sweep.
-  delta_json=$(print -r -- "$rp" | jq -c '.delta_files // []') || {
-    print -u2 -- "resolve-story-loop: could not read delta_files at round $round"; exit 1 }
-  # skippable_dimensions (#2009), read AFTER any re-plan for the same reason:
-  # an empty-delta round re-planned with --final is a full round, whose field is
+  # skippable_dimensions (#2009), read AFTER any re-plan, so it describes the
+  # descriptor the round actually ran with: an empty-delta round re-planned with
+  # --final is a full round, whose field is
   # `[]`. Persisted per round so the history line below can record what this
   # round actually skipped, and exported to a hook-mode panel. A descriptor
   # predating the field reads `[]` — nothing skipped, the fail-closed answer.
@@ -2907,31 +2870,6 @@ while (( round <= effective_max )); do
   print -r -- "$skippable_json" > "$work_dir/skippable-$round.json" || {
     print -u2 -- "resolve-story-loop: could not write $work_dir/skippable-$round.json"; exit 1 }
 
-  # --- INVALIDATE the adjudications the last fix pass disturbed (#1434) -----
-  # Every entry whose file appears in this round's delta_files goes, because a
-  # suggestion re-raised in a file that was just edited is plausibly a NEW
-  # observation about the new code, not a re-litigation of the old one.
-  # Computed from this story's own attested-tree delta — deliberately NOT from the
-  # fix-touched capture (#1435), which exists by this point but is the narrower
-  # set. Delta scoping errs toward keeping a suggestion visible, and that is the
-  # direction this rule wants.
-  # File-granular on purpose: it errs toward keeping a suggestion visible, and
-  # the cost of that is one logged Low where the cost of erring the other way is
-  # a real finding silently deleted.
-  #
-  # Only the consolidator reads the list since #3168 (the panel is no longer
-  # handed it), so the invalidation need only land before consolidation; it
-  # stays here, where delta_json is first known.
-  if [[ "$delta_json" != "[]" && "$delta_json" != "null" ]]; then
-    adj_tmp="$work_dir/.adjudicated-invalidated.json"
-    # bind the entry FIRST: inside `$d | index(...)` the input is $d, so a bare
-    # `.file` would index the delta ARRAY with a string and abort the program
-    jq -c --argjson d "$delta_json" \
-      '[ .[] | . as $e | select(($d | index($e.file // "")) == null) ]' -- "$adjudicated_file" > "$adj_tmp" || {
-      print -u2 -- "resolve-story-loop: could not invalidate adjudications at round $round"; exit 1 }
-    mv -- "$adj_tmp" "$adjudicated_file" || {
-      print -u2 -- "resolve-story-loop: could not write back $adjudicated_file at round $round"; exit 1 }
-  fi
   # Whether this round's panel was handed an EMPTY scope — derived once, HERE,
   # for both wirings (#1485). It used to be set only inside the step-mode arm
   # below, so hook mode never knew it and the empty-story-diff refusal after
@@ -2993,8 +2931,7 @@ while (( round <= effective_max )); do
       # writes between invocations) emits true,true and PASSES. Every consumer
       # downstream then multiplies: two scoped arrays, two changelist objects,
       # a two-line `blocking` capture that aborts the arithmetic, and a BLANK
-      # status JSON emitted beside an exit code that claims a verdict. Same
-      # rule, same reason, as the adjudicated-list check on --resume.
+      # status JSON emitted beside an exit code that claims a verdict.
       jq -e -s 'length == 1 and (.[0] | type == "array")' -- "$findings_file" >/dev/null 2>&1 || {
         print -u2 -- "resolve-story-loop: --findings-file must hold exactly ONE JSON array: $findings_file"; exit 1 }
       # stale-findings guard (#974): the panel is the session's job, run between
@@ -3276,8 +3213,6 @@ while (( round <= effective_max )); do
   fi
 
   # 3. consolidate (#561), carrying the previous round for non-convergence
-  # (the adjudicated list was already invalidated above, before the panel read
-  # it — see the block next to `delta_json`)
   changelist="$work_dir/changelist-$round.json"
   # built as an array so the optional flags compose without a branch per pair
   consolidate_args=( --findings "$scoped" --round "$round" )
@@ -3291,7 +3226,6 @@ while (( round <= effective_max )); do
   # past the ceiling too, but it has no ledger, so it keeps the normal bar; the
   # closing sweep of an extended run is an extension round.
   _is_extension_round "$round" && consolidate_args+=( --extension )
-  consolidate_args+=( --adjudicated "$adjudicated_file" )
   # the PREVIOUS round's fix-touched set (#1435), so each blocker is stamped with
   # where it came from. `-f` not `-s`: an empty set is a real answer (every
   # blocker is then a `new_defect`), and an ABSENT one means the capture could
@@ -3363,21 +3297,6 @@ while (( round <= effective_max )); do
   jq -c '.blocking // []' -- "$changelist" > "$work_dir/verify-$(( round + 1 )).json" || {
     print -u2 -- "resolve-story-loop: could not write the round $(( round + 1 )) fix-verification carry"; exit 1 }
 
-  # Only NOW record this round's own suggestions as adjudicated (#1434) — doing
-  # it before consolidation would let a round drop its own findings, which is
-  # both wrong and impossible to notice from the outside.
-  #
-  # NORMALISE and FILTER on the way in, to the consolidator's own --adjudicated
-  # predicate. The consolidator deliberately TOLERATES malformed reviewer input
-  # in these fields — a missing `dimension` becomes "", and `// ` leaves a
-  # non-string `title` (a reviewer emitting `"title": 42`) untouched — so copying
-  # `suggestions[]` verbatim can persist an entry its own validator will reject.
-  # The next round then fails validation, the loop aborts as a BARE exit 1 that
-  # writes no status JSON (the #912 hazard), and because the bad entry is
-  # PERSISTENT state every later --resume dies at the same point: one reviewer
-  # forgetting `dimension` on one finding bricks the work-dir. An entry that
-  # cannot carry a non-empty file+dimension matches nothing anyway, so dropping
-  # it costs no suppression.
   blocking=$(jq '.summary.blocking' "$changelist")
   conflict=$(jq 'if ((.escalation_reasons // []) | index("unresolved_conflict")) then 1 else 0 end' "$changelist")
   nonconv=$(jq 'if .non_converging then 1 else 0 end' "$changelist")
@@ -3387,17 +3306,6 @@ while (( round <= effective_max )); do
   # drive an escalation (that is $nonconv, which the consolidator already excludes
   # them from).
   ftrips=$(jq '.summary.false_trips // 0' "$changelist")
-  # adjudicated_dropped (#1434) rides the per-round line so history.jsonl stays a
-  # single-file run summary: "why did round 4 log fewer suggestions than round 3"
-  # is answerable without opening four changelists.
-  # status-checked, unlike its pre-existing siblings above: an empty capture
-  # would reach `--argjson ad` below, jq would refuse it, and the whole history
-  # append would write nothing — leaving history one line short of changelists,
-  # which the next --resume reads as the kill-window orphan and repairs by
-  # TRUNCATING a completed round's changelist. (The siblings want the same
-  # treatment; that is a follow-up, not this story's scope.)
-  adj_dropped=$(jq '.summary.adjudicated_dropped // 0' -- "$changelist") || {
-    print -u2 -- "resolve-story-loop: could not read summary.adjudicated_dropped at round $round"; exit 1 }
   # The convergence guard (#2926): a full round with zero blockers is
   # CONVERGED, and CONVERGED opens the PR, so the whole suite must be green on
   # this tree first. When only a selected gate proved it, run --test-cmd — the
@@ -3428,7 +3336,7 @@ while (( round <= effective_max )); do
   fi
   # the gate that preceded this round (#1973): its record, or null. A record
   # that is not a JSON object reads as null, so it can never cost the history
-  # line — the same reason adjudicated_dropped is checked above.
+  # line.
   gate_rec='null'
   if [[ -s "$work_dir/gate-$round.json" ]]; then
     gate_rec=$(jq -ce 'if type == "object" then . else null end' -- "$work_dir/gate-$round.json" 2>/dev/null) || gate_rec='null'
@@ -3457,55 +3365,11 @@ while (( round <= effective_max )); do
   [[ -n "$step_rec" ]] || step_rec='{"panel":null,"decide":null,"risk":null,"fix":null}'
   hook_panel_s="" hook_fix_s=""
   jq -c --argjson r "$round" --argjson b "$blocking" --argjson c "$nconf" --argjson nc "$nonconv" \
-     --argjson ft "$ftrips" --argjson ad "$adj_dropped" --argjson g "$gate_rec" --argjson sk "$skipped_rec" \
+     --argjson ft "$ftrips" --argjson g "$gate_rec" --argjson sk "$skipped_rec" \
      --argjson sw "$step_rec" \
      '{round:$r, blocking:$b, conflicts:$c, non_converging:($nc==1), false_trips:$ft,
-       adjudicated_dropped:$ad, gate:$g, skipped_dimensions:$sk, step_wall_s:$sw}' <<< '{}' >> "$history_file" || {
+       gate:$g, skipped_dimensions:$sk, step_wall_s:$sw}' <<< '{}' >> "$history_file" || {
     print -u2 -- "resolve-story-loop: could not append the round $round history line to $history_file"; exit 1 }
-
-  # ...and ONLY NOW record this round's suggestions as adjudicated. The append
-  # is deliberately the LAST write of the round, after the history line.
-  #
-  # The --resume kill-window repair reads "changelists exactly one line ahead of
-  # history" as "the orphaned round re-runs", so anything committed between the
-  # changelist append and the history line is state a re-run inherits as if the
-  # round had completed. With the append ordered before it, a round that re-runs
-  # would find its OWN suggestions already adjudicated and drop them — and the
-  # invalidation above cannot save the case that matters, because the closing
-  # sweep applies no fix pass, so its `delta_files` is `[]` and nothing is
-  # invalidated. A suggestion only the sweep found would then be deleted from
-  # the changelist that the promotion phase and the telemetry `waived` count
-  # both read, with no surface left to restore it from.
-  #
-  # Ordered last, a kill in the window instead loses one round's adjudications,
-  # so a waived suggestion is logged once more. That is the direction the drop
-  # rule is built on: over-dropping deletes a real defect, under-dropping costs
-  # one line. Nothing between the two reads $adjudicated_file, and its next
-  # consumer is the NEXT invocation's consolidate, so the happy path is
-  # unchanged.
-  #
-  # ...and for the SAME reason this pair WARNS instead of exiting. An `exit 1`
-  # here would sit between the round's history line and the promotion record
-  # below, on an ordinary I/O failure rather than a kill: the round would be
-  # complete and consistent on disk (history and changelists equal, so the
-  # --resume repair correctly does nothing) with the closing sweep it just
-  # earned never written. The next --resume would then plan an ordinary delta
-  # round against an unmoved tree and refuse it, every time, until someone
-  # hand-wrote the marker. Warning costs one re-logged suggestion; exiting
-  # costs the run.
-  adj_tmp="$work_dir/.adjudicated-appended.json"
-  jq -sc '(.[0] + [ .[1].suggestions[]?
-                    | { file: ((.file // "") | tostring),
-                        line,
-                        dimension: ((.dimension // "") | tostring),
-                        title: ((.title // "") | tostring) }
-                    | select(((.file | length) > 0) and ((.dimension | length) > 0)) ])
-          | unique_by([.file, (.line|tostring), .dimension, .title])' \
-    -- "$adjudicated_file" "$changelist" > "$adj_tmp" && \
-  mv -- "$adj_tmp" "$adjudicated_file" || \
-    print -u2 -- "resolve-story-loop: could not record round $round's suggestions as adjudicated ($adjudicated_file) — the round STANDS; at most one already-waived suggestion is logged again next round"
-  rm -f -- "$adj_tmp"
-
 
   # 4. decide the round's fate. In step mode a survivable round (blockers,
   # budget left) exits AWAITING_FIX (20): the fix pass is the driving session's

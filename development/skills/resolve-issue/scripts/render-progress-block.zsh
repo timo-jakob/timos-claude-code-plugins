@@ -15,12 +15,8 @@
 # cumulative blocking trend (--history), a per-blocker possible-false-trip line
 # whenever the consolidator flagged an ESCALATING carried blocker whose matched
 # prior has a different title (#913/#969), a distinct "false trip
-# auto-continued" line for each identity-cleared false trip (#983). Since #1434
-# it also carries an
-# `- adjudicated re-raises dropped: N` line whenever the consolidator suppressed
-# a re-raise of an already-waived suggestion — rendered only when N > 0, on the
-# same direct-read, no-stamp-gate rule, so a run with no adjudicated list is
-# byte-identical to before the count existed. Since #1435 it also carries a
+# auto-continued" line for each identity-cleared false trip (#983). Since #1435
+# it also carries a
 # `- by class:` row — new_defect / incomplete_propagation / under_assertion —
 # whenever the round HAS blockers and every one of them carries the
 # consolidator's `class` stamp, so the human watching the tail can see whether a
@@ -208,15 +204,6 @@ jq -r --arg ts "$(date +%H:%M:%S)" --argjson r "$round" --arg v "$verdict" \
        "- by class: new_defect \([ $classed[] | select(.class == "new_defect") ] | length)"
        + ", incomplete_propagation \([ $classed[] | select(.class == "incomplete_propagation") ] | length)"
        + ", under_assertion \([ $classed[] | select(.class == "under_assertion") ] | length)"
-     else empty end),
-    # adjudicated re-raises (#1434): suggestions an earlier round already
-    # surfaced and the human already let go, dropped instead of re-logged.
-    # Rendered ONLY when non-zero, which is
-    # what keeps a run with no adjudicated list byte-identical to before the
-    # count existed. A direct read with no stamp gate: a pre-#1434 changelist
-    # simply has no key, `// 0` makes it zero, and no line renders.
-    (if (.summary.adjudicated_dropped // 0) > 0 then
-       "- adjudicated re-raises dropped: \(.summary.adjudicated_dropped)"
      else empty end),
     # an extension round (#2577) demotes against the extension bar, which may
     # differ from corner_case_risk_threshold or apply with it off — so the line

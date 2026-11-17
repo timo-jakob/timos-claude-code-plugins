@@ -40,7 +40,7 @@ EOF
   cat > "$F" <<'EOF'
 [
  {"severity":"WARNING","dimension":"performance","file":"b.py","line":5,"title":"N+1 query","description":"d","reviewer":"python-performance-reviewer"},
- {"severity":"SUGGESTION","dimension":"code_quality","file":"c.py","line":8,"title":"rename var","description":"d","reviewer":"python-code-quality"}
+ {"severity":"SUGGESTION","dimension":"code_quality","file":"c.py","line":8,"title":"rename var","description":"follow-up: rename var","reviewer":"python-code-quality"}
 ]
 EOF
   con
@@ -56,7 +56,7 @@ EOF
   cat > "$F" <<'EOF'
 [
  {"severity":"WARNING","dimension":"performance","file":"d.py","line":20,"title":"inline the hot loop","description":"d","reviewer":"python-performance-reviewer"},
- {"severity":"SUGGESTION","dimension":"code_quality","file":"d.py","line":20,"title":"extract a helper for clarity","description":"d","reviewer":"python-code-quality"}
+ {"severity":"SUGGESTION","dimension":"code_quality","file":"d.py","line":20,"title":"extract a helper for clarity","description":"follow-up: extract a helper for clarity","reviewer":"python-code-quality"}
 ]
 EOF
   con
@@ -731,327 +731,145 @@ EOF
   [ "$(echo "$output" | jq '.non_converging')" = "true" ]
 }
 
-# ---- adjudicated re-raises (#1434) ------------------------------------------
+# ---- the Low filter (#3169) -------------------------------------------------
 #
-# Rounds after the first carry a list of Low findings earlier rounds already
-# surfaced and the human already waived. Re-raising them is free re-litigation,
-# so the consolidator drops an exact re-raise — but only under THREE guards, and
-# each of the three has its own negative case below, because the cost of
-# over-dropping is a real defect silently deleted where the cost of
-# under-dropping is one extra logged suggestion that never blocked anything.
+# A reviewer-emitted Low with neither a `decides:` nor a `follow-up:` line is
+# discarded: it reaches neither array and no summary key counts it. A Low in a
+# lane is kept, never blocking; a risk-demoted item and a tool verdict are never
+# discarded. The round-to-round waived-suggestion carry (#1434) went with it, so
+# its flag is refused as unknown.
 
-@test "adjudicated: an exact-title Low re-raise is dropped and counted (#1434)" {
+@test "#3169 a Low with neither lane line is discarded and not counted in summary.low" {
   cat > "$F" <<'EOF'
 [
- {"severity":"SUGGESTION","dimension":"code_quality","file":"a.py","line":106,"title":"Scope wording   restated in three places","description":"d","reviewer":"r"},
- {"severity":"SUGGESTION","dimension":"code_quality","file":"a.py","line":400,"title":"untouched suggestion","description":"d","reviewer":"r"}
+ {"severity":"SUGGESTION","dimension":"code_quality","file":"scripts/build-dossier.zsh","line":40,"title":"rename the loop variable","description":"the name i says nothing","reviewer":"code-quality"},
+ {"severity":"SUGGESTION","dimension":"code_quality","file":"scripts/build-dossier.zsh","line":90,"title":"pre-existing unchecked exit code","description":"follow-up: pre-existing unchecked exit code in build-dossier.zsh","reviewer":"code-quality"}
 ]
 EOF
-  # the entry sits 6 lines away — inside the #983 gather window (LINEWIN 10) —
-  # and the title differs only in case and internal whitespace, which normtitle
-  # folds away
-  cat > "$BATS_TEST_TMPDIR/adj.json" <<'EOF'
-[{"file":"a.py","line":100,"dimension":"code_quality","title":"scope wording restated in three places"}]
-EOF
-  con --round 2 --adjudicated "$BATS_TEST_TMPDIR/adj.json"
+  con
   [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq '.summary.adjudicated_dropped')" -eq 1 ]
-  # gone from suggestions, and the Low count fell with it
+  [ "$(echo "$output" | jq '.suggestions | length')" -eq 1 ]
+  [ "$(echo "$output" | jq -r '.suggestions[0].title')" = "pre-existing unchecked exit code" ]
+  echo "$output" | jq -e '[.blocking[], .suggestions[]] | all(.title != "rename the loop variable")' >/dev/null
+  # the COUNT is computed apart from the array: pin both
   [ "$(echo "$output" | jq '.summary.low')" -eq 1 ]
-  [ "$(echo "$output" | jq -r '.suggestions[0].title')" = "untouched suggestion" ]
+  [ "$(echo "$output" | jq '.summary.blocking')" -eq 0 ]
+  # no summary key counts the discard
+  echo "$output" | jq -e '.summary | keys == ["blocking","conflicts","critical","false_trips","high","low"]' >/dev/null
 }
 
-@test "adjudicated: a shared-token-only title is NOT dropped (#1434)" {
-  # The #983 matcher's shared-token arm exists to fail TOWARD the human on a
-  # possible survivor. Suppression runs the other way, so only the EXACT arm
-  # counts — otherwise one shared domain word deletes a genuinely new finding.
-  cat > "$F" <<'EOF'
-[{"severity":"SUGGESTION","dimension":"code_quality","file":"a.py","line":300,"title":"coverage of the resume branch","description":"d","reviewer":"r"}]
-EOF
-  cat > "$BATS_TEST_TMPDIR/adj.json" <<'EOF'
-[{"file":"a.py","line":300,"dimension":"code_quality","title":"coverage counter never reset"}]
-EOF
-  con --round 2 --adjudicated "$BATS_TEST_TMPDIR/adj.json"
-  [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq '.summary.adjudicated_dropped')" -eq 0 ]
-  [ "$(echo "$output" | jq '.summary.low')" -eq 1 ]
-}
-
-@test "adjudicated: the same title re-raised at WARNING is never suppressed (#1434)" {
-  # Guard 2. A reviewer escalating something the human waived at Suggestion
-  # level is new information, not a re-litigation.
-  cat > "$F" <<'EOF'
-[{"severity":"WARNING","dimension":"bugs","file":"b.py","line":10,"title":"unquoted path in the copy step","description":"d","reviewer":"r"}]
-EOF
-  cat > "$BATS_TEST_TMPDIR/adj.json" <<'EOF'
-[{"file":"b.py","line":10,"dimension":"bugs","title":"unquoted path in the copy step"}]
-EOF
-  con --round 2 --adjudicated "$BATS_TEST_TMPDIR/adj.json"
-  [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq '.summary.adjudicated_dropped')" -eq 0 ]
-  [ "$(echo "$output" | jq '.summary.blocking')" -eq 1 ]
-  [ "$(echo "$output" | jq -r '.blocking[0].title')" = "unquoted path in the copy step" ]
-}
-
-@test "adjudicated: the drop runs BEFORE conflict detection, so a dropped Low seeds no conflict (#1434)" {
-  # The placement the engine argues for: a dropped item must not go on to pair
-  # with a co-located one and resurrect as an `unresolved_conflict` escalation
-  # reason — which would escalate the whole loop on a finding the human already
-  # let go. Conflicts are computed over the items irrespective of priority, so
-  # a Low really can seed one.
+@test "#3169 a decides: Low is kept as a suggestion; a decides: finding raised on a red blocks" {
   cat > "$F" <<'EOF'
 [
- {"severity":"SUGGESTION","dimension":"performance","file":"a.py","line":100,"title":"cache the compiled matcher","description":"d","reviewer":"r"},
- {"severity":"SUGGESTION","dimension":"code_quality","file":"a.py","line":100,"title":"inline the matcher for readability","description":"d","reviewer":"r"}
+ {"severity":"SUGGESTION","dimension":"manifest","file":".claude-plugin/marketplace.json","line":31,"title":"marketplace entry drifts from plugin.json","description":"the version may not match\ndecides: zsh scripts/check-marketplace-sync.zsh\nproposed-severity: WARNING","reviewer":"manifest-check"},
+ {"severity":"WARNING","dimension":"contract","file":"docs/e.md","line":12,"title":"MD013 line too long","description":"decides: pre-commit run markdownlint --files docs/e.md\nproposed-severity: WARNING","reviewer":"contract","decided":"red"}
 ]
 EOF
-  # the negative control FIRST: without --adjudicated the pair really does
-  # conflict, so the assertion below is about the ordering and not about an
-  # absence of conflicts
-  con --round 2
+  con
   [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq '.summary.conflicts')" -eq 1 ]
-  echo "$output" | jq -e '.escalation_reasons | index("unresolved_conflict")' >/dev/null
+  [ "$(echo "$output" | jq '.suggestions | length')" -eq 1 ]
+  echo "$output" | jq -e '.suggestions[0] | .title == "marketplace entry drifts from plugin.json" and .blocking == false' >/dev/null
+  [ "$(echo "$output" | jq '.blocking | length')" -eq 1 ]
+  echo "$output" | jq -e '.blocking[0] | .title == "MD013 line too long" and .decided == "red" and .priority == "High"' >/dev/null
+}
 
-  cat > "$BATS_TEST_TMPDIR/adj.json" <<'EOF'
-[{"file":"a.py","line":100,"dimension":"performance","title":"cache the compiled matcher"}]
+@test "#3169 a follow-up: Low with no decides: is kept, never blocks, and keeps its line" {
+  cat > "$F" <<'EOF'
+[{"severity":"SUGGESTION","dimension":"bugs","file":"development/skills/resolve-issue/scripts/build-dossier.zsh","line":212,"title":"unchecked jq exit","description":"the jq call at 212 is not status-checked\nfollow-up: pre-existing unchecked exit code in build-dossier.zsh","reviewer":"script-reviewer"}]
 EOF
-  con --round 2 --adjudicated "$BATS_TEST_TMPDIR/adj.json"
+  con
   [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq '.summary.adjudicated_dropped')" -eq 1 ]
-  [ "$(echo "$output" | jq '.summary.conflicts')" -eq 0 ]
-  [ "$(echo "$output" | jq -c '.escalation_reasons')" = '[]' ]
+  [ "$(echo "$output" | jq '.suggestions | length')" -eq 1 ]
+  [ "$(echo "$output" | jq '.blocking | length')" -eq 0 ]
+  echo "$output" | jq -e '.suggestions[0].blocking == false' >/dev/null
+  echo "$output" | jq -e '.suggestions[0].description | test("(^|\n)follow-up: pre-existing unchecked exit code in build-dossier.zsh")' >/dev/null
   [ "$(echo "$output" | jq '.summary.low')" -eq 1 ]
 }
 
-@test "adjudicated: without the flag nothing is dropped, and an EMPTY list is byte-identical (#1434)" {
-  # The always-present key is the whole compatibility story: a consumer must
-  # never have to tell "dropped nothing" from "an older changelist". And an
-  # empty array matching the no-flag output byte-for-byte is what lets the loop
-  # pass --adjudicated unconditionally, on round 1 as on round 5.
-  cat > "$F" <<'EOF'
-[{"severity":"SUGGESTION","dimension":"code_quality","file":"a.py","line":106,"title":"scope wording restated in three places","description":"d","reviewer":"r"}]
-EOF
-  con --round 2
-  [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq '.summary.adjudicated_dropped')" -eq 0 ]
-  [ "$(echo "$output" | jq '.summary.low')" -eq 1 ]
-  local without="$output"
-  printf '[]' > "$BATS_TEST_TMPDIR/adj-empty.json"
-  con --round 2 --adjudicated "$BATS_TEST_TMPDIR/adj-empty.json"
-  [ "$status" -eq 0 ]
-  [ "$output" = "$without" ]
-}
-
-@test "adjudicated: a match FAR from the entry's line is not dropped (#1434)" {
-  # The drop reuses the #983 gather predicate, LINEWIN 10 included. Without the
-  # proximity conjunct an adjudication becomes file+dimension-WIDE, silently
-  # deleting a genuinely new suggestion hundreds of lines away that happens to
-  # reuse a waived title — the over-drop direction, where the cost is a real
-  # finding lost rather than one extra logged Low.
-  cat > "$F" <<'EOF'
-[{"severity":"SUGGESTION","dimension":"code_quality","file":"a.py","line":400,"title":"scope wording restated in three places","description":"d","reviewer":"r"}]
-EOF
-  cat > "$BATS_TEST_TMPDIR/adj.json" <<'EOF'
-[{"file":"a.py","line":100,"dimension":"code_quality","title":"scope wording restated in three places"}]
-EOF
-  con --round 2 --adjudicated "$BATS_TEST_TMPDIR/adj.json"
-  [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq '.summary.adjudicated_dropped')" -eq 0 ]
-  [ "$(echo "$output" | jq '.summary.low')" -eq 1 ]
-}
-
-@test "adjudicated: the proximity window's boundary is exactly LINEWIN (#1434)" {
-  # 10 away drops, 11 away does not — so the window SIZE is pinned, not merely
-  # its existence.
-  cat > "$BATS_TEST_TMPDIR/adj.json" <<'EOF'
-[{"file":"a.py","line":100,"dimension":"code_quality","title":"scope wording restated in three places"}]
-EOF
-  cat > "$F" <<'EOF'
-[{"severity":"SUGGESTION","dimension":"code_quality","file":"a.py","line":110,"title":"scope wording restated in three places","description":"d","reviewer":"r"}]
-EOF
-  con --round 2 --adjudicated "$BATS_TEST_TMPDIR/adj.json"
-  [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq '.summary.adjudicated_dropped')" -eq 1 ]
-  cat > "$F" <<'EOF'
-[{"severity":"SUGGESTION","dimension":"code_quality","file":"a.py","line":111,"title":"scope wording restated in three places","description":"d","reviewer":"r"}]
-EOF
-  con --round 2 --adjudicated "$BATS_TEST_TMPDIR/adj.json"
-  [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq '.summary.adjudicated_dropped')" -eq 0 ]
-}
-
-@test "adjudicated: a line-less entry is a file+dimension WILDCARD, by design (#1434)" {
-  # `line` is the one optional member of an identity key, and line_near treats a
-  # missing line on either side as a match — so a line-less adjudication
-  # suppresses every exact-title Low in its file+dimension regardless of
-  # distance. The loop persists `line` verbatim from a reviewer's suggestion, so
-  # this shape really reaches the engine; pin it rather than leave the wildcard
-  # arm to be discovered by a mutation.
-  cat > "$F" <<'EOF'
-[{"severity":"SUGGESTION","dimension":"code_quality","file":"a.py","line":900,"title":"scope wording restated in three places","description":"d","reviewer":"r"}]
-EOF
-  cat > "$BATS_TEST_TMPDIR/adj.json" <<'EOF'
-[{"file":"a.py","dimension":"code_quality","title":"scope wording restated in three places"}]
-EOF
-  con --round 2 --adjudicated "$BATS_TEST_TMPDIR/adj.json"
-  [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq '.summary.adjudicated_dropped')" -eq 1 ]
-  [ "$(echo "$output" | jq '.summary.low')" -eq 0 ]
-}
-
-@test "adjudicated: a digit-only STRING line is recovered, not read as a wildcard (#1434)" {
-  # normline's lossless recovery, on the adjudicated side. Without it a key
-  # carrying "line": "100" is a non-number, which line_near treats as a
-  # WILDCARD — silently widening "near line 100" to the whole file+dimension and
-  # over-dropping every title-matching Low in it.
-  cat > "$BATS_TEST_TMPDIR/adj.json" <<'EOF'
-[{"file":"a.py","line":"100","dimension":"code_quality","title":"scope wording restated in three places"}]
-EOF
-  cat > "$F" <<'EOF'
-[{"severity":"SUGGESTION","dimension":"code_quality","file":"a.py","line":110,"title":"scope wording restated in three places","description":"d","reviewer":"r"}]
-EOF
-  con --round 2 --adjudicated "$BATS_TEST_TMPDIR/adj.json"
-  [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq '.summary.adjudicated_dropped')" -eq 1 ]
-  # ...and one line beyond the window it does NOT drop — which is only true if
-  # the string was recovered as the number 100 rather than treated as a wildcard
-  cat > "$F" <<'EOF'
-[{"severity":"SUGGESTION","dimension":"code_quality","file":"a.py","line":111,"title":"scope wording restated in three places","description":"d","reviewer":"r"}]
-EOF
-  con --round 2 --adjudicated "$BATS_TEST_TMPDIR/adj.json"
-  [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq '.summary.adjudicated_dropped')" -eq 0 ]
-}
-
-@test "adjudicated: a different FILE or DIMENSION is not dropped (#1434)" {
-  # The two equality conjuncts, each with its own negative. Without them a waived code_quality suggestion in a.py
-  # suppresses an identically-titled finding in another file, or in another
-  # dimension: cross-file and cross-dimension deletion of real findings.
+@test "#3169 a lane line on a NON-representative dedup member keeps the merged item" {
+  # dedup keeps the LONGEST description, which here is the member without the
+  # line, so a filter reading only the representative would discard the item
   cat > "$F" <<'EOF'
 [
- {"severity":"SUGGESTION","dimension":"code_quality","file":"b.py","line":100,"title":"scope wording restated in three places","description":"d","reviewer":"r"},
- {"severity":"SUGGESTION","dimension":"tests","file":"a.py","line":100,"title":"scope wording restated in three places","description":"d","reviewer":"r"}
+ {"severity":"SUGGESTION","dimension":"tests","file":"tests/render.bats","line":7,"title":"assertion cannot fail","description":"follow-up: the helper","reviewer":"r1"},
+ {"severity":"SUGGESTION","dimension":"tests","file":"tests/render.bats","line":7,"title":"assertion cannot fail","description":"a considerably longer description of the same assertion that cannot fail","reviewer":"r2"}
 ]
 EOF
-  cat > "$BATS_TEST_TMPDIR/adj.json" <<'EOF'
-[{"file":"a.py","line":100,"dimension":"code_quality","title":"scope wording restated in three places"}]
-EOF
-  con --round 2 --adjudicated "$BATS_TEST_TMPDIR/adj.json"
+  con
   [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq '.summary.adjudicated_dropped')" -eq 0 ]
-  [ "$(echo "$output" | jq '.summary.low')" -eq 2 ]
-  echo "$output" | jq -e '[.suggestions[] | .file] | index("b.py") != null' >/dev/null
-  echo "$output" | jq -e '[.suggestions[] | .dimension] | index("tests") != null' >/dev/null
+  [ "$(echo "$output" | jq '.suggestions | length')" -eq 1 ]
+  echo "$output" | jq -e '.suggestions[0] | .agreement == 2 and (.description | test("considerably longer"))' >/dev/null
+  # the internal lane key never reaches the output
+  echo "$output" | jq -e '[.blocking[], .suggestions[]] | map(has("_lane") or has("group_red")) | any | not' >/dev/null
 }
 
-@test "adjudicated: an entry with an EMPTY title silences nothing (#1434)" {
-  # The engine tolerates an untitled finding, and the loop persists it verbatim,
-  # so an empty-title entry is a shape that really occurs. Without the
-  # non-empty-normtitle guard it would match every untitled Low in its
-  # file+dimension and suppress the lot for the rest of the run.
+@test "#3169 a lane line counts only at the start of a line, leading blanks allowed" {
   cat > "$F" <<'EOF'
 [
- {"severity":"SUGGESTION","dimension":"code_quality","file":"a.py","line":100,"title":"","description":"one","reviewer":"r"},
- {"severity":"SUGGESTION","dimension":"code_quality","file":"a.py","line":104,"title":"","description":"two","reviewer":"r"}
+ {"severity":"SUGGESTION","dimension":"code_quality","file":"a.zsh","line":1,"title":"mid-line mention","description":"see decides: for how this is settled","reviewer":"r"},
+ {"severity":"SUGGESTION","dimension":"code_quality","file":"a.zsh","line":20,"title":"mid-line follow-up","description":"a later follow-up: maybe","reviewer":"r"},
+ {"severity":"SUGGESTION","dimension":"code_quality","file":"a.zsh","line":40,"title":"indented line","description":"context\n   follow-up: the indented lane line","reviewer":"r"},
+ {"severity":"SUGGESTION","dimension":"code_quality","file":"a.zsh","line":60,"title":"second line","description":"context\ndecides: zsh scripts/check.zsh","reviewer":"r"}
 ]
 EOF
-  cat > "$BATS_TEST_TMPDIR/adj.json" <<'EOF'
-[{"file":"a.py","line":100,"dimension":"code_quality","title":""}]
-EOF
-  con --round 2 --adjudicated "$BATS_TEST_TMPDIR/adj.json"
+  con
   [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq '.summary.adjudicated_dropped')" -eq 0 ]
-  [ "$(echo "$output" | jq '.summary.low')" -eq 2 ]
-  # a whitespace-only title normalizes to empty too, and is equally inert
-  cat > "$BATS_TEST_TMPDIR/adj.json" <<'EOF'
-[{"file":"a.py","line":100,"dimension":"code_quality","title":"   "}]
-EOF
-  con --round 2 --adjudicated "$BATS_TEST_TMPDIR/adj.json"
-  [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq '.summary.adjudicated_dropped')" -eq 0 ]
+  [ "$(echo "$output" | jq -c '[.suggestions[].title] | sort')" = '["indented line","second line"]' ]
   [ "$(echo "$output" | jq '.summary.low')" -eq 2 ]
 }
 
-@test "adjudicated: every input guard names the ADJUDICATED file, at its own exit (#1434)" {
-  # All SEVEN refusals exist so a bad --adjudicated is never relabelled "invalid
-  # findings JSON", sending the caller to an input that is perfectly fine. Only
-  # the element-shape one was covered (and it has its own test below).
+@test "#3169 a discarded Low seeds no conflict; the same Low in a lane does" {
   cat > "$F" <<'EOF'
-[{"severity":"SUGGESTION","dimension":"code_quality","file":"a.py","line":106,"title":"t","description":"d","reviewer":"r"}]
+[
+ {"severity":"WARNING","dimension":"performance","file":"d.py","line":20,"title":"inline the hot loop","description":"d","reviewer":"perf"},
+ {"severity":"SUGGESTION","dimension":"code_quality","file":"d.py","line":20,"title":"extract a helper for clarity","description":"d","reviewer":"cq"}
+]
 EOF
-  # a dangling flag is a USAGE error (2), not the internal code
-  con --round 2 --adjudicated
-  [ "$status" -eq 2 ]
-  echo "$output" | grep -q -- '--adjudicated requires a value'
-  # ...and so is a FLAG-SHAPED value: `_need_val` has three arms, not two, and
-  # this one is what stops `--adjudicated --round 2` swallowing the next flag
-  con --adjudicated --round 2
-  [ "$status" -eq 2 ]
-  echo "$output" | grep -q -- '--adjudicated requires a value (got the flag --round)'
-  # an explicitly empty value reads downstream as "flag omitted" if unguarded
-  con --round 2 --adjudicated ''
-  [ "$status" -eq 2 ]
-  echo "$output" | grep -q -- '--adjudicated requires a non-empty value'
-  # a directory has non-zero size, so -s alone would pass it to jq
-  con --round 2 --adjudicated "$BATS_TEST_TMPDIR"
-  [ "$status" -eq 1 ]
-  echo "$output" | grep -q -- 'must be a non-empty regular file'
-  echo "$output" | grep -q -- '--adjudicated'
-  # a nonexistent path takes the same arm
-  con --round 2 --adjudicated "$BATS_TEST_TMPDIR/nope.json"
-  [ "$status" -eq 1 ]
-  echo "$output" | grep -q -- 'must be a non-empty regular file'
-  # two concatenated arrays (>> instead of >) must NOT be blamed on --findings
-  printf '[]\n[]\n' > "$BATS_TEST_TMPDIR/adj-two.json"
-  con --round 2 --adjudicated "$BATS_TEST_TMPDIR/adj-two.json"
-  [ "$status" -eq 1 ]
-  echo "$output" | grep -q -- 'must hold exactly ONE JSON array'
-  run -1 grep -q 'invalid findings JSON' <<< "$output"
-  # the SIXTH arm: whitespace-only. It passes `-f && -s`, jq reads no JSON value
-  # from it and exits 0 with EMPTY stdout, so both shape guards above pass and
-  # only the empty-output guard catches it. Unguarded, `--argjson adjudicated ""`
-  # aborts the main jq and the caller is told "invalid findings JSON" about a
-  # findings file that is perfectly good — and a truncated adjudicated.json is a
-  # real shape, since the loop writes that file itself.
-  printf '   \n' > "$BATS_TEST_TMPDIR/adj-blank.json"
-  con --round 2 --adjudicated "$BATS_TEST_TMPDIR/adj-blank.json"
-  [ "$status" -eq 1 ]
-  echo "$output" | grep -q -- 'yielded no JSON value'
-  run -1 grep -q 'invalid findings JSON' <<< "$output"
+  con
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.conflicts | length')" -eq 0 ]
+  echo "$output" | jq -e '.escalation_reasons | index("unresolved_conflict") | not' >/dev/null
+  # control: in the follow-up lane the very same pair IS a conflict, so the
+  # filter's position before the conflict classification is what decides it
+  jq '.[1].description = "follow-up: extract a helper for clarity"' "$F" > "$F.tmp" && mv "$F.tmp" "$F"
+  con
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.conflicts | length')" -eq 1 ]
 }
 
-@test "adjudicated: a mis-shaped file names the ADJUDICATED input, at exit 1 (#1434)" {
-  # A typed failure that names its own input, because an unchecked
-  # bad file aborts the MAIN jq and gets relabelled "invalid findings JSON",
-  # sending the caller to an input that is perfectly fine.
+@test "#3169 a tool verdict is never discarded: a red Low, a group red under another title, a green record" {
+  # the red-at-SUGGESTION shape: the decided pass recorded a red but changed no
+  # severity, and this finding lost its decides: line
   cat > "$F" <<'EOF'
-[{"severity":"SUGGESTION","dimension":"code_quality","file":"a.py","line":106,"title":"t","description":"d","reviewer":"r"}]
+[
+ {"severity":"SUGGESTION","dimension":"contract","file":"docs/e.md","line":12,"title":"MD013 line too long","description":"no lane line","reviewer":"r1","decided":"red"},
+ {"severity":"SUGGESTION","dimension":"contract","file":"docs/h.md","line":120,"title":"MD013 line too long","description":"short","reviewer":"r1","decided":"red"},
+ {"severity":"SUGGESTION","dimension":"contract","file":"docs/h.md","line":120,"title":"the page documents a flag the script does not accept","description":"a considerably longer description of a different defect","reviewer":"r2"},
+ {"severity":"SUGGESTION","dimension":"contract","file":"docs/g.md","line":12,"title":"MD013 line too long","description":"no lane line","reviewer":"r1","decided":"green"},
+ {"severity":"SUGGESTION","dimension":"contract","file":"docs/x.md","line":12,"title":"MD013 line too long","description":"no lane line","reviewer":"r1"}
+]
 EOF
-  # each element-shape conjunct gets its own case: a non-object, an empty file,
-  # an empty dimension, a non-string title and a null one. Dropping any single
-  # `length > 0` / `type == "string"` would otherwise stay green while the
-  # engine happily matched on an empty key — an empty `dimension` matches every
-  # finding the engine normalised to "", suppressing them all.
-  local bad
-  for bad in '["just a title"]' \
-             '[{"file":"","dimension":"code_quality","title":"t"}]' \
-             '[{"file":"a.py","dimension":"","title":"t"}]' \
-             '[{"file":"a.py","dimension":"code_quality","title":42}]' \
-             '[{"file":"a.py","dimension":"code_quality","title":null}]'; do
-    printf '%s' "$bad" > "$BATS_TEST_TMPDIR/adj-bad.json"
-    con --round 2 --adjudicated "$BATS_TEST_TMPDIR/adj-bad.json"
-    [ "shape $bad: $status" = "shape $bad: 1" ]
-    # the SHAPE arm's own wording, not the bare flag name: `--adjudicated` is
-    # carried by all five refusals this flag can raise, so asserting on it
-    # alone stays green if a mis-shaped array is re-routed to the
-    # file-existence or the multi-value arm — sending the caller to check
-    # whether the file exists instead of what is inside it
-    echo "$output" | grep -q -- 'not a JSON array of objects with non-empty file and dimension and a string title'
-    echo "$output" | grep -q -- '--adjudicated'
-    # ...and never blamed on the findings file, which is perfectly good
-    run -1 grep -q 'invalid findings JSON' <<< "$output"
-  done
+  con
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c '[.suggestions[].file] | sort')" = '["docs/e.md","docs/g.md","docs/h.md"]' ]
+  [ "$(echo "$output" | jq '.summary.low')" -eq 3 ]
+  echo "$output" | jq -e '.suggestions[] | select(.file == "docs/e.md") | .decided == "red"' >/dev/null
+  # the h.md item carries no same-claim stamp: the GROUP red kept it
+  echo "$output" | jq -e '.suggestions[] | select(.file == "docs/h.md") | has("decided") | not' >/dev/null
+  echo "$output" | jq -e '[.blocking[], .suggestions[]] | map(has("group_red") or has("_lane")) | any | not' >/dev/null
+}
+
+@test "#3169 the waived-suggestion flag is refused as unknown, and no summary key survives it" {
+  printf '%s\n' '[{"severity":"SUGGESTION","dimension":"code_quality","file":"a.py","line":1,"title":"t","description":"follow-up: t","reviewer":"r"}]' > "$F"
+  printf '%s\n' '[]' > "$BATS_TEST_TMPDIR/adj.json"
+  run -2 zsh "$S" --findings "$F" --adjudicated "$BATS_TEST_TMPDIR/adj.json"
+  [ "$output" = "unknown flag: --adjudicated" ]
+  run -2 zsh "$S" --adjudicated --findings "$F"
+  [ "$output" = "unknown flag: --adjudicated" ]
+  run -0 zsh "$S" --findings "$F"
+  echo "$output" | jq -e '.summary | has("adjudicated_dropped") | not' >/dev/null
+  run -0 zsh "$S" --help
+  [ "$(printf '%s' "$output" | grep -c -e 'adjudicated')" -eq 0 ]
 }
 
 # --- #1435: the residue class classifier ------------------------------------
@@ -1270,7 +1088,10 @@ EOF
   # The golden was captured by running the PRE-#1584 engine — this branch's base,
   # `24bbab1a` — against the same fixture; the SHA is recorded so a later editor
   # can re-derive it rather than regenerate the golden from the current engine,
-  # which would turn this into "the engine agrees with itself". It exercises
+  # which would turn this into "the engine agrees with itself". #3169 re-derived
+  # it from that capture with jq, never from the engine: the fixture's two Lows
+  # gained a `follow-up: ` lane line (so the Low filter keeps them), the golden's
+  # two suggestions the same prefix, and the retired summary count was deleted. It exercises
   # dedup, the severity max, a conflict pair, blocking and suggestions. Any stray
   # key, reordering or whitespace change fails here.
   golden="$REPO_ROOT/tests/fixtures/consolidate-findings/no-decided-changelist.golden.json"
@@ -1345,58 +1166,6 @@ EOF
   con
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r '.blocking[0].decided')" = "red" ]
-}
-
-@test "#1584 GUARD 4: --adjudicated never drops a Low that a tool decided RED" {
-  # The decided pass contracts a reachable red-at-SUGGESTION state (the malformed
-  # shapes, where the verdict is recorded but no severity changes). A red is an
-  # observed tool verdict, not a restated opinion, so guard 2 (Low only) is not
-  # enough on its own.
-  cat > "$F" <<'EOF'
-[
- {"severity":"SUGGESTION","dimension":"contract","file":"docs/e.md","line":12,"title":"MD013 line too long","description":"decides: pre-commit run markdownlint --files docs/e.md","reviewer":"r1","decided":"red"},
- {"severity":"SUGGESTION","dimension":"contract","file":"docs/f.md","line":12,"title":"MD013 line too long","description":"an undecided sibling at the same title","reviewer":"r2"}
-]
-EOF
-  cat > "$BATS_TEST_TMPDIR/adj.json" <<'EOF'
-[{"file":"docs/e.md","line":12,"dimension":"contract","title":"MD013 line too long"},
- {"file":"docs/f.md","line":12,"dimension":"contract","title":"MD013 line too long"}]
-EOF
-  con --adjudicated "$BATS_TEST_TMPDIR/adj.json"
-  [ "$status" -eq 0 ]
-  # the undecided sibling IS dropped; the decided-red one survives
-  [ "$(echo "$output" | jq '.summary.adjudicated_dropped')" -eq 1 ]
-  [ "$(echo "$output" | jq '.suggestions | length')" -eq 1 ]
-  # the COUNT is computed separately from the array — pin both, or a mutation
-  # that drops the survivor from `summary.low` alone passes here
-  [ "$(echo "$output" | jq '.summary.low')" -eq 1 ]
-  [ "$(echo "$output" | jq -r '.suggestions[0].file')" = "docs/e.md" ]
-  [ "$(echo "$output" | jq -r '.suggestions[0].decided')" = "red" ]
-}
-
-@test "#1584 GUARD 4 consults the GROUP, so a red-decided member with a different title still protects the item" {
-  # The `decided` stamp is same-claim, so a red-decided member that is neither
-  # the representative nor same-titled leaves NO `.decided` on the merged item.
-  # A guard reading only `.decided` would drop the item and the red with it —
-  # the verdict deleted with `adjudicated_dropped` as its only trace.
-  cat > "$F" <<'EOF'
-[
- {"severity":"SUGGESTION","dimension":"contract","file":"docs/h.md","line":120,"title":"MD013 line too long","description":"short","reviewer":"r1","decided":"red"},
- {"severity":"SUGGESTION","dimension":"contract","file":"docs/h.md","line":120,"title":"the page documents a flag the script does not accept","description":"a considerably longer description of a different defect","reviewer":"r2"}
-]
-EOF
-  cat > "$BATS_TEST_TMPDIR/adj.json" <<'EOF'
-[{"file":"docs/h.md","line":120,"dimension":"contract","title":"the page documents a flag the script does not accept"}]
-EOF
-  con --adjudicated "$BATS_TEST_TMPDIR/adj.json"
-  [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq '.summary.adjudicated_dropped')" -eq 0 ]
-  [ "$(echo "$output" | jq '.suggestions | length')" -eq 1 ]
-  [ "$(echo "$output" | jq '.summary.low')" -eq 1 ]
-  # the item carries no same-claim stamp — the protection came from the group
-  echo "$output" | jq -e '.suggestions[0] | has("decided") | not' >/dev/null
-  # and the internal key never reaches the output
-  echo "$output" | jq -e '[.blocking[], .suggestions[]] | map(has("group_red")) | any | not' >/dev/null
 }
 
 @test "#1584 a green-decided member carried into blocking[] by the GROUP SEVERITY MAX" {
@@ -1489,22 +1258,6 @@ EOF
   [ "$(echo "$output" | jq -r '.false_trips[0].decided')" = "red" ]
 }
 
-@test "#1584 GUARD 4 does not widen the drop: a decided GREEN Low is still adjudicated away" {
-  # Only `red` is exempt. A green record is "not red" — it must not turn the
-  # adjudication guard into a blanket exemption for anything the pass touched.
-  cat > "$F" <<'EOF'
-[{"severity":"SUGGESTION","dimension":"contract","file":"docs/g.md","line":12,"title":"MD013 line too long","description":"decides: pre-commit run markdownlint --files docs/g.md","reviewer":"r1","decided":"green"}]
-EOF
-  cat > "$BATS_TEST_TMPDIR/adj.json" <<'EOF'
-[{"file":"docs/g.md","line":12,"dimension":"contract","title":"MD013 line too long"}]
-EOF
-  con --adjudicated "$BATS_TEST_TMPDIR/adj.json"
-  [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq '.summary.adjudicated_dropped')" -eq 1 ]
-  [ "$(echo "$output" | jq '.suggestions | length')" -eq 0 ]
-  [ "$(echo "$output" | jq '.summary.low')" -eq 0 ]
-}
-
 @test "#1584 a REWORDED duplicate of the decided claim still contributes its record" {
   # Same-claim must not mean same-bytes: normtitle's case/whitespace leniency is
   # what lets two reviewers word one defect differently and still merge.
@@ -1543,7 +1296,8 @@ EOF
   # The golden was captured by running the PRE-#1921 engine — this story's base,
   # `c664c4e4` — against the same fixture (`--round 2`); the SHA is recorded so
   # a later editor re-derives it rather than regenerating it from the current
-  # engine, which would only prove the engine agrees with itself.
+  # engine, which would only prove the engine agrees with itself. #3169
+  # re-derived it from that capture the same way as the pre-#1584 golden.
   golden="$REPO_ROOT/tests/fixtures/consolidate-findings/risk-changelist.golden.json"
   fixture="$REPO_ROOT/tests/fixtures/consolidate-findings/risk-findings.json"
   old_golden="$REPO_ROOT/tests/fixtures/consolidate-findings/no-decided-changelist.golden.json"
@@ -1792,15 +1546,15 @@ EOF
   echo "$output" | jq -e '.suggestions[0].demoted == true' >/dev/null
 }
 
-@test "#1921 a demoted finding is never dropped as an adjudicated re-raise" {
+@test "#3169 a risk-demoted Low with neither lane line is never discarded" {
   cat > "$F" <<'EOF'
 [{"severity":"WARNING","dimension":"tests","file":"tests/a.bats","line":10,"title":"mutation drops the trailing newline check","description":"d","reviewer":"t"}]
 EOF
-  printf '%s\n' '[{"file":"tests/a.bats","line":10,"dimension":"tests","title":"mutation drops the trailing newline check"}]' > "$BATS_TEST_TMPDIR/adj.json"
   printf '%s\n' '[{"file":"tests/a.bats","line":10,"dimension":"tests","title":"mutation drops the trailing newline check","p":0.01,"p_why":"w","impact":0.1,"impact_why":"w"}]' > "$BATS_TEST_TMPDIR/r.json"
-  run -0 env corner_case_risk_threshold=0.05 zsh "$S" --findings "$F" --adjudicated "$BATS_TEST_TMPDIR/adj.json" --risk "$BATS_TEST_TMPDIR/r.json"
-  [ "$(echo "$output" | jq '.summary.adjudicated_dropped')" -eq 0 ]
-  echo "$output" | jq -e '.suggestions[0].demoted == true' >/dev/null
+  run -0 env corner_case_risk_threshold=0.05 zsh "$S" --findings "$F" --risk "$BATS_TEST_TMPDIR/r.json"
+  [ "$(echo "$output" | jq '.suggestions | length')" -eq 1 ]
+  echo "$output" | jq -e '.suggestions[0] | .demoted == true and .description == "d"' >/dev/null
+  [ "$(echo "$output" | jq '.summary.low')" -eq 1 ]
 }
 
 @test "#1921 an assessment spelled with ./ matches the finding it names, and is not reported unmatched" {
@@ -1982,7 +1736,7 @@ EOF
   # The #994 overlay is gone with the loop's --promote (#3134), so the flag is no
   # longer parsed: it falls to the unknown-option arm, whatever its value. A
   # VALID selection is the case that matters — it used to raise a Low to WARNING.
-  printf '%s\n' '[{"severity":"SUGGESTION","dimension":"code_quality","file":"src/f.zsh","line":60,"title":"rename the helper","description":"d","reviewer":"q"}]' > "$F"
+  printf '%s\n' '[{"severity":"SUGGESTION","dimension":"code_quality","file":"src/f.zsh","line":60,"title":"rename the helper","description":"follow-up: rename the helper","reviewer":"q"}]' > "$F"
   printf '%s\n' '[{"file":"src/f.zsh","line":60,"dimension":"code_quality","title":"rename the helper"}]' > "$BATS_TEST_TMPDIR/promote.json"
   run -2 zsh "$S" --findings "$F" --promote "$BATS_TEST_TMPDIR/promote.json"
   [ "$output" = "unknown flag: --promote" ]
@@ -2012,6 +1766,23 @@ EOF
   lacks "$flat" 'Two promotion rules bound the merge'
   lacks "$flat" 'a promoted item and a tool-red item'
   lacks "$flat" 'raisable by the #994 promotion path'
+}
+
+@test "#3169 the agent and ARCHITECTURE.md state the Low filter, and no waived-suggestion carry (doc-drift pin)" {
+  local agent="$REPO_ROOT/development/agents/review-consolidator.md" arch="$REPO_ROOT/ARCHITECTURE.md" fa fl
+  fa="$(LC_ALL=C tr -s '[:space:]' ' ' < "$agent")"
+  fl="$(LC_ALL=C tr -s '[:space:]' ' ' < "$arch")"
+  contains "$fa" '**the Low filter (#3169)** — the engine DISCARDS a reviewer-emitted Low with neither a `decides:` nor a `follow-up:` line: it lands in neither `suggestions` nor `blocking`, and no summary key counts it, so `summary.low` counts only the Lows that were kept.'
+  contains "$fa" 'A Low is kept, never blocking, when any member of its dedup group has a description line beginning with `decides:` or `follow-up:`, or when it carries a `decided` record or a red anywhere in its group.'
+  contains "$fa" 'A risk-demoted item (`demoted: true`) is never discarded.'
+  contains "$fa" 'A `WARNING`/`CRITICAL` is never discarded, so nothing blocking is ever hidden this way;'
+  contains "$fa" '**Forward it verbatim when your prompt gives you one, and never edit the file.**'
+  contains "$fl" '- **The Low filter'"'"'s mechanics** (#3169).'
+  contains "$fl" 'The filter runs **after** the #1921 risk demotion, so a `demoted: true` item is exempt, and **before** the conflict / non-convergence classification'
+  contains "$fl" 'No summary key counts the discards, and `summary.low` counts the kept Lows only.'
+  # the carry and its count are gone from both
+  [ "$(grep -ci 'adjudicat' "$agent")" -eq 0 ]
+  [ "$(grep -ci 'adjudicat' "$arch")" -eq 0 ]
 }
 
 # --- the --round / --prev / --findings usage contract (#1026) -----------------
