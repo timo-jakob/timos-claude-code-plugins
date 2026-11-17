@@ -46,7 +46,9 @@ consolidator_bullet() {
   # the contract is staged: #3158 landed it for the claude-plugin panel, and
   # the other reviewers follow it once #3159–#3167 land
   contains "$flat" "That rule holds for every panel's reviewers, whether or not they carry a bar."
-  contains "$flat" '**Only the reviewers #3158 rewrote follow this contract yet**, in the claude-plugin panel. The other reviewer agents still report a below-the-bar finding as a `SUGGESTION`, and the `development-react` panel still fixes one check at `SUGGESTION` (above), until children #3159–#3167 of #3122 rewrite them.'
+  contains "$flat" '**Only the reviewers #3158 rewrote follow this contract yet**, in the claude-plugin panel. The other reviewer agents still report a below-the-bar finding as a `SUGGESTION` until children #3159–#3167 of #3122 rewrite them.'
+  # the development-react panel no longer fixes a check at SUGGESTION (#3166)
+  lacks "$flat" 'panel still fixes one check at `SUGGESTION`'
   lacks "$flat" 'still pins the agents to the earlier report-as-'
   # the delta-round rule demotes below the bar, not to a reported SUGGESTION
   contains "$flat" 'demotes an untested branch or an unpinned sentence below the bar when it lies inside a range the previous fix pass **added**'

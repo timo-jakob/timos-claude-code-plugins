@@ -1,6 +1,6 @@
 ---
 name: review
-description: Perform a React idioms review — Rules of Hooks, TanStack Query as the one server-state default, and the Vite SPA shape — with one specialized agent. A topic panel — on a React repo the resolve-issue review loop runs it beside /development-javascript:review, never instead of it.
+description: Perform a React idioms review — Rules of Hooks and TanStack Query as the one server-state default — with one specialized agent. A topic panel — on a React repo the resolve-issue review loop runs it beside /development-javascript:review, never instead of it.
 disable-model-invocation: false
 ---
 
@@ -75,8 +75,7 @@ against one dimension's file.
 
 **A `null` or unreadable carry on a round ≥ 2 is a caller slip, not an empty
 carry.** Read it from the plan's `fix_verification_path` **or, in hook mode,
-from `$REVIEW_FIX_VERIFICATION`** (`$REVIEW_ADJUDICATED` carries the waived
-list) — a hook-mode panel sees no dispatch descriptor at all, so treating a
+from `$REVIEW_FIX_VERIFICATION`** — a hook-mode panel sees no dispatch descriptor at all, so treating a
 null `fix_verification_path` as decisive there would declare every hook-mode
 round's carry absent when the loop had in fact passed one. The terminal fires
 only when **neither** names a readable carry; then it means
@@ -165,21 +164,18 @@ dedup key on. A shared name such as `bugs` would merge this panel's findings wit
 (ARCHITECTURE.md, *Registering a review topic*).
 
 When the **review loop** drives this panel from round 2 on, its dispatch plan
-also carries two paths — `fix_verification_path` and `adjudicated_path` — and
-the reviewer must be told about both. The first is the only way a fix that
-silently did not land gets re-raised (a delta round cannot re-derive it), and the
-second is what stops the panel re-litigating what the human already waived. Add
-each line below only when the plan names a **non-null** path for it — a
-standalone run has no descriptor at all, and on round 1 the loop's own caller
-passes no `--fix-verification`. The carry holds every panel's blockers, but the
-split-carry map (above) hands the agent only the `react_idioms` entries: the
+also carries `fix_verification_path`, and the reviewer must be told about it.
+It is the only way a fix that silently did not land gets re-raised (a delta round
+cannot re-derive it). Add the line below only when the plan names a **non-null**
+path for it — a standalone run has no descriptor at all, and on round 1 the
+loop's own caller passes no `--fix-verification`. The carry holds every panel's
+blockers, but the split-carry map (above) hands the agent only the `react_idioms` entries: the
 Fix verification line carries that path, never `fix_verification_path` itself,
 and is added only when the map holds `react_idioms` (#2010).
 
 ```text
 Review scope: {the review scope}
 Fix verification (round >= 2): {own_fix_verification_path} — the previous round's blockers. Confirm each one actually landed BEFORE looking for anything new. For each carried entry report ONE of confirmed / re-raised / unconfirmed, as one line keyed by the carry's own spelling — carried entry "<title>" (<file>, <dimension>): confirmed at <file:line> | re-raised (see finding) | unconfirmed — re-raising ONLY what you observed still present, at its ORIGINAL severity, citing the carried entry and the file:line plus the unchanged text or passing mutation in the findings file, even when its file is outside this round's scope; never re-raise on the absence of a fix. A re-raise is a finding whose file, dimension and title are the carried entry's own spelling (title verbatim) and whose line is the carried line or null, with what you observed in its description — under a different title it is not matched to the carry and the round is refused. Every entry in that file is of your own dimension ("{DIMENSION}", which the identity includes) and is yours alone to account for: no other reviewer is shown it. End your report with the triple: carried: confirmed N / re-raised M / unconfirmed K of TOTAL, where TOTAL is the number of entries in that file.
-Already waived (round >= 2): {adjudicated_path} — suggestions earlier rounds surfaced and the human waived. Do not re-raise them as Suggestions, EXCEPT in a file the PREVIOUS ROUND'S FIX PASS touched (on a delta round that is this round's scope; on a closing full sweep that NO fix pass preceded the set is empty, so withhold them — but on a sweep the residue promotion earned, a fix pass did run, so the exemption applies as on any round). A genuinely blocking re-raise at CRITICAL/WARNING is always allowed.
 
 Analyze all React code in scope following your instructions. Report every finding using the prose reporting format defined in your agent definition.
 
@@ -219,12 +215,11 @@ Brief summary of what was reviewed and the React health of the change.
 ## Warnings
 {every WARNING finding — normally server state outside TanStack Query}
 
-## Suggestions
-{every SUGGESTION finding — normally Vite SPA shape and component-structure deviations, plus any finding
- the agent filed below its row}
+## Suggested follow-ups and capped claims
+{only the SUGGESTION findings that carry a `follow-up:` or `decides:` line}
 
 ## Metrics
-- **Total findings:** X (Y critical, Z warnings, W suggestions)
+- **Total findings:** X (Y critical, Z warnings, W capped or follow-up suggestions)
 - **Carried entries:** confirmed N / re-raised M / unconfirmed K of TOTAL — required
   on any round whose `fix_verification_path` holds entries, whatever this
   report's findings are (#1583, #2010: with one agent every entry is its own —

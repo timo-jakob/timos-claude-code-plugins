@@ -3823,9 +3823,8 @@ collide with a language panel's dimension in the one round both join. Its
 severity is **fixed per check** in the reviewer itself, so the loop converges:
 a Rules of Hooks violation (including a stale closure the reviewer can show) is
 `CRITICAL`, server state fetched outside TanStack Query (ad-hoc `useEffect`
-fetching, or an alternative server-state library) is `WARNING`, and a Vite SPA
-shape or component-structure deviation is `SUGGESTION`, which never blocks a
-round. Like every non-core dimension it inherits the `build-dossier.zsh` `$core`
+fetching, or an alternative server-state library) is `WARNING`; the reviewer
+has no other check. Like every non-core dimension it inherits the `build-dossier.zsh` `$core`
 gap (#1148).
 
 ### Scope-bounded severity (#982)
@@ -3928,8 +3927,7 @@ for every panel's reviewers, whether or not they carry a bar. The bars bound
 below included — is not reported unless it falls in one of the two lanes.
 **Only the reviewers #3158 rewrote follow this contract yet**, in the
 claude-plugin panel. The other reviewer agents still
-report a below-the-bar finding as a `SUGGESTION`, and the `development-react`
-panel still fixes one check at `SUGGESTION` (above), until children #3159–#3167
+report a below-the-bar finding as a `SUGGESTION` until children #3159–#3167
 of #3122 rewrite them.
 `tests/claude-plugin-review-severity-bars.bats` is the guard, and it asserts the
 bars are one convention rather than a set of ad-hoc rules — including against this
