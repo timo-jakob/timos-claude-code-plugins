@@ -248,6 +248,12 @@ agent_section() {
   # the field the orchestrator reads — a heading nothing reads is a finding
   # dropped on the way to the human
   contains "$s" 'report one `actions_requiring_review` entry per finding'
+  # #3164: the review panel's "below the blocking bar is not reported" never
+  # drops a finding the maintenance pipeline handed over
+  local r
+  r="$(agent_section opentofu-security-reviewer 'Reporting Format')"
+  [ -n "$r" ]
+  contains "$r" 'That bar is the review panel'"'"'s alone. When the maintenance pipeline dispatches you, every finding you were handed gets its `actions_requiring_review` entry, whatever its severity.'
 }
 
 @test "no agent reports into a heading the orchestrator never reads (#1161)" {
