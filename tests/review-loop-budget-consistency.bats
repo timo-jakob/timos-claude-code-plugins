@@ -1052,6 +1052,16 @@ _outside_moved_spans() {  # $1 = file
   # step 1's carry bullet keeps the observed-not-landed re-raise, with no
   # cannot-confirm clause (#1583's three outcomes govern, in carry.md)
   printf '%s' "$flat" | grep -Fq -e 'a fix the reviewer observed did not land must be **re-raised at its original severity**'
+  # ...one carry, not two: the lead-in counts the single bullet that follows
+  printf '%s' "$flat" | grep -Fq -e 'One carry rides in the plan from round 2 on, and the reviewers must be **told about it**'
+  run -1 grep -Fq -e 'Two carries ride in the plan' <<< "$flat"
+  run -1 grep -Fq -e 'told about both' <<< "$flat"
+  # ...and step 1 agrees with carry.md's one-owner rule (#2010) instead of the
+  # retired union-of-reviewers count
+  printf '%s' "$flat" | grep -Fq -e 'carried entry has exactly one owner, the reviewer of its own dimension**: split the carry with `review-dispatch.zsh split-carry`'
+  printf '%s' "$flat" | grep -Fq -e "**The owner's report alone decides an entry's outcome** — never a union across reviewers"
+  run -1 grep -Fq -e 'the round'"'"'s count is their UNION' <<< "$flat"
+  run -1 grep -Fq -e 'confirmed when **at least one** reviewer says so' <<< "$flat"
   flat="$(tr '\n' ' ' < "$d/briefs/panel.md" | tr -s ' ')"
   printf '%s' "$flat" | grep -Fq -e 'From round 2 on, add `--prior-tree <delta_base>` and `--fix-verification <work_dir>/verify-<round>.json`.'
 }

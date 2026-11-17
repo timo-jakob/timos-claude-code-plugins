@@ -178,25 +178,24 @@ subagent dispatch (#2113).** A `round-panel`, `round-fix`, `round-decide` or
      a zero-blocker delta round. The loop's own refusal message names the same
      recovery — never invent a code change just to move the tree.
 
-   Two carries ride in the plan from round 2 on, and the reviewers must be
-   **told about both** — they are the point of the delta, not decoration:
+   One carry rides in the plan from round 2 on, and the reviewers must be
+   **told about it** — it is the point of the delta, not decoration:
 
-   - **`fix_verification_path`** — the previous round's blockers. Each
-     reviewer's first job is to confirm those fixes actually landed, before
-     looking for anything new. **Say what to do when one did not:** a fix the
-     reviewer observed did not land must be
+   - **`fix_verification_path`** — the previous round's blockers. **Each
+     carried entry has exactly one owner, the reviewer of its own dimension**:
+     split the carry with `review-dispatch.zsh split-carry` and hand each
+     reviewer only its own dimension's file, as *Carry accounting* (the
+     `carry.md` shard, later in this index) says — that section governs the
+     carry. The owner's first job is to confirm those fixes
+     actually landed, before looking for anything new. **Say what to do when
+     one did not:** a fix the reviewer observed did not land must be
      **re-raised at its original severity**, citing the carried entry, *even
      when its file is outside this round's delta* — a delta round cannot
      re-derive it, so silence here converges the run with the blocker unfixed.
-     **And tell each reviewer to report how many carried entries it confirmed
-     landed** — on any round whose carry is non-empty, whatever it writes to the
-     findings file, `[]` or otherwise. Step 2 refuses a round that does not
-     account for every carried entry, so asking for the count belongs to the
-     dispatch, not to the recovery.
-
-     **You get one count per reviewer, and the round's count is their UNION.**
-     A carried entry is confirmed when **at least one** reviewer says so; the
-     round's count is `|union| of M`. A reviewer silent about the carry
-     contributes zero confirmations — it does **not** fail the round on its own,
-     since the entry may be outside its dimension. What fails the round is a
-     carried entry that no reviewer confirmed **and** no reviewer re-raised.
+     **And tell each owner to account for every carried entry of its own
+     dimension** — on any round whose carry is non-empty, whatever it writes to
+     the findings file, `[]` or otherwise. Step 2 refuses a round that does not
+     account for every carried entry, so asking for the accounting belongs to
+     the dispatch, not to the recovery. **The owner's report alone decides an
+     entry's outcome** — never a union across reviewers: an entry its owner
+     neither confirmed nor re-raised is refused as CARRY-UNACCOUNTED.
