@@ -11,8 +11,12 @@
 #
 # It emits, on stdout:
 #   1. a human-readable "## Review dossier" markdown section — per-round blockers
-#      found/fixed, dimensions reviewed, waived Low suggestions, reviewers, and
-#      the final consolidator state. Each dimension also carries `open` in the
+#      found/fixed, dimensions reviewed, the risk-demoted table (#1921), the
+#      **Suggested follow-ups** (#3170: each Low whose description has a line
+#      beginning `follow-up:`), reviewers, and the final consolidator state. No
+#      waived-suggestion list and no suggestion count is rendered: a Low with a
+#      `decides:` line and no `follow-up:` line appears in no rendered section,
+#      only in the hidden block's `waived_low`. Each dimension also carries `open` in the
 #      hidden block: the blockers still open in the final
 #      changelist. The guard below refuses a non-zero count, so it is always 0;
 #      it stays because the Approver backstops read it (#2586, #2587); and
@@ -20,7 +24,9 @@
 #      the #449 enum, so the Approver re-ingests reviewer verdicts into its risk
 #      register the same way maintenance re-ingests Approver findings today. An
 #      empty (clean) dimension lets the Approver lower that lens's residual-risk
-#      weight; the waived-Low list is context, not a finding.
+#      weight; the waived-Low list is context, not a finding. Its shape is
+#      unchanged by #3170: `waived_low` still holds every Low — follow-up,
+#      `decides:` and risk-demoted alike.
 #
 # If the loop did not run (--no-review / no rounds), nothing is emitted (exit 0)
 # so the PR body is exactly as it is today.
@@ -156,7 +162,7 @@ nrounds=$(jq -n --argjson s "$status_json" '($s.round_changelists // []) | lengt
 #
 # THE RISK-DEMOTED SET (#1921). Findings the loop demoted below
 # corner_case_risk_threshold are Low items stamped `demoted: true`, so without a
-# rule they would read as ordinary waived suggestions — hiding that each one
+# rule they would read as ordinary Low suggestions — hiding that each one
 # cleared a reviewer blocking bar and was set aside by a risk judgement. ONE
 # harvest, prepended to both programs below so the hidden block and the rendered
 # table can never list different findings. It walks EVERY item — blocking and
@@ -271,9 +277,9 @@ dossier=$(jq -cn --argjson s "$status_json" "$demoted_def"'
       dimensions: $dimmap,
       # a risk-demoted finding (#1921) STAYS in this machine-readable list, which
       # the Approver folds into its risk register: removing it would take a
-      # finding that cleared a blocking bar out of that register. Only the
-      # rendered waived list below leaves it out, since the human reads it in
-      # its own table; `risk_demoted` names which of these were demoted.
+      # finding that cleared a blocking bar out of that register. The rendered
+      # section lists it only in its own table, never under Suggested
+      # follow-ups; `risk_demoted` names which of these were demoted.
       waived_low: [ $uv[] | select(.priority=="Low") | {file, line, dimension, title} ],
       reviewers: ([ $u[] | .reviewers[]? ] | unique),
       final: ($s.final_changelist.summary // {})
@@ -301,8 +307,16 @@ section=$(jq -rn --argjson s "$status_json" --argjson d "$dossier" "$demoted_def
   def cell: safe | gsub("\\|"; "\\|");
   def linepart: if (.line | type) == "number" then ":\(.line)" else "" end;
   def roundline($r): "- Round \($r.round): \($r.summary.blocking) blocking"
-    + (if ($r.summary.conflicts // 0) > 0 then ", \($r.summary.conflicts) conflict(s)" else "" end)
-    + ", \($r.summary.low) suggestion(s) logged";
+    + (if ($r.summary.conflicts // 0) > 0 then ", \($r.summary.conflicts) conflict(s)" else "" end);
+  # the follow-up text of an item (#3170): the rest of the FIRST description
+  # line that begins with follow-up: (leading blanks allowed, never mid-line,
+  # the same match consolidate-findings.zsh applies to its lanes), or null
+  def futext: [ ((.description // "") | tostring | split("\n"))[]
+                | select(test("^[ \t]*follow-up:"))
+                | sub("^[ \t]*follow-up:"; "") ] | (.[0] // null);
+  # untrusted text on a markdown list line: safe, plus every < written as an
+  # entity, so no comment opener or closer and no HTML tag survives into the body
+  def listsafe: safe | gsub("<"; "&lt;");
   [ "## Review dossier",
     "",
     ("The local review loop ran **\($d.rounds) round(s)** and exited **\($d.status)** "
@@ -314,9 +328,9 @@ section=$(jq -rn --argjson s "$status_json" --argjson d "$dossier" "$demoted_def
   + [ "", "**Dimensions reviewed** (#449 lenses)", "" ]
   + [ ($d.dimensions | to_entries[] |
         if .value.clean then "- `\(.key)` — ✓ clean (reviewed, no findings)"
-        else "- `\(.key)` — \(.value.blocking) blocking found & fixed, \(.value.suggestions) suggestion(s)" end) ]
+        else "- `\(.key)` — \(.value.blocking) blocking found & fixed" end) ]
   + [ "" ]
-  # RISK-DEMOTED (#1921), above the waived list and never folded into it.
+  # RISK-DEMOTED (#1921), above the Suggested follow-ups and never folded into them.
   + ( [ demoted_set($s)[] ] as $dem
       | if ($dem | length) == 0 then [] else
           # the heading names the base threshold from a base-bar record; when
@@ -336,17 +350,26 @@ section=$(jq -rn --argjson s "$status_json" --argjson d "$dossier" "$demoted_def
                        + (if .bar == "extension" then " (extension bar, threshold \(.threshold | cell))" else "" end)
                        + " | \(.p_why | cell); \(.impact_why | cell) |" ]
           + [ "" ] end )
-  # the rendered waived list leaves out what the demoted table above already
-  # lists (#1921); waived_low carries each demoted finding under the latest
-  # identity of its record, so that identity is the match. With nothing demoted the
-  # filter keeps everything
-  + ( demoted_set($s) as $dm
-      | [ $dm[] | [.file, .line, .dimension, .title] | tojson ] as $dmids
-      | [ $d.waived_low[] | ([.file, .line, .dimension, .title] | tojson) as $id
-          | select(any($dmids[]; . == $id) | not) ] as $wl
-      | if ($wl | length) > 0 then
-          [ "**Waived suggestions** (Low — logged, never blocking)", "" ]
-          + [ ($wl[] | "- `\(.file):\(.line)` [\(.dimension)] \(.title)") ]
+  # SUGGESTED FOLLOW-UPS (#3170), in the slot the retired waived list held: each
+  # Low of any round whose description has a follow-up: line, deduped across
+  # rounds on [file, line, dimension, title] and taking the text of the LATEST
+  # occurrence. An item whose record is risk-demoted in its latest occurrence is
+  # listed only in the demoted table above: every identity that record ever
+  # carried (`ids`) is left out here. A decides: Low with no follow-up: line is
+  # rendered nowhere; it stays in the hidden waived_low. Rendered only when
+  # non-empty.
+  + ( [ demoted_set($s)[] | .ids[] ] as $dmids
+      | [ ($s.round_changelists // [])[] | ((.blocking // []), (.suggestions // []))[]
+          | select((.priority // "Low") == "Low")
+          | (futext) as $fu
+          | select($fu != null)
+          | {file, line, dimension, title, fu: $fu} ]
+      | group_by([.file, .line, .dimension, .title]) | map(last)
+      | [ .[] | ([.file, .line, .dimension, .title] | tojson) as $id
+          | select(any($dmids[]; . == $id) | not) ] as $fl
+      | if ($fl | length) > 0 then
+          [ "**Suggested follow-ups** (scope-bounded defects left for a follow-up, never blocking)", "" ]
+          + [ ($fl[] | "- `\((.file // "") | safe)\(linepart)` [\(.dimension | listsafe)] \(.fu | listsafe)") ]
           + [ "" ]
         else [] end )
   + [ ("**Reviewers:** " + ($d.reviewers | if length==0 then "—" else join(", ") end)),

@@ -97,8 +97,8 @@ A demoted finding never disappears:
 
 - **Progress log:** the round's block has a `demoted by risk threshold` line,
   then one line per finding with its probability, impact and risk.
-- **PR body:** a **Demoted by the risk threshold** table above the waived
-  suggestions lists each finding with its assessment and reasoning.
+- **PR body:** a **Demoted by the risk threshold** table above the suggested
+  follow-ups lists each finding with its assessment and reasoning.
 
 ## A higher bar in extra rounds
 

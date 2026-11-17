@@ -3839,9 +3839,8 @@ never mentioned that lives in code the story never touched), **is reported at
 That line sits in the same position and style as the evidence rule's
 `decides:` line (*Terminating severity bars* below), so the consolidator detects
 both lanes the same way. Such a finding never blocks a round, and the dossier
-lists it under *Suggested follow-ups*. That dossier section is not built yet: #3170
-adds it to `build-dossier.zsh`, and until then the finding appears in the
-dossier's **Waived suggestions** list. A plain out-of-diff observation below the
+lists it under *Suggested follow-ups*, which `build-dossier.zsh` renders
+since #3170. A plain out-of-diff observation below the
 bar is not reported at all. Nothing blocking-grade is lost, because the defect
 rides into the dossier under *Suggested follow-ups* as a non-blocking Low; only
 an observation that would not block anyway is dropped. A scope-expanding remedy
@@ -6307,7 +6306,9 @@ emitted after the run's self-guided retry, so that record's `outcome` is the
 retry's outcome), `possible_false_trip_auto_continues`, `findings_by_round`,
 `gate_by_round`, `step_wall_s_by_round`, `skipped_dimensions_by_round`,
 `convergence_assessment`, and `fixed`
-(blockers found and cleared) vs `waived` (Low suggestions logged).
+(blockers found and cleared) vs `waived` (distinct Low items logged: since
+the #3169 Low filter only the `decides:` and `follow-up:` lanes and risk-demoted
+items, #3170).
 `gate_by_round` (#1973) is `[{round, gate}]`, read from the status JSON's
 `history[]`: each round's gate record (`{scope, attested, wall_s, slowest, jobs}`,
 or `null`), described under *Per-round gate telemetry*. It is a separate field
@@ -6334,7 +6335,9 @@ keys, and no recipe below reads them. Each `findings_by_round` entry
 uses), plus `by_severity` in the **user-facing vocabulary** —
 `Critical` / `Warning` / `Suggestion`, the same words the human reads in
 `progress.md` and the escalation (internally `Warning` = priority High,
-`Suggestion` = the Low bucket) — plus `by_dimension`,
+`Suggestion` = the Low bucket, which since #3169 holds only the `decides:` and
+`follow-up:` lanes plus risk-demoted items, so it is `0` for a round with none of
+them and the key stays, #3170) — plus `by_dimension`,
 `by_class` (#1435 — the residue class histogram
 `{new_defect, incomplete_propagation, under_assertion}`, i.e. whether the round
 found fresh problems or re-read the last fix pass's own edits; `null`, **not**
@@ -7286,8 +7289,19 @@ the PR body by `open-pr`:
 1. a **"Review dossier"** section — rounds run, per-round blockers found & fixed,
    dimensions reviewed — the #449 core five plus any panel-specific dimension
    that reported findings (a CLEAN non-core one is dropped, #1148) — each
-   `clean` or with a fixed count, waived Low suggestions, and the reviewers who
-   contributed. Since #1435 each dimension also carries `open`: the blockers
+   `clean` or with a fixed count, the risk-demoted table (#1921), the
+   **Suggested follow-ups**, and the reviewers who contributed. Since #3170 the
+   section renders no waived-suggestion list and no suggestion count: a round
+   line reads `- Round N: X blocking` (plus `, Y conflict(s)` when Y > 0) and a
+   non-clean dimension line `X blocking found & fixed`, so a dimension whose only
+   findings are kept Lows reads `0 blocking found & fixed`. The *Suggested
+   follow-ups* section sits after the risk-demoted table and before the
+   Reviewers line, and appears only when it has an entry: one line per Low whose
+   `description` has a line beginning `follow-up:` — `file:line`, the dimension
+   in square brackets, then the rest of the first such line, neutralised as
+   untrusted text — deduped across rounds on `[file, line, dimension, title]`.
+   An item risk-demoted in its latest occurrence is listed only in its table. A
+   `decides:` Low with no `follow-up:` line is not rendered at all. Since #1435 each dimension also carries `open`: the blockers
    still open in the status's `final_changelist.blocking` when the PR was
    opened. Since `CONVERGED` is the only ending that opens a PR (#2580), the
    loop always ends with an empty final changelist, and `build-dossier.zsh` refuses
@@ -7303,7 +7317,10 @@ the PR body by `open-pr`:
    each carries blockers by construction, so it would otherwise render a dossier
    attesting to a merge that never happened; and
 2. a hidden `<!-- review-dossier: {…} -->` JSON block, dimension-tagged the same
-   way.
+   way. #3170 left its shape unchanged: `waived_low` still holds every Low —
+   follow-up, `decides:` and risk-demoted alike — and
+   `dimensions.<lens>.suggestions` and `risk_demoted` keep their keys and
+   derivation.
 
 The Approver re-ingests the hidden block **the same way maintenance re-ingests
 Approver findings** — via the shared `approver-policy-core` (#555), so all four
@@ -7319,8 +7336,7 @@ also took a promotion phase's status file and the human's selection, and merged
 that suggestion-promotion phase (#994, #1064) into the same section and block.
 No run produces either file any more, so both flags are refused as unknown options (exit 2), and the dossier
 neither prints a promotion paragraph nor follows items across two phases. The
-**Waived suggestions** list and the risk-demoted table (`demoted: true`, #1921)
-are unchanged.
+risk-demoted table (`demoted: true`, #1921) is unchanged by either change.
 
 The status input is validated strictly: it must be a regular non-empty file
 holding exactly ONE JSON object, so a `null`-holding, multi-object or directory
@@ -7328,8 +7344,9 @@ operand is exit 1 rather than a silent exit-0-with-no-output; the human section
 is buffered and printed once, so **any** non-zero exit emits nothing on stdout,
 which is what makes "empty output at exit 0 after a known round" diagnosable at
 the call sites. A Low that a later round re-reports at a drifted line is listed
-at both lines: the findings are deduped on `[file, line, dimension, title]`
-alone.
+at both lines, in `waived_low` and, when it carries a `follow-up:` line, under
+*Suggested follow-ups*: the findings are deduped on
+`[file, line, dimension, title]` alone.
 
 ## Typed escalation path (#564)
 
@@ -8642,11 +8659,11 @@ only inside the loop.
     source one parser and one assessment validator,
     `scripts/risk-threshold-lib.zsh`, so no value is read two ways.
   - **Visibility.** A demotion is shown in the progress block and in the
-    dossier: a paragraph and table above the waived suggestions, and an
+    dossier: a paragraph and table above the *Suggested follow-ups*, and an
     optional `risk_demoted` array in the hidden block, present only when
     non-empty. The hidden `waived_low` still lists demoted items, because the
-    Approver folds it into its risk register; only the rendered waived list
-    leaves them out.
+    Approver folds it into its risk register; the rendered *Suggested
+    follow-ups* never list one, even with a `follow-up:` line.
 - **Extension bar (#2577): a raised bar in rounds a grant bought.** An
   **extension round** is one a recorded grant paid for: the work-dir's grant
   ledger `grants.jsonl`, which `record-grant.zsh` appends to for human and

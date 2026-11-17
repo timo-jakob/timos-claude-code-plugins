@@ -138,13 +138,13 @@ sections of `ARCHITECTURE.md` named under each table.
 | `grants` | object | `human` and `automatic`: how many round grants the run took from each source |
 | `auto_guided_retry` | boolean | `true` when the record was emitted after the run's one self-guided retry, so its `outcome` is that retry's |
 | `possible_false_trip_auto_continues` | integer | how often the loop auto-continued past a probable false trip |
-| `findings_by_round` | array of objects | per round: `round`, `by_severity` (`Critical` / `Warning` / `Suggestion`), `by_dimension`, `by_class`, `new`, `carried`, `fixed_from_prev`, `false_trips` |
+| `findings_by_round` | array of objects | per round: `round`, `by_severity` (`Critical` / `Warning` / `Suggestion`; `Suggestion` counts only the `decides:` and `follow-up:` lanes plus risk-demoted items, and is `0` for a round with none), `by_dimension`, `by_class`, `new`, `carried`, `fixed_from_prev`, `false_trips` |
 | `gate_by_round` | array of objects | per round: `round` and its test gate (`scope`, `attested`, `wall_s`, `slowest`, `jobs`), or `null` |
 | `step_wall_s_by_round` | array of objects | per round: `round` and the `panel` / `decide` / `risk` / `fix` seconds, or `null` |
 | `skipped_dimensions_by_round` | array of objects | per round: `round` and the review dimensions its panel left out, or `null` |
 | `convergence_assessment` | object or `null` | `blocking_by_round`, `trend`, `blockers_moving`, `carried_final`, `possible_false_trips`; `null` when no round ran |
 | `fixed` | integer | blocking findings found and cleared |
-| `waived` | integer | distinct Low suggestions the loop logged |
+| `waived` | integer | distinct Low items the loop logged: the `decides:` and `follow-up:` lanes plus risk-demoted items, as `Suggestion` counts them |
 
 Normative: `ARCHITECTURE.md`, *Review-loop telemetry*.
 
