@@ -3603,13 +3603,11 @@ launches emits the block for free, with no per-agent boilerplate to maintain.
 
 **Step 1 has a second injection duty since #1434**, and it is per-panel for the
 same reason: from round 2 on the loop's dispatch descriptor carries
-`fix_verification_path` and `adjudicated_path`, and the `review` skill must
-forward both into each agent's launch prompt — the previous round's blockers to
+`fix_verification_path`, and the `review` skill must
+forward it into each agent's launch prompt — the previous round's blockers to
 verify (the only way a fix that silently did not land gets re-raised, since a
-delta round cannot re-derive it) and the already-waived suggestions the panel
-must not re-litigate. That second half is pending #3168: since #3158–#3167 no
-panel forwards `adjudicated_path`, and #3168 drops the key from the descriptor
-and this duty. Each panel also states that when it DOES verify a
+delta round cannot re-derive it). The descriptor hands the panel no waived-suggestion list (#3168).
+Each panel also states that when it DOES verify a
 non-empty carry it **reports how many carried entries it confirmed**, how many
 it re-raised and how many it left unconfirmed — on ANY
 round whose `fix_verification_path` holds entries, and whatever it writes to the
@@ -4301,8 +4299,8 @@ subcommands can never disagree about a repo, and `--base` is refused rather than
 accepted-and-ignored.
 
 **`plan --repo PATH [--base REF] [--round N] [--findings-path PATH] [--final]
-[--prior-tree TREE_ID] [--fix-verification PATH] [--adjudicated PATH]
-[--self-check PATH] [--fallback]`** emits the
+[--prior-tree TREE_ID] [--fix-verification PATH] [--self-check PATH]
+[--fallback]`** emits the
 dispatch descriptor. `--findings-path` overrides where the panel is told to write
 its aggregate, defaulting to `<worktree_root>/.review/findings-round-<N>.json` —
 **absolute, and the same for every spelling of `--repo`**, because `--repo` is
@@ -4337,7 +4335,6 @@ cannot mint a second artifact path for the same round:
   "delta_hunks": null,
   "skippable_dimensions": [],
   "fix_verification_path": null,
-  "adjudicated_path": null,
   "self_check_path": null
 }
 ```
@@ -4387,9 +4384,11 @@ cannot mint a second artifact path for the same round:
   delta, so the descriptor reports a non-empty scope while the panel would be
   handed nothing. Round 1's "a scope that is only
   artifacts yields an empty `changed_files`, not an error" behaviour is
-  untouched either way. `--fix-verification` / `--adjudicated` are **echoed through** as
-  `fix_verification_path` / `adjudicated_path` — this script never reads either
-  file, so one descriptor value carries everything a round's panel needs.
+  untouched either way. `--fix-verification` is **echoed through** as
+  `fix_verification_path` — this script never reads the file, so one descriptor
+  value carries everything a round's panel needs. `plan` takes no
+  `--adjudicated` and emits no `adjudicated_path` key (#3168): no panel reads
+  the waived-suggestion list, so the flag is refused as unknown (exit 2).
   `--self-check` (#2014) is echoed through the same way as `self_check_path`,
   the descriptor's **last** key (under `--fallback`, `fallback_for` and
   `review_mode` follow it), `null` when absent and never read: the path of
@@ -4422,7 +4421,7 @@ cannot mint a second artifact path for the same round:
   is itself the main checkout, or the main worktree is **bare**, a git directory
   rather than a tree anyone can read; it never means "this is the main
   checkout". `null` rather than absent keeps one convention with `prior_tree` /
-  `fix_verification_path` / `adjudicated_path`, so a consumer reads the key
+  `fix_verification_path`, so a consumer reads the key
   unconditionally. `scope_abs` is `changed_files` with
   `worktree_root` joined onto each entry: same order, same length, `[]` exactly
   when `changed_files` is `[]`. It **accompanies** `changed_files` and never
@@ -4824,7 +4823,10 @@ the pre-move `SKILL.md` — **for the chunks the manifest declares, which are no
 the whole of `reference/`**. The #1582 re-cut split `round-protocol` into a head
 and a tail to open a gap for the reviewer-path rule, and the text in that gap is
 verified by nothing: the gate proves only that no *original* line migrated into
-it, by asserting the two anchors stay adjacent in the pinned commit. The
+it, by asserting the two anchors stay adjacent in the pinned commit. Since #3168
+retired the tail, the gap runs on through the whole of round step 1, and its
+two edges are held instead: the head's last anchor adjacent to step 1's first
+line, and step 2's first anchor adjacent to step 1's last. The
 carve-out is owed by the **shape of the claim**, not by which file the claim is
 about: it belongs wherever a statement would otherwise read as covering a
 gap-containing file **as a whole** — the `reference/review-loop.md` index's
@@ -4944,8 +4946,9 @@ the **end** of round N-1 rather than the start of round N — in step mode the
 round's panel runs between invocations, so a file first created at round N's
 start would be written after the reviewers meant to read it had finished; the
 round-start build survives only as the fallback for an older work-dir),
-`adjudicated.json` (the waived Lows, passed as `--adjudicated`, exported as
-`REVIEW_ADJUDICATED`, invalidated per round against `delta_files`, and appended
+`adjudicated.json` (the waived Lows, passed to the consolidator as
+`--adjudicated` and, since #3168, never handed to the panel, invalidated per
+round against `delta_files`, and appended
 to only **after** the round consolidates so a round can never drop its own
 findings), `.closing-sweep`, and `.max-rounds` (plus, transiently,
 `.max-rounds.tmp.*` — `record-grant.zsh`'s atomic-rename staging, swept by the

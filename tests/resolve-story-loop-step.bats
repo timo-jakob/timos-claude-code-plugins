@@ -1846,6 +1846,33 @@ EOF
   [ "$(jq -s 'length' "$WD/history.jsonl")" -eq 2 ]
 }
 
+@test "#3168 step mode: the loop never hands the waived list to the plan, on round 1 or round 2" {
+  # The stub logs every dispatch invocation's arguments, one per line, then
+  # delegates to the real review-dispatch.zsh. Round 2 is a carried delta round,
+  # where --adjudicated used to ride beside --fix-verification.
+  local real="$REPO_ROOT/development/skills/resolve-issue/scripts/review-dispatch.zsh"
+  local stub="$BATS_TEST_TMPDIR/dispatch-logs-args.sh" log="$BATS_TEST_TMPDIR/dispatch-args.log"
+  cat > "$stub" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$log"
+exec "$real" "\$@"
+EOF
+  chmod +x "$stub"
+  export RESOLVE_LOOP_DISPATCH_BIN="$stub"
+  seed_awaiting                       # round 1 (through the stub): one blocker
+  echo "print(2)" > "$R/fixed.py"
+  printf '[]' > "$F"
+  step --resume
+  [ "$status" -eq 20 ]
+  # non-vacuity: both rounds' plans went through the stub, round 2's carrying
+  # the fix-verification carry
+  grep -q -- '^plan .*--round 1' "$log"
+  grep -q -- '^plan .*--round 2 .*--fix-verification ' "$log"
+  run -1 grep -qF -- '--adjudicated' "$log"
+  # the list is still the consolidator's work-dir state until #3169
+  [ -f "$WD/adjudicated.json" ]
+}
+
 @test "#1434 step mode: a .closing-sweep marker just TWO rounds out is refused — the boundary, not just the far case" {
   # The far-out control (99) leaves the boundary free to move: `> max_rounds + 2`
   # would still refuse 99 and still adopt 4, while a resume passing a smaller

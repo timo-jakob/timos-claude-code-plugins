@@ -13,8 +13,8 @@ exchanges work with the subagents only through the `round-handoff/v1` and
 `round-verdict/v1` files (ARCHITECTURE.md, *Round handoff and verdict
 contracts*). **Where *Each round* above has the conductor plan and dispatch the
 panel itself (step 1) or apply the fix pass itself (step 3), this section
-governs**: those steps sit in a byte-frozen span, so they are superseded here
-rather than edited. What they say a panel or a fix pass must *do* still holds —
+governs**: step 3 sits in a byte-frozen span, so both steps are superseded
+here rather than edited. What they say a panel or a fix pass must *do* still holds —
 the briefs below hand that work to a subagent, they do not change it.
 
 **Depth budget.** No implementation adds a layer:

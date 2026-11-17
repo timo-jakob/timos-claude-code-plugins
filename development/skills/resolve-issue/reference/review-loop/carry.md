@@ -3,14 +3,14 @@
 
 ### Carry accounting — confirmed, re-raised, unconfirmed (#1583)
 
-The `fix_verification_path` bullet above (step 1) tells the reviewers to re-raise a
-fix the reviewer failed to confirm at its original severity, and step 2's
-carry arm treats a round whose count does not add up — fewer confirmations than
-carries and no re-raise of the remainder — as failed. Both sit inside a
-byte-frozen `moved:` span, so — exactly as
-the #1571 correction above — the rule that replaces them is recorded here
+Step 2's carry arm treats a round whose count does not add up — fewer
+confirmations than carries and no re-raise of the remainder — as failed. It
+sits inside a byte-frozen `moved:` span, so — exactly as
+the #1571 correction above — the rule that replaces it is recorded here
 rather than edited into the span. **Where the span and this section disagree, this
-section governs.**
+section governs.** (Step 1's `fix_verification_path` bullet also told reviewers
+to re-raise a fix they failed to confirm, until #3168 took step 1 out of the
+frozen text and dropped that clause.)
 
 **Every carried entry has exactly one owner (#2010): the reviewer of its own
 dimension.** The panel splits the carry with `review-dispatch.zsh split-carry

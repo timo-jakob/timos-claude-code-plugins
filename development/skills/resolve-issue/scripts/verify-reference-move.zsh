@@ -22,8 +22,9 @@
 # manifest, is invisible to every path here. Read the claim as "each declared
 # chunk moved verbatim", never as "nothing was lost". (Conservation is tracked
 # separately; see #1548.) Nor does it prove anything about text sitting BETWEEN
-# two chunks of a SPLIT span — the #1582 gap inside `round-protocol` — which is
-# verified by nothing; see the manifest comment below.
+# two chunks of a SPLIT span — the #1582 gap inside `round-protocol`, which since
+# #3168 runs on through the whole of round step 1 — which is verified by
+# nothing; see the manifest comment below.
 #
 # Normalisation, stated so the claim is honest: leading and trailing BLANK or
 # WHITESPACE-ONLY lines are stripped from BOTH sides before comparison (they are
@@ -51,9 +52,11 @@
 #      chunk failure so the sweeps below it still run), OR a sentinel
 #      sweep failed: an undeclared/duplicated sentinel, the sweep could not be
 #      RUN at all (#1588 — grep or its normalisation failed, so the invariant is
-#      vacuous rather than satisfied), or the #1582 split-span
-#      checks (a split sentinel not appearing exactly once, the halves out of
-#      order, or the split anchors no longer adjacent in the pre-move file).
+#      vacuous rather than satisfied), the round-protocol head closer not
+#      appearing exactly once, in core.md, or the head's last anchor or
+#      round-protocol-step-2's first anchor no longer adjacent to round step 1 in
+#      the pinned commit (#1582, #3168), or a re-cut span's seam leaving an
+#      original line uncovered or out of order (#2055).
 #      Chunk differences and sweep failures are counted and reported separately
 #      — they are different defects — but both land here.
 #   2  usage error
@@ -149,14 +152,24 @@ fi
 #
 # `round-protocol` is SPLIT into head + tail (#1582). The reviewer path rule had
 # to land in the round protocol, and the whole span was byte-frozen, so the span
-# was re-cut to open a gap for it. The gap holds ONLY new prose: the head ends at
-# `Each round:` and the tail resumes at step 1's own first line, so 224 + 788 of
-# the original 1 013 lines stay verified and the only original line in the gap is
-# the blank separator between them (which `strip_blanks` would discard anyway).
+# was re-cut to open a gap for it. Until #3168 the gap held ONLY new prose: the
+# head ends at `Each round:` and the tail resumed at step 1's own first line, so
+# the only original line in the gap was the blank separator between them.
 #
 # The cost is still real and is recorded rather than hidden: text sitting in that
 # gap is verified by NOTHING, so an edit to the new rule passes this gate in
-# silence. It is bounded to the rule itself.
+# silence. It was bounded to the rule itself until #3168.
+#
+# #3168 retired the TAIL (`round-protocol-tail`, round step 1 in
+# review-loop/step-1-panel.md). Dropping the waived-suggestion hand-off edited
+# step 1 from its plan flags near the top to its last sub-bullet, and step 1 is
+# ONE numbered list item, so no column-0 sentinel can sit inside it (see the
+# markdown note below). No part of it could stay byte-frozen, so its row and
+# sentinels are gone and the whole of step 1 is verified by NOTHING. With no
+# tail anchor to pair with, two adjacency assertions below guard the gap's two
+# edges in the pinned commit: the head's last anchor must sit next to step 1's
+# first line, and round-protocol-step-2's first anchor next to step 1's last
+# line, so no original prose leaves either neighbour's verified region unnoticed.
 #
 # The cut is where it is because of MARKDOWN, not preference. `extract_chunk`
 # matches a sentinel as a whole line at column 0, and a column-0 HTML comment
@@ -192,8 +205,6 @@ MANIFEST=(
 "interactive-remediation	interactive/remediation.md	Applies **only** with a human present, and only to a **shape (i)**	  what the gate exists to prevent.
 "
 "round-protocol-head	review-loop/core.md	**The round boundary is concurrent — one minted tree, two readers (#1497).**	Each round:
-"
-"round-protocol-tail	review-loop/step-1-panel.md	1. **Review panel, in-session.** Get the dispatch plan (\`review-dispatch.zsh	     Critical nobody reported.
 "
 "round-protocol-step-2	review-loop/step-2-invocation.md	2. **One loop invocation.**	     actually read. The stderr names both identities and the files that moved.
 "
@@ -279,7 +290,7 @@ for row in "${MANIFEST[@]}"; do
   # reference file, unlocatable range, missing sentinel block, empty chunk) —
   # not an `exit 1` mid-loop. The script's design is report-everything-exit-once:
   # aborting here would report only the FIRST malformed row, skip the
-  # sentinel/duplicate sweeps and the whole split-span invariant block, and print
+  # sentinel/duplicate sweeps and the head-closer and seam checks, and print
   # neither summary line. The run still ends at exit 1 via the `chunk_failures`
   # arm below, so the observable contract — exit 1, naming the offending row — is
   # unchanged, and the reconciliation `verified + chunk_failures != ${#MANIFEST}`
@@ -436,124 +447,120 @@ for s in "${stray[@]}"; do
   (( known )) || { print -u2 -- "FAIL: reference/ declares chunk '$s' that this script does not verify"; (( sweep_failures++ )) }
 done
 
-# --- the SPLIT-span invariant the manifest cannot express (#1582) ------------
-# head and tail are located independently, so per-chunk byte-identity proves
-# nothing about their RELATIONSHIP: swap the two blocks and every check above
-# still passes.
+# --- the head closer, and the head's last anchor (#1582, #3168) --------------
+# #1582 split `round-protocol` into a head and a tail to open an unverified gap
+# for the reviewer-path rule, and asserted here that the head's LAST anchor and
+# the tail's FIRST stayed adjacent in the pinned commit, so no original line
+# could migrate into the gap. #3168 retired the tail (see the manifest comment),
+# so the gap now runs from the head's closer through the whole of round step 1.
 #
-# What is asserted, and why it is EXACT rather than a size cap. The split cost
-# exactly ONE original line — the blank separator between `Each round:` and step
-# 1 — so head keeps 224 pre-move lines and tail 788, and 1 012 of 1 013 stay
-# byte-verified however much NEW prose the gap holds. The hazard is therefore
-# never the gap being large; it is ORIGINAL conductor prose migrating into it,
-# which happens by moving a chunk anchor inward and would shrink the verified
-# region while every byte-identity check above stayed green.
+# The hazard the adjacency check caught is still live on the head's side: move
+# the head row's LAST anchor inward (with its closer) and original conductor
+# prose leaves the verified region with every byte comparison green. So the
+# head's last anchor is still required to sit directly above round step 1's
+# first line in the pinned commit, modulo blank lines. That line is a constant
+# here, and that is sound where the old literal-only form was not: the hazard is
+# an edit to the MANIFEST's head row, which is read out of the manifest below,
+# so the assertion moves with the edit it exists to catch.
 #
-# A gap-SIZE cap only approximates that, and badly: it cannot fire until more
-# original lines migrate than the headroom the new prose happens to be leaving,
-# and any number it names can be raised in the same edit that violates it. The
-# exact statement is available instead — in the PRE-MOVE file, the head's LAST
-# anchor and the tail's FIRST anchor must be ADJACENT modulo blank lines, since
-# nothing sits between them there. Assert that, and no original line can enter
-# the gap undetected regardless of how the new prose grows.
-# Since #2055 the two halves sit in DIFFERENT shards of `reference/review-loop/`
-# — the head in `core.md`, the tail in `step-1-panel.md` — so each sentinel is
-# counted across the whole reference tree and required in its own shard. The
-# same-file line-order comparison this block used to make is gone: two files
-# have no line order between them, and the shard a sentinel sits in is what
-# now says which half it is.
-typeset head_shard="$REF_DIR/review-loop/core.md" tail_shard="$REF_DIR/review-loop/step-1-panel.md"
-typeset -a hc_hits to_hits
-# Captured as ARRAYS and required to be exactly one: a DUPLICATED sentinel —
-# in the right shard or in any other — must fail rather than be read as the one
-# expected. The stray sweep above cannot catch it either: it greps only the
-# OPENING form, so a duplicated `/moved:` closer is seen by nothing else in this
-# script. `-l` lists each FILE once, so a duplicate inside one shard is counted
-# by the `-c` read below instead.
-# stderr is NOT discarded, the same rule the sentinel sweep above states: an
-# unreadable shard (mode 000, an ACL, a bad checkout) would otherwise be
-# reported as "head-close: 0, tail-open: 0" — a verdict about the file's
-# CONTENT derived from a read that never happened.
+# The head's closer marks where the unverified prose begins, so it must appear
+# exactly once across reference/, and in core.md.
+typeset -r STEP1_FIRST='1. **Review panel, in-session.** Get the dispatch plan (`review-dispatch.zsh'
+typeset head_shard="$REF_DIR/review-loop/core.md"
+typeset -a hc_hits
+# Captured as an ARRAY and required to be exactly one: a DUPLICATED closer — in
+# the right shard or in any other — must fail rather than be read as the one
+# expected. The stray sweep above cannot catch it: it greps only the OPENING
+# form. stderr is NOT discarded, the same rule the sentinel sweep above states:
+# an unreadable shard would otherwise be reported as "head-close: 0" — a verdict
+# about the file's CONTENT derived from a read that never happened.
 hc_hits=("${(@f)$(grep -rxF -- '<!-- /moved: round-protocol-head -->' "$REF_DIR")}")
-to_hits=("${(@f)$(grep -rxF -- '<!-- moved: round-protocol-tail -->'  "$REF_DIR")}")
-hc_hits=(${hc_hits:#}); to_hits=(${to_hits:#})
-if (( ${#hc_hits} != 1 || ${#to_hits} != 1 )); then
-  print -u2 -- "FAIL: the round-protocol split sentinels must appear exactly once each across reference/ (head-close: ${#hc_hits}, tail-open: ${#to_hits})"
+hc_hits=(${hc_hits:#})
+if (( ${#hc_hits} != 1 )); then
+  print -u2 -- "FAIL: the round-protocol head closer must appear exactly once across reference/ (head-close: ${#hc_hits})"
+  (( sweep_failures++ ))
+elif [[ "${hc_hits[1]%%:*}" != "$head_shard" ]]; then
+  print -u2 -- "FAIL: the round-protocol head closer is in the wrong shard — ${hc_hits[1]%%:*} (want review-loop/core.md)"
+  (( sweep_failures++ ))
+fi
+typeset head_last="" mrow
+for mrow in "${MANIFEST[@]}"; do
+  mrow="${mrow%$'\n'}"
+  # Skip a MALFORMED row, with the same test the main loop uses (#1588), so a
+  # bad row is reported once, as malformed, rather than read here as an anchor.
+  typeset mrow_tabs="${mrow//[^$'\t']/}"
+  (( ${#mrow_tabs} >= 3 )) || continue
+  # Peeled NON-greedily, exactly as the main loop's `last="${row#*$'\t'}"` is
+  # (#1588), so the two parses agree on a LAST_LINE anchor that contains a tab.
+  [[ "${mrow%%$'\t'*}" == round-protocol-head ]] && head_last="${${${mrow#*$'\t'}#*$'\t'}#*$'\t'}"
+done
+if [[ -z "$head_last" ]]; then
+  print -u2 -- "FAIL: the manifest no longer declares round-protocol-head, so its last anchor cannot be checked"
   (( sweep_failures++ ))
 else
-  if [[ "${hc_hits[1]%%:*}" != "$head_shard" || "${to_hits[1]%%:*}" != "$tail_shard" ]]; then
-    print -u2 -- "FAIL: the round-protocol split sentinels are in the wrong shards — head-close in ${hc_hits[1]%%:*} (want review-loop/core.md), tail-open in ${to_hits[1]%%:*} (want review-loop/step-1-panel.md)"
+  # A here-string, not `print … | awk`: awk `exit`s at the step-1 line and would
+  # SIGPIPE the producer, which `pipefail` promotes to 141. It matters here
+  # because the status IS read.
+  typeset between
+  typeset -i awk_rc=0
+  between=$(awk -v h="$head_last" -v t="$STEP1_FIRST" '
+    $0 == h        { seen = 1; next }
+    seen && $0 == t { done = 1; exit }
+    seen && $0 ~ /[^[:space:]]/ { print }
+    END { if (!seen || !done) exit 3 }
+  ' <<< "$pre") || awk_rc=$?
+  if (( awk_rc )); then
+    print -u2 -- "FAIL: the head's last anchor and round step 1's first line are not both present, in order, in ${base}:${SKILL_REL} — head-last <<${head_last}>>"
     (( sweep_failures++ ))
-  else
-    # The EXACT invariant: in the pre-move conductor, nothing but blank lines
-    # separated the head's LAST anchor from the tail's FIRST anchor, so nothing
-    # original belongs in the gap now.
-    #
-    # Both anchors are READ OUT OF THE MANIFEST, never restated here. That is the
-    # whole point: `$pre` is a pinned, immutable commit, so an assertion built
-    # from literals is a CONSTANT — it would return the same verdict forever and
-    # could not fire on the one edit it exists to catch. The hazard is a manifest
-    # anchor moved inward (which migrates original lines into the gap while every
-    # per-chunk byte comparison still passes), and the manifest is the only thing
-    # such an edit touches.
-    typeset head_last="" tail_first="" mrow
-    for mrow in "${MANIFEST[@]}"; do
-      mrow="${mrow%$'\n'}"
-      # Skip a MALFORMED row, with the same test the main loop uses (#1588).
-      # This block re-reads MANIFEST independently, and since the field-count
-      # guard became count-and-continue rather than a mid-loop abort, a bad row
-      # now reaches here. On a two-field `round-protocol-head` the peels below
-      # return the string unchanged, `head_last` becomes the REF_FILE, the
-      # non-empty guard passes, and the awk then reports the split anchors as
-      # missing from the PINNED COMMIT — blaming `$pre` for a fault entirely in
-      # the row. Skipping instead lets the existing "no longer declares both
-      # round-protocol split rows" diagnostic say what is actually wrong.
-      typeset mrow_tabs="${mrow//[^$'\t']/}"
-      (( ${#mrow_tabs} >= 3 )) || continue
-      case "${mrow%%$'\t'*}" in
-        # Peeled NON-greedily, exactly as the main loop's `last="${row#*$'\t'}"`
-        # is (#1588). `${mrow##*$'\t'}` was greedy, so it kept only the text
-        # after the LAST tab — which differs from what the loop verifies the
-        # moment a LAST_LINE anchor contains a tab. That is the row shape the
-        # field-count guard's `< 3` (not `!= 3`) deliberately permits, so the
-        # two parses have to agree or the guard's stated tolerance is a lie:
-        # `extract_range` would verify the chunk while this block searched `$pre`
-        # for a truncated anchor, failed to find it, and blamed the pinned commit.
-        round-protocol-head) head_last="${${${mrow#*$'\t'}#*$'\t'}#*$'\t'}" ;;
-        round-protocol-tail) tail_first="${${mrow#*$'\t'}#*$'\t'}"; tail_first="${tail_first%%$'\t'*}" ;;
-      esac
-    done
-    if [[ -z "$head_last" || -z "$tail_first" ]]; then
-      print -u2 -- "FAIL: the manifest no longer declares both round-protocol split rows, so their adjacency cannot be checked"
-      (( sweep_failures++ ))
-    else
-      # A here-string, not `print … | awk`: awk `exit`s at the tail anchor and
-      # would SIGPIPE the producer, which `pipefail` promotes to 141 — the very
-      # pattern this file documents for `extract_range` and that #1582 swept out
-      # of `_primary`. It matters here because the status IS read.
-      typeset between
-      typeset -i awk_rc=0
-      between=$(awk -v h="$head_last" -v t="$tail_first" '
-        $0 == h        { seen = 1; next }
-        seen && $0 == t { done = 1; exit }
-        seen && $0 ~ /[^[:space:]]/ { print }
-        END { if (!seen || !done) exit 3 }
-      ' <<< "$pre") || awk_rc=$?
-      if (( awk_rc )); then
-        print -u2 -- "FAIL: the split anchors named by the manifest are not both present in ${base}:${SKILL_REL} — head-last <<${head_last}>>, tail-first <<${tail_first}>>"
-        (( sweep_failures++ ))
-      elif [[ -n "$between" ]]; then
-        print -u2 -- "FAIL: the round-protocol split anchors are no longer adjacent in ${base}:${SKILL_REL} — original prose now sits between them, so the gap in review-loop/ is not new text alone:"
-        print -u2 -- "$between"
-        (( sweep_failures++ ))
-      fi
-    fi
+  elif [[ -n "$between" ]]; then
+    print -u2 -- "FAIL: the head's last anchor is no longer adjacent to round step 1 in ${base}:${SKILL_REL} — original prose now sits between them, outside every verified chunk:"
+    print -u2 -- "$between"
+    (( sweep_failures++ ))
+  fi
+fi
+
+# The same hazard on the gap's other edge: move round-protocol-step-2's FIRST
+# anchor down (with its opener) and step 2's opening lines leave the verified
+# region with every comparison green. Before #3168 the tail -> step-2 seam below
+# caught that; with the tail retired, step-2's first anchor is required to sit
+# directly below round step 1's last line in the pinned commit (the retired tail
+# row's last anchor), modulo blank lines. The step-2 anchor is read out of the
+# manifest, so the assertion moves with the edit it exists to catch.
+typeset -r STEP1_LAST='     Critical nobody reported.'
+typeset step2_first=""
+for mrow in "${MANIFEST[@]}"; do
+  mrow="${mrow%$'\n'}"
+  typeset mrow_tabs="${mrow//[^$'\t']/}"
+  (( ${#mrow_tabs} >= 3 )) || continue
+  [[ "${mrow%%$'\t'*}" == round-protocol-step-2 ]] || continue
+  step2_first="${${mrow#*$'\t'}#*$'\t'}"; step2_first="${step2_first%%$'\t'*}"
+done
+if [[ -z "$step2_first" ]]; then
+  print -u2 -- "FAIL: the manifest no longer declares round-protocol-step-2, so its first anchor cannot be checked"
+  (( sweep_failures++ ))
+else
+  awk_rc=0
+  between=$(awk -v h="$STEP1_LAST" -v t="$step2_first" '
+    !seen && $0 == h { seen = 1; next }
+    seen && $0 == t  { done = 1; exit }
+    seen && $0 ~ /[^[:space:]]/ { print }
+    END { if (!seen || !done) exit 3 }
+  ' <<< "$pre") || awk_rc=$?
+  if (( awk_rc )); then
+    print -u2 -- "FAIL: round step 1's last line and round-protocol-step-2's first anchor are not both present, in order, in ${base}:${SKILL_REL} — step-2-first <<${step2_first}>>"
+    (( sweep_failures++ ))
+  elif [[ -n "$between" ]]; then
+    print -u2 -- "FAIL: round-protocol-step-2's first anchor is no longer adjacent to round step 1 in ${base}:${SKILL_REL} — original prose now sits between them, outside every verified chunk:"
+    print -u2 -- "$between"
+    (( sweep_failures++ ))
   fi
 fi
 
 # --- each re-cut span covers its source with no gap and no overlap -----------
 # A frozen span re-cut into chunks across several shards: the former
-# `round-protocol-tail`, cut into four, one per step shard (#2055). The former
+# `round-protocol-tail`, cut into four, one per step shard (#2055), of which
+# #3168 retired the first (round step 1), leaving three; the retired tail ->
+# step-2 seam is replaced by the step-2 adjacency check above. The former
 # `suggestion-promotion`, cut into five (#2057), left the manifest when #3121
 # deleted its shards. The former `interactive-extension`, cut into two across
 # reference/interactive/ (#2058), was a group too until #3121 took step 5 out of
@@ -563,16 +570,18 @@ fi
 # put, and the lines between them leave the verified region with every
 # comparison green. So, for each consecutive pair within a group, the earlier
 # chunk's LAST anchor and the later chunk's FIRST anchor must be adjacent modulo
-# blank lines in the pinned commit — the same exact statement the head/tail
-# block above makes — and the later first anchor must come AFTER the earlier
-# last one, which is what rules out overlap. Anchors are read out of the
-# MANIFEST, for the reason that block gives.
+# blank lines in the pinned commit — the exact statement the #1582 head/tail
+# block made until #3168 retired the tail — and the later first anchor must come
+# AFTER the earlier last one, which is what rules out overlap. Anchors are read
+# out of the MANIFEST, never restated as literals: `$pre` is a pinned, immutable
+# commit, so an assertion built from literals is a CONSTANT that could never
+# fire on the one edit — a manifest anchor moved — it exists to catch.
 #
 # CUT_GROUPS is the extendable list: one space-separated group per re-cut span,
 # its chunks in source order. A later split that re-cuts a span appends its
 # group here.
 typeset -a CUT_GROUPS=(
-  "round-protocol-tail round-protocol-step-2 round-protocol-recover round-protocol-steps-3-4"
+  "round-protocol-step-2 round-protocol-recover round-protocol-steps-3-4"
 )
 typeset -a CUT_NAMES=(${=CUT_GROUPS})
 typeset -A cut_first cut_last

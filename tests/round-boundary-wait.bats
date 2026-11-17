@@ -366,45 +366,45 @@ _roster_hits() {
 # SAME assertion over its mutated fixture, never a hand-written copy of it.
 #
 # Why it is not in the normative paragraph: that paragraph sits inside the
-# byte-frozen `round-protocol-head` span (#1503), and so does the panel step's
-# pointer, in `round-protocol-tail` — verify-reference-move.zsh reds on a single
-# changed byte in either. The one editable prose between them is the #1582 gap,
-# which ends right where the panel step begins: the last thing a driver reads
-# before that step's pointer sends it to the paragraph's "end it". So the pin is
-# the position as much as the words — moved out of the gap, the carve-out stops
-# meeting the driver at the pointer it limits.
+# byte-frozen `round-protocol-head` span (#1503), and so did the panel step's
+# pointer, in `round-protocol-tail`, until #3168 retired that chunk —
+# verify-reference-move.zsh reds on a single changed byte in a frozen one. The
+# carve-out sits in the #1582 gap, which ends right where the panel step begins:
+# the last thing a driver reads before that step's pointer sends it to the
+# paragraph's "end it". So the pin is the position as much as the words — moved
+# away from the panel step, the carve-out stops meeting the driver at the pointer
+# it limits.
 _round_dispatch_carveout() {
   #
   # #2055 split the gap: the #1582 scope block is now scope-block.md, and the
-  # carve-out heads step-1-panel.md, before that shard's `round-protocol-tail`
-  # sentinel. `round-protocol-head` closes in core.md, so "in the gap" is now
-  # "before the FIRST moved sentinel of this shard, and that sentinel is the
-  # tail's".
-  local ln first_sentinel tail_start panel body _v
+  # carve-out heads step-1-panel.md, before the panel step. Until #3168 the step
+  # opened with the `round-protocol-tail` sentinel; #3168 retired that chunk, so
+  # "in the gap" is now "before the panel step's own first line, with no moved
+  # sentinel anywhere in this shard".
+  local ln panel body _v
   ln="$(prose_gate_lines "$1" 'The end-the-turn wait that step 1')"
-  # The sentinels by WHOLE-LINE match on the raw file, never a prose locator: a
-  # header that names one in backticks would normalise to a second hit.
-  first_sentinel="$(grep -m1 -nE '^<!-- /?moved: [a-z0-9-]+ -->$' "$1" | cut -d: -f1)"
-  tail_start="$(grep -nxF '<!-- moved: round-protocol-tail -->' "$1" | cut -d: -f1)"
   panel="$(prose_gate_lines "$1" 'Review panel, in-session. Get the dispatch plan (review-dispatch.zsh')"
-  for _v in "$ln" "$first_sentinel" "$tail_start" "$panel"; do
+  for _v in "$ln" "$panel"; do
     case "$_v" in ''|*[!0-9]*)
       printf 'carve-out locator missing or ambiguous: %s\n' "$_v" >&2; return 1 ;;
     esac
   done
-  # In the unfrozen gap, and the gap's LAST prose before the panel step.
-  if [ "$first_sentinel" -ne "$tail_start" ] || [ "$ln" -ge "$tail_start" ] \
-    || [ "$tail_start" -ge "$panel" ]; then
-    printf 'the carve-out is at line %s, not in the gap before the tail sentinel (%s; first sentinel %s) and the panel step (%s)\n' \
-      "$ln" "$tail_start" "$first_sentinel" "$panel" >&2
+  # By WHOLE-LINE match on the raw file, never a prose locator: a header that
+  # names a sentinel in backticks would normalise to a hit.
+  if grep -qE '^<!-- /?moved: [a-z0-9-]+ -->$' "$1"; then
+    printf 'the panel shard carries a moved sentinel again; this pin assumes none (#3168)\n' >&2
     return 1
   fi
-  if [ "$((tail_start - ln))" -gt 5 ]; then
-    printf 'the carve-out (line %s) is not directly before the panel step sentinel (%s)\n' \
-      "$ln" "$tail_start" >&2
+  # In the gap, and the gap's LAST prose before the panel step.
+  if [ "$ln" -ge "$panel" ]; then
+    printf 'the carve-out is at line %s, not before the panel step (%s)\n' "$ln" "$panel" >&2
     return 1
   fi
-  # Forward-only: the carve-out paragraph and nothing past the sentinel.
+  if [ "$((panel - ln))" -gt 5 ]; then
+    printf 'the carve-out (line %s) is not directly before the panel step (%s)\n' "$ln" "$panel" >&2
+    return 1
+  fi
+  # Forward-only: the carve-out paragraph and nothing past the panel step.
   body="$(prose_window "$1" "$((ln + 2))" 2)"
   contains "$body" "The end-the-turn wait that step 1's pointer names never covers a round subagent dispatch (#2113)." \
     || return 1
@@ -757,10 +757,10 @@ _round_dispatch_carveout() {
     printf 'expected the pin to fail (1) on the removal fixture, got %s\n' "$rc" >&2
     return 1
   fi
-  # RELOCATED past the frozen span, wording intact — the words pass, so only the
-  # position half (before the tail sentinel) can red it.
+  # RELOCATED past the panel step, to the end of the shard, wording intact —
+  # the words pass, so only the position half (before the panel step) can red it.
   perl -0pe 's/(\*\*The end-the-turn wait that step 1.*?not by ending the turn\.\n\n)//s and $p = $1;
-             s/(<!-- \/moved: round-protocol-tail -->\n)/$1\n$p/' "$STEP1" > "$G"
+             s/\z/\n$p/' "$STEP1" > "$G"
   if cmp -s "$STEP1" "$G"; then
     printf 'relocation fixture is identical to the source\n' >&2
     return 1
@@ -772,8 +772,8 @@ _round_dispatch_carveout() {
     return 1
   fi
   # PUSHED to the top of the gap: the scope block's opening paragraph planted
-  # between the carve-out and the sentinel — still in the gap, still before the
-  # panel step, so only the directly-before half can red it.
+  # between the carve-out and the panel step — still in the gap, still before
+  # the panel step, so only the directly-before half can red it.
   # the first paragraph after the shard's header comment, however many lines
   # that header wraps to
   scope_para="$(awk '!hdr { if (/-->$/) hdr = 1; next }
@@ -781,7 +781,7 @@ _round_dispatch_carveout() {
                      { seen = 1; print }' "$SHARDS/scope-block.md")"
   [ "$(printf '%s\n' "$scope_para" | grep -c .)" -gt 5 ]
   SCOPE_PARA="$scope_para" perl -0pe \
-    's/(<!-- moved: round-protocol-tail -->\n)/$ENV{SCOPE_PARA}\n\n$1/' "$STEP1" > "$H"
+    's/(^1\. \*\*Review panel, in-session\.\*\*)/$ENV{SCOPE_PARA}\n\n$1/m' "$STEP1" > "$H"
   if cmp -s "$STEP1" "$H"; then
     printf 'push-up fixture is identical to the source\n' >&2
     return 1

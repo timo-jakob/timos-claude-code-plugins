@@ -4,9 +4,9 @@
 ### Topic panels — every `topic_review_skills` entry joins the round (#1072)
 
 **Review panel, in-session** (step 1 above) names one skill, `review_skill`,
-and step 2's recovery arms were written for one panel per round. Both sit inside
-the byte-frozen span, so the topic-composition rule is recorded here. **Where
-step 1 or step 2 and this section disagree, this section governs.**
+and step 2's recovery arms were written for one panel per round. Step 2 sits
+inside the byte-frozen span, so the topic-composition rule is recorded here.
+**Where step 2 and this section disagree, this section governs.**
 
 The plan also carries `topic_review_skills` — an always-present array of
 `development-<topic>:review` skills, `[]` when no topic applies (ARCHITECTURE.md,
@@ -17,7 +17,8 @@ Otherwise:
   the reviewers of `review_skill` **and** of every `topic_review_skills` entry,
   in one message, each scoped exactly as step 1 scopes the language panel — the
   same `changed_files`, the same `worktree_root` rail and opener, the same
-  `fix_verification_path` and `adjudicated_path`. A topic panel is never given
+  split-carry map — each reviewer gets only its own dimension's path (*Carry
+  accounting*, #2010). A topic panel is never given
   a narrower or wider scope, and never planned by a second `plan` call. Wait for
   **all** of them before step 2.
 - **Join their #558 arrays into the one round findings file.** Concatenate every
@@ -43,21 +44,18 @@ Otherwise:
   failing does: recover by step 2's arms and re-dispatch that panel. Never
   consolidate the other panels' findings as if the failed one had reported
   clean.
-- **Each panel checks the carried blockers raised by its own reviewers.** The
-  carry is one file for the whole round, and *Carry accounting* below already
-  confines a re-raise to the reviewer of the entry's own dimension. That makes
+- **Each panel checks the carried blockers raised by its own reviewers.**
+  *Carry accounting* below gives every carried entry one owner, the reviewer of
+  its own dimension, and that reviewer alone accounts for it. That makes
   a dimension name identify its panel **only because no two panels in a round
   share one**: a topic panel's dimensions carry the topic's own name as a
   prefix, disjoint from every other panel's, language or topic
   (ARCHITECTURE.md, *Registering a review topic*) — otherwise
   `consolidate-findings.zsh`'s file + line + dimension dedup would also merge
-  two panels' distinct findings. So an entry a topic panel's reviewer raised
-  is confirmed or re-raised by that panel;
-  another panel's reviewer reports it `unconfirmed` or stays silent. So judge
-  step 2's per-panel carry arm over the **union** of every panel's per-entry
-  lines, as *Carry accounting* does: a panel whose triple reads `N of M` with
-  `N < M` because the rest belong to another panel's dimensions has **not**
-  taken the wrong branch, and is never re-run for it. Join **every** panel's
+  two panels' distinct findings. A reviewer's TOTAL is the length of its own
+  dimension's file, so a triple whose counts sum to fewer than its TOTAL is a
+  missing per-entry line: re-dispatch the panel for that reviewer's dimension,
+  as *Carry accounting* says. Join **every** panel's
   per-entry lines into the round's **one** accounting file — the
   `--carry-accounting` file in step mode, the `<findings-path>.carry.json`
   sidecar in hook mode — never one file per panel.

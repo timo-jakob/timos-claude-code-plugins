@@ -54,13 +54,12 @@
 #
 #   plan --repo PATH [--base REF] [--round N] [--findings-path PATH]
 #        [--final] [--prior-tree TREE_ID] [--fix-verification PATH]
-#        [--adjudicated PATH] [--self-check PATH] [--fallback]
+#        [--self-check PATH] [--fallback]
 #       Emit the dispatch descriptor JSON on stdout:
 #         { repo_type, review_skill, topic_review_skills[], round, base,
 #           findings_path, changed_files[], worktree_root, original_root, scope_abs[],
 #           scope_mode, scope_empty, prior_tree, delta_files, delta_hunks,
-#           skippable_dimensions, fix_verification_path, adjudicated_path,
-#           self_check_path }
+#           skippable_dimensions, fix_verification_path, self_check_path }
 #       worktree_root / original_root / scope_abs are the #1582 path rail. A
 #       reviewer that resolves a repo-relative path against its own cwd reads the
 #       ORIGINAL checkout whenever the run is in a linked worktree — which is how
@@ -81,8 +80,8 @@
 #       warn a reviewer about — either the --repo IS the main checkout, or the
 #       main worktree is BARE (a git directory, not a tree anyone can read). Do
 #       not read it as "this is the main checkout".
-#       `null` rather than absent, matching prior_tree / fix_verification_path /
-#       adjudicated_path, so a consumer can read the key unconditionally.
+#       `null` rather than absent, matching prior_tree / fix_verification_path,
+#       so a consumer can read the key unconditionally.
 #       scope_abs is changed_files with worktree_root joined onto each entry:
 #       same order, same length, `[]` exactly when changed_files is `[]`. It
 #       ACCOMPANIES changed_files and never replaces it — a finding's `.file`
@@ -123,10 +122,12 @@
 #       every delta, so this field would say non-empty while the panel is handed
 #       nothing). Round 1's existing "a scope that is ONLY artifacts yields empty
 #       changed_files, not an error" behaviour stands either way.
-#       --fix-verification / --adjudicated are echoed through as
-#       fix_verification_path / adjudicated_path (null when absent) — this script
-#       never reads either file; the loop writes them and the reviewers consume
-#       them. --self-check (#2014) is echoed through as self_check_path the
+#       --fix-verification is echoed through as fix_verification_path (null
+#       when absent) — this script never reads the file; the loop writes it and
+#       the reviewers consume it. `plan` takes no --adjudicated and emits no
+#       adjudicated_path key (#3168): no panel reads the waived-suggestion list
+#       any more, so the plan no longer hands it to one, and --adjudicated is an
+#       unknown flag (exit 2). --self-check (#2014) is echoed through as self_check_path the
 #       same way (null when absent), never read: the claude-plugin writer's
 #       round-1 self-check waiver file, which the panel brief passes on round 1
 #       only, and only when the file exists.
@@ -328,8 +329,8 @@ die_usage() { print -u2 -- "$1"; exit 2 }
 #     exit 1 (internal error) with a confidently wrong cause, where a malformed
 #     invocation is contracted as exit 2;
 #   * an EXPLICITLY EMPTY value reads downstream as "flag omitted" at exit 0:
-#     `--fix-verification ""` / `--adjudicated ""` emit a null path, so the
-#     round's panel silently gets no carry and no waived list.
+#     `--fix-verification ""` emits a null path, so the round's panel silently
+#     gets no carry.
 need_value() {
   (( $# >= 3 )) || die_usage "$1: $2 requires a value"
   [[ "$3" != --* ]] || die_usage "$1: $2 requires a value (got the flag $3)"
@@ -1110,7 +1111,7 @@ cmd_plan() {
   # the realistic `--prior-tree "$(<tree-1.txt)"` with the file absent — is
   # indistinguishable from "flag omitted" once assigned, and would be waved
   # through, which is precisely the shape the check exists to catch.
-  local final=0 prior_tree="" prior_tree_given=0 fix_verification="" adjudicated=""
+  local final=0 prior_tree="" prior_tree_given=0 fix_verification=""
   local self_check="" fallback=0
   while [[ $# -gt 0 ]]; do
     # `need_value` BEFORE the assignment (#1177): this script runs under
@@ -1154,11 +1155,10 @@ cmd_plan() {
     # #2909: plan the fallback panel (claude-plugin's fallback mode). Boolean.
     --fallback) fallback=1; shift ;;
     --prior-tree) need_value "plan" "$@"; prior_tree="$2"; prior_tree_given=1; shift 2 ;;
-    # Echoed through, never read here: the loop writes both files and the
-    # reviewers consume them. Keeping them in the descriptor is what lets one
+    # Echoed through, never read here: the loop writes the file and the
+    # reviewers consume it. Keeping it in the descriptor is what lets one
     # value (the plan) carry everything a round's panel needs.
     --fix-verification) need_value "plan" "$@"; fix_verification="$2"; shift 2 ;;
-    --adjudicated) need_value "plan" "$@"; adjudicated="$2"; shift 2 ;;
     # #2014: the round-1 self-check waiver file, echoed through the same way.
     --self-check) need_value "plan" "$@"; self_check="$2"; shift 2 ;;
     -*) die_usage "plan: unknown flag: $1" ;;
@@ -1369,7 +1369,6 @@ cmd_plan() {
     --argjson hunks "$hunks_json" \
     --argjson skippable "$skippable_json" \
     --arg fixver "$fix_verification" \
-    --arg adjud "$adjudicated" \
     --arg selfchk "$self_check" \
     --argjson fallback "$fallback" \
     '{repo_type:$repo_type, review_skill:$review_skill,
@@ -1385,7 +1384,6 @@ cmd_plan() {
       delta_hunks:$hunks,
       skippable_dimensions:$skippable,
       fix_verification_path:(if $fixver=="" then null else $fixver end),
-      adjudicated_path:(if $adjud=="" then null else $adjud end),
       self_check_path:(if $selfchk=="" then null else $selfchk end)}
      | if $fallback == 1 then
          .fallback_for = .review_skill
