@@ -435,11 +435,10 @@ loop converges:
 | --- | --- |
 | A Rules of Hooks violation — a hook called conditionally, after an early return, in a loop or callback, or outside a React function, and a stale closure the reviewer can show | `CRITICAL` |
 | Server state fetched outside TanStack Query — an effect that fetches and stores the result in state, or an alternative server-state library such as SWR, RTK Query or Apollo | `WARNING` |
-| A deviation from the Vite single-page-app shape or the component structure — a second build toolchain, a component defined inside another, a module exporting components beside values that are not constants | `SUGGESTION` |
 
-Only `CRITICAL` and `WARNING` block a review round. The checks are aligned with the
-rules of hooks and react-refresh rules the bootstrap overlay's ESLint config
-enforces, so the reviewer and a bootstrapped repo agree.
+Both checks block a review round, and the reviewer reports nothing below them. The
+hooks check is aligned with the rules-of-hooks rule the bootstrap overlay's ESLint
+config enforces, so the reviewer and a bootstrapped repo agree.
 
 **Bootstrap overlay
 ([#957](https://github.com/timo-jakob/timos-claude-code-plugins/issues/957)).**
@@ -465,7 +464,7 @@ replacing it. The templates live with every other bootstrap template, in
 
 | Agent | Model | Focus |
 | ------- | ------- | ------- |
-| react-idioms-reviewer | opus | Rules of Hooks and stale closures (CRITICAL), server state outside TanStack Query (WARNING), Vite SPA shape and component structure (SUGGESTION) (#959) |
+| react-idioms-reviewer | opus | Rules of Hooks and stale closures (CRITICAL), server state outside TanStack Query (WARNING) (#959) |
 | react-webui-quality-advisor | opus | Triages `a11y` and `lighthouse_budget` findings: a narrow setup-file matcher import and `jq` edits to `lighthouserc.json` budgets and timing gates are fixed; a missing axe package, a missing or invalid config and a preset are escalated (#1948) |
 
 ## development-kubernetes

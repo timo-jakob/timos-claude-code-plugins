@@ -81,7 +81,7 @@ panel_rows() {
   [ "$(awk -F': *' '/^tools:/{print $2; exit}' "$AGENT")" = "Read, Grep, Glob" ]
 }
 
-@test "the agent's severity table fixes one severity per check (hooks CRITICAL, server state WARNING, shape SUGGESTION)" {
+@test "the agent's severity table fixes one severity per check (hooks CRITICAL, server state WARNING), and nothing else" {
   local mission
   mission="$(section "$AGENT" '^## Your Mission' '^## What You Look For')"
   [ -n "$mission" ]
@@ -89,16 +89,26 @@ panel_rows() {
   # phrase present while changing what blocks the loop
   contains "$mission" '| A Rules of Hooks violation | **CRITICAL** |'
   contains "$mission" '| Server state fetched outside TanStack Query | **WARNING** |'
-  contains "$mission" '| A Vite SPA shape or component-structure deviation | **SUGGESTION** |'
+  # the Vite SPA / component-structure check is gone (#3166): two fixed checks,
+  # and no row at SUGGESTION
+  lacks "$mission" '| **SUGGESTION** |'
+  lacks "$mission" 'Vite SPA'
+  contains "$mission" 'Check the change against two React positions of this plugin family'
   contains "$mission" 'Never raise a finding above its row.'
   # ...and the other half of the ceiling: lower ONLY under the two named rules,
   # never at the reviewer's discretion — a loosened clause would let a Rules of
   # Hooks CRITICAL be demoted and the loop converge over it
   contains "$mission" 'You may file one lower only under the scope-bounded rule in *Reviewing thoroughness* or the evidence rule below.'
-  # the three check sections carry the same severities in their headings
+  # ...and below the bar nothing is reported: SUGGESTION is only the two lanes
+  # of ARCHITECTURE.md *Terminating severity bars* (#3157, #3166)
+  contains "$mission" 'An observation below the blocking bar is not reported.'
+  contains "$mission" '`SUGGESTION` is reserved for the two lanes of ARCHITECTURE.md *Terminating severity bars*: a tool-verdict claim capped by the evidence rule, and a scope-bounded follow-up under *Scope-bounded severity*.'
+  # the two check sections carry the same severities in their headings, and no
+  # third check section survives
   grep -qx '### Rules of Hooks — CRITICAL' "$AGENT"
   grep -qx '### Server state outside TanStack Query — WARNING' "$AGENT"
-  grep -qx '### Vite SPA shape and component structure — SUGGESTION' "$AGENT"
+  run -1 grep -q '^### Vite SPA' "$AGENT"
+  run -1 grep -q -- '— SUGGESTION$' "$AGENT"
 }
 
 @test "the hooks check covers the conditional, early-return, loop and outside-a-React-function shapes" {
@@ -135,7 +145,7 @@ panel_rows() {
 
 @test "the server-state check names TanStack Query as the one default and the alternatives it flags" {
   local ss
-  ss="$(section "$AGENT" '^### Server state' '^### Vite SPA')"
+  ss="$(section "$AGENT" '^### Server state' '^### What is in scope')"
   [ -n "$ss" ]
   contains "$ss" "**TanStack Query (\`@tanstack/react-query\`) is the family's one blessed server-state default.**"
   contains "$ss" '**Ad-hoc fetching in an effect**'
@@ -148,38 +158,6 @@ panel_rows() {
   # blocking WARNING
   contains "$ss" 'Not a finding: an effect that talks to a non-server system'
   contains "$ss" 'client state kept in `useState` or a store'
-}
-
-@test "the Vite SPA / component-structure check names each shape it reports" {
-  local v
-  v="$(section "$AGENT" '^### Vite SPA' '^### What is in scope')"
-  [ -n "$v" ]
-  contains "$v" '`react-scripts` (Create React App)'
-  contains "$v" 'webpack or Parcel configured to build it'
-  contains "$v" 'Next.js or Remix'
-  contains "$v" 'no root `index.html` loading the entry module'
-  contains "$v" 'mounting more than one React root'
-  contains "$v" 'a new class component'
-  contains "$v" "**defined inside another component's body**"
-  contains "$v" '`react-refresh/only-export-components`'
-  contains "$v" 'PascalCase'
-  # aligned with the bootstrap overlay's allowConstantExport: a constant export
-  # beside a component is exempt, so the reviewer and a bootstrapped repo agree
-  contains "$v" 'A **constant** exported beside a component'
-  contains "$v" 'is not a finding'
-  contains "$v" '`allowConstantExport: true`'
-}
-
-@test "the reviewer's exemption for constant exports matches the bootstrap overlay's ESLint configs" {
-  # the claim above is only true while both templates keep the option; derive it
-  # from them rather than trusting the prose
-  local t
-  for t in \
-    "$REPO_ROOT/development/skills/bootstrap/templates/languages/javascript/react/eslint.config.js" \
-    "$REPO_ROOT/development/skills/bootstrap/templates/languages/javascript/react/contract-consumer/eslint.config.js"; do
-    [ -f "$t" ]
-    grep -qF '"react-refresh/only-export-components": ["warn", { allowConstantExport: true }]' "$t"
-  done
 }
 
 @test "the agent's own in-scope list covers plain .js/.ts modules and the SPA entry files" {
@@ -232,6 +210,38 @@ panel_rows() {
   contains "$t" '**(2) When the issue'"'"'s stated scope is not provided in your prompt**'
   contains "$t" 'never demote on a scope you inferred from the diff or branch name'
   lacks "$t" 'treat it as pre-existing'
+  # the scope-bounded lane is the follow-up: line of ARCHITECTURE.md's
+  # *Scope-bounded severity* (#3157), never a plain "spin off" SUGGESTION (#3166)
+  contains "$t" 'is reported at **SUGGESTION** with a Description line `follow-up: <the defect, in one line>`, and it never blocks a round.'
+  contains "$t" 'A plain out-of-diff observation below the bar is not reported.'
+  lacks "$t" 'spin off a follow-up issue'
+}
+
+@test "the agent's Reporting Format and severity guide offer SUGGESTION only for its two lanes (#3166)" {
+  local r
+  r="$(section "$AGENT" '^## Reporting Format' 'EOF')"
+  [ -n "$r" ]
+  contains "$r" 'proposed-severity: CRITICAL|WARNING'
+  contains "$r" 'for a scope-bounded follow-up (*Scope-bounded severity* above), this one line appended to the **Description** field, with the severity set to SUGGESTION: follow-up: <the defect, in one line>'
+  contains "$r" 'A Rules of Hooks violation is CRITICAL and server state outside TanStack Query is WARNING.'
+  contains "$r" 'An observation below the blocking bar is not reported: SUGGESTION is only the evidence-capped tool-verdict claim and the scope-bounded follow-up.'
+  lacks "$r" 'a shape or structure deviation is SUGGESTION'
+}
+
+@test "no frontmatter description advertises the removed Vite SPA check (#3166)" {
+  run -1 grep -Fq -e 'Vite' -- "$AGENT"
+  run -1 grep -Fq -e 'Vite SPA' -- "$PANEL"
+  local d
+  d="$(awk '/^description:/{print; exit}' "$PANEL")"
+  contains "$d" 'Rules of Hooks and TanStack Query as the one server-state default — with one specialized agent.'
+}
+
+@test "the panel carries no waived list (#3166)" {
+  run -1 grep -Fq -e 'Already waived' -- "$PANEL"
+  run -1 grep -Fq -e 'adjudicated_path' -- "$PANEL"
+  run -1 grep -Fq -e 'REVIEW_ADJUDICATED' -- "$PANEL"
+  run -1 grep -Fq -e 'what the human already waived' -- "$PANEL"
+  grep -Fq -e 'also carries `fix_verification_path`, and the reviewer must be told about it.' -- "$PANEL"
 }
 
 @test "a scope with no React file is NOT APPLICABLE on a full round, never a clean []" {
@@ -299,8 +309,11 @@ panel_rows() {
   # blank line), so swapping two placeholders between headings reds here
   contains "$s3" '## Critical Issues {every CRITICAL finding — normally Rules of Hooks violations}'
   contains "$s3" '## Warnings {every WARNING finding — normally server state outside TanStack Query}'
-  contains "$s3" '## Suggestions {every SUGGESTION finding'
-  contains "$s3" 'component-structure deviations, plus any finding the agent filed below its row}'
+  # below WARNING only the two SUGGESTION lanes are listed (#3166)
+  contains "$s3" '## Suggested follow-ups and capped claims {only the SUGGESTION findings that carry a `follow-up:` or `decides:` line}'
+  contains "$s3" '(Y critical, Z warnings, W capped or follow-up suggestions)'
+  lacks "$s3" '## Suggestions {'
+  lacks "$s3" 'W suggestions)'
   contains "$s3" 'on a failed round, **Areas not reviewed:** React idioms'
 }
 
@@ -328,6 +341,9 @@ panel_rows() {
   contains "$enum" '`development-react` (#959) is the first **topic** panel'
   contains "$enum" 'a Rules of Hooks violation'
   contains "$enum" 'is `CRITICAL`, server state fetched outside TanStack Query'
+  # two checks only: the Vite SPA SUGGESTION check is gone (#3166)
+  contains "$enum" 'is `WARNING`; the reviewer has no other check.'
+  lacks "$enum" 'Vite SPA'
 }
 
 @test "ARCHITECTURE.md's seam section names react as the review-topic table's one row" {
