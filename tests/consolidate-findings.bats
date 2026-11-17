@@ -859,6 +859,22 @@ EOF
   echo "$output" | jq -e '[.blocking[], .suggestions[]] | map(has("group_red") or has("_lane")) | any | not' >/dev/null
 }
 
+@test "#3169 only a SUGGESTION is discarded: a Low from an unrecognised severity is kept" {
+  # prio() maps any severity but CRITICAL/WARNING to Low, so a misspelled
+  # blocker ("Warning", "HIGH") is Low too; the filter must not delete it
+  cat > "$F" <<'EOF'
+[
+ {"severity":"Warning","dimension":"bugs","file":"a.zsh","line":1,"title":"miscased warning","description":"no lane line","reviewer":"r"},
+ {"severity":"HIGH","dimension":"bugs","file":"a.zsh","line":20,"title":"wrong-scale severity","description":"no lane line","reviewer":"r"},
+ {"severity":"SUGGESTION","dimension":"bugs","file":"a.zsh","line":40,"title":"plain suggestion","description":"no lane line","reviewer":"r"}
+]
+EOF
+  con
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c '[.suggestions[].title] | sort')" = '["miscased warning","wrong-scale severity"]' ]
+  [ "$(echo "$output" | jq '.summary.low')" -eq 2 ]
+}
+
 @test "#3169 the waived-suggestion flag is refused as unknown, and no summary key survives it" {
   printf '%s\n' '[{"severity":"SUGGESTION","dimension":"code_quality","file":"a.py","line":1,"title":"t","description":"follow-up: t","reviewer":"r"}]' > "$F"
   printf '%s\n' '[]' > "$BATS_TEST_TMPDIR/adj.json"

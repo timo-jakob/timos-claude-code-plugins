@@ -64,7 +64,9 @@
 #       * or the item carries a `decided` record, or a red sits anywhere in its
 #         dedup group (`group_red`) — an observed tool verdict is never deleted.
 #     A risk-demoted item (`demoted: true`) is never discarded: the consolidator
-#     writes that Low itself, on purpose. The filter runs AFTER dedup and the
+#     writes that Low itself, on purpose. Only a SUGGESTION is discarded: a Low
+#     whose severity is unrecognised (`Warning`, `HIGH`) is kept, because it may
+#     be a blocker a reviewer misspelled. The filter runs AFTER dedup and the
 #     risk demotion and BEFORE the conflict / non-convergence classification, so
 #     a discarded Low cannot go on to seed a conflict pair or a carried-blocker
 #     match. `summary.low` counts the kept Lows only.
@@ -546,9 +548,10 @@ def nearest($c): sort_by(
 # filter just removed.
 #
 # NB: no apostrophes in this block — the jq program is single-quoted.
-# An item is KEPT when it is not Low, when the risk demotion wrote it
-# (`demoted`), when its group is in a lane (`_lane`), or when it carries a tool
-# verdict: a `decided` record, or a red anywhere in its group (`group_red`). The
+# An item is KEPT when its severity is not SUGGESTION (so a Low from an
+# unrecognised severity, maybe a misspelled blocker, stays visible as before),
+# when the risk demotion wrote it (`demoted`), when its group is in a lane
+# (`_lane`), or when it carries a tool verdict: a `decided` record, or a red anywhere in its group (`group_red`). The
 # last two are tested apart from the lane on purpose. Dedup keeps the `decided`
 # stamp of one claim only, and the decided pass may record a red on a `decides:` finding
 # without changing its severity, so the red-at-Low item is an observed verdict
@@ -561,7 +564,7 @@ def nearest($c): sort_by(
 # above it and emit them. `del` of an absent key is a no-op that preserves key
 # order.
 | ( [ $items[]
-      | select((.priority != "Low") or (.demoted == true) or (._lane == true)
+      | select((.severity != "SUGGESTION") or (.demoted == true) or (._lane == true)
                or (.decided != null) or (.group_red == true))
       | del(.group_red, ._lane) ] ) as $items
 

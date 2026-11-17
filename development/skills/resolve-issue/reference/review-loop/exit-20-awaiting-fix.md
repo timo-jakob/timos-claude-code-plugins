@@ -291,8 +291,8 @@ fix-touched set as an input to the **residue decision**; it no longer is one.
 The residue terminal takes **two** conditions — 1 (the last two rounds are both
 zero-CRITICAL) and 3 (the declaring round ran as a full sweep). Condition 2
 could never fail: `scope-findings` already confines findings to the story diff.
-The fix-touched set still drives the per-blocker `class`, the `by class:` row
-and the waived-suggestion exemption. Only the residue predicate stopped reading it.
+The fix-touched set still drives the per-blocker `class` and the `by class:`
+row. Only the residue predicate stopped reading it.
 
 **Every fix pass also applies the loaded profile's fix-pass rule (#1805).**
 Step 3's fix pass sits inside the byte-frozen span, so this is recorded here:

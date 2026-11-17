@@ -1244,10 +1244,10 @@ _run_test_cmd() {  # $1 = the round this gate precedes
 # --- fix-touched capture (#1435) -------------------------------------------
 # The set of repo artifacts a round's FIX PASS created or modified, persisted as
 # `<work-dir>/fix-touched-<round>.txt` — repo-relative, one path per line. It is
-# what `consolidate-findings.zsh --fix-touched` derives its `class` from, and
-# what keys the waived-suggestion exemption. No verdict reads it: the residue
-# predicate stopped in #1571 and was retired with its terminal by #2580, so a
-# failure here costs the round's `class` and nothing else.
+# what `consolidate-findings.zsh --fix-touched` derives its `class` from. No
+# verdict reads it: the residue predicate stopped in #1571 and was retired with
+# its terminal by #2580, so a failure here costs the round's `class` and nothing
+# else.
 #
 # FILE-SET membership, not hunk-level: it matches the finding's own `.file`
 # granularity and stays robust to the line drift that the #983 proximity matcher
