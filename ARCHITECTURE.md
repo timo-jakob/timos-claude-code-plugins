@@ -7299,7 +7299,8 @@ the PR body by `open-pr`:
    Reviewers line, and appears only when it has an entry: one line per Low whose
    `description` has a line beginning `follow-up:` — `file:line`, the dimension
    in square brackets, then the rest of the first such line, neutralised as
-   untrusted text — deduped across rounds on `[file, line, dimension, title]`.
+   untrusted text — one per finding, followed across rounds as the risk-demoted
+   table follows it, at its latest line and text.
    An item risk-demoted in its latest occurrence is listed only in its table. A
    `decides:` Low with no `follow-up:` line is not rendered at all. Since #1435 each dimension also carries `open`: the blockers
    still open in the status's `final_changelist.blocking` when the PR was
@@ -7344,9 +7345,8 @@ operand is exit 1 rather than a silent exit-0-with-no-output; the human section
 is buffered and printed once, so **any** non-zero exit emits nothing on stdout,
 which is what makes "empty output at exit 0 after a known round" diagnosable at
 the call sites. A Low that a later round re-reports at a drifted line is listed
-at both lines, in `waived_low` and, when it carries a `follow-up:` line, under
-*Suggested follow-ups*: the findings are deduped on
-`[file, line, dimension, title]` alone.
+at both lines in `waived_low`, which is deduped on
+`[file, line, dimension, title]` alone; *Suggested follow-ups* lists it once.
 
 ## Typed escalation path (#564)
 

@@ -199,6 +199,12 @@ local demoted_def='
         | { i: .key, d: (if ((.value.line | type) == "number") and (($it.line | type) == "number")
                          then ((.value.line - $it.line) | if . < 0 then -. else . end) else 11 end) } ]
     | sort_by(.d) | (.[0].i // null);
+  # the follow-up text of an item (#3170): the rest of the FIRST line of its own
+  # description that begins with follow-up: (leading blanks allowed, never
+  # mid-line), or null
+  def futext: [ ((.description // "") | tostring | split("\n"))[]
+                | select(test("^[ \t]*follow-up:"))
+                | sub("^[ \t]*follow-up:"; "") ] | (.[0] // null);
   def dem_records($s):
     [ ($s.round_changelists // [])
       | to_entries[] | .key as $pass | .value | .round as $rn
@@ -212,7 +218,7 @@ local demoted_def='
             title: $it.title, round: $e.value.round, pass: $e.value.pass, seq: $e.key,
             ids: ((if $i == null then [] else .[$i].ids end)
                   + [[$it.file, $it.line, $it.dimension, $it.title] | tojson]),
-            priority: ($it.priority // "Low"), demoted: ($it.demoted == true),
+            priority: ($it.priority // "Low"), demoted: ($it.demoted == true), fu: ($it | futext),
             anydemoted: (($it.demoted == true) or ($i != null and (.[$i].anydemoted // false))),
             p: $it.risk_assessment.p, impact: $it.risk_assessment.impact,
             risk_thousandths: $it.risk_assessment.risk_thousandths,
@@ -308,12 +314,6 @@ section=$(jq -rn --argjson s "$status_json" --argjson d "$dossier" "$demoted_def
   def linepart: if (.line | type) == "number" then ":\(.line)" else "" end;
   def roundline($r): "- Round \($r.round): \($r.summary.blocking) blocking"
     + (if ($r.summary.conflicts // 0) > 0 then ", \($r.summary.conflicts) conflict(s)" else "" end);
-  # the follow-up text of an item (#3170): the rest of the FIRST description
-  # line that begins with follow-up: (leading blanks allowed, never mid-line,
-  # the same match consolidate-findings.zsh applies to its lanes), or null
-  def futext: [ ((.description // "") | tostring | split("\n"))[]
-                | select(test("^[ \t]*follow-up:"))
-                | sub("^[ \t]*follow-up:"; "") ] | (.[0] // null);
   # untrusted text on a markdown list line: safe, plus every < written as an
   # entity, so no comment opener or closer and no HTML tag survives into the body
   def listsafe: safe | gsub("<"; "&lt;");
@@ -350,23 +350,14 @@ section=$(jq -rn --argjson s "$status_json" --argjson d "$dossier" "$demoted_def
                        + (if .bar == "extension" then " (extension bar, threshold \(.threshold | cell))" else "" end)
                        + " | \(.p_why | cell); \(.impact_why | cell) |" ]
           + [ "" ] end )
-  # SUGGESTED FOLLOW-UPS (#3170), in the slot the retired waived list held: each
-  # Low of any round whose description has a follow-up: line, deduped across
-  # rounds on [file, line, dimension, title] and taking the text of the LATEST
-  # occurrence. An item whose record is risk-demoted in its latest occurrence is
-  # listed only in the demoted table above: every identity that record ever
-  # carried (`ids`) is left out here. A decides: Low with no follow-up: line is
-  # rendered nowhere; it stays in the hidden waived_low. Rendered only when
-  # non-empty.
-  + ( [ demoted_set($s)[] | .ids[] ] as $dmids
-      | [ ($s.round_changelists // [])[] | ((.blocking // []), (.suggestions // []))[]
-          | select((.priority // "Low") == "Low")
-          | (futext) as $fu
-          | select($fu != null)
-          | {file, line, dimension, title, fu: $fu} ]
-      | group_by([.file, .line, .dimension, .title]) | map(last)
-      | [ .[] | ([.file, .line, .dimension, .title] | tojson) as $id
-          | select(any($dmids[]; . == $id) | not) ] as $fl
+  # SUGGESTED FOLLOW-UPS (#3170), in the slot the retired waived list held: one
+  # entry per record of the harvest above whose LATEST occurrence is a Low, not
+  # risk-demoted, with a follow-up: line, rendered at that occurrence line with
+  # its text. So a re-report at a drifted line continues one entry, and a
+  # finding that later blocked or was demoted is not listed here. A decides: Low
+  # with no follow-up: line is rendered nowhere; it stays in the hidden
+  # waived_low. Rendered only when non-empty.
+  + ( [ dem_records($s)[] | select(.priority == "Low" and (.demoted | not) and .fu != null) ] as $fl
       | if ($fl | length) > 0 then
           [ "**Suggested follow-ups** (scope-bounded defects left for a follow-up, never blocking)", "" ]
           + [ ($fl[] | "- `\((.file // "") | safe)\(linepart)` [\(.dimension | listsafe)] \(.fu | listsafe)") ]

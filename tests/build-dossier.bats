@@ -372,10 +372,10 @@ EOF
   [ "$(hidden_json | jq -c '.reviewers')" = '["python-bug-hunter","python-code-quality","python-security-reviewer"]' ]
 }
 
-@test "a same-title follow-up Low re-reported at a drifted line is listed at both lines" {
-  # A follow-up Low re-reported by a later round after a fix shifted it is
-  # listed at both lines, in waived_low and under Suggested follow-ups: the
-  # dossier dedupes on [file, line, dimension, title] only.
+@test "a same-title follow-up Low re-reported at a drifted line is in waived_low at both lines, listed once" {
+  # A follow-up Low re-reported by a later round after a fix shifted it is in
+  # waived_low at both lines (deduped on [file, line, dimension, title] only),
+  # and listed once under Suggested follow-ups, at its latest line.
   cat > "$BATS_TEST_TMPDIR/drift1.json" <<'EOF'
 {"status":"CONVERGED","rounds":2,"repo_type":"python",
  "round_changelists":[
@@ -389,7 +389,8 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(hidden_json | jq '[.waived_low[] | select(.title == "rename var")] | length')" -eq 2 ]
   [ "$(hidden_json | jq -r '.dimensions.code_quality.suggestions')" = "2" ]
-  [ "$(echo "$output" | grep -cE '^- .app\.py:(9|14). \[code_quality\] rename var')" -eq 2 ]
+  [ "$(echo "$output" | grep -cE '^- .app\.py:(9|14). \[code_quality\] rename var')" -eq 1 ]
+  echo "$output" | grep -qE '^- .app\.py:14. \[code_quality\] rename var$'
 }
 
 @test "the rounds FIELD wins over the changelist length" {
@@ -946,7 +947,7 @@ EOF
   grep -qF 'A `decides:` Low with no `follow-up:` line is not rendered at all.' <<< "$arch"
   grep -qF '#3170 left its shape unchanged: `waived_low` still holds every Low — follow-up, `decides:` and risk-demoted alike — and `dimensions.<lens>.suggestions` and `risk_demoted` keep their keys and derivation.' <<< "$arch"
   grep -qF 'The risk-demoted table (`demoted: true`, #1921) is unchanged by either change.' <<< "$arch"
-  grep -qF 'in `waived_low` and, when it carries a `follow-up:` line, under *Suggested follow-ups*: the findings are deduped on `[file, line, dimension, title]` alone.' <<< "$arch"
+  grep -qF 'at both lines in `waived_low`, which is deduped on `[file, line, dimension, title]` alone; *Suggested follow-ups* lists it once.' <<< "$arch"
   # the #1921 Visibility bullet
   grep -qF 'dossier: a paragraph and table above the *Suggested follow-ups*, and an optional `risk_demoted` array' <<< "$arch"
   grep -qF 'the rendered *Suggested follow-ups* never list one, even with a `follow-up:` line.' <<< "$arch"
