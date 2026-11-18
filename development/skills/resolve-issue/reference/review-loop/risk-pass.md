@@ -155,4 +155,4 @@ resolve-story-loop.zsh … --resume --findings-file <…> \
   rather than leaving it unaccounted: the carry accounting counts it as
   `demoted`, the round line shows `demoted by risk D`, and it is not carried
   into the next round (*Carry accounting*).
-- The PR dossier lists it in its own table, above the waived suggestions.
+- The PR dossier lists it in its own table, above the suggested follow-ups.

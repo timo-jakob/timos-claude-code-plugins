@@ -854,8 +854,8 @@ with a status JSON + code:
   that still offers the suggestion-promotion phase there: skip that offer and
   continue to §4. **Keep the loop's status JSON**
   (`--status-file`) — step 6 feeds it to `build-dossier.zsh` so the **Review
-  dossier** (per-round blockers found/fixed, dimensions reviewed, waived Low
-  suggestions, reviewers) lands in the PR body, with a hidden JSON block the
+  dossier** (per-round blockers found/fixed, dimensions reviewed, suggested
+  follow-ups, reviewers) lands in the PR body, with a hidden JSON block the
   Approver re-ingests (#563).
 - **Exit 14 is retired (#2580)** and is never reused. It was the residue terminal
   (#1435), which opened the PR with non-critical blockers still open. The loop no

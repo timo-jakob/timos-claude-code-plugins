@@ -63,9 +63,10 @@ consolidator_bullet() {
   [ -n "$flat" ]
   contains "$flat" '**A pre-existing defect that would block, but whose only correct fix expands the change beyond the story scope**'
   contains "$flat" '**is reported at `SUGGESTION` with a Description line `follow-up: <the defect, in one line>`.**'
-  contains "$flat" 'Such a finding never blocks a round, and the dossier lists it under *Suggested follow-ups*.'
-  # the dossier section is staged: #3170 adds it
-  contains "$flat" 'That dossier section is not built yet: #3170 adds it to `build-dossier.zsh`, and until then the finding appears in the dossier'"'"'s **Waived suggestions** list.'
+  # #3170 built the dossier section, so the staging clause is gone
+  contains "$flat" 'Such a finding never blocks a round, and the dossier lists it under *Suggested follow-ups*, which `build-dossier.zsh` renders since #3170.'
+  lacks "$flat" 'That dossier section is not built yet'
+  lacks "$flat" 'Waived suggestions'
   # #3169 landed the Low filter, so the staging clause is gone
   contains "$flat" 'whose Low filter keeps a Low carrying a `follow-up:` line, #3169)'
   lacks "$flat" 'once #3169 lands'
@@ -99,9 +100,10 @@ consolidator_bullet() {
   contains "$flat" '## Suggested follow-ups'
   contains "$flat" 'A reviewer reports blockers, evidence-capped tool claims and scope-bounded follow-ups only; a plain observation below the bar is not reported at all.'
   contains "$flat" 'is reported with a one-line `follow-up:` note, so the PR'"'"'s review dossier lists it under *Suggested follow-ups* rather than spending a round on work the story never asked for.'
-  # the one staged part names the child that ships it; every panel's
-  # reviewers follow the contract since #3167
-  contains "$flat" 'This is the contract the loop is moving to, and one part of it has not shipped yet. The dossier has no *Suggested follow-ups* section until #3170 lands, so until then such a defect appears in the dossier'"'"'s **Waived suggestions** list.'
+  # nothing is staged any more: every panel's reviewers follow the contract
+  # since #3167, and the dossier renders Suggested follow-ups since #3170
+  lacks "$flat" 'has not shipped yet'
+  lacks "$flat" 'Waived suggestions'
   lacks "$flat" 'reviewers still report below-the-bar observations as suggestions'
   lacks "$flat" 'two parts of it have not shipped yet'
   # the risk-demoted paragraph stays

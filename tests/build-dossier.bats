@@ -17,7 +17,7 @@ setup() {
  "round_changelists":[
    {"round":1,"summary":{"critical":1,"high":0,"low":1,"blocking":1,"conflicts":0},
     "blocking":[{"priority":"Critical","dimension":"bugs","file":"app.py","line":1,"title":"None deref","reviewers":["python-bug-hunter","python-security-reviewer"]}],
-    "suggestions":[{"priority":"Low","dimension":"code_quality","file":"app.py","line":9,"title":"rename var","reviewers":["python-code-quality"]}]},
+    "suggestions":[{"priority":"Low","dimension":"code_quality","file":"app.py","line":9,"title":"rename var","description":"The name hides intent.\nfollow-up: rename var","reviewers":["python-code-quality"]}]},
    {"round":2,"summary":{"critical":0,"high":0,"low":0,"blocking":0,"conflicts":0},"blocking":[],"suggestions":[]}
  ],
  "final_changelist":{"summary":{"critical":0,"high":0,"low":0,"blocking":0,"conflicts":0},"blocking":[],"suggestions":[]}}
@@ -27,7 +27,7 @@ EOF
 # extract the hidden dossier JSON from the rendered output
 hidden_json() { echo "$output" | grep -o '<!-- review-dossier: .* -->' | sed -E 's/^<!-- review-dossier: (.*) -->$/\1/'; }
 
-@test "renders the dossier section for a looped story (rounds + reviewers + waived)" {
+@test "renders the dossier section for a looped story (rounds + reviewers + follow-ups)" {
   run zsh "$S" --status "$ST"
   [ "$status" -eq 0 ]
   echo "$output" | grep -q '^## Review dossier'
@@ -36,8 +36,8 @@ hidden_json() { echo "$output" | grep -o '<!-- review-dossier: .* -->' | sed -E 
   # anchored: both strings also appear inside the hidden JSON, so an unanchored
   # needle would leave the human-readable half entirely unasserted
   echo "$output" | grep -qE '^\*\*Reviewers:\*\*.*python-bug-hunter'
-  # waived Low suggestion is logged, not a blocker
-  echo "$output" | grep -qE '^- .app\.py:9. \[code_quality\] rename var'
+  # the follow-up: Low is listed under Suggested follow-ups, not as a blocker (#3170)
+  echo "$output" | grep -qE '^- .app\.py:9. \[code_quality\] rename var$'
 }
 
 @test "hidden JSON is present, dimension-tagged with the #449 enum, and valid" {
@@ -159,7 +159,7 @@ EOF
   run zsh "$S" --status "$ST"
   [ "$status" -eq 0 ]
   [ "$output" = "$plain" ]
-  echo "$output" | grep -q '^- Round 1: 1 blocking, 1 suggestion(s) logged$'
+  echo "$output" | grep -q '^- Round 1: 1 blocking$'
   [ "$(echo "$output" | grep -c 'promot')" -eq 0 ]
 }
 
@@ -282,8 +282,10 @@ EOF
   mv "$ST.x" "$ST"
   run zsh "$S" --status "$ST"
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q '^- Round 1: 1 blocking, 2 conflict(s), 1 suggestion(s) logged$'
-  echo "$output" | grep -q '^- Round 2: 0 blocking, 0 suggestion(s) logged$'
+  echo "$output" | grep -q '^- Round 1: 1 blocking, 2 conflict(s)$'
+  echo "$output" | grep -q '^- Round 2: 0 blocking$'
+  # no round line or dimension line reports a suggestion count any more (#3170)
+  [ "$(echo "$output" | grep -c 'suggestion(s)')" -eq 0 ]
 }
 
 # ---- remaining input refusals (#1064) --------------------------------------
@@ -354,6 +356,7 @@ EOF
   done
   [ "$(hidden_json | jq '.waived_low | length')" -eq 0 ]
   [ "$(echo "$output" | grep -c 'Waived suggestions')" -eq 0 ]
+  [ "$(echo "$output" | grep -c 'Suggested follow-ups')" -eq 0 ]
 }
 
 # ---- round-3 coverage: the deliberately-chosen behaviours (#1064) -----------
@@ -369,23 +372,25 @@ EOF
   [ "$(hidden_json | jq -c '.reviewers')" = '["python-bug-hunter","python-code-quality","python-security-reviewer"]' ]
 }
 
-@test "a same-title Low re-reported at a drifted line is listed at both lines" {
-  # A Low re-reported by a later round after a fix shifted it is listed at
-  # both lines: the dossier dedupes on [file, line, dimension, title] only.
+@test "a same-title follow-up Low re-reported at a drifted line is in waived_low at both lines, listed once" {
+  # A follow-up Low re-reported by a later round after a fix shifted it is in
+  # waived_low at both lines (deduped on [file, line, dimension, title] only),
+  # and listed once under Suggested follow-ups, at its latest line.
   cat > "$BATS_TEST_TMPDIR/drift1.json" <<'EOF'
 {"status":"CONVERGED","rounds":2,"repo_type":"python",
  "round_changelists":[
   {"round":1,"summary":{"critical":0,"high":0,"low":1,"blocking":0,"conflicts":0},"blocking":[],
-   "suggestions":[{"priority":"Low","dimension":"code_quality","file":"app.py","line":9,"title":"rename var","reviewers":["q"]}]},
+   "suggestions":[{"priority":"Low","dimension":"code_quality","file":"app.py","line":9,"title":"rename var","description":"follow-up: rename var","reviewers":["q"]}]},
   {"round":2,"summary":{"critical":0,"high":0,"low":1,"blocking":0,"conflicts":0},"blocking":[],
-   "suggestions":[{"priority":"Low","dimension":"code_quality","file":"app.py","line":14,"title":"rename var","reviewers":["q"]}]}],
+   "suggestions":[{"priority":"Low","dimension":"code_quality","file":"app.py","line":14,"title":"rename var","description":"follow-up: rename var","reviewers":["q"]}]}],
  "final_changelist":{"summary":{"critical":0,"high":0,"low":1,"blocking":0,"conflicts":0}}}
 EOF
   run zsh "$S" --status "$BATS_TEST_TMPDIR/drift1.json"
   [ "$status" -eq 0 ]
   [ "$(hidden_json | jq '[.waived_low[] | select(.title == "rename var")] | length')" -eq 2 ]
   [ "$(hidden_json | jq -r '.dimensions.code_quality.suggestions')" = "2" ]
-  [ "$(echo "$output" | grep -cE '^- .app\.py:(9|14). \[code_quality\] rename var')" -eq 2 ]
+  [ "$(echo "$output" | grep -cE '^- .app\.py:(9|14). \[code_quality\] rename var')" -eq 1 ]
+  echo "$output" | grep -qE '^- .app\.py:14. \[code_quality\] rename var$'
 }
 
 @test "the rounds FIELD wins over the changelist length" {
@@ -407,7 +412,8 @@ EOF
   [ "$status" -eq 0 ]
   echo "$output" | grep -q '^\*\*Per round\*\*$'
   echo "$output" | grep -q '^\*\*Dimensions reviewed\*\* (#449 lenses)$'
-  echo "$output" | grep -q '^\*\*Waived suggestions\*\* (Low — logged, never blocking)$'
+  echo "$output" | grep -q '^\*\*Suggested follow-ups\*\* (scope-bounded defects left for a follow-up, never blocking)$'
+  [ "$(echo "$output" | grep -c 'Waived suggestions')" -eq 0 ]
   grep_needle="_Machine-readable dossier below is consumed by the Approver"
   echo "$output" | grep -q "$grep_needle"
 }
@@ -544,7 +550,7 @@ EOF
   [ "$status" -eq 0 ]
   hidden_json | jq -e '(.dimensions | length) > 0 and ([.dimensions[] | has("open")] | all)' >/dev/null
   hidden_json | jq -e '[.dimensions[].open] | all(. == 0)' >/dev/null
-  echo "$output" | grep -q -- '- `bugs` — 1 blocking found & fixed, 0 suggestion(s)'
+  echo "$output" | grep -qx -- '- `bugs` — 1 blocking found & fixed'
 }
 
 @test "the rendered section never claims residue or a still-open blocker" {
@@ -559,8 +565,9 @@ EOF
 # --- #1921: risk-demoted findings in the PR body --------------------------------
 
 # a two-round status whose rounds demote findings: the same identity in both
-# rounds (the later record must win), one only in round 1, one ordinary waived
-# suggestion, and a title carrying a pipe, a backtick and a newline
+# rounds (the later record must win, and carrying a follow-up: line it must not
+# be listed under), one only in round 1, one follow-up: Low (#3170), and a title
+# carrying a pipe, a backtick and a newline
 demoted_status() {
   cat > "$ST" <<'EOF'
 {"status":"CONVERGED","rounds":2,"max_rounds":5,"repo_type":"claude-plugin",
@@ -572,18 +579,18 @@ demoted_status() {
        "risk_assessment":{"p":0.07,"p_why":"round-one view","impact":0.7,"impact_why":"a hang","risk":0.049,"risk_thousandths":49,"threshold":"0.05","threshold_thousandths":50}},
       {"priority":"Low","dimension":"bugs","file":"src/b.zsh","line":5,"title":"a | pipe, a `tick`\nand a forged line","demoted":true,
        "risk_assessment":{"p":0.01,"p_why":"rare | really","impact":1.0,"impact_why":"a false `green`","risk":0.01,"risk_thousandths":10,"threshold":"0.05","threshold_thousandths":50}},
-      {"priority":"Low","dimension":"code_quality","file":"src/c.zsh","line":9,"title":"rename var","reviewers":["claude-plugin-prose-logic"]}]},
+      {"priority":"Low","dimension":"code_quality","file":"src/c.zsh","line":9,"title":"rename var","description":"follow-up: rename var","reviewers":["claude-plugin-prose-logic"]}]},
    {"round":2,"summary":{"critical":0,"high":0,"low":1,"blocking":0,"conflicts":0,"risk_demoted":1},
     "blocking":[],
     "suggestions":[
       {"priority":"Low","dimension":"tests","file":"tests/a.bats","line":10,"title":"mutation drops the check","demoted":true,
-       "risk_assessment":{"p":0.04,"p_why":"round-two view","impact":0.7,"impact_why":"a hang","risk":0.028,"risk_thousandths":28,"threshold":"0.05","threshold_thousandths":50}}]}
+       "description":"follow-up: harden the check","risk_assessment":{"p":0.04,"p_why":"round-two view","impact":0.7,"impact_why":"a hang","risk":0.028,"risk_thousandths":28,"threshold":"0.05","threshold_thousandths":50}}]}
  ],
  "final_changelist":{"summary":{"critical":0,"high":0,"low":1,"blocking":0,"conflicts":0},"blocking":[],"suggestions":[]}}
 EOF
 }
 
-@test "#1921 AC9 demoted findings get their own paragraph and table above the waived list" {
+@test "#1921 AC9 demoted findings get their own paragraph and table above the Suggested follow-ups" {
   demoted_status
   run zsh "$S" --status "$ST"
   [ "$status" -eq 0 ]
@@ -596,13 +603,20 @@ EOF
   # untrusted text is neutralised: newline and backticks stripped, pipes escaped
   echo "$output" | grep -qxF -- '| `a \| pipe, a tick and a forged line` — `src/b.zsh:5` | 1 | 0.01 | 1.0 | 0.01 | rare \| really; a false green |'
   [ "$(echo "$output" | grep -c '^and a forged line')" -eq 0 ]
-  # the table sits above the waived list, which no longer lists a demoted finding
-  local tline wline
+  # the table sits above the Suggested follow-ups (#3170), which sit above the
+  # Reviewers line and never list a demoted finding — not even one whose
+  # description carries a follow-up: line (tests/a.bats:10)
+  local tline fline rline
   tline=$(echo "$output" | grep -n -- '^\*\*Demoted by the risk threshold' | cut -d: -f1)
-  wline=$(echo "$output" | grep -n -- '^\*\*Waived suggestions\*\*' | cut -d: -f1)
-  [ "$tline" -lt "$wline" ]
-  echo "$output" | grep -qE '^- .src/c\.zsh:9. \[code_quality\] rename var'
+  fline=$(echo "$output" | grep -n -- '^\*\*Suggested follow-ups\*\*' | cut -d: -f1)
+  rline=$(echo "$output" | grep -n -- '^\*\*Reviewers:\*\*' | cut -d: -f1)
+  [ -n "$tline" ] && [ -n "$fline" ] && [ -n "$rline" ]
+  [ "$tline" -lt "$fline" ]
+  [ "$fline" -lt "$rline" ]
+  echo "$output" | grep -qxF -- '- `src/c.zsh:9` [code_quality] rename var'
   [ "$(echo "$output" | grep -cE '^- `(tests/a\.bats|src/b\.zsh):')" -eq 0 ]
+  [ "$(echo "$output" | grep -c 'harden the check')" -eq 0 ]
+  [ "$(echo "$output" | grep -c 'Waived suggestions')" -eq 0 ]
 }
 
 @test "#1921 AC9 the hidden block carries risk_demoted, and its waived_low still holds the demoted findings for the Approver" {
@@ -612,7 +626,7 @@ EOF
   [ "$(hidden_json | jq -c '.risk_demoted')" = \
     '[{"file":"tests/a.bats","line":10,"dimension":"tests","title":"mutation drops the check","round":2,"p":0.04,"impact":0.7,"risk_thousandths":28},{"file":"src/b.zsh","line":5,"dimension":"bugs","title":"a | pipe, a `tick`\nand a forged line","round":1,"p":0.01,"impact":1.0,"risk_thousandths":10}]' ]
   # the Approver folds waived_low into its risk register, so a demoted finding
-  # must not leave it; only the RENDERED waived list omits it (tested above)
+  # must not leave it; only the RENDERED follow-ups omit it (tested above)
   [ "$(hidden_json | jq -c '[.waived_low[].title] | sort')" = \
     '["a | pipe, a `tick`\nand a forged line","mutation drops the check","rename var"]' ]
 }
@@ -649,7 +663,7 @@ EOF
  "round_changelists":[
    {"round":1,"summary":{"blocking":1,"low":1,"conflicts":0},
     "blocking":[{"priority":"High","dimension":"bugs","file":"a.zsh","line":10,"title":"unquoted expansion"}],
-    "suggestions":[{"priority":"Low","dimension":"bugs","file":"a.zsh","line":50,"title":"unquoted expansion"}]},
+    "suggestions":[{"priority":"Low","dimension":"bugs","file":"a.zsh","line":50,"title":"unquoted expansion","description":"follow-up: unquoted expansion"}]},
    {"round":2,"summary":{"blocking":0,"low":1,"conflicts":0},"blocking":[],
     "suggestions":[{"priority":"Low","dimension":"bugs","file":"a.zsh","line":10,"title":"unquoted expansion","demoted":true,
       "risk_assessment":{"p":0.01,"p_why":"w","impact":0.4,"impact_why":"w","risk":0.004,"risk_thousandths":4,"threshold":"0.05","threshold_thousandths":50}}]}],
@@ -660,8 +674,8 @@ EOF
   [ "$(hidden_json | jq '.dimensions.bugs.blocking')" -eq 0 ]
   [ "$(hidden_json | jq -c '[.waived_low[].line] | sort')" = '[10,50]' ]
   [ "$(hidden_json | jq -c '[.risk_demoted[].line]')" = '[10]' ]
-  # the line-50 waived suggestion is not hidden by the line-10 demotion
-  echo "$output" | grep -qE '^- `a\.zsh:50` \[bugs\] unquoted expansion'
+  # the line-50 follow-up is not hidden by the line-10 demotion
+  echo "$output" | grep -qxF -- '- `a.zsh:50` [bugs] unquoted expansion'
 }
 
 @test "#1921 AC9 a demoted finding re-assessed and kept blocking counts as blocking found & fixed" {
@@ -684,8 +698,9 @@ EOF
 }
 
 # One status JSON from a list of rounds, each round a JSON array of items written
-# compactly as {l: line, t: title, pri: "High"|"Low", dem: true} — every item in
-# file a.zsh, dimension bugs. A demoted item carries a risk stamp.
+# compactly as {l: line, t: title, pri: "High"|"Low", dem: true, fu: text} — every
+# item in file a.zsh, dimension bugs. A demoted item carries a risk stamp, and an
+# item with fu carries the description line `follow-up: <fu>`.
 window_status() {  # $@ = one JSON array per round
   local rounds="[]" r n=0
   for r in "$@"; do
@@ -694,7 +709,8 @@ window_status() {  # $@ = one JSON array per round
       [ .[] | { priority: .pri, dimension: "bugs", file: "a.zsh", line: .l, title: (.t // "unquoted expansion") }
               + (if .dem then { demoted: true, risk_assessment: { p: 0.01, p_why: "w", impact: 0.4,
                    impact_why: "w", risk: 0.004, risk_thousandths: 4, threshold: "0.05",
-                   threshold_thousandths: 50 } } else {} end) ] as $its
+                   threshold_thousandths: 50 } } else {} end)
+              + (if .fu then { description: ("follow-up: " + .fu) } else {} end) ] as $its
       | $rs + [ { round: $n, summary: { blocking: 0, low: 0, conflicts: 0 },
                   blocking: [ $its[] | select(.priority == "High") ],
                   suggestions: [ $its[] | select(.priority == "Low") ] } ]' <<< "$r")
@@ -736,16 +752,19 @@ window_status() {  # $@ = one JSON array per round
   done
 }
 
-@test "#1921 AC9 a demoted finding respelled in a later round, in place or moved, is listed once — in the demoted table, never also as waived" {
+@test "#1921 AC9 a demoted finding respelled in a later round, in place or moved, is listed once — in the demoted table, never also as a follow-up" {
   local rounds
+  # each occurrence carries a follow-up: line, so only the demotion keeps it out
+  # of the Suggested follow-ups (#3170)
   for rounds in \
-    '[{"l":10,"t":"Weak assertion","pri":"Low","dem":true}]@@[{"l":10,"t":"weak assertion","pri":"Low","dem":true}]' \
-    '[{"l":10,"t":"Weak assertion","pri":"Low","dem":true}]@@[{"l":13,"t":"weak  assertion","pri":"Low","dem":true}]'; do
+    '[{"l":10,"t":"Weak assertion","pri":"Low","dem":true,"fu":"x"}]@@[{"l":10,"t":"weak assertion","pri":"Low","dem":true,"fu":"x"}]' \
+    '[{"l":10,"t":"Weak assertion","pri":"Low","dem":true,"fu":"x"}]@@[{"l":13,"t":"weak  assertion","pri":"Low","dem":true,"fu":"x"}]'; do
     window_status "${rounds%%@@*}" "${rounds##*@@}"
     run zsh "$S" --status "$BATS_TEST_TMPDIR/ws.json"
     [ "$status" -eq 0 ]
     [ "$(echo "$output" | grep -c '^| `.*` — `a\.zsh:')" -eq 1 ]
     [ "$(echo "$output" | grep -c '^- `a\.zsh:')" -eq 0 ]
+    [ "$(echo "$output" | grep -c 'Suggested follow-ups')" -eq 0 ]
     [ "$(hidden_json | jq '.risk_demoted | length')" -eq 1 ]
     [ "$(hidden_json | jq -c '[.waived_low[] | [.line, .title]] == [.risk_demoted[] | [.line, .title]]')" = "true" ]
   done
@@ -814,4 +833,136 @@ flat_doc() { tr '\n' ' ' < "$1" | tr -s ' '; }
   grep -qF 'The once-only rule is about **appended output**, not processes: never append two dossier outputs (two hidden blocks) to one body.' <<< "$(flat_doc "$op")"
   grep -qF '`build-dossier.zsh` no longer reads the stamp: the dossier dropped the promotion phase (#3131).' <<< "$(flat_doc "$arch")"
   grep -qF 'so both flags are refused as unknown options (exit 2), and the dossier neither prints a promotion paragraph nor follows items across two phases.' <<< "$(flat_doc "$arch")"
+}
+
+# --- #3170: Suggested follow-ups replace the waived list -----------------------
+
+# one round holding a plain Low (a pre-#3169 shape), a decides: Low and a
+# follow-up: Low whose line is indented and followed by a second follow-up: line
+lanes_status() {
+  cat > "$ST" <<'EOF'
+{"status":"CONVERGED","rounds":1,"repo_type":"claude-plugin",
+ "round_changelists":[{"round":1,"summary":{"critical":0,"high":0,"low":3,"blocking":0,"conflicts":0},
+   "blocking":[],
+   "suggestions":[
+     {"priority":"Low","dimension":"code_quality","file":"src/a.zsh","line":4,"title":"plain observation","description":"just a thought"},
+     {"priority":"Low","dimension":"script_quality","file":"scripts/check.zsh","line":7,"title":"shellcheck SC2086","description":"Unquoted.\ndecides: zsh -n scripts/check-marketplace-sync.zsh"},
+     {"priority":"Low","dimension":"bugs","file":"development/skills/resolve-issue/scripts/build-dossier.zsh","line":212,"title":"unchecked exit code","description":"Seen while reviewing.\n  follow-up: pre-existing unchecked exit code in build-dossier.zsh\nfollow-up: a second line that is not taken"}]}],
+ "final_changelist":{"summary":{"critical":0,"high":0,"low":3,"blocking":0,"conflicts":0},"blocking":[],"suggestions":[]}}
+EOF
+}
+
+@test "#3170 a follow-up: Low is listed under Suggested follow-ups; a decides: or plain Low is rendered nowhere" {
+  lanes_status
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  local visible
+  visible=$(echo "$output" | grep -v '^<!-- review-dossier:')
+  [ "$(grep -c 'Waived suggestions' <<< "$visible")" -eq 0 ]
+  grep -qxF -- '**Suggested follow-ups** (scope-bounded defects left for a follow-up, never blocking)' <<< "$visible"
+  # file:line, [dimension], the text after follow-up: on the FIRST such line
+  grep -qxF -- '- `development/skills/resolve-issue/scripts/build-dossier.zsh:212` [bugs] pre-existing unchecked exit code in build-dossier.zsh' <<< "$visible"
+  [ "$(grep -c 'a second line that is not taken' <<< "$visible")" -eq 0 ]
+  # the follow-up is the only file:line list entry
+  [ "$(grep -cE '^- `[^`]*:[0-9]+` \[' <<< "$visible")" -eq 1 ]
+  # the decides: Low and the plain Low are in no rendered line
+  [ "$(grep -cE 'shellcheck SC2086|scripts/check\.zsh|plain observation|src/a\.zsh' <<< "$visible")" -eq 0 ]
+  # ...but every Low is still in the hidden waived_low, whose shape is unchanged
+  [ "$(hidden_json | jq -c '[.waived_low[].title] | sort')" = \
+    '["plain observation","shellcheck SC2086","unchecked exit code"]' ]
+  [ "$(hidden_json | jq -c '.waived_low[0] | keys')" = '["dimension","file","line","title"]' ]
+  [ "$(hidden_json | jq '.dimensions.bugs.suggestions')" -eq 1 ]
+  [ "$(hidden_json | jq '.dimensions.script_quality.suggestions')" -eq 1 ]
+  # a dimension whose only findings are kept Lows reads 0 blocking, no count
+  grep -qxF -- '- `bugs` — 0 blocking found & fixed' <<< "$visible"
+  grep -qxF -- '- `script_quality` — 0 blocking found & fixed' <<< "$visible"
+  grep -qxF -- '- `security` — ✓ clean (reviewed, no findings)' <<< "$visible"
+  grep -qxF -- '- Round 1: 0 blocking' <<< "$visible"
+  [ "$(grep -c 'suggestion(s)' <<< "$visible")" -eq 0 ]
+}
+
+@test "#3170 the Suggested follow-ups section is absent when no Low carries follow-up:" {
+  lanes_status
+  jq '.round_changelists[0].suggestions |= map(select(.title != "unchecked exit code"))' "$ST" > "$ST.x"
+  mv "$ST.x" "$ST"
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | grep -c 'Suggested follow-ups')" -eq 0 ]
+  [ "$(echo "$output" | grep -c 'Waived suggestions')" -eq 0 ]
+  [ "$(hidden_json | jq '.waived_low | length')" -eq 2 ]
+  # nothing renders between the dimension list and the Reviewers line
+  [ "$(echo "$output" | grep -A2 -- '^- `tests` —' | tail -1 | cut -c1-14)" = '**Reviewers:**' ]
+}
+
+@test "#3170 a follow-up: that is not at a line start is not a follow-up" {
+  lanes_status
+  jq '.round_changelists[0].suggestions[2].description = "see the note; follow-up: not at a line start"' "$ST" > "$ST.x"
+  mv "$ST.x" "$ST"
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | grep -c 'Suggested follow-ups')" -eq 0 ]
+}
+
+@test "#3170 the same follow-up across rounds is listed once, with the text of the latest round" {
+  lanes_status
+  jq '.round_changelists += [ .round_changelists[0]
+        | .round = 2
+        | .suggestions = [ .suggestions[2] | .description = "follow-up: the round-two wording" ] ]
+      | .rounds = 2' "$ST" > "$ST.x"
+  mv "$ST.x" "$ST"
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | grep -c '^- `development/skills/resolve-issue/scripts/build-dossier.zsh:212`')" -eq 1 ]
+  echo "$output" | grep -qxF -- '- `development/skills/resolve-issue/scripts/build-dossier.zsh:212` [bugs] the round-two wording'
+}
+
+@test "#3170 hostile follow-up text cannot break the list line or the hidden comment" {
+  lanes_status
+  local hostile='follow-up: a `tick` | pipe --> close <!-- open <b>bold</b>'
+  jq --arg d "$hostile" '.round_changelists[0].suggestions[2] += {description: $d, title: "title\n--> spill"}' "$ST" > "$ST.x"
+  mv "$ST.x" "$ST"
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  # one well-formed list line: backticks stripped, every < an entity
+  echo "$output" | grep -qxF -- '- `development/skills/resolve-issue/scripts/build-dossier.zsh:212` [bugs] a tick | pipe --> close &lt;!-- open &lt;b>bold&lt;/b>'
+  # no comment opener anywhere but the hidden block, which is still one line,
+  # the last one, and parses
+  [ "$(echo "$output" | grep -c '<!--')" -eq 1 ]
+  [ "$(echo "$output" | grep -c '^<!-- review-dossier: .* -->$')" -eq 1 ]
+  echo "$output" | tail -1 | grep -q '^<!-- review-dossier:'
+  hidden_json | jq -e '[.waived_low[].title] | index("title\n--> spill") != null' >/dev/null
+  [ "$(echo "$output" | grep -c '^--> spill')" -eq 0 ]
+}
+
+@test "#3170 the docs describe Suggested follow-ups and no rendered waived list" {
+  local arch tel thr risk ri
+  arch="$(flat_doc "$REPO_ROOT/ARCHITECTURE.md")"
+  tel="$(flat_doc "$REPO_ROOT/docs/how-to/read-pipeline-telemetry.md")"
+  thr="$(flat_doc "$REPO_ROOT/docs/how-to/set-a-corner-case-risk-threshold.md")"
+  risk="$(flat_doc "$REPO_ROOT/development/skills/resolve-issue/reference/review-loop/risk-pass.md")"
+  ri="$(flat_doc "$REPO_ROOT/development/skills/resolve-issue/SKILL.md")"
+  # Review dossier + Approver re-ingest (#563)
+  grep -qF 'Since #3170 the section renders no waived-suggestion list and no suggestion count: a round line reads `- Round N: X blocking` (plus `, Y conflict(s)` when Y > 0) and a non-clean dimension line `X blocking found & fixed`' <<< "$arch"
+  grep -qF 'The *Suggested follow-ups* section sits after the risk-demoted table and before the Reviewers line, and appears only when it has an entry: one line per Low whose `description` has a line beginning `follow-up:`' <<< "$arch"
+  grep -qF 'A `decides:` Low with no `follow-up:` line is not rendered at all.' <<< "$arch"
+  grep -qF '#3170 left its shape unchanged: `waived_low` still holds every Low — follow-up, `decides:` and risk-demoted alike — and `dimensions.<lens>.suggestions` and `risk_demoted` keep their keys and derivation.' <<< "$arch"
+  grep -qF 'The risk-demoted table (`demoted: true`, #1921) is unchanged by either change.' <<< "$arch"
+  grep -qF 'at both lines in `waived_low`, which is deduped on `[file, line, dimension, title]` alone; *Suggested follow-ups* lists it once.' <<< "$arch"
+  # the #1921 Visibility bullet
+  grep -qF 'dossier: a paragraph and table above the *Suggested follow-ups*, and an optional `risk_demoted` array' <<< "$arch"
+  grep -qF 'the rendered *Suggested follow-ups* never list one, even with a `follow-up:` line.' <<< "$arch"
+  # Review-loop telemetry
+  grep -qF '`waived` (distinct Low items logged: since the #3169 Low filter only the `decides:` and `follow-up:` lanes and risk-demoted items, #3170).' <<< "$arch"
+  grep -qF 'which since #3169 holds only the `decides:` and `follow-up:` lanes plus risk-demoted items, so it is `0` for a round with none of them and the key stays, #3170)' <<< "$arch"
+  grep -qF '| `waived` | integer | distinct Low items the loop logged: since #3169 the `decides:` and `follow-up:` lanes plus risk-demoted items, as `Suggestion` counts them; a record written before #3169 counts every reviewer-emitted Low, so cut before/after comparisons on the record'"'"'s `ts` |' <<< "$tel"
+  grep -qF 'since #3169 `Suggestion` counts only the `decides:` and `follow-up:` lanes plus risk-demoted items, and is `0` for a round with none; on a record written before #3169 it counts every reviewer-emitted Low, so cut before/after comparisons on the record'"'"'s `ts`)' <<< "$tel"
+  grep -qF 'table above the suggested follow-ups lists each finding' <<< "$thr"
+  grep -qF 'The PR dossier lists it in its own table, above the suggested follow-ups.' <<< "$risk"
+  grep -qF 'dimensions reviewed, suggested follow-ups, reviewers) lands in the PR body' <<< "$ri"
+  # the retired wording is gone everywhere the dossier is described
+  local f
+  for f in "$arch" "$tel" "$thr" "$risk" "$ri"; do
+    run grep -cE 'Waived suggestions|above the waived|rendered waived list|waived Low suggestions|Low suggestions logged|distinct Low suggestions' <<< "$f"
+    [ "$output" = "0" ]
+  done
 }

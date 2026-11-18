@@ -118,6 +118,9 @@ jq -c '
       # Critical / Warning / Suggestion — the same words the human reads in
       # progress.md and the escalation — so on-screen and on-disk agree
       # (internally Warning == priority High, Suggestion == the Low bucket).
+      # Since #3169 only the decides: and follow-up: lanes and risk-demoted
+      # items reach suggestions[], so Suggestion (and waived below) counts
+      # just those; the keys are unchanged (#3170).
       # The stamped/carried/new/fixed derivation is one of THREE copies kept
       # in lockstep with render-progress-block.zsh and build-escalation.zsh;
       # change all three together. build-dossier.zsh is NOT one of them.

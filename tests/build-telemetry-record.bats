@@ -57,6 +57,17 @@ EOF
   [ "$(echo "$output" | jq '.findings_by_round[0].by_dimension.code_quality')" -eq 1 ]
 }
 
+@test "#3170 Suggestion stays a by_severity key, 0 for a round whose suggestions is empty" {
+  # since #3169 a plain Low never reaches suggestions[], so a round with none
+  # is common; the key must stay present (value 0), never vanish, so records
+  # from before and after compare without a schema bump
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c '.findings_by_round[1].by_severity | has("Suggestion")')" = "true" ]
+  [ "$(echo "$output" | jq '.findings_by_round[1].by_severity.Suggestion')" -eq 0 ]
+  [ "$(echo "$output" | jq -c '.findings_by_round[1].by_severity | keys')" = '["Critical","Suggestion","Warning"]' ]
+}
+
 @test "the payload carries NO envelope key — the emitter owns those (#1004)" {
   run zsh "$S" --status "$ST"
   [ "$status" -eq 0 ]
