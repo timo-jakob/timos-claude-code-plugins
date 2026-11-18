@@ -82,7 +82,7 @@ jobs:
 
       - name: Setup Go
         if: steps.ko_decision.outputs.do_build == 'true'
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: "stable"
       - name: Setup ko
@@ -115,7 +115,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: echo "KO_DOCKER_REPO=ghcr.io/$(echo "$GH_REPO" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: "stable"
       - name: Setup ko
