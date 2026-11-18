@@ -1115,7 +1115,7 @@ rstep() {
   readme="$REPO_ROOT/README.md"
   [ -f "$readme" ]
   [ -n "$PLUGIN_NAMES" ]
-  table="$(grep -E '^\| \*\*development' "$readme")"
+  table="$(grep -E '^\| \*\*(development|product)' "$readme")"
   [ -n "$table" ]
 
   while read -r name; do

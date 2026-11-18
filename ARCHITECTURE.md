@@ -24,6 +24,7 @@ development-kubernetes   ← topic: infrastructure-as-code (manifests, Helm, Kus
 development-opentofu     ← topic: infrastructure-as-code (cloud provisioning; OpenTofu + Terraform-compatible HCL; may be primary)
 development-composition  ← topic: composition repo type (constellation manifest + promotion; marker .claude-workspace.yaml, #1747; may be primary)
 development-…            ← future topics: …
+product                  ← outside the language/topic model: charter, personas, rendering (see below)
 ```
 
 All plugins live in this monorepo. End users install whichever subset
@@ -234,6 +235,35 @@ A change belongs in `development` (not in any language plugin) when it:
 If you find yourself adding language-specific logic to `development`,
 or generic logic to `development-<lang>`, the split is doing its job
 by surfacing a category error.
+
+### The `product` plugin — outside the language/topic model
+
+`product` (directory `product/`, #3202) is the one plugin in this marketplace
+that is not a `development*` plugin, and its name says so on purpose. It holds
+the product side of the family: what a product is for and who uses it, rather
+than how its code is built and kept healthy.
+
+- **What it owns.** The **product charter**, the **persona registry**
+  (`personas/v1`, `docs/personas.md` in a target repo) and the **rendering** of
+  product documents to PDF and ePub. Its own copy of the prose-hash script,
+  `product/scripts/prose-hash.zsh`, is byte-identical to
+  `development/skills/refine-issue/scripts/story-spec-prose-hash.zsh`, and a
+  `cmp` test (`tests/product-plugin.bats`) keeps the two equal.
+- **It is neither a language plugin nor a topic plugin.** It ships no gather
+  script, no maintenance dispatcher, no resolve profile and no review panel, so
+  it fits none of the three categories in the table above. The maintenance
+  orchestrator discovers plugins by their gather script, and `product` has
+  none, so maintenance discovery never sees it. It takes no part in
+  maintenance, review or `/development:resolve-issue`.
+- **It stands alone.** `product` must work with `development` not installed:
+  no file under `product/` names a path into another plugin's directory.
+- **`development` refers to it by command name only** — a `/product:…`
+  command, never a path into `product/`. Nothing in `development` may fail
+  when `product` is absent: a persona check that points at `product` stays
+  advisory.
+- **Old provenance stays valid.** A `personas/v1` block whose
+  `provenance.generated_by` names `/development:define-personas` stays valid.
+  The string is informational, and no validator may reject the old value.
 
 ## Polyrepo, contracts, and the cross-repo big picture
 

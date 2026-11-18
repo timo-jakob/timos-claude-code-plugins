@@ -47,6 +47,7 @@ PLUGINS = [
     "development-react",
     "development-spring",
     "development-swift",
+    "product",
 ]
 
 _FRONTMATTER = re.compile(r"^---\n(.*?)\n---", re.S)

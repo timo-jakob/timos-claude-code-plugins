@@ -1069,3 +1069,21 @@ alternative.
 | --- | --- | --- |
 | `go-grpc-advisor` | opus | buf `generate` with pinned protoc-gen-go + protoc-gen-go-grpc, `buf lint` / `buf breaking` gating the contract in CI, and generated sources excluded from coverage |
 | `go-api-contract-advisor` | opus | Proto-first REST: buf wiring, `google.api.http` completeness on external RPCs, grpc-gateway mux registration, and the OpenAPI 2.0→3.0 spec pipeline. Opt-in — an unconfigured repo is reported informationally, never pushed toward REST |
+
+## product
+
+The product side of the family: the **product charter**, the **persona
+registry** (`personas/v1`) and **PDF + ePub rendering** of product documents.
+It is not a language plugin and not a topic plugin. It ships no gather script,
+no maintenance dispatcher, no resolve profile and no review panel, so
+`/development:maintenance` never discovers it and it takes no part in review or
+`/development:resolve-issue`. It works with `development` not installed, and
+`development` refers to it only by command name. ARCHITECTURE.md's section
+*The `product` plugin — outside the language/topic model* states the boundary.
+
+**What's built (v0.1).** The plugin shell: its manifest, its marketplace entry
+and `product/scripts/prose-hash.zsh`, a byte-identical copy of `refine-issue`'s
+story-spec prose-hash script that a test keeps equal. It has no skills or
+agents yet; `define-personas` and the charter and rendering skills move in or
+land in the stories that follow
+([#3202](https://github.com/timo-jakob/timos-claude-code-plugins/issues/3202)).
