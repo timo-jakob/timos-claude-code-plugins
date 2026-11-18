@@ -954,8 +954,8 @@ EOF
   # Review-loop telemetry
   grep -qF '`waived` (distinct Low items logged: since the #3169 Low filter only the `decides:` and `follow-up:` lanes and risk-demoted items, #3170).' <<< "$arch"
   grep -qF 'which since #3169 holds only the `decides:` and `follow-up:` lanes plus risk-demoted items, so it is `0` for a round with none of them and the key stays, #3170)' <<< "$arch"
-  grep -qF '| `waived` | integer | distinct Low items the loop logged: the `decides:` and `follow-up:` lanes plus risk-demoted items, as `Suggestion` counts them |' <<< "$tel"
-  grep -qF '`Suggestion` counts only the `decides:` and `follow-up:` lanes plus risk-demoted items, and is `0` for a round with none' <<< "$tel"
+  grep -qF '| `waived` | integer | distinct Low items the loop logged: since #3169 the `decides:` and `follow-up:` lanes plus risk-demoted items, as `Suggestion` counts them; a record written before #3169 counts every reviewer-emitted Low, so cut before/after comparisons on the record'"'"'s `ts` |' <<< "$tel"
+  grep -qF 'since #3169 `Suggestion` counts only the `decides:` and `follow-up:` lanes plus risk-demoted items, and is `0` for a round with none; on a record written before #3169 it counts every reviewer-emitted Low, so cut before/after comparisons on the record'"'"'s `ts`)' <<< "$tel"
   grep -qF 'table above the suggested follow-ups lists each finding' <<< "$thr"
   grep -qF 'The PR dossier lists it in its own table, above the suggested follow-ups.' <<< "$risk"
   grep -qF 'dimensions reviewed, suggested follow-ups, reviewers) lands in the PR body' <<< "$ri"
