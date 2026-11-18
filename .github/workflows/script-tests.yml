@@ -139,6 +139,11 @@ on:
       # rows, plus runs validate-workspace.zsh itself (#1744) — same
       # non-**-prefixed hazard as every per-plugin line above
       - 'development-composition/**'
+      # tests/product-plugin.bats pins the product plugin's manifest, its
+      # marketplace entry and the cmp test keeping product/scripts/prose-hash.zsh
+      # byte-identical to refine-issue's copy (#3222) — same non-**-prefixed
+      # hazard: 'development/**' does NOT match 'product/**'
+      - 'product/**'
       - '.github/workflows/script-tests.yml'
   push:
     branches: [main]

@@ -91,3 +91,26 @@ setup() {
   contains "$SECTION" '`provenance.generated_by` names `/development:define-personas` stays valid'
   contains "$SECTION" 'no validator may reject the old value'
 }
+
+@test "the bats suite's PR path filter lists product/** (#3222)" {
+  # in LIST-ENTRY form: the cmp test above is the only guard on the byte-identical
+  # copy, and a product-only PR must run it at PR time, not after merge
+  local paths
+  paths="$(sed -n '/^  pull_request:/,/^  push:/p' "$REPO_ROOT/.github/workflows/script-tests.yml")"
+  [ -n "$paths" ]
+  contains "$paths" "      - 'product/**'"
+}
+
+@test "reference-drift triggers on product's skill and agent frontmatter, PR and push (#3222)" {
+  # generate-docs-reference.py renders product's skills and agents; the
+  # development* globs never match product/, so both lists name it explicitly
+  local wf="$REPO_ROOT/.github/workflows/reference-drift.yml" pr push p
+  pr="$(sed -n '/^  pull_request:/,/^  push:/p' "$wf")"
+  push="$(sed -n '/^  push:/,/^permissions:/p' "$wf")"
+  [ -n "$pr" ]
+  [ -n "$push" ]
+  for p in 'product/skills/**/SKILL.md' 'product/agents/*.md'; do
+    contains "$pr" "      - \"$p\""
+    contains "$push" "      - \"$p\""
+  done
+}
