@@ -59,6 +59,12 @@ setup() {
   [ ! -e "$PLUGIN_DIR/skills/maintenance" ]
   [ ! -e "$PLUGIN_DIR/skills/resolve-profile" ]
   [ ! -e "$PLUGIN_DIR/skills/review" ]
+  # maintenance discovers a plugin by a gather script in its own scripts dir,
+  # not the plugin's: none may exist for product there
+  local mscripts="$REPO_ROOT/development/skills/maintenance/scripts"
+  [ -d "$mscripts" ]
+  [ ! -e "$mscripts/gather-product-findings.zsh" ]
+  [ ! -e "$mscripts/gather-product-findings.sh" ]
 }
 
 @test "the two prose-hash copies are byte-identical" {
@@ -81,6 +87,7 @@ setup() {
   contains "$SECTION" '**It is neither a language plugin nor a topic plugin.**'
   contains "$SECTION" 'maintenance discovery never sees it'
   contains "$SECTION" '**`development` refers to it by command name only**'
+  contains "$SECTION" 'Nothing in `development` may fail when `product` is absent: a persona check that points at `product` stays advisory.'
   contains "$SECTION" '`provenance.generated_by` names `/development:define-personas` stays valid'
   contains "$SECTION" 'no validator may reject the old value'
 }
