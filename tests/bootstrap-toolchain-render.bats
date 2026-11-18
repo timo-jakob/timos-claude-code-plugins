@@ -371,12 +371,15 @@ job_body() { # <workflow> <job>
 
 # The one normaliser, applied identically to both sides: it deletes block-marker
 # lines, full-line `#` comments in non-.md files (a shebang included), and
-# blank lines — and changes nothing else. Trailing inline comments stay.
+# blank lines, and in non-.md files masks each action pin — `@<40 hex>` plus any
+# trailing ` # <tag>` — to `@<pin>` (#2934) — and changes nothing else. Other
+# trailing inline comments stay. The mask keeps the action name, so a dropped,
+# swapped or moved action still fails AC3; a Renovate pin bump no longer does.
 normalise() { # <file>
   case "$1" in
   *.md) grep -Ev '^[[:space:]]*(#|<!--) --- [A-Z_-]+-(START|END)' "$1" | grep -Ev '^[[:space:]]*$' || true ;;
   *) grep -Ev '^[[:space:]]*(#|<!--) --- [A-Z_-]+-(START|END)' "$1" | grep -Ev '^[[:space:]]*#' |
-    grep -Ev '^[[:space:]]*$' || true ;;
+    grep -Ev '^[[:space:]]*$' | sed -E 's/@[0-9a-f]{40}( # [^[:space:]]+)?/@<pin>/g' || true ;;
   esac
 }
 
@@ -399,12 +402,46 @@ normalise() { # <file>
   [ "$checked" -eq 17 ]
 }
 
-@test "toolchain render: AC3 — the normaliser deletes only markers, full-line comments (not in .md) and blank lines" {
+@test "toolchain render: AC3 — the normaliser deletes only markers, full-line comments (not in .md) and blank lines, and masks action pins" {
   local d="$BATS_TEST_TMPDIR"
   printf '#!/bin/sh\n  # --- TRIVY-START ---\n  key: v # inline\n\n   \n  # full\n<!-- --- PUBLIC-END --- -->\n' > "$d/a.yml"
   [ "$(normalise "$d/a.yml")" = "  key: v # inline" ]
   printf '# Heading\n<!-- --- SNYK-START --- -->\n\ntext\n' > "$d/b.md"
   [ "$(normalise "$d/b.md")" = "$(printf '# Heading\ntext')" ]
+  # #2934: two pins of one action normalise to the same line, tag comment included
+  local sha1=3d3c42e5aac5ba805825da76410c181273ba90b1 sha2=6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+  printf '      - uses: a/b@%s # v1\n' "$sha1" > "$d/p1.yml"
+  printf '      - uses: a/b@%s # v2\n' "$sha2" > "$d/p2.yml"
+  [ "$(normalise "$d/p1.yml")" = "      - uses: a/b@<pin>" ]
+  [ "$(normalise "$d/p1.yml")" = "$(normalise "$d/p2.yml")" ]
+  # a pin with no tag comment is masked the same way
+  printf '      - uses: a/b@%s\n' "$sha2" > "$d/p3.yml"
+  [ "$(normalise "$d/p3.yml")" = "      - uses: a/b@<pin>" ]
+  # the action name is kept, so two actions still differ
+  printf '      - uses: a/c@%s # v1\n' "$sha1" > "$d/p4.yml"
+  [ "$(normalise "$d/p4.yml")" = "      - uses: a/c@<pin>" ]
+  [ "$(normalise "$d/p1.yml")" != "$(normalise "$d/p4.yml")" ]
+  # not a pin: a short ref, and a 40-hex string with no `@`, are left alone
+  printf '      - uses: a/b@v4 # v4\n  sha: %s # v1\n' "$sha1" > "$d/p5.yml"
+  [ "$(normalise "$d/p5.yml")" = "$(printf '      - uses: a/b@v4 # v4\n  sha: %s # v1' "$sha1")" ]
+  # .md is never masked
+  printf 'uses: a/b@%s # v1\n' "$sha1" > "$d/p6.md"
+  [ "$(normalise "$d/p6.md")" = "uses: a/b@$sha1 # v1" ]
+}
+
+@test "toolchain render: AC3 #2934 — a golden pin bump still matches the render; a golden action-name change does not" {
+  local f=public/.github/workflows/quality-public.yml d="$BATS_TEST_TMPDIR" old new
+  old='actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0'
+  new='actions/setup-python@0123456789abcdef0123456789abcdef01234567 # v9.9.9'
+  grep -qF "$old" "$GOLDEN/row1/$f"
+  cmp <(normalise "$GOLDEN/row1/$f") <(normalise "$BATS_FILE_TMPDIR/row1/$f")
+  # a different valid SHA and tag on one pin: still byte-identical after normalising
+  sed "s|$old|$new|" "$GOLDEN/row1/$f" > "$d/bumped.yml"
+  run ! cmp -s "$GOLDEN/row1/$f" "$d/bumped.yml"
+  cmp <(normalise "$d/bumped.yml") <(normalise "$BATS_FILE_TMPDIR/row1/$f")
+  # a different action name: the comparison fails
+  sed "s|actions/setup-python@|actions/setup-pythonx@|" "$GOLDEN/row1/$f" > "$d/renamed.yml"
+  run ! cmp -s <(normalise "$d/renamed.yml") <(normalise "$BATS_FILE_TMPDIR/row1/$f")
 }
 
 # --- AC4: SETUP.md composed per D6 ------------------------------------------------------
