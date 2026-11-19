@@ -47,7 +47,6 @@ of this plugin):
 | Commit | `/development:commit [message]` | Runs formatting/linting (delegates to language-specific plugin), generates a commit message, ensures a feature branch, and commits |
 | Resolve Issue | `/development:resolve-issue <issue#\|epic#>` | Takes a filed issue (or an epic of issues) and drives it to a merge-ready, **bot-authored** PR: dependency precheck (GitHub-native `blockedBy`; rejects on open blockers, refuses cycles, offers guided remediation interactively — epic #583) → readiness gate → branch off fresh main → implement → validate (tests must be green) → commit → `open-pr` (Maintenance-App-authored, auto-merge armed). For an epic: decomposes the children, orders them conflict-aware (sequential-by-default, disjoint-only parallel worktrees), tests each before merge, then runs a holistic end-to-end test over the merged epic. Repo-type-agnostic (Swift / Python / Java / Go / JavaScript / Claude-plugin / Composition / Kubernetes). |
 | Refine Issue | `/development:refine-issue <issue#>` | **Interactive** — drives a `needs-refinement` issue back to READY. Diagnoses via the readiness gate, then loops the `issue-refiner` agent with you (explanation → questions → recommendations → a prose rewrite → a proposed `story-spec/v1` block, with outside-in test cases mined from the repo), writes back the **human-approved** prose + block (a human-authored issue edit, not a bot PR), re-gates, and clears the label only on READY. Spins out linked `test-case` issues for a surface-touching story's outside-in cases; takes a typed parked exit when a session can't converge; pointed at an **epic**, walks each `needs-refinement` child and posts an epic summary. |
-| Define Personas | `/development:define-personas` | **Interactive** — creates or updates a repo's `personas/v1` registry (`docs/personas.md`): who actually uses each surface and what they type into it. Loops the `persona-definer` agent with you (repo-grounded candidate personas + Socratic questions), then writes back the **human-approved** prose + machine block to the working tree (lands via the normal PR flow). The registry feeds `refine-issue`'s realistic test-data generation and the readiness gate's advisory persona-reference check. |
 | Git Branch Naming | `/development:git-branch-naming` | Defines the branch naming convention (`<type>/<issue>-<description>`) and creates properly named branches |
 | Open PR | `/development:open-pr` | Opens a PR for the current branch **authored by the Claude Maintenance bot** — so you can approve it (GitHub blocks self-approval) — with squash auto-merge armed; falls back to a user-authored PR when the writer App isn't installed |
 | Sync PRs | `/development:sync-prs [--dry-run]` | Re-syncs open **Maintenance-App** PRs that became conflicting with `main`: rebases each through the rebase engine (mechanical manifest conflicts resolved by the repo type's merge driver), force-pushes it as the bot under a lease pinned to its pre-rebase head and re-triggers CI so armed auto-merge can fire; a real conflict gets one comment and the `needs-manual-rebase` label. Human-authored PRs are never touched. Idempotent — run it repeatedly, e.g. under `/loop` |
@@ -66,7 +65,6 @@ of this plugin):
 | Story Readiness | fable | Readiness gate for `/development:resolve-issue` — judges whether a story is specified well enough to build (testable acceptance, bounded scope, resolved dependencies) and emits a low/normal/elevated risk classification. Classifies the runtime `surface` and, for surface-touching stories, hard-requires outside-in `use_case` + `test_cases` (interface-aware check 5, #670). Also emits a proposed `story-spec/v1` block for READY stories and non-blocking advisories (e.g. persona-reference validation against the repo's `personas/v1` registry); verdict JSON only |
 | Review Consolidator | opus | Consolidates one review round's findings into a single prioritised changelist for the `resolve-issue` local review loop (dedup, blocking classification, conflict + non-convergence detection); changelist JSON only |
 | Issue Refiner | fable | Per-turn refinement engine for `/development:refine-issue` — turns the gate's objections + a human reply into a why-not-ready explanation, questions, recommendations, a prose rewrite, and a proposed `story-spec/v1` block (mining the repo for outside-in test cases, drawing realistic payloads from persona `data_traits`); pure function, no writes |
-| Persona Definer | fable | Per-turn elicitation engine for `/development:define-personas` — proposes repo-grounded candidate personas, asks Socratic questions to extract tacit knowledge, and returns a draft `personas/v1` registry update; challenges gaps (missing kinds, uncovered surfaces) rather than only confirming; pure function, no writes |
 
 ## development-swift
 
@@ -1081,9 +1079,22 @@ no maintenance dispatcher, no resolve profile and no review panel, so
 `development` refers to it only by command name. ARCHITECTURE.md's section
 *The `product` plugin — outside the language/topic model* states the boundary.
 
-**What's built (v0.1).** The plugin shell: its manifest, its marketplace entry
+**What's built (v0.2).** The plugin shell — its manifest, its marketplace entry
 and `product/scripts/prose-hash.zsh`, a byte-identical copy of `refine-issue`'s
-story-spec prose-hash script that a test keeps equal. It has no skills or
-agents yet; `define-personas` and the charter and rendering skills move in or
-land in the stories that follow
+story-spec prose-hash script that a test keeps equal — and the persona registry:
+the `/product:define-personas` skill and its `persona-definer` agent, which moved
+here from `development`. The charter and rendering skills land in the stories
+that follow
 ([#3202](https://github.com/timo-jakob/timos-claude-code-plugins/issues/3202)).
+
+**Skills:**
+
+| Skill | Command | Description |
+| ------- | --------- | ------------- |
+| Define Personas | `/product:define-personas` | **Interactive** — creates or updates a repo's `personas/v1` registry (`docs/personas.md`): who actually uses each surface and what they type into it. Loops the `persona-definer` agent with you (repo-grounded candidate personas + Socratic questions), then writes back the **human-approved** prose + machine block to the working tree (lands via the normal PR flow). The registry feeds `refine-issue`'s realistic test-data generation and the readiness gate's advisory persona-reference check. Ships in the `product` plugin. |
+
+**Agents:**
+
+| Agent | Model | Focus |
+| ------- | ------- | ------- |
+| Persona Definer | fable | Per-turn elicitation engine for `/product:define-personas` — proposes repo-grounded candidate personas, asks Socratic questions to extract tacit knowledge, and returns a draft `personas/v1` registry update; challenges gaps (missing kinds, uncovered surfaces) rather than only confirming; pure function, no writes |

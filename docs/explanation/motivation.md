@@ -124,7 +124,8 @@ What is shipped and aligned with the motivation:
   can never drift
   ([#696](https://github.com/timo-jakob/timos-claude-code-plugins/issues/696)).
   The block's **outside-in** test data is drawn from a repo's **persona
-  registry**: `/development:define-personas` builds `personas/v1`
+  registry**: `/product:define-personas`, which ships in the `product` plugin,
+  builds `personas/v1`
   ([#665](https://github.com/timo-jakob/timos-claude-code-plugins/issues/665))
   via the `persona-definer` agent
   ([#666](https://github.com/timo-jakob/timos-claude-code-plugins/issues/666)),

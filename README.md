@@ -21,7 +21,7 @@ Read more: [The six pillars](docs/explanation/philosophy.md) ·
 
 | Plugin | Purpose |
 | --- | --- |
-| **development** | Language-agnostic workflow tooling — bootstrap, maintenance orchestrator, commit, resolve-issue, refine-issue, define-personas, open-pr, branch naming |
+| **development** | Language-agnostic workflow tooling — bootstrap, maintenance orchestrator, commit, resolve-issue, refine-issue, open-pr, branch naming |
 | **development-python** | Full Python maintenance tier — triage, autonomous upgrades, coverage, review, Approver |
 | **development-java** | Full Java/Gradle maintenance tier (Gradle + Kotlin DSL only) |
 | **development-swift** | Full Swift maintenance tier — incl. Swift 6 migration |
@@ -33,7 +33,7 @@ Read more: [The six pillars](docs/explanation/philosophy.md) ·
 | **development-kubernetes** | Topic plugin for infrastructure-as-code (Kubernetes manifests, Helm, Kustomize, Argo CD; may be *primary* for a repo with no application language) — ownership boundary, maintenance dispatch, and the agents and review panel in v0.3; its CI pipeline ships as a `development` bootstrap template (one requirable check, `gate`, over *rendered* output); test fixtures still to come |
 | **development-opentofu** | Topic plugin for cloud provisioning (OpenTofu + Terraform-compatible HCL; may be *primary* for a repo with no application language) — ownership boundary, marketplace registration, maintenance dispatch and the agents and review panel only in v0.3 (the CI check pipeline and test fixtures follow); no approver agent, because a provisioning change can destroy state no rollback recovers |
 | **development-composition** | Topic plugin for the composition repo type — one repo per constellation that pins its members' published images in a `.claude-workspace.yaml` manifest and owns promotion (*primary*-eligible: `primary: composition`) — ownership boundary, the `claude-workspace/v1` contract, its validator, the bootstrap scaffold with its promote-to-prod workflow and Renovate image-tag config, and the maintenance gather and dispatcher (manifest findings escalated to a human, Renovate bumps triaged by an injection-hardened agent), and the `/development:resolve-issue` repo type with its review panel and resolve profile, only in v0.2; `deploy_target` accepts only `none`, so nothing deploys, until the compose and Kubernetes renderers exist |
-| **product** | The product side — the product charter, the persona registry and PDF + ePub rendering of product documents. Not a language or topic plugin: it takes no part in maintenance, review or resolve. Only the plugin shell (manifest and its prose-hash script) in v0.1; its skills follow |
+| **product** | The product side — the product charter, the persona registry and PDF + ePub rendering of product documents. Not a language or topic plugin: it takes no part in maintenance, review or resolve. In v0.2 the plugin shell (manifest and its prose-hash script) and `/product:define-personas` with its `persona-definer` agent, which ship in the `product` plugin; the charter and rendering skills follow |
 
 Full command + agent inventory: **[docs/reference/plugins.md](docs/reference/plugins.md)**.
 

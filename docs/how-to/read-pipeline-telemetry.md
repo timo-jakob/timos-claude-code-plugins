@@ -115,9 +115,10 @@ Three things decide where you find these records:
   review already in the sink file is skipped.
 - **Every other skill emits nothing.** `/development:open-pr`,
   `/development:commit`, `/development:sync-prs`, `/development:cleanup`,
-  `/development:define-personas` and the review panels are steps or tools, not
-  pipelines of the epic, and are not instrumented — their work shows up, where
-  it matters, inside a pipeline's own record.
+  `/product:define-personas` (it ships in the `product` plugin) and the review
+  panels are steps or tools, not pipelines of the epic, and are not
+  instrumented — their work shows up, where it matters, inside a pipeline's own
+  record.
 
 ## Payload keys by pipeline
 

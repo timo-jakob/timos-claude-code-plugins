@@ -37,8 +37,9 @@ shipped. Every change, whichever skill produced it, ships the same way.
 
 1. **Set up — once per repository.** `/development:bootstrap` installs the quality and security toolchain — CI
    workflows, scanners, hooks, the docs stack — and opens it as a PR ([How bootstrap works](workflow-bootstrap.md)).
-   `/development:define-personas` writes the persona registry, `docs/personas.md`. Personas are optional, but they are
-   what lets refinement write test data that looks like real input ([Personas](#personas-who-a-story-serves) below).
+   `/product:define-personas`, from the `product` plugin, writes the persona registry, `docs/personas.md`. Personas are
+   optional, but they are what lets refinement write test data that looks like real input
+   ([Personas](#personas-who-a-story-serves) below).
 2. **Specify.** You file an issue or an epic, as you would for a human colleague, and start
    `/development:resolve-issue` on it. Before anything is built, its first steps check that no open blocker stands in
    the way and have the `story-readiness` agent judge whether the story is specified well enough. In a run you started,
@@ -122,7 +123,7 @@ A **persona** is a short, evidence-based description of someone who uses one of 
 API, a web UI — and of the values they actually type into it. The registry of them lives in
 [`docs/personas.md`](../personas.md), as readable prose plus a generated `personas/v1` block that tools consume.
 
-1. **Gather evidence.** `/development:define-personas` reads the README, the docs, existing issues, OpenAPI and proto
+1. **Gather evidence.** `/product:define-personas` reads the README, the docs, existing issues, OpenAPI and proto
    specs and UI routes. It runs in *create* mode when there is no registry yet and *update* mode when there is.
 2. **Elicit, one turn at a time.** The `persona-definer` agent proposes candidates grounded in that evidence and asks
    Socratic questions. It challenges gaps instead of only confirming you: a surface with no primary persona, a missing
@@ -158,8 +159,8 @@ Each workflow is defined by its skill; when a page here and a skill disagree, th
 
 - `/development:refine-issue` —
   [`development/skills/refine-issue/SKILL.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development/skills/refine-issue/SKILL.md)
-- `/development:define-personas` —
-  [`development/skills/define-personas/SKILL.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development/skills/define-personas/SKILL.md)
+- `/product:define-personas` (in the `product` plugin) —
+  [`product/skills/define-personas/SKILL.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/product/skills/define-personas/SKILL.md)
 - `/development:resolve-issue` —
   [`development/skills/resolve-issue/SKILL.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development/skills/resolve-issue/SKILL.md)
 - `/development:bootstrap` —
