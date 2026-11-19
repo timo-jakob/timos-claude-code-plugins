@@ -134,6 +134,7 @@ setup() {
   contains "$s" 'or the human explicitly confirms a deliberate exception to a convention; record that exception in the prose and proceed to final approval.'
   contains "$a" 'or the human explicitly confirms a deliberate exception to a convention; record that exception in the prose and proceed to final approval.'
   contains "$s" 'A missing sentinel pair or an unparseable block counts as a mismatch: pass the whole file as `registry_prose` with registry-so-far empty, and Step 2 rewrites the whole file as in create.'
+  contains "$s" 'unless Step 0 found no sentinel pair or an unparseable block: then compose the whole file as in create, heading and intro included.'
   run grep -nF -e '/development:define-personas' -e 'development:persona-definer' "$skill" "$agent"
   [ "$status" -eq 1 ]
   [ -z "$output" ]
