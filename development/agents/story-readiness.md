@@ -107,7 +107,8 @@ gh issue view <N> --repo <owner/name> --json number,title,body,state,labels,url
   Persona references **never** move the verdict: they inform, they don't gate
   (personas are advisory by design, #573). When an advisory names a missing or
   ill-fitting persona, its message points the human at
-  `/development:define-personas` to add or fix it.
+  `/product:define-personas` to add or fix it — it ships in the `product`
+  plugin, and the advisory stands whether or not that plugin is installed.
 - **Classify the story's runtime surface** (#670). Decide which runtime
   surface(s) the delivered change will expose to the outside, using the **#242
   taxonomy** so the definition layer and the CI layer speak one language:
@@ -444,7 +445,8 @@ Rules for the payload:
   "persona-registry-stale" | "persona-registry-missing" |
   "implementation-pinned", "message": "…" }`. A persona advisory's `message`
   names the id and, where relevant, points the human at
-  `/development:define-personas`; an `implementation-pinned` advisory's
+  `/product:define-personas` (it ships in the `product` plugin); an
+  `implementation-pinned` advisory's
   `message` reads `criterion <N> pins implementation; consider stating the
   observable behaviour`, with `<N>` the criterion's 1-based number in the
   story. **Advisories never change the verdict** — a `READY` story with

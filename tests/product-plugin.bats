@@ -27,6 +27,11 @@ setup() {
   # level, never widening into a sibling section
   SECTION="$(sed -n '/^### The `product` plugin — outside the language\/topic model/,/^##/p' \
                "$REPO_ROOT/ARCHITECTURE.md" | tr -s '[:space:]' ' ')"
+  # the retired development names (#3225), each built from two halves so that
+  # no line of this file holds either whole name and the sweep below cannot
+  # match its own source
+  OLD_CMD="/development"":define-personas"
+  OLD_AGENT="development"":persona-definer"
 }
 
 @test "product plugin.json names the plugin and a version" {
@@ -88,7 +93,7 @@ setup() {
   contains "$SECTION" 'maintenance discovery never sees it'
   contains "$SECTION" '**`development` refers to it by command name only**'
   contains "$SECTION" 'Nothing in `development` may fail when `product` is absent: a persona check that points at `product` stays advisory.'
-  contains "$SECTION" '`provenance.generated_by` names `/development:define-personas` stays valid'
+  contains "$SECTION" "\`provenance.generated_by\` names \`$OLD_CMD\` stays valid"
   contains "$SECTION" 'no validator may reject the old value'
 }
 
@@ -135,7 +140,7 @@ setup() {
   contains "$a" 'or the human explicitly confirms a deliberate exception to a convention; record that exception in the prose and proceed to final approval.'
   contains "$s" 'A missing sentinel pair or an unparseable block counts as a mismatch: pass the whole file as `registry_prose` with registry-so-far empty, and Step 2 rewrites the whole file as in create.'
   contains "$s" 'unless Step 0 found no sentinel pair or an unparseable block: then compose the whole file as in create, heading and intro included.'
-  run grep -nF -e '/development:define-personas' -e 'development:persona-definer' "$skill" "$agent"
+  run grep -nF -e "$OLD_CMD" -e "$OLD_AGENT" "$skill" "$agent"
   [ "$status" -eq 1 ]
   [ -z "$output" ]
 }
@@ -150,4 +155,80 @@ setup() {
   [ -z "$output" ]
   # the relative path resolves from the skill's base dir to the shipped script
   [ -x "$PLUGIN_DIR/skills/define-personas/../../scripts/prose-hash.zsh" ]
+}
+
+# The old-name sweep (#3225). Every tracked line naming a retired development
+# name, outside the two exempt trees — docs/superpowers/ holds dated records and
+# tests/fixtures/ holds test inputs — and outside recorded `generated_by`
+# provenance lines, whose old value stays valid (ARCHITECTURE.md). Prints the
+# offending lines; exits non-zero only when git itself fails.
+old_name_hits() {
+  local out rc
+  out="$(git -C "$1" grep -nF -e "$OLD_CMD" -e "$OLD_AGENT" -- . \
+           ':!docs/superpowers/' ':!tests/fixtures/')"
+  rc=$?
+  [ "$rc" -le 1 ] || return "$rc"
+  printf '%s\n' "$out" | grep -vF 'generated_by' || true
+}
+
+@test "development no longer ships define-personas or persona-definer (#3225)" {
+  run git -C "$REPO_ROOT" ls-files -- development/skills/define-personas development/agents/persona-definer.md
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ ! -e "$REPO_ROOT/development/skills/define-personas" ]
+  [ ! -e "$REPO_ROOT/development/agents/persona-definer.md" ]
+}
+
+@test "no tracked file names the retired development command or agent type (#3225)" {
+  run old_name_hits "$REPO_ROOT"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "the sweep's own file holds neither retired name whole (#3225)" {
+  [ -n "$OLD_CMD" ]
+  [ -n "$OLD_AGENT" ]
+  run grep -cF -e "$OLD_CMD" -e "$OLD_AGENT" "$BATS_TEST_FILENAME"
+  [ "$output" = "0" ]
+}
+
+@test "the sweep finds a planted old name and spares the exempt trees and provenance lines (#3225)" {
+  unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE
+  local d="$BATS_TEST_TMPDIR/sweep"
+  mkdir -p "$d/docs/superpowers" "$d/tests/fixtures" "$d/development/agents"
+  printf 'run %s\n' "$OLD_CMD" > "$d/docs/superpowers/plan.md"
+  printf 'agent %s\n' "$OLD_AGENT" > "$d/tests/fixtures/f.md"
+  printf '"generated_by": "persona-definer via %s"\n' "$OLD_CMD" > "$d/registry.md"
+  git -C "$d" init -q
+  git -C "$d" add -A
+  run old_name_hits "$d"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  printf 'route to %s\n' "$OLD_CMD" > "$d/development/agents/a.md"
+  printf 'dispatch %s\n' "$OLD_AGENT" > "$d/b.md"
+  git -C "$d" add -A
+  run old_name_hits "$d"
+  [ "$status" -eq 0 ]
+  contains "$output" "development/agents/a.md:1:route to $OLD_CMD"
+  contains "$output" "b.md:1:dispatch $OLD_AGENT"
+  # an untracked file is not in the tracked-file listing
+  printf 'stray %s\n' "$OLD_CMD" > "$d/untracked.md"
+  run old_name_hits "$d"
+  [ "$status" -eq 0 ]
+  lacks "$output" 'untracked.md'
+}
+
+@test "development routes a missing persona to /product:define-personas in the product plugin (#3225)" {
+  local refiner readiness skill
+  refiner="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/development/agents/issue-refiner.md")"
+  readiness="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/development/agents/story-readiness.md")"
+  # the routing note is a blockquote: drop each line's `> ` before joining
+  skill="$(sed 's/^> *//' "$REPO_ROOT/development/skills/refine-issue/SKILL.md" | tr -s '[:space:]' ' ')"
+  contains "$refiner" 'tell the human to run **`/product:define-personas`** to add or fix it — it ships in the `product` plugin'
+  contains "$refiner" 'its absence never blocks the turn'
+  contains "$readiness" '`/product:define-personas` to add or fix it — it ships in the `product` plugin, and the advisory stands whether or not that plugin is installed.'
+  contains "$readiness" '`/product:define-personas` (it ships in the `product` plugin); an `implementation-pinned` advisory'
+  contains "$skill" '`/product:define-personas`** to add or adjust the persona — it ships in the `product` plugin, and you never invoke that skill automatically.'
+  contains "$skill" '**advisory**, whether or not `product` is installed'
+  contains "$skill" 'route the human to **`/product:define-personas`** (in the `product` plugin, as in Step 2)'
 }

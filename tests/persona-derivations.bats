@@ -543,7 +543,7 @@ json_after() {
 
 @test "advisory: an unresolvable id routes to define-personas, per id" {
   run -0 extract "$REFINER" "$CORNER_START" "$SECTION_END_2"
-  contains "$output" '/development:define-personas'
+  contains "$output" '/product:define-personas'
   contains "$output" 'that is a persona problem, not a missing-test-case problem'
   # 'per id' is the test's own title claim and was previously unasserted; the
   # truncated 'including on a turn that' survives any completion, including one
