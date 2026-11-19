@@ -47,8 +47,8 @@ schema, the five kinds, the conventions, and the provenance mechanism.
   prose to the agent as `registry_prose` so it reconciles from the prose rather
   than the block. On a match, `registry_prose` is `null`. A missing sentinel
   pair or an unparseable block counts as a mismatch: pass the whole file as
-  `registry_prose` with registry-so-far empty, and in Step 2 the approved
-  region and block replace that hand-written prose rather than sit beside it.
+  `registry_prose` with registry-so-far empty, and Step 2 rewrites the whole
+  file as in create.
 - **Gather repo evidence** the agent will mine — confirm what's available so you
   can tell the human what the first proposals are grounded in: README/docs,
   OpenAPI/proto specs, UI routes, existing issues, and the runtime surfaces the
@@ -112,7 +112,9 @@ normal PR flow.
      customized them, and they sit *outside* the hashed region), and surgically
      **replace only** the sentinel prose region and the `<details>` machine block
      with the approved prose + regenerated block. Do not regenerate the whole
-     file, or the diff bloats and human-authored intro/conventions text is lost.
+     file, or the diff bloats and human-authored intro/conventions text is lost
+     — unless Step 0 found no sentinel pair or an unparseable block: then
+     compose the whole file as in create, heading and intro included.
 
    The block layout, either way:
 
@@ -148,7 +150,8 @@ normal PR flow.
 
 3. **Validate then write.** Confirm the block is valid JSON (`jq -e` the fenced
    object), then write `docs/personas.md`. In **update** mode, replace the prior
-   sentinel-region + machine block in place (never append a second).
+   sentinel-region + machine block in place, or rewrite the whole file per
+   step 1's exception (never append a second).
 
 4. **Report.** Tell the human the file was written to the working tree, summarize
    what changed (create: N personas; update: the diff), and that the change lands

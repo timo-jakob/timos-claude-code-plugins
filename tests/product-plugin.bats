@@ -133,6 +133,7 @@ setup() {
   contains "$a" '`/product:define-personas` skill (#667) drives the loop'
   contains "$s" 'or the human explicitly confirms a deliberate exception to a convention; record that exception in the prose and proceed to final approval.'
   contains "$a" 'or the human explicitly confirms a deliberate exception to a convention; record that exception in the prose and proceed to final approval.'
+  contains "$s" 'A missing sentinel pair or an unparseable block counts as a mismatch: pass the whole file as `registry_prose` with registry-so-far empty, and Step 2 rewrites the whole file as in create.'
   run grep -nF -e '/development:define-personas' -e 'development:persona-definer' "$skill" "$agent"
   [ "$status" -eq 1 ]
   [ -z "$output" ]
