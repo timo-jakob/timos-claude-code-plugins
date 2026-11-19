@@ -114,3 +114,40 @@ setup() {
     contains "$push" "      - \"$p\""
   done
 }
+
+@test "define-personas and persona-definer ship in product with every self-reference renamed (#3223)" {
+  local skill="$PLUGIN_DIR/skills/define-personas/SKILL.md" agent="$PLUGIN_DIR/agents/persona-definer.md"
+  [ -s "$skill" ]
+  [ -s "$agent" ]
+  run sed -n '2p' "$skill"
+  [ "$output" = "name: define-personas" ]
+  run sed -n '2p' "$agent"
+  [ "$output" = "name: persona-definer" ]
+  local s a
+  s="$(tr -s '[:space:]' ' ' < "$skill")"
+  a="$(tr -s '[:space:]' ' ' < "$agent")"
+  contains "$s" 'You are the **conductor** of `/product:define-personas`'
+  contains "$s" '`subagent_type: product:persona-definer`'
+  contains "$s" '"generated_by": "persona-definer via /product:define-personas"'
+  contains "$a" 'Per-turn elicitation engine for /product:define-personas'
+  contains "$a" '`/product:define-personas` skill (#667) drives the loop'
+  contains "$s" 'or the human explicitly confirms a deliberate exception to a convention; record that exception in the prose and proceed to final approval.'
+  contains "$a" 'or the human explicitly confirms a deliberate exception to a convention; record that exception in the prose and proceed to final approval.'
+  contains "$s" 'A missing sentinel pair or an unparseable block counts as a mismatch: pass the whole file as `registry_prose` with registry-so-far empty, and Step 2 rewrites the whole file as in create.'
+  contains "$s" 'unless Step 0 found no sentinel pair or an unparseable block: then compose the whole file as in create, heading and intro included.'
+  run grep -nF -e '/development:define-personas' -e 'development:persona-definer' "$skill" "$agent"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+}
+
+@test "product's define-personas hashes the prose with product's own prose-hash.zsh (#3223)" {
+  local skill="$PLUGIN_DIR/skills/define-personas/SKILL.md"
+  [ -s "$skill" ]
+  run grep -cF '"<skill-base-dir>/../../scripts/prose-hash.zsh" --file <prose.txt>' "$skill"
+  [ "$output" = "1" ]
+  run grep -nF 'story-spec-prose-hash.zsh' "$skill"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  # the relative path resolves from the skill's base dir to the shipped script
+  [ -x "$PLUGIN_DIR/skills/define-personas/../../scripts/prose-hash.zsh" ]
+}
