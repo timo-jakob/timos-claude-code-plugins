@@ -195,6 +195,22 @@ place() {
   contains "$stderr" "cannot read"
 }
 
+@test "a .gitmodules with no path key is no submodules: not found is exit 3" {
+  : > "$R/.gitmodules"
+  run --separate-stderr zsh "$S" --repo "$R" "$DOC"
+  [ "$status" -eq 3 ]
+  [ "$stderr" = "product-doc: not found: $DOC" ]
+}
+
+@test "a file inside a submodule mounted at a prefix of the path is linked, never own" {
+  declare_subs docs
+  populate docs
+  printf '# Personas\n' > "$R/$DOC"
+  run --separate-stderr zsh "$S" --repo "$R" "$DOC"
+  [ "$status" -eq 0 ]
+  ends_with "$output" $'\t'"linked:docs"
+}
+
 @test "define-personas looks the registry up and stops on a linked one without writing" {
   local step0
   step0="$(sed -n '/^## Step 0/,/^## Step 1/p' "$SKILL" | tr -s '[:space:]' ' ')"

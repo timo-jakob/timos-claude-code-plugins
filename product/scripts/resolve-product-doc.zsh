@@ -62,17 +62,12 @@ done
 
 repo="${repo:A}"
 
-# 1. The repo's own file wins.
-if [[ -f "$repo/$rel" ]]; then
-  print -r -- "$repo/$rel"$'\t'"own"
-  exit 0
-fi
-
-# 2. The declared submodules, in .gitmodules file order.
+# The declared submodules, in .gitmodules file order.
 local gm="$repo/.gitmodules"
+local -a subs=()
 if [[ -f "$gm" ]]; then
   command -v git >/dev/null 2>&1 || { print -r -- "$me: git is not on PATH" >&2; exit 1; }
-  local raw
+  local raw entry
   local -i rc=0
   # --null: each entry is `<key>\n<value>\0`, so a name or path holding spaces
   # never splits. Exit 1 is "no submodule.*.path key", which means no
@@ -82,26 +77,39 @@ if [[ -f "$gm" ]]; then
     print -r -- "$me: cannot read $gm (git config exit $rc)" >&2
     exit 1
   fi
-  local entry sub dir
-  local -a full
   for entry in "${(@0)raw}"; do
-    [[ -n "$entry" ]] || continue
-    sub="${entry#*$'\n'}"
-    [[ -n "$sub" ]] || continue
-    dir="$repo/$sub"
-    # (NF): the directory itself, only when it is a non-empty directory
-    full=( "$dir"(NF) )
-    if (( ${#full} == 0 )); then
-      print -r -- "product-doc: submodule not initialised: $sub" >&2
-      print -r -- "  it may hold $rel; run: git submodule update --init -- ${(q-)sub}" >&2
-      exit 4
-    fi
-    if [[ -f "$dir/$rel" ]]; then
-      print -r -- "${dir:A}/$rel"$'\t'"linked:$sub"
-      exit 0
-    fi
+    entry="${${entry#*$'\n'}%/}"
+    [[ -n "$entry" ]] && subs+=( "$entry" )
   done
 fi
+
+# 1. The repo's own file wins, unless it lies inside a declared submodule:
+#    then it is that submodule's file.
+local sub dir origin="own"
+for sub in "${subs[@]}"; do
+  [[ "$rel" == "$sub"/* ]] && { origin="linked:$sub"; break; }
+done
+if [[ -f "$repo/$rel" ]]; then
+  print -r -- "$repo/$rel"$'\t'"$origin"
+  exit 0
+fi
+
+# 2. Otherwise the first declared submodule holding the file wins.
+local -a full
+for sub in "${subs[@]}"; do
+  dir="$repo/$sub"
+  # (NF): the directory itself, only when it is a non-empty directory
+  full=( "$dir"(NF) )
+  if (( ${#full} == 0 )); then
+    print -r -- "product-doc: submodule not initialised: $sub" >&2
+    print -r -- "  it may hold $rel; run: git submodule update --init -- ${(q-)sub}" >&2
+    exit 4
+  fi
+  if [[ -f "$dir/$rel" ]]; then
+    print -r -- "${dir:A}/$rel"$'\t'"linked:$sub"
+    exit 0
+  fi
+done
 
 print -r -- "product-doc: not found: $rel" >&2
 exit 3
