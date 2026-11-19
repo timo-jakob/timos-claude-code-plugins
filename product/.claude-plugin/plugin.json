@@ -1,7 +1,7 @@
 {
   "name": "product",
   "description": "Product-side skills: the product charter, the persona registry, and PDF + ePub rendering of product documents. Not a language or topic plugin — it takes no part in maintenance, review or resolve.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": {
     "name": "Timo Jakob"
   },

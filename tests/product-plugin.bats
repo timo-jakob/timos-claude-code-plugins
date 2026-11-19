@@ -114,3 +114,36 @@ setup() {
     contains "$push" "      - \"$p\""
   done
 }
+
+@test "define-personas and persona-definer ship in product with every self-reference renamed (#3223)" {
+  local skill="$PLUGIN_DIR/skills/define-personas/SKILL.md" agent="$PLUGIN_DIR/agents/persona-definer.md"
+  [ -s "$skill" ]
+  [ -s "$agent" ]
+  run sed -n '2p' "$skill"
+  [ "$output" = "name: define-personas" ]
+  run sed -n '2p' "$agent"
+  [ "$output" = "name: persona-definer" ]
+  local s a
+  s="$(tr -s '[:space:]' ' ' < "$skill")"
+  a="$(tr -s '[:space:]' ' ' < "$agent")"
+  contains "$s" 'You are the **conductor** of `/product:define-personas`'
+  contains "$s" '`subagent_type: product:persona-definer`'
+  contains "$s" '"generated_by": "persona-definer via /product:define-personas"'
+  contains "$a" 'Per-turn elicitation engine for /product:define-personas'
+  contains "$a" '`/product:define-personas` skill (#667) drives the loop'
+  run grep -nF -e '/development:define-personas' -e 'development:persona-definer' "$skill" "$agent"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+}
+
+@test "product's define-personas hashes the prose with product's own prose-hash.zsh (#3223)" {
+  local skill="$PLUGIN_DIR/skills/define-personas/SKILL.md"
+  [ -s "$skill" ]
+  run grep -cF '"<skill-base-dir>/../../scripts/prose-hash.zsh" --file <prose.txt>' "$skill"
+  [ "$output" = "1" ]
+  run grep -nF 'story-spec-prose-hash.zsh' "$skill"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  # the relative path resolves from the skill's base dir to the shipped script
+  [ -x "$PLUGIN_DIR/skills/define-personas/../../scripts/prose-hash.zsh" ]
+}
