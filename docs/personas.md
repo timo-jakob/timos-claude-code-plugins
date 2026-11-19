@@ -8,7 +8,7 @@ like real input instead of `foo`/`bar`. The contract lives in
 [`ARCHITECTURE.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/ARCHITECTURE.md)
 under *Persona registry contract*.
 
-**Regenerate it with `/development:define-personas`** — never hand-edit the
+**Regenerate it with `/product:define-personas`** (it ships in the `product` plugin) — never hand-edit the
 `<details>` block below. The prose between the sentinels is authoritative; the
 block is generated from it and carries a hash over exactly that region, so a
 hand-edit to the prose makes the block detectably stale and consumers route you
