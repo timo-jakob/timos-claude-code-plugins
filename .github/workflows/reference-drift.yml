@@ -7,6 +7,10 @@
 # to the frontmatter sources, the generated pages, or the generator itself — NOT
 # on unrelated docs edits, and it's separate from the docs site build so a plain
 # frontmatter change doesn't spin up mkdocs/pandoc.
+#
+# `product` (#3222) is the one plugin outside the development* naming, so its
+# skill and agent paths are listed on their own: the development* globs never
+# match product/.
 
 name: reference drift
 
@@ -15,6 +19,8 @@ on:
     paths:
       - "development*/skills/**/SKILL.md"
       - "development*/agents/*.md"
+      - "product/skills/**/SKILL.md"
+      - "product/agents/*.md"
       - "docs/reference/commands.md"
       - "docs/reference/agents.md"
       - "scripts/generate-docs-reference.py"
@@ -24,6 +30,8 @@ on:
     paths:
       - "development*/skills/**/SKILL.md"
       - "development*/agents/*.md"
+      - "product/skills/**/SKILL.md"
+      - "product/agents/*.md"
       - "docs/reference/commands.md"
       - "docs/reference/agents.md"
       - "scripts/generate-docs-reference.py"
