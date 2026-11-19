@@ -35,6 +35,7 @@ Your prompt gives you **one JSON object**:
   "registry_so_far": {
     "personas": [ … existing personas/v1 objects, [] in create mode … ]
   },
+  "registry_prose": "… the current docs/personas.md prose region, or null …",
   "conversation": [ { "role": "definer"|"human", "text": "…" } ],
   "human_reply": "… the human's latest reply (empty on the first turn) …"
 }
@@ -44,6 +45,11 @@ Your prompt gives you **one JSON object**:
   e.g. routed here because a story needs a missing/ill-fitting persona).
 - `registry_so_far.personas` is the registry state to build on; `[]` in create
   mode.
+- `registry_prose` is the current prose region of `docs/personas.md` when the
+  skill found its machine block stale (the prose was edited after the block was
+  generated), else `null`. When it is set, the prose is authoritative: reconcile
+  `draft_prose` and `draft_personas` from it, keeping the human's edits, and use
+  `registry_so_far` only for what the prose does not say.
 - `conversation` is the dialogue so far, oldest first; on the first turn it and
   `human_reply` are empty — that turn is repo-mining + opening proposals +
   questions.
@@ -143,7 +149,10 @@ Rules for the payload:
   rule out); and `persona_count` (the length of `draft_personas`). The skill
   **converges only when every surface has exactly one primary, `kinds_to_confirm`
   is `[]` (each considered and decided), `persona_count` is 3–7, and the human
-  approves** — so drive that here.
+  approves — or the human explicitly confirms a deliberate exception to a
+  convention; record that exception in the prose and proceed to final
+  approval.** Coverage is advice, not a precondition for writing — so drive it
+  here.
 - **`draft_prose`** — the proposed `docs/personas.md` persona sections as
   **prose only** (human-authoritative). Omit the machine block and the sentinels;
   the skill renders those. Emit `null` on an early turn when you can't yet draft.

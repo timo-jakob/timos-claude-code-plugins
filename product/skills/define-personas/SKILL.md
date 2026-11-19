@@ -38,6 +38,14 @@ schema, the five kinds, the conventions, and the provenance mechanism.
   root) exists → **update**; parse its `personas/v1` block into the
   registry-so-far (the personas array). Else → **create**, registry-so-far is
   empty.
+- **In update mode, check the block against the prose.** Write the current
+  prose region (the bytes between the sentinels, sentinel lines excluded) to a
+  temp file and hash it with the same `prose-hash.zsh` as Step 2
+  (`--file <current-prose.txt>`). Compare the result to the block's
+  `provenance.prose_sha256`. On a mismatch, tell the human the machine block is
+  stale (the prose was edited after it was generated), and pass the current
+  prose to the agent as `registry_prose` so it reconciles from the prose rather
+  than the block. On a match, `registry_prose` is `null`.
 - **Gather repo evidence** the agent will mine — confirm what's available so you
   can tell the human what the first proposals are grounded in: README/docs,
   OpenAPI/proto specs, UI routes, existing issues, and the runtime surfaces the
@@ -53,6 +61,7 @@ Each round is one call to the **`persona-definer`** agent (Task tool,
   "repo": "owner/name",
   "mode": "create" | "update",
   "registry_so_far": { "personas": [ … existing personas/v1 objects, [] in create … ] },
+  "registry_prose": "… the current prose region when Step 0 found the block stale, else null …",
   "conversation": [ { "role": "definer"|"human", "text": "…" } ],
   "human_reply": "… the human's latest reply (empty on the first round) …"
 }
@@ -70,8 +79,10 @@ Relay its returned JSON to the human in readable form:
 Append this round (your relayed summary + the human's reply) to `conversation`
 and call the agent again with the human's `human_reply`. **Converge when
 `coverage` shows every surface has exactly one primary, `kinds_to_confirm` is
-`[]`, `persona_count` is 3–7, and the human approves** — the agent drives this
-signal (that is its purpose). Then present the **final `draft_prose` +
+`[]`, `persona_count` is 3–7, and the human approves — or the human explicitly
+confirms a deliberate exception to a convention; record that exception in the
+prose and proceed to final approval.** The coverage signal is advice, not a
+precondition for writing — the agent drives it (that is its purpose). Then present the **final `draft_prose` +
 `draft_personas`** and get the human's **explicit approval of the exact
 registry**. In **update** mode, show a **minimal diff** against the current
 `docs/personas.md` (what personas/fields change), not a wall of unchanged text.
