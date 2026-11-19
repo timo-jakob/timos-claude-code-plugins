@@ -8394,9 +8394,9 @@ shapes refinement mines to generate `curl` / `grpcurl` / Playwright payloads
 that look like real user input instead of `foo`/`bar`. This section defines the
 `personas/v1` artifact: the file layout, the machine-readable schema, the five
 persona kinds, the registry conventions, and the provenance mechanism that makes
-staleness detectable. The `persona-definer` agent (#666) generates it and the
-`/development:define-personas` skill (#667) writes it back; `story-readiness`
-(advisory check) and `refine-issue` (data-trait mining) consume it (#668).
+staleness detectable. The `product:persona-definer` agent (#666) generates it
+and the `/product:define-personas` skill (#667) writes it back — both ship in the
+`product` plugin; `story-readiness` (advisory check) and `refine-issue` (data-trait mining) consume it (#668).
 
 The artifact lives at **`docs/personas.md`, in every repo that has a surface —
 including this one**. A surface need not be a *runtime* surface: this repo
@@ -8461,7 +8461,7 @@ not the hash of the prose shown above). Shape:
 {
   "schema": "personas/v1",
   "provenance": {
-    "generated_by": "persona-definer via /development:define-personas",
+    "generated_by": "persona-definer via /product:define-personas",
     "generated_at": "2026-07-10T12:00:00Z",
     "prose_sha256": "9b2e0a1c4d6f83b5a7c9e1f3058d2a4b6c8e0f1a3b5d7c9e1f2a4b6c8d0e2f4a"
   },
@@ -8572,7 +8572,7 @@ Provenance makes that detectable — the same mechanism `story-spec/v1` uses:
 - **The check.** A consumer recomputes the hash over the current prose region and
   compares. **Match** → the block is in sync with its prose. **Mismatch** → the
   prose was hand-edited after generation; the block is **stale**, and the
-  consumer flags it and routes the human to `/development:define-personas` to
+  consumer flags it and routes the human to `/product:define-personas` to
   regenerate rather than trusting the drifted block.
 
 This is the whole staleness machinery — no background job. The registry is

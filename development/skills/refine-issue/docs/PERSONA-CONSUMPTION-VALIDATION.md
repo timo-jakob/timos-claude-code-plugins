@@ -10,13 +10,13 @@ work end-to-end, using the **shipped** primitives (the same
 > **Scope of this evidence.** This validates the *mechanics* the epic ships — the
 > provenance/staleness hash, the advisory logic, and the `data_traits` → payload
 > path — deterministically. The remaining acceptance step, a **human-approved
-> `docs/personas.md` produced by an interactive `/development:define-personas`
+> `docs/personas.md` produced by an interactive `/product:define-personas`
 > session on `ai-doc-organizer`** and a real refined issue there, is a
 > human-in-the-loop adoption action (the interactive skills require a human to
 > answer and approve). The skills are validated *capable* of it here; running it
 > for real on the test bed is the maintainer's step.
 
-## 1. A `personas/v1` registry as `/development:define-personas` emits it
+## 1. A `personas/v1` registry as `/product:define-personas` emits it
 
 The registry prose (one persona, `dana-dispatcher`, `kind: end-user`) is hashed
 by the shipped primitive to stamp `provenance.prose_sha256`:

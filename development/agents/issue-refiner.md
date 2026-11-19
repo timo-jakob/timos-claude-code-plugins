@@ -101,9 +101,9 @@ authoring it. Draft it from real evidence (`Read`/`Grep`/`Glob`; `Bash` for
   Personas are **advisory** — if none fits, leave `personas: []`; never block on
   it. When a story clearly *needs* a persona the registry lacks (or the best fit
   is poor), **do not invent an id**: say so in a `recommendations` entry and tell
-  the human to run **`/development:define-personas`** to add or fix it (the
-  routing is a recommendation to the human — you never invoke that skill
-  yourself).
+  the human to run **`/product:define-personas`** to add or fix it — it ships in
+  the `product` plugin (the routing is a recommendation to the human — you never
+  invoke that skill yourself, and its absence never blocks the turn).
 - **Read the referenced persona's conditions, not only its data** — its `role`,
   `context`, `proficiency` and `failure_costs` (all required `personas/v1`
   fields). `data_traits` say what the persona *types*; these say what the surface
@@ -231,7 +231,7 @@ Say nothing at all when there is nothing to enumerate from — a `none`-surface
 story (`interface_surfaces: []`), `personas: []`, or every resolving persona
 carrying `data_traits: []` (legal for a pure observer). For a referenced id that
 does **not** resolve — a missing registry, a stale id — emit the
-`/development:define-personas` recommendation instead: that is a persona problem,
+`/product:define-personas` recommendation instead: that is a persona problem,
 not a missing-test-case problem, and it applies per id, including on a turn that
 derived cases from the personas that did resolve.
 
@@ -339,7 +339,7 @@ requires it); when it no longer arrives, omit it. Never report it
 
 **Say nothing at all** — no UI/UX objection, and no UI/UX recommendation — for a
 `none`-surface story (`interface_surfaces: []`) or one with `personas: []`. For a
-referenced id that does not resolve, the `/development:define-personas`
+referenced id that does not resolve, the `/product:define-personas`
 recommendation above is the whole response: there are no conditions to read.
 
 ## Cross-feature consistency from prior story-specs (#1363)
