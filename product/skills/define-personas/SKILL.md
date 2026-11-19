@@ -45,7 +45,10 @@ schema, the five kinds, the conventions, and the provenance mechanism.
   `provenance.prose_sha256`. On a mismatch, tell the human the machine block is
   stale (the prose was edited after it was generated), and pass the current
   prose to the agent as `registry_prose` so it reconciles from the prose rather
-  than the block. On a match, `registry_prose` is `null`.
+  than the block. On a match, `registry_prose` is `null`. A missing sentinel
+  pair or an unparseable block counts as a mismatch: pass the whole file as
+  `registry_prose` with registry-so-far empty, and in Step 2 the approved
+  region and block replace that hand-written prose rather than sit beside it.
 - **Gather repo evidence** the agent will mine — confirm what's available so you
   can tell the human what the first proposals are grounded in: README/docs,
   OpenAPI/proto specs, UI routes, existing issues, and the runtime surfaces the
