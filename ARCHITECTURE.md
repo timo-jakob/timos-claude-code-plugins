@@ -3135,7 +3135,8 @@ development/skills/maintenance/
                    #   the per-stage PR cycle, summary, issue tracking
   reference/
     pr-cycle.md    # Phase 8 rationale: identity switch, isolation invariant,
-                   #   per-tool override, `-f -f`, post-merge state re-check
+                   #   per-tool override, `-f -f`, post-merge state re-check,
+                   #   the concern order
     gather.md      # Phases 3–4/6: no-trim contract incidents, drift severities
     report.md      # Phase 9: Snyk channel-naming table, cross-link examples
   scripts/         # gather-/verify-<lang>, write-payload, token mint, …
@@ -3527,20 +3528,21 @@ with its own script + label. An unrecognized `type` is skipped and
 surfaced as a quality bug (forward-compatibility: an older orchestrator
 ignores hook types it doesn't implement rather than failing the run).
 
-The orchestrator processes the plan **sequentially in priority order**:
+The orchestrator processes the plan **sequentially, in the concern order**
+(*The concern order of a full run (#3211)*), Stage 0 first:
 
 1. If `improver_result` is present, promote it to a PR first
    (Stage 0): push, open, monitor CI, optionally invoke the CI-fix
    agent (`ci_fixer_agent`) up to 3 times on failure, pass the approval
    gate, merge, sync local main.
-2. For each entry in `plan`, in order: spawn `plan[i].agent` (with
+2. For each entry of the ordered queue, in order: spawn `plan[i].agent` (with
    `isolation="worktree"` when `plan[i].isolation` is `true`/absent,
    without it when `false`) off the latest base; a worktree group
    returns a worktree branch; push, open a PR, run the same CI cycle,
    pass the approval gate, merge, sync. An advisory group
    (`plan[i].advisory: true`) returns no worktree branch and opens no PR:
    its reported entries are recorded and the stage ends `advisory`. Only
-   then move to `plan[i+1]`.
+   then move to the next entry.
 
 **The approval gate (#224, Phase 2 of #476):** a maintenance merge requires an
 approving review from `claude-approver[bot]` or a human — the pipeline never
@@ -8870,6 +8872,42 @@ review later.
 
 The coverage improver (Stage 0) runs the same way — its PR closes
 before any work agent's worktree is created.
+
+### The concern order of a full run (#3211)
+
+The groups run in one fixed order between **concerns**, on every run,
+attended or not: `security` < `dependencies` < `bugs` < `codequality` <
+`topic`. Once Phase 6 holds every dispatcher's plan, the orchestrator
+concatenates the plans, tags each group with its `target`, and pipes the
+array through `development/skills/maintenance/scripts/order-groups.zsh`,
+which sorts it stably by concern rank and adds each group's `concern`.
+Inside a concern the order the groups came in is kept, so each planner's
+ranking still decides there, and #432's worktree-first rule still sinks a
+concern's vendor-PR stages behind its worktree stages. Stage 0 is never
+passed in: the coverage pre-flight stays ahead of everything.
+
+`development/skills/maintenance/scripts/concern-of.zsh <tool>` is the one
+place the tool → concern mapping lives. It prints the concern of every tool
+Phase 0's `--tool` flag accepts, of the language tools only a planner groups
+by (`format_lint`, `grpc`, `api_contract`, `openapi`, `versioning`, all
+`codequality`), and `topic` for every topic plugin's tool; an unknown tool
+exits 2. `concern-of.zsh --tools <concern>` prints the concern's `--tool`
+tools, the set `--concern=<concern>` expands to. No tool maps to `bugs`
+yet. `tests/maintenance-concern-order.bats` sweeps the mapping against
+Phase 0's `--tool` list, every language dispatcher's supported tools and
+every topic dispatcher's routing table.
+
+*Rationale:* an open vulnerability is the costliest thing to leave open,
+so a run cut short — by time or by `--batch` — must have spent itself
+there first. A dependency update is often that vulnerability's fix, and an
+update PR goes stale fastest. A bug is a known defect with a person waiting
+for it. Code quality has no deadline, and neither do the topic plugins'
+checks, which run last even on a repo whose primary type is a topic, where
+they are most of the work and little runs ahead of them. Working
+`dependencies` second puts its standing PRs ahead of later concerns'
+worktree merges, which can re-stale them under `strict` branch protection;
+that churn is accepted so that a security-relevant update never waits
+behind code-quality work.
 
 ### From worktrees to PRs
 

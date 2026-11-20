@@ -38,18 +38,24 @@ Supported flags in `$ARGUMENTS`:
   `ruff` is Python-only.) Combinable with `--dry-run` and `--no-merge`.
 - `--concern=<name>` — scope dispatch to a whole **concern** (a named
   group of tools); the coarse-grained sibling of `--tool`. `<name>` must
-  be one of:
-  - `security` → `snyk_prs`, `code_scanning`, `semgrep`, `container_scan`, `govulncheck`
-  - `dependencies` → `dependabot`, `renovate`
-  - `codequality` → `sonarcloud`, `ruff`
+  be one of `security`, `dependencies`, `codequality`. Which tool belongs
+  to which concern is stated in one place only,
+  `<skill-base-dir>/scripts/concern-of.zsh` (#3211):
+  `concern-of.zsh --tools <name>` prints the concern's tools from the
+  `--tool` list above, one per line.
 
   It expands to that tool set and scopes dispatch exactly like `--tool`,
   just to several tools at once — the gather phase still runs for
   everything, only dispatch is narrowed. Combinable with `--dry-run` and
   `--no-merge`; **mutually exclusive with `--tool`** (pass one or the
-  other). The three concerns partition all nine tools, so
+  other). The concerns rank `security`, `dependencies`, `bugs`,
+  `codequality`, and topic-plugin checks come last, the order an unscoped
+  run works in (Phase 8). Every tool of the `--tool` list belongs to
+  exactly one of `security`, `dependencies` and `codequality`, so
   `--concern=security` + `--concern=dependencies` + `--concern=codequality`
-  together cover the same set as an unscoped run.
+  together cover the same set as an unscoped run. No tool belongs to
+  `bugs` yet, and topic-plugin checks belong to no `--concern`: a scoped
+  run skips them.
 - `--batch=N` — cap how much of the plan this run processes. After the
   language plugin's planner ranks the findings into groups (one PR / stage
   each), process only the **top N groups by priority**, deferring the rest
@@ -103,7 +109,8 @@ sonarcloud, dependabot, renovate, container_scan, govulncheck."
 When `--concern=<name>` is set, validate `<name>` against `security`,
 `dependencies`, `codequality`. On a mismatch, halt with: "Unknown
 --concern '`<name>`'; supported: security, dependencies, codequality."
-Expand it to its tool set (above) and carry that set forward as the
+Expand it to its tool set with `concern-of.zsh --tools <name>` and carry
+that set forward as the
 dispatch scope — Phase 4 writes it into `dispatch_filter.only_tools`
 exactly as it does for `--tool`. If **both** `--tool` and `--concern`
 are passed, halt with: "Pass --tool or --concern, not both."
@@ -1359,8 +1366,8 @@ entirely otherwise):
 ```
 
 `only_tools` is the scoped tool set: a single-element list for `--tool`,
-or the concern's expanded tool set for `--concern` (e.g.
-`["snyk_prs", "code_scanning", "semgrep", "container_scan", "govulncheck"]` for `--concern=security`).
+or the concern's expanded tool set for `--concern` (the lines
+`concern-of.zsh --tools <name>` printed, as a JSON list).
 The field shape is identical either way — the language plugin already
 treats `only_tools` as a set, so no plugin change is needed to support
 multi-tool scoping.
@@ -2133,7 +2140,34 @@ spawned with `isolation="worktree"`.
    the dispatcher; the project's coverage isn't where Stages 1..N
    need it to be.
 
-### Stages 1..N — one PR per planner group, in priority order
+### Stages 1..N — one PR per planner group, in concern order
+
+**Build the stage queue in the concern order (#3211) — on every run,
+attended or not.** Once Phase 6 holds every dispatcher's plan (and Stage 0,
+when one ran, has merged and the target was re-dispatched), concatenate the
+`plan` arrays — the languages in Phase 6's dispatch order, then the topics —
+adding `"target": "<lang or topic>"` to each group so its `ci_fixer_agent`
+and approve skill stay known, and pipe that one array through the order
+script:
+
+```bash
+"<skill-base-dir>/scripts/order-groups.zsh" < <groups.json> > <ordered.json>
+```
+
+It stably sorts the groups by concern — `security`, `dependencies`, `bugs`,
+`codequality`, then topic-plugin checks — and adds each group's `concern`
+(`concern-of.zsh`'s answer for its `tool`). Inside one concern the groups
+keep the order they came in, so each planner's ranking still decides there.
+Stage 0 is never passed in: the coverage pre-flight stays ahead of
+everything. On a resume the queue is rebuilt the same way from
+`phase6-plan`, so it comes out identical. **Exit 2** names a tool
+`concern-of.zsh` does not know, or input that is not one array of groups
+each with a `tool`: a gap in the mapping or in your own call, never a
+reason to guess a concern. Fix your call if it is yours; otherwise walk
+the groups in the order they came in, and name the unknown tool in the
+Phase 9 summary as a defect in `concern-of.zsh`. **Exit 1** (jq) is the
+same fallback, quoting its stderr. Why this order is
+`reference/pr-cycle.md` § *Why a full run works the concerns in a fixed order*.
 
 **Batch cap — `--batch=N` (when set).** Before applying the ordering rule
 below, decide which groups run this round. Sort the full `response.plan` by
@@ -2147,10 +2181,15 @@ above) is never counted against `N`. When `--batch` is absent the batch is
 the whole plan, so this step is a no-op. Selection is by **priority**;
 *execution order* among the selected groups is still set by the ordering
 rule below (priority ranks what matters most; the rule sequences the chosen
-work to minimise re-stale churn — the two are independent).
+work — the two are independent).
 
-**Ordering rule — worktree stages first, vendor-PR (GitHub-PR) stages last
-(#432).** The planner ranks groups by priority, but under `main`'s `strict`
+**Ordering rule — the concern order between concerns; inside one concern,
+worktree stages first, vendor-PR (GitHub-PR) stages last (#432, #3211).**
+The selected groups run in the queue's concern order. A concern's stages
+all run before the next concern's start, even when that puts the
+`dependencies` concern's vendor-PR stages ahead of later worktree stages.
+Inside one concern the rule below applies. The planner ranks groups by
+priority, but under `main`'s `strict`
 ("require branches up to date") + `dismiss_stale_reviews` branch protection a
 multi-PR run is quadratic: every merged stage moves `main`, marking every other
 open PR `BEHIND`; bringing one up to date is a new commit that **dismisses the
@@ -2158,10 +2197,11 @@ approval already earned** and re-runs CI. To minimise that churn, run all
 `isolation: true` (worktree) stages — which open and merge their own fresh PRs —
 and only **then** the `isolation: false` vendor-PR stages (Dependabot / Renovate
 / Snyk triage), which act on standing GitHub PRs that each first-party merge
-would otherwise re-stale. Keep the planner's priority order among the worktree
-stages; just sink the vendor-PR stage(s) to the end so they're processed once
-`main` is stable. (A standing PR against a moving base is the worst case — it
-re-stales on every intervening merge.)
+would otherwise re-stale. Keep the queue's order among the worktree
+stages; just sink the concern's vendor-PR stage(s) to its end so they're
+processed once that concern's worktree stages have merged. (A standing PR
+against a moving base is the worst case — it re-stales on every intervening
+merge.)
 
 **Re-staling is unavoidable under `strict`, but deterministic.** When a PR you
 still need to merge has gone `BEHIND` from an intervening merge, drive it with
@@ -2209,9 +2249,9 @@ re-stales the rest, so a batch must be serial.
 conflicts (#653).** When Phase 2.5's inventory recorded `conflicting_bot_prs`
 (open `claude-maintenance`-authored PRs at `mergeable: CONFLICTING` — a
 `--update` can't fix those; only a rebase with conflict resolution can),
-remediate them in the **standing-PR slot** — after the worktree stages, at the
-head of the vendor-PR/standing-PR work, so the rebase lands on a stable
-`main`. One PR at a time:
+remediate them in the **standing-PR slot** — once the queue's last worktree
+stage has merged, ahead of any vendor-PR stage still to run, so the rebase
+lands on a stable `main`. One PR at a time:
 
 1. **Scratch worktree on the PR head** — never the session worktree (#643):
 
@@ -2253,7 +2293,8 @@ summary never presents a bot PR's conflict as a manual to-do — after this
 step it is either merged/armed or `escalated` with a concrete reason.
 
 For each entry in the **selected batch** (the whole plan when `--batch` is
-absent; the top-N groups when it is set), in priority order:
+absent; the top-N groups when it is set), in the order the ordering rule
+above sets:
 
 1. **Determine the effective base branch** — the user's current branch
    after all prior merges (initially `worktree.base_branch`; updated

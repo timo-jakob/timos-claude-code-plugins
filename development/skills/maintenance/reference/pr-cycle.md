@@ -122,3 +122,33 @@ verification against state that no longer matches what's on `main`, producing
 false-positive errors and missed regressions (the live test on
 ai-doc-organizer's Stage 7 surfaced exactly this for the Python venv case after
 a 3.13 → 3.14 merge).
+
+## Why a full run works the concerns in a fixed order
+
+Before #3211 the stage queue was whatever order the planners returned, with
+only the vendor-PR stages sunk to the end. A run that ran out of time, or a
+`--batch` cap that cut it short, could therefore spend the night on lint while
+a vulnerability waited. The queue now runs `security`, `dependencies`, `bugs`,
+`codequality`, then the topic plugins' checks:
+
+- **security first** — an open vulnerability is the costliest thing to leave
+  open, so it is fixed before anything else can use up the run;
+- **dependencies next** — a dependency update is often the vulnerability fix
+  itself, and an update PR goes stale faster than any other;
+- **bugs** — a known defect, with a person waiting for its fix;
+- **code quality** — it never has a deadline;
+- **topic-plugin checks last** — plugin validation, docs drift, manifest and
+  policy checks have no deadline either. On a repo whose primary type is a
+  topic (`claude-plugin`, `kubernetes`) they are most of the work and still run
+  last; there is little ahead of them there.
+
+The order is between concerns only. Inside a concern each planner's ranking
+still decides, and #432's worktree-first rule still sinks the concern's
+vendor-PR stages behind its worktree stages. Putting `dependencies` second
+means its standing PRs are worked before later concerns' worktree merges, so
+they can re-stale again under `strict` branch protection. That cost was
+accepted: a dependency update that is a security fix should not wait behind
+code-quality work. The coverage pre-flight (Stage 0) stays ahead of
+everything, because the planner must rank against a `main` that already holds
+it. The tool-to-concern mapping lives only in `scripts/concern-of.zsh`;
+`scripts/order-groups.zsh` applies the order.
