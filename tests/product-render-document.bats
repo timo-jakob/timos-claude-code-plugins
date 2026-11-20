@@ -245,12 +245,15 @@ setup() {
   make_repo
   printf '\n<details>\n<summary>Rejected alternatives</summary>\n\nA Kanban wall was weighed and dropped.\n\n</details>\n' \
     >> "$R/$MAIN"
+  printf '\n<details>\n<summary>Open questions</summary>\nA night shift was left undecided.\n</details>\n' \
+    >> "$R/$MAIN"
   render_in "$R" "$MAIN"
   [ "$status" -eq 0 ]
   local text
   for text in "$(pdf_text "$PDF")" "$(epub_text "$EPUB")"; do
     contains "$text" "Rejected alternatives"
     contains "$text" "A Kanban wall was weighed and dropped."
+    contains "$text" "A night shift was left undecided."
     lacks "$text" "prose_sha256"
   done
 }

@@ -85,7 +85,7 @@ local function holds_machine_block(span)
 end
 
 -- Any other `<details>` is unwrapped: its tags go, its summary stays as a bold
--- line and the blocks inside it stay as they are.
+-- line and everything else inside it stays, raw HTML read as HTML.
 local function unwrap(span)
   local out = pandoc.Blocks({})
   for _, b in ipairs(span) do
@@ -95,6 +95,9 @@ local function unwrap(span)
         local inlines = pandoc.utils.blocks_to_inlines(pandoc.read(summary, "html").blocks)
         out:insert(pandoc.Para({ pandoc.Strong(inlines) }))
       end
+      local rest = b.text:gsub("<summary[^>]*>.-</summary%s*>", "")
+        :gsub("</?details[^>]*>", "")
+      if rest:match("%S") then out:extend(pandoc.read(rest, "html").blocks) end
     else
       out:insert(b)
     end
