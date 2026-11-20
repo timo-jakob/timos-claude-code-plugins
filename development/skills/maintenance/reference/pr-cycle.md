@@ -126,9 +126,8 @@ a 3.13 → 3.14 merge).
 ## Why a full run works the concerns in a fixed order
 
 Before #3211 the stage queue was whatever order the planners returned, with
-only the vendor-PR stages sunk to the end. A run that ran out of time, or a
-`--batch` cap that cut it short, could therefore spend the night on lint while
-a vulnerability waited. The queue now runs `security`, `dependencies`, `bugs`,
+only the vendor-PR stages sunk to the end. A run that ran out of time could
+therefore spend the night on lint while a vulnerability waited. The queue now runs `security`, `dependencies`, `bugs`,
 `codequality`, then the topic plugins' checks:
 
 - **security first** — an open vulnerability is the costliest thing to leave

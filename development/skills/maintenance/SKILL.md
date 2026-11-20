@@ -1368,9 +1368,7 @@ entirely otherwise):
 `only_tools` is the scoped tool set: a single-element list for `--tool`,
 or the concern's expanded tool set for `--concern` (the lines
 `concern-of.zsh --tools <name>` printed, as a JSON list).
-The field shape is identical either way — the language plugin already
-treats `only_tools` as a set, so no plugin change is needed to support
-multi-tool scoping.
+The field shape is identical either way.
 
 This is what the language plugin reads to know it should skip every
 other agent. The gather output is unchanged — only dispatch is scoped.
@@ -1743,12 +1741,14 @@ The orchestrator only needs to handle the three response shapes:
      second invocation sees post-merge coverage and naturally lands on
      Phase B.
 - **Response has `plan` and no `improver_result`** → improver wasn't
-  needed. Skip Stage 0. Proceed straight to Phase 8's per-group PRs.
+  needed. Skip Stage 0. Record the plan; once every language and topic
+  has been dispatched, build the Phase 8 queue.
 - **Response has `human_action_required`** → halt as before
   (Phase 7).
 
 **The `Skill(...)` call is a step, not a turn boundary.** On return,
-continue straight into Phase 7 and Phase 8 in the same assistant turn.
+continue into Phase 7, then Phase 8 once every target has returned, in
+the same assistant turn.
 The dispatcher's plan response is Phase 8's **input** — and it is
 checkpointed (`phase6-plan`, below, #517), so an interrupted Phase 8
 resumes with the same plan instead of re-dispatching; persistence changes
@@ -1901,7 +1901,8 @@ been invoked.** When Phase 6's first dispatcher call returned an
 `improver_result`-only response, you immediately do Stage 0 here.
 Only after the improver's PR is merged + main is synced do you go
 back and re-invoke the dispatcher for Phase B, which gives you the
-plan. Then Stages 1..N proceed. This serialization is the whole
+plan. Then, once every target holds a plan, Stages 1..N proceed over
+the merged, concern-ordered queue. This serialization is the whole
 point — the planner must rank against actually-merged main, not a
 worktree branch.
 
@@ -2170,7 +2171,7 @@ same fallback, quoting its stderr. Why this order is
 `reference/pr-cycle.md` § *Why a full run works the concerns in a fixed order*.
 
 **Batch cap — `--batch=N` (when set).** Before applying the ordering rule
-below, decide which groups run this round. Sort the full `response.plan` by
+below, decide which groups run this round. Sort the merged queue by
 `priority_score` (descending) and keep the **top N**; the remaining `M − N`
 groups are **deferred** — not dispatched, no PR opened, no agent spawned.
 Record each deferred group (tool, description, finding count, priority
@@ -2249,9 +2250,8 @@ re-stales the rest, so a batch must be serial.
 conflicts (#653).** When Phase 2.5's inventory recorded `conflicting_bot_prs`
 (open `claude-maintenance`-authored PRs at `mergeable: CONFLICTING` — a
 `--update` can't fix those; only a rebase with conflict resolution can),
-remediate them in the **standing-PR slot** — once the queue's last worktree
-stage has merged, ahead of any vendor-PR stage still to run, so the rebase
-lands on a stable `main`. One PR at a time:
+remediate them in the **standing-PR slot** — once the queue's last stage
+has run, so the rebase lands on a `main` no later stage moves. One PR at a time:
 
 1. **Scratch worktree on the PR head** — never the session worktree (#643):
 

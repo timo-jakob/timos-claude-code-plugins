@@ -66,7 +66,7 @@ A full run, attended or not, works the plan in one fixed order between concerns:
 
 An open vulnerability is the costliest thing to leave open, and a dependency update is often the vulnerability fix
 itself and goes stale fastest. A bug is a known defect with someone waiting for its fix. Code quality and the topic
-checks have no deadline. So a run that is cut short, by time or by `--batch`, has spent itself on what matters most.
+checks have no deadline. So a run that is cut short by time has spent itself on what matters most.
 The coverage pre-flight still runs ahead of everything.
 
 The order is between concerns only. Inside a concern each planner's ranking still decides, and the concern's

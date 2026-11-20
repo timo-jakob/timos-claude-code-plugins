@@ -310,7 +310,10 @@ EOF
   contains "$s" '**Exit 2** names a tool `concern-of.zsh` does not know, or input that is not one array of groups each with a `tool`: a gap in the mapping or in your own call, never a reason to guess a concern.'
   contains "$s" 'otherwise walk the groups in the order they came in, and name the unknown tool in the Phase 9 summary as a defect in `concern-of.zsh`.'
   contains "$s" 'Why this order is `reference/pr-cycle.md` § *Why a full run works the concerns in a fixed order*.'
-  contains "$s" 'remediate them in the **standing-PR slot** — once the queue'"'"'s last worktree stage has merged, ahead of any vendor-PR stage still to run'
+  contains "$s" 'remediate them in the **standing-PR slot** — once the queue'"'"'s last stage has run, so the rebase lands on a `main` no later stage moves.'
+  contains "$s" 'concatenate the `plan` arrays — the languages in Phase 6'"'"'s dispatch order, then the topics — adding `"target": "<lang or topic>"` to each group'
+  contains "$s" 'A concern'"'"'s stages all run before the next concern'"'"'s start, even when that puts the `dependencies` concern'"'"'s vendor-PR stages ahead of later worktree stages.'
+  contains "$s" 'just sink the concern'"'"'s vendor-PR stage(s) to its end so they'"'"'re processed once that concern'"'"'s worktree stages have merged.'
 }
 
 @test "SKILL.md Phase 4: a --concern scope's only_tools is what concern-of.zsh --tools printed" {

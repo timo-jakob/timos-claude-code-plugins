@@ -8898,9 +8898,9 @@ Phase 0's `--tool` list, every language dispatcher's supported tools and
 every topic dispatcher's routing table.
 
 *Rationale:* an open vulnerability is the costliest thing to leave open,
-so a run cut short — by time or by `--batch` — must have spent itself
-there first. A dependency update is often that vulnerability's fix, and an
-update PR goes stale fastest. A bug is a known defect with a person waiting
+so a run cut short by time must have spent itself there first. A
+dependency update is often that vulnerability's fix, and an update PR goes
+stale fastest. A bug is a known defect with a person waiting
 for it. Code quality has no deadline, and neither do the topic plugins'
 checks, which run last even on a repo whose primary type is a topic, where
 they are most of the work and little runs ahead of them. Working
