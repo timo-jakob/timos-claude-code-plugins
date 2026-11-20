@@ -8632,6 +8632,165 @@ This is the whole staleness machinery — no background job. The registry is
 re-derived exactly when reality (the prose a human edited) contradicts the
 generated mirror, on the next pull by a consumer.
 
+## Product charter contract (`charter/v1`)
+
+A **product charter** says what a product is for, who it serves, what wins when
+goals conflict, what it builds and what it deliberately does not, and how that
+direction has changed over time (#3205). It lives at `docs/product/charter.md`
+in a target repo, found through the product-document lookup like any product
+document ([The `product` plugin](#the-product-plugin--outside-the-languagetopic-model)).
+The `product` plugin owns it: `product/scripts/validate-charter.zsh` checks it.
+
+### The charter file (`docs/product/charter.md`)
+
+The same two-layer shape as the persona registry. The prose is
+human-authoritative and sits between `<!-- charter:prose:start -->` and
+`<!-- charter:prose:end -->`. It is followed by a collapsed `<details>` block
+holding one fenced `json` object, the generated mirror. Provenance is the
+persona contract's mechanism, unchanged: `provenance.prose_sha256` hashes the
+bytes between the two sentinels, normalised and compared exactly as
+[Provenance and staleness detection](#provenance-and-staleness-detection)
+states for `personas/v1`. This section does not restate it.
+
+The prose sections come in this order: Summary, Purpose and background, Who it
+serves, Values, What we build, What we deliberately don't build, Direction
+changes. Each is one level-two heading with exactly that text, and the prose
+holds no other level-two heading. Who it serves names persona ids and links the registry;
+it never redefines a persona. Direction changes is a dated log, newest first.
+
+### The `charter/v1` block
+
+An invented example: a small note-taking product with three values, two
+non-goals, and one direction change that retires a non-goal
+(`prose_sha256` is an illustrative digest):
+
+```json
+{
+  "schema": "charter/v1",
+  "provenance": {
+    "generated_by": "charter-definer via /product:define-charter",
+    "generated_at": "2026-11-12T10:00:00Z",
+    "prose_sha256": "4f1c2e8a9b3d5f7061c2e4a6b8d0f1325476a8b9cadbecfd0e1f2a3b4c5d6e7f"
+  },
+  "title": "Jotter charter",
+  "appendices": ["docs/principles.md"],
+  "purpose": "Capture a thought in seconds, on any device, and find it again.",
+  "background": "Note apps grew into project tools; Jotter stays a notebook.",
+  "serves": ["sam-student"],
+  "values": [
+    {
+      "id": "V-1",
+      "status": "active",
+      "ref": { "path": "docs/principles.md", "anchor": "quiet-by-default", "title": "Quiet by default" }
+    },
+    { "id": "V-2", "status": "active", "statement": "A note is never lost, even offline." },
+    { "id": "V-3", "status": "active", "statement": "Plain text first." }
+  ],
+  "scope": [
+    { "id": "S-1", "status": "active", "statement": "Fast capture on a phone, offline first." }
+  ],
+  "non_goals": [
+    {
+      "id": "NG-1",
+      "status": "retired",
+      "statement": "No sharing of notes.",
+      "rationale": "Sharing pulls a notebook toward a collaboration tool."
+    },
+    { "id": "NG-2", "status": "active", "statement": "No team workspaces.", "rationale": "Jotter is for one writer." }
+  ],
+  "direction_changes": [
+    {
+      "id": "DC-2026-11-1",
+      "date": "2026-11-12",
+      "from": "Notes are never shared.",
+      "to": "One note can be sent as a read-only link.",
+      "rationale": "Writers asked to send a single note to a friend.",
+      "affects": ["NG-1"],
+      "evidence": ["#42"]
+    }
+  ]
+}
+```
+
+**Field contract.**
+
+| Field | Type | Value |
+| --- | --- | --- |
+| `schema` | string | `"charter/v1"` |
+| `provenance` | object | `generated_by`, `generated_at`, `prose_sha256` (64 lowercase hex digits), as for `personas/v1` |
+| `title` | string | the document title a renderer puts on the cover |
+| `appendices` | string[] | repo-relative Markdown paths rendered after the charter; may be empty |
+| `purpose`, `background` | string | what the product is for, and why it exists |
+| `serves` | string[] | persona ids from the repo's persona registry; may be empty |
+| `values`, `scope`, `non_goals` | object[] | entries, below |
+| `direction_changes` | object[] | the log, below, newest first as in the prose |
+
+**An entry** (a value, a scope item or a non-goal) has a stable `id` — `V-<n>`
+for a value, `S-<n>` for a scope item, `NG-<n>` for a non-goal — a `status`,
+`active` or `retired`, and exactly one of `statement` (a string) or `ref`
+(`{ "path", "anchor", "title" }`: where the repo already states it, and the
+link's title). A non-goal with a `statement` also has a `rationale`. A `ref`
+exists for a repo that already states its principles on a page of its own.
+
+**A direction change** has `id` (`DC-<yyyy>-<mm>-<n>`, the year and month of
+its `date`), `date` (an ISO calendar date, `YYYY-MM-DD`), `from`, `to`,
+`rationale`, `affects[]` (the ids of the values, scope items and non-goals it
+introduced, changed or retired) and `evidence[]` (issue or PR references; may
+be empty).
+
+**The rules.**
+
+- **An entry is never deleted.** A value, scope item or non-goal that no longer
+  holds becomes `retired`, and a direction change records its retirement by
+  naming it in `affects`.
+- **An id is unique in the charter, and never reused or renumbered.**
+- Every id in `affects` names a value, scope item or non-goal of the charter,
+  and every id in `serves` names a persona in the registry. With no registry
+  anywhere, `serves` must be empty.
+- A `ref` path and every appendix are files of the charter's own repo. A path
+  found only in a linked submodule does not count. The `ref` anchor is not
+  checked.
+
+### The validator (`validate-charter.zsh`)
+
+`product/scripts/validate-charter.zsh <charter.md>` checks one charter. It
+exits 0 on a valid file, printing `charter: valid`, and 1 on an invalid one,
+with one stderr line `charter: <rule>: <detail>` for every violation, not only
+the first. It exits 2 on a usage error or an unreadable file; a missing `jq` and
+a lookup that fails internally exit 2 too, since neither is a verdict on the
+charter. The rules:
+
+| Rule | A violation |
+| --- | --- |
+| `schema` | the layout or the block's shape breaks the contract: sentinels, the section order, the `<details>` block, a field's type, a `status`, a non-goal's `rationale` |
+| `bad-id-shape` | an id that does not have its list's shape |
+| `duplicate-id` | an id used more than once |
+| `statement-and-ref` | an entry with both |
+| `neither-statement-nor-ref` | an entry with neither |
+| `retired-unnamed` | a retired entry no direction change names in `affects` |
+| `unresolved-affects` | an `affects` id the charter does not have |
+| `unresolved-serves` | a `serves` id the persona registry does not have, or any `serves` id when no registry is found |
+| `ref-missing` | a `ref` path that is not a file of the repo |
+| `appendix-missing` | an appendix that is not a file of the repo |
+| `bad-date` | a direction change whose `date` is not a calendar date, or not in the month its id names |
+| `direction-order` | a direction change listed before a newer one: a later `date`, or on the same date a higher `n` in `DC-<yyyy>-<mm>-<n>` |
+| `stale-prose` | `provenance.prose_sha256` does not match the prose |
+
+The repo is the git work tree holding the charter, or the current directory
+outside git. The persona registry is the lookup's answer for
+`docs/personas.md`, so a registry in a linked submodule counts. When that
+lookup stops at a declared submodule that is not initialised, the `serves`
+check cannot complete: the validator exits 2, and it is not an
+`unresolved-serves` violation.
+
+**The validator checks a single file, so it cannot see an active entry reworded
+in place, an entry deleted, an id renumbered or reused, or a retired entry
+named only by the change that introduced it.** Catching those
+means comparing the charter with its earlier versions, which is a different
+tool. Until one exists, they are left to the change itself: whoever changes an
+entry's meaning adds a direction change, and the human who approves the PR
+reads the diff for every one of them.
+
 ## Agent model selection
 
 Every agent in a language plugin declares its model in frontmatter:
