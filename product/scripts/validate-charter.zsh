@@ -5,8 +5,8 @@
 #
 # The contract is ARCHITECTURE.md, *Product charter contract (`charter/v1`)*.
 # This script is its single-file check: it reads one charter and judges it
-# alone, so it cannot see an active entry reworded in place, which only the
-# file's history would show.
+# alone, so it cannot see an active entry reworded in place, an entry deleted,
+# or an id renumbered or reused, which only the file's history would show.
 #
 # Every violation is reported, not only the first: one stderr line each,
 #   charter: <rule>: <detail>
@@ -24,7 +24,8 @@
 #   0 valid      (stdout: `charter: valid`)
 #   1 invalid    (stderr: one line per violation)
 #   2 usage error, an unreadable charter, or a check that cannot complete
-#     (jq or a sibling script missing, a lookup that fails internally) —
+#     (jq or a sibling script missing, a lookup that fails internally, a
+#     persona-registry lookup stopped by an uninitialised submodule) —
 #     none of which is a verdict on the charter
 
 emulate -L zsh
@@ -132,8 +133,8 @@ fi
 # The machine block: the first fenced `json` object after the prose, inside a
 # <details> element.
 local block="" details_open=0 details_close=0
+local -i fence_open=0 fence_close=0
 if (( layout_ok )); then
-  local -i fence_open=0 fence_close=0
   for (( i = end + 1; i <= n; i++ )); do
     line="${lines[i]%%[[:space:]]#}"
     line="${line##[[:space:]]#}"
@@ -156,7 +157,7 @@ if (( layout_ok )); then
 fi
 
 local -i block_ok=0
-if [[ -n "$block" ]]; then
+if (( fence_open && fence_close )); then
   if print -r -- "$block" | jq -e 'type == "object"' >/dev/null 2>&1; then
     block_ok=1
   else
@@ -334,7 +335,9 @@ if (( block_ok )); then
            known=(); reg_why="the persona registry $reg_path has no readable personas/v1 block"
          fi ;;
       3|5) reg_why="no persona registry (docs/personas.md) was found" ;;
-      4) reg_why="the persona registry cannot be looked up: a declared submodule is not initialised" ;;
+      4) print -r -- "$me: the persona registry cannot be looked up: a declared submodule is not" \
+           "initialised (run git submodule update --init)" >&2
+         exit 2 ;;
       *) print -r -- "$me: the persona-registry lookup failed (exit $reg_rc)" >&2; exit 2 ;;
     esac
     local s

@@ -115,6 +115,37 @@ only_rule() {
   only_rule schema
 }
 
+@test "schema: an empty json block" {
+  awk '/^```json$/ { print; f = 1; next } f && /^```$/ { f = 0 } !f' "$C" > "$C.new"
+  mv "$C.new" "$C"
+  run --separate-stderr zsh "$S" "$C"
+  only_rule schema
+  contains "$stderr" 'the json block is not one valid JSON object'
+}
+
+@test "schema: no fenced json block after the prose" {
+  awk '/^```json$/ { f = 1; next } f && /^```$/ { f = 0; next } !f' "$C" > "$C.new"
+  mv "$C.new" "$C"
+  run --separate-stderr zsh "$S" "$C"
+  only_rule schema
+  contains "$stderr" 'no fenced json block follows the prose'
+}
+
+@test "schema: a json block that is not valid JSON" {
+  awk '/^```json$/ { print; print "{ not json"; f = 1; next } f && /^```$/ { f = 0 } !f' "$C" > "$C.new"
+  mv "$C.new" "$C"
+  run --separate-stderr zsh "$S" "$C"
+  only_rule schema
+  contains "$stderr" 'the json block is not one valid JSON object'
+}
+
+@test "schema: provenance with no prose_sha256" {
+  edit_block 'del(.provenance.prose_sha256)'
+  run --separate-stderr zsh "$S" "$C"
+  only_rule schema
+  contains "$stderr" 'prose_sha256 is not 64 lowercase hex digits'
+}
+
 @test "schema: a non-goal statement with no rationale" {
   edit_block '.non_goals[1] |= del(.rationale)'
   run --separate-stderr zsh "$S" "$C"
@@ -201,6 +232,16 @@ only_rule() {
   run --separate-stderr zsh "$S" "$C"
   [ "$status" -eq 0 ]
   [ "$output" = "charter: valid" ]
+}
+
+@test "an uninitialised submodule before the persona registry exits 2, not unresolved-serves" {
+  rm "$R/docs/personas.md"
+  mkdir -p "$R/product-docs"
+  printf '[submodule "product-docs"]\n\tpath = product-docs\n\turl = https://example.invalid/d.git\n' \
+    > "$R/.gitmodules"
+  run --separate-stderr zsh "$S" "$C"
+  [ "$status" -eq 2 ]
+  contains "$stderr" 'a declared submodule is not initialised'
 }
 
 @test "ref-missing: a ref path that is not in the repo" {

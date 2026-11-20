@@ -49,7 +49,7 @@ setup() {
 }
 
 @test "the contract states the validator's single-file limit" {
-  contains "$SECTION" '**The validator checks a single file, so it cannot see an active entry reworded in place.**'
+  contains "$SECTION" '**The validator checks a single file, so it cannot see an active entry reworded in place, an entry deleted, or an id renumbered or reused.**'
 }
 
 @test "provenance is the persona contract's mechanism, given as a link and not restated" {

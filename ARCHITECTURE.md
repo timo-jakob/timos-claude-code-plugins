@@ -8776,13 +8776,17 @@ charter. The rules:
 
 The repo is the git work tree holding the charter, or the current directory
 outside git. The persona registry is the lookup's answer for
-`docs/personas.md`, so a registry in a linked submodule counts.
+`docs/personas.md`, so a registry in a linked submodule counts. When that
+lookup stops at a declared submodule that is not initialised, the `serves`
+check cannot complete: the validator exits 2, and it is not an
+`unresolved-serves` violation.
 
 **The validator checks a single file, so it cannot see an active entry reworded
-in place.** Catching that means comparing the charter with its earlier
-versions, which is a different tool. Until one exists, that case is left to
-the change itself: whoever changes an entry's meaning adds a direction change,
-and the human who approves the PR reads the diff.
+in place, an entry deleted, or an id renumbered or reused.** Catching those
+means comparing the charter with its earlier versions, which is a different
+tool. Until one exists, they are left to the change itself: whoever changes an
+entry's meaning adds a direction change, and the human who approves the PR
+reads the diff for every one of them.
 
 ## Agent model selection
 
