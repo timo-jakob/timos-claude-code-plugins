@@ -9,10 +9,11 @@ description: >
   update) relaying between it and the human until they approve, then write back
   the human-approved prose plus a provenance-stamped `personas/v1` block to
   `docs/personas.md` in the working tree (the change lands via the normal PR flow;
-  the skill does not push). Two modes: create (no registry yet) and update
-  (refine an existing one — e.g. routed here from refine-issue for a missing
-  persona). The intelligence lives in the agent; this skill conducts. Composes
-  persona-definer (#666); produces the personas/v1 contract (#665).
+  the skill does not push), then renders it to a PDF and an ePub. Two modes:
+  create (no registry yet) and update (refine an existing one — e.g. routed
+  here from refine-issue for a missing persona). The intelligence lives in the
+  agent; this skill conducts. Composes persona-definer (#666); produces the
+  personas/v1 contract (#665).
 disable-model-invocation: false
 ---
 
@@ -29,15 +30,34 @@ ARCHITECTURE.md (*Persona registry contract*) — the file layout, the per-perso
 schema, the five kinds, the conventions, and the provenance mechanism.
 
 **User input:** an optional target repo/path (default: the session's repo). The
-**mode is inferred**: `update` if `docs/personas.md` already exists, else
-`create`.
+**mode is inferred**: `update` if the repo's own `docs/personas.md` already
+exists, else `create` — unless the registry lives in a linked submodule, which
+stops the skill (Step 0).
 
 ## Step 0 — gather evidence and set the mode
 
-- **Determine the mode.** If `docs/personas.md` (relative to the target repo
-  root) exists → **update**; parse its `personas/v1` block into the
-  registry-so-far (the personas array). Else → **create**, registry-so-far is
-  empty.
+- **Determine the mode — find the registry first.** Run the product-document
+  lookup from the target repo root:
+  `"<skill-base-dir>/../../scripts/resolve-product-doc.zsh" --repo <target repo root> docs/personas.md`.
+  Its stdout is `<absolute path>` TAB `<origin>`; branch on its exit:
+  - **exit 0, origin `own`** → **update**; parse that file's `personas/v1`
+    block into the registry-so-far (the personas array).
+  - **exit 3** (not found anywhere) → **create**, registry-so-far is empty.
+  - **exit 0, origin `linked:<submodule path>`** → this repo has no registry
+    of its own, so this would be create mode, and the product's registry
+    already lives in a linked repository. **Stop without writing anything.**
+    Tell the human: the product's persona registry lives in the linked
+    repository at `<submodule path>`, at `<absolute path>`; run
+    `/product:define-personas` in that repository to change it.
+  - **exit 4** (a declared submodule is not initialised, and it could hold the
+    registry) → **stop without writing anything**. Relay the lookup's stderr,
+    which names the submodule and its `git submodule update --init` line, and
+    ask the human to initialise it and run this skill again.
+  - **exit 5** (`docs/personas.md` lies inside a declared submodule's mount,
+    and no submodule holds it at that path) → **stop without writing
+    anything**. Relay the lookup's stderr, which names the submodule and the
+    registry's path inside it; that repository owns the registry.
+  - **exit 1 or 2** → **stop without writing anything** and report the stderr.
 - **In update mode, check the block against the prose.** Write the current
   prose region (the bytes between the sentinels, sentinel lines excluded) to a
   temp file and hash it with the same `prose-hash.zsh` as Step 2
@@ -157,13 +177,46 @@ normal PR flow.
    what changed (create: N personas; update: the diff), and that the change lands
    via the normal PR flow (commit + PR) — this skill does not push.
 
+## Step 3 — render the registry (PDF + ePub)
+
+Right after the write, render the registry from the target repo root, so the
+human has a copy to send. The registry's machine block carries no title, so
+pass one:
+
+```bash
+"<skill-base-dir>/../../scripts/render-document.zsh" --title "<repo name> — Personas" docs/personas.md
+```
+
+`<repo name>` is the `name` part of the `owner/name` Step 1 passes as `repo`
+— never the root directory's name, which in a worktree is the worktree's
+folder. The renderer writes `dist/product/personas.pdf` and
+`dist/product/personas.epub` and prints both absolute paths, the PDF first.
+
+- **`dist/product/` is build output.** Before rendering, add `dist/product/` to
+  the target repo's `.gitignore` when `git check-ignore -q dist/product/` says
+  it is not already ignored — only that subtree, since a repo may commit its
+  own `dist/`; part of the same working-tree change as the registry, never
+  committed by this skill.
+- **exit 0** → report both paths. The file was just written and not committed,
+  so the cover says **DRAFT**: this copy is the preview. The sendable copy comes
+  from running the same command once the registry is committed.
+- **Any other exit** → the registry write stands, but the render failed: report
+  the exit code and the renderer's stderr verbatim — exit 3 ends with the
+  `brew install pandoc typst` line the human needs — and never as success. No
+  PDF or ePub was written.
+
 ## Guardrails
 
 - **The intelligence is the agent; you are the conductor.** Never author personas
   yourself — spawn `product:persona-definer`. Never let the agent write files or GitHub.
 - **Human-approved, working-tree write.** Only after the human approves the exact
-  registry, and only to `docs/personas.md` in the working tree — no commit, no
-  push, no PR (that is the normal flow the human drives afterward).
+  registry, and only to `docs/personas.md` in the working tree — plus Step 3's
+  `dist/product/` line in `.gitignore` and the rendered files under `dist/product/` —
+  no commit, no push, no PR (that is the normal flow the human drives
+  afterward).
+- **Never shadow a linked registry.** When the lookup finds the registry in a
+  linked submodule, never create a second one in this repo: Step 0 stops
+  without writing.
 - **One canonical hash.** Compute `prose_sha256` with this plugin's
   `prose-hash.zsh` — never hand-roll it, or the gate's persona
   staleness advisory (#668) will disagree with what you wrote.
