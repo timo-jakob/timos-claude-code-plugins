@@ -626,6 +626,9 @@ fm() { awk -v k="$2" 'NR == 1 && /^---$/ { f = 1; next } f && /^---$/ { exit } f
   lacks "$t" 'Wait with one bounded Monitor call'
   contains "$t" 'One that writes no verdict file, such as the issue-refiner, has no loop to wait on: stop it, and once it has ended write the "no chain-result document" verdict above.'
   contains "$t" 'Write that verdict too when the rule stops the skill.'
+  contains "$t" 'Which verdict each outcome writes, and what the root does with it, is the resolve-issue skill'"'"'s `reference/chain-steps.md` § The chained refinement step (#2940).'
+  # the section it points at exists
+  grep -qxF '## The chained refinement step (#2940)' "$STEPS"
   # the turn ending is the rule's own: the agent points at it and carries no exception of its own
   lacks "$t" 'never end your turn'
   lacks "$t" 'arms no loop'
