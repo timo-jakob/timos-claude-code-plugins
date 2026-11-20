@@ -52,6 +52,10 @@ stops the skill (Step 0).
     registry) → **stop without writing anything**. Relay the lookup's stderr,
     which names the submodule and its `git submodule update --init` line, and
     ask the human to initialise it and run this skill again.
+  - **exit 5** (`docs/personas.md` lies inside a declared submodule's mount,
+    and no submodule holds it at that path) → **stop without writing
+    anything**. Relay the lookup's stderr, which names the submodule and the
+    registry's path inside it; that repository owns the registry.
   - **exit 1 or 2** → **stop without writing anything** and report the stderr.
 - **In update mode, check the block against the prose.** Write the current
   prose region (the bytes between the sentinels, sentinel lines excluded) to a

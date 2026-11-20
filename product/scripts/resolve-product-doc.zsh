@@ -27,6 +27,9 @@
 #   3 not found          (stderr: `product-doc: not found: <relative-path>`)
 #   4 a declared submodule is not initialised and no earlier location had the
 #     file (stderr names it and the `git submodule update --init` line)
+#   5 the path lies under a declared submodule's mount, so it is never the
+#     repo's own, and no submodule had it at the same relative path (stderr
+#     names the submodule and the path inside it)
 
 emulate -L zsh
 setopt extended_glob
@@ -83,14 +86,14 @@ if [[ -f "$gm" ]]; then
   done
 fi
 
-# 1. The repo's own file wins, unless it lies inside a declared submodule:
-#    then it is that submodule's file.
-local sub dir origin="own"
+# 1. The repo's own file wins. A path under a declared submodule's mount is
+#    never the repo's own: it is kept for exit 5 after the walk.
+local sub dir inside=""
 for sub in "${subs[@]}"; do
-  [[ "$rel" == "$sub"/* ]] && { origin="linked:$sub"; break; }
+  [[ "$rel" == "$sub"/* ]] && { inside="$sub"; break; }
 done
-if [[ -f "$repo/$rel" ]]; then
-  print -r -- "$repo/$rel"$'\t'"$origin"
+if [[ -z "$inside" && -f "$repo/$rel" ]]; then
+  print -r -- "$repo/$rel"$'\t'"own"
   exit 0
 fi
 
@@ -110,6 +113,12 @@ for sub in "${subs[@]}"; do
     exit 0
   fi
 done
+
+if [[ -n "$inside" ]]; then
+  print -r -- "product-doc: $rel lies inside submodule $inside" >&2
+  print -r -- "  in that repository it is ${rel#$inside/}; look it up there" >&2
+  exit 5
+fi
 
 print -r -- "product-doc: not found: $rel" >&2
 exit 3

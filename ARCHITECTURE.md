@@ -272,9 +272,12 @@ than how its code is built and kept healthy.
   or 4 when a declared submodule that is not initialised (a missing or empty
   directory) comes before any hit, since that submodule might hold the file;
   its stderr then names the submodule and the `git submodule update --init`
-  line. Exit 1 is an internal failure: git missing, or a `.gitmodules` git
-  cannot read. `/product:define-personas` stops without writing when the
-  registry is `linked:…`, and names where it lives.
+  line. A path under a declared submodule's mount is never the repo's own;
+  when no submodule holds it at the same relative path, the lookup exits 5
+  and its stderr names the submodule and the path inside it. Exit 1 is an
+  internal failure: git missing, or a `.gitmodules` git cannot read.
+  `/product:define-personas` stops without writing when the registry is
+  `linked:…` or the lookup exits 5, and names where it lives.
 - **Old provenance stays valid.** A `personas/v1` block whose
   `provenance.generated_by` names `/development:define-personas` stays valid.
   The string is informational, and no validator may reject the old value.

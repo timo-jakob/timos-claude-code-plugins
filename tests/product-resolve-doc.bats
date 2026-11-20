@@ -202,13 +202,34 @@ place() {
   [ "$stderr" = "product-doc: not found: $DOC" ]
 }
 
-@test "a file inside a submodule mounted at a prefix of the path is linked, never own" {
+@test "a file under a submodule mount is never own: exit 5 names the path inside it" {
   declare_subs docs
   populate docs
   printf '# Personas\n' > "$R/$DOC"
   run --separate-stderr zsh "$S" --repo "$R" "$DOC"
+  [ "$status" -eq 5 ]
+  [ "$output" = "" ]
+  contains "$stderr" "product-doc: $DOC lies inside submodule docs"
+  contains "$stderr" "in that repository it is personas.md; look it up there"
+}
+
+@test "a path under a submodule mount still walks the submodules: an uninitialised earlier one is exit 4" {
+  declare_subs handbook docs
+  populate docs
+  printf '# Personas\n' > "$R/$DOC"
+  run --separate-stderr zsh "$S" --repo "$R" "$DOC"
+  [ "$status" -eq 4 ]
+  contains "$stderr" "submodule not initialised: handbook"
+}
+
+@test "a path under a submodule mount still walks the submodules: an earlier holder is linked" {
+  declare_subs handbook docs
+  place handbook
+  populate docs
+  printf '# Personas\n' > "$R/$DOC"
+  run --separate-stderr zsh "$S" --repo "$R" "$DOC"
   [ "$status" -eq 0 ]
-  ends_with "$output" $'\t'"linked:docs"
+  [ "$output" = "$(cd "$R/handbook" && pwd -P)/$DOC"$'\t'"linked:handbook" ]
 }
 
 @test "define-personas looks the registry up and stops on a linked one without writing" {
@@ -222,6 +243,7 @@ place() {
   contains "$step0" "Relay the lookup's stderr, which names the submodule and its \`git submodule update --init\` line, and ask the human to initialise it and run this skill again."
   contains "$step0" "Its stdout is \`<absolute path>\` TAB \`<origin>\`; branch on its exit:"
   contains "$step0" "**exit 0, origin \`own\`** → **update**; parse that file's \`personas/v1\` block into the registry-so-far"
+  contains "$step0" "**exit 5** (\`docs/personas.md\` lies inside a declared submodule's mount, and no submodule holds it at that path) → **stop without writing anything**. Relay the lookup's stderr, which names the submodule and the registry's path inside it"
   contains "$step0" "**exit 1 or 2** → **stop without writing anything** and report the stderr."
 }
 
@@ -238,4 +260,5 @@ place() {
   contains "$section" "\`product/scripts/resolve-product-doc.zsh [--repo <dir>] <relative-path>\`"
   contains "$section" "The repo's own file wins. Otherwise the submodules declared in \`.gitmodules\` are tried in file order"
   contains "$section" "There is no configuration."
+  contains "$section" "A path under a declared submodule's mount is never the repo's own; when no submodule holds it at the same relative path, the lookup exits 5"
 }
