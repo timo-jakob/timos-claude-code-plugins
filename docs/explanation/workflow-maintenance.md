@@ -52,8 +52,28 @@ queue.
 
 ## The PR cycle {#maintenance-the-pr-cycle}
 
-Groups run strictly one after another — worktree groups first, vendor-PR groups last — so every PR branches off a
-`main` that already holds the previous one.
+Groups run strictly one after another, so every PR branches off a `main` that already holds the previous one.
+
+### The concern order {#maintenance-the-concern-order}
+
+A full run, attended or not, works the plan in one fixed order between concerns:
+
+1. **security** — vulnerabilities: Snyk, code scanning, Semgrep, container scans, `govulncheck`;
+2. **dependencies** — Dependabot and Renovate updates;
+3. **bugs** — no tool reports into it yet; its place in the order is kept for it;
+4. **code quality** — SonarCloud, linters and formatters;
+5. **topic-plugin checks** — plugin validation, docs drift, manifest and policy checks.
+
+An open vulnerability is the costliest thing to leave open, and a dependency update is often the vulnerability fix
+itself and goes stale fastest. A bug is a known defect with someone waiting for its fix. Code quality and the topic
+checks have no deadline. So a run that is cut short by time has spent itself on what matters most.
+The coverage pre-flight still runs ahead of everything.
+
+The order is between concerns only. Inside a concern each planner's ranking still decides, and the concern's
+worktree groups run before its vendor-PR groups, which act on standing PRs that every merge would otherwise re-stale.
+One script, `concern-of.zsh`, says which tool belongs to which concern; `--concern` reads the same mapping.
+
+### One group, one PR {#maintenance-one-group-one-pr}
 
 1. **Run the work agent** in its own worktree: a mechanical fixer (formatting, lint), a triage agent (Sonar, Semgrep,
    code scanning, container CVEs), an upgrade agent (a major dependency, a runtime, Spring Boot) or an advisor. Vendor
