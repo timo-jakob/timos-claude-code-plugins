@@ -187,6 +187,26 @@ run_script_in() {
   [ "$ro_mounts" -eq 2 ]
 }
 
+# ci_apt_block <workflow> — the Linux leg's MAIN apt package list, comment-stripped:
+# from the first `sudo apt-get install` through the `yamllint` line that closes
+# that list, and no further. A later single-package `sudo apt-get install` line
+# (the poppler-utils install, #3204) opens no second range: a range that
+# never meets a closing `yamllint` line would run to the end of the file.
+ci_apt_block() {
+  awk '/sudo apt-get install/ { on = 1 } on { print } on && /yamllint$/ { exit }' "$1" \
+    | grep -v '^[[:space:]]*#'
+}
+
+@test "ci_apt_block stops at the main list's yamllint line, past a later apt install line (#3204)" {
+  local wf="$BATS_TEST_TMPDIR/wf.yml"
+  printf '%s\n' '          sudo apt-get install -y \' '            bats jq yamllint' \
+    '          # a comment' '          sudo apt-get install -y "poppler-utils=26.01.0-*"' \
+    '          echo after' > "$wf"
+  run ci_apt_block "$wf"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '%s\n' '          sudo apt-get install -y \' '            bats jq yamllint')" ]
+}
+
 @test "the image declares the python venv toolchain, and so does the CI Linux leg (#1360)" {
   # The roster invariant the workflow comment asserts in prose ("Declared here so
   # the two rosters agree"). Dropping either side re-reds detect-stack.bats's two
@@ -202,7 +222,7 @@ run_script_in() {
   # be satisfiable by a comment, which is exactly what it denies.
   local docker_apt ci_apt
   docker_apt="$(sed -n '/apt-get install/,/rm -rf/p' "$dockerfile" | grep -v '^[[:space:]]*#')"
-  ci_apt="$(sed -n '/sudo apt-get install/,/yamllint$/p' "$wf" | grep -v '^[[:space:]]*#')"
+  ci_apt="$(ci_apt_block "$wf")"
   # each slice is short — a runaway slice would make the needles below vacuous
   [ "$(wc -l <<<"$docker_apt" | tr -d ' ')" -lt 10 ]
   [ "$(wc -l <<<"$ci_apt" | tr -d ' ')" -lt 10 ]

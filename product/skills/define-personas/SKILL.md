@@ -9,10 +9,11 @@ description: >
   update) relaying between it and the human until they approve, then write back
   the human-approved prose plus a provenance-stamped `personas/v1` block to
   `docs/personas.md` in the working tree (the change lands via the normal PR flow;
-  the skill does not push). Two modes: create (no registry yet) and update
-  (refine an existing one — e.g. routed here from refine-issue for a missing
-  persona). The intelligence lives in the agent; this skill conducts. Composes
-  persona-definer (#666); produces the personas/v1 contract (#665).
+  the skill does not push), then renders it to a PDF and an ePub. Two modes:
+  create (no registry yet) and update (refine an existing one — e.g. routed
+  here from refine-issue for a missing persona). The intelligence lives in the
+  agent; this skill conducts. Composes persona-definer (#666); produces the
+  personas/v1 contract (#665).
 disable-model-invocation: false
 ---
 
@@ -176,13 +177,43 @@ normal PR flow.
    what changed (create: N personas; update: the diff), and that the change lands
    via the normal PR flow (commit + PR) — this skill does not push.
 
+## Step 3 — render the registry (PDF + ePub)
+
+Right after the write, render the registry from the target repo root, so the
+human has a copy to send. The registry's machine block carries no title, so
+pass one:
+
+```bash
+"<skill-base-dir>/../../scripts/render-document.zsh" --title "<repo name> — Personas" docs/personas.md
+```
+
+`<repo name>` is the `name` part of the `owner/name` Step 1 passes as `repo`
+— never the root directory's name, which in a worktree is the worktree's
+folder. The renderer writes `dist/product/personas.pdf` and
+`dist/product/personas.epub` and prints both absolute paths, the PDF first.
+
+- **`dist/product/` is build output.** Before rendering, add `dist/product/` to
+  the target repo's `.gitignore` when `git check-ignore -q dist/product/` says
+  it is not already ignored — only that subtree, since a repo may commit its
+  own `dist/`; part of the same working-tree change as the registry, never
+  committed by this skill.
+- **exit 0** → report both paths. The file was just written and not committed,
+  so the cover says **DRAFT**: this copy is the preview. The sendable copy comes
+  from running the same command once the registry is committed.
+- **Any other exit** → the registry write stands, but the render failed: report
+  the exit code and the renderer's stderr verbatim — exit 3 ends with the
+  `brew install pandoc typst` line the human needs — and never as success. No
+  PDF or ePub was written.
+
 ## Guardrails
 
 - **The intelligence is the agent; you are the conductor.** Never author personas
   yourself — spawn `product:persona-definer`. Never let the agent write files or GitHub.
 - **Human-approved, working-tree write.** Only after the human approves the exact
-  registry, and only to `docs/personas.md` in the working tree — no commit, no
-  push, no PR (that is the normal flow the human drives afterward).
+  registry, and only to `docs/personas.md` in the working tree — plus Step 3's
+  `dist/product/` line in `.gitignore` and the rendered files under `dist/product/` —
+  no commit, no push, no PR (that is the normal flow the human drives
+  afterward).
 - **Never shadow a linked registry.** When the lookup finds the registry in a
   linked submodule, never create a second one in this repo: Step 0 stops
   without writing.
