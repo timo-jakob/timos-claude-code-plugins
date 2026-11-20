@@ -316,25 +316,32 @@ EOF
   contains "$s" 'just sink the concern'"'"'s vendor-PR stage(s) to its end so they'"'"'re processed once that concern'"'"'s worktree stages have merged.'
 }
 
-@test "SKILL.md Phase 4: a --concern scope's only_tools is what concern-of.zsh --tools printed" {
+@test "SKILL.md Phase 4: only_tools is the scope limited to each language's tools" {
   local s
   s="$(section '## Phase 4 — construct one payload per supported language')"
-  contains "$s" 'or, for `--concern`, the concern'"'"'s expanded tool set (the lines `concern-of.zsh --tools <name>` printed, as a JSON list) limited to the tools this language supports.'
+  contains "$s" '`only_tools` is the scoped tool set — the `--tool` name, or the lines `concern-of.zsh --tools <name>` printed for `--concern` — as a JSON list, limited to this language'"'"'s tools as the next paragraph says.'
   lacks "$s" '`["snyk_prs", "code_scanning", "semgrep", "container_scan", "govulncheck"]`'
-  contains "$s" 'write only the intersection of the concern'"'"'s set with that language'"'"'s supported tools'
-  contains "$s" 'When the intersection is empty, do not dispatch that language'
-  contains "$s" 'Go and JavaScript take the full set: their dispatchers already intersect it with their own tools'
+  contains "$s" 'A dispatcher halts on an `only_tools` name it does not know, so write only the scoped tools that language supports'
+  lacks "$s" 'take the full set'
+  contains "$s" 'Under `--concern`, also drop each tool whose `tooling_configured.<tool>` is `false`'
+  contains "$s" 'When nothing is left, build no payload for that language: record "nothing in scope for `<lang>` under `--tool=<name>`" (or `--concern=<name>`) for the Phase 9 summary and move on to the next target.'
 }
 
-@test "sweep: Phase 4's per-language --concern limit matches each halting dispatcher's supported tools" {
+@test "SKILL.md Phase 6: a language Phase 4 built no payload for is not dispatched" {
+  local s
+  s="$(section '## Phase 6 — dispatch per supported language to plan')"
+  contains "$s" 'For each `lang` in `supported` that has a kept payload (Phase 4 builds none for a language with nothing in scope)'
+}
+
+@test "sweep: Phase 4's per-language limit matches each dispatcher's supported tools" {
   local lang s want got
   s="$(section '## Phase 4 — construct one payload per supported language' \
-    | sed -n 's/.*\*\*Limit a `--concern` set to the language'"'"'s tools\.\*\*\(.*\) When the intersection is empty.*/\1/p')"
+    | sed -n 's/.*\*\*Limit `only_tools` to the language'"'"'s tools\.\*\*\(.*\) Under `--concern`, also drop.*/\1/p')"
   [ -n "$s" ]
-  for lang in java python swift; do
+  for lang in java python swift go javascript; do
     want="$(tr -s '[:space:]' ' ' <"$REPO_ROOT/development-$lang/skills/maintenance/SKILL.md" \
-      | grep -o 'dispatch_filter.only_tools; supported: [^"]*\."' \
-      | sed 's/^dispatch_filter.only_tools; supported: //; s/\."$//' \
+      | grep -oE 'dispatch_filter\.only_tools; (development-[a-z]+ supports|supported): [^"]*\."' \
+      | sed -E 's/^dispatch_filter\.only_tools; (development-[a-z]+ supports|supported): //; s/\."$//' \
       | tr ',' '\n' | tr -d ' ' | sort | tr '\n' ' ')"
     got="$(printf '%s\n' "$s" \
       | grep -o "\- $lang → [^-]*" \

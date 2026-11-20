@@ -45,8 +45,7 @@ Supported flags in `$ARGUMENTS`:
   `--tool` list above, one per line.
 
   It expands to that tool set and scopes dispatch like `--tool`, just to
-  several tools at once, each language getting only the ones it supports
-  (Phase 4) — the gather phase still runs for
+  several tools at once (Phase 4) — the gather phase still runs for
   everything, only dispatch is narrowed. Combinable with `--dry-run` and
   `--no-merge`; **mutually exclusive with `--tool`** (pass one or the
   other). The concerns rank `security`, `dependencies`, `bugs`,
@@ -113,8 +112,7 @@ When `--concern=<name>` is set, validate `<name>` against `security`,
 Expand it to its tool set with `concern-of.zsh --tools <name>` and carry
 that set forward as the
 dispatch scope — Phase 4 writes it into `dispatch_filter.only_tools`
-as it does for `--tool`, limited for each language to the tools that
-language supports. If **both** `--tool` and `--concern`
+as it does for `--tool`. If **both** `--tool` and `--concern`
 are passed, halt with: "Pass --tool or --concern, not both."
 
 When `--batch=N` is set, validate that `N` parses as an integer ≥ 1. On a
@@ -1367,27 +1365,33 @@ entirely otherwise):
 "dispatch_filter": { "only_tools": ["<tool>", "..."] }
 ```
 
-`only_tools` is the scoped tool set: a single-element list for `--tool`,
-or, for `--concern`, the concern's expanded tool set (the lines
-`concern-of.zsh --tools <name>` printed, as a JSON list) limited to the
-tools this language supports. The field shape is identical either way.
+`only_tools` is the scoped tool set — the `--tool` name, or the lines
+`concern-of.zsh --tools <name>` printed for `--concern` — as a JSON
+list, limited to this language's tools as the next paragraph says.
 
-**Limit a `--concern` set to the language's tools.** The Python, Java
-and Swift dispatchers halt on any `only_tools` name they do not support,
-so write only the intersection of the concern's set with that
-language's supported tools:
+**Limit `only_tools` to the language's tools.** A dispatcher halts on
+an `only_tools` name it does not know, so write only the scoped tools
+that language supports:
 
 - python → `ruff`, `semgrep`, `code_scanning`, `snyk_prs`, `sonarcloud`,
   `dependabot`, `container_scan`
 - java → `format_lint`, `sonarcloud`, `code_scanning`, `semgrep`,
   `dependabot`, `snyk_prs`, `renovate`, `versioning`, `grpc`, `openapi`
 - swift → `format_lint`, `sonarcloud`, `code_scanning`
+- go → `format_lint`, `sonarcloud`, `code_scanning`, `semgrep`,
+  `govulncheck`, `dependabot`, `snyk_prs`, `renovate`, `grpc`,
+  `api_contract`
+- javascript → `format_lint`
 
-When the intersection is empty, do not dispatch that language: record
-"nothing in scope for `<lang>` under `--concern=<name>`" for the Phase 9
-summary and move on to the next target. Go and JavaScript take the full
-set: their dispatchers already intersect it with their own tools and
-return `plan: []` when nothing is left.
+Under `--concern`, also drop each tool whose `tooling_configured.<tool>`
+is `false`: a dispatcher halts on a tool that is not set up, which suits
+a `--tool` the user named but not a concern's bundle. Record "`<tool>`
+not set up for `<lang>`" for the Phase 9 summary.
+
+When nothing is left, build no payload for that language: record
+"nothing in scope for `<lang>` under `--tool=<name>`" (or
+`--concern=<name>`) for the Phase 9 summary and move on to the next
+target.
 
 This is what the language plugin reads to know it should skip every
 other agent. The gather output is unchanged — only dispatch is scoped.
@@ -1676,8 +1680,9 @@ don't claim a specific group count, since the plan doesn't exist yet.
 
 ## Phase 6 — dispatch per supported language to plan
 
-For each `lang` in `supported`, invoke the matching language plugin via
-the Skill tool. **The payload is handed over via a temp file**, not
+For each `lang` in `supported` that has a kept payload (Phase 4 builds
+none for a language with nothing in scope), invoke the matching
+language plugin via the Skill tool. **The payload is handed over via a temp file**, not
 inline — see ARCHITECTURE.md § "JSON schema (v2)" for the contract.
 
 ```bash
@@ -3147,6 +3152,8 @@ Approver mode:       <ci | local | none — from the Phase 2.5 detection (#642);
 ⚠ Scoped to concern: <name> (tools: <comma-separated expanded set>)
   Tools outside this concern were gathered but not dispatched. Re-run
   without --concern (or with the other concerns) to process them.
+<For each note Phase 4 recorded while limiting only_tools:>
+  - <the note, e.g. "nothing in scope for swift under --concern=security">
 <If --batch=N was set AND the plan had more than N groups:>
 ⚠ Batch-limited: processed the top <N> of <M> planned groups (by priority).
   The remaining <M−N> are deferred (listed below) — re-run
