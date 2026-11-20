@@ -190,7 +190,7 @@ run_script_in() {
 # ci_apt_block <workflow> — the Linux leg's MAIN apt package list, comment-stripped:
 # from the first `sudo apt-get install` through the `yamllint` line that closes
 # that list, and no further. A later single-package `sudo apt-get install` line
-# (the pinned poppler-utils install, #3204) opens no second range: a range that
+# (the poppler-utils install, #3204) opens no second range: a range that
 # never meets a closing `yamllint` line would run to the end of the file.
 ci_apt_block() {
   awk '/sudo apt-get install/ { on = 1 } on { print } on && /yamllint$/ { exit }' "$1" \

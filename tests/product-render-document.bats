@@ -417,15 +417,22 @@ pin_of() {
   step_body "$1" | sed -nE "s/^ +$2: *\"?([0-9][0-9.a-z~+-]*)\"? *$/\1/p"
 }
 
-@test "script-tests installs pandoc, Typst and poppler at pinned versions in both install steps" {
+@test "script-tests pins pandoc and Typst, and installs poppler unpinned, in both install steps" {
   local step var
   for step in 'Install test dependencies (Linux)' 'Install test dependencies (macOS)'; do
-    for var in PANDOC_VERSION TYPST_VERSION POPPLER_VERSION; do
+    for var in PANDOC_VERSION TYPST_VERSION; do
       run pin_of "$step" "$var"
       matches "$output" '^[0-9]+\.[0-9][0-9.a-z~+-]*$'
       contains "$(step_body "$step")" "\${$var}"
     done
+    # poppler is only the tests' reader: a pin breaks the required check when
+    # the runner image moves (#3251), so neither leg may carry one
+    run pin_of "$step" POPPLER_VERSION
+    [ -z "$output" ]
+    lacks "$(step_body "$step")" 'POPPLER_VERSION'
   done
+  contains "$(step_body 'Install test dependencies (Linux)')" 'install -y --no-install-recommends poppler-utils'
+  contains "$(step_body 'Install test dependencies (macOS)')" 'brew install poppler'
   # the ubuntu leg runs the suite; the macOS leg stays deactivated (#1407, #1408)
   run grep -E '^        os: \[' "$WORKFLOW"
   [ "$output" = "        os: [ubuntu-latest]" ]

@@ -264,18 +264,19 @@ jobs:
             | sudo tar -xz -C /usr/local/bin actionlint
           # pandoc + Typst + poppler: tests/product-render-document.bats (#3204)
           # renders real PDFs and ePubs and reads them back with pdftotext, so
-          # all three are declared and pinned, at or above the renderer's
-          # MIN_PANDOC / MIN_TYPST. pandoc and Typst come from their upstream
-          # releases (apt's pandoc is too old for the Typst engine); poppler from
-          # apt, pinned to its upstream version so an Ubuntu security revision
-          # still installs.
+          # all three are declared. pandoc and Typst are the renderer and are
+          # pinned, at or above its MIN_PANDOC / MIN_TYPST, from their upstream
+          # releases (apt's pandoc is too old for the Typst engine). poppler is
+          # only the tests' reader, so it comes from apt UNPINNED, as in
+          # tests/Dockerfile: a version pin here breaks this required check the
+          # day ubuntu-latest moves to an image without that version (#3251).
           curl -sSfLo /tmp/pandoc.deb \
             "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-1-amd64.deb"
           sudo dpkg -i /tmp/pandoc.deb
           typst_url="https://github.com/typst/typst/releases/download/v${TYPST_VERSION}"
           curl -sSfL "$typst_url/typst-x86_64-unknown-linux-musl.tar.xz" \
             | sudo tar -xJ -C /usr/local/bin --strip-components=1 typst-x86_64-unknown-linux-musl/typst
-          sudo apt-get install -y --no-install-recommends "poppler-utils=${POPPLER_VERSION}-*"
+          sudo apt-get install -y --no-install-recommends poppler-utils
           pandoc --version | head -1
           typst --version
           pdftotext -v 2>&1 | head -1
@@ -285,7 +286,6 @@ jobs:
           TYPESCRIPT_VERSION: 7.0.2
           PANDOC_VERSION: 3.14
           TYPST_VERSION: 0.15.1
-          POPPLER_VERSION: 26.01.0
       - name: Install test dependencies (macOS)
         if: runner.os == 'macOS'
         # brew's `yq` IS mikefarah's, so the macOS leg needs no special case.
@@ -300,9 +300,8 @@ jobs:
           brew install bats-core jq shellcheck node parallel yamllint yq actionlint
           npm install -g "typescript@${TYPESCRIPT_VERSION}"
           # pandoc + Typst from their upstream macOS releases at the Linux leg's
-          # pins (tests/product-render-document.bats, #3204). Homebrew serves one
-          # poppler version only, so its pin is enforced rather than chosen: the
-          # step fails on any other, and restoring this leg (#1408) re-pins it.
+          # pins (tests/product-render-document.bats, #3204). poppler is the
+          # tests' reader only, so it is unpinned here as on the Linux leg.
           mkdir -p "$HOME/render-tools"
           curl -sSfLo /tmp/pandoc.zip \
             "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-arm64-macOS.zip"
@@ -312,12 +311,11 @@ jobs:
             | tar -xJ -C "$HOME/render-tools" --strip-components=1 typst-aarch64-apple-darwin/typst
           echo "$HOME/render-tools" >> "$GITHUB_PATH"
           brew install poppler
-          pdftotext -v 2>&1 | grep -F "pdftotext version ${POPPLER_VERSION}"
+          pdftotext -v 2>&1 | head -1
         env:
           TYPESCRIPT_VERSION: 7.0.2
           PANDOC_VERSION: 3.14
           TYPST_VERSION: 0.15.1
-          POPPLER_VERSION: 26.11.0
       # The pinned IaC toolchain the real-tool harness executes the bootstrapped
       # gate script with (tests/kubernetes-ci-fixtures.bats, #1199, #1603): helm,
       # kustomize, kubeconform, kube-linter, kyverno, trivy and yq.
