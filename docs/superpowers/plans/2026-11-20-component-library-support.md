@@ -1,10 +1,10 @@
 # Component Library Support Implementation Plan
 
-> **For agentic workers:** this plan is executed through the repo's own pipeline, not through a superpowers
-> execution skill. Each task below is one child story of the component-library-support epic (#3253: tasks 1–7 are
-> #3254–#3260, under super-epic #3194 as umbrella project 8); refine it with `/development:refine-issue` when the readiness gate asks,
-> and build it with `/development:resolve-issue`. Tasks run **in the order given**, each off fresh `origin/main` —
-> they collide on `ARCHITECTURE.md`, the bootstrap `SKILL.md` and the `development` plugin version.
+> **For agentic workers:** this plan is executed through the repo's own pipeline, not through a superpowers execution
+> skill. Each task below is one child story of the component-library-support epic (#3253: tasks 1–7 are #3254–#3260,
+> under super-epic #3194 as umbrella project 8); refine it with `/development:refine-issue` when the readiness gate
+> asks, and build it with `/development:resolve-issue`. Tasks run **in the order given**, each off fresh `origin/main`
+> — they collide on `ARCHITECTURE.md`, the bootstrap `SKILL.md` and the `development` plugin version.
 
 **Goal:** A repo's linked styleguide can declare a component library; the family reads what the library offers from
 a generated index, holds UI repos to it with gates and review, turns a missing component into work for the library,
@@ -113,13 +113,15 @@ ESLint, stylelint, Storybook and axe (in rendered templates only), Markdown skil
 
 **Interfaces:**
 
-- `tokens/theme-roles.json` in the styleguide: `schema` (`"theme-roles/v1"`), `modes[]` (mode names, at least one), `roles[]` — each `name`, `kind`
+- `tokens/theme-roles.json` in the styleguide: `schema` (`"theme-roles/v1"`), `modes[]` (mode names, at least
+  one), `roles[]` — each `name`, `kind`
   (`color` | `font-family` | `shape` | `logo`), `css_variable`, `required` (bool); `contrast_pairs[]` — each
   `foreground`, `background` (role names of kind `color`), `minimum` (4.5 or 3).
 - A theme file: `schema` (`"theme/v1"`), `name`, `modes` (object: mode name → object of role name → string), with
   exactly the modes the role file lists.
 - `validate-theme.zsh --roles <theme-roles.json> <theme.json>` → exit 0 · 2 with one stderr line per error: a
-  mode missing or unknown, a required role missing in a mode, a role the list does not know, a `color` value that is not `#rrggbb`, an empty value.
+  mode missing or unknown, a required role missing in a mode, a role the list does not know, a `color` value that
+  is not `#rrggbb`, an empty value.
 - `check-theme-contrast.zsh --roles <theme-roles.json> <theme.json>` → stdout one JSON array, per mode and pair
   `mode`, `foreground`, `background`, `ratio` (two decimals), `minimum`, `ok`; exit 0 all ok · 1 at least one below · 2
   input invalid. Ratio by the WCAG 2.x relative-luminance formula.

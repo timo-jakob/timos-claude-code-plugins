@@ -451,8 +451,8 @@ Children, in order:
 5. The reference Feature and its behaviour test.
 6. How-to, reference and explanation pages.
 
-Epic A's children 1–3 and 6 need no product stage and can start as soon as
-#3198 has landed.
+Epic A's children 1–3 and 6 need no product stage and can start as soon
+as #3198 has landed.
 
 ## Left to the builder
 
