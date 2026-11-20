@@ -55,6 +55,7 @@ separate.
   [refine-issue](explanation/workflow-refine-issue.md), [resolve-issue](explanation/workflow-resolve-issue.md),
   [bootstrap](explanation/workflow-bootstrap.md), [maintenance](explanation/workflow-maintenance.md)
 - [How the family learns](explanation/how-the-family-learns.md) — positions, telemetry and the self-improvement loop
+- [The delivery loop](explanation/delivery-loop.md) — where the family is going, and what ships today
 - [The Claude Approver — design summary](explanation/claude-approver.md)
 - [The C4 architecture docs](explanation/c4-architecture-docs.md)
 - [The target-repo docs stack](explanation/target-repo-docs-stack.md)
