@@ -1645,12 +1645,13 @@ crash, or an ending that never reaches *Run complete*, it is left in `$TMPDIR`
 for the OS to reap, as `write-payload.zsh` already does with its temp.
 
 **Checkpoint `phase4-payload`** (skip under `--dry-run`): copy exactly the
-kept files in `<payload-dir>` into the store and record their names, so a
-resumed run dispatches the exact payloads this run built:
+kept files in `<payload-dir>` into the store and record their names (`[]`
+when Phase 4 built none), so a resumed run dispatches the exact payloads
+this run built:
 
 ```bash
 ckdir=$("<skill-base-dir>/scripts/checkpoint.zsh" dir)
-cp "<payload-dir>"/payload-*.json "$ckdir/"
+for f in "<payload-dir>"/payload-*.json(N); do cp -- "$f" "$ckdir/"; done
 print -r -- "{\"payloads\":[\"payload-<target>.json\",…]}" \
   | "<skill-base-dir>/scripts/checkpoint.zsh" save --phase phase4-payload --data -
 ```
