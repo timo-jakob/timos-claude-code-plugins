@@ -223,6 +223,18 @@ place() {
   contains "$stderr" "cannot read"
 }
 
+@test "git missing from PATH is exit 1" {
+  declare_subs product-docs
+  # Ubuntu CI keeps git in /usr/bin, so PATH is a stub dir holding only zsh
+  local hide_bin="$BATS_TEST_TMPDIR/hide-bin"
+  mkdir -p "$hide_bin"
+  ln -s "$(command -v zsh)" "$hide_bin/zsh"
+  run --separate-stderr env PATH="$hide_bin" zsh "$S" --repo "$R" "$DOC"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  contains "$stderr" "git is not on PATH"
+}
+
 @test "a .gitmodules with no path key is no submodules: not found is exit 3" {
   : > "$R/.gitmodules"
   run --separate-stderr zsh "$S" --repo "$R" "$DOC"
