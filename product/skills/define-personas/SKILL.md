@@ -187,13 +187,15 @@ pass one:
 "<skill-base-dir>/../../scripts/render-document.zsh" --title "<repo name> — Personas" docs/personas.md
 ```
 
-`<repo name>` is the target repo's name (the root directory's name). The
-renderer writes `dist/product/personas.pdf` and `dist/product/personas.epub`
-and prints both absolute paths, the PDF first.
+`<repo name>` is the `name` part of the `owner/name` Step 1 passes as `repo`
+— never the root directory's name, which in a worktree is the worktree's
+folder. The renderer writes `dist/product/personas.pdf` and
+`dist/product/personas.epub` and prints both absolute paths, the PDF first.
 
-- **`dist/` is build output.** Before rendering, add `dist/` to the target
-  repo's `.gitignore` when `git check-ignore -q dist/` says it is not already
-  ignored — part of the same working-tree change as the registry, never
+- **`dist/product/` is build output.** Before rendering, add `dist/product/` to
+  the target repo's `.gitignore` when `git check-ignore -q dist/product/` says
+  it is not already ignored — only that subtree, since a repo may commit its
+  own `dist/`; part of the same working-tree change as the registry, never
   committed by this skill.
 - **exit 0** → report both paths. The file was just written and not committed,
   so the cover says **DRAFT**: this copy is the preview. The sendable copy comes
@@ -209,7 +211,7 @@ and prints both absolute paths, the PDF first.
   yourself — spawn `product:persona-definer`. Never let the agent write files or GitHub.
 - **Human-approved, working-tree write.** Only after the human approves the exact
   registry, and only to `docs/personas.md` in the working tree — plus Step 3's
-  `dist/` line in `.gitignore` and the rendered files under `dist/product/` —
+  `dist/product/` line in `.gitignore` and the rendered files under `dist/product/` —
   no commit, no push, no PR (that is the normal flow the human drives
   afterward).
 - **Never shadow a linked registry.** When the lookup finds the registry in a

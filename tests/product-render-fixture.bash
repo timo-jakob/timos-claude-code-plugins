@@ -61,6 +61,11 @@ epub_text() {
   unzip -p "$1" '*.xhtml'
 }
 
+# epub_title <epub> — the ePub's main title, its package's first dc:title
+epub_title() {
+  unzip -p "$1" '*.opf' | sed -nE 's/.*<dc:title[^>]*>([^<]*)<\/dc:title>.*/\1/p' | sed -n 1p
+}
+
 # listing <dir> — name and checksum of every file in <dir>, hidden ones included
 listing() {
   if [ -d "$1" ]; then

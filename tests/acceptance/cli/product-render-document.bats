@@ -45,9 +45,11 @@ setup() {
   local text
   text="$(pdf_text "$PDF")"
   contains "$text" "„Depot-Planung Nord“"
-  contains "$text" "DEPOT REPO"
+  contains "$text" "DEPOT-PRODUCT"
   lacks "$text" "DRAFT"
-  contains "$text" "Depot Repo · $(fx_git rev-parse --short HEAD)"
+  contains "$text" "depot-product · $(fx_git rev-parse --short HEAD)"
+  # the body says „Depot-Planung Nord“ too: the ePub's title pins the block's
+  [ "$(epub_title "$EPUB")" = "„Depot-Planung Nord“" ]
 }
 
 @test "tc-happy-machine-block-stripped" {

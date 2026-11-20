@@ -289,19 +289,21 @@ than how its code is built and kept healthy.
   in only when both succeeded. Title and appendices come from the document's
   machine block (`title`, `appendices` as repo-relative paths) when it has
   them; the flags serve a document with none, such as the persona registry, and
-  giving one the block already supplies is exit 2. One pandoc filter,
-  `product/templates/product-doc.lua`, drops the machine block (`<details>`)
-  and every HTML comment, the `charter:prose:*` and `personas:prose:*`
-  sentinels included; appends the appendices after the main document; turns a
+  giving one the block already supplies is exit 2, as is a machine block that
+  is not valid JSON. One pandoc filter, `product/templates/product-doc.lua`,
+  drops the machine block (the `<details>` holding it; any other `<details>`
+  keeps its content) and every HTML comment, the `charter:prose:*` and
+  `personas:prose:*` sentinels included; appends the appendices after the main document; turns a
   link into the main document or an appendix into an internal link, and a link
   to any other repo file into an absolute URL on the remote (plain text without
   one) that always shows the file's repo-relative path. **Callouts are marked as
   GitHub alerts** — a blockquote opening `> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`,
   `[!WARNING]` or `[!CAUTION]` — which github.com renders natively and both
   outputs render as a styled callout; a section headed `Summary` ends on its own
-  page. The PDF's cover shows the title, the repo name, the date and a version
-  line (the newest direction change's id, when the block has one, then the
-  commit's short SHA), and **DRAFT** when the document or an appendix has
+  page. The repo name is the remote's last path segment, else the main work
+  tree's directory name. The PDF's cover shows the title, the repo name, the
+  date and a version line (the newest direction change's id, when the block
+  has one, then the commit's short SHA), and **DRAFT** when the document or an appendix has
   uncommitted changes; every page's footer carries the short SHA and commit
   date, or `uncommitted` outside git. There are no styling options: A4, and
   Typst's built-in fonts only (the render passes `--ignore-system-fonts`), so

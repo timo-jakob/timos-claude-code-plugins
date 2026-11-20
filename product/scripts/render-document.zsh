@@ -19,9 +19,10 @@
 # Without either, the title is the document's first `#` heading, else its file
 # name.
 #
-# The cover carries the title, the repo name, today's date and a version line
-# (the newest `direction_changes[0].id` when the block has one, then the source
-# commit's short SHA), and DRAFT when the document or an appendix has
+# The repo name is the remote's last path segment, else the main work tree's
+# directory name. The cover carries the title, the repo name, today's date and
+# a version line (the newest `direction_changes[0].id` when the block has one,
+# then the source commit's short SHA), and DRAFT when the document or an appendix has
 # uncommitted changes. Every PDF page's footer carries the repo name, the short
 # SHA and that commit's date, or `uncommitted` outside git or before the first
 # commit.
@@ -31,8 +32,8 @@
 # Exit codes:
 #   0 rendered
 #   1 internal failure: jq missing, or a temporary directory could not be made
-#   2 usage error, an input file that does not exist, or a flag the machine
-#     block already supplies
+#   2 usage error, an input file that does not exist, a flag the machine
+#     block already supplies, or a machine block that is not valid JSON
 #   3 pandoc or Typst missing or older than MIN_PANDOC / MIN_TYPST; stderr ends
 #     with the line `brew install pandoc typst`; nothing written
 #   4 unsupported content: a `mermaid` fenced block (stderr names file and
@@ -166,7 +167,17 @@ esac
 web="${web%/}"; web="${web%.git}"
 [[ -n "$web" ]] && remote_base="$web/blob/${sha:-HEAD}"
 
-local repo_name="${root:t}"
+# The repo name: the remote's last path segment, else the main work tree's
+# directory (a linked worktree's own directory is not the repo's name), else the
+# root's directory.
+local repo_name="" common_dir=""
+if [[ -n "$web" ]]; then
+  repo_name="${web:t}"
+elif (( in_git == 1 )); then
+  common_dir="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || common_dir=""
+  [[ "${common_dir:t}" == .git ]] && repo_name="${common_dir:h:t}"
+fi
+[[ -n "$repo_name" ]] || repo_name="${root:t}"
 
 # --- the machine block: title, appendices, newest direction change ----------
 
@@ -185,6 +196,12 @@ local block="" block_title="" newest_change=""
 local -i block_has_title=0 block_has_appendices=0
 local -a appendices=()
 block="$(machine_block "$doc")"
+local block_err
+if [[ -n "$block" ]] && ! block_err="$(print -r -- "$block" | jq empty 2>&1 >/dev/null)"; then
+  print -r -- "$me: the machine block is not valid JSON" >&2
+  [[ -n "$block_err" ]] && print -r -- "$block_err" >&2
+  exit 2
+fi
 if [[ -n "$block" ]] && print -r -- "$block" | jq -e 'type == "object" and has("schema")' >/dev/null 2>&1; then
   if print -r -- "$block" | jq -e '.title | type == "string"' >/dev/null 2>&1; then
     block_has_title=1

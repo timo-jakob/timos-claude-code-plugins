@@ -61,12 +61,14 @@ setup() {
   text="$(pdf_text "$PDF")"
   sha="$(fx_git rev-parse --short HEAD)"
   contains "$text" "„Depot-Planung Nord“"
-  contains "$text" "DEPOT REPO"
+  contains "$text" "DEPOT-PRODUCT"
   contains "$text" "$(date +%Y-%m-%d)"
   contains "$text" "Version DC-2026-11-1 · $sha"
   lacks "$text" "DRAFT"
+  # the body says „Depot-Planung Nord“ too: the ePub's title pins the block's
+  [ "$(epub_title "$EPUB")" = "„Depot-Planung Nord“" ]
   run epub_text "$EPUB"
-  contains "$output" "Depot Repo · Version DC-2026-11-1 · $sha"
+  contains "$output" "depot-product · Version DC-2026-11-1 · $sha"
   lacks "$output" "DRAFT"
 }
 
@@ -98,7 +100,7 @@ setup() {
   sha="$(fx_git rev-parse --short HEAD)"
   day="$(fx_git log -1 --format=%cs)"
   pages="$(pdfinfo "$PDF" | sed -n 's/^Pages: *//p')"
-  stamps="$(pdf_text "$PDF" | grep -c "Depot Repo · $sha · $day")"
+  stamps="$(pdf_text "$PDF" | grep -c "depot-product · $sha · $day")"
   [ "$pages" -ge 4 ]
   [ "$stamps" -eq "$pages" ]
 }
@@ -223,8 +225,34 @@ setup() {
   printf '# Lieferkette Süd\n\nPlain text.\n' > "$R/docs/plain.md"
   render_in "$R" docs/plain.md
   [ "$status" -eq 0 ]
-  run pdf_text "$OUT/plain.pdf"
-  contains "$output" "Lieferkette Süd"
+  [ "$(epub_title "$OUT/plain.epub")" = "Lieferkette Süd" ]
+}
+
+@test "in a linked worktree without a remote, the repo name is the main work tree's directory" {
+  make_repo --no-remote
+  local wt="$BATS_TEST_TMPDIR/wt-elsewhere"
+  fx_git worktree add -q "$wt"
+  render_in "$wt" "$MAIN"
+  [ "$status" -eq 0 ]
+  local sha
+  sha="$(fx_git rev-parse --short HEAD)"
+  run pdf_text "$wt/dist/product/Depot Übersicht.pdf"
+  contains "$output" "Depot Repo · $sha"
+  lacks "$output" "wt-elsewhere"
+}
+
+@test "a <details> that is not the machine block keeps its content in both outputs" {
+  make_repo
+  printf '\n<details>\n<summary>Rejected alternatives</summary>\n\nA Kanban wall was weighed and dropped.\n\n</details>\n' \
+    >> "$R/$MAIN"
+  render_in "$R" "$MAIN"
+  [ "$status" -eq 0 ]
+  local text
+  for text in "$(pdf_text "$PDF")" "$(epub_text "$EPUB")"; do
+    contains "$text" "Rejected alternatives"
+    contains "$text" "A Kanban wall was weighed and dropped."
+    lacks "$text" "prose_sha256"
+  done
 }
 
 # --- refusals and failures --------------------------------------------------
@@ -248,6 +276,17 @@ setup() {
   render_in "$R" --appendix docs/personas.md "$MAIN"
   [ "$status" -eq 2 ]
   contains "$stderr" "already lists appendices"
+  [ ! -e "$OUT" ]
+}
+
+@test "a machine block that is not valid JSON is exit 2 and writes nothing" {
+  make_repo
+  sed -i.bak 's/"appendices": \["docs\/personas.md"\],/"appendices": ["docs\/personas.md"],,/' "$R/$MAIN"
+  rm -f "$R/$MAIN.bak"
+  render_in "$R" "$MAIN"
+  [ "$status" -eq 2 ]
+  contains "$stderr" "the machine block is not valid JSON"
+  [ "$output" = "" ]
   [ ! -e "$OUT" ]
 }
 
@@ -406,13 +445,14 @@ pin_of() {
   step="$(sed -n '/^## Step 3 — render the registry/,/^## /p' "$SKILL" | tr -s '[:space:]' ' ')"
   contains "$step" 'render-document.zsh" --title "<repo name> — Personas" docs/personas.md'
   contains "$step" "both paths"
-  contains "$step" "dist/"
+  contains "$step" "dist/product/"
   contains "$step" ".gitignore"
   contains "$step" "never as success"
-  contains "$step" '`<repo name>` is the target repo'"'"'s name (the root directory'"'"'s name).'
+  contains "$step" '`<repo name>` is the `name` part of the `owner/name` Step 1 passes as `repo`'
   contains "$step" 'writes `dist/product/personas.pdf` and `dist/product/personas.epub` and prints both absolute paths, the PDF first.'
-  contains "$step" '**`dist/` is build output.**'
-  contains "$step" 'when `git check-ignore -q dist/` says it is not already ignored'
+  contains "$step" '**`dist/product/` is build output.**'
+  contains "$step" 'when `git check-ignore -q dist/product/` says it is not already ignored'
+  lacks "$step" 'check-ignore -q dist/ '
   contains "$step" 'never committed by this skill'
 }
 

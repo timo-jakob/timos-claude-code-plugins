@@ -2,9 +2,11 @@
 --
 -- One filter serves both outputs (Typst for the PDF, EPUB for the ePub). It
 --
---   1. drops the machine block (a `<details>` element and everything inside
---      it) and every HTML comment, the `charter:prose:*` / `personas:prose:*`
---      sentinels included, so neither reaches the output;
+--   1. drops the machine block (a `<details>` element holding a fenced JSON
+--      object with a `schema` key, and everything inside it) and every HTML
+--      comment, the `charter:prose:*` / `personas:prose:*` sentinels included,
+--      so neither reaches the output; any other `<details>` keeps its content,
+--      its summary as a bold line;
 --   2. appends each appendix after the main document, read with the same
 --      reader, its identifiers prefixed so two documents never share one;
 --   3. rewrites links: one into the main document or an appendix becomes an
@@ -68,26 +70,64 @@ local function is_comment(text)
   return text:match("^%s*<!%-%-") ~= nil
 end
 
--- The machine block and the comments. A `<details>` element may arrive as one
--- raw block or split around the markdown pandoc parsed inside it, so the depth
--- is counted across blocks and everything between the outer tags is dropped.
-local function strip(blocks)
-  local out, depth = pandoc.Blocks({}), 0
-  for _, b in ipairs(blocks) do
+-- True when a span of blocks holds the machine block: a `json` code block
+-- whose text is an object with a `schema` key.
+local function holds_machine_block(span)
+  local found = false
+  pandoc.Blocks(span):walk({
+    CodeBlock = function(cb)
+      if found or not cb.classes:includes("json") then return nil end
+      local ok, value = pcall(pandoc.json.decode, cb.text, false)
+      if ok and type(value) == "table" and value.schema ~= nil then found = true end
+    end,
+  })
+  return found
+end
+
+-- Any other `<details>` is unwrapped: its tags go, its summary stays as a bold
+-- line and the blocks inside it stay as they are.
+local function unwrap(span)
+  local out = pandoc.Blocks({})
+  for _, b in ipairs(span) do
     if b.t == "RawBlock" and b.format:match("html") then
-      local text = b.text
-      local opens = select(2, text:gsub("<details[%s>]", ""))
-      local closes = select(2, text:gsub("</details%s*>", ""))
-      if depth > 0 or opens > 0 then
-        depth = depth + opens - closes
-        if depth < 0 then depth = 0 end
-      elseif not is_comment(text) then
-        out:insert(b)
+      local summary = b.text:match("<summary[^>]*>(.-)</summary%s*>")
+      if summary and summary:match("%S") then
+        local inlines = pandoc.utils.blocks_to_inlines(pandoc.read(summary, "html").blocks)
+        out:insert(pandoc.Para({ pandoc.Strong(inlines) }))
       end
-    elseif depth == 0 then
+    else
       out:insert(b)
     end
   end
+  return out
+end
+
+-- The machine block and the comments. A `<details>` element may arrive as one
+-- raw block or split around the markdown pandoc parsed inside it, so the depth
+-- is counted across blocks and the span between the outer tags is collected:
+-- dropped when it holds the machine block, unwrapped otherwise.
+local function strip(blocks)
+  local out, depth, span = pandoc.Blocks({}), 0, {}
+  for _, b in ipairs(blocks) do
+    local opens, closes = 0, 0
+    if b.t == "RawBlock" and b.format:match("html") then
+      opens = select(2, b.text:gsub("<details[%s>]", ""))
+      closes = select(2, b.text:gsub("</details%s*>", ""))
+    end
+    if depth > 0 or opens > 0 then
+      span[#span + 1] = b
+      depth = depth + opens - closes
+      if depth <= 0 then
+        depth = 0
+        if not holds_machine_block(span) then out:extend(unwrap(span)) end
+        span = {}
+      end
+    elseif not (b.t == "RawBlock" and b.format:match("html") and is_comment(b.text)) then
+      out:insert(b)
+    end
+  end
+  -- an unclosed `<details>` runs to the end of the document
+  if #span > 0 and not holds_machine_block(span) then out:extend(unwrap(span)) end
   return out:walk({
     RawInline = function(r)
       if r.format:match("html") and is_comment(r.text) then return {} end
