@@ -104,7 +104,7 @@ tool_flag_list() {
   contains "$stderr" 'usage: concern-of.zsh'
 }
 
-@test "concern-of --tools: each concern lists its --tool tools in Phase 0's order" {
+@test "concern-of --tools: each concern lists its --tool tools in Phase 0's order, then its planner-only ones" {
   run "$CONCERN" --tools security
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | tr '\n' ' ')" = 'snyk_prs code_scanning semgrep container_scan govulncheck' ]
@@ -113,10 +113,10 @@ tool_flag_list() {
   [ "$(printf '%s' "$output" | tr '\n' ' ')" = 'dependabot renovate' ]
   run "$CONCERN" --tools codequality
   [ "$status" -eq 0 ]
-  [ "$(printf '%s' "$output" | tr '\n' ' ')" = 'sonarcloud ruff' ]
+  [ "$(printf '%s' "$output" | tr '\n' ' ')" = 'sonarcloud ruff format_lint grpc api_contract openapi versioning' ]
 }
 
-@test "concern-of --tools: bugs and topic are known concerns with no --tool tool" {
+@test "concern-of --tools: bugs and topic are known concerns with no language tool" {
   run "$CONCERN" --tools bugs
   [ "$status" -eq 0 ]
   [ -z "$output" ]
@@ -152,9 +152,9 @@ tool_flag_list() {
   [ "$n" -eq 9 ]
 }
 
-@test "sweep: the three --concern sets together are exactly Phase 0's --tool list" {
+@test "sweep: the three --concern sets together are exactly Phase 0's --tool list plus the planner-only tools" {
   local want got
-  want="$(tool_flag_list | tr '\n' ' ')"
+  want="$({ tool_flag_list; printf '%s\n' format_lint grpc api_contract openapi versioning; } | sort | tr '\n' ' ')"
   got="$({ "$CONCERN" --tools security; "$CONCERN" --tools dependencies; "$CONCERN" --tools codequality; } \
     | sort | tr '\n' ' ')"
   [ "$got" = "$want" ]
@@ -289,7 +289,8 @@ EOF
   contains "$s" 'Which tool belongs to which concern is stated in one place only, `<skill-base-dir>/scripts/concern-of.zsh` (#3211)'
   contains "$s" 'Expand it to its tool set with `concern-of.zsh --tools <name>`'
   contains "$s" 'The concerns rank `security`, `dependencies`, `bugs`, `codequality`, and topic-plugin checks come last'
-  contains "$s" 'Every tool of the `--tool` list belongs to exactly one of `security`, `dependencies` and `codequality`'
+  contains "$s" 'Every language tool belongs to exactly one of `security`, `dependencies` and `codequality`, so `--concern=security` + `--concern=dependencies` + `--concern=codequality` together cover the same language tools as an unscoped run.'
+  lacks "$s" 'Every tool of the `--tool` list belongs to exactly one of'
   contains "$s" 'No tool belongs to `bugs` yet, and topic-plugin checks belong to no `--concern`: a scoped run skips them.'
   lacks "$s" 'The three concerns partition all nine tools'
   # the mapping is no longer restated inline

@@ -41,8 +41,9 @@ Supported flags in `$ARGUMENTS`:
   be one of `security`, `dependencies`, `codequality`. Which tool belongs
   to which concern is stated in one place only,
   `<skill-base-dir>/scripts/concern-of.zsh` (#3211):
-  `concern-of.zsh --tools <name>` prints the concern's tools from the
-  `--tool` list above, one per line.
+  `concern-of.zsh --tools <name>` prints the concern's language tools,
+  one per line: its tools from the `--tool` list above, then the ones
+  only a planner groups by.
 
   It expands to that tool set and scopes dispatch like `--tool`, just to
   several tools at once (Phase 4) — the gather phase still runs for
@@ -50,10 +51,10 @@ Supported flags in `$ARGUMENTS`:
   `--no-merge`; **mutually exclusive with `--tool`** (pass one or the
   other). The concerns rank `security`, `dependencies`, `bugs`,
   `codequality`, and topic-plugin checks come last, the order an unscoped
-  run works in (Phase 8). Every tool of the `--tool` list belongs to
-  exactly one of `security`, `dependencies` and `codequality`, so
+  run works in (Phase 8). Every language tool belongs to exactly one of
+  `security`, `dependencies` and `codequality`, so
   `--concern=security` + `--concern=dependencies` + `--concern=codequality`
-  together cover the same set as an unscoped run. No tool belongs to
+  together cover the same language tools as an unscoped run. No tool belongs to
   `bugs` yet, and topic-plugin checks belong to no `--concern`: a scoped
   run skips them.
 - `--batch=N` — cap how much of the plan this run processes. After the

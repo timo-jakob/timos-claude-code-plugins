@@ -8891,8 +8891,8 @@ place the tool → concern mapping lives. It prints the concern of every tool
 Phase 0's `--tool` flag accepts, of the language tools only a planner groups
 by (`format_lint`, `grpc`, `api_contract`, `openapi`, `versioning`, all
 `codequality`), and `topic` for every topic plugin's tool; an unknown tool
-exits 2. `concern-of.zsh --tools <concern>` prints the concern's `--tool`
-tools, the set `--concern=<concern>` expands to. No tool maps to `bugs`
+exits 2. `concern-of.zsh --tools <concern>` prints the concern's language
+tools, its `--tool` ones first, the set `--concern=<concern>` expands to. No tool maps to `bugs`
 yet. `tests/maintenance-concern-order.bats` sweeps the mapping against
 Phase 0's `--tool` list, every language dispatcher's supported tools and
 every topic dispatcher's routing table.

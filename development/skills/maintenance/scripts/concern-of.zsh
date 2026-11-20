@@ -8,9 +8,10 @@
 #       Print the concern of a findings_by_tool key: security | dependencies |
 #       bugs | codequality | topic. Every topic plugin's tool prints `topic`.
 #   concern-of.zsh --tools <concern>
-#       Print, one per line, the tools of Phase 0's `--tool` list that belong to
-#       <concern> — the set `--concern=<concern>` expands to. A concern with no
-#       such tool (bugs, topic) prints nothing.
+#       Print, one per line, the language tools of <concern> — its tools of
+#       Phase 0's `--tool` list, then its planner-only ones — the set
+#       `--concern=<concern>` expands to. A concern with no such tool (bugs,
+#       topic) prints nothing.
 #
 # Exit codes:
 #   0  printed
@@ -28,10 +29,11 @@ usage() {
   exit 2
 }
 
-# Phase 0's `--tool` list, by concern. These are the tools a run can be scoped
-# to; together they are exactly that list (tests/maintenance-concern-order.bats
-# sweeps SKILL.md against it).
-typeset -A DISPATCH=(
+# Every language tool, by concern: Phase 0's `--tool` list (the tools a run
+# can be scoped to by name; tests/maintenance-concern-order.bats sweeps SKILL.md
+# against it), then the tools a planner groups by but `--tool` does not accept —
+# linters, formatters and config advisors, all code quality.
+typeset -A CONCERN_OF=(
   snyk_prs security
   code_scanning security
   semgrep security
@@ -41,19 +43,15 @@ typeset -A DISPATCH=(
   renovate dependencies
   sonarcloud codequality
   ruff codequality
-)
-# The same tools in Phase 0's order (an associative array has none).
-typeset -a DISPATCH_ORDER=(snyk_prs code_scanning semgrep container_scan govulncheck dependabot renovate sonarcloud ruff)
-
-# Language tools a planner groups by but `--tool` does not accept: linters,
-# formatters and config advisors, all code quality.
-typeset -A PLANNER_ONLY=(
   format_lint codequality
   grpc codequality
   api_contract codequality
   openapi codequality
   versioning codequality
 )
+# The same tools in that order (an associative array has none).
+typeset -a TOOL_ORDER=(snyk_prs code_scanning semgrep container_scan govulncheck dependabot renovate sonarcloud ruff
+  format_lint grpc api_contract openapi versioning)
 
 # Every topic plugin's tools (claude-plugin, composition, docs, kubernetes,
 # opentofu, react, spring) — the keys of each topic dispatcher's routing table.
@@ -78,8 +76,8 @@ if [[ "$1" == --tools ]]; then
     print -u2 "concern-of.zsh: unknown concern '$concern'; known: ${CONCERNS[*]}"
     exit 2
   fi
-  for tool in "${DISPATCH_ORDER[@]}"; do
-    [[ "${DISPATCH[$tool]}" == "$concern" ]] && print -r -- "$tool"
+  for tool in "${TOOL_ORDER[@]}"; do
+    [[ "${CONCERN_OF[$tool]}" == "$concern" ]] && print -r -- "$tool"
   done
   exit 0
 fi
@@ -88,10 +86,8 @@ fi
 tool="$1"
 [[ -n "$tool" ]] || usage
 
-if (( ${+DISPATCH[$tool]} )); then
-  print -r -- "${DISPATCH[$tool]}"
-elif (( ${+PLANNER_ONLY[$tool]} )); then
-  print -r -- "${PLANNER_ONLY[$tool]}"
+if (( ${+CONCERN_OF[$tool]} )); then
+  print -r -- "${CONCERN_OF[$tool]}"
 elif (( ${TOPIC_TOOLS[(Ie)$tool]} )); then
   print -r -- topic
 else
