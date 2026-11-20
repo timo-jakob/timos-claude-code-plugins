@@ -13,7 +13,8 @@
 #   charter: <rule>: <detail>
 # where <rule> is one of schema, bad-id-shape, duplicate-id, statement-and-ref,
 # neither-statement-nor-ref, retired-unnamed, unresolved-affects,
-# unresolved-serves, ref-missing, appendix-missing, bad-date, stale-prose.
+# unresolved-serves, ref-missing, appendix-missing, bad-date, direction-order,
+# stale-prose.
 #
 # The repo is the git work tree holding the charter, or the current directory
 # outside git. A `ref` path and an appendix must be the repo's own file:
@@ -182,6 +183,9 @@ if (( block_ok )); then
     def isodate: type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
       and (split("-") | map(tonumber) as [$y, $m, $d]
            | $m >= 1 and $m <= 12 and $d >= 1 and $d <= days($y; $m));
+    # the <n> of a well-formed DC-<yyyy>-<mm>-<n>, or null
+    def dcseq: if test("^DC-[0-9]{4}-(0[1-9]|1[0-2])-[1-9][0-9]*$") then split("-")[3] | tonumber
+               else null end;
     def v($rule; $detail): "\($rule)\t\($detail)";
     . as $c
     | (
@@ -240,6 +244,18 @@ if (( block_ok )); then
          (["affects", "evidence"][] as $f
           | select(($d[$f] | type == "array" and all(.[]; type == "string")) | not)
           | v("schema"; "\($name): \($f) is not an array of strings"))),
+
+      # direction-order: newest first; on one date the higher DC-<yyyy>-<mm>-<n>
+      # comes first. A pair with a non-calendar date or a non-string id is skipped.
+      (objs("direction_changes") as $dcs
+       | range(1; $dcs | length) as $i
+       | $dcs[$i - 1] as $a | $dcs[$i] as $b
+       | select(($a.date | isodate) and ($b.date | isodate)
+                and ($a.id | type == "string") and ($b.id | type == "string"))
+       | select($b.date > $a.date
+                or ($b.date == $a.date and ($a.id | dcseq) != null and ($b.id | dcseq) != null
+                    and ($b.id | dcseq) > ($a.id | dcseq)))
+       | v("direction-order"; "\($a.id) is listed before \($b.id), which is newer")),
 
       # ids: unique across the whole charter
       ([(lists[][0], "direction_changes") as $k | objs($k)[] | .id | select(type == "string")]

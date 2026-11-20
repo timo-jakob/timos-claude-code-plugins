@@ -8773,6 +8773,7 @@ charter. The rules:
 | `ref-missing` | a `ref` path that is not a file of the repo |
 | `appendix-missing` | an appendix that is not a file of the repo |
 | `bad-date` | a direction change whose `date` is not a calendar date, or not in the month its id names |
+| `direction-order` | a direction change listed before a newer one: a later `date`, or on the same date a higher `n` in `DC-<yyyy>-<mm>-<n>` |
 | `stale-prose` | `provenance.prose_sha256` does not match the prose |
 
 The repo is the git work tree holding the charter, or the current directory

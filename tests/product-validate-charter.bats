@@ -60,6 +60,10 @@ derive_unresolved_serves()         { edit_block '.serves += ["kofi-archivist"]';
 derive_ref_missing()               { edit_block '.values[0].ref.path = "docs/missing.md"'; }
 derive_appendix_missing()          { edit_block '.appendices = ["docs/appendix-gone.md"]'; }
 derive_bad_date()                  { edit_block '.direction_changes[0].date = "2026-11-31"'; }
+# a newer direction change appended after the older one, not put first
+derive_direction_order() {
+  edit_block '.direction_changes += [.direction_changes[0] | .id = "DC-2026-12-1" | .date = "2026-12-03"]'
+}
 # the prose changes and the stored hash does not
 derive_stale_prose() {
   sed 's/^- \*\*S-2\*\* Sync to a laptop reader\.$/- **S-2** Sync to any laptop reader./' "$C" > "$C.new"
@@ -318,6 +322,26 @@ only_rule() {
   run --separate-stderr zsh "$S" "$C"
   only_rule bad-date
   contains "$stderr" 'DC-2027-02-1: date 2027-02-29 is not a calendar date'
+}
+
+@test "direction-order: a newer direction change listed after an older one" {
+  derive_direction_order
+  run --separate-stderr zsh "$S" "$C"
+  only_rule direction-order
+  [ "$stderr" = "charter: direction-order: DC-2026-11-1 is listed before DC-2026-12-1, which is newer" ]
+}
+
+@test "direction-order: newest first is valid, and on one date the higher n comes first" {
+  # three entries: DC-2026-12-1, then DC-2026-11-2 and DC-2026-11-1 on one date
+  derive_direction_order
+  edit_block '.direction_changes |= [.[1], (.[0] | .id = "DC-2026-11-2"), .[0]]'
+  run --separate-stderr zsh "$S" "$C"
+  [ "$status" -eq 0 ]
+  [ "$output" = "charter: valid" ]
+  edit_block '.direction_changes |= [.[0], .[2], .[1]]'
+  run --separate-stderr zsh "$S" "$C"
+  only_rule direction-order
+  [ "$stderr" = "charter: direction-order: DC-2026-11-1 is listed before DC-2026-11-2, which is newer" ]
 }
 
 @test "stale-prose: the prose changed and the hash did not" {

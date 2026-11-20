@@ -68,7 +68,7 @@ setup() {
   doc="$(printf '%s\n' "$RAW" | sed -n '/^| Rule | A violation |$/,/^$/p' | sed -n 's/^| `\([a-z-]*\)` | .*/\1/p' | sort)"
   script="$(sed -n '/^# where <rule> is one of/,/^#$/p' "$S" | tr -d '#,.' | tr -s '[:space:]' '\n' \
     | grep -E '^[a-z]+(-[a-z]+)*$' | grep -vx -e where -e rule -e is -e one -e of | sort)"
-  [ "$(printf '%s\n' "$doc" | wc -l | tr -d ' ')" -eq 12 ]
+  [ "$(printf '%s\n' "$doc" | wc -l | tr -d ' ')" -eq 13 ]
   [ "$doc" = "$script" ]
 }
 
