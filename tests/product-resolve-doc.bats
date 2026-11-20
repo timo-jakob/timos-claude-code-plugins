@@ -37,6 +37,13 @@ declare_subs() {
   done
 }
 
+# declare_named_sub <name> <path> — a hand-written .gitmodules declaring one
+# submodule whose name differs from its path; the lookup must use the path
+declare_named_sub() {
+  printf '[submodule "%s"]\n\tpath = %s\n\turl = https://example.invalid/%s.git\n' "$1" "$2" "$1" \
+    > "$R/.gitmodules"
+}
+
 # populate <dir> — an initialised-looking submodule: a non-empty directory
 populate() {
   mkdir -p "$R/$1"
@@ -137,6 +144,27 @@ place() {
   run --separate-stderr zsh "$S" --repo "$R" "$DOC"
   [ "$status" -eq 0 ]
   ends_with "$output" $'\t'"own"
+}
+
+@test "a submodule whose name differs from its path is looked up and reported by its path" {
+  declare_named_sub docs-repo "vendor/product docs"
+  mkdir -p "$R/docs-repo/docs"
+  printf '# Personas\n' > "$R/docs-repo/$DOC"
+  place "vendor/product docs"
+  run --separate-stderr zsh "$S" --repo "$R" "$DOC"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(cd "$R/vendor/product docs" && pwd -P)/$DOC"$'\t'"linked:vendor/product docs" ]
+}
+
+@test "an uninitialised submodule whose name differs from its path is exit 4 naming the path" {
+  declare_named_sub docs-repo "vendor/product docs"
+  mkdir -p "$R/vendor/product docs" "$R/docs-repo/docs"
+  printf '# Personas\n' > "$R/docs-repo/$DOC"
+  run --separate-stderr zsh "$S" --repo "$R" "$DOC"
+  [ "$status" -eq 4 ]
+  [ -z "$output" ]
+  contains "$stderr" "submodule not initialised: vendor/product docs"
+  contains "$stderr" "git submodule update --init -- 'vendor/product docs'"
 }
 
 @test "works with spaces in the repo path, the submodule path and the document path" {
