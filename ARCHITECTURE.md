@@ -8723,7 +8723,7 @@ non-goals, and one direction change that retires a non-goal
 | `purpose`, `background` | string | what the product is for, and why it exists |
 | `serves` | string[] | persona ids from the repo's persona registry; may be empty |
 | `values`, `scope`, `non_goals` | object[] | entries, below |
-| `direction_changes` | object[] | the log, below |
+| `direction_changes` | object[] | the log, below, newest first as in the prose |
 
 **An entry** (a value, a scope item or a non-goal) has a stable `id` — `V-<n>`
 for a value, `S-<n>` for a scope item, `NG-<n>` for a non-goal — a `status`,
@@ -8741,7 +8741,8 @@ be empty).
 **The rules.**
 
 - **An entry is never deleted.** A value, scope item or non-goal that no longer
-  holds becomes `retired`, and some direction change names it in `affects`.
+  holds becomes `retired`, and a direction change records its retirement by
+  naming it in `affects`.
 - **An id is unique in the charter, and never reused or renumbered.**
 - Every id in `affects` names a value, scope item or non-goal of the charter,
   and every id in `serves` names a persona in the registry. With no registry
@@ -8782,7 +8783,8 @@ check cannot complete: the validator exits 2, and it is not an
 `unresolved-serves` violation.
 
 **The validator checks a single file, so it cannot see an active entry reworded
-in place, an entry deleted, or an id renumbered or reused.** Catching those
+in place, an entry deleted, an id renumbered or reused, or a retired entry
+named only by the change that introduced it.** Catching those
 means comparing the charter with its earlier versions, which is a different
 tool. Until one exists, they are left to the change itself: whoever changes an
 entry's meaning adds a direction change, and the human who approves the PR

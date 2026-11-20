@@ -6,7 +6,8 @@
 # The contract is ARCHITECTURE.md, *Product charter contract (`charter/v1`)*.
 # This script is its single-file check: it reads one charter and judges it
 # alone, so it cannot see an active entry reworded in place, an entry deleted,
-# or an id renumbered or reused, which only the file's history would show.
+# an id renumbered or reused, or a retired entry named only by the change that
+# introduced it, which only the file's history would show.
 #
 # Every violation is reported, not only the first: one stderr line each,
 #   charter: <rule>: <detail>

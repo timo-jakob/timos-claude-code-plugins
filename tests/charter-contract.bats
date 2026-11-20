@@ -44,12 +44,12 @@ setup() {
 }
 
 @test "an entry is never deleted, and an id is never reused or renumbered" {
-  contains "$SECTION" '**An entry is never deleted.** A value, scope item or non-goal that no longer holds becomes `retired`, and some direction change names it in `affects`.'
+  contains "$SECTION" '**An entry is never deleted.** A value, scope item or non-goal that no longer holds becomes `retired`, and a direction change records its retirement by naming it in `affects`.'
   contains "$SECTION" '**An id is unique in the charter, and never reused or renumbered.**'
 }
 
 @test "the contract states the validator's single-file limit" {
-  contains "$SECTION" '**The validator checks a single file, so it cannot see an active entry reworded in place, an entry deleted, or an id renumbered or reused.**'
+  contains "$SECTION" '**The validator checks a single file, so it cannot see an active entry reworded in place, an entry deleted, an id renumbered or reused, or a retired entry named only by the change that introduced it.**'
 }
 
 @test "provenance is the persona contract's mechanism, given as a link and not restated" {

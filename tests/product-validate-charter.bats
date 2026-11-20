@@ -108,11 +108,22 @@ only_rule() {
   contains "$stderr" 'prose sections are'
 }
 
-@test "schema: no prose sentinels" {
+@test "schema: no prose sentinels, a duplicated one, or swapped ones" {
+  cp "$C" "$BATS_TEST_TMPDIR/valid.md"
   grep -v '^<!-- charter:prose:' "$C" > "$C.new"
   mv "$C.new" "$C"
   run --separate-stderr zsh "$S" "$C"
   only_rule schema
+  awk '{ print } /^<!-- charter:prose:start -->$/ { print }' "$BATS_TEST_TMPDIR/valid.md" > "$C"
+  run --separate-stderr zsh "$S" "$C"
+  only_rule schema
+  contains "$stderr" 'found 2 and 1'
+  awk '/^<!-- charter:prose:start -->$/ { print "<!-- charter:prose:end -->"; next }
+       /^<!-- charter:prose:end -->$/ { print "<!-- charter:prose:start -->"; next } 1' \
+    "$BATS_TEST_TMPDIR/valid.md" > "$C"
+  run --separate-stderr zsh "$S" "$C"
+  only_rule schema
+  contains "$stderr" 'comes before'
 }
 
 @test "schema: an empty json block" {
@@ -260,6 +271,10 @@ only_rule() {
   run --separate-stderr zsh "$S" "$C"
   only_rule ref-missing
   contains "$stderr" 'found only in linked:handbook'
+  edit_block '.values[0].ref.path = "handbook/docs/team-principles.md"'
+  run --separate-stderr zsh "$S" "$C"
+  only_rule ref-missing
+  contains "$stderr" 'lies inside a submodule'
 }
 
 @test "ref-missing: an absolute ref path, and one that leaves the repo" {
