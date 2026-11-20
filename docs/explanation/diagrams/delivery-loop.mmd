@@ -1,39 +1,55 @@
+%%{init: {"flowchart": {"wrappingWidth": 700, "nodeSpacing": 45, "rankSpacing": 55}, "themeCSS": ".phaseIntent text, .phaseIntent tspan, .phaseExec text, .phaseExec tspan, .phaseLearn text, .phaseLearn tspan { font-weight: 700; letter-spacing: 1px; } .edgeLabel text, .edgeLabel tspan { font-size: 13px; }"}}%%
 flowchart TD
-    classDef shipped fill:#d9f2df,stroke:#2e8b4e,color:#222
-    classDef partly fill:#fde7c8,stroke:#b8741a,color:#222
-    classDef planned fill:#dbe8fb,stroke:#3567b5,color:#222
-    classDef open fill:#ffffff,stroke:#777,color:#222,stroke-dasharray:5 4
+    classDef shipped fill:#2e8b4e,stroke:#1f6b3a,stroke-width:2px,color:#ffffff
+    classDef partly fill:#cdeed6,stroke:#2e8b4e,stroke-width:2px,color:#1b1b1b
+    classDef planned fill:#ffffff,stroke:#6b7280,stroke-width:2px,color:#1b1b1b
+    classDef open fill:#ffffff,stroke:#6b7280,stroke-width:2px,color:#1b1b1b,stroke-dasharray:6 5
+    classDef phaseIntent fill:#e8730c,stroke:#b3540a,stroke-width:2px,color:#ffffff,font-size:24px,font-weight:bold
+    classDef phaseExec fill:#7c3aed,stroke:#5b21b6,stroke-width:2px,color:#ffffff,font-size:24px,font-weight:bold
+    classDef phaseLearn fill:#1d6fd6,stroke:#154f9c,stroke-width:2px,color:#ffffff,font-size:24px,font-weight:bold
 
-    subgraph INTENT["Intent and Synthesis"]
+    subgraph INTENT[" "]
+        P1(["1 · INTENT ＆ SYNTHESIS"]):::phaseIntent
         DIR["Direction<br/>charter, personas,<br/>protection needs"]:::partly
-        REFDOC["Reference documents<br/>architecture, styleguide,<br/>component library"]:::planned
         BACKLOG["Backlog<br/>ideas, grooming, roadmap"]:::planned
         DEFINE["Product stage<br/>Feature defined"]:::partly
         DESIGN["Design step<br/>mockups approved"]:::planned
+        REFDOC["Reference documents<br/>architecture, styleguide,<br/>component library"]:::planned
         READY["Technical stage<br/>story ready to build"]:::partly
     end
 
-    subgraph EXEC["Execution"]
+    subgraph EXEC[" "]
+        P2(["2 · EXECUTION"]):::phaseExec
         BUILD["Build<br/>implement, test gate"]:::shipped
         REVIEW["Review loop<br/>panel, fix, re-test"]:::shipped
         SHIP["Ship<br/>bot PR, approval, merge"]:::shipped
     end
 
-    subgraph LEARN["Monitor and Learn"]
+    subgraph LEARN[" "]
+        P3(["3 · MONITOR ＆ LEARN"]):::phaseLearn
         MAINT["Maintain<br/>security, dependencies,<br/>code quality, bugs"]:::partly
         OBSERVE["Observe<br/>the running product"]:::open
     end
 
+    P1 ~~~ DIR
+    P1 ~~~ REFDOC
+    P2 ~~~ BUILD
+    P3 ~~~ MAINT
+    P3 ~~~ OBSERVE
     DIR -. yardstick .-> BACKLOG
     DIR -. yardstick .-> DEFINE
-    BACKLOG --> DEFINE
-    DEFINE -- "has a UI" --> DESIGN
-    DEFINE -- "no UI" --> READY
-    DESIGN --> READY
+    BACKLOG ==> DEFINE
+    DEFINE == "has a UI" ==> DESIGN
+    DEFINE == "no UI" ==> READY
+    DESIGN ==> READY
     REFDOC -. "decides the how" .-> DESIGN
     REFDOC -. "decides the how" .-> READY
-    READY --> BUILD --> REVIEW --> SHIP
-    SHIP --> MAINT
-    SHIP --> OBSERVE
+    READY ==> BUILD ==> REVIEW ==> SHIP
+    SHIP ==> MAINT
+    SHIP ==> OBSERVE
     MAINT -. "bugs, new issues" .-> BACKLOG
     OBSERVE -. "ideas, bugs" .-> BACKLOG
+
+    style INTENT fill:#fff1e0,stroke:#e8730c,stroke-width:4px,color:#b3540a
+    style EXEC fill:#f1e9fc,stroke:#7c3aed,stroke-width:4px,color:#5b21b6
+    style LEARN fill:#e3f0ff,stroke:#1d6fd6,stroke-width:4px,color:#154f9c

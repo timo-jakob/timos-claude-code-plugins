@@ -10,14 +10,17 @@ is updated by the epic that lands each part.
 
 ![The delivery loop: three phases, with what ships today and what is planned](diagrams/delivery-loop.svg)
 
-| Colour | Meaning |
+Each phase has its own frame and banner: orange for Intent and Synthesis, purple for Execution, blue for Monitor
+and Learn. Read it clockwise from the top. Inside a frame, the fill of a step says how much of it exists:
+
+| Step | Meaning |
 | --- | --- |
-| Green | Ships today |
-| Orange | Ships in part; the rest is planned |
-| Blue | Designed and planned, not built |
+| Dark green | Ships today |
+| Light green | Ships in part; the rest is planned |
+| White | Designed and planned, not built |
 | White, dashed | Not designed yet |
 
-A solid arrow is the path a piece of work takes. A dotted arrow is something a step is judged against, or work that
+A thick arrow is the path a piece of work takes. A dotted arrow is something a step is judged against, or work that
 flows back into the backlog.
 
 ## The three phases {#loop-phases}
