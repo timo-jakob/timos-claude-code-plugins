@@ -1,10 +1,10 @@
 # Protection Needs Implementation Plan
 
 > **For agentic workers:** this plan is executed through the repo's own pipeline, not through a superpowers execution
-> skill. Each task below is one child story of the protection-needs epic (to be filed under super-epic #3194 as
-> umbrella project 10); refine it with `/development:refine-issue` when the readiness gate asks, and build it with
-> `/development:resolve-issue`. Tasks run **in the order given**, each off fresh `origin/main` — they collide on
-> `ARCHITECTURE.md`, `product/.claude-plugin/plugin.json` and the marketplace manifest.
+> skill. Each task below is one child story of the protection-needs epic (#3269: tasks 1–7 are #3270–#3276, under
+> super-epic #3194 as umbrella project 10); refine it with `/development:refine-issue` when the readiness gate asks,
+> and build it with `/development:resolve-issue`. Tasks run **in the order given**, each off fresh `origin/main` —
+> they collide on `ARCHITECTURE.md`, `product/.claude-plugin/plugin.json` and the marketplace manifest.
 
 **Goal:** An owner declares one protection scheme; each product gets one protection-needs assessment derived from the
 kinds of information it holds, with every component's contribution; and a Feature cannot be defined or made ready
