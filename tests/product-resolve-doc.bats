@@ -257,7 +257,11 @@ place() {
   local section
   section="$(sed -n '/^### The `product` plugin — outside the language\/topic model/,/^##/p' \
                "$REPO_ROOT/ARCHITECTURE.md" | tr -s '[:space:]' ' ')"
-  contains "$section" "\`product/scripts/resolve-product-doc.zsh [--repo <dir>] <relative-path>\`"
+  contains "$section" "\`product/scripts/resolve-product-doc.zsh [--repo <dir>] <relative-path>\`, and never by a path of its own."
+  contains "$section" "It prints \`<absolute path>\` TAB \`<origin>\`, where the origin is \`own\` or \`linked:<submodule path>\`, and exits 0 found, 2 usage, 3 not found, or 4 when a declared submodule that is not initialised (a missing or empty directory) comes before any hit, since that submodule might hold the file; its stderr then names the submodule and the \`git submodule update --init\` line."
+  contains "$section" "the lookup exits 5 and its stderr names the submodule and the path inside it."
+  contains "$section" "Exit 1 is an internal failure: git missing, or a \`.gitmodules\` git cannot read."
+  contains "$section" "\`/product:define-personas\` stops without writing when the registry is \`linked:…\` or the lookup exits 5, and names where it lives."
   contains "$section" "The repo's own file wins. Otherwise the submodules declared in \`.gitmodules\` are tried in file order"
   contains "$section" "There is no configuration."
   contains "$section" "A path under a declared submodule's mount is never the repo's own; when no submodule holds it at the same relative path, the lookup exits 5"
