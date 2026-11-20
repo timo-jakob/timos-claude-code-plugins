@@ -44,8 +44,9 @@ Supported flags in `$ARGUMENTS`:
   `concern-of.zsh --tools <name>` prints the concern's tools from the
   `--tool` list above, one per line.
 
-  It expands to that tool set and scopes dispatch exactly like `--tool`,
-  just to several tools at once — the gather phase still runs for
+  It expands to that tool set and scopes dispatch like `--tool`, just to
+  several tools at once, each language getting only the ones it supports
+  (Phase 4) — the gather phase still runs for
   everything, only dispatch is narrowed. Combinable with `--dry-run` and
   `--no-merge`; **mutually exclusive with `--tool`** (pass one or the
   other). The concerns rank `security`, `dependencies`, `bugs`,
@@ -112,7 +113,8 @@ When `--concern=<name>` is set, validate `<name>` against `security`,
 Expand it to its tool set with `concern-of.zsh --tools <name>` and carry
 that set forward as the
 dispatch scope — Phase 4 writes it into `dispatch_filter.only_tools`
-exactly as it does for `--tool`. If **both** `--tool` and `--concern`
+as it does for `--tool`, limited for each language to the tools that
+language supports. If **both** `--tool` and `--concern`
 are passed, halt with: "Pass --tool or --concern, not both."
 
 When `--batch=N` is set, validate that `N` parses as an integer ≥ 1. On a
@@ -1366,9 +1368,26 @@ entirely otherwise):
 ```
 
 `only_tools` is the scoped tool set: a single-element list for `--tool`,
-or the concern's expanded tool set for `--concern` (the lines
-`concern-of.zsh --tools <name>` printed, as a JSON list).
-The field shape is identical either way.
+or, for `--concern`, the concern's expanded tool set (the lines
+`concern-of.zsh --tools <name>` printed, as a JSON list) limited to the
+tools this language supports. The field shape is identical either way.
+
+**Limit a `--concern` set to the language's tools.** The Python, Java
+and Swift dispatchers halt on any `only_tools` name they do not support,
+so write only the intersection of the concern's set with that
+language's supported tools:
+
+- python → `ruff`, `semgrep`, `code_scanning`, `snyk_prs`, `sonarcloud`,
+  `dependabot`, `container_scan`
+- java → `format_lint`, `sonarcloud`, `code_scanning`, `semgrep`,
+  `dependabot`, `snyk_prs`, `renovate`, `versioning`, `grpc`, `openapi`
+- swift → `format_lint`, `sonarcloud`, `code_scanning`
+
+When the intersection is empty, do not dispatch that language: record
+"nothing in scope for `<lang>` under `--concern=<name>`" for the Phase 9
+summary and move on to the next target. Go and JavaScript take the full
+set: their dispatchers already intersect it with their own tools and
+return `plan: []` when nothing is left.
 
 This is what the language plugin reads to know it should skip every
 other agent. The gather output is unchanged — only dispatch is scoped.

@@ -319,8 +319,31 @@ EOF
 @test "SKILL.md Phase 4: a --concern scope's only_tools is what concern-of.zsh --tools printed" {
   local s
   s="$(section '## Phase 4 — construct one payload per supported language')"
-  contains "$s" 'or the concern'"'"'s expanded tool set for `--concern` (the lines `concern-of.zsh --tools <name>` printed, as a JSON list).'
+  contains "$s" 'or, for `--concern`, the concern'"'"'s expanded tool set (the lines `concern-of.zsh --tools <name>` printed, as a JSON list) limited to the tools this language supports.'
   lacks "$s" '`["snyk_prs", "code_scanning", "semgrep", "container_scan", "govulncheck"]`'
+  contains "$s" 'write only the intersection of the concern'"'"'s set with that language'"'"'s supported tools'
+  contains "$s" 'When the intersection is empty, do not dispatch that language'
+  contains "$s" 'Go and JavaScript take the full set: their dispatchers already intersect it with their own tools'
+}
+
+@test "sweep: Phase 4's per-language --concern limit matches each halting dispatcher's supported tools" {
+  local lang s want got
+  s="$(section '## Phase 4 — construct one payload per supported language' \
+    | sed -n 's/.*\*\*Limit a `--concern` set to the language'"'"'s tools\.\*\*\(.*\) When the intersection is empty.*/\1/p')"
+  [ -n "$s" ]
+  for lang in java python swift; do
+    want="$(tr -s '[:space:]' ' ' <"$REPO_ROOT/development-$lang/skills/maintenance/SKILL.md" \
+      | grep -o 'dispatch_filter.only_tools; supported: [^"]*\."' \
+      | sed 's/^dispatch_filter.only_tools; supported: //; s/\."$//' \
+      | tr ',' '\n' | tr -d ' ' | sort | tr '\n' ' ')"
+    got="$(printf '%s\n' "$s" \
+      | grep -o "\- $lang → [^-]*" \
+      | sed "s/^- $lang → //" | tr ',' '\n' | tr -d ' `' | grep -v '^$' | sort | tr '\n' ' ')"
+    [ -n "$want" ] && [ "$got" = "$want" ] || {
+      printf '%s: Phase 4 lists [%s], dispatcher supports [%s]\n' "$lang" "$got" "$want" >&2
+      return 1
+    }
+  done
 }
 
 @test "reference/pr-cycle.md states why the concerns run in a fixed order" {
