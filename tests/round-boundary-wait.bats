@@ -119,13 +119,13 @@ setup() {
   # takes — a SENTENCE, which begins `It does not run …`.
   RESTATEMENT_NEEDLES=(
     'does not run date, sleep, echo, git status or any other heartbeat'
-    'one bounded blocking call'
+    'one background until loop (#3044)'
     'does not schedule short wake-ups to poll work the harness already tracks'
     'there is nothing left for this turn to do, so end it'
     'arrives as a harness notification that re-invokes you'
     'The gate is not one of these'
     'for a signal the harness does not deliver'
-    'Monitor, with a timeout generous enough for the wait'
+    'Never Monitor for a marker-file wait'
     'One call, never one probe per turn'
     'signal-never-arrived arm instead of blocking again'
   )
@@ -335,22 +335,29 @@ _roster_hits() {
   contains "$body" 'does not schedule short wake-ups to poll work the harness already tracks'
 }
 
-@test "#1513 AC1 the paragraph states the single-bounded-call EXCEPTION" {
+@test "#1513 AC1 the paragraph states the single-background-loop EXCEPTION" {
   # The exception is what keeps the rule usable: a driver that may never block
   # in-turn has no way to collect the gate's marker, and would go back to
   # per-turn probes. Pinned with its scope (a signal the harness does not
-  # deliver), its bound (one call), and its single sanctioned form.
+  # deliver), its bound (one call), and its single sanctioned form — since
+  # #3044 a background until loop, never Monitor, whose 30-minute cap stranded
+  # a step for hours behind a green gate.
   local ln body
   ln="$(prose_gate_lines "$CORE" "$BANNER")"
   [ -n "$ln" ]
-  body="$(prose_window "$CORE" "$((ln + 9))" 9)"
+  body="$(prose_window "$CORE" "$((ln + 26))" 26)"
   contains "$body" 'for a signal the harness does not deliver'
-  contains "$body" 'it is one bounded blocking call'
-  # ONE form, carrying its own bound. Offering a second, unbounded shell form
-  # beside it is what two earlier drafts got wrong — first with a hand-rolled
-  # deadline the harness would cut short, then with a duration condition the
-  # driver cannot evaluate for the one wait the exception actually names.
-  contains "$body" 'Monitor, with a timeout generous enough for the wait'
+  contains "$body" 'it is one background until loop (#3044): one Bash call with run_in_background: true whose command exits once its condition holds'
+  # ONE form. The ban is spelled out with its reason, so a later edit cannot
+  # bring Monitor back as "also fine".
+  contains "$body" 'Never Monitor for a marker-file wait: it caps every bound at thirty minutes'
+  # #3044 AC2: the gate loop ends on BOTH terminal states and says which
+  contains "$body" 'The loop exits on every terminal state, never only the happy path, and its last line says which one it reached.'
+  contains "$body" 'until [ -e "$G/gate.done" ]; do'
+  contains "$body" 'if ! kill -0 -- "-$(cat "$G/gate.pgid" 2>/dev/null)" 2>/dev/null; then'
+  contains "$body" 'echo "gate-gone: the process group ended without gate.done"; exit 3'
+  contains "$body" 'echo "gate-done: gate.done exists"'
+  contains "$body" "gate-done takes step 4's verdict read, and gate-gone — an unreadable gate.pgid included — is step 4's signal-never-arrived arm."
   # …and how the driver learns which way the call ended. The loop's exit status
   # is 0 whether the signal arrived or not, so a rule that says what to do on
   # expiry without saying how to detect it sends a healthy round to report-and-stop.
@@ -553,7 +560,7 @@ _round_dispatch_carveout() {
   # …and the half that carries the operative instruction. Without it the page
   # can keep the "nothing announces it" clause and still tell a reader to watch
   # the suite, contradicting the rule it claims to defer to.
-  contains "$body" 'it is collected once, in a single blocking call, rather than watched'
+  contains "$body" 'it is collected once, by a single background loop whose exit is its one notice, rather than watched'
   # …and why it is a cost rule, which is the half that makes it non-negotiable
   contains "$body" 'a third of its turns and a third of its input tokens'
   # ONE needle, carrying the pointer and the disclaimer together. It is the
@@ -709,8 +716,8 @@ _round_dispatch_carveout() {
          print "   work the harness already tracks. Once dispatched there is nothing left"
          print "   for this turn to do, so end it: every reviewer'"'"'s result arrives as a"
          print "   harness notification that re-invokes you. The gate is not one of these,"
-         print "   so the wait for a signal the harness does not deliver is one bounded"
-         print "   blocking call: Monitor, with a timeout generous enough for the wait."
+         print "   so the wait for a signal the harness does not deliver is one"
+         print "   background until loop (#3044). Never Monitor for a marker-file wait."
          print "   One call, never one probe per turn — then take the boundary'"'"'s own"
          print "   signal-never-arrived arm instead of blocking again." }' \
     "$CORE" > "$F"
@@ -830,4 +837,183 @@ _round_dispatch_carveout() {
     printf 'expected 6 synthetic roster hits, found %s\n' "$n" >&2
     return 1
   fi
+}
+
+# --- #3044: no marker-file wait prescribes Monitor -----------------------------
+#
+# Monitor caps every bound at thirty minutes and returns at once, and a step
+# whose turn ended on one that expired was never woken (the #3040 run idled
+# three hours behind a green gate). The round protocol's shards and the two
+# step agents are where a marker-file wait is prescribed, so in those files
+# every mention of Monitor must be a ban: each occurrence is preceded by
+# "never". Counted over the normalised body (`prose_body`), so emphasis, code
+# ticks and a reflow cannot hide a mention. The frontmatter `tools:` line is
+# excluded: it grants the tool, which the bounded-wait.zsh PR and issue waits
+# elsewhere still use, and prescribes no wait.
+
+# Prints "<file>: <Monitor mentions> <negated mentions>" for each file whose two
+# counts differ; prints nothing when every mention is a ban.
+_monitor_not_banned() {
+  local f body total neg
+  for f in "$@"; do
+    body="$(sed '/^tools:/d' "$f" > "$BATS_TEST_TMPDIR/monitor-sweep.md" \
+      && prose_body "$BATS_TEST_TMPDIR/monitor-sweep.md")" || return 2
+    total="$(printf '%s' "$body" | grep -o 'Monitor' | wc -l | tr -d ' ')"
+    neg="$(printf '%s' "$body" | grep -oE '[Nn]ever Monitor' | wc -l | tr -d ' ')"
+    [ "$total" -eq "$neg" ] || printf '%s: %s %s\n' "$f" "$total" "$neg"
+  done
+}
+
+_monitor_sweep_files() {
+  find "$SHARDS" -type f -name '*.md' | LC_ALL=C sort
+  printf '%s\n' "$INDEX" \
+    "$REPO_ROOT/development/agents/resolve-step.md" \
+    "$REPO_ROOT/development/agents/refine-step.md"
+}
+
+@test "#3044 AC4 no round-protocol shard or step agent prescribes Monitor for a marker-file wait" {
+  local files out
+  files="$(_monitor_sweep_files)"
+  [ -n "$files" ]
+  # the four sites the story rewrote are in the sweep
+  grep -qxF -- "$CORE" <<< "$files"
+  grep -qxF -- "$SUBAGENTS" <<< "$files"
+  grep -qxF -- "$REPO_ROOT/development/agents/resolve-step.md" <<< "$files"
+  grep -qxF -- "$REPO_ROOT/development/agents/refine-step.md" <<< "$files"
+  local -a arr=()
+  local _l
+  while IFS= read -r _l; do arr+=("$_l"); done <<< "$files"
+  out="$(_monitor_not_banned "${arr[@]}")" || return 1
+  if [ -n "$out" ]; then
+    printf 'a Monitor mention that is not a ban (file: mentions negated):\n%s\n' "$out" >&2
+    return 1
+  fi
+  # …and each rewritten site does carry the ban, so the sweep is not vacuous
+  local f
+  for f in "$CORE" "$SUBAGENTS" "$REPO_ROOT/development/agents/resolve-step.md" \
+           "$REPO_ROOT/development/agents/refine-step.md"; do
+    prose_body "$f" | grep -qE '[Nn]ever Monitor' || {
+      printf '%s no longer bans Monitor\n' "$f" >&2; return 1; }
+  done
+}
+
+@test "#3044 AC4 the step agents and subagents.md prescribe the background until loop" {
+  local f
+  for f in "$REPO_ROOT/development/agents/resolve-step.md" "$REPO_ROOT/development/agents/refine-step.md"; do
+    contains "$(prose_body "$f")" 'with one background Bash until loop, never Monitor and never a foreground poll (#3044)'
+  done
+  local body
+  body="$(prose_body "$SUBAGENTS")"
+  contains "$body" 'one background until loop on that file, never Monitor and never a foreground Bash poll (#3044)'
+  contains "$body" 'echo "verdict-stalled: $V"; exit 3;'
+  contains "$body" 'echo "verdict-written: $V"'
+  contains "$body" 'The bound is an elapsed-time ceiling inside the loop'
+}
+
+@test "#3044 AC3 round step 4 no longer claims a full suite runs in minutes" {
+  local body ln
+  body="$(prose_body "$CORE")"
+  lacks "$body" 'a full suite runs minutes, not hours'
+  ln="$(prose_gate_lines "$CORE" "4. Observe the gate's completion before consolidating")"
+  [ -n "$ln" ]
+  body="$(prose_window "$CORE" "$ln" 18)"
+  contains "$body" 'The loop has no fixed bound: a whole suite on a shared host can run for more than an hour'
+  contains "$body" "Where a ceiling is wanted, take it from gate-eta.zsh's estimate, never a fixed figure."
+}
+
+@test "#3044 AC4 non-vacuity: restoring one Monitor sentence reds the sweep" {
+  # Each mutation restores the exact sentence the story removed from one site.
+  local D="$BATS_TEST_TMPDIR/monitor-mutants" out
+  mkdir -p "$D"
+  local rs="$D/resolve-step.md" rf="$D/refine-step.md" co="$D/core.md" sa="$D/subagents.md"
+  cp "$REPO_ROOT/development/agents/resolve-step.md" "$rs"
+  printf 'Wait with one bounded Monitor call, never a Bash poll.\n' >> "$rs"
+  cp "$REPO_ROOT/development/agents/refine-step.md" "$rf"
+  printf 'Wait with one bounded\nMonitor call, never a Bash poll.\n' >> "$rf"
+  cp "$CORE" "$co"
+  printf 'and it is **one bounded\nblocking call**: `Monitor`, with a timeout generous enough for the wait.\n' >> "$co"
+  cp "$SUBAGENTS" "$sa"
+  printf 'with one bounded `Monitor` call for that file, never a Bash poll.\n' >> "$sa"
+  local f
+  for f in "$rs" "$rf" "$co" "$sa"; do
+    out="$(_monitor_not_banned "$f")" || return 1
+    [ -n "$out" ] || { printf 'the sweep missed the restored sentence in %s\n' "$f" >&2; return 1; }
+  done
+  # …and the unmutated originals are clean, so the red is the mutation's
+  out="$(_monitor_not_banned "$CORE" "$SUBAGENTS" \
+    "$REPO_ROOT/development/agents/resolve-step.md" "$REPO_ROOT/development/agents/refine-step.md")" || return 1
+  [ -z "$out" ]
+}
+
+# --- #3044 AC2: the gate loop, DRIVEN ----------------------------------------
+# The loop is extracted from core.md as written, so the text a driver copies is
+# the code under test. Only its poll interval is shortened, so the cases run in
+# well under a second each.
+_gate_loop() {
+  awk '
+    /The \*\*gate loop\*\*, with/ { armed = 1 }
+    armed && /^```bash$/      { inside = 1; next }
+    inside && /^```$/         { exit }
+    inside                    { print }
+  ' "$CORE" | sed 's/sleep 20$/sleep 0.1/'
+}
+
+@test "#3044 AC2 the gate loop is extracted from core.md, with both exit lines" {
+  local code
+  code="$(_gate_loop)"
+  [ -n "$code" ]
+  contains "$code" 'until [ -e "$G/gate.done" ]; do'
+  contains "$code" 'echo "gate-gone: the process group ended without gate.done"; exit 3'
+  contains "$code" 'echo "gate-done: gate.done exists"'
+}
+
+@test "#3044 AC2 the gate loop ends gate-done when gate.done is already there" {
+  local G="$BATS_TEST_TMPDIR/g-done"
+  mkdir -p "$G"; : > "$G/gate.done"
+  G="$G" run bash -c "$(_gate_loop)"
+  [ "$status" -eq 0 ]
+  [ "$output" = "gate-done: gate.done exists" ]
+}
+
+@test "#3044 AC2 the gate loop waits on a live process group, then ends gate-done" {
+  local G="$BATS_TEST_TMPDIR/g-live"
+  mkdir -p "$G"
+  # A live process group of its own: perl puts a sleeper in a new group and
+  # prints that group's id, which stands in for the detached gate's handle.
+  perl -e 'if (my $p = fork) { print "$p\n"; exit 0 } setpgrp(0, 0); exec "sleep", "30"' > "$G/gate.pgid"
+  local pg; pg="$(cat "$G/gate.pgid")"
+  kill -0 -- "-$pg"
+  ( sleep 1; : > "$G/gate.done" ) &
+  G="$G" run bash -c "$(_gate_loop)"
+  kill -- "-$pg" 2>/dev/null || true
+  [ "$status" -eq 0 ]
+  [ "$output" = "gate-done: gate.done exists" ]
+}
+
+@test "#3044 AC2 the gate loop ends gate-gone when the process group dies without gate.done" {
+  local G="$BATS_TEST_TMPDIR/g-gone"
+  mkdir -p "$G"
+  perl -e 'if (my $p = fork) { print "$p\n"; exit 0 } setpgrp(0, 0); exec "sleep", "1"' > "$G/gate.pgid"
+  G="$G" run bash -c "$(_gate_loop)"
+  [ "$status" -eq 3 ]
+  [ "$output" = "gate-gone: the process group ended without gate.done" ]
+  [ ! -e "$G/gate.done" ]
+}
+
+@test "#3044 AC2 the gate loop ends gate-gone when gate.pgid is missing" {
+  local G="$BATS_TEST_TMPDIR/g-nopgid"
+  mkdir -p "$G"
+  G="$G" run bash -c "$(_gate_loop)"
+  [ "$status" -eq 3 ]
+  [ "$output" = "gate-gone: the process group ended without gate.done" ]
+}
+
+@test "#3044 the verdict-file loop and the index's gap record are stated" {
+  local body
+  body="$(prose_body "$CORE")"
+  contains "$body" 'A verdict-file loop waits on a file a subagent writes (subagents.md); it ends when the file exists or when its stall bound passes, and the bound is the only clock it carries.'
+  body="$(prose_body "$SUBAGENTS")"
+  contains "$body" 'The loop ends when the file exists, printing verdict-written, or when its stall bound passes, printing verdict-stalled:'
+  body="$(prose_body "$INDEX")"
+  contains "$body" "two more cut out core.md's step 4 and wait paragraph (#3044)."
 }

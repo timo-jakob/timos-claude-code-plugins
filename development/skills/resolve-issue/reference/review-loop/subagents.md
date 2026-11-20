@@ -161,15 +161,29 @@ verdict that validates but is not `ok` is not a stall, and recovery dispatches
 (#2034).** When a `round-panel`, `round-fix`, `round-decide` or `round-risk`
 dispatch launched in the background anyway — the flag left out, or ignored —
 the conductor waits for that dispatch's `<work-dir>/verdict-<R>-<kind>.json`
-with one bounded `Monitor` call for that file, never a Bash poll, then reads it
-with `round-handoff.zsh read-verdict`. That call's timeout is the bound: set it
-generous enough for that kind's whole job — a panel, which fans out to
-reviewers, is routinely the longest — since a bound that expires on a healthy
-subagent spends the stall retry. This holds on the single-issue flow and the
+with the verdict-file loop of `core.md`'s end-the-turn wait rule — one background
+`until` loop on that file, never `Monitor` and never a foreground Bash poll
+(#3044) — then reads it with `round-handoff.zsh read-verdict`. The loop ends
+when the file exists, printing `verdict-written`, or when its stall bound
+passes, printing `verdict-stalled`:
+
+```bash
+V=<work-dir>/verdict-<R>-<kind>.json end=$(( $(date +%s) + <bound in seconds> ))
+until [ -e "$V" ]; do
+  [ "$(date +%s)" -lt "$end" ] || { echo "verdict-stalled: $V"; exit 3; }
+  sleep 15
+done
+echo "verdict-written: $V"
+```
+
+The bound is an elapsed-time ceiling inside the loop: set it generous enough
+for that kind's whole job — a panel, which fans out to reviewers, is routinely
+the longest — since a bound that expires on a healthy subagent spends the stall
+retry. This holds on the single-issue flow and the
 epic E3 child flow alike: an E3 child conductor is itself a subagent, and one
 that ended its turn would return to its parent mid-round, with no verdict read
 and its gate left running, and never be re-invoked. A verdict still missing
-when the bound expires is a stall, but the stall retry above applies to it only
+when the loop prints `verdict-stalled` is a stall, but the stall retry above applies to it only
 once that background dispatch is stopped and confirmed ended, so no two
 subagents of one round and kind ever run at once; the re-dispatch is made in
 the foreground. A background dispatch that cannot be stopped is

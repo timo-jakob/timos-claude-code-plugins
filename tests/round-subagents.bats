@@ -96,11 +96,11 @@ _background_wait_pins() {
   contains "$s" '**How to wait** governs only the gate — it is not restated here. A round dispatch that launched in the background anyway is waited on in-turn, as *A background round dispatch* below says.' || return 1
   lacks "$s" 'governs only the gate and a dispatch that did launch in the background' || return 1
   contains "$s" '**A background round dispatch is waited on in-turn, never by ending the turn (#2034).**' || return 1
-  contains "$s" 'the conductor waits for that dispatch'"'"'s `<work-dir>/verdict-<R>-<kind>.json` with one bounded `Monitor` call for that file, never a Bash poll, then reads it with `round-handoff.zsh read-verdict`.' || return 1
+  contains "$s" 'the conductor waits for that dispatch'"'"'s `<work-dir>/verdict-<R>-<kind>.json` with the verdict-file loop of `core.md`'"'"'s end-the-turn wait rule — one background `until` loop on that file, never `Monitor` and never a foreground Bash poll (#3044) — then reads it with `round-handoff.zsh read-verdict`.' || return 1
   contains "$s" 'This holds on the single-issue flow and the epic E3 child flow alike: an E3 child conductor is itself a subagent, and one that ended its turn would return to its parent mid-round' || return 1
   contains "$s" 'When a `round-panel`, `round-fix`, `round-decide` or `round-risk` dispatch launched in the background anyway — the flag left out, or ignored — the conductor waits' || return 1
-  contains "$s" 'That call'"'"'s timeout is the bound: set it generous enough for that kind'"'"'s whole job — a panel, which fans out to reviewers, is routinely the longest — since a bound that expires on a healthy subagent spends the stall retry.' || return 1
-  contains "$s" 'A verdict still missing when the bound expires is a stall, but the stall retry above applies to it only once that background dispatch is stopped and confirmed ended, so no two subagents of one round and kind ever run at once; the re-dispatch is made in the foreground.' || return 1
+  contains "$s" 'The bound is an elapsed-time ceiling inside the loop: set it generous enough for that kind'"'"'s whole job — a panel, which fans out to reviewers, is routinely the longest — since a bound that expires on a healthy subagent spends the stall retry.' || return 1
+  contains "$s" 'A verdict still missing when the loop prints `verdict-stalled` is a stall, but the stall retry above applies to it only once that background dispatch is stopped and confirmed ended, so no two subagents of one round and kind ever run at once; the re-dispatch is made in the foreground.' || return 1
   contains "$s" 'A background dispatch that cannot be stopped is report-and-stop, never re-dispatched.' || return 1
 }
 
@@ -207,7 +207,7 @@ _background_wait_pins() {
 @test "#2034 AC3 non-vacuity: dropping the stall clause reds the pins" {
   load_section
   local old mutated
-  old='A verdict still missing when the bound expires is a stall, but the stall retry above applies to it only once that background dispatch is stopped and confirmed ended, so no two subagents of one round and kind ever run at once; the re-dispatch is made in the foreground.'
+  old='A verdict still missing when the loop prints `verdict-stalled` is a stall, but the stall retry above applies to it only once that background dispatch is stopped and confirmed ended, so no two subagents of one round and kind ever run at once; the re-dispatch is made in the foreground.'
   mutated="${section/"$old"/}"
   [ "$mutated" != "$section" ]
   run _background_wait_pins "$mutated"

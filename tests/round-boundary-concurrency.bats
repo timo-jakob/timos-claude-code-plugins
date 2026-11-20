@@ -977,13 +977,17 @@ _roster_hits() {
   ln="$(prose_gate_lines "$CORE" "4. Observe the gate's completion before consolidating")"
   [ -n "$ln" ]
   body="$(prose_window "$CORE" "$ln" 18)"
-  contains "$body" "wait for step 2's signal, with a generous bound (a full suite runs minutes, not hours)"
+  contains "$body" "wait for step 2's signal with the gate loop below, in the end-the-turn wait rule (#3044), then read the verdict it recorded"
+  # #3044: no fixed bound, since a whole suite on a shared host outruns any
+  # figure the old parenthetical allowed; the loop ends on its own
+  contains "$body" 'The loop has no fixed bound'
+  lacks "$body" 'a full suite runs minutes, not hours'
   # the ban is SCOPED — an unqualified one would forbid the only wait a
   # signal-file mechanism has
   contains "$body" 'What is banned is a poll that runs while the panel could have been running'
   # …and the arm for a gate that never returns, without which the bound is a
   # detection with no action and the session either spins or consolidates anyway
-  contains "$body" 'A gate whose signal never arrives, or whose recorded verdict cannot be read, is neither green nor red'
+  contains "$body" "A gate whose signal never arrives — the loop's gate-gone line — or whose recorded verdict cannot be read, is neither green nor red"
   contains "$body" "stop it with step 3's handle, do not consolidate, and report and stop"
   contains "$body" "never read a missing verdict as step 5's empty-tree arm"
   contains "$body" 'Never consolidate a gate that has not returned.'
@@ -1477,18 +1481,17 @@ _roster_hits() {
   contains "$body" 'verify that; never assume it'
 }
 
-@test "#1497 non-vacuity: recalibrating step 4's bound to SECONDS reds its pin" {
-  # The parenthetical is the bound's only quantifier: 'seconds, not minutes'
-  # makes a real full suite trip the signal-never-arrives arm every round, on a
-  # green gate, while 'with a generous bound' still matches.
-  local F="$BATS_TEST_TMPDIR/skill-short-bound.md" ln body
-  sed 's/(a full suite runs minutes, not hours)/(a full suite runs seconds, not minutes)/' \
+@test "#3044 non-vacuity: giving step 4 a fixed bound again reds its pin" {
+  # The fixed bound is what stranded a step for hours (#3044): a sentence that
+  # brings one back must red, while the loop's own wording still matches.
+  local F="$BATS_TEST_TMPDIR/skill-fixed-bound.md" ln body
+  sed 's/The loop has \*\*no fixed bound\*\*:/The loop has a bound of thirty minutes:/' \
     "$CORE" > "$F"
   ln="$(prose_gate_lines "$F" "4. Observe the gate's completion before consolidating")"
   [ -n "$ln" ]
   body="$(prose_window "$F" "$ln" 18)"
-  lacks "$body" "wait for step 2's signal, with a generous bound (a full suite runs minutes, not hours)"
-  contains "$body" "wait for step 2's signal, with a generous bound"
+  lacks "$body" 'The loop has no fixed bound'
+  contains "$body" "wait for step 2's signal with the gate loop below"
 }
 
 @test "#1497 non-vacuity: deleting property 4's wrapper-pid QUALIFICATION reds its pin" {
