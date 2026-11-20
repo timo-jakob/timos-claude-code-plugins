@@ -1069,13 +1069,15 @@ _verdict_loop() {
   contains "$(prose_body "$SUBAGENTS")" 'That is an ending with no loop armed: once the loop is launched the turn ends, and the harness re-invokes the conductor, a subagent included, when the loop exits.'
   local f
   for f in "$REPO_ROOT/development/agents/resolve-step.md" "$REPO_ROOT/development/agents/refine-step.md"; do
-    contains "$(prose_body "$f")" 'The ending forbidden above is one with no loop armed: once the loop is launched, end your turn, and the harness re-invokes you when it exits.'
-    # a dispatch with no verdict file has no loop to arm, and still has a permitted action
-    contains "$(prose_body "$f")" 'writes no verdict file, such as'
-    contains "$(prose_body "$f")" 'arms no loop: once it is launched, end your turn, and the harness'"'"'s notice that it finished re-invokes you.'
+    # the step agents point at that one rule and carry no turn-ending exception of their own
+    contains "$(prose_body "$f")" 'is waited on in-turn says; follow it as written, its turn ending and its retry included.'
+    lacks "$(prose_body "$f")" 'The ending forbidden above'
+    lacks "$(prose_body "$f")" 'end your turn, and the harness'
+    # a dispatch with no verdict file has no loop to wait on: it is stopped, never left running unarmed
+    contains "$(prose_body "$f")" 'has no loop to wait on: stop it, and once it has ended write'
   done
-  contains "$(prose_body "$REPO_ROOT/development/agents/refine-step.md")" 'such as the issue-refiner, arms no loop'
-  contains "$(prose_body "$REPO_ROOT/development/agents/resolve-step.md")" 'such as the readiness gate, arms no loop'
+  contains "$(prose_body "$REPO_ROOT/development/agents/refine-step.md")" 'such as the issue-refiner, has no loop to wait on'
+  contains "$(prose_body "$REPO_ROOT/development/agents/resolve-step.md")" 'such as the readiness gate, has no loop to wait on'
 }
 
 @test "#3044 the verdict-file loop and the index's gap record are stated" {
