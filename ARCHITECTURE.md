@@ -278,6 +278,40 @@ than how its code is built and kept healthy.
   internal failure: git missing, or a `.gitmodules` git cannot read.
   `/product:define-personas` stops without writing when the registry is
   `linked:…` or the lookup exits 5, and names where it lives.
+- **How a product document is rendered (#3204).** One script,
+  `product/scripts/render-document.zsh [--title <text>] [--appendix <path>]... <document.md>`,
+  turns a product document into `<basename>.pdf` (pandoc with Typst as its
+  engine, `product/templates/house.typ`) and `<basename>.epub` (pandoc,
+  `product/templates/house.css`), always both or neither, in
+  `<repo-root>/dist/product/`, and prints both absolute paths, the PDF first.
+  The repo root is the git work tree holding the document, or the current
+  directory outside git. Both files are built in a scratch directory and moved
+  in only when both succeeded. Title and appendices come from the document's
+  machine block (`title`, `appendices` as repo-relative paths) when it has
+  them; the flags serve a document with none, such as the persona registry, and
+  giving one the block already supplies is exit 2. One pandoc filter,
+  `product/templates/product-doc.lua`, drops the machine block (`<details>`)
+  and every HTML comment, the `charter:prose:*` and `personas:prose:*`
+  sentinels included; appends the appendices after the main document; turns a
+  link into the main document or an appendix into an internal link, and a link
+  to any other repo file into an absolute URL on the remote (plain text without
+  one) that always shows the file's repo-relative path. **Callouts are marked as
+  GitHub alerts** — a blockquote opening `> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`,
+  `[!WARNING]` or `[!CAUTION]` — which github.com renders natively and both
+  outputs render as a styled callout; a section headed `Summary` ends on its own
+  page. The PDF's cover shows the title, the repo name, the date and a version
+  line (the newest direction change's id, when the block has one, then the
+  commit's short SHA), and **DRAFT** when the document or an appendix has
+  uncommitted changes; every page's footer carries the short SHA and commit
+  date, or `uncommitted` outside git. There are no styling options: A4, and
+  Typst's built-in fonts only (the render passes `--ignore-system-fonts`), so
+  macOS and CI produce the same pages. Exits: 0 rendered; 1 internal failure;
+  2 usage; 3 pandoc or Typst missing or older than the script's `MIN_PANDOC` /
+  `MIN_TYPST`, with stderr ending on the line `brew install pandoc typst` and
+  nothing written; exit 4 for a `mermaid` block, stderr naming file and line,
+  nothing written; exit 5 when the toolchain fails, its stderr passed through
+  and an earlier output left untouched. `/product:define-personas` renders the
+  registry after its write.
 - **Old provenance stays valid.** A `personas/v1` block whose
   `provenance.generated_by` names `/development:define-personas` stays valid.
   The string is informational, and no validator may reject the old value.

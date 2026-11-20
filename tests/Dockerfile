@@ -52,6 +52,22 @@ ARG ACTIONLINT_VERSION=1.7.12
 RUN url="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}" \
  && curl -sSfL "$url/actionlint_${ACTIONLINT_VERSION}_linux_$(dpkg --print-architecture).tar.gz" \
     | tar -xz -C /usr/local/bin actionlint
+# pandoc + Typst + poppler: tests/product-render-document.bats (#3204) renders
+# real PDFs and ePubs and reads them back with pdftotext. pandoc and Typst are
+# pinned from upstream to the workflow's versions (Debian's pandoc predates the
+# Typst engine); poppler-utils and xz-utils (for Typst's .tar.xz) come from apt.
+ARG PANDOC_VERSION=3.14
+ARG TYPST_VERSION=0.15.1
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends poppler-utils xz-utils \
+ && rm -rf /var/lib/apt/lists/* \
+ && arch="$(dpkg --print-architecture)" \
+ && curl -sSfLo /tmp/pandoc.deb \
+      "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-1-${arch}.deb" \
+ && dpkg -i /tmp/pandoc.deb && rm -f /tmp/pandoc.deb \
+ && case "$arch" in arm64) t=aarch64 ;; *) t=x86_64 ;; esac \
+ && curl -sSfL "https://github.com/typst/typst/releases/download/v${TYPST_VERSION}/typst-${t}-unknown-linux-musl.tar.xz" \
+    | tar -xJ -C /usr/local/bin --strip-components=1 "typst-${t}-unknown-linux-musl/typst"
 # The IaC gate real-tool harness (tests/kubernetes-ci-fixtures.bats, #1199,
 # #1603) needs helm, kustomize, kubeconform, kube-linter, kyverno, trivy and yq
 # — and they are deliberately NOT installed here. Two reasons, both about

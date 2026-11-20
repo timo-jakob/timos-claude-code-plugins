@@ -1,0 +1,81 @@
+/* house.css — the one ePub stylesheet for product documents (#3204). It
+   mirrors house.typ: the same palette, the same callouts. No options. */
+
+body {
+  font-family: serif;
+  line-height: 1.45;
+  color: #1f2a37;
+}
+
+h1, h2, h3, h4 {
+  color: #1d4e89;
+  line-height: 1.2;
+  page-break-after: avoid;
+}
+
+a {
+  color: #1d4e89;
+}
+
+code, pre {
+  font-family: monospace;
+  font-size: 0.9em;
+}
+
+pre {
+  white-space: pre-wrap;
+  padding: 0.5em 0.8em;
+  background: #f4f6f8;
+}
+
+blockquote {
+  margin: 1em 0;
+  padding-left: 1em;
+  border-left: 2px solid #b8c0ca;
+}
+
+table {
+  border-collapse: collapse;
+}
+
+th {
+  border-bottom: 1px solid #5b6675;
+  text-align: left;
+}
+
+th, td {
+  padding: 0.3em 0.6em;
+}
+
+/* the title page */
+header#title-block-header {
+  margin-top: 30%;
+}
+
+p.subtitle {
+  color: #5b6675;
+}
+
+p.subtitle .draft {
+  color: #b42318;
+  font-weight: bold;
+}
+
+/* GitHub alerts in the source: div.callout.<kind> with a div.title */
+div.callout {
+  margin: 1em 0;
+  padding: 0.6em 1em;
+  border-left: 3px solid #1d4e89;
+  background: #eef3f9;
+}
+
+div.callout > div.title {
+  font-weight: bold;
+  font-size: 0.85em;
+  text-transform: uppercase;
+}
+
+div.callout.tip { border-left-color: #2f6f3e; background: #eef6f0; }
+div.callout.important { border-left-color: #6b3fa0; background: #f3eef9; }
+div.callout.warning { border-left-color: #9a6700; background: #fbf5e8; }
+div.callout.caution { border-left-color: #b42318; background: #fcefed; }
