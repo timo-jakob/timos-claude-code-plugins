@@ -47,9 +47,12 @@ flowchart TD
     READY ==> BUILD ==> REVIEW ==> SHIP
     SHIP ==> MAINT
     SHIP ==> OBSERVE
-    MAINT -. "bugs, new issues" .-> BACKLOG
-    OBSERVE -. "ideas, bugs" .-> BACKLOG
+    MAINT == "learnt: bugs, new issues" ==> BACKLOG
+    OBSERVE == "learnt: ideas, bugs" ==> BACKLOG
+    OBSERVE -. "learnt: evidence to change direction" .-> DIR
 
     style INTENT fill:#fff1e0,stroke:#e8730c,stroke-width:4px,color:#b3540a
     style EXEC fill:#f1e9fc,stroke:#7c3aed,stroke-width:4px,color:#5b21b6
     style LEARN fill:#e3f0ff,stroke:#1d6fd6,stroke-width:4px,color:#154f9c
+    linkStyle 18,19 stroke:#1d6fd6,stroke-width:4px
+    linkStyle 20 stroke:#1d6fd6,stroke-width:2px

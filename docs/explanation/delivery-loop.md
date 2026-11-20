@@ -11,7 +11,8 @@ is updated by the epic that lands each part.
 ![The delivery loop: three phases, with what ships today and what is planned](diagrams/delivery-loop.svg)
 
 Each phase has its own frame and banner: orange for Intent and Synthesis, purple for Execution, blue for Monitor
-and Learn. Read it clockwise from the top. Inside a frame, the fill of a step says how much of it exists:
+and Learn. Read it from the top, round through Execution, and back. Inside a frame, the fill of a step says how
+much of it exists:
 
 | Step | Meaning |
 | --- | --- |
@@ -20,8 +21,9 @@ and Learn. Read it clockwise from the top. Inside a frame, the fill of a step sa
 | White | Designed and planned, not built |
 | White, dashed | Not designed yet |
 
-A thick arrow is the path a piece of work takes. A dotted arrow is something a step is judged against, or work that
-flows back into the backlog.
+A thick grey arrow is the path a piece of work takes. A dotted arrow is something a step is judged against. The
+blue arrows close the loop: what is learnt after shipping returns to the first phase, as new entries in the backlog
+and, more rarely, as evidence that the direction itself should change.
 
 ## The three phases {#loop-phases}
 
@@ -56,8 +58,9 @@ Today a change starts at "there is an issue". In the loop it starts earlier and 
    #3261.*
 8. **Maintain.** Scanner findings, dependency updates and filed bugs are worked in a fixed order, on demand or
    on a schedule. *Ships today on demand; #3210.*
-9. **Observe.** What the running product shows — failures, cost, use — returns to step 2 as ideas and bugs. *Not
-   designed.*
+9. **Observe and learn.** What the running product shows — failures, cost, use — returns to step 2 as ideas and
+   bugs. When it contradicts the charter, a persona or the protection-needs assessment, it returns to step 1 as
+   evidence for a deliberate change there; nothing changes a direction document on its own. *Not designed.*
 
 ## Who decides what {#loop-roles}
 
