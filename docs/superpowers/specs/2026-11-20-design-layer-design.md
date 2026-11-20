@@ -365,7 +365,9 @@ The approval in the record is bound to a hash of the mockup sources and the data
 file. The readiness gate of the technical stage (project 5) requires, for a
 Feature whose definition names a UI, a record whose approval hash matches the
 files as they are. Any later edit voids the approval and the Feature is no
-longer ready.
+longer ready. The record also carries a hash of the Feature's product-stage
+prose as it was at approval; when that prose changes afterwards the gate
+reports it as its own reason and the Feature is likewise not ready.
 
 A change of mind — the Feature's definition changes, or the build finds the
 mockup cannot be built as approved — is a question of *what*, so it goes to the
