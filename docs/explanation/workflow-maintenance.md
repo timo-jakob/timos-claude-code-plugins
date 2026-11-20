@@ -60,7 +60,7 @@ A full run, attended or not, works the plan in one fixed order between concerns:
 
 1. **security** — vulnerabilities: Snyk, code scanning, Semgrep, container scans, `govulncheck`;
 2. **dependencies** — Dependabot and Renovate updates;
-3. **bugs** — no tool reports into it yet; its place in the order is kept for it;
+3. **bugs** — open bug issues a code owner filed, each analysed into a bug spec that a code owner then confirms;
 4. **code quality** — SonarCloud, linters and formatters;
 5. **topic-plugin checks** — plugin validation, docs drift, manifest and policy checks.
 

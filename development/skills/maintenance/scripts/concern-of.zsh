@@ -19,8 +19,8 @@
 #
 # The concerns rank security < dependencies < bugs < codequality < topic; that
 # rank is order-groups.zsh's, stated in ARCHITECTURE.md (*The concern order of a
-# full run*). No tool maps to `bugs` yet: the bugs concern's tool arrives with
-# the bug-analysis story of the scheduled-maintenance epic (#3210).
+# full run*). No tool maps to `bugs`: that concern works the repo's bug issues,
+# not a scanner's findings, by reference/bugs.md (#3212).
 
 set -uo pipefail
 
