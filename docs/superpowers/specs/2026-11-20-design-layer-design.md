@@ -219,7 +219,13 @@ The styleguide owns **the list of what a theme may set**, in a theme-role file
 beside its token file: colour roles, the font family, shape overrides and logo
 slots, plus the role pairs that must contrast (text role on its surface role).
 The token file keeps the fixed values no theme may change; the two files do not
-overlap. A **theme file** gives a value for each. The
+overlap.
+
+**Modes.** The role file also lists the display modes a theme must cover (for
+example light, dark and high contrast). A theme gives its values once per mode,
+and validation and the contrast check run for every mode. A styleguide that
+lists a single mode gets today's simple case. Which mode is active at runtime is
+the application's business, not the family's. A **theme file** gives a value for each. The
 family ships:
 
 - a validator: a theme file sets every required role and nothing unknown;
@@ -301,7 +307,7 @@ product documents:
 |---|---|
 | one **mockup source** per view | a React module that composes library components and takes the data as input; it imports nothing but the library and holds no logic beyond showing its states |
 | one **data file** | the pseudo data, as named scenarios: `default`, and one per further state |
-| **screenshots** | every view × state × reference theme × width (desktop and 320 px, the reflow width) |
+| **screenshots** | every view × state × variant × width (desktop and 320 px, the reflow width). The variants are the neutral reference theme in every mode, and the second reference theme in the first mode **(my call)** — enough to show each mode and to expose a hard-coded brand value without multiplying the pictures. The checks in B4 still run for both themes in every mode. |
 | the **design sheet** | Markdown: the Feature, each view with its screenshots, the decisions taken in the session, the check results; rendered to PDF and ePub by the house renderer (#3204) |
 | the **mockup record** (`mockup/v1`) | the issue, the library version and styleguide pin used, the views and states, each check's result, and the approval |
 

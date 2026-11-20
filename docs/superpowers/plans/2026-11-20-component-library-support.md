@@ -1,8 +1,8 @@
 # Component Library Support Implementation Plan
 
 > **For agentic workers:** this plan is executed through the repo's own pipeline, not through a superpowers
-> execution skill. Each task below is one child story of the component-library-support epic (to be filed under
-> super-epic #3194 as umbrella project 8); refine it with `/development:refine-issue` when the readiness gate asks,
+> execution skill. Each task below is one child story of the component-library-support epic (#3253: tasks 1–7 are
+> #3254–#3260, under super-epic #3194 as umbrella project 8); refine it with `/development:refine-issue` when the readiness gate asks,
 > and build it with `/development:resolve-issue`. Tasks run **in the order given**, each off fresh `origin/main` —
 > they collide on `ARCHITECTURE.md`, the bootstrap `SKILL.md` and the `development` plugin version.
 
@@ -113,20 +113,22 @@ ESLint, stylelint, Storybook and axe (in rendered templates only), Markdown skil
 
 **Interfaces:**
 
-- `tokens/theme-roles.json` in the styleguide: `schema` (`"theme-roles/v1"`), `roles[]` — each `name`, `kind`
+- `tokens/theme-roles.json` in the styleguide: `schema` (`"theme-roles/v1"`), `modes[]` (mode names, at least one), `roles[]` — each `name`, `kind`
   (`color` | `font-family` | `shape` | `logo`), `css_variable`, `required` (bool); `contrast_pairs[]` — each
   `foreground`, `background` (role names of kind `color`), `minimum` (4.5 or 3).
-- A theme file: `schema` (`"theme/v1"`), `name`, `values` (object, role name → string).
+- A theme file: `schema` (`"theme/v1"`), `name`, `modes` (object: mode name → object of role name → string), with
+  exactly the modes the role file lists.
 - `validate-theme.zsh --roles <theme-roles.json> <theme.json>` → exit 0 · 2 with one stderr line per error: a
-  required role missing, a role the list does not know, a `color` value that is not `#rrggbb`, an empty value.
-- `check-theme-contrast.zsh --roles <theme-roles.json> <theme.json>` → stdout one JSON array, per pair
-  `foreground`, `background`, `ratio` (two decimals), `minimum`, `ok`; exit 0 all ok · 1 at least one below · 2
+  mode missing or unknown, a required role missing in a mode, a role the list does not know, a `color` value that is not `#rrggbb`, an empty value.
+- `check-theme-contrast.zsh --roles <theme-roles.json> <theme.json>` → stdout one JSON array, per mode and pair
+  `mode`, `foreground`, `background`, `ratio` (two decimals), `minimum`, `ok`; exit 0 all ok · 1 at least one below · 2
   input invalid. Ratio by the WCAG 2.x relative-luminance formula.
 
 - [ ] **Step 1: Write the suite**, failing: the valid theme passes; each error class above; black on white is
   `21.00`; a pair computed to exactly its minimum is `ok`; a pair just below fails with exit 1; `rgb(0,0,0)`, `red`,
   `#fff` and `#ffffffff` are each rejected by the validator naming the role; a pair naming a non-colour role makes
-  the roles file invalid (exit 2).
+  the roles file invalid (exit 2); a theme lacking one listed mode is rejected; a pair that fails in one mode only
+  exits 1 and its row names that mode.
 - [ ] **Step 2: Run** the suite — expect failures.
 - [ ] **Step 3: Implement both scripts** (zsh floating-point arithmetic; no external colour tool).
 - [ ] **Step 4: Document** both contracts and that the styleguide alone is authoritative for the role list.
@@ -256,7 +258,7 @@ ESLint, stylelint, Storybook and axe (in rendered templates only), Markdown skil
   component (`@replaces button`, first sentence of the comment). `--check` writes nothing and exits 1 when the
   committed file differs.
 - `check-catalogue.mjs` exits 1, naming each offender, when: a public component has no catalogue entry for one of
-  its `states`; an entry has an accessibility violation in either reference theme; a reference theme fails
+  its `states`; an entry has an accessibility violation in any reference theme and mode; a reference theme fails
   `validate-theme` or the contrast check against the styleguide's roles.
 - CI workflow: lint, the token gate, the brand-value gate, tests, `build-component-index.mjs --check`,
   `check-catalogue.mjs` — all blocking; there is no `warn` in a library repo.

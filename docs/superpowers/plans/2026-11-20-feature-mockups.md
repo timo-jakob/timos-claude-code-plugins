@@ -1,8 +1,8 @@
 # Feature Mockups Implementation Plan
 
 > **For agentic workers:** this plan is executed through the repo's own pipeline, not through a superpowers
-> execution skill. Each task below is one child story of the feature-mockups epic (to be filed under super-epic
-> #3194 as umbrella project 9); refine it with `/development:refine-issue` when the readiness gate asks, and build
+> execution skill. Each task below is one child story of the feature-mockups epic (#3261: tasks 1–6 are #3262–#3267, under
+> super-epic #3194 as umbrella project 9); refine it with `/development:refine-issue` when the readiness gate asks, and build
 > it with `/development:resolve-issue`. Tasks run **in the order given**, each off fresh `origin/main` — they
 > collide on `ARCHITECTURE.md`, `product/.claude-plugin/plugin.json` and the marketplace manifest.
 
@@ -29,8 +29,10 @@ additionally need umbrella project 5 (the product stage and the two-step readine
 
 - Mockup directory in the repo where the Feature is filed: `docs/product/mockups/<issue-number>-<slug>/`,
   containing `views/<view>.mockup.tsx`, `data.json`, `mockup.json`, `design.md`,
-  `screenshots/<view>--<state>--<theme>--<width>.png`.
-- Widths: `1280` and `320`. Themes: the library's `reference` and `contrast`. States: `default` always, plus one
+  `screenshots/<view>--<state>--<theme>-<mode>--<width>.png`.
+- Widths: `1280` and `320`. Checks run for both reference themes (`reference`, `contrast`) in every mode the
+  styleguide lists. Screenshots are written for these variants only: `reference` in every mode, and `contrast` in
+  the first listed mode. States: `default` always, plus one
   per state the acceptance criteria name.
 - A mockup source default-exports a React component taking `{ data, state }`, imports only `react` and the
   declared library package, and holds no logic beyond choosing what to show for `state`.
@@ -95,11 +97,11 @@ additionally need umbrella project 5 (the product stage and the two-step readine
   or open gaps · 2 record invalid · 3 no record · 4 files changed since approval · 5 Feature prose changed since
   approval (only with the flag). One stderr line `mockup: <reason>`.
 - `render-mockup.zsh <mockup-dir> [--write-screenshots] [--serve]` → installs the library at the record's version
-  into the scratch workspace when absent, bundles every view × state × theme × width, runs the mechanical checks
+  into the scratch workspace when absent, bundles every view × state × theme × mode × width, runs the mechanical checks
   and writes their results into the record's `checks` (never `checklist`, never `approval`). Without
   `--write-screenshots` images go to a temporary directory whose path is printed. `--serve` keeps a local preview
   running and prints its URL. Exit 0 all checks pass · 1 a check failed (stdout lists each as `<check>: <view>
-  <state> <theme> <width>: <what>`) · 3 no library declared · 7 library cannot be installed (registry
+  <state> <theme> <mode> <width>: <what>`) · 3 no library declared · 7 library cannot be installed (registry
   unreachable, token missing or refused — stderr names which and the fixing command) · 8 a tool is missing, with
   its install line.
 - Mechanical checks: `imports` (only `react` and the library package), `brand_values` and `tokens` (the same rule
@@ -111,9 +113,9 @@ additionally need umbrella project 5 (the product stage and the two-step readine
   `gaps` → 1 even when `status` says `approved`; the prose flag with a different hash → 5; both script copies and
   every file under `mockup-runner/rules/` are `cmp`-identical to their `development` originals.
 - [ ] **Step 2: Write `tests/product-render-mockup.bats`**, failing, against the fixture library served from a
-  local directory: a clean mockup exits 0 and produces 2 views × states × 2 themes × 2 widths images; a source
+  local directory: a clean mockup exits 0 and produces one image per view × state × variant × width; a source
   importing another package fails `imports`; a hex colour in a source fails `brand_values`; a control with no
-  accessible name fails `a11y` naming view, state, theme and width; a data value of `<script>alert(1)</script>`
+  accessible name fails `a11y` naming view, state, theme, mode and width; a data value of `<script>alert(1)</script>`
   appears as text in the page; a second run with the registry stubbed unreachable succeeds from the warm
   workspace; a cold workspace with the registry unreachable exits 7; a refused token exits 7 naming the Keychain
   command; nothing in the fixture repo's working tree changes without `--write-screenshots`.
@@ -210,10 +212,10 @@ additionally need umbrella project 5 (the product stage and the two-step readine
   Exit 0 · 3 source not reachable · 4 the record at that commit is not approved. Default `--dest`:
   `tests/fixtures/mockups/<issue-number>/`.
 - The default-view test template: reads its mocked data from the imported `data.json` scenario `default`, applies
-  the library's reference and contrast themes, and saves `test-results/default-view/<view>--<theme>--<width>.png`
+  the same variants, and saves `test-results/default-view/<view>--<theme>-<mode>--<width>.png`
   at widths 1280 and 320.
 - Agent `development-react:react-mockup-conformance-reviewer` — tools Read, Grep, Glob. Reads each built
-  screenshot beside the approved one of the same view, theme and width. Findings, dimension `mockup_conformance`:
+  screenshot beside the approved one of the same view, variant and width. Findings, dimension `mockup_conformance`:
   an element in the mockup missing from the build; a different component for the same element; a changed order or
   hierarchy; different label wording. Differences that come only from data are never findings. A missing built
   screenshot is one blocking finding naming the file.
