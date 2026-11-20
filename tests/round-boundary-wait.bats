@@ -1070,7 +1070,12 @@ _verdict_loop() {
   local f
   for f in "$REPO_ROOT/development/agents/resolve-step.md" "$REPO_ROOT/development/agents/refine-step.md"; do
     contains "$(prose_body "$f")" 'The ending forbidden above is one with no loop armed: once the loop is launched, end your turn, and the harness re-invokes you when it exits.'
+    # a dispatch with no verdict file has no loop to arm, and still has a permitted action
+    contains "$(prose_body "$f")" 'writes no verdict file, such as'
+    contains "$(prose_body "$f")" 'arms no loop: once it is launched, end your turn, and the harness'"'"'s notice that it finished re-invokes you.'
   done
+  contains "$(prose_body "$REPO_ROOT/development/agents/refine-step.md")" 'such as the issue-refiner, arms no loop'
+  contains "$(prose_body "$REPO_ROOT/development/agents/resolve-step.md")" 'such as the readiness gate, arms no loop'
 }
 
 @test "#3044 the verdict-file loop and the index's gap record are stated" {
