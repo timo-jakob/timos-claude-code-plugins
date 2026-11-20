@@ -21,9 +21,10 @@ much of it exists:
 | White | Designed and planned, not built |
 | White, dashed | Not designed yet |
 
-A thick grey arrow is the path a piece of work takes. A dotted arrow is something a step is judged against. The
-blue arrows close the loop: what is learnt after shipping returns to the first phase, as new entries in the backlog
-and, more rarely, as evidence that the direction itself should change.
+A rounded step is a Feature and a six-sided step is an Enabler; [Feature and Enabler](#loop-feature-enabler)
+tells them apart. A thick grey arrow is the path a piece of work takes. A dotted arrow is something a step is
+judged against. The blue arrows close the loop: what is learnt after shipping returns to the first phase, as new
+entries in the backlog and, more rarely, as evidence that the direction itself should change.
 
 ## The three phases {#loop-phases}
 
@@ -32,6 +33,25 @@ and, more rarely, as evidence that the direction itself should change.
 | **Intent and Synthesis** | Direction is written down, ideas are captured and ordered, a Feature is defined, designed and made ready | Personas; refinement of a filed issue to a ready story | Charter (#3195), issue types and board (#3196), grooming (#3197), reference documents (#3198), the two-stage refinement (#3199), roadmap (#3200), component library support (#3253), feature mockups (#3261), protection needs (#3269) | Threat and risk analysis, privacy records |
 | **Execution** | A ready story is built, reviewed, shipped | Build, the review loop, bot-authored PRs, the Approver, documentation checks | Work across a product's repos (#3201) | — |
 | **Monitor and Learn** | The shipped product is kept healthy and what is learnt returns as new work | Maintenance: security findings, dependency updates, code quality | Bugs as a maintenance concern, a fixed order, unattended scheduled runs (#3210) | Observing the running product: monitoring, cost, incident response |
+
+## Feature and Enabler {#loop-feature-enabler}
+
+One backlog and one roadmap hold two kinds of planned work. In the diagram the rounded step is the Feature and the
+six-sided step is the Enabler; both end in the same technical stage and are built the same way. *The two types
+are #3196, the roadmap #3200.*
+
+| | Feature | Enabler |
+| --- | --- | --- |
+| What it is | Something a user can see or do | Work no user sees, which keeps or moves the product on its target architecture |
+| Why it exists | The charter and a persona call for it | The target architecture says so, or has changed |
+| Judged against | Charter and personas | Target architecture |
+| Owner | Product owner | Architect |
+| Design step | Yes, when it has a UI | No |
+| Typical source | An idea, a request, something learnt from use | A dated change to the target architecture; a component the library lacks |
+| Order | Set by the product owner | Set by the product owner, within the architect's *must precede* and *must be done by* marks |
+
+Grooming never weighs an Enabler against the charter, and never weighs a Feature against the architecture alone.
+An idea becomes one or the other, or is dropped, when it is promoted.
 
 ## The longer path of a Feature {#loop-feature-path}
 

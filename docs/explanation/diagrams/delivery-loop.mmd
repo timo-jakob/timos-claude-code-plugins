@@ -12,9 +12,10 @@ flowchart TD
         P1(["1 · INTENT ＆ SYNTHESIS"]):::phaseIntent
         DIR["Direction<br/>charter, personas,<br/>protection needs"]:::partly
         BACKLOG["Backlog<br/>ideas, grooming, roadmap"]:::planned
-        DEFINE["Product stage<br/>Feature defined"]:::partly
+        FEATURE(["Feature<br/>something a user sees or does<br/>product stage · product owner"]):::partly
+        ENABLER{{"Enabler<br/>work no user sees<br/>architect"}}:::planned
         DESIGN["Design step<br/>mockups approved"]:::planned
-        REFDOC["Reference documents<br/>architecture, styleguide,<br/>component library"]:::planned
+        REFDOC["Reference documents<br/>target architecture, styleguide,<br/>component library"]:::planned
         READY["Technical stage<br/>story ready to build"]:::partly
     end
 
@@ -36,13 +37,15 @@ flowchart TD
     P2 ~~~ BUILD
     P3 ~~~ MAINT
     P3 ~~~ OBSERVE
-    DIR -. yardstick .-> BACKLOG
-    DIR -. yardstick .-> DEFINE
-    BACKLOG ==> DEFINE
-    DEFINE == "has a UI" ==> DESIGN
-    DEFINE == "no UI" ==> READY
+    DIR -. "groomed against" .-> BACKLOG
+    DIR -. "judged against" .-> FEATURE
+    REFDOC -. "judged against" .-> ENABLER
+    BACKLOG ==> FEATURE
+    BACKLOG ==> ENABLER
+    FEATURE == "has a UI" ==> DESIGN
+    FEATURE == "no UI" ==> READY
     DESIGN ==> READY
-    REFDOC -. "decides the how" .-> DESIGN
+    ENABLER ==> READY
     REFDOC -. "decides the how" .-> READY
     READY ==> BUILD ==> REVIEW ==> SHIP
     SHIP ==> MAINT
@@ -54,5 +57,5 @@ flowchart TD
     style INTENT fill:#fff1e0,stroke:#e8730c,stroke-width:4px,color:#b3540a
     style EXEC fill:#f1e9fc,stroke:#7c3aed,stroke-width:4px,color:#5b21b6
     style LEARN fill:#e3f0ff,stroke:#1d6fd6,stroke-width:4px,color:#154f9c
-    linkStyle 18,19 stroke:#1d6fd6,stroke-width:4px
-    linkStyle 20 stroke:#1d6fd6,stroke-width:2px
+    linkStyle 20,21 stroke:#1d6fd6,stroke-width:4px
+    linkStyle 22 stroke:#1d6fd6,stroke-width:2px
