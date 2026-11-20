@@ -261,6 +261,23 @@ than how its code is built and kept healthy.
   command, never a path into `product/`. Nothing in `development` may fail
   when `product` is absent: a persona check that points at `product` stays
   advisory.
+- **Where a product document lives (#3203).** A product skill finds a product
+  document, such as `docs/personas.md`, with one lookup,
+  `product/scripts/resolve-product-doc.zsh [--repo <dir>] <relative-path>`, and
+  never by a path of its own. The repo's own file wins. Otherwise the
+  submodules declared in `.gitmodules` are tried in file order, and the first
+  one holding the file at the same relative path wins. There is no
+  configuration. It prints `<absolute path>` TAB `<origin>`, where the origin is
+  `own` or `linked:<submodule path>`, and exits 0 found, 2 usage, 3 not found,
+  or 4 when a declared submodule that is not initialised (a missing or empty
+  directory) comes before any hit, since that submodule might hold the file;
+  its stderr then names the submodule and the `git submodule update --init`
+  line. A path under a declared submodule's mount is never the repo's own;
+  when no submodule holds it at the same relative path, the lookup exits 5
+  and its stderr names the submodule and the path inside it. Exit 1 is an
+  internal failure: git missing, or a `.gitmodules` git cannot read.
+  `/product:define-personas` stops without writing when the registry is
+  `linked:…` or the lookup exits 5, and names where it lives.
 - **Old provenance stays valid.** A `personas/v1` block whose
   `provenance.generated_by` names `/development:define-personas` stays valid.
   The string is informational, and no validator may reject the old value.
