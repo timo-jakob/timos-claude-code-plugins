@@ -19,6 +19,9 @@ behind the plugins. Read these to understand *why* things are the way they are.
   the positions the family builds towards, what every run records, and the
   self-improvement loop that turns that evidence into the next release — with
   what ships today and what is still planned.
+- [The delivery loop](delivery-loop.md) — the map of where the family is going: three phases from intent to
+  operation, the longer path of a Feature, who decides what, and for every part what ships today and what is
+  planned.
 - [The Claude Approver — design summary](claude-approver.md) — the movable
   human/AI approval seam, its two-App identity model, and the gating rules.
 - [The C4 architecture docs](c4-architecture-docs.md) — the two-level C4 model

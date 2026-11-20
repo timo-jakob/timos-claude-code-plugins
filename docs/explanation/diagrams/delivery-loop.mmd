@@ -1,0 +1,39 @@
+flowchart TD
+    classDef shipped fill:#d9f2df,stroke:#2e8b4e,color:#222
+    classDef partly fill:#fde7c8,stroke:#b8741a,color:#222
+    classDef planned fill:#dbe8fb,stroke:#3567b5,color:#222
+    classDef open fill:#ffffff,stroke:#777,color:#222,stroke-dasharray:5 4
+
+    subgraph INTENT["Intent and Synthesis"]
+        DIR["Direction<br/>charter, personas,<br/>protection needs"]:::partly
+        REFDOC["Reference documents<br/>architecture, styleguide,<br/>component library"]:::planned
+        BACKLOG["Backlog<br/>ideas, grooming, roadmap"]:::planned
+        DEFINE["Product stage<br/>Feature defined"]:::partly
+        DESIGN["Design step<br/>mockups approved"]:::planned
+        READY["Technical stage<br/>story ready to build"]:::partly
+    end
+
+    subgraph EXEC["Execution"]
+        BUILD["Build<br/>implement, test gate"]:::shipped
+        REVIEW["Review loop<br/>panel, fix, re-test"]:::shipped
+        SHIP["Ship<br/>bot PR, approval, merge"]:::shipped
+    end
+
+    subgraph LEARN["Monitor and Learn"]
+        MAINT["Maintain<br/>security, dependencies,<br/>code quality, bugs"]:::partly
+        OBSERVE["Observe<br/>the running product"]:::open
+    end
+
+    DIR -. yardstick .-> BACKLOG
+    DIR -. yardstick .-> DEFINE
+    BACKLOG --> DEFINE
+    DEFINE -- "has a UI" --> DESIGN
+    DEFINE -- "no UI" --> READY
+    DESIGN --> READY
+    REFDOC -. "decides the how" .-> DESIGN
+    REFDOC -. "decides the how" .-> READY
+    READY --> BUILD --> REVIEW --> SHIP
+    SHIP --> MAINT
+    SHIP --> OBSERVE
+    MAINT -. "bugs, new issues" .-> BACKLOG
+    OBSERVE -. "ideas, bugs" .-> BACKLOG
