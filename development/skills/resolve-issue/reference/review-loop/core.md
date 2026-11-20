@@ -237,13 +237,23 @@ sanctioned in-turn wait is for a signal the harness does **not** deliver — the
 gate's own marker, or another file a process writes — and it is **one
 background `until` loop (#3044)**: one Bash call with `run_in_background: true`
 whose command exits once its condition holds, so its exit is the single
-completion notice. **Never `Monitor` for a marker-file wait**: it caps every
+completion notice. The harness keeps that command running across turns and
+re-invokes the agent that launched it, a subagent included, when it exits; that
+is the behaviour this wait relies on, so once the loop is launched the turn
+**ends** and the loop's notice resumes it. Step 2's #811 note records a harness
+that killed such a command at turn end, which is why the loop is only ever the
+waiter, never the gate's launch: the suite must not die with its waiter.
+**Never `Monitor` for a marker-file wait**: it caps every
 bound at thirty minutes, a whole suite on a shared host runs longer, and a step
 whose turn ended on one that expired was never woken by its notice. The loop
 exits on **every** terminal state, never only the happy path, and its last line
 says which one it reached. The **gate loop**, with `G` the out-of-repo
 directory step 2's launch writes its signal (`gate.done`) and its handle
-(`gate.pgid`) into:
+(`gate.pgid`) into. Those names and the handle's form are requirements on that
+launch, beside step 2's four: `gate.pgid` holds the id of a **process group the
+launch created for the suite** (`setsid`, or perl's `setpgrp`), never a plain
+pid and never the reference shape's printed pid — `kill -0` on a pid that leads
+no group fails at once, and a group shared with the session never ends:
 
 ```bash
 until [ -e "$G/gate.done" ]; do

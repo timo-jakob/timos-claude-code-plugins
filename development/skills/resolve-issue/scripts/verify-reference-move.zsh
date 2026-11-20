@@ -24,8 +24,9 @@
 # separately; see #1548.) Nor does it prove anything about text sitting BETWEEN
 # two chunks of a SPLIT span — the #1582 gap inside `round-protocol`, which since
 # #3168 runs on through the whole of round step 1, and the #3169 gap holding
-# step 3's narration paragraph — which is verified by nothing; see the manifest
-# comment below.
+# step 3's narration paragraph, and the two #3044 gaps in review-loop/core.md
+# holding round step 4 and the *How to wait* paragraph — which is verified by
+# nothing; see the manifest comment below.
 #
 # Normalisation, stated so the claim is honest: leading and trailing BLANK or
 # WHITESPACE-ONLY lines are stripped from BOTH sides before comparison (they are
@@ -58,7 +59,7 @@
 #      round-protocol-step-2's first anchor no longer adjacent to round step 1 in
 #      the pinned commit (#1582, #3168), a re-cut span's seam leaving an
 #      original line uncovered or out of order (#2055), or a gapped seam whose
-#      gap is no longer exactly the paragraph it was opened for (#3169).
+#      gap is no longer exactly the paragraph it was opened for (#3169, #3044).
 #      Chunk differences and sweep failures are counted and reported separately
 #      — they are different defects — but both land here.
 #   2  usage error

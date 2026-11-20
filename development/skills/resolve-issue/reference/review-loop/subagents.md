@@ -182,7 +182,9 @@ the longest — since a bound that expires on a healthy subagent spends the stal
 retry. This holds on the single-issue flow and the
 epic E3 child flow alike: an E3 child conductor is itself a subagent, and one
 that ended its turn would return to its parent mid-round, with no verdict read
-and its gate left running, and never be re-invoked. A verdict still missing
+and its gate left running, and never be re-invoked. That is an ending with no
+loop armed: once the loop is launched the turn ends, and the harness re-invokes
+the conductor, a subagent included, when the loop exits. A verdict still missing
 when the loop prints `verdict-stalled` is a stall, but the stall retry above applies to it only
 once that background dispatch is stopped and confirmed ended, so no two
 subagents of one round and kind ever run at once; the re-dispatch is made in

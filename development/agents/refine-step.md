@@ -40,7 +40,9 @@ issue-refiner — is not a step. Dispatch each in the foreground
 its result in your turn; never end your turn while it runs, and never write the
 "no chain-result document" verdict before it has ended. Wait on its
 verdict file, where it writes one, with one background Bash until loop, never
-Monitor and never a foreground poll (#3044). When the loop reports its bound passed, the resolve-issue
+Monitor and never a foreground poll (#3044). The ending forbidden above is one
+with no loop armed: once the loop is launched, end your turn, and the harness
+re-invokes you when it exits. When the loop reports its bound passed, the resolve-issue
 skill's `reference/review-loop/subagents.md` rule *A background round dispatch
 is waited on in-turn* governs the retry; follow it as written. Write the "no
 chain-result document" verdict above only when that rule stops the skill. Which verdict each outcome writes, and what the

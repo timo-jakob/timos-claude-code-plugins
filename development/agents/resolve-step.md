@@ -60,7 +60,8 @@ headless claude. A subagent the flow itself dispatches — the readiness gate, a
 review round's panel, fix, decide or risk subagent — is not a step. Dispatch
 each in the foreground (`run_in_background: false`). When one runs in the background, wait for its result in your turn; never end your turn
 while it runs. Wait on its verdict file, where it writes one, with one background Bash until loop, never
-Monitor and never a foreground poll (#3044). When the loop reports its bound passed, the resolve-issue
+Monitor and never a foreground poll (#3044). The ending forbidden above is one with no loop armed: once the loop is
+launched, end your turn, and the harness re-invokes you when it exits. When the loop reports its bound passed, the resolve-issue
 skill's `reference/review-loop/subagents.md` rule *A background round dispatch is waited on in-turn* governs the
 retry; follow it as written. Write a stopped verdict, cause tooling, only when that rule stops the run.
 

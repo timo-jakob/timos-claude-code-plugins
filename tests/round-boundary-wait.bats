@@ -345,12 +345,20 @@ _roster_hits() {
   local ln body
   ln="$(prose_gate_lines "$CORE" "$BANNER")"
   [ -n "$ln" ]
-  body="$(prose_window "$CORE" "$((ln + 26))" 26)"
+  body="$(prose_window "$CORE" "$((ln + 40))" 40)"
   contains "$body" 'for a signal the harness does not deliver'
   contains "$body" 'it is one background until loop (#3044): one Bash call with run_in_background: true whose command exits once its condition holds'
   # ONE form. The ban is spelled out with its reason, so a later edit cannot
   # bring Monitor back as "also fine".
   contains "$body" 'Never Monitor for a marker-file wait: it caps every bound at thirty minutes'
+  # what the turn does once the loop is launched, and the harness behaviour that
+  # makes it safe, reconciled with step 2's #811 note
+  contains "$body" 'The harness keeps that command running across turns and re-invokes the agent that launched it, a subagent included, when it exits'
+  contains "$body" "once the loop is launched the turn ends and the loop's notice resumes it."
+  contains "$body" "the loop is only ever the waiter, never the gate's launch: the suite must not die with its waiter."
+  # the handle the loop probes is a suite-owned process group, never a pid
+  contains "$body" 'gate.pgid holds the id of a process group the launch created for the suite (setsid, or perl'"'"'s setpgrp), never a plain pid and never the reference shape'"'"'s printed pid'
+  contains "$body" '[ -e "$G/gate.done" ] && break'
   # #3044 AC2: the gate loop ends on BOTH terminal states and says which
   contains "$body" 'The loop exits on every terminal state, never only the happy path, and its last line says which one it reached.'
   contains "$body" 'until [ -e "$G/gate.done" ]; do'
@@ -980,7 +988,9 @@ _gate_loop() {
   mkdir -p "$G"
   # A live process group of its own: perl puts a sleeper in a new group and
   # prints that group's id, which stands in for the detached gate's handle.
-  perl -e 'if (my $p = fork) { print "$p\n"; exit 0 } setpgrp(0, 0); exec "sleep", "30"' > "$G/gate.pgid"
+  # The parent sets the group too, before printing, so the group exists before
+  # anything reads gate.pgid — the child's own setpgrp may not have run yet.
+  perl -e 'if (my $p = fork) { setpgrp($p, $p); print "$p\n"; exit 0 } setpgrp(0, 0); exec "sleep", "30"' > "$G/gate.pgid"
   local pg; pg="$(cat "$G/gate.pgid")"
   kill -0 -- "-$pg"
   ( sleep 1; : > "$G/gate.done" ) &
@@ -993,7 +1003,7 @@ _gate_loop() {
 @test "#3044 AC2 the gate loop ends gate-gone when the process group dies without gate.done" {
   local G="$BATS_TEST_TMPDIR/g-gone"
   mkdir -p "$G"
-  perl -e 'if (my $p = fork) { print "$p\n"; exit 0 } setpgrp(0, 0); exec "sleep", "1"' > "$G/gate.pgid"
+  perl -e 'if (my $p = fork) { setpgrp($p, $p); print "$p\n"; exit 0 } setpgrp(0, 0); exec "sleep", "1"' > "$G/gate.pgid"
   G="$G" run bash -c "$(_gate_loop)"
   [ "$status" -eq 3 ]
   [ "$output" = "gate-gone: the process group ended without gate.done" ]
@@ -1006,6 +1016,61 @@ _gate_loop() {
   G="$G" run bash -c "$(_gate_loop)"
   [ "$status" -eq 3 ]
   [ "$output" = "gate-gone: the process group ended without gate.done" ]
+}
+
+# --- #3044: the verdict-file loop, DRIVEN -------------------------------------
+# Extracted from subagents.md as written; the placeholders are substituted with
+# a temp path ($1) and a bound in seconds ($2), and the poll is shortened.
+_verdict_loop() {
+  awk '
+    /printing `verdict-stalled`:/ { armed = 1 }
+    armed && /^```bash$/          { inside = 1; next }
+    inside && /^```$/             { exit }
+    inside                        { print }
+  ' "$SUBAGENTS" \
+    | sed -e "s|<work-dir>/verdict-<R>-<kind>.json|$1|" \
+          -e "s|<bound in seconds>|$2|" -e 's/sleep 15$/sleep 0.1/'
+}
+
+@test "#3044 the verdict-file loop is extracted from subagents.md, placeholders substituted" {
+  local code
+  code="$(_verdict_loop /x/v.json 7)"
+  contains "$code" 'V=/x/v.json end=$(( $(date +%s) + 7 ))'
+  contains "$code" 'until [ -e "$V" ]; do'
+  contains "$code" 'sleep 0.1'
+  lacks "$code" '<'
+}
+
+@test "#3044 the verdict-file loop ends verdict-written when the file is already there" {
+  local V="$BATS_TEST_TMPDIR/verdict-1-fix.json"
+  : > "$V"
+  run bash -c "$(_verdict_loop "$V" 5)"
+  [ "$status" -eq 0 ]
+  [ "$output" = "verdict-written: $V" ]
+}
+
+@test "#3044 the verdict-file loop waits within its bound, then ends verdict-written" {
+  local V="$BATS_TEST_TMPDIR/verdict-1-panel.json"
+  ( sleep 1; : > "$V" ) &
+  run bash -c "$(_verdict_loop "$V" 5)"
+  [ "$status" -eq 0 ]
+  [ "$output" = "verdict-written: $V" ]
+}
+
+@test "#3044 the verdict-file loop ends verdict-stalled once its bound passes" {
+  local V="$BATS_TEST_TMPDIR/verdict-1-risk.json"
+  run bash -c "$(_verdict_loop "$V" 1)"
+  [ "$status" -eq 3 ]
+  [ "$output" = "verdict-stalled: $V" ]
+  [ ! -e "$V" ]
+}
+
+@test "#3044 a subagent ends its turn once the loop is armed, and the harness re-invokes it" {
+  contains "$(prose_body "$SUBAGENTS")" 'That is an ending with no loop armed: once the loop is launched the turn ends, and the harness re-invokes the conductor, a subagent included, when the loop exits.'
+  local f
+  for f in "$REPO_ROOT/development/agents/resolve-step.md" "$REPO_ROOT/development/agents/refine-step.md"; do
+    contains "$(prose_body "$f")" 'The ending forbidden above is one with no loop armed: once the loop is launched, end your turn, and the harness re-invokes you when it exits.'
+  done
 }
 
 @test "#3044 the verdict-file loop and the index's gap record are stated" {
