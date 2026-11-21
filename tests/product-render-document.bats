@@ -450,6 +450,13 @@ pin_of() {
   done
 }
 
+@test "the charter how-to states MIN_PANDOC and MIN_TYPST as the minimums" {
+  local min_pandoc min_typst
+  min_pandoc="$(sed -nE 's/^MIN_PANDOC=([0-9.]+)$/\1/p' "$RENDER")"
+  min_typst="$(sed -nE 's/^MIN_TYPST=([0-9.]+)$/\1/p' "$RENDER")"
+  contains "$(tr -s '[:space:]' ' ' < "$REPO_ROOT/docs/how-to/write-and-send-your-product-charter.md")" "needs pandoc ${min_pandoc} or newer and Typst ${min_typst} or newer"
+}
+
 @test "define-personas renders the registry after its write and reports both paths" {
   local step
   step="$(sed -n '/^## Step 3 — render the registry/,/^## /p' "$SKILL" | tr -s '[:space:]' ' ')"
