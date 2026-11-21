@@ -314,6 +314,19 @@ than how its code is built and kept healthy.
   nothing written; exit 5 when the toolchain fails, its stderr passed through
   and an earlier output left untouched. `/product:define-personas` renders the
   registry after its write.
+- **How a charter is written (#3207).** `/product:define-charter` finds
+  `docs/product/charter.md` with the lookup: its own file means update mode,
+  exit 3 means create mode, and a charter that is `linked:…`, or a lookup that
+  exits 4 or 5, stops the skill without a write, naming where the charter
+  lives. On the human's approval it writes the charter, then runs
+  `validate-charter.zsh`, then `render-document.zsh`; a failure of either is
+  reported with its output and never as success. It does not commit or push.
+- **No charter, no guessing.** Every product skill that needs the charter
+  finds it with the lookup, and when the lookup finds none it offers to run
+  `/product:define-charter` then and there — or, in a repo that links a shared
+  docs repository, names that repository as the place to run it — and does not
+  proceed on an assumed direction. A lookup stopped by an uninitialised
+  submodule (exit 4) is relayed with its init line, never read as no charter.
 - **Old provenance stays valid.** A `personas/v1` block whose
   `provenance.generated_by` names `/development:define-personas` stays valid.
   The string is informational, and no validator may reject the old value.
