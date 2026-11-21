@@ -71,9 +71,9 @@ For each `needs-analysis` bug, in the order `list-bugs.zsh` printed:
    replaces the spec a previous analysis wrote. **Exit 1** means the analysis is
    unusable (a key missing, a value outside its enum, a heading missing from
    the prose) or the body holds a spec cut short: write nothing, list the bug
-   as "analysis failed" with the stderr line, and go on. **Exit 3**, or
-   either `gh` call failing, is a tooling failure, listed the same way and never
-   commented on. **Exit 2** is your own malformed call: fix it and re-run once.
+   as "analysis failed" with the stderr line, post no comment, and go on to the
+   next bug. **Exit 3**, or either `gh` call failing, is a tooling failure,
+   handled the same way. **Exit 2** is your own malformed call: fix it and re-run once.
 3. **Comment once.** Post one comment carrying the marker
    `<!-- bug-spec-awaiting/v1 <verdict> -->`, unless a comment on the issue
    already carries it with this verdict (`gh issue view <N> --json comments` —

@@ -112,7 +112,7 @@ whole() {
   contains "$s" '> <scratch>/bug-<N>-new-body.md && gh issue edit <N>'
   contains "$s" '`<!-- bug-spec-awaiting/v1 <verdict> -->`, unless a comment on the issue already carries it with this verdict'
   contains "$s" 'it never relabels it and never fixes it.'
-  contains "$s" 'or the body holds a spec cut short: write nothing, list the bug as "analysis failed" with the stderr line, and go on.'
+  contains "$s" 'or the body holds a spec cut short: write nothing, list the bug as "analysis failed" with the stderr line, post no comment, and go on to the next bug.'
   contains "$s" '**Dispatch `development:bug-analyst`** (Task tool, foreground), naming the repo, the checkout'"'"'s path and the issue number.'
   contains "$s" 'exit 3 decided nothing and is never read as either answer.'
   contains "$s" 'The confirmation is what makes a bug fixable, not the absence of a human at the keyboard'
