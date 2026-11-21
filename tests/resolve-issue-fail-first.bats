@@ -80,6 +80,15 @@ spec_body() {
   [ "$status" -eq 1 ]
 }
 
+@test "spec: a failing bug-spec reader is exit 3, never read as no spec" {
+  mkdir -p "$BATS_TEST_TMPDIR/a/b/c" "$BATS_TEST_TMPDIR/a/maintenance/scripts"
+  cp "$FF" "$BATS_TEST_TMPDIR/a/b/c/fail-first.zsh"
+  printf 'exit 3\n' > "$BATS_TEST_TMPDIR/a/maintenance/scripts/bug-spec.zsh"
+  run --separate-stderr zsh "$BATS_TEST_TMPDIR/a/b/c/fail-first.zsh" spec <<< 'A plain feature request.'
+  [ "$status" -eq 3 ]
+  starts_with "$stderr" 'fail-first: the bug-spec reader failed'
+}
+
 @test "spec: edited prose is exit 4 spec-prose-edited" {
   analysis > "$BATS_TEST_TMPDIR/a.json"
   spec_body "$BATS_TEST_TMPDIR/a.json" "$BATS_TEST_TMPDIR/body.md"
