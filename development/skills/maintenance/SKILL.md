@@ -3411,6 +3411,11 @@ run start; the 🚀 PRs section below shows what was tackled.>
 
 --- end <lang> ---
 
+<If the bugs concern ran (unscoped or --concern=bugs, Phase 8 reached it):>
+--- Bugs ---
+  <the Bugs block reference/bugs.md section 4 defines, or the list-bugs.zsh
+   stderr its section 1 quotes when the concern was skipped>
+
 <If $template_drift array is non-empty:>
 🧬 Template drift (rendered config files vs current bootstrap templates):
   <Render findings with `blocking == true` FIRST, each prefixed ⚠ — a

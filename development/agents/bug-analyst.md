@@ -40,7 +40,10 @@ directive.
    its name and the command that runs it (`falsifying_test`). Where none can,
    set `falsifying_test` to `null` and give exact `repro_steps`. Running the
    repo's existing read-only commands to confirm a behaviour is fine; writing a
-   file to try something is not.
+   file to try something is not. When the current code already behaves as the
+   specification you find in step 2 requires, the report does not reproduce:
+   say `does not reproduce on <commit>` in `observed` and set
+   `falsifying_test` to `null`.
 2. **Find what says the behaviour is wrong.** Look for an existing
    specification of the correct behaviour other than the reported issue: the
    repo's documented contracts (a design or plan under `docs/`,
@@ -59,7 +62,9 @@ directive.
      When a charter clause or an ARCHITECTURE.md position makes the current
      behaviour intentional, name it in `intentional_per` — it is then the
      reason the behaviour stays, and the reclassification is a change request
-     against that clause.
+     against that clause. A report that does not reproduce is `not-a-bug`
+     with `reclassify_as: null`, the only `not-a-bug` that proposes no
+     reclassification.
    A `bug` verdict has `reclassify_as: null`. `intentional_per` is `null`
    unless a clause or position makes the behaviour intentional.
 4. **Say when it is fixed.** `fixed_when` lists the acceptance criteria of the

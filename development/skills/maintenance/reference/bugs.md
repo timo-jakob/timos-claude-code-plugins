@@ -41,7 +41,7 @@ What each state means for this step:
 | --- | --- |
 | `needs-analysis` | analyse it (section 2) |
 | `awaiting-confirmation` | nothing; list it with its reason — it waits for a code owner |
-| `not-a-bug` | nothing; its comment already proposed the reclassification |
+| `not-a-bug` | nothing; its comment already proposed the reclassification or said the report does not reproduce |
 | `confirmed` | nothing here; the fix step takes it |
 | `held` | nothing; list it with its reason (a hold label, or the open PR) |
 | `not-eligible` | nothing; list it as "needs a code owner to re-file" |
@@ -85,8 +85,9 @@ For each `needs-analysis` bug, in the order `list-bugs.zsh` printed:
    - verdict `not-a-bug`: no existing specification says the current
      behaviour is wrong, so the run proposes reclassifying it as the
      analysis's `reclassify_as` (and names its `intentional_per`, when one
-     makes the behaviour intentional). The run stops there for this issue: it
-     never relabels it and never fixes it.
+     makes the behaviour intentional); when `reclassify_as` is `null`, it says
+     instead that the report does not reproduce. The run stops there for this
+     issue: it never relabels it and never fixes it.
 
    Ensure the label exists first, idempotently:
    `gh label create confirmed --color 0e8a16 --description "A code owner confirmed this bug's spec" 2>/dev/null || true`.

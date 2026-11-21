@@ -8347,7 +8347,8 @@ headings, in this order:
   count.
 - **Verdict** — *bug*, or *not a bug*. **Where no existing specification says
   the current behaviour is wrong, it is not a bug**: it is a feature or a
-  change request, and the analysis proposes that reclassification and stops. A
+  change request, and the analysis proposes that reclassification and stops; a
+  report that does not reproduce on the current code proposes none. A
   behaviour that a charter clause or a position makes intentional is named as
   such.
 - **Fixed when** — the acceptance criteria: the falsifying test passes, and
@@ -8376,7 +8377,8 @@ One JSON object, generated from the `bug-analyst` agent's answer:
 ```
 
 `verdict` is `bug` or `not-a-bug`; `reclassify_as` is `feature`,
-`change-request` or `null` (always `null` for a `bug`); `falsifying_test` is
+`change-request` or `null` (always `null` for a `bug`, and for a `not-a-bug`
+report that does not reproduce on the current code); `falsifying_test` is
 `{path, name, command}` or `null`, when only `repro_steps` can show it.
 `prose_sha256` is `refine-issue/scripts/story-spec-prose-hash.zsh` over the
 bytes between the two prose sentinels: the same recipe as the story-spec's
@@ -8386,7 +8388,8 @@ prose carries those, the mirror does not.
 
 **Analysis writes to the issue only.** It writes the spec into the body and
 comments once that the spec awaits a code owner's `confirmed` label, or, for a
-`not-a-bug` verdict, proposes the reclassification. It changes no file in the
+`not-a-bug` verdict, proposes the reclassification or says the report does not
+reproduce. It changes no file in the
 repository and opens no PR; the falsifying test stays text in the spec until
 the fix step.
 
