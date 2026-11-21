@@ -62,10 +62,10 @@ setup() {
 
 # --- input ------------------------------------------------------------------
 
-@test "the input example parses and carries the five input keys" {
+@test "the input example parses and carries the six input keys" {
   run jq -c 'keys' "$IN_JSON"
   [ "$status" -eq 0 ]
-  [ "$output" = '["charter_so_far","conversation","evidence","latest_reply","mode"]' ]
+  [ "$output" = '["charter_so_far","conversation","evidence","latest_reply","mode","previous_turn"]' ]
   run jq -r '.mode != "update" or .charter_so_far != null' "$IN_JSON"
   [ "$output" = "true" ]
 }
@@ -167,8 +167,14 @@ setup() {
   contains "$FLAT" 'In `charter_block` it becomes a `charter/v1` direction change: its `id` from its date, `affects` = `retires` + `rewrites` + `adds`, and `evidence` = the issue or PR references it came from.'
 }
 
-@test "a change with a null date stays out of both drafts, effects included" {
-  contains "$FLAT" 'While a change'"'"'s date is `null`, the whole change stays out of both drafts: its log entry and the entries it retires, rewrites or adds keep their state from `charter_so_far`, and the change appears only in `direction_change`.'
+@test "a change is complete once its date and rationale are known, and stays out of both drafts until then" {
+  contains "$FLAT" 'A change is complete once its date and rationale are both known. Until then the whole change stays out of both drafts: its log entry and the entries it retires, rewrites or adds keep their state from `charter_so_far`, and the change appears only in `direction_change`.'
+}
+
+@test "it never invents a reason: a rationale nobody gave is null and asked for" {
+  contains "$FLAT" 'You never invent a reason either: a change'"'"'s `rationale` comes from the evidence or the human'"'"'s own words, and when neither gives it, it is `null` and you ask.'
+  run jq -r '.direction_change.rationale' "$OUT_JSON"
+  [ "$output" = "null" ]
 }
 
 @test "a new entry takes the next free number of its list" {
@@ -182,8 +188,9 @@ setup() {
   contains "$FLAT" 'you never define a persona here'
 }
 
-@test "ready_for_approval is true only when no question is open and both drafts are complete" {
-  contains "$FLAT" '**`ready_for_approval`** — `true` only when `questions` is `[]` and both drafts are complete; otherwise `false`.'
+@test "ready_for_approval is true only when no question or candidate is open and both drafts are complete" {
+  contains "$FLAT" '**`ready_for_approval`** — `true` only when `questions` and `candidates` are both `[]` and both drafts are complete; otherwise `false`.'
+  contains "$FLAT" 'Set `ready_for_approval` as its payload rule below says'
 }
 
 @test "a candidate's kind is value, scope or non_goal, each with its evidence" {
@@ -202,6 +209,10 @@ setup() {
   contains "$FLAT" 'Never re-ask what the reply or the evidence already answered.'
 }
 
-@test "a candidate the reply does not address stays open, and the draft is not ready" {
-  contains "$FLAT" 'A candidate the reply does not address stays open: repeat it in `candidates`, and keep `ready_for_approval` `false`.'
+@test "what the previous turn left open is carried until a reply settles it" {
+  contains "$FLAT" '`previous_turn` is the object you returned last turn, unchanged, and `null` on the first turn.'
+  contains "$FLAT" 'What `previous_turn` left open stays open until a reply settles it: a candidate the reply does not accept, revise or drop is repeated in `candidates`, and an incomplete `direction_change` is repeated with the reply'"'"'s answers filled in.'
+  contains "$FLAT" '**`candidates`** — every entry still undecided: those proposed this turn plus each one from `previous_turn` the reply did not accept, revise or drop'
+  contains "$FLAT" '`[]` only when no candidate is undecided.'
+  contains "$FLAT" '**`direction_change`** — the change this turn drafts or carries from `previous_turn`, or `null`.'
 }

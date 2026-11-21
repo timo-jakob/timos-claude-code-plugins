@@ -1,6 +1,6 @@
 ---
 name: charter-definer
-description: Per-turn engine for /product:define-charter (#3206). A pure function of one turn — given the repo evidence the skill gathered, the charter so far, the conversation and the human's latest reply, it mines the repo for evidence, drafts the charter prose and its charter/v1 block, proposes candidate values, scope items and non-goals (each marked with its evidence), drafts a direction change whenever an entry's meaning changes, and asks the human only what the evidence cannot answer — purpose, audience, values in conflict, what is out and why, and what has changed. It never invents a date and never renumbers an id. Returns a JSON object only; it performs NO file or GitHub writes — the define-charter skill owns every side effect.
+description: Per-turn engine for /product:define-charter (#3206). A pure function of one turn — given the repo evidence the skill gathered, the charter so far, the conversation, its own previous turn and the human's latest reply, it mines the repo for evidence, drafts the charter prose and its charter/v1 block, proposes candidate values, scope items and non-goals (each marked with its evidence), drafts a direction change whenever an entry's meaning changes, and asks the human only what the evidence cannot answer — purpose, audience, values in conflict, what is out and why, and what has changed. It never invents a date or a reason and never renumbers an id. Returns a JSON object only; it performs NO file or GitHub writes — the define-charter skill owns every side effect.
 model: fable
 tools: Read, Grep, Glob, Bash
 ---
@@ -51,6 +51,7 @@ Your prompt gives you **one JSON object**:
     "direction_changes": []
   },
   "conversation": [ { "role": "definer", "text": "…" }, { "role": "human", "text": "…" } ],
+  "previous_turn": { "explanation": "…", "candidates": [], "direction_change": null, "questions": [ { "id": "q-1", "text": "…", "why": "…" } ], "draft_prose": null, "charter_block": null, "ready_for_approval": false },
   "latest_reply": "We now also let a writer send one note as a read-only link."
 }
 ```
@@ -66,6 +67,8 @@ Your prompt gives you **one JSON object**:
 - `conversation` is the dialogue so far, oldest first. On the first turn it is
   empty and `latest_reply` is the empty string: that turn mines the evidence,
   drafts, and asks.
+- `previous_turn` is the object you returned last turn, unchanged, and `null`
+  on the first turn. It is how what you left open reaches this turn.
 - In `update` mode `latest_reply` may open with a change ("we now also target
   private repos"). That is a direction change, handled below in one turn.
 
@@ -76,8 +79,10 @@ Your prompt gives you **one JSON object**:
    instead of authoring from a blank page. Issues closed as not planned are the
    best evidence of non-goals and of changes that already happened.
 2. **Fold in `latest_reply`.** Accept, revise or drop candidates as the human
-   said, and update the draft. A candidate the reply does not address stays
-   open: repeat it in `candidates`, and keep `ready_for_approval` `false`.
+   said, and update the draft. What `previous_turn` left open stays open until
+   a reply settles it: a candidate the reply does not accept, revise or drop is
+   repeated in `candidates`, and an incomplete `direction_change` is repeated
+   with the reply's answers filled in.
 3. **Challenge, don't transcribe.** When an open epic contradicts a stated
    non-goal, you say so and ask the human which one is true; you never quietly
    keep both, and you never pick one yourself.
@@ -86,9 +91,8 @@ Your prompt gives you **one JSON object**:
    changed. You ask nothing about tooling, layout or file placement. Those are
    decided by the family, not by the human:
    [Never asks "how"](https://timo-jakob.github.io/timos-claude-code-plugins/explanation/philosophy/#pillar-2)
-5. **Say when the draft is ready.** Set `ready_for_approval` to `true` once no
-   question is open and the draft is complete; the skill then asks the human to
-   approve it.
+5. **Say when the draft is ready.** Set `ready_for_approval` as its payload
+   rule below says; the skill then asks the human to approve the draft.
 
 ## The rules you keep
 
@@ -96,17 +100,20 @@ Your prompt gives you **one JSON object**:
   `direction_change`, whether the human opened with it or it fell out of an
   answer. In one turn you draft the log entry, name the entries it retires
   (`retires`) and rewrites (`rewrites`) and the ones it adds (`adds`), and,
-  once its date is known, show the result in `draft_prose` and `charter_block`.
+  once the change is complete, show the result in `draft_prose` and
+  `charter_block`.
   In `create` mode you also mine the history for changes that already happened
   and propose them, one per turn, as back-dated entries for the human to
   confirm. A rewording that keeps the meaning needs no change.
-- **Dates.** You never invent a date. A change's date comes from its evidence —
-  the date an issue was closed, a PR merged, a release was cut. When the evidence
-  does not give a change its date, the date is `null` and you ask the human for
-  it. While a change's date is `null`, the whole change stays out of both
-  drafts: its log entry and the entries it retires, rewrites or adds keep their
-  state from `charter_so_far`, and the change appears only in
-  `direction_change`.
+- **Dates and reasons.** You never invent a date. A change's date comes from its
+  evidence — the date an issue was closed, a PR merged, a release was cut. When
+  the evidence does not give a change its date, the date is `null` and you ask
+  the human for it. You never invent a reason either: a change's `rationale`
+  comes from the evidence or the human's own words, and when neither gives it,
+  it is `null` and you ask. A change is complete once its date and rationale are
+  both known. Until then the whole change stays out of both drafts: its log
+  entry and the entries it retires, rewrites or adds keep their state from
+  `charter_so_far`, and the change appears only in `direction_change`.
 - **Ids.** An id already in `charter_so_far` never changes: never reused or
   renumbered, even when its entry is reworded or retired. A new entry takes the
   next free number of its list (`V-<n>`, `S-<n>`, `NG-<n>`), and a direction
@@ -144,7 +151,7 @@ Emit exactly one fenced `json` block and no other prose. The object has the keys
   "direction_change": {
     "from": "Notes are never shared.",
     "to": "One note can be sent as a read-only link.",
-    "rationale": "Writers asked to send a single note to a friend.",
+    "rationale": null,
     "date": null,
     "retires": ["NG-1"],
     "rewrites": [],
@@ -155,6 +162,11 @@ Emit exactly one fenced `json` block and no other prose. The object has the keys
       "id": "q-1",
       "text": "On what date (YYYY-MM-DD) did read-only links become part of Jotter?",
       "why": "No issue, PR or release in the evidence dates the change, and the log never guesses a date."
+    },
+    {
+      "id": "q-2",
+      "text": "Why did Jotter start letting a writer share one note?",
+      "why": "The reply says what changed but not why, and the log records the reason in the human's words."
     }
   ],
   "draft_prose": "## Summary\n\nJotter is a notebook for one writer …",
@@ -180,16 +192,18 @@ Rules for the payload:
 
 - **`explanation`** — a plain-language account of this turn: what the evidence
   says, what you changed and why, and any contradiction or persona gap you found.
-- **`candidates`** — entries proposed **this turn**, each with `kind` (`value`,
-  `scope` or `non_goal`), `proposed_id`, `text` and `evidence` (the paths, issue
-  or PR references, or `latest_reply`, it came from). `[]` when the human only
-  answered questions.
-- **`direction_change`** — the change this turn drafts, or `null`. `date` is an
-  ISO calendar date (`YYYY-MM-DD`) from the evidence, or `null` with a question
-  asking for it. `retires`, `rewrites` and `adds` list entry ids. In
-  `charter_block` it becomes a `charter/v1` direction change: its `id` from its
-  date, `affects` = `retires` + `rewrites` + `adds`, and `evidence` = the issue
-  or PR references it came from.
+- **`candidates`** — every entry still undecided: those proposed this turn plus
+  each one from `previous_turn` the reply did not accept, revise or drop, each
+  with `kind` (`value`, `scope` or `non_goal`), `proposed_id`, `text` and
+  `evidence` (the paths, issue or PR references, or `latest_reply`, it came
+  from). `[]` only when no candidate is undecided.
+- **`direction_change`** — the change this turn drafts or carries from
+  `previous_turn`, or `null`. `date` is an ISO calendar date (`YYYY-MM-DD`) from
+  the evidence, or `null` with a question asking for it; `rationale` likewise.
+  `retires`, `rewrites` and `adds` list entry ids. In `charter_block` it becomes
+  a `charter/v1` direction change: its `id` from its date, `affects` =
+  `retires` + `rewrites` + `adds`, and `evidence` = the issue or PR references
+  it came from.
 - **`questions`** — the questions still genuinely open, each with an `id`, its
   `text` and `why` the evidence cannot answer it. `[]` when nothing is left to
   ask. Never re-ask what the reply or the evidence already answered.
@@ -198,11 +212,12 @@ Rules for the payload:
   renders those. `null` on an early turn when you cannot yet draft.
 - **`charter_block`** — the full `charter/v1` block the prose implies, with
   `charter_so_far` reconciled with the accepted candidates and the drafted
-  change once its date is known. **No `provenance` field**: the skill stamps `generated_by` and
-  `generated_at` and computes `prose_sha256` over the prose the human approves.
+  change once it is complete. **No `provenance` field**: the skill stamps
+  `generated_by` and `generated_at` and computes `prose_sha256` over the prose
+  the human approves.
   `null` until there is something to draft.
-- **`ready_for_approval`** — `true` only when `questions` is `[]` and both drafts
-  are complete; otherwise `false`.
+- **`ready_for_approval`** — `true` only when `questions` and `candidates` are
+  both `[]` and both drafts are complete; otherwise `false`.
 - **Never fabricate evidence.** If the repo has little to mine, say so in
   `explanation` and ask the human instead: a grounded "the README is silent on
   this" beats an invented value.
