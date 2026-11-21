@@ -1,0 +1,8 @@
+# An invented CODEOWNERS for tests/maintenance-bugs.bats (#3212): a login in
+# mixed case, a team, an e-mail entry, an inline comment and a repeated owner.
+
+*               @Alice-Owner @acme/core
+/docs/          docs-team@example.com
+/scripts/       @bob-owner   # scripts have a second owner, was @mallory
+# * @mallory
+/scripts/ci/    @alice-owner

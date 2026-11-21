@@ -125,7 +125,7 @@ H_DONE='### Run complete — clear the checkpoint (#517)'
 @test "the phase4-payload checkpoint copies exactly the kept files, and is skipped under --dry-run" {
   s="$(section "$H_KEEP")"
   contains "$s" '**Checkpoint `phase4-payload`** (skip under `--dry-run`): copy exactly the kept files in `<payload-dir>` into the store'
-  contains "$s" 'cp "<payload-dir>"/payload-*.json "$ckdir/"'
+  contains "$s" 'for f in "<payload-dir>"/payload-*.json(N); do cp -- "$f" "$ckdir/"; done'
   contains "$s" 'save --phase phase4-payload --data -'
 }
 

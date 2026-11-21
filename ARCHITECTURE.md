@@ -314,6 +314,19 @@ than how its code is built and kept healthy.
   nothing written; exit 5 when the toolchain fails, its stderr passed through
   and an earlier output left untouched. `/product:define-personas` renders the
   registry after its write.
+- **How a charter is written (#3207).** `/product:define-charter` finds
+  `docs/product/charter.md` with the lookup: its own file means update mode,
+  exit 3 means create mode, and a charter that is `linked:…`, or a lookup that
+  exits 4 or 5, stops the skill without a write, naming where the charter
+  lives. On the human's approval it writes the charter, then runs
+  `validate-charter.zsh`, then `render-document.zsh`; a failure of either is
+  reported with its output and never as success. It does not commit or push.
+- **No charter, no guessing.** Every product skill that needs the charter
+  finds it with the lookup, and when the lookup finds none it offers to run
+  `/product:define-charter` then and there — or, in a repo that links a shared
+  docs repository, names that repository as the place to run it — and does not
+  proceed on an assumed direction. A lookup stopped by an uninitialised
+  submodule (exit 4) is relayed with its init line, never read as no charter.
 - **Old provenance stays valid.** A `personas/v1` block whose
   `provenance.generated_by` names `/development:define-personas` stays valid.
   The string is informational, and no validator may reject the old value.
@@ -3188,7 +3201,8 @@ development/skills/maintenance/
                    #   the per-stage PR cycle, summary, issue tracking
   reference/
     pr-cycle.md    # Phase 8 rationale: identity switch, isolation invariant,
-                   #   per-tool override, `-f -f`, post-merge state re-check
+                   #   per-tool override, `-f -f`, post-merge state re-check,
+                   #   the concern order
     gather.md      # Phases 3–4/6: no-trim contract incidents, drift severities
     report.md      # Phase 9: Snyk channel-naming table, cross-link examples
   scripts/         # gather-/verify-<lang>, write-payload, token mint, …
@@ -3580,20 +3594,21 @@ with its own script + label. An unrecognized `type` is skipped and
 surfaced as a quality bug (forward-compatibility: an older orchestrator
 ignores hook types it doesn't implement rather than failing the run).
 
-The orchestrator processes the plan **sequentially in priority order**:
+The orchestrator processes the plan **sequentially, in the concern order**
+(*The concern order of a full run (#3211)*), Stage 0 first:
 
 1. If `improver_result` is present, promote it to a PR first
    (Stage 0): push, open, monitor CI, optionally invoke the CI-fix
    agent (`ci_fixer_agent`) up to 3 times on failure, pass the approval
    gate, merge, sync local main.
-2. For each entry in `plan`, in order: spawn `plan[i].agent` (with
+2. For each entry of the ordered queue, in order: spawn `plan[i].agent` (with
    `isolation="worktree"` when `plan[i].isolation` is `true`/absent,
    without it when `false`) off the latest base; a worktree group
    returns a worktree branch; push, open a PR, run the same CI cycle,
    pass the approval gate, merge, sync. An advisory group
    (`plan[i].advisory: true`) returns no worktree branch and opens no PR:
    its reported entries are recorded and the stage ends `advisory`. Only
-   then move to `plan[i+1]`.
+   then move to the next entry.
 
 **The approval gate (#224, Phase 2 of #476):** a maintenance merge requires an
 approving review from `claude-approver[bot]` or a human — the pipeline never
@@ -8291,6 +8306,121 @@ tests and feature can never drift apart.
 - **Proportionality.** A **no-surface** story (`interface_surfaces: []`,
   `test_cases: []`) spins out nothing.
 
+## Bug spec contract (`bug-spec/v1`)
+
+The bugs concern of `/development:maintenance` (#3212, epic #3210) never fixes
+a filed bug straight from its report. A bug moves through two steps with a
+human between them: **analysis** writes a bug spec onto the issue, a code owner
+**confirms** it, and only a confirmed spec is fixed. `bug-spec/v1` is that
+spec. The procedure is `development/skills/maintenance/reference/bugs.md`; the
+one writer and reader is `development/skills/maintenance/scripts/bug-spec.zsh`.
+
+**Who is eligible.** Only an open `bug` issue whose **author is a code owner**
+is analysed. `codeowners-logins.zsh` resolves the owners from the first of
+`.github/CODEOWNERS`, `CODEOWNERS` and `docs/CODEOWNERS` (GitHub's own order),
+expands `@org/team` entries to their members and skips e-mail entries. With no
+CODEOWNERS, no bug is eligible, and the run says so. Anyone else's bug is listed
+as needing a code owner to re-file it, and its text is never handed to an agent.
+`list-bugs.zsh` classifies every open bug as `not-eligible`, `held`,
+`needs-analysis`, `not-a-bug`, `awaiting-confirmation` or `confirmed`, sorted
+confirmed first, then needs-analysis, high priority before the rest, oldest
+first.
+
+### Where the spec lives
+
+At the end of the issue body, below the reporter's text, which is kept as
+written:
+
+```markdown
+<!-- bug-spec:prose:start -->
+### Observed
+### Expected
+### Verdict
+### Fixed when
+<!-- bug-spec:prose:end -->
+
+<details>
+<summary>machine-readable bug spec (<code>bug-spec/v1</code>) — generated, do not hand-edit</summary>
+
+<!-- one fenced json block: the mirror below -->
+
+</details>
+<!-- bug-spec:end -->
+```
+
+The prose is what a code owner reads and confirms, under exactly these four
+headings, in this order:
+
+- **Observed** — what happens now, and how to show it on the current code: a
+  test that fails today, or, where no test can show it, exact steps.
+- **Expected** — the correct behaviour, and which existing specification other
+  than the reported issue says so: the repo's documented contracts (a spec,
+  charter clause or position), another issue's acceptance criteria, or an
+  existing test. The reported issue's own text and acceptance criteria never
+  count.
+- **Verdict** — *bug*, or *not a bug*. **Where no existing specification says
+  the current behaviour is wrong, it is not a bug**: it is a feature or a
+  change request, and the analysis proposes that reclassification and stops; a
+  report that does not reproduce on the current code proposes none. A
+  behaviour that a charter clause or a position makes intentional is named as
+  such.
+- **Fixed when** — the acceptance criteria: the falsifying test passes, and
+  nothing else that is specified changes.
+
+### The mirror
+
+One JSON object, generated from the `bug-analyst` agent's answer:
+
+```json
+{
+  "schema": "bug-spec/v1",
+  "provenance": {
+    "generated_by": "bug-analyst via /development:maintenance",
+    "generated_at": "2026-11-20T03:10:00Z",
+    "prose_sha256": "<the prose hash of the region between the prose sentinels>"
+  },
+  "verdict": "bug",
+  "reclassify_as": null,
+  "falsifying_test": {"path": "tests/export.bats", "name": "an umlaut survives the export",
+                      "command": "bats tests/export.bats"},
+  "repro_steps": ["Create a report titled Müller-Quartal", "Export it as PDF"],
+  "cites": ["docs/reference/export.md#file-names"],
+  "fixed_when": ["the falsifying test passes", "nothing else that is specified changes"]
+}
+```
+
+`verdict` is `bug` or `not-a-bug`; `reclassify_as` is `feature`,
+`change-request` or `null` (always `null` for a `bug`, and for a `not-a-bug`
+report that does not reproduce on the current code); `falsifying_test` is
+`{path, name, command}` or `null`, when only `repro_steps` can show it.
+`prose_sha256` is `refine-issue/scripts/story-spec-prose-hash.zsh` over the
+bytes between the two prose sentinels: the same recipe as the story-spec's
+(*Provenance and staleness detection*). The `bug-analyst` agent returns these
+fields plus `observed`, `expected`, `intentional_per` and `draft_prose`; the
+prose carries those, the mirror does not.
+
+**Analysis writes to the issue only.** It writes the spec into the body and
+comments once that the spec awaits a code owner's `confirmed` label, or, for a
+`not-a-bug` verdict, proposes the reclassification or says the report does not
+reproduce. It changes no file in the
+repository and opens no PR; the falsifying test stays text in the spec until
+the fix step.
+
+### Confirmation
+
+`check-bug-confirmation.zsh <issue>` exits 0 only when a spec exists, its
+verdict is `bug`, the latest event that applied the `confirmed` label was a
+code owner's, and the spec is unchanged since: the prose still hashes to the
+mirror's `prose_sha256`, and the body was not edited after that label event.
+Otherwise it exits 1 with one stderr line, `bug-confirmation: <reason>`, naming
+the first check that failed: `no-spec`, `spec-prose-edited`, `not-a-bug`,
+`no-label`, `label-not-by-code-owner` or `spec-edited-after-label`. Exit 3
+decided nothing. A label an issue form applied at filing carries its non-owner
+author as the actor and so confirms nothing. Any edit to the issue body after
+the label voids the confirmation until a code owner removes and re-applies the
+label; an edit to the spec's prose sends the bug back to analysis, whose new
+render restores the hash.
+
 ## Readiness stamp contract (`readiness-stamp/v1`)
 
 The `story-readiness` gate is one subagent per story, and on an epic every run
@@ -8632,6 +8762,165 @@ This is the whole staleness machinery — no background job. The registry is
 re-derived exactly when reality (the prose a human edited) contradicts the
 generated mirror, on the next pull by a consumer.
 
+## Product charter contract (`charter/v1`)
+
+A **product charter** says what a product is for, who it serves, what wins when
+goals conflict, what it builds and what it deliberately does not, and how that
+direction has changed over time (#3205). It lives at `docs/product/charter.md`
+in a target repo, found through the product-document lookup like any product
+document ([The `product` plugin](#the-product-plugin--outside-the-languagetopic-model)).
+The `product` plugin owns it: `product/scripts/validate-charter.zsh` checks it.
+
+### The charter file (`docs/product/charter.md`)
+
+The same two-layer shape as the persona registry. The prose is
+human-authoritative and sits between `<!-- charter:prose:start -->` and
+`<!-- charter:prose:end -->`. It is followed by a collapsed `<details>` block
+holding one fenced `json` object, the generated mirror. Provenance is the
+persona contract's mechanism, unchanged: `provenance.prose_sha256` hashes the
+bytes between the two sentinels, normalised and compared exactly as
+[Provenance and staleness detection](#provenance-and-staleness-detection)
+states for `personas/v1`. This section does not restate it.
+
+The prose sections come in this order: Summary, Purpose and background, Who it
+serves, Values, What we build, What we deliberately don't build, Direction
+changes. Each is one level-two heading with exactly that text, and the prose
+holds no other level-two heading. Who it serves names persona ids and links the registry;
+it never redefines a persona. Direction changes is a dated log, newest first.
+
+### The `charter/v1` block
+
+An invented example: a small note-taking product with three values, two
+non-goals, and one direction change that retires a non-goal
+(`prose_sha256` is an illustrative digest):
+
+```json
+{
+  "schema": "charter/v1",
+  "provenance": {
+    "generated_by": "charter-definer via /product:define-charter",
+    "generated_at": "2026-11-12T10:00:00Z",
+    "prose_sha256": "4f1c2e8a9b3d5f7061c2e4a6b8d0f1325476a8b9cadbecfd0e1f2a3b4c5d6e7f"
+  },
+  "title": "Jotter charter",
+  "appendices": ["docs/principles.md"],
+  "purpose": "Capture a thought in seconds, on any device, and find it again.",
+  "background": "Note apps grew into project tools; Jotter stays a notebook.",
+  "serves": ["sam-student"],
+  "values": [
+    {
+      "id": "V-1",
+      "status": "active",
+      "ref": { "path": "docs/principles.md", "anchor": "quiet-by-default", "title": "Quiet by default" }
+    },
+    { "id": "V-2", "status": "active", "statement": "A note is never lost, even offline." },
+    { "id": "V-3", "status": "active", "statement": "Plain text first." }
+  ],
+  "scope": [
+    { "id": "S-1", "status": "active", "statement": "Fast capture on a phone, offline first." }
+  ],
+  "non_goals": [
+    {
+      "id": "NG-1",
+      "status": "retired",
+      "statement": "No sharing of notes.",
+      "rationale": "Sharing pulls a notebook toward a collaboration tool."
+    },
+    { "id": "NG-2", "status": "active", "statement": "No team workspaces.", "rationale": "Jotter is for one writer." }
+  ],
+  "direction_changes": [
+    {
+      "id": "DC-2026-11-1",
+      "date": "2026-11-12",
+      "from": "Notes are never shared.",
+      "to": "One note can be sent as a read-only link.",
+      "rationale": "Writers asked to send a single note to a friend.",
+      "affects": ["NG-1"],
+      "evidence": ["#42"]
+    }
+  ]
+}
+```
+
+**Field contract.**
+
+| Field | Type | Value |
+| --- | --- | --- |
+| `schema` | string | `"charter/v1"` |
+| `provenance` | object | `generated_by`, `generated_at`, `prose_sha256` (64 lowercase hex digits), as for `personas/v1` |
+| `title` | string | the document title a renderer puts on the cover |
+| `appendices` | string[] | repo-relative Markdown paths rendered after the charter; may be empty |
+| `purpose`, `background` | string | what the product is for, and why it exists |
+| `serves` | string[] | persona ids from the repo's persona registry; may be empty |
+| `values`, `scope`, `non_goals` | object[] | entries, below |
+| `direction_changes` | object[] | the log, below, newest first as in the prose |
+
+**An entry** (a value, a scope item or a non-goal) has a stable `id` — `V-<n>`
+for a value, `S-<n>` for a scope item, `NG-<n>` for a non-goal — a `status`,
+`active` or `retired`, and exactly one of `statement` (a string) or `ref`
+(`{ "path", "anchor", "title" }`: where the repo already states it, and the
+link's title). A non-goal with a `statement` also has a `rationale`. A `ref`
+exists for a repo that already states its principles on a page of its own.
+
+**A direction change** has `id` (`DC-<yyyy>-<mm>-<n>`, the year and month of
+its `date`), `date` (an ISO calendar date, `YYYY-MM-DD`), `from`, `to`,
+`rationale`, `affects[]` (the ids of the values, scope items and non-goals it
+introduced, changed or retired) and `evidence[]` (issue or PR references; may
+be empty).
+
+**The rules.**
+
+- **An entry is never deleted.** A value, scope item or non-goal that no longer
+  holds becomes `retired`, and a direction change records its retirement by
+  naming it in `affects`.
+- **An id is unique in the charter, and never reused or renumbered.**
+- Every id in `affects` names a value, scope item or non-goal of the charter,
+  and every id in `serves` names a persona in the registry. With no registry
+  anywhere, `serves` must be empty.
+- A `ref` path and every appendix are files of the charter's own repo. A path
+  found only in a linked submodule does not count. The `ref` anchor is not
+  checked.
+
+### The validator (`validate-charter.zsh`)
+
+`product/scripts/validate-charter.zsh <charter.md>` checks one charter. It
+exits 0 on a valid file, printing `charter: valid`, and 1 on an invalid one,
+with one stderr line `charter: <rule>: <detail>` for every violation, not only
+the first. It exits 2 on a usage error or an unreadable file; a missing `jq` and
+a lookup that fails internally exit 2 too, since neither is a verdict on the
+charter. The rules:
+
+| Rule | A violation |
+| --- | --- |
+| `schema` | the layout or the block's shape breaks the contract: sentinels, the section order, the `<details>` block, a field's type, a `status`, a non-goal's `rationale` |
+| `bad-id-shape` | an id that does not have its list's shape |
+| `duplicate-id` | an id used more than once |
+| `statement-and-ref` | an entry with both |
+| `neither-statement-nor-ref` | an entry with neither |
+| `retired-unnamed` | a retired entry no direction change names in `affects` |
+| `unresolved-affects` | an `affects` id the charter does not have |
+| `unresolved-serves` | a `serves` id the persona registry does not have, or any `serves` id when no registry is found |
+| `ref-missing` | a `ref` path that is not a file of the repo |
+| `appendix-missing` | an appendix that is not a file of the repo |
+| `bad-date` | a direction change whose `date` is not a calendar date, or not in the month its id names |
+| `direction-order` | a direction change listed before a newer one: a later `date`, or on the same date a higher `n` in `DC-<yyyy>-<mm>-<n>` |
+| `stale-prose` | `provenance.prose_sha256` does not match the prose |
+
+The repo is the git work tree holding the charter, or the current directory
+outside git. The persona registry is the lookup's answer for
+`docs/personas.md`, so a registry in a linked submodule counts. When that
+lookup stops at a declared submodule that is not initialised, the `serves`
+check cannot complete: the validator exits 2, and it is not an
+`unresolved-serves` violation.
+
+**The validator checks a single file, so it cannot see an active entry reworded
+in place, an entry deleted, an id renumbered or reused, or a retired entry
+named only by the change that introduced it.** Catching those
+means comparing the charter with its earlier versions, which is a different
+tool. Until one exists, they are left to the change itself: whoever changes an
+entry's meaning adds a direction change, and the human who approves the PR
+reads the diff for every one of them.
+
 ## Agent model selection
 
 Every agent in a language plugin declares its model in frontmatter:
@@ -8923,6 +9212,44 @@ review later.
 
 The coverage improver (Stage 0) runs the same way — its PR closes
 before any work agent's worktree is created.
+
+### The concern order of a full run (#3211)
+
+The groups run in one fixed order between **concerns**, on every run,
+attended or not: `security` < `dependencies` < `bugs` < `codequality` <
+`topic`. Once Phase 6 holds every dispatcher's plan, the orchestrator
+concatenates the plans, tags each group with its `target`, and pipes the
+array through `development/skills/maintenance/scripts/order-groups.zsh`,
+which sorts it stably by concern rank and adds each group's `concern`.
+Inside a concern the order the groups came in is kept, so each planner's
+ranking still decides there, and #432's worktree-first rule still sinks a
+concern's vendor-PR stages behind its worktree stages. Stage 0 is never
+passed in: the coverage pre-flight stays ahead of everything.
+
+`development/skills/maintenance/scripts/concern-of.zsh <tool>` is the one
+place the tool → concern mapping lives. It prints the concern of every tool
+Phase 0's `--tool` flag accepts, of the language tools only a planner groups
+by (`format_lint`, `grpc`, `api_contract`, `openapi`, `versioning`, all
+`codequality`), and `topic` for every topic plugin's tool; an unknown tool
+exits 2. `concern-of.zsh --tools <concern>` prints the concern's language
+tools, its `--tool` ones first, the set `--concern=<concern>` expands to. No tool maps to `bugs`:
+that concern works the repo's bug issues, not a scanner's findings, and runs
+at its position in the order (*Bug spec contract (`bug-spec/v1`)*, #3212).
+`tests/maintenance-concern-order.bats` sweeps the mapping against
+Phase 0's `--tool` list, every language dispatcher's supported tools and
+every topic dispatcher's routing table.
+
+*Rationale:* an open vulnerability is the costliest thing to leave open,
+so a run cut short by time must have spent itself there first. A
+dependency update is often that vulnerability's fix, and an update PR goes
+stale fastest. A bug is a known defect with a person waiting
+for it. Code quality has no deadline, and neither do the topic plugins'
+checks, which run last even on a repo whose primary type is a topic, where
+they are most of the work and little runs ahead of them. Working
+`dependencies` second puts its standing PRs ahead of later concerns'
+worktree merges, which can re-stale them under `strict` branch protection;
+that churn is accepted so that a security-relevant update never waits
+behind code-quality work.
 
 ### From worktrees to PRs
 
