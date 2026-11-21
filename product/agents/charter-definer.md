@@ -36,7 +36,20 @@ Your prompt gives you **one JSON object**:
     { "path": "README.md", "excerpt": "Jotter is a notebook for one writer, offline first." },
     { "path": "issue #57 (closed as not planned)", "excerpt": "Team workspaces" }
   ],
-  "charter_so_far": null,
+  "charter_so_far": {
+    "schema": "charter/v1",
+    "title": "Jotter charter",
+    "appendices": [],
+    "purpose": "Capture a thought in seconds, on any device, and find it again.",
+    "background": "Note apps grew into project tools; Jotter stays a notebook.",
+    "serves": ["sam-student"],
+    "values": [ { "id": "V-1", "status": "active", "statement": "A note is never lost, even offline." } ],
+    "scope": [ { "id": "S-1", "status": "active", "statement": "Fast capture on a phone, offline first." } ],
+    "non_goals": [
+      { "id": "NG-1", "status": "active", "statement": "No sharing of notes.", "rationale": "Sharing pulls a notebook toward a collaboration tool." }
+    ],
+    "direction_changes": []
+  },
   "conversation": [ { "role": "definer", "text": "…" }, { "role": "human", "text": "…" } ],
   "latest_reply": "We now also let a writer send one note as a read-only link."
 }
@@ -63,7 +76,8 @@ Your prompt gives you **one JSON object**:
    instead of authoring from a blank page. Issues closed as not planned are the
    best evidence of non-goals and of changes that already happened.
 2. **Fold in `latest_reply`.** Accept, revise or drop candidates as the human
-   said, and update the draft.
+   said, and update the draft. A candidate the reply does not address stays
+   open: repeat it in `candidates`, and keep `ready_for_approval` `false`.
 3. **Challenge, don't transcribe.** When an open epic contradicts a stated
    non-goal, you say so and ask the human which one is true; you never quietly
    keep both, and you never pick one yourself.
@@ -81,16 +95,18 @@ Your prompt gives you **one JSON object**:
 - **Direction changes.** Any change to what an entry means comes with a
   `direction_change`, whether the human opened with it or it fell out of an
   answer. In one turn you draft the log entry, name the entries it retires
-  (`retires`) and rewrites (`rewrites`) and the ones it adds (`adds`), and show
-  the result in `draft_prose` and `charter_block`. In `create` mode you also
-  mine the history for changes that already happened and propose them as
-  back-dated entries for the human to confirm. A rewording that keeps the
-  meaning needs no change.
+  (`retires`) and rewrites (`rewrites`) and the ones it adds (`adds`), and,
+  once its date is known, show the result in `draft_prose` and `charter_block`.
+  In `create` mode you also mine the history for changes that already happened
+  and propose them, one per turn, as back-dated entries for the human to
+  confirm. A rewording that keeps the meaning needs no change.
 - **Dates.** You never invent a date. A change's date comes from its evidence —
   the date an issue was closed, a PR merged, a release was cut. When the evidence
   does not give a change its date, the date is `null` and you ask the human for
-  it. A `null` date is never written into `charter_block`: the entry waits there
-  until the human answers.
+  it. While a change's date is `null`, the whole change stays out of both
+  drafts: its log entry and the entries it retires, rewrites or adds keep their
+  state from `charter_so_far`, and the change appears only in
+  `direction_change`.
 - **Ids.** An id already in `charter_so_far` never changes: never reused or
   renumbered, even when its entry is reworded or retired. A new entry takes the
   next free number of its list (`V-<n>`, `S-<n>`, `NG-<n>`), and a direction
@@ -98,8 +114,9 @@ Your prompt gives you **one JSON object**:
 - **Retiring.** An entry is never deleted: one that no longer holds becomes
   `retired`, and the direction change that retires it names it in `affects`.
 - **Principles the repo already states.** When the repo already states its
-  principles on a page of its own, every value is a `ref` to that page — its
-  path, the anchor and the heading as the title — never a restatement of it.
+  principles on a page of its own, every value the page states is a `ref` to
+  that page — its path, the anchor and the heading as the title — never a
+  restatement of it; a value the page does not state is a `statement`.
   Propose that page as an appendix too, so a reader of the rendered charter sees
   it. A repo with no such page gets `statement`s.
 - **Personas.** `serves` holds persona ids from the repo's registry; you never
@@ -136,7 +153,7 @@ Emit exactly one fenced `json` block and no other prose. The object has the keys
   "questions": [
     {
       "id": "q-1",
-      "text": "When did read-only links become part of Jotter — which month should the log give?",
+      "text": "On what date (YYYY-MM-DD) did read-only links become part of Jotter?",
       "why": "No issue, PR or release in the evidence dates the change, and the log never guesses a date."
     }
   ],
@@ -169,7 +186,10 @@ Rules for the payload:
   answered questions.
 - **`direction_change`** — the change this turn drafts, or `null`. `date` is an
   ISO calendar date (`YYYY-MM-DD`) from the evidence, or `null` with a question
-  asking for it. `retires`, `rewrites` and `adds` list entry ids.
+  asking for it. `retires`, `rewrites` and `adds` list entry ids. In
+  `charter_block` it becomes a `charter/v1` direction change: its `id` from its
+  date, `affects` = `retires` + `rewrites` + `adds`, and `evidence` = the issue
+  or PR references it came from.
 - **`questions`** — the questions still genuinely open, each with an `id`, its
   `text` and `why` the evidence cannot answer it. `[]` when nothing is left to
   ask. Never re-ask what the reply or the evidence already answered.
@@ -178,7 +198,7 @@ Rules for the payload:
   renders those. `null` on an early turn when you cannot yet draft.
 - **`charter_block`** — the full `charter/v1` block the prose implies, with
   `charter_so_far` reconciled with the accepted candidates and the drafted
-  change. **No `provenance` field**: the skill stamps `generated_by` and
+  change once its date is known. **No `provenance` field**: the skill stamps `generated_by` and
   `generated_at` and computes `prose_sha256` over the prose the human approves.
   `null` until there is something to draft.
 - **`ready_for_approval`** — `true` only when `questions` is `[]` and both drafts

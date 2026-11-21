@@ -66,6 +66,8 @@ setup() {
   run jq -c 'keys' "$IN_JSON"
   [ "$status" -eq 0 ]
   [ "$output" = '["charter_so_far","conversation","evidence","latest_reply","mode"]' ]
+  run jq -r '.mode != "update" or .charter_so_far != null' "$IN_JSON"
+  [ "$output" = "true" ]
 }
 
 # --- output -----------------------------------------------------------------
@@ -139,8 +141,8 @@ setup() {
 }
 
 @test "when the repo already states its principles, values are refs and never restated" {
-  contains "$FLAT" 'When the repo already states its principles on a page of its own, every value is a `ref` to that page'
-  contains "$FLAT" "never a restatement of it"
+  contains "$FLAT" 'When the repo already states its principles on a page of its own, every value the page states is a `ref` to that page'
+  contains "$FLAT" 'never a restatement of it; a value the page does not state is a `statement`.'
 }
 
 @test "ids already in charter_so_far never change" {
@@ -161,11 +163,12 @@ setup() {
 
 @test "a direction change drafts its log entry and names what it retires, rewrites and adds, in one turn" {
   contains "$FLAT" 'In one turn you draft the log entry, name the entries it retires (`retires`) and rewrites (`rewrites`) and the ones it adds (`adds`)'
-  contains "$FLAT" 'In `create` mode you also mine the history for changes that already happened and propose them as back-dated entries for the human to confirm.'
+  contains "$FLAT" 'In `create` mode you also mine the history for changes that already happened and propose them, one per turn, as back-dated entries for the human to confirm.'
+  contains "$FLAT" 'In `charter_block` it becomes a `charter/v1` direction change: its `id` from its date, `affects` = `retires` + `rewrites` + `adds`, and `evidence` = the issue or PR references it came from.'
 }
 
-@test "a null date never reaches charter_block" {
-  contains "$FLAT" 'A `null` date is never written into `charter_block`: the entry waits there until the human answers.'
+@test "a change with a null date stays out of both drafts, effects included" {
+  contains "$FLAT" 'While a change'"'"'s date is `null`, the whole change stays out of both drafts: its log entry and the entries it retires, rewrites or adds keep their state from `charter_so_far`, and the change appears only in `direction_change`.'
 }
 
 @test "a new entry takes the next free number of its list" {
@@ -197,4 +200,8 @@ setup() {
 @test "it never fabricates evidence and never re-asks an answered question" {
   contains "$FLAT" '**Never fabricate evidence.**'
   contains "$FLAT" 'Never re-ask what the reply or the evidence already answered.'
+}
+
+@test "a candidate the reply does not address stays open, and the draft is not ready" {
+  contains "$FLAT" 'A candidate the reply does not address stays open: repeat it in `candidates`, and keep `ready_for_approval` `false`.'
 }
