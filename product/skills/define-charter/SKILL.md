@@ -65,8 +65,9 @@ and hash it with `prose-hash.zsh --file <current-prose.txt>`, as Step 2 does.
 On a mismatch with the block's `provenance.prose_sha256`, tell the human the
 machine block is stale (the prose was edited after it was generated) and add
 the current prose to the evidence, so the agent reconciles from the prose. A
-missing sentinel pair or an unparseable block counts as a mismatch: the
-charter so far is then `null`, and Step 2 rewrites the whole file as in create.
+missing sentinel pair or an unparseable block **stops the skill without writing
+anything**: tell the human what is missing, since a draft made without the
+block's ids could reuse them.
 
 **Recording a direction change is a first-class path in update mode.** When the
 human opens with a change ("we now also target private repos"), it is the
@@ -75,8 +76,9 @@ the log entry and names what it retires, rewrites and adds in one turn.
 
 ## Step 0b — gather the evidence
 
-Collect each of these that exists, as a path and an excerpt, so the agent's
-first proposals are grounded and you can tell the human what they rest on:
+Collect each of these that exists, as a path and an excerpt, from the target
+repo root, so the agent's first proposals are grounded and you can tell the
+human what they rest on and which source a failed command left out:
 
 - the README;
 - the explanation pages under `docs/` (motivation, philosophy or the
@@ -153,9 +155,7 @@ Write `docs/product/charter.md` in the **working tree**, creating
      then the machine block.
    - **update** — keep the existing heading and intro, which sit outside the
      hashed region, and replace only the sentinel prose region and the
-     `<details>` block, so the diff stays minimal; when Step 0 found no
-     sentinel pair or an unparseable block, compose the whole file as in
-     create.
+     `<details>` block, so the diff stays minimal.
 
    ```text
    <!-- charter:prose:start -->
@@ -197,7 +197,10 @@ Run both from the target repo root, in this order.
    - **exit 1** → report every `charter: <rule>: <detail>` line verbatim and
      do not render. The Markdown stays written, since it is the human-approved
      text. Offer the human another round of the loop with the violations as
-     `latest_reply`, which ends in a fresh write and a fresh validation.
+     `latest_reply`, which ends in a fresh write and a fresh validation. A
+     `stale-prose` line, or a `schema` line about the sentinels or the
+     `<details>` block, is your own write's fault: redo Step 2 and validate
+     again, with no agent round.
    - **exit 2** → report the stderr; the check could not complete, which is
      not a verdict, and you do not render.
 2. **Ignore the build output.** When `git check-ignore -q dist/product/` says
@@ -222,8 +225,7 @@ which the human drives.
 
 - **Both output paths**, the PDF and the ePub, as the renderer printed them.
 - **The PDF is a DRAFT until the file is committed**: the charter was just
-  written and not committed, so the cover says DRAFT and the footer carries no
-  commit.
+  written and not committed, so the cover says DRAFT.
 - **The one command that renders the sendable copy**, once
   `docs/product/charter.md` is committed, run from the repo root with
   `<skill-base-dir>` resolved to its absolute path:

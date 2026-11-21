@@ -97,7 +97,7 @@ setup() {
 
 @test "a stale block in update mode is reported and the prose goes to the agent" {
   contains "$FLAT" 'tell the human the machine block is stale (the prose was edited after it was generated)'
-  contains "$FLAT" 'A missing sentinel pair or an unparseable block counts as a mismatch'
+  contains "$FLAT" 'A missing sentinel pair or an unparseable block **stops the skill without writing anything**: tell the human what is missing, since a draft made without the block'"'"'s ids could reuse them.'
 }
 
 # --- Step 0b: the evidence --------------------------------------------------
@@ -192,7 +192,7 @@ setup() {
 
 @test "the closing report gives both paths, the DRAFT note and the sendable-copy command" {
   contains "$FLAT" '**Both output paths**, the PDF and the ePub'
-  contains "$FLAT" '**The PDF is a DRAFT until the file is committed**'
+  contains "$FLAT" '**The PDF is a DRAFT until the file is committed**: the charter was just written and not committed, so the cover says DRAFT.'
   contains "$FLAT" '**The one command that renders the sendable copy**, once `docs/product/charter.md` is committed'
 }
 
@@ -242,6 +242,7 @@ setup() {
 
 @test "an invalid charter offers another round, and an incomplete check is not a verdict" {
   contains "$FLAT" 'Offer the human another round of the loop with the violations as `latest_reply`, which ends in a fresh write and a fresh validation.'
+  contains "$FLAT" 'A `stale-prose` line, or a `schema` line about the sentinels or the `<details>` block, is your own write'"'"'s fault: redo Step 2 and validate again, with no agent round.'
   contains "$FLAT" '**exit 2** → report the stderr; the check could not complete, which is not a verdict, and you do not render.'
 }
 
@@ -255,6 +256,7 @@ setup() {
 }
 
 @test "the epics and not-planned issues are read with gh" {
+  contains "$FLAT" 'as a path and an excerpt, from the target repo root, so the agent'"'"'s first proposals are grounded and you can tell the human what they rest on and which source a failed command left out:'
   contains "$FLAT" '(`gh issue list --label epic --state all`)'
   contains "$FLAT" '(`gh issue list --state closed --search '"'"'reason:"not planned"'"'"'`)'
 }
