@@ -13,16 +13,37 @@ bug spec's format is ARCHITECTURE.md, *Bug spec contract (`bug-spec/v1`)*.
 creates no branch and opens no PR. The falsifying test is part of the spec's
 text until the fix step writes it.
 
+**The names this file uses.** `<skill-base-dir>` is the one SKILL.md defines
+in Phase 1 — `development/skills/maintenance/`, as its resolved absolute path.
+`<scratch>` is the run's scratch directory, the one SKILL.md's start stamp
+writes `<scratch>/maintenance-run.json` into; substitute its resolved path.
+`<N>` is the number of the bug being worked, the `number` field of its object
+in `<scratch>/bugs.json`. `REPO` is the repo's `owner/name`, set in section 1's
+first step.
+
 ## 1. Classify every open bug
 
-From the repository root:
+First read the repo's `owner/name` into `REPO`, from the repository root:
+
+```bash
+REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)" && [[ -n "$REPO" ]]
+```
+
+When that fails or leaves `REPO` empty, stop the bugs concern, quote the
+failure in the Phase 9 summary and go on with the run: never run a script or a
+`gh` call below with an empty `--repo`. Every later command in this file passes
+`--repo "$REPO"`. Shell variables do not survive between steps (SKILL.md,
+Phase 4 — the same reason `<skill-base-dir>` is a placeholder), so a command
+that runs in a new shell sets `REPO` again with the line above first.
+
+Then, from the repository root:
 
 ```bash
 "<skill-base-dir>/scripts/list-bugs.zsh" --repo "$REPO" --repo-dir . > <scratch>/bugs.json
 ```
 
 It prints one object per open `bug`-labelled issue, already in the order the
-concern works them, each with a `state` and a `reason`. **Exit 1** is a tooling
+concern works them, each with a `number`, a `state` and a `reason`. **Exit 1** is a tooling
 failure — a `gh` read, the code-owner lookup or a confirmation check that could
 not decide: skip the concern, quote its stderr in the Phase 9 summary and go
 on with the run. **Exit 2** is your own malformed call: fix it and re-run once.
@@ -75,9 +96,11 @@ For each `needs-analysis` bug, in the order `list-bugs.zsh` printed:
    next bug. **Exit 3**, or either `gh` call failing, is a tooling failure,
    handled the same way. **Exit 2** is your own malformed call: fix it and re-run once.
 3. **Comment once.** Post one comment carrying the marker
-   `<!-- bug-spec-awaiting/v1 <verdict> -->`, unless a comment on the issue
-   already carries it with this verdict (`gh issue view <N> --json comments` —
-   a re-analysis comments again only when its verdict changed):
+   `<!-- bug-spec-awaiting/v1 <verdict> -->`, where `<verdict>` is the
+   analysis's `verdict` (`bug` or `not-a-bug`), unless a comment on the issue
+   already carries it with this verdict
+   (`gh issue view <N> --repo "$REPO" --json comments` — a re-analysis
+   comments again only when its verdict changed):
    - verdict `bug`: the spec is on the issue and awaits a code owner's
      `confirmed` label; a code owner confirms it by applying that label,
      removing and re-applying it if it is already on, and any edit to the issue
@@ -90,7 +113,11 @@ For each `needs-analysis` bug, in the order `list-bugs.zsh` printed:
      issue: it never relabels it and never fixes it.
 
    Ensure the label exists first, idempotently:
-   `gh label create confirmed --color 0e8a16 --description "A code owner confirmed this bug's spec" 2>/dev/null || true`.
+
+   ```bash
+   gh label create confirmed --repo "$REPO" --color 0e8a16 \
+     --description "A code owner confirmed this bug's spec" 2>/dev/null || true
+   ```
 
 ## 3. Confirmation
 

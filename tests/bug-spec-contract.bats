@@ -111,12 +111,30 @@ whole() {
   contains "$s" '"<skill-base-dir>/scripts/list-bugs.zsh" --repo "$REPO" --repo-dir .'
   contains "$s" '> <scratch>/bug-<N>-body.md && "<skill-base-dir>/scripts/bug-spec.zsh" render --analysis'
   contains "$s" '> <scratch>/bug-<N>-new-body.md && gh issue edit <N>'
-  contains "$s" '`<!-- bug-spec-awaiting/v1 <verdict> -->`, unless a comment on the issue already carries it with this verdict'
+  contains "$s" '`<!-- bug-spec-awaiting/v1 <verdict> -->`, where `<verdict>` is the analysis'"'"'s `verdict` (`bug` or `not-a-bug`), unless a comment on the issue already carries it with this verdict'
   contains "$s" 'it never relabels it and never fixes it.'
   contains "$s" 'or the body holds a spec cut short: write nothing, list the bug as "analysis failed" with the stderr line, post no comment, and go on to the next bug.'
   contains "$s" '**Dispatch `development:bug-analyst`** (Task tool, foreground), naming the repo, the checkout'"'"'s path and the issue number.'
   contains "$s" 'exit 3 decided nothing and is never read as either answer.'
   contains "$s" 'The confirmation is what makes a bug fixable, not the absence of a human at the keyboard'
+}
+
+@test "reference/bugs.md: REPO is set before the first line that uses it, and an empty REPO stops the concern" {
+  local def use
+  def="$(grep -n -F 'REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"' "$BUGS" | head -1 | cut -d: -f1)"
+  use="$(grep -n -F '"$REPO"' "$BUGS" | head -1 | cut -d: -f1)"
+  [ -n "$def" ]
+  [ -n "$use" ]
+  [ "$def" -le "$use" ]
+  contains "$(whole "$BUGS")" 'never run a script or a `gh` call below with an empty `--repo`.'
+}
+
+@test "reference/bugs.md: every placeholder is defined before its first use" {
+  local s
+  s="$(whole "$BUGS")"
+  contains "$s" '`<skill-base-dir>` is the one SKILL.md defines in Phase 1'
+  contains "$s" '`<scratch>` is the run'"'"'s scratch directory, the one SKILL.md'"'"'s start stamp writes `<scratch>/maintenance-run.json` into'
+  contains "$s" '`<N>` is the number of the bug being worked'
 }
 
 @test "SKILL.md: --concern accepts bugs and the bugs concern runs at its position in Phase 8" {
