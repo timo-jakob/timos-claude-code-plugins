@@ -77,9 +77,10 @@ directive.
    or steps under Observed, the cited source under Expected, the verdict and —
    for `not-a-bug` — the proposed reclassification and any intentional clause
    under Verdict, the criteria as a list under Fixed when. The structured fields
-   and the prose say the same thing. **Write `falsifying_test.command` verbatim
-   under Observed**, in a code span: the fix step runs that command only as the
-   confirmed prose carries it, and the spec is refused without it.
+   and the prose say the same thing. **Write no `Falsifying test:` line
+   yourself**: the render ends the prose with one carrying
+   `falsifying_test.command`, and the fix step runs only the command that line
+   names.
 
 ## Output
 

@@ -209,7 +209,7 @@ confirmed_issue() {
 @test "bug-spec: the mirror's prose hash is refine-issue's prose hash of the prose region" {
   spec_body bug "$BATS_TEST_TMPDIR/body.md"
   local want
-  want="$(jq -r '.draft_prose' "$BATS_TEST_TMPDIR/analysis.json" \
+  want="$(jq -r '.draft_prose + "\n\nFalsifying test: `" + .falsifying_test.command + "`"' "$BATS_TEST_TMPDIR/analysis.json" \
     | zsh "$REPO_ROOT/development/skills/refine-issue/scripts/story-spec-prose-hash.zsh")"
   run --separate-stderr zsh "$SPEC" read --body-file "$BATS_TEST_TMPDIR/body.md"
   [ "$status" -eq 0 ]
@@ -240,16 +240,15 @@ confirmed_issue() {
   contains "$stderr" "lacks the heading '### Verdict'"
 }
 
-@test "bug-spec: render refuses prose that does not carry the falsifying test's command verbatim, exit 1 (#3213)" {
-  analysis bug | jq '.draft_prose |= sub("the test `bats tests/export.bats` fails on it today"; "a test fails on it today")' \
-    > "$BATS_TEST_TMPDIR/a.json"
-  run --separate-stderr zsh "$SPEC" render --analysis "$BATS_TEST_TMPDIR/a.json"
-  [ "$status" -eq 1 ]
-  contains "$stderr" "draft_prose does not carry the falsifying test's command verbatim"
-  analysis bug | jq '.falsifying_test = null | .draft_prose |= sub("the test `bats tests/export.bats` fails on it today"; "the steps show it")' \
-    > "$BATS_TEST_TMPDIR/a.json"
+@test "bug-spec: render ends the prose with the falsifying test's line, and writes none without a test (#3213)" {
+  analysis bug > "$BATS_TEST_TMPDIR/a.json"
   run --separate-stderr zsh "$SPEC" render --analysis "$BATS_TEST_TMPDIR/a.json"
   [ "$status" -eq 0 ]
+  contains "$output" $'- nothing else specified changes\n\nFalsifying test: `bats tests/export.bats`\n<!-- bug-spec:prose:end -->'
+  analysis bug | jq '.falsifying_test = null' > "$BATS_TEST_TMPDIR/a.json"
+  run --separate-stderr zsh "$SPEC" render --analysis "$BATS_TEST_TMPDIR/a.json"
+  [ "$status" -eq 0 ]
+  lacks "$output" 'Falsifying test:'
 }
 
 @test "bug-spec: read prints the prose region's text beside its hash (#3213)" {
@@ -257,7 +256,7 @@ confirmed_issue() {
   run --separate-stderr zsh "$SPEC" read --body-file "$BATS_TEST_TMPDIR/body.md"
   [ "$status" -eq 0 ]
   # the region opens with the newline after its start sentinel
-  [ "$(jq -r '.prose' <<< "$output" | sed '1{/^$/d;}')" = "$(jq -r '.draft_prose' "$BATS_TEST_TMPDIR/analysis.json")" ]
+  [ "$(jq -r '.prose' <<< "$output" | sed '1{/^$/d;}')" = "$(jq -r '.draft_prose + "\n\nFalsifying test: `" + .falsifying_test.command + "`"' "$BATS_TEST_TMPDIR/analysis.json")" ]
 }
 
 @test "bug-spec: render refuses a verdict or a reclassification outside its enum, exit 1" {

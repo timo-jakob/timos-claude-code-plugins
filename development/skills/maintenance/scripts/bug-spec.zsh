@@ -18,7 +18,9 @@
 #
 # The region, in this order, ends the body:
 #   <!-- bug-spec:prose:start -->
-#   ### Observed / ### Expected / ### Verdict / ### Fixed when   (the prose)
+#   ### Observed / ### Expected / ### Verdict / ### Fixed when   (the prose,
+#   ending, when the analysis names a falsifying test, with the line
+#   Falsifying test: `<its command>`)
 #   <!-- bug-spec:prose:end -->
 #   <details> … one ```json block, the mirror … </details>
 #   <!-- bug-spec:end -->
@@ -29,7 +31,7 @@
 #   0  printed
 #   1  render: the analysis is not a usable bug-analyst object (a key missing,
 #      a verdict or reclassify_as outside its enum, draft_prose lacking one of
-#      the four headings or the falsifying test's command), or the body holds
+#      the four headings), or the body holds
 #      a spec region with no end marker;
 #      read: no spec, or a spec whose block is missing, unparseable or not
 #      bug-spec/v1 — either way there is no usable spec
@@ -142,12 +144,9 @@ for h in "${HEADINGS[@]}"; do
   rest="${rest#*"$h"}"
 done
 # The falsifying test's command is run by the fix step (fail-first.zsh, #3213),
-# which trusts it only as written in the hashed prose a code owner confirms.
+# which trusts it only as this line, the hashed prose's last, carries it.
 cmd="$(print -r -- "$a" | jq -r '.falsifying_test.command? // ""')"
-if [[ -n "$cmd" && "$prose" != *"\`$cmd\`"* ]]; then
-  print -u2 "$me: draft_prose does not carry the falsifying test's command verbatim as a code span"
-  exit 1
-fi
+[[ -n "$cmd" ]] && prose="${prose%%[[:space:]]#}"$'\n\n'"Falsifying test: \`$cmd\`"
 
 if [[ "$body" == *"$START"* ]]; then
   if [[ "$body" != *"$START"*"$END"* ]]; then

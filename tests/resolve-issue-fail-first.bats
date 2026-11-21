@@ -121,6 +121,14 @@ spec_body() {
   sed -i.bak 's|"command": "bats tests/export.bats"|"command": "bats"|' "$BATS_TEST_TMPDIR/body.md"
   run --separate-stderr zsh "$FF" spec --body-file "$BATS_TEST_TMPDIR/body.md"
   [ "$status" -eq 4 ]
+  # another whole code span of the confirmed prose is not the command either
+  analysis | jq '.draft_prose |= sub("The export"; "Running `make deploy-prod` after the export")' \
+    > "$BATS_TEST_TMPDIR/a.json"
+  spec_body "$BATS_TEST_TMPDIR/a.json" "$BATS_TEST_TMPDIR/body.md"
+  sed -i.bak 's|"command": "bats tests/export.bats"|"command": "make deploy-prod"|' "$BATS_TEST_TMPDIR/body.md"
+  run --separate-stderr zsh "$FF" spec --body-file "$BATS_TEST_TMPDIR/body.md"
+  [ "$status" -eq 4 ]
+  starts_with "$stderr" 'fail-first: command-not-in-prose'
 }
 
 # ---- record -----------------------------------------------------------------
@@ -340,7 +348,7 @@ whole() {
   local s
   s="$(whole "$REPO_ROOT/development/skills/resolve-issue/SKILL.md")"
   contains "$s" 'For an issue whose body carries a `bug-spec/v1` block, §2 first adds the falsifying test and records its result at the branch base; when that test passes, the run stops with outcome `spec-does-not-reproduce` and fixes nothing. An issue without the block is untouched by all of this: see `reference/fail-first.md` § Detect the bug spec (#3213)'
-  contains "$s" '`fail-first.zsh check` must exit 0 before a PR is opened, and `render`'"'"'s **Bug evidence** section goes into the PR body: see `reference/fail-first.md` § Before the PR — record it again and check (#3213)'
+  contains "$s" '**Bug evidence (#3213).** Every run, a resumed one included, detects the bug spec again here; on a bug fix it records the falsifying test again after the fix; `fail-first.zsh check` must exit 0 before a PR is opened, and `render`'"'"'s **Bug evidence** section goes into the PR body: see `reference/fail-first.md` § Before the PR — record it again and check (#3213)'
 }
 
 @test "reference/fail-first.md: the falsifying test first, the stop, and the check before the PR" {
@@ -366,6 +374,7 @@ whole() {
 @test "reference/fail-first.md: each exit arm names its stop and the step verdict it ends on" {
   local s
   s="$(whole "$REPO_ROOT/development/skills/resolve-issue/reference/fail-first.md")"
+  contains "$s" 'Its exit 1 edits nothing and stops, the run'"'"'s record `failed` and a step'"'"'s verdict `stopped`, cause `failed`, with its stderr line as the reason; its exit 3 is Exit 3'"'"'s stop.'
   contains "$s" '**Exit 4** — a bug spec this run cannot fix from; stderr names the reason (`unreadable-spec`, `spec-prose-edited`, `not-a-bug`, `no-falsifying-test`, `command-not-in-prose`). Edit nothing, and post one comment carrying `<!-- fail-first/v1 <reason> -->`'
   contains "$s" 'a step'"'"'s verdict is `stopped`, cause `failed`, with the stderr line as its reason.'
   contains "$s" 'A non-zero exit must be the test'"'"'s own assertion failing, as `<durable>/fail-first.log` shows it.'

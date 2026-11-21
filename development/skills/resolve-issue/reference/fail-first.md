@@ -48,8 +48,9 @@ gh issue view <N> --json body -q .body > <scratch>/issue-<N>-body.md
 **The command is trusted only as the code owner confirmed it.** The prose is
 what a code owner reads before applying `confirmed`, and only the prose is
 hashed; the JSON block is not. `spec` therefore hands back a command only when
-the prose still matches its hash and carries that command verbatim as a code
-span, so an edit to the block alone can never choose what this run executes.
+the prose still matches its hash and its last line, which `bug-spec.zsh render`
+writes, is exactly ``Falsifying test: `<command>` ``, so an edit to the block
+alone can never choose what this run executes.
 
 ## The falsifying test first (#3213)
 

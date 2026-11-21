@@ -13,9 +13,10 @@
 #   fail-first.zsh spec [--body-file <file>]
 #       Read an issue body (--body-file, else stdin) and print the falsifying
 #       test its bug spec names: {"path", "name", "command"}. The command is
-#       trusted only when it is written, verbatim as a code span, in the
-#       spec's prose, whose hash still matches the block: the prose is what a
-#       code owner confirmed, while the JSON block sits outside the hash.
+#       trusted only when the prose's last line, which bug-spec.zsh render
+#       writes, is exactly Falsifying test: `<command>`, and the prose's hash
+#       still matches the block: the prose is what a code owner confirmed,
+#       while the JSON block sits outside the hash.
 #   fail-first.zsh record --phase <before|after> --sha <commit> --out <file>
 #       [--log <file>] -- <command…>
 #       Run the command from the current directory and append one JSON line,
@@ -127,8 +128,9 @@ spec)
     || die 4 "no-falsifying-test (the spec names no runnable test)"
   cmd="$(print -r -- "$spec" | jq -r '.block.falsifying_test.command')"
   prose="$(print -r -- "$spec" | jq -r '.prose // ""')"
-  [[ "$prose" == *"\`$cmd\`"* ]] \
-    || die 4 "command-not-in-prose (the test's command is not written in the confirmed prose)"
+  prose="${prose%%[[:space:]]#}"
+  [[ "${prose##*$'\n'}" == "Falsifying test: \`$cmd\`" ]] \
+    || die 4 "command-not-in-prose (the test's command is not the one the confirmed prose's last line names)"
   print -r -- "$spec" | jq -c '.block.falsifying_test | {path, name, command}'
   ;;
 

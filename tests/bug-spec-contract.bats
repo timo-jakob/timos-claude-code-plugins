@@ -99,7 +99,7 @@ whole() {
   contains "$s" 'A `bug` verdict has `reclassify_as: null`.'
   contains "$s" '`intentional_per` is `null` unless a clause or position makes the behaviour intentional.'
   contains "$s" 'You edit no file, create no file, run no command that writes, and post nothing to GitHub'
-  contains "$s" '**Write `falsifying_test.command` verbatim under Observed**, in a code span' # #3213
+  contains "$s" '**Write no `Falsifying test:` line yourself**: the render ends the prose with one carrying `falsifying_test.command`, and the fix step runs only the command that line names.' # #3213
 }
 
 @test "reference/bugs.md: analysis writes to the issue only, comments once, and never analyses a non-owner's bug" {

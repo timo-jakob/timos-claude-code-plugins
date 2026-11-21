@@ -8444,11 +8444,11 @@ opened.
 **The command is trusted only as confirmed.** A code owner confirms the prose,
 and only the prose is hashed: the JSON block, which holds
 `falsifying_test.command`, sits outside the hash. So `bug-spec.zsh render`
-refuses an analysis whose prose does not carry that command verbatim as a code
-span, and
+ends the prose with one line, ``Falsifying test: `<command>` ``, and
 `fail-first.zsh spec` hands a command to the run only when the prose still
-matches its hash and carries it. An edit to the block alone never chooses what
-an unattended run executes.
+matches its hash and its last line is exactly that line for the block's
+command. An edit to the block alone never chooses what an unattended run
+executes.
 
 **The record file** is JSON Lines, one object per run of the test:
 
