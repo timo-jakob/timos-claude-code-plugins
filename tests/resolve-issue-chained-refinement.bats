@@ -592,7 +592,7 @@ fm() { awk -v k="$2" 'NR == 1 && /^---$/ { f = 1; next } f && /^---$/ { exit } f
   lacks "$(flat "$STEPS")" 'You are a step of a human-started'
   lacks "$(flat "$STEPS")" 'You are a chained refinement step'
   contains "$(flat "$RSTEP")" 'Invoke the development:resolve-issue skill with "<N>" plus the root'"'"'s telemetry flags and its --no-review when given'
-  contains "$(flat "$RSTEP")" 'Before you end your turn, write <scratch_dir>/step-<N>-verdict.json (step-verdict/v1, ARCHITECTURE.md *Step verdict contract*)'
+  contains "$(flat "$RSTEP")" 'Before you end your turn, save for that wait, write <scratch_dir>/step-<N>-verdict.json (step-verdict/v1, ARCHITECTURE.md *Step verdict contract*)'
 }
 
 @test "#3014 the refine-step agent's unreadable-handoff verdict passes the root's verdict check" {
@@ -608,7 +608,7 @@ fm() { awk -v k="$2" 'NR == 1 && /^---$/ { f = 1; next } f && /^---$/ { exit } f
 @test "#3014 the refine-step agent feeds its conversion a saved document and writes a verdict when none is printed" {
   local t; t="$(flat "$FSTEP")"
   contains "$t" 'save that document verbatim to `<scratch_dir>/chain-result-<N>.json` with the Write tool, never through a shell string'
-  contains "$t" 'never end it without a verdict file.'
+  contains "$t" 'never end it without a verdict file, save for the wait below.'
   local doc
   doc="$(perl -0ne 'print $1 if /`(\{"schema": "step-verdict\/v1", "issue": <N>, "verdict": "stopped", "follow_ups": \[\], "reason": "no chain-result document"\})`/s' "$FSTEP")"
   [ -n "$doc" ]

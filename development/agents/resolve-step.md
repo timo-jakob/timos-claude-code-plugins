@@ -63,11 +63,12 @@ resolve-issue skill's `reference/review-loop/subagents.md` rule *A background ro
 in-turn* says; follow it as written, its turn ending and its retry included. Wait on its verdict file with
 one background Bash until loop, never Monitor and never a foreground poll (#3044). One that writes no
 verdict file, such as the readiness gate, has no loop to wait on: stop it, and once it has ended write a
-stopped verdict, cause tooling. When you cannot stop it, end your turn without writing a verdict: that
-ending is a wait, not the run's end, since the harness wakes you when the subagent ends, and you then
-write that verdict. Never stop it through Bash. Write that verdict too when the rule stops the run.
+stopped verdict, cause tooling. One you cannot stop without Bash you never stop through
+Bash: end your turn without a verdict file, with `waiting on <subagent>` as your last line. The harness
+re-invokes you when that subagent ends, as it re-invokes a conductor when its loop exits, and you then
+write that verdict. Write that verdict too when the rule stops the run.
 
-Before you end your turn, write <scratch_dir>/step-<N>-verdict.json
+Before you end your turn, save for that wait, write <scratch_dir>/step-<N>-verdict.json
 (step-verdict/v1, ARCHITECTURE.md *Step verdict contract*), listing every
 follow-up issue you filed in follow_ups and your run's run_id in run_id. A
 stopped verdict carries its cause: escalation, clean-stop, tooling or failed.

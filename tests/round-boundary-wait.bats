@@ -1087,16 +1087,19 @@ _verdict_loop() {
   contains "$(prose_body "$SUBAGENTS")" 'That is an ending with no loop armed: once the loop is launched the turn ends, and the harness re-invokes the conductor, a subagent included, when the loop exits.'
   local f
   for f in "$REPO_ROOT/development/agents/resolve-step.md" "$REPO_ROOT/development/agents/refine-step.md"; do
-    # the step agents point at that one rule and carry no turn-ending exception of their own
+    # the step agents point at that one rule; their only turn-ending exception is the wait below
     contains "$(prose_body "$f")" 'is waited on in-turn says; follow it as written, its turn ending and its retry included.'
     lacks "$(prose_body "$f")" 'The ending forbidden above'
     lacks "$(prose_body "$f")" 'end your turn, and the harness'
     # a dispatch with no verdict file has no loop to wait on: it is stopped, never left running unarmed
     contains "$(prose_body "$f")" 'has no loop to wait on: stop it, and once it has ended write'
-    # one it cannot stop: the turn ends unverdicted and the harness wakes it, never a Bash kill
-    contains "$(prose_body "$f")" 'When you cannot stop it, end your turn without writing a verdict: that ending is a wait'
-    contains "$(prose_body "$f")" 'since the harness wakes you when the subagent ends, and you then write that verdict. Never stop it through Bash.'
+    # one it cannot stop: the turn ends unverdicted as a wait, never a Bash kill
+    contains "$(prose_body "$f")" 'One you cannot stop without Bash you never stop through Bash: end your turn without a verdict file, with waiting on <subagent> as your last line.'
+    contains "$(prose_body "$f")" 'The harness re-invokes you when that subagent ends, as it re-invokes a conductor when its loop exits, and you then write that verdict.'
   done
+  # the root's arm for that wait, beside the one-message rule it narrows
+  local steps; steps="$(prose_body "$REPO_ROOT/development/skills/resolve-issue/reference/chain-steps.md")"
+  contains "$steps" 'A step whose last line is waiting on <subagent> (#3044) gets no message: the root waits for its next turn ending.'
   contains "$(prose_body "$REPO_ROOT/development/agents/refine-step.md")" 'such as the issue-refiner, has no loop to wait on'
   contains "$(prose_body "$REPO_ROOT/development/agents/resolve-step.md")" 'such as the readiness gate, has no loop to wait on'
 }
