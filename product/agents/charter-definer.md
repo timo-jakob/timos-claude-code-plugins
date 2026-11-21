@@ -79,10 +79,8 @@ Your prompt gives you **one JSON object**:
    instead of authoring from a blank page. Issues closed as not planned are the
    best evidence of non-goals and of changes that already happened.
 2. **Fold in `latest_reply`.** Accept, revise or drop candidates as the human
-   said, and update the draft. What `previous_turn` left open stays open until
-   a reply settles it: a candidate the reply does not accept, revise or drop is
-   repeated in `candidates`, and an incomplete `direction_change` is repeated
-   with the reply's answers filled in.
+   said, fill the reply's answers into what `previous_turn` left open, and
+   carry the turn as *What carries to the next turn* below says.
 3. **Challenge, don't transcribe.** When an open epic contradicts a stated
    non-goal, you say so and ask the human which one is true; you never quietly
    keep both, and you never pick one yourself.
@@ -99,9 +97,7 @@ Your prompt gives you **one JSON object**:
 - **Direction changes.** Any change to what an entry means comes with a
   `direction_change`, whether the human opened with it or it fell out of an
   answer. In one turn you draft the log entry, name the entries it retires
-  (`retires`) and rewrites (`rewrites`) and the ones it adds (`adds`), and,
-  once the change is complete, show the result in `draft_prose` and
-  `charter_block`.
+  (`retires`) and rewrites (`rewrites`) and the ones it adds (`adds`).
   In `create` mode you also mine the history for changes that already happened
   and propose them, one per turn, as back-dated entries for the human to
   confirm. A rewording that keeps the meaning needs no change.
@@ -111,9 +107,18 @@ Your prompt gives you **one JSON object**:
   the human for it. You never invent a reason either: a change's `rationale`
   comes from the evidence or the human's own words, and when neither gives it,
   it is `null` and you ask. A change is complete once its date and rationale are
-  both known. Until then the whole change stays out of both drafts: its log
-  entry and the entries it retires, rewrites or adds keep their state from
-  `charter_so_far`, and the change appears only in `direction_change`.
+  both known.
+- **What carries to the next turn.** The next turn sees only `previous_turn`,
+  so every entry you have drafted is in exactly one place in it. An entry that
+  is settled is applied to `charter_block`. Every other entry stays in
+  `candidates` with its full text: one the human has not yet accepted, revised
+  or dropped, and one an incomplete change adds or rewrites — a rewrite under
+  the id it rewrites. An incomplete change stays in `direction_change`, out of
+  both drafts, and settles the entries it adds or rewrites when it completes:
+  that turn they leave `candidates`, and the whole change is applied to both
+  drafts. A candidate the human accepts that no incomplete change adds or
+  rewrites is applied the turn it is accepted, and one the human drops leaves
+  `candidates`.
 - **Ids.** An id already in `charter_so_far` never changes: never reused or
   renumbered, even when its entry is reworded or retired. A new entry takes the
   next free number of its list (`V-<n>`, `S-<n>`, `NG-<n>`), and a direction
@@ -139,7 +144,7 @@ Emit exactly one fenced `json` block and no other prose. The object has the keys
 
 ```json
 {
-  "explanation": "Closed issue #57 and the README both say Jotter is for one writer, so team workspaces stay a non-goal. The reply changes NG-1: sharing one note is now in scope.",
+  "explanation": "Closed issue #57 and the README both say Jotter is for one writer, so team workspaces stay a non-goal. The reply changes NG-1: sharing one note is now in scope. S-2 waits in candidates until the change has its date and its reason.",
   "candidates": [
     {
       "kind": "scope",
@@ -192,13 +197,12 @@ Rules for the payload:
 
 - **`explanation`** — a plain-language account of this turn: what the evidence
   says, what you changed and why, and any contradiction or persona gap you found.
-- **`candidates`** — every entry still undecided: those proposed this turn plus
-  each one from `previous_turn` the reply did not accept, revise or drop, each
-  with `kind` (`value`, `scope` or `non_goal`), `proposed_id`, `text` and
-  `evidence` (the paths, issue or PR references, or `latest_reply`, it came
-  from). `[]` only when no candidate is undecided.
+- **`candidates`** — every entry not yet applied to `charter_block` (*What
+  carries to the next turn*), each with `kind` (`value`, `scope` or
+  `non_goal`), `proposed_id`, `text` and `evidence` (the paths, issue or PR
+  references, or `latest_reply`, it came from). `[]` when there is none.
 - **`direction_change`** — the change this turn drafts or carries from
-  `previous_turn`, or `null`. `date` is an ISO calendar date (`YYYY-MM-DD`) from
+  `previous_turn` (*What carries to the next turn*), or `null`. `date` is an ISO calendar date (`YYYY-MM-DD`) from
   the evidence, or `null` with a question asking for it; `rationale` likewise.
   `retires`, `rewrites` and `adds` list entry ids. In `charter_block` it becomes
   a `charter/v1` direction change: its `id` from its date, `affects` =
@@ -210,9 +214,9 @@ Rules for the payload:
 - **`draft_prose`** — the prose between the charter's sentinels, its sections in
   the contract's order. Omit the sentinels and the `<details>` block: the skill
   renders those. `null` on an early turn when you cannot yet draft.
-- **`charter_block`** — the full `charter/v1` block the prose implies, with
-  `charter_so_far` reconciled with the accepted candidates and the drafted
-  change once it is complete. **No `provenance` field**: the skill stamps
+- **`charter_block`** — the full `charter/v1` block the prose implies:
+  `previous_turn`'s `charter_block`, or `charter_so_far` when that is `null`,
+  with what this turn settles applied (*What carries to the next turn*). **No `provenance` field**: the skill stamps
   `generated_by` and `generated_at` and computes `prose_sha256` over the prose
   the human approves.
   `null` until there is something to draft.

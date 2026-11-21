@@ -168,7 +168,8 @@ setup() {
 }
 
 @test "a change is complete once its date and rationale are known, and stays out of both drafts until then" {
-  contains "$FLAT" 'A change is complete once its date and rationale are both known. Until then the whole change stays out of both drafts: its log entry and the entries it retires, rewrites or adds keep their state from `charter_so_far`, and the change appears only in `direction_change`.'
+  contains "$FLAT" 'A change is complete once its date and rationale are both known.'
+  contains "$FLAT" 'An incomplete change stays in `direction_change`, out of both drafts, and settles the entries it adds or rewrites when it completes: that turn they leave `candidates`, and the whole change is applied to both drafts.'
 }
 
 @test "it never invents a reason: a rationale nobody gave is null and asked for" {
@@ -198,6 +199,7 @@ setup() {
 }
 
 @test "charter_block carries no provenance, and draft_prose omits the sentinels" {
+  contains "$FLAT" '**`charter_block`** — the full `charter/v1` block the prose implies: `previous_turn`'"'"'s `charter_block`, or `charter_so_far` when that is `null`, with what this turn settles applied (*What carries to the next turn*).'
   contains "$FLAT" '**No `provenance` field**: the skill stamps `generated_by` and `generated_at` and computes `prose_sha256` over the prose the human approves.'
   contains "$FLAT" 'Omit the sentinels and the `<details>` block: the skill renders those.'
   run jq -r '.charter_block | has("provenance")' "$OUT_JSON"
@@ -211,8 +213,18 @@ setup() {
 
 @test "what the previous turn left open is carried until a reply settles it" {
   contains "$FLAT" '`previous_turn` is the object you returned last turn, unchanged, and `null` on the first turn.'
-  contains "$FLAT" 'What `previous_turn` left open stays open until a reply settles it: a candidate the reply does not accept, revise or drop is repeated in `candidates`, and an incomplete `direction_change` is repeated with the reply'"'"'s answers filled in.'
-  contains "$FLAT" '**`candidates`** — every entry still undecided: those proposed this turn plus each one from `previous_turn` the reply did not accept, revise or drop'
-  contains "$FLAT" '`[]` only when no candidate is undecided.'
-  contains "$FLAT" '**`direction_change`** — the change this turn drafts or carries from `previous_turn`, or `null`.'
+  contains "$FLAT" 'The next turn sees only `previous_turn`, so every entry you have drafted is in exactly one place in it. An entry that is settled is applied to `charter_block`.'
+  contains "$FLAT" 'Every other entry stays in `candidates` with its full text: one the human has not yet accepted, revised or dropped, and one an incomplete change adds or rewrites — a rewrite under the id it rewrites.'
+  contains "$FLAT" 'A candidate the human accepts that no incomplete change adds or rewrites is applied the turn it is accepted, and one the human drops leaves `candidates`.'
+  contains "$FLAT" '**`candidates`** — every entry not yet applied to `charter_block` (*What carries to the next turn*)'
+  contains "$FLAT" '**`direction_change`** — the change this turn drafts or carries from `previous_turn` (*What carries to the next turn*), or `null`.'
+}
+
+@test "the output example keeps an entry an incomplete change adds in candidates" {
+  run jq -r '.direction_change.date' "$OUT_JSON"
+  [ "$output" = "null" ]
+  run jq -r '.direction_change.adds[0]' "$OUT_JSON"
+  [ "$output" = "S-2" ]
+  run jq -r '.candidates[0].proposed_id' "$OUT_JSON"
+  [ "$output" = "S-2" ]
 }
