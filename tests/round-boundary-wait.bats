@@ -1131,6 +1131,7 @@ _verdict_loop() {
   contains "$body" 'The loop ends when the file exists, printing verdict-written, or when its stall bound passes, printing verdict-stalled:'
   contains "$body" 'A call that returns with neither line is a waiter that died, not a stall: re-test the verdict file, read it when it is there, and otherwise re-arm the same loop once.'
   contains "$body" 'A second early return is report-and-stop, with the background dispatch left running.'
+  contains "$body" 'A dispatch completion notice is not a call that returns with neither line, and it never re-arms the loop.'
   body="$(prose_body "$INDEX")"
   contains "$body" "two more cut out core.md's step 4 and wait paragraph (#3044)."
 }

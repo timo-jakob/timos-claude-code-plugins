@@ -8,32 +8,32 @@ context: a **panel** subagent reviews, a **decide** subagent settles the
 round's `decides:` claims, a **risk** subagent assesses its blockers while
 `corner_case_risk_threshold` is on and in an extension round (#2577), a **fix**
 subagent fixes. The conductor
-keeps the round boundary, the gate, consolidation and every human decision, and
-exchanges work with the subagents only through the `round-handoff/v1` and
+keeps the round boundary, the gate, consolidation and every human decision,
+exchanging work with subagents only through the `round-handoff/v1` and
 `round-verdict/v1` files (ARCHITECTURE.md, *Round handoff and verdict
 contracts*). **Where *Each round* above has the conductor plan and dispatch the
 panel itself (step 1) or apply the fix pass itself (step 3), this section
 governs**: step 3 sits in a byte-frozen span, so both steps are superseded
-here rather than edited. What they say a panel or a fix pass must *do* still holds —
-the briefs below hand that work to a subagent, they do not change it.
+here rather than edited. What they say a panel or fix pass must *do* still holds,
+handed to a subagent.
 
 **Depth budget.** No implementation adds a layer:
 
 - single-issue flow: conductor (0) → panel subagent (1) → reviewers (2);
-- epic E3 child flow: child conductor (1) → panel (2) → reviewers (3), which is
+- epic E3 child flow: child conductor (1) → panel (2) → reviewers (3) —
   Claude Code's default nesting limit;
 - the fix subagent dispatches nothing;
 - the decide subagent dispatches nothing;
 - the risk subagent dispatches nothing.
 
-A panel subagent that has no `Agent` tool cannot dispatch reviewers: it returns
+A panel subagent with no `Agent` tool cannot dispatch reviewers: it returns
 `failed` / `no-agent-tool`, and the conductor reports and stops.
 
 **Dispatch mechanism.** ARCHITECTURE.md's *Subagent dispatch mechanism*
 paragraph records a probe **pass**, so the four kinds ship as plugin agents:
-`development/agents/round-panel.md`, `development/agents/round-fix.md`,
-`development/agents/round-decide.md` and `development/agents/round-risk.md`;
-the risk kind is dispatched as *Risk subagent brief* below says. The conductor dispatches `subagent_type:
+`development/agents/round-risk.md` and its `round-panel.md`, `round-fix.md` and
+`round-decide.md` siblings;
+the risk kind is dispatched per *Risk subagent brief* below. The conductor dispatches `subagent_type:
 round-panel` and `subagent_type: round-fix`, and `subagent_type: round-decide`
 for the decided pass, one fresh subagent per job — a recovery or a retry is a **new**
 dispatch, never a resumed one — with a prompt that names the handoff file and
@@ -46,14 +46,13 @@ A foreground dispatch returns its verdict in the same turn, so the conductor
 carries straight on: **How to wait** governs only the gate — it is not restated
 here. A round dispatch that launched in the background anyway is waited on
 in-turn, as *A background round dispatch* below says. Each agent body only
-points at its brief below.
+points at its brief.
 
 **Contract usage.** The conductor writes every handoff with `round-handoff.zsh
-write-handoff --work-dir <work-dir>` and reads every verdict with
-`round-handoff.zsh read-verdict --file <work-dir>/verdict-<R>-<kind>.json`. A
-subagent reads its handoff with `round-handoff.zsh read-handoff` and writes its
-verdict only with `round-handoff.zsh write-verdict --work-dir <work-dir>`.
-Neither side hand-writes or hand-parses those files.
+write-handoff` and reads every verdict with `round-handoff.zsh read-verdict`;
+a subagent reads its handoff with `read-handoff` and writes its verdict only
+with `round-handoff.zsh write-verdict`, each writer passing `--work-dir
+<work-dir>`. Neither side hand-writes or hand-parses those files.
 
 **The round boundary is unchanged, and the conductor owns all of it.** It mints
 `T`, launches the detached gate, waits on it, and dispatches the panel subagent
@@ -71,8 +70,8 @@ report-and-stop.
 values only the conductor can supply:
 
 - **every kind:** `round`; `tree_id` is the round's `T`; `worktree_root` is the
-  implementation worktree (*Build each reviewer's scope block* above says how to
-  identify it), resolved with `:A`;
+  implementation worktree (*Build each reviewer's scope block* above),
+  resolved with `:A`;
 - **panel:** `base` is the loop's `--base`, resolved to a commit; `mode` is
   `round`, so `carry_entries` is `[]`, except on the two carry recoveries
   (*Verdict recovery arms (#1937)*); `delta_base` is the tree identity
@@ -85,11 +84,11 @@ A non-zero `round-handoff.zsh write-handoff` exit, or a `read-verdict` exit 1 or
 
 **Consolidation stays with the conductor.** On an `ok` panel verdict, and then
 an `ok` decide verdict where the round's decided pass runs (*Decide subagent
-brief*), the conductor runs step-mode `resolve-story-loop.zsh` itself, exactly as step 2
+brief*), the conductor runs step-mode `resolve-story-loop.zsh` itself, as step 2
 says, passing the verdict's `aggregate_findings_file` as `--findings-file` and,
 when it is non-null, its `carry_accounting_file` as `--carry-accounting`. It
 opens neither file. It narrates the round from the verdict's `findings_count`,
-the status JSON and the progress block the loop appended. When an `ok` panel
+the status JSON and the loop's progress block. When an `ok` panel
 verdict comes with the line naming both panels, the fallback engaged this
 round (#2909): print that line first, as `reference/ask-branches.md` § RS-06a
 says. A non-`ok` panel
@@ -99,24 +98,24 @@ verdict takes *Verdict recovery arms (#1937)* below.
 from the status JSON:
 
 - **non-zero** → dispatch the fix subagent with `trigger: awaiting-fix`, and
-  `changelist` naming `<work-dir>/changelist-<R>.json`, the round's changelist
-  the loop wrote. After an `ok` verdict, take the next round's boundary.
+  `changelist` naming `<work-dir>/changelist-<R>.json`, which the loop wrote.
+  After an `ok` verdict, take the next round's boundary.
 - **zero** → the closing-sweep promotion (step 3). No fix runs; take the next
   round's boundary as step 3 says.
-- **zero, with a verdict naming a red whole suite (#2926)** → a fix turn, not
-  the zero arm: the conductor fixes it in-session, as the red-suite note in
-  `exit-20-awaiting-fix.md` says, and a no-edit re-run of a flaky red is exempt
+- **zero, with a verdict naming a red whole suite (#2926)** → not the zero arm:
+  the conductor fixes it in-session (the red-suite note in
+  `exit-20-awaiting-fix.md`), and a no-edit re-run of a flaky red is exempt
   from the *changed nothing* stop below.
 
 On a **red gate** (the boundary's step 6), dispatch the fix subagent with
 `trigger: gate-red` and `gate_log` naming the gate's recorded output. After an
 `ok` verdict, the conductor restarts the boundary from its step 1.
 
-In both cases the handoff also carries the round's `grant` (`null` when none was
-granted) and its `guidance` (the human's granted-round guidance, or `null`),
-`rule2_mandatory` (step 3's histogram trigger), and `profile_fix_rules` — the
-loaded profile's *Fix-pass rules* reference, or `null` when that heading begins
-with `none` (§1b's test). When it is non-null, the dispatch prompt carries that
+In both cases the handoff also carries the round's `grant` (or `null`) and its
+`guidance` (the human's granted-round guidance, or `null`), `rule2_mandatory`
+(step 3's histogram trigger), and `profile_fix_rules` — the loaded profile's
+*Fix-pass rules* reference, or `null` when that heading begins with `none`
+(§1b's test). When it is non-null, the dispatch prompt carries that
 heading's body, since the subagent cannot load a skill. It also carries
 `acceptance_criteria_file` (#3074): `acceptance-criteria.md` in the handoff's
 work-dir, which the conductor composes once per run from the issue body it
@@ -148,8 +147,8 @@ panel, what its mode replaces:
   `<work-dir>/verify-<R>-carry.json`, and keeps `findings-round-<R>.json`,
   `carry-lines-<R>.txt` and `carry-round-<R>.json`.
 
-A delete that fails is report-and-stop. Without it, a re-dispatched subagent
-that dies reads back as the earlier one's verdict.
+A delete that fails is report-and-stop. Without it, a re-dispatch that dies
+reads back as the earlier verdict.
 
 **Stall retry.** A missing or invalid verdict is exactly a `round-handoff.zsh
 read-verdict` exit 3, a missing file included. It gets exactly one re-dispatch,
@@ -182,6 +181,13 @@ stall below. A call that returns with neither line is a waiter that died, not a
 stall: re-test the verdict file, read it when it is there, and otherwise re-arm
 the same loop once. A second early return is report-and-stop, with the
 background dispatch left running.
+
+Its completion notice is a second wake source: with the loop still
+armed, re-test the verdict file. Present, read it; the loop's later
+`verdict-written` exit is already handled: no re-read, no re-consolidation.
+Missing, it is a stall now: stop the loop, take the stall arm. A dispatch
+completion notice is not a call that returns with neither line, and it never
+re-arms the loop.
 
 The bound is an elapsed-time ceiling inside the loop: set it generous enough
 for that kind's whole job — a panel, which fans out to reviewers, is routinely
