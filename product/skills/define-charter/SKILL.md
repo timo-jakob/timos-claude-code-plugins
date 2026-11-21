@@ -63,8 +63,10 @@ Its stdout is `<absolute path>` TAB `<origin>`; branch on its exit:
 region (the bytes between the sentinels, sentinel lines excluded) to a temp file
 and hash it with `prose-hash.zsh --file <current-prose.txt>`, as Step 2 does.
 On a mismatch with the block's `provenance.prose_sha256`, tell the human the
-machine block is stale (the prose was edited after it was generated) and add
-the current prose to the evidence, so the agent reconciles from the prose. A
+machine block is stale (the prose was edited after it was generated), add the
+current prose to the evidence, and open the first turn's `latest_reply` with
+"The block is stale: the current prose in the evidence wins wherever the two
+differ", so the agent reconciles from the prose. A
 missing sentinel pair or an unparseable block **stops the skill without writing
 anything**: tell the human what is missing, since a draft made without the
 block's ids could reuse them.
