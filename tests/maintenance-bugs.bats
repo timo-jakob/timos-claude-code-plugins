@@ -367,6 +367,15 @@ confirmed_issue() {
   contains "$stderr" 'no longer matches its hash'
 }
 
+@test "confirmation: a not-a-bug spec whose prose was edited is spec-prose-edited, not not-a-bug" {
+  spec_body not-a-bug "$BATS_TEST_TMPDIR/b.md"
+  sed 's/^A bug\.$/A bug, and a bad one./' "$BATS_TEST_TMPDIR/b.md" > "$BATS_TEST_TMPDIR/edited.md"
+  graphql_issue 53 "$BATS_TEST_TMPDIR/edited.md" '["bug"]' '[]' null
+  run --separate-stderr zsh "$CHECK" 53 --repo acme/widgets --repo-dir "$CHECKOUT"
+  [ "$status" -eq 1 ]
+  starts_with "$stderr" 'bug-confirmation: spec-prose-edited'
+}
+
 @test "confirmation: --owners-file replaces the CODEOWNERS lookup" {
   confirmed_issue 51 frank-elsewhere
   printf 'frank-elsewhere\n' > "$BATS_TEST_TMPDIR/owners"
@@ -461,6 +470,26 @@ reason_of() {
   [ "$(state_of 67)" = awaiting-confirmation ]
   [ "$(reason_of 67)" = no-label ]
   [ "$(state_of 68)" = confirmed ]
+}
+
+@test "list: an edited spec is needs-analysis whatever its verdict; an unedited not-a-bug is not" {
+  spec_body not-a-bug "$BATS_TEST_TMPDIR/nab.md"
+  sed 's/^A bug\.$/A bug, and a bad one./' "$BATS_TEST_TMPDIR/nab.md" > "$BATS_TEST_TMPDIR/nab-edited.md"
+  graphql_issue 90 "$BATS_TEST_TMPDIR/nab-edited.md" '["bug"]' '[]' null
+  graphql_issue 91 "$BATS_TEST_TMPDIR/nab.md" '["bug"]' '[]' null
+  spec_body bug "$BATS_TEST_TMPDIR/b.md"
+  sed 's/^A bug\.$/A bug, and a bad one./' "$BATS_TEST_TMPDIR/b.md" > "$BATS_TEST_TMPDIR/b-edited.md"
+  graphql_issue 92 "$BATS_TEST_TMPDIR/b-edited.md" '["bug","confirmed"]' \
+    "$(confirmed_by alice-owner 2026-11-02T09:00:00Z)" null
+  { bug_issue 90 alice-owner 2026-10-01T00:00:00Z; bug_issue 91 alice-owner 2026-10-02T00:00:00Z
+    bug_issue 92 alice-owner 2026-10-03T00:00:00Z '["confirmed"]'; } | issues
+  run --separate-stderr zsh "$LIST" --repo acme/widgets --repo-dir "$CHECKOUT"
+  [ "$status" -eq 0 ]
+  [ "$(state_of 90)" = needs-analysis ]
+  starts_with "$(reason_of 90)" spec-prose-edited
+  [ "$(state_of 91)" = not-a-bug ]
+  [ "$(state_of 92)" = needs-analysis ]
+  starts_with "$(reason_of 92)" spec-prose-edited
 }
 
 @test "list: confirmed first, then needs-analysis; high priority first, then oldest, inside each" {

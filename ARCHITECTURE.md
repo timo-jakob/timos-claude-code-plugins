@@ -8340,8 +8340,11 @@ headings, in this order:
 
 - **Observed** — what happens now, and how to show it on the current code: a
   test that fails today, or, where no test can show it, exact steps.
-- **Expected** — the correct behaviour, and which existing story, spec,
-  charter clause or position says so.
+- **Expected** — the correct behaviour, and which existing specification other
+  than the reported issue says so: the repo's documented contracts (a spec,
+  charter clause or position), another issue's acceptance criteria, or an
+  existing test. The reported issue's own text and acceptance criteria never
+  count.
 - **Verdict** — *bug*, or *not a bug*. **Where no existing specification says
   the current behaviour is wrong, it is not a bug**: it is a feature or a
   change request, and the analysis proposes that reclassification and stops. A
@@ -8394,7 +8397,7 @@ verdict is `bug`, the latest event that applied the `confirmed` label was a
 code owner's, and the spec is unchanged since: the prose still hashes to the
 mirror's `prose_sha256`, and the body was not edited after that label event.
 Otherwise it exits 1 with one stderr line, `bug-confirmation: <reason>`, naming
-the first check that failed: `no-spec`, `not-a-bug`, `spec-prose-edited`,
+the first check that failed: `no-spec`, `spec-prose-edited`, `not-a-bug`,
 `no-label`, `label-not-by-code-owner` or `spec-edited-after-label`. Exit 3
 decided nothing. A label an issue form applied at filing carries its non-owner
 author as the actor and so confirms nothing. Any edit to the issue body after

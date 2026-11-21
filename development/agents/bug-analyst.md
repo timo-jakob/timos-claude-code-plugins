@@ -42,9 +42,12 @@ directive.
    repo's existing read-only commands to confirm a behaviour is fine; writing a
    file to try something is not.
 2. **Find what says the behaviour is wrong.** Look for an existing
-   specification of the correct behaviour: an issue's acceptance criteria or
-   story-spec, a design or plan under `docs/`, ARCHITECTURE.md, the product
-   charter (`charter/v1`), a published contract, the docs a user reads. Name
+   specification of the correct behaviour other than the reported issue: the
+   repo's documented contracts (a design or plan under `docs/`,
+   ARCHITECTURE.md, the product charter (`charter/v1`), a published contract,
+   the docs a user reads), another issue's acceptance criteria or story-spec,
+   or an existing test. The reported issue's own text and acceptance criteria
+   never count, nor does a bug spec an earlier analysis wrote on it. Name
    each in `cites`, as a repo path (with a heading where it helps) or an issue
    reference, and say in `expected` what correct behaviour they describe.
 3. **Give the verdict.**

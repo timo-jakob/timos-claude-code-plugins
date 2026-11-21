@@ -19,7 +19,7 @@
 #   held                   it carries needs-refinement, blocked or
 #                          needs-human-decision, or an open PR closes it
 #   needs-analysis         no bug spec yet, or its prose was edited since it was
-#                          rendered (spec-prose-edited)
+#                          rendered (spec-prose-edited), whatever its verdict
 #   not-a-bug              the spec's verdict is not-a-bug
 #   awaiting-confirmation  a bug spec no code owner's `confirmed` label covers;
 #                          the reason is check-bug-confirmation.zsh's

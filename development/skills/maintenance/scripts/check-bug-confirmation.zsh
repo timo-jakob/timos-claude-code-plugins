@@ -17,9 +17,10 @@
 # The checks, in this order; the first that fails is the reason:
 #   no-spec                  no bug-spec/v1 on the body, or one bug-spec.zsh
 #                            cannot read
-#   not-a-bug                the spec's verdict is `not-a-bug`
 #   spec-prose-edited        the block's prose_sha256 no longer matches the
-#                            prose; only a new analysis re-renders it
+#                            prose, whatever the verdict; only a new analysis
+#                            re-renders it
+#   not-a-bug                the spec's verdict is `not-a-bug`
 #   no-label                 the issue does not carry `confirmed`
 #   label-not-by-code-owner  the latest event that applied `confirmed` was not a
 #                            code owner's — an issue form or a bot applying it,
@@ -99,9 +100,9 @@ case $? in
   *) print -u2 "$me: bug-spec.zsh could not read the body"; exit 3 ;;
 esac
 
-[[ "$(print -r -- "$spec" | jq -r '.block.verdict')" == bug ]] || not_confirmed not-a-bug
 [[ "$(print -r -- "$spec" | jq -r '(.block.provenance.prose_sha256 // "") == .prose_sha256')" == true ]] \
   || not_confirmed "spec-prose-edited (the prose no longer matches its hash)"
+[[ "$(print -r -- "$spec" | jq -r '.block.verdict')" == bug ]] || not_confirmed not-a-bug
 
 print -r -- "$doc" | jq -e '[.labels.nodes[].name] | index("confirmed") != null' >/dev/null || not_confirmed no-label
 
