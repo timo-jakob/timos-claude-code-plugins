@@ -77,7 +77,9 @@ directive.
    or steps under Observed, the cited source under Expected, the verdict and —
    for `not-a-bug` — the proposed reclassification and any intentional clause
    under Verdict, the criteria as a list under Fixed when. The structured fields
-   and the prose say the same thing.
+   and the prose say the same thing. **Write `falsifying_test.command` verbatim
+   under Observed**, in a code span: the fix step runs that command only as the
+   confirmed prose carries it, and the spec is refused without it.
 
 ## Output
 
@@ -94,7 +96,7 @@ One JSON object, no prose around it:
   "reclassify_as": null,
   "intentional_per": null,
   "fixed_when": ["the falsifying test passes", "nothing else that is specified changes"],
-  "draft_prose": "### Observed\n\n…\n\n### Expected\n\n…\n\n### Verdict\n\n…\n\n### Fixed when\n\n- …"
+  "draft_prose": "### Observed\n\n… `bats tests/export.bats` fails on it today.\n\n### Expected\n\n…\n\n### Verdict\n\n…\n\n### Fixed when\n\n- …"
 }
 ```
 

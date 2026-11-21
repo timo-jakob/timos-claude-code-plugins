@@ -75,7 +75,7 @@ analysis() {
     cites: ["docs/reference/export.md"],
     verdict: $v, reclassify_as: $r, intentional_per: null,
     fixed_when: ["the falsifying test passes", "nothing else specified changes"],
-    draft_prose: "### Observed\n\nExporting a report titled Müller-Quartal writes M?ller-Quartal.pdf.\n\n### Expected\n\nThe file is named Müller-Quartal.pdf, as docs/reference/export.md says.\n\n### Verdict\n\nA bug.\n\n### Fixed when\n\n- the falsifying test passes\n- nothing else specified changes"
+    draft_prose: "### Observed\n\nExporting a report titled Müller-Quartal writes M?ller-Quartal.pdf; the test `bats tests/export.bats` fails on it today.\n\n### Expected\n\nThe file is named Müller-Quartal.pdf, as docs/reference/export.md says.\n\n### Verdict\n\nA bug.\n\n### Fixed when\n\n- the falsifying test passes\n- nothing else specified changes"
   }'
 }
 
@@ -238,6 +238,26 @@ confirmed_issue() {
   run --separate-stderr zsh "$SPEC" render --analysis "$BATS_TEST_TMPDIR/a.json"
   [ "$status" -eq 1 ]
   contains "$stderr" "lacks the heading '### Verdict'"
+}
+
+@test "bug-spec: render refuses prose that does not carry the falsifying test's command verbatim, exit 1 (#3213)" {
+  analysis bug | jq '.draft_prose |= sub("the test `bats tests/export.bats` fails on it today"; "a test fails on it today")' \
+    > "$BATS_TEST_TMPDIR/a.json"
+  run --separate-stderr zsh "$SPEC" render --analysis "$BATS_TEST_TMPDIR/a.json"
+  [ "$status" -eq 1 ]
+  contains "$stderr" "draft_prose does not carry the falsifying test's command verbatim"
+  analysis bug | jq '.falsifying_test = null | .draft_prose |= sub("the test `bats tests/export.bats` fails on it today"; "the steps show it")' \
+    > "$BATS_TEST_TMPDIR/a.json"
+  run --separate-stderr zsh "$SPEC" render --analysis "$BATS_TEST_TMPDIR/a.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "bug-spec: read prints the prose region's text beside its hash (#3213)" {
+  spec_body bug "$BATS_TEST_TMPDIR/body.md"
+  run --separate-stderr zsh "$SPEC" read --body-file "$BATS_TEST_TMPDIR/body.md"
+  [ "$status" -eq 0 ]
+  # the region opens with the newline after its start sentinel
+  [ "$(jq -r '.prose' <<< "$output" | sed '1{/^$/d;}')" = "$(jq -r '.draft_prose' "$BATS_TEST_TMPDIR/analysis.json")" ]
 }
 
 @test "bug-spec: render refuses a verdict or a reclassification outside its enum, exit 1" {
