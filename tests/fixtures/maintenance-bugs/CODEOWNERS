@@ -3,5 +3,6 @@
 
 *               @Alice-Owner @acme/core
 /docs/          docs-team@example.com
-/scripts/       @bob-owner   # scripts have a second owner
+/scripts/       @bob-owner   # scripts have a second owner, was @mallory
+# * @mallory
 /scripts/ci/    @alice-owner

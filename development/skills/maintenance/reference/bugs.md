@@ -48,8 +48,8 @@ What each state means for this step:
 
 ## 2. Analyse each `needs-analysis` bug, in order
 
-Under `--dry-run`, stop after section 1 and list what a live run would
-analyse: a dry run writes nothing, to GitHub included.
+A `--dry-run` stops at Phase 5 and a `--no-merge` run skips Phase 8, so
+neither reaches this file.
 
 For each `needs-analysis` bug, in the order `list-bugs.zsh` printed:
 
@@ -61,9 +61,9 @@ For each `needs-analysis` bug, in the order `list-bugs.zsh` printed:
 2. **Write the spec into the body:**
 
    ```bash
-   gh issue view <N> --repo "$REPO" --json body -q .body > <scratch>/bug-<N>-body.md
+   gh issue view <N> --repo "$REPO" --json body -q .body > <scratch>/bug-<N>-body.md &&
    "<skill-base-dir>/scripts/bug-spec.zsh" render --analysis <scratch>/bug-<N>-analysis.json \
-     --body-file <scratch>/bug-<N>-body.md > <scratch>/bug-<N>-new-body.md
+     --body-file <scratch>/bug-<N>-body.md > <scratch>/bug-<N>-new-body.md &&
    gh issue edit <N> --repo "$REPO" --body-file <scratch>/bug-<N>-new-body.md
    ```
 
@@ -71,15 +71,17 @@ For each `needs-analysis` bug, in the order `list-bugs.zsh` printed:
    replaces the spec a previous analysis wrote. **Exit 1** means the analysis is
    unusable (a key missing, a value outside its enum, a heading missing from
    the prose) or the body holds a spec cut short: write nothing, list the bug
-   as "analysis failed" with the stderr line, and go on. **Exit 3** is a
-   tooling failure, listed the same way.
+   as "analysis failed" with the stderr line, and go on. **Exit 3**, or
+   either `gh` call failing, is a tooling failure, listed the same way and never
+   commented on. **Exit 2** is your own malformed call: fix it and re-run once.
 3. **Comment once.** Post one comment carrying the marker
    `<!-- bug-spec-awaiting/v1 -->`, unless a comment on the issue already
    carries it (`gh issue view <N> --json comments` — a re-analysis does not
    comment twice):
    - verdict `bug`: the spec is on the issue and awaits a code owner's
-     `confirmed` label; a code owner confirms it by applying that label, and an
-     edit to the spec after the label voids the confirmation.
+     `confirmed` label; a code owner confirms it by applying that label,
+     removing and re-applying it if it is already on, and any edit to the issue
+     body after the label voids the confirmation until it is applied again.
    - verdict `not-a-bug`: no existing specification says the current
      behaviour is wrong, so the run proposes reclassifying it as the
      analysis's `reclassify_as` (and names its `intentional_per`, when one

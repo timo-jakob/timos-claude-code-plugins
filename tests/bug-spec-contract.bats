@@ -68,14 +68,14 @@ whole() {
   contains "$s" 'With no CODEOWNERS, no bug is eligible, and the run says so.'
 }
 
-@test "ARCHITECTURE.md: the mirror's keys and the confirmation's five reasons" {
+@test "ARCHITECTURE.md: the mirror's keys and the confirmation's reasons" {
   local s key reason
   s="$(section '## Bug spec contract (`bug-spec/v1`)' "$ARCH")"
   for key in '"schema": "bug-spec/v1"' '"generated_by"' '"generated_at"' '"prose_sha256"' '"verdict"' \
       '"reclassify_as"' '"falsifying_test"' '"repro_steps"' '"cites"' '"fixed_when"'; do
     contains "$s" "$key"
   done
-  for reason in no-spec not-a-bug no-label label-not-by-code-owner spec-edited-after-label; do
+  for reason in no-spec not-a-bug spec-prose-edited no-label label-not-by-code-owner spec-edited-after-label; do
     contains "$s" "\`$reason\`"
   done
   contains "$s" '`prose_sha256` is `refine-issue/scripts/story-spec-prose-hash.zsh` over the bytes between the two prose sentinels'
@@ -111,7 +111,7 @@ whole() {
   contains "$s" '"<skill-base-dir>/scripts/bug-spec.zsh" render --analysis'
   contains "$s" '`<!-- bug-spec-awaiting/v1 -->`, unless a comment on the issue already carries it'
   contains "$s" 'it never relabels it and never fixes it.'
-  contains "$s" 'Under `--dry-run`, stop after section 1'
+  contains "$s" 'or the body holds a spec cut short: write nothing, list the bug as "analysis failed" with the stderr line, and go on.'
   contains "$s" '**Dispatch `development:bug-analyst`** (Task tool, foreground), naming the repo, the checkout'"'"'s path and the issue number.'
   contains "$s" 'exit 3 decided nothing and is never read as either answer.'
   contains "$s" 'The confirmation is what makes a bug fixable, not the absence of a human at the keyboard'

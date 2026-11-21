@@ -115,6 +115,7 @@ confirmed_issue() {
   [ "$status" -eq 0 ]
   [ "$output" = "$(printf 'alice-owner\nbob-owner\ncarol-core\ndave-core')" ]
   contains "$(cat "$GH_LOG")" 'api --paginate orgs/acme/teams/core/members'
+  lacks "$output" mallory
 }
 
 @test "codeowners: an e-mail entry is skipped, never read as a login" {
@@ -202,6 +203,7 @@ confirmed_issue() {
   [ "$(jq -r '.block.provenance.generated_at' <<< "$output")" = 2026-11-01T10:00:00Z ]
   [ "$(jq -r '.block.falsifying_test.command' <<< "$output")" = 'bats tests/export.bats' ]
   [ "$(jq -r '[.block | keys[]] | join(",")' <<< "$output")" = 'cites,falsifying_test,fixed_when,provenance,reclassify_as,repro_steps,schema,verdict' ]
+  [ "$(jq -c '.block | [.repro_steps, .cites, .fixed_when]' <<< "$output")" = "$(jq -c '[.repro_steps, .cites, .fixed_when]' "$BATS_TEST_TMPDIR/analysis.json")" ]
 }
 
 @test "bug-spec: the mirror's prose hash is refine-issue's prose hash of the prose region" {
@@ -227,6 +229,8 @@ confirmed_issue() {
   contains "$output" 'A later note from the reporter.'
   contains "$output" 'The export breaks on umlauts.'
   contains "$output" '"verdict": "not-a-bug"'
+  printf '%s\n' "$output" > "$BATS_TEST_TMPDIR/rerendered.md"
+  [ "$(zsh "$SPEC" read --body-file "$BATS_TEST_TMPDIR/rerendered.md" | jq -r '.block.reclassify_as')" = feature ]
 }
 
 @test "bug-spec: render refuses an analysis whose draft prose lacks a heading, exit 1" {
@@ -352,14 +356,14 @@ confirmed_issue() {
   contains "$stderr" 'edited after the label'
 }
 
-@test "confirmation: prose that no longer matches its hash is spec-edited-after-label" {
+@test "confirmation: prose that no longer matches its hash is spec-prose-edited" {
   spec_body bug "$BATS_TEST_TMPDIR/b.md"
   sed 's/^A bug\.$/A bug, and a bad one./' "$BATS_TEST_TMPDIR/b.md" > "$BATS_TEST_TMPDIR/edited.md"
   graphql_issue 50 "$BATS_TEST_TMPDIR/edited.md" '["bug","confirmed"]' \
     "$(confirmed_by alice-owner 2026-11-02T09:00:00Z)" null
   run --separate-stderr zsh "$CHECK" 50 --repo acme/widgets --repo-dir "$CHECKOUT"
   [ "$status" -eq 1 ]
-  starts_with "$stderr" 'bug-confirmation: spec-edited-after-label'
+  starts_with "$stderr" 'bug-confirmation: spec-prose-edited'
   contains "$stderr" 'no longer matches its hash'
 }
 

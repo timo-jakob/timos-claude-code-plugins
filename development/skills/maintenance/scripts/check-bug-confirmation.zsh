@@ -18,12 +18,13 @@
 #   no-spec                  no bug-spec/v1 on the body, or one bug-spec.zsh
 #                            cannot read
 #   not-a-bug                the spec's verdict is `not-a-bug`
+#   spec-prose-edited        the block's prose_sha256 no longer matches the
+#                            prose; only a new analysis re-renders it
 #   no-label                 the issue does not carry `confirmed`
 #   label-not-by-code-owner  the latest event that applied `confirmed` was not a
 #                            code owner's — an issue form or a bot applying it,
 #                            or a repo with no code owners at all
-#   spec-edited-after-label  the block's prose_sha256 no longer matches the
-#                            prose, or the body was edited after that event
+#   spec-edited-after-label  the body was edited after that event
 #
 # Exit codes:
 #   0  confirmed; stdout is {"issue", "confirmed_by", "labelled_at"}
@@ -99,6 +100,8 @@ case $? in
 esac
 
 [[ "$(print -r -- "$spec" | jq -r '.block.verdict')" == bug ]] || not_confirmed not-a-bug
+[[ "$(print -r -- "$spec" | jq -r '(.block.provenance.prose_sha256 // "") == .prose_sha256')" == true ]] \
+  || not_confirmed "spec-prose-edited (the prose no longer matches its hash)"
 
 print -r -- "$doc" | jq -e '[.labels.nodes[].name] | index("confirmed") != null' >/dev/null || not_confirmed no-label
 
@@ -121,8 +124,6 @@ fi
 typeset -a owner_list=(${(fL)owners})
 [[ -n "$actor" ]] && (( ${owner_list[(Ie)$actor]} )) || not_confirmed label-not-by-code-owner
 
-[[ "$(print -r -- "$spec" | jq -r '(.block.provenance.prose_sha256 // "") == .prose_sha256')" == true ]] \
-  || not_confirmed "spec-edited-after-label (the prose no longer matches its hash)"
 edited="$(print -r -- "$doc" | jq -r '.lastEditedAt // ""')"
 [[ -z "$edited" || ! "$edited" > "$labelled_at" ]] \
   || not_confirmed "spec-edited-after-label (the body was edited after the label)"

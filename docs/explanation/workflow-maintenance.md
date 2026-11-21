@@ -18,7 +18,7 @@ The colour key for the diagrams is on [How the plugins work](how-the-plugins-wor
 
 ## From findings to a plan {#maintenance-from-findings-to-a-plan}
 
-1. **Flags.** `--dry-run`, `--tool=<name>` or `--concern=security|dependencies|codequality` to narrow the run,
+1. **Flags.** `--dry-run`, `--tool=<name>` or `--concern=security|dependencies|bugs|codequality` to narrow the run,
    `--batch=N` to cap the number of PRs, `--no-merge`, and `--resume` to pick up an interrupted run from its
    checkpoint.
 2. **Phase 1 — detect.** `detect-stack.sh` finds the languages and markers. The `primary:` key in `.maintenance.yml`

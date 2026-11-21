@@ -18,7 +18,8 @@
 #                          code owners at all — the reason says which
 #   held                   it carries needs-refinement, blocked or
 #                          needs-human-decision, or an open PR closes it
-#   needs-analysis         no bug spec yet
+#   needs-analysis         no bug spec yet, or its prose was edited since it was
+#                          rendered (spec-prose-edited)
 #   not-a-bug              the spec's verdict is not-a-bug
 #   awaiting-confirmation  a bug spec no code owner's `confirmed` label covers;
 #                          the reason is check-bug-confirmation.zsh's
@@ -119,6 +120,7 @@ for row in ${(f)rows}; do
     case "$rc:${why%% *}" in
       0:*) state=confirmed reason="confirmed by a code owner" ;;
       1:no-spec) state=needs-analysis reason="no bug spec yet" ;;
+      1:spec-prose-edited) state=needs-analysis reason="$why" ;;
       1:not-a-bug) state=not-a-bug reason="the bug spec's verdict is not-a-bug" ;;
       1:?*) state=awaiting-confirmation reason="$why" ;;
       *)
