@@ -1093,13 +1093,15 @@ _verdict_loop() {
     lacks "$(prose_body "$f")" 'end your turn, and the harness'
     # a dispatch with no verdict file has no loop to wait on: it is stopped, never left running unarmed
     contains "$(prose_body "$f")" 'has no loop to wait on: stop it, and once it has ended write'
-    # one it cannot stop: the turn ends unverdicted as a wait, never a Bash kill
-    contains "$(prose_body "$f")" 'One you cannot stop without Bash you never stop through Bash: end your turn without a verdict file, with waiting on <subagent> as your last line.'
-    contains "$(prose_body "$f")" 'The harness re-invokes you when that subagent ends, as it re-invokes a conductor when its loop exits, and you then write that verdict.'
+    # one it cannot stop: report-and-stop with a stopped verdict, never a Bash kill, never an unarmed wait
+    lacks "$(prose_body "$f")" 'The harness re-invokes you when that subagent ends'
+    lacks "$(prose_body "$f")" 'save for th'
   done
-  # the root's arm for that wait, beside the one-message rule it narrows
+  contains "$(prose_body "$REPO_ROOT/development/agents/refine-step.md")" 'One you cannot stop without Bash you never stop through Bash: write verdict stopped with the reason "background subagent could not be stopped" as <scratch_dir>/step-<N>-verdict.json and end your turn.'
+  contains "$(prose_body "$REPO_ROOT/development/agents/resolve-step.md")" 'One you cannot stop without Bash you never stop through Bash: write a stopped verdict, cause tooling, and end your turn.'
+  # the root keeps no unbounded wait arm beside its one-message rule
   local steps; steps="$(prose_body "$REPO_ROOT/development/skills/resolve-issue/reference/chain-steps.md")"
-  contains "$steps" 'A step whose last line is waiting on <subagent> (#3044) gets no message: the root waits for its next turn ending.'
+  lacks "$steps" 'waiting on <subagent>'
   contains "$(prose_body "$REPO_ROOT/development/agents/refine-step.md")" 'such as the issue-refiner, has no loop to wait on'
   contains "$(prose_body "$REPO_ROOT/development/agents/resolve-step.md")" 'such as the readiness gate, has no loop to wait on'
 }

@@ -130,8 +130,7 @@ then stops the chain. In an epic, the root treats it as a tooling failure of
 that child: it parks the child, quotes the failure in the epic summary, and
 continues E3. That message is not a retry or a recovery: the same agent finishes
 its own unfinished work, and nothing is run again. Any retry after it is a new
-dispatch. A step whose last line is `waiting on <subagent>` (#3044) gets no
-message: the root waits for its next turn ending.
+dispatch.
 
 **A retry or a recovery is a new dispatch, never a resumed agent.** A step
 dispatches no further step, so the depth stays root (0) → step (1) → panel or

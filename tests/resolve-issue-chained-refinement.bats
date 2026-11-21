@@ -592,7 +592,7 @@ fm() { awk -v k="$2" 'NR == 1 && /^---$/ { f = 1; next } f && /^---$/ { exit } f
   lacks "$(flat "$STEPS")" 'You are a step of a human-started'
   lacks "$(flat "$STEPS")" 'You are a chained refinement step'
   contains "$(flat "$RSTEP")" 'Invoke the development:resolve-issue skill with "<N>" plus the root'"'"'s telemetry flags and its --no-review when given'
-  contains "$(flat "$RSTEP")" 'Before you end your turn, save for that wait, write <scratch_dir>/step-<N>-verdict.json (step-verdict/v1, ARCHITECTURE.md *Step verdict contract*)'
+  contains "$(flat "$RSTEP")" 'Before you end your turn, write <scratch_dir>/step-<N>-verdict.json (step-verdict/v1, ARCHITECTURE.md *Step verdict contract*)'
 }
 
 @test "#3014 the refine-step agent's unreadable-handoff verdict passes the root's verdict check" {
@@ -608,7 +608,7 @@ fm() { awk -v k="$2" 'NR == 1 && /^---$/ { f = 1; next } f && /^---$/ { exit } f
 @test "#3014 the refine-step agent feeds its conversion a saved document and writes a verdict when none is printed" {
   local t; t="$(flat "$FSTEP")"
   contains "$t" 'save that document verbatim to `<scratch_dir>/chain-result-<N>.json` with the Write tool, never through a shell string'
-  contains "$t" 'never end it without a verdict file, save for the wait below.'
+  contains "$t" 'never end it without a verdict file. Never dispatch a step'
   local doc
   doc="$(perl -0ne 'print $1 if /`(\{"schema": "step-verdict\/v1", "issue": <N>, "verdict": "stopped", "follow_ups": \[\], "reason": "no chain-result document"\})`/s' "$FSTEP")"
   [ -n "$doc" ]
@@ -625,7 +625,7 @@ fm() { awk -v k="$2" 'NR == 1 && /^---$/ { f = 1; next } f && /^---$/ { exit } f
   contains "$t" 'Wait on its verdict file with one background Bash until loop, never Monitor and never a foreground poll (#3044).'
   lacks "$t" 'Wait with one bounded Monitor call'
   contains "$t" 'One that writes no verdict file, such as the issue-refiner, has no loop to wait on: stop it, and once it has ended write the "no chain-result document" verdict above.'
-  contains "$t" 'Write that verdict too when the rule stops the skill.'
+  contains "$t" 'Write the "no chain-result document" verdict too when the rule stops the skill.'
   contains "$t" 'Which verdict each outcome writes, and what the root does with it, is the resolve-issue skill'"'"'s `reference/chain-steps.md` § The chained refinement step (#2940).'
   # the section it points at exists
   grep -qxF '## The chained refinement step (#2940)' "$STEPS"

@@ -33,7 +33,7 @@ jq '{schema: "step-verdict/v1", issue, verdict: .outcome, follow_ups: []}
 and end your turn. When the skill ends without printing one, write
 `{"schema": "step-verdict/v1", "issue": <N>, "verdict": "stopped", "follow_ups": [], "reason": "no chain-result document"}`
 as `<scratch_dir>/step-<N>-verdict.json` and end your turn; never end it
-without a verdict file, save for the wait below. Never dispatch a step, and never launch a headless claude.
+without a verdict file. Never dispatch a step, and never launch a headless claude.
 A subagent the skill itself dispatches — the readiness gate, the
 issue-refiner — is not a step. Dispatch each in the foreground
 (`run_in_background: false`). When one runs in the background anyway, wait for
@@ -44,10 +44,9 @@ verdict before it has ended. Wait on its verdict file with one background Bash
 until loop, never Monitor and never a foreground poll (#3044). One that writes
 no verdict file, such as the issue-refiner, has no loop to wait on: stop it,
 and once it has ended write the "no chain-result document" verdict above. One
-you cannot stop without Bash you never stop through Bash: end your turn
-without a verdict file, with `waiting on <subagent>` as your last line. The
-harness re-invokes you when that subagent ends, as it re-invokes a conductor
-when its loop exits, and you then write that verdict. Write that verdict
+you cannot stop without Bash you never stop through Bash: write verdict
+`stopped` with the reason "background subagent could not be stopped" as
+`<scratch_dir>/step-<N>-verdict.json` and end your turn. Write the "no chain-result document" verdict
 too when the rule stops the skill. Which verdict each outcome writes, and what
 the root does with it, is the resolve-issue skill's `reference/chain-steps.md`
 § The chained refinement step (#2940).
