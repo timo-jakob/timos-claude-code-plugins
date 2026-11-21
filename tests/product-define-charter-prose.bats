@@ -242,7 +242,7 @@ setup() {
 
 @test "an invalid charter offers another round, and an incomplete check is not a verdict" {
   contains "$FLAT" 'Offer the human another round of the loop with the violations as `latest_reply`, which ends in a fresh write and a fresh validation.'
-  contains "$FLAT" 'A `stale-prose` line, or a `schema` line about the sentinels or the `<details>` block, is your own write'"'"'s fault: redo Step 2 and validate again, with no agent round.'
+  contains "$FLAT" 'When every line is a `stale-prose` line, or a `schema` line about the sentinels or the `<details>` block, the fault is your own write'"'"'s: redo Step 2 once, with no agent round, and validate again; a second failure is only reported.'
   contains "$FLAT" '**exit 2** → report the stderr; the check could not complete, which is not a verdict, and you do not render.'
 }
 
