@@ -291,7 +291,9 @@ EOF
   contains "$s" 'The concerns rank `security`, `dependencies`, `bugs`, `codequality`, and topic-plugin checks come last'
   contains "$s" 'Every language tool belongs to exactly one of `security`, `dependencies` and `codequality`, so `--concern=security` + `--concern=dependencies` + `--concern=codequality` together cover the same language tools as an unscoped run.'
   lacks "$s" 'Every tool of the `--tool` list belongs to exactly one of'
-  contains "$s" 'No tool belongs to `bugs` yet, and topic-plugin checks belong to no `--concern`: a scoped run skips them.'
+  contains "$s" 'No tool belongs to `bugs`: it works the repo'"'"'s open bug issues rather than a scanner'"'"'s findings, by `<skill-base-dir>/reference/bugs.md` (#3212), so `--concern=bugs` dispatches no tool and runs only that procedure.'
+  contains "$s" 'Topic-plugin checks belong to no `--concern`: a scoped run skips them.'
+  lacks "$s" 'No tool belongs to `bugs` yet'
   lacks "$s" 'The three concerns partition all nine tools'
   # the mapping is no longer restated inline
   lacks "$s" '`security` → `snyk_prs`'

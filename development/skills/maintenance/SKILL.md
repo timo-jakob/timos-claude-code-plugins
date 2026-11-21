@@ -38,7 +38,7 @@ Supported flags in `$ARGUMENTS`:
   `ruff` is Python-only.) Combinable with `--dry-run` and `--no-merge`.
 - `--concern=<name>` — scope dispatch to a whole **concern** (a named
   group of tools); the coarse-grained sibling of `--tool`. `<name>` must
-  be one of `security`, `dependencies`, `codequality`. Which tool belongs
+  be one of `security`, `dependencies`, `bugs`, `codequality`. Which tool belongs
   to which concern is stated in one place only,
   `<skill-base-dir>/scripts/concern-of.zsh` (#3211):
   `concern-of.zsh --tools <name>` prints the concern's language tools,
@@ -55,8 +55,10 @@ Supported flags in `$ARGUMENTS`:
   `security`, `dependencies` and `codequality`, so
   `--concern=security` + `--concern=dependencies` + `--concern=codequality`
   together cover the same language tools as an unscoped run. No tool belongs to
-  `bugs` yet, and topic-plugin checks belong to no `--concern`: a scoped
-  run skips them.
+  `bugs`: it works the repo's open bug issues rather than a scanner's
+  findings, by `<skill-base-dir>/reference/bugs.md` (#3212), so
+  `--concern=bugs` dispatches no tool and runs only that procedure. Topic-plugin
+  checks belong to no `--concern`: a scoped run skips them.
 - `--batch=N` — cap how much of the plan this run processes. After the
   language plugin's planner ranks the findings into groups (one PR / stage
   each), process only the **top N groups by priority**, deferring the rest
@@ -108,12 +110,14 @@ above before proceeding. On a mismatch, halt with: "Unknown --tool
 sonarcloud, dependabot, renovate, container_scan, govulncheck."
 
 When `--concern=<name>` is set, validate `<name>` against `security`,
-`dependencies`, `codequality`. On a mismatch, halt with: "Unknown
---concern '`<name>`'; supported: security, dependencies, codequality."
+`dependencies`, `bugs`, `codequality`. On a mismatch, halt with: "Unknown
+--concern '`<name>`'; supported: security, dependencies, bugs, codequality."
 Expand it to its tool set with `concern-of.zsh --tools <name>` and carry
 that set forward as the
 dispatch scope — Phase 4 writes it into `dispatch_filter.only_tools`
-as it does for `--tool`. If **both** `--tool` and `--concern`
+as it does for `--tool`. For `bugs` that set is empty, so no language gets a
+payload and Phase 8's queue is empty; the bugs concern then runs at its
+position in Phase 8, `reference/bugs.md`. If **both** `--tool` and `--concern`
 are passed, halt with: "Pass --tool or --concern, not both."
 
 When `--batch=N` is set, validate that `N` parses as an integer ≥ 1. On a
@@ -2196,6 +2200,14 @@ Phase 9 summary as a defect in `concern-of.zsh`. **Exit 1** (jq) is the
 same fallback, quoting its stderr. Why this order is
 `reference/pr-cycle.md` § *Why a full run works the concerns in a fixed order*.
 
+**The bugs concern has no groups; it runs at its position (#3212).** In an
+unscoped run and under `--concern=bugs` — never under `--tool` or another
+`--concern` — run `reference/bugs.md` once the queue's last `dependencies`
+stage has finished and before its first `codequality` stage starts (with no
+such stage, before the first `topic` stage, else after the last stage). It
+reads the repo's open bug issues, writes a bug spec onto each eligible one
+that has none, and leaves its own `Bugs` block for the Phase 9 summary.
+
 **Batch cap — `--batch=N` (when set).** Before applying the ordering rule
 below, decide which groups run this round. Sort the merged queue by
 `priority_score` (descending) and keep the **top N**; the remaining `M − N`
@@ -3398,6 +3410,11 @@ run start; the 🚀 PRs section below shows what was tackled.>
     recommendation: <recommendation>
 
 --- end <lang> ---
+
+<If the bugs concern ran (unscoped or --concern=bugs, Phase 8 reached it):>
+--- Bugs ---
+  <the Bugs block reference/bugs.md section 4 defines, or the list-bugs.zsh
+   stderr its section 1 quotes when the concern was skipped>
 
 <If $template_drift array is non-empty:>
 🧬 Template drift (rendered config files vs current bootstrap templates):

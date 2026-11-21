@@ -18,7 +18,7 @@ The colour key for the diagrams is on [How the plugins work](how-the-plugins-wor
 
 ## From findings to a plan {#maintenance-from-findings-to-a-plan}
 
-1. **Flags.** `--dry-run`, `--tool=<name>` or `--concern=security|dependencies|codequality` to narrow the run,
+1. **Flags.** `--dry-run`, `--tool=<name>` or `--concern=security|dependencies|bugs|codequality` to narrow the run,
    `--batch=N` to cap the number of PRs, `--no-merge`, and `--resume` to pick up an interrupted run from its
    checkpoint.
 2. **Phase 1 — detect.** `detect-stack.sh` finds the languages and markers. The `primary:` key in `.maintenance.yml`
@@ -60,7 +60,7 @@ A full run, attended or not, works the plan in one fixed order between concerns:
 
 1. **security** — vulnerabilities: Snyk, code scanning, Semgrep, container scans, `govulncheck`;
 2. **dependencies** — Dependabot and Renovate updates;
-3. **bugs** — no tool reports into it yet; its place in the order is kept for it;
+3. **bugs** — open bug issues a code owner filed, each analysed into a bug spec that a code owner then confirms;
 4. **code quality** — SonarCloud, linters and formatters;
 5. **topic-plugin checks** — plugin validation, docs drift, manifest and policy checks.
 

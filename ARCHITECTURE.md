@@ -8293,6 +8293,121 @@ tests and feature can never drift apart.
 - **Proportionality.** A **no-surface** story (`interface_surfaces: []`,
   `test_cases: []`) spins out nothing.
 
+## Bug spec contract (`bug-spec/v1`)
+
+The bugs concern of `/development:maintenance` (#3212, epic #3210) never fixes
+a filed bug straight from its report. A bug moves through two steps with a
+human between them: **analysis** writes a bug spec onto the issue, a code owner
+**confirms** it, and only a confirmed spec is fixed. `bug-spec/v1` is that
+spec. The procedure is `development/skills/maintenance/reference/bugs.md`; the
+one writer and reader is `development/skills/maintenance/scripts/bug-spec.zsh`.
+
+**Who is eligible.** Only an open `bug` issue whose **author is a code owner**
+is analysed. `codeowners-logins.zsh` resolves the owners from the first of
+`.github/CODEOWNERS`, `CODEOWNERS` and `docs/CODEOWNERS` (GitHub's own order),
+expands `@org/team` entries to their members and skips e-mail entries. With no
+CODEOWNERS, no bug is eligible, and the run says so. Anyone else's bug is listed
+as needing a code owner to re-file it, and its text is never handed to an agent.
+`list-bugs.zsh` classifies every open bug as `not-eligible`, `held`,
+`needs-analysis`, `not-a-bug`, `awaiting-confirmation` or `confirmed`, sorted
+confirmed first, then needs-analysis, high priority before the rest, oldest
+first.
+
+### Where the spec lives
+
+At the end of the issue body, below the reporter's text, which is kept as
+written:
+
+```markdown
+<!-- bug-spec:prose:start -->
+### Observed
+### Expected
+### Verdict
+### Fixed when
+<!-- bug-spec:prose:end -->
+
+<details>
+<summary>machine-readable bug spec (<code>bug-spec/v1</code>) — generated, do not hand-edit</summary>
+
+<!-- one fenced json block: the mirror below -->
+
+</details>
+<!-- bug-spec:end -->
+```
+
+The prose is what a code owner reads and confirms, under exactly these four
+headings, in this order:
+
+- **Observed** — what happens now, and how to show it on the current code: a
+  test that fails today, or, where no test can show it, exact steps.
+- **Expected** — the correct behaviour, and which existing specification other
+  than the reported issue says so: the repo's documented contracts (a spec,
+  charter clause or position), another issue's acceptance criteria, or an
+  existing test. The reported issue's own text and acceptance criteria never
+  count.
+- **Verdict** — *bug*, or *not a bug*. **Where no existing specification says
+  the current behaviour is wrong, it is not a bug**: it is a feature or a
+  change request, and the analysis proposes that reclassification and stops; a
+  report that does not reproduce on the current code proposes none. A
+  behaviour that a charter clause or a position makes intentional is named as
+  such.
+- **Fixed when** — the acceptance criteria: the falsifying test passes, and
+  nothing else that is specified changes.
+
+### The mirror
+
+One JSON object, generated from the `bug-analyst` agent's answer:
+
+```json
+{
+  "schema": "bug-spec/v1",
+  "provenance": {
+    "generated_by": "bug-analyst via /development:maintenance",
+    "generated_at": "2026-11-20T03:10:00Z",
+    "prose_sha256": "<the prose hash of the region between the prose sentinels>"
+  },
+  "verdict": "bug",
+  "reclassify_as": null,
+  "falsifying_test": {"path": "tests/export.bats", "name": "an umlaut survives the export",
+                      "command": "bats tests/export.bats"},
+  "repro_steps": ["Create a report titled Müller-Quartal", "Export it as PDF"],
+  "cites": ["docs/reference/export.md#file-names"],
+  "fixed_when": ["the falsifying test passes", "nothing else that is specified changes"]
+}
+```
+
+`verdict` is `bug` or `not-a-bug`; `reclassify_as` is `feature`,
+`change-request` or `null` (always `null` for a `bug`, and for a `not-a-bug`
+report that does not reproduce on the current code); `falsifying_test` is
+`{path, name, command}` or `null`, when only `repro_steps` can show it.
+`prose_sha256` is `refine-issue/scripts/story-spec-prose-hash.zsh` over the
+bytes between the two prose sentinels: the same recipe as the story-spec's
+(*Provenance and staleness detection*). The `bug-analyst` agent returns these
+fields plus `observed`, `expected`, `intentional_per` and `draft_prose`; the
+prose carries those, the mirror does not.
+
+**Analysis writes to the issue only.** It writes the spec into the body and
+comments once that the spec awaits a code owner's `confirmed` label, or, for a
+`not-a-bug` verdict, proposes the reclassification or says the report does not
+reproduce. It changes no file in the
+repository and opens no PR; the falsifying test stays text in the spec until
+the fix step.
+
+### Confirmation
+
+`check-bug-confirmation.zsh <issue>` exits 0 only when a spec exists, its
+verdict is `bug`, the latest event that applied the `confirmed` label was a
+code owner's, and the spec is unchanged since: the prose still hashes to the
+mirror's `prose_sha256`, and the body was not edited after that label event.
+Otherwise it exits 1 with one stderr line, `bug-confirmation: <reason>`, naming
+the first check that failed: `no-spec`, `spec-prose-edited`, `not-a-bug`,
+`no-label`, `label-not-by-code-owner` or `spec-edited-after-label`. Exit 3
+decided nothing. A label an issue form applied at filing carries its non-owner
+author as the actor and so confirms nothing. Any edit to the issue body after
+the label voids the confirmation until a code owner removes and re-applies the
+label; an edit to the spec's prose sends the bug back to analysis, whose new
+render restores the hash.
+
 ## Readiness stamp contract (`readiness-stamp/v1`)
 
 The `story-readiness` gate is one subagent per story, and on an epic every run
@@ -9104,8 +9219,10 @@ Phase 0's `--tool` flag accepts, of the language tools only a planner groups
 by (`format_lint`, `grpc`, `api_contract`, `openapi`, `versioning`, all
 `codequality`), and `topic` for every topic plugin's tool; an unknown tool
 exits 2. `concern-of.zsh --tools <concern>` prints the concern's language
-tools, its `--tool` ones first, the set `--concern=<concern>` expands to. No tool maps to `bugs`
-yet. `tests/maintenance-concern-order.bats` sweeps the mapping against
+tools, its `--tool` ones first, the set `--concern=<concern>` expands to. No tool maps to `bugs`:
+that concern works the repo's bug issues, not a scanner's findings, and runs
+at its position in the order (*Bug spec contract (`bug-spec/v1`)*, #3212).
+`tests/maintenance-concern-order.bats` sweeps the mapping against
 Phase 0's `--tool` list, every language dispatcher's supported tools and
 every topic dispatcher's routing table.
 
