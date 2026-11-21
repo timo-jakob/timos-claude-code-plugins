@@ -113,9 +113,23 @@ setup() {
   contains "$FLAT" '- the issues closed as not planned'
 }
 
-@test "a missing persona or registry names /product:define-personas and the session continues" {
-  contains "$FLAT" 'name `/product:define-personas` to the human and continue: `serves` stays as it is'
-  contains "$FLAT" 'with no registry anywhere it stays empty, which the validator allows'
+@test "registry lookup exit 4 stops the session before the interview, relaying the init line" {
+  contains "$FLAT" 'every branch below is settled before the interview starts:'
+  contains "$FLAT" '**exit 4** (a declared submodule is not initialised, and it could hold the registry) → **stop without writing anything**, exactly as Step 0 does on exit 4. Relay the lookup'"'"'s stderr, which names the submodule and its `git submodule update --init` line, and ask the human to initialise it and run this skill again. The interview does not start.'
+}
+
+@test "registry lookup exit 3 or 5 with a non-empty serves in update mode warns the human before the interview" {
+  contains "$FLAT" '**exit 3 or 5 in update mode with a non-empty `serves`** → before the interview starts, tell the human that the charter cannot validate until the persona registry is reachable or those `serves` entries are retired through a direction change'
+  lacks "$FLAT" '`serves` stays as it is'
+  lacks "$FLAT" 'exits 4 or 5 is relayed the same way, and the session continues'
+}
+
+@test "registry lookup exit 3 or 5 in create mode or with an empty serves keeps serves empty and continues" {
+  contains "$FLAT" '**exit 3 or 5 in create mode, or in update mode with an empty `serves`** → `serves` stays empty, which the validator allows. Name `/product:define-personas` to the human and continue.'
+}
+
+@test "a persona the registry lacks names /product:define-personas and the session continues" {
+  contains "$FLAT" 'When the agent'"'"'s `explanation` says the audience needs a persona the registry lacks, name `/product:define-personas` to the human and continue.'
 }
 
 # --- Step 1: the loop -------------------------------------------------------

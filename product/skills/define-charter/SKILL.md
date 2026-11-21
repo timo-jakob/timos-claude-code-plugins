@@ -94,12 +94,27 @@ human what they rest on and which source a failed command left out:
 - the issues closed as not planned
   (`gh issue list --state closed --search 'reason:"not planned"'`).
 
-**Missing persona or no registry.** When the registry lookup exits 3, or the
-agent's `explanation` says the audience needs a persona the registry lacks,
-name `/product:define-personas` to the human and continue: `serves` stays as it
-is, and with no registry anywhere it stays empty, which the validator allows. A
-registry lookup that exits 4 or 5 is relayed the same way, and the session
-continues.
+**The registry lookup's exits.** The persona-registry lookup branches on its
+exit like Step 0's charter lookup, and every branch below is settled before the
+interview starts:
+
+- **exit 4** (a declared submodule is not initialised, and it could hold the
+  registry) → **stop without writing anything**, exactly as Step 0 does on
+  exit 4. Relay the lookup's stderr, which names the submodule and its
+  `git submodule update --init` line, and ask the human to initialise it and
+  run this skill again. The interview does not start.
+- **exit 3 or 5 in update mode with a non-empty `serves`** → before the
+  interview starts, tell the human that the charter cannot validate until the
+  persona registry is reachable or those `serves` entries are retired through a
+  direction change, since the validator rejects a `serves` id it cannot
+  resolve. Relay the lookup's stderr on exit 5, then continue.
+- **exit 3 or 5 in create mode, or in update mode with an empty `serves`** →
+  `serves` stays empty, which the validator allows. Name
+  `/product:define-personas` to the human and continue.
+
+**Missing persona.** When the agent's `explanation` says the audience needs a
+persona the registry lacks, name `/product:define-personas` to the human and
+continue.
 
 ## Step 1 — the charter loop (human present)
 
