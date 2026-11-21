@@ -190,7 +190,7 @@ first gate (#3080).
 
 **Without `--resume`**, an unattended run always runs
 `"<skill-base-dir>/scripts/clean-stop.zsh" clear --repo-dir <worktree> --issue
-<N>` before round 1, whether or not a marker exists, so it never adopts a
+<N>` before §2, whether or not a marker exists, so it never adopts a
 stopped run's work-dir, status file or grant ledger. An attended run moves any
 kept state aside instead, deleting nothing.
 
@@ -985,8 +985,8 @@ left as it is — never post a second origin comment.
 **When the fallback review panel engaged (#2909):**
 see `reference/ask-branches.md` § RS-06a — the fallback review panel default (#2909)
 
-**Bug evidence (#3213).** On a bug fix, the run records the falsifying test again after the fix; `fail-first.zsh check`
-must exit 0 before a PR is opened, and `render`'s **Bug evidence** section goes into the PR body:
+**Bug evidence (#3213).** Every run, a resumed one included, detects the bug spec again here; on a bug fix it records
+the falsifying test again after the fix; `fail-first.zsh check` must exit 0 before a PR is opened, and `render`'s **Bug evidence** section goes into the PR body:
 see `reference/fail-first.md` § Before the PR — record it again and check (#3213)
 
 **Joint closure of the story + its test-case issues (#696).** When the same-PR test-case lifecycle ran (Step 2's planner

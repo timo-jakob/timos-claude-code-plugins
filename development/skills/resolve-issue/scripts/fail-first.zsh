@@ -13,9 +13,9 @@
 #   fail-first.zsh spec [--body-file <file>]
 #       Read an issue body (--body-file, else stdin) and print the falsifying
 #       test its bug spec names: {"path", "name", "command"}. The command is
-#       trusted only when it is written, verbatim, in the spec's prose, whose
-#       hash still matches the block: the prose is what a code owner confirmed,
-#       while the JSON block sits outside the hash.
+#       trusted only when it is written, verbatim as a code span, in the
+#       spec's prose, whose hash still matches the block: the prose is what a
+#       code owner confirmed, while the JSON block sits outside the hash.
 #   fail-first.zsh record --phase <before|after> --sha <commit> --out <file>
 #       [--log <file>] -- <command…>
 #       Run the command from the current directory and append one JSON line,
@@ -49,6 +49,7 @@ setopt extendedglob
 me="fail-first"
 spec_reader="${0:A:h}/../../maintenance/scripts/bug-spec.zsh"
 START='<!-- bug-spec:prose:start -->'
+END='<!-- bug-spec:end -->'
 
 usage() {
   print -u2 "usage: fail-first.zsh spec [--body-file <file>]"
@@ -111,7 +112,9 @@ spec)
   spec="$(print -r -- "$body" | zsh "$spec_reader" read 2>/dev/null)"
   case $? in
     0) ;;
-    1) [[ "$body" == *"$START"* ]] && die 4 "unreadable-spec (the body holds a bug spec bug-spec.zsh cannot read)"
+    # a spec region ends the body, so a sentinel merely quoted earlier is no spec
+    1) [[ "$body" == *"$START"*"$END"[[:space:]]# ]] \
+         && die 4 "unreadable-spec (the body holds a bug spec bug-spec.zsh cannot read)"
        exit 1 ;;
     *) die 3 "the bug-spec reader failed" ;;
   esac
@@ -124,7 +127,7 @@ spec)
     || die 4 "no-falsifying-test (the spec names no runnable test)"
   cmd="$(print -r -- "$spec" | jq -r '.block.falsifying_test.command')"
   prose="$(print -r -- "$spec" | jq -r '.prose // ""')"
-  [[ "$prose" == *"$cmd"* ]] \
+  [[ "$prose" == *"\`$cmd\`"* ]] \
     || die 4 "command-not-in-prose (the test's command is not written in the confirmed prose)"
   print -r -- "$spec" | jq -c '.block.falsifying_test | {path, name, command}'
   ;;

@@ -73,6 +73,11 @@ spec_body() {
   run --separate-stderr zsh "$FF" spec --body-file "$BATS_TEST_TMPDIR/body.md"
   [ "$status" -eq 4 ]
   starts_with "$stderr" 'fail-first: unreadable-spec'
+  # a sentinel merely quoted before the body's end is no spec at all
+  printf 'Body quoting `<!-- bug-spec:prose:start -->` and `<!-- bug-spec:end -->`.\nMore.\n' \
+    > "$BATS_TEST_TMPDIR/body.md"
+  run --separate-stderr zsh "$FF" spec --body-file "$BATS_TEST_TMPDIR/body.md"
+  [ "$status" -eq 1 ]
 }
 
 @test "spec: edited prose is exit 4 spec-prose-edited" {
@@ -111,6 +116,11 @@ spec_body() {
   [ "$status" -eq 4 ]
   starts_with "$stderr" 'fail-first: command-not-in-prose'
   [ -z "$output" ]
+  # a fragment of the prose's code span is not the command it carries
+  spec_body "$BATS_TEST_TMPDIR/a.json" "$BATS_TEST_TMPDIR/body.md"
+  sed -i.bak 's|"command": "bats tests/export.bats"|"command": "bats"|' "$BATS_TEST_TMPDIR/body.md"
+  run --separate-stderr zsh "$FF" spec --body-file "$BATS_TEST_TMPDIR/body.md"
+  [ "$status" -eq 4 ]
 }
 
 # ---- record -----------------------------------------------------------------
@@ -133,6 +143,9 @@ spec_body() {
   [ -z "$output" ]
   contains "$(cat "$BATS_TEST_TMPDIR/ff.log")" 'loud'
   contains "$(cat "$BATS_TEST_TMPDIR/ff.log")" 'louder'
+  # a second record appends to the log, never overwrites it
+  zsh "$FF" record --phase after --sha "$FIXED" --out "$REC" --log "$BATS_TEST_TMPDIR/ff.log" -- sh -c 'echo again'
+  [ "$(grep -c -e '^loud$' -e '^again$' "$BATS_TEST_TMPDIR/ff.log")" -eq 2 ]
 }
 
 @test "record: a command not found is recorded as a failing run, exit 127" {
@@ -141,11 +154,16 @@ spec_body() {
   [ "$(jq -r '.exit' "$REC")" -eq 127 ]
 }
 
-@test "record: an unwritable --out is exit 3 and runs nothing" {
+@test "record: an unwritable --out or --log is exit 3 and runs nothing" {
   run --separate-stderr zsh "$FF" record --phase before --sha "$BASE" --out "$BATS_TEST_TMPDIR/no/such/dir/r" \
     -- sh -c "touch '$BATS_TEST_TMPDIR/ran'"
   [ "$status" -eq 3 ]
   [ ! -e "$BATS_TEST_TMPDIR/ran" ]
+  run --separate-stderr zsh "$FF" record --phase before --sha "$BASE" --out "$REC" \
+    --log "$BATS_TEST_TMPDIR/no/such/dir/l" -- sh -c "touch '$BATS_TEST_TMPDIR/ran'"
+  [ "$status" -eq 3 ]
+  [ ! -e "$BATS_TEST_TMPDIR/ran" ]
+  [ ! -s "$REC" ]
 }
 
 @test "record: a bad phase, a bad sha or no command is a usage error, exit 2" {
@@ -339,6 +357,10 @@ whole() {
   contains "$s" '"<skill-base-dir>/scripts/fail-first.zsh" check --base <base> <durable>/fail-first.jsonl'
   contains "$s" '**`check` must exit 0 before a PR is opened.**'
   contains "$s" 'so an edit to the block alone can never choose what this run executes.'
+  contains "$s" 'and again at §6 before *Before the PR* below — on every run, a resumed one included, since a resume skips §2 —'
+  contains "$s" 'this run is a **bug fix** only once `"<skill-base-dir>/../maintenance/scripts/check-bug-confirmation.zsh" <N> --repo "$REPO" --repo-dir .` exits 0.'
+  contains "$s" 'At §2, plan and pass §2'"'"'s size pre-flight with the test'"'"'s `path` in its inventory, then take *The falsifying test first* below as the first implementation edit'
+  contains "$s" 'At §6, after open-pr'"'"'s Step 1b and before its Step 2, whose fallback can already push and open the PR'
 }
 
 @test "reference/fail-first.md: each exit arm names its stop and the step verdict it ends on" {
@@ -352,6 +374,10 @@ whole() {
   contains "$s" 'Exit 1 names the reason on stderr (`fail-first: <reason>`): open no PR, emit the record as `failed` and stop'
   contains "$s" 'Exit 3 is the same stop with cause `tooling`.'
   contains "$s" 'Note the **base**: the `base` §1'"'"'s branch script printed, the commit this branch was cut from.'
+  contains "$s" 'A resumed run skips §1 and takes the full id `git rev-parse <the branch'"'"'s first wip(resolve-issue #<N>) commit>^` instead.'
+  contains "$s" '**Exit 3** decided nothing — the issue body could not be read or the spec reader failed. Report the stderr, emit the run'"'"'s record as `failed` and stop: a step'"'"'s verdict is `stopped`, cause `tooling`. **Exit 2** is your own malformed call: fix it and re-run once.'
+  contains "$s" 'Exit 3 is a tooling stop: report the stderr, emit the record as `failed`, and end a step `stopped` with cause `tooling`.'
+  contains "$s" 'A test that cannot run (a syntax error, a missing tool) proves nothing: rewrite it and record again.'
 }
 
 @test "open-pr SKILL.md: the Bug evidence section goes into the body once, after the Test plan" {
@@ -360,6 +386,7 @@ whole() {
   contains "$s" '**Bug evidence (#3213).**'
   contains "$s" 'Put that section in the PR body **once**, after the Test plan and before the Review dossier: it shows the command, the test'"'"'s exit before the fix and with it, and both commits.'
   contains "$s" 'A bug fix whose `check` did not exit 0 has no section to hand over and opens no PR, so never open one without it'
+  contains "$s" 'it records the falsifying test at this branch'"'"'s HEAD after Step 1b and before Step 2, and hands over'
 }
 
 @test "maintenance reference/bugs.md: the fix step, one bug after another, and the bugs cap" {
@@ -372,11 +399,10 @@ whole() {
   contains "$s" 'its session mode is `unattended` and it asks no one.'
   contains "$s" '**`spec-does-not-reproduce`**'
   contains "$s" 'No ending of one bug stops the concern: the next bug starts.'
-  contains "$s" '**The bugs cap: at most 5 bugs per run, attended or scheduled.** Each fix and each analysis counts one'
+  contains "$s" '**The bugs cap: at most 5 bugs per run, attended or scheduled.** Each fix and each analysis counts one, fixes first, in the order `list-bugs.zsh` printed.'
   contains "$s" '| `confirmed` | fix it (section 2) |'
-  contains "$s" 'Under `--concern=bugs`, `--batch=N` sets the cap to `N` instead.'
   contains "$s" 'For each `confirmed` bug, in the order `list-bugs.zsh` printed, **one after another** — never two at once — while the cap allows:'
-  contains "$s" 'Exit 1 → do not fix it: list it with the stderr reason and go on to the next bug. Exit 3 decided nothing'
+  contains "$s" 'Exit 1 → do not fix it: list it with the stderr reason and go on to the next bug. Exit 3 decided nothing: list it as "confirmation could not be checked" and go on. Neither counts against the cap.'
   contains "$s" 'For each `needs-analysis` bug, in the order `list-bugs.zsh` printed, while the cap allows:'
   contains "$s" 'the bugs deferred by the cap'
 }

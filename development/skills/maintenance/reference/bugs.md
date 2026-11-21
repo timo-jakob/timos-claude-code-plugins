@@ -12,8 +12,7 @@ contract (`bug-spec/v1`)*.
 **The bugs cap: at most 5 bugs per run, attended or scheduled.** Each fix and
 each analysis counts one, fixes first, in the order `list-bugs.zsh` printed.
 Each fix is a whole `resolve-issue` run that can take hours, so a run typed by
-hand is capped too. Under `--concern=bugs`, `--batch=N` sets the cap to `N`
-instead. A bug the cap leaves is listed as "deferred by the cap" and waits for
+hand is capped too. A bug the cap leaves is listed as "deferred by the cap" and waits for
 the next run.
 
 **Analysis writes to the issue only.** It changes no file in the repository,

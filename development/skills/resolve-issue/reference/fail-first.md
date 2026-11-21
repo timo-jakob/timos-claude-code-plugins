@@ -12,7 +12,9 @@ procedure that consumes them.
 
 ## Detect the bug spec (#3213)
 
-At the start of §2, before the size pre-flight, from the repository root:
+At the start of §2, before the size pre-flight, and again at §6 before *Before
+the PR* below — on every run, a resumed one included, since a resume skips §2 —
+from the repository root:
 
 ```bash
 gh issue view <N> --json body -q .body > <scratch>/issue-<N>-body.md
@@ -24,9 +26,13 @@ gh issue view <N> --json body -q .body > <scratch>/issue-<N>-body.md
   untouched by all of this**: run §2 to §7 exactly as written, and read nothing
   more of this file.
 - **Exit 0** — `<scratch>/bug-test-<N>.json` is the falsifying test,
-  `{path, name, command}`. This run is a **bug fix**: take *The falsifying test
-  first* below before any other edit, and §6's and §7's steps of this file
-  later.
+  `{path, name, command}`, and this run is a **bug fix** only once
+  `"<skill-base-dir>/../maintenance/scripts/check-bug-confirmation.zsh" <N> --repo "$REPO" --repo-dir .`
+  exits 0. Its exit 1 edits nothing and stops, the run's record `failed` and a
+  step's verdict `stopped`, cause `failed`, with its stderr line as the reason;
+  its exit 3 is Exit 3's stop. At §2, plan and pass §2's size pre-flight with the
+  test's `path` in its inventory, then take *The falsifying test first* below
+  as the first implementation edit; at §6, take *Before the PR*.
 - **Exit 4** — a bug spec this run cannot fix from; stderr names the reason
   (`unreadable-spec`, `spec-prose-edited`, `not-a-bug`, `no-falsifying-test`,
   `command-not-in-prose`). Edit nothing, and post one comment carrying
@@ -42,21 +48,20 @@ gh issue view <N> --json body -q .body > <scratch>/issue-<N>-body.md
 **The command is trusted only as the code owner confirmed it.** The prose is
 what a code owner reads before applying `confirmed`, and only the prose is
 hashed; the JSON block is not. `spec` therefore hands back a command only when
-the prose still matches its hash and carries that command verbatim, so an edit
-to the block alone can never choose what this run executes.
+the prose still matches its hash and carries that command verbatim as a code
+span, so an edit to the block alone can never choose what this run executes.
 
 ## The falsifying test first (#3213)
 
 Note the **base**: the `base` §1's branch script printed, the commit this
-branch was cut from. A run resumed from a checkpoint skips §1 and takes the
-parent of the branch's first `wip(resolve-issue #<N>)` commit instead. The
-record file lives in `<durable>`, the run's durable folder — the `base` path
+branch was cut from. A resumed run skips §1 and takes the full id
+`git rev-parse <the branch's first wip(resolve-issue #<N>) commit>^` instead.
+The record file lives in `<durable>`, the run's durable folder — the `base` path
 `clean-stop.zsh dir --repo-dir <worktree> --issue <N>` prints (create it when
-absent) — so a checkpoint resume finds it:
+absent) — so a resumed run finds it:
 
-1. **Write the falsifying test, and nothing else.** The size pre-flight's
-   inventory lists its `path`. The first implementation edit adds the test
-   named `name` at `path`. No source file changes yet.
+1. **Write the falsifying test, and nothing else.** The first implementation
+   edit adds the test named `name` at `path`. No source file changes yet.
 2. **Record it at the base**, from the repository root, the test still
    uncommitted on top of the base:
 
@@ -91,13 +96,14 @@ absent) — so a checkpoint resume finds it:
 
    Emit the run's record as `failed` (§7) and stop. A step's verdict is
    `stopped`, cause `failed`, reason `spec-does-not-reproduce`.
-5. **Otherwise fix the bug**, and go on with §2's size pre-flight already passed,
-   §3's gate and §3.5's loop as usual. The falsifying test stays in the change.
+5. **Otherwise fix the bug**, and go on with §3's gate and §3.5's loop as
+   usual. The falsifying test stays in the change.
 
 ## Before the PR — record it again and check (#3213)
 
-At §6, after open-pr's Step 1b and before its Step 3 push, so the commit
-recorded is the one the PR carries, from the repository root:
+At §6, after open-pr's Step 1b and before its Step 2, whose fallback can
+already push and open the PR, so the commit recorded is the one the PR
+carries, from the repository root:
 
 ```bash
 "<skill-base-dir>/scripts/fail-first.zsh" record --phase after --sha "$(git rev-parse HEAD)" \

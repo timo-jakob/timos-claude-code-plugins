@@ -144,8 +144,8 @@ done
 # The falsifying test's command is run by the fix step (fail-first.zsh, #3213),
 # which trusts it only as written in the hashed prose a code owner confirms.
 cmd="$(print -r -- "$a" | jq -r '.falsifying_test.command? // ""')"
-if [[ -n "$cmd" && "$prose" != *"$cmd"* ]]; then
-  print -u2 "$me: draft_prose does not carry the falsifying test's command verbatim"
+if [[ -n "$cmd" && "$prose" != *"\`$cmd\`"* ]]; then
+  print -u2 "$me: draft_prose does not carry the falsifying test's command verbatim as a code span"
   exit 1
 fi
 

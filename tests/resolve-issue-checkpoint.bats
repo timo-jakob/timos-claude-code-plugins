@@ -594,7 +594,7 @@ flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
   contains "$ref" 'When both are found anyway, `clean-stop.zsh read` resumes the clean stop, says so and deletes the checkpoint.'
   contains "$skill" 'stops on exit 3. Without `--resume`, read first how a run'"'"'s kept state and branch are handled: see `reference/checkpoint.md` § A fresh run on kept state (#2920)'
   contains "$ref" 'In an attended run, ask the human whether to delete it: its loop state stays in the superseded folder, and the run'"'"'s first checkpoint push replaces its remote branch.'
-  contains "$ref" 'Once §1 has cut the branch, and before round 1, either one runs:'
+  contains "$ref" 'Once §1 has cut the branch, and before §2, either one runs:'
   contains "$ref" 'Every other ending keeps the folder, so a later `--resume` can find it.'
   contains "$inv" '**Every blocking-loop invocation carries `--checkpoint <mode>` (#2920).**'
   contains "$inv" 'The template above predates checkpoints too: append the session mode §0a resolved, round 1 and every `--resume` alike, so each round the loop consolidates on a green gate is pushed as a wip checkpoint (`reference/checkpoint.md`).'
