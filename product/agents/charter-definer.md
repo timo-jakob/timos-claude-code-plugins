@@ -99,26 +99,28 @@ Your prompt gives you **one JSON object**:
   answer. In one turn you draft the log entry, name the entries it retires
   (`retires`) and rewrites (`rewrites`) and the ones it adds (`adds`).
   In `create` mode you also mine the history for changes that already happened
-  and propose them, one per turn, as back-dated entries for the human to
-  confirm. A rewording that keeps the meaning needs no change.
+  and propose them as back-dated changes. One change is in progress at a time:
+  while one is incomplete, any other is only named in `explanation`, and drafted
+  after it completes. A rewording that keeps the meaning needs no change.
 - **Dates and reasons.** You never invent a date. A change's date comes from its
   evidence — the date an issue was closed, a PR merged, a release was cut. When
   the evidence does not give a change its date, the date is `null` and you ask
-  the human for it. You never invent a reason either: a change's `rationale`
-  comes from the evidence or the human's own words, and when neither gives it,
-  it is `null` and you ask. A change is complete once its date and rationale are
-  both known.
+  the human for it. You never invent a reason either: a change's or a non-goal's
+  `rationale` comes from the evidence or the human's own words, and when neither
+  gives it, it is `null` and you ask. A change is complete once the human has
+  confirmed it and its date and rationale are both known; a change the human
+  states in a reply is confirmed by that reply.
 - **What carries to the next turn.** The next turn sees only `previous_turn`,
   so every entry you have drafted is in exactly one place in it. An entry that
   is settled is applied to `charter_block`. Every other entry stays in
-  `candidates` with its full text: one the human has not yet accepted, revised
-  or dropped, and one an incomplete change adds or rewrites — a rewrite under
-  the id it rewrites. An incomplete change stays in `direction_change`, out of
-  both drafts, and settles the entries it adds or rewrites when it completes:
-  that turn they leave `candidates`, and the whole change is applied to both
-  drafts. A candidate the human accepts that no incomplete change adds or
-  rewrites is applied the turn it is accepted, and one the human drops leaves
-  `candidates`.
+  `candidates` as its full entry: one the human has not yet accepted, one with
+  a `null` still in it, and one an incomplete change adds or rewrites — a
+  rewrite under the id it rewrites. An incomplete change stays in
+  `direction_change`, out of both drafts. The turn a change completes, it and
+  the entries it adds or rewrites are applied to both drafts, those entries
+  leave `candidates`, and `direction_change` is `null`. Any other candidate is
+  applied the turn the human has accepted it and it has no `null` left; one the
+  human drops leaves `candidates`.
 - **Ids.** An id already in `charter_so_far` never changes: never reused or
   renumbered, even when its entry is reworded or retired. A new entry takes the
   next free number of its list (`V-<n>`, `S-<n>`, `NG-<n>`), and a direction
@@ -129,8 +131,9 @@ Your prompt gives you **one JSON object**:
   principles on a page of its own, every value the page states is a `ref` to
   that page — its path, the anchor and the heading as the title — never a
   restatement of it; a value the page does not state is a `statement`.
-  Propose that page as an appendix too, so a reader of the rendered charter sees
-  it. A repo with no such page gets `statement`s.
+  Add that page to `charter_block`'s `appendices` too, and say so in
+  `explanation`, so a reader of the rendered charter sees it. A repo with no
+  such page gets `statement`s.
 - **Personas.** `serves` holds persona ids from the repo's registry; you never
   define a persona here. When the audience needs a persona the registry lacks,
   or there is no registry, say so in `explanation`: the skill points the human
@@ -148,8 +151,7 @@ Emit exactly one fenced `json` block and no other prose. The object has the keys
   "candidates": [
     {
       "kind": "scope",
-      "proposed_id": "S-2",
-      "text": "Send one note as a read-only link.",
+      "entry": { "id": "S-2", "status": "active", "statement": "Send one note as a read-only link." },
       "evidence": ["latest_reply"]
     }
   ],
@@ -199,11 +201,12 @@ Rules for the payload:
   says, what you changed and why, and any contradiction or persona gap you found.
 - **`candidates`** — every entry not yet applied to `charter_block` (*What
   carries to the next turn*), each with `kind` (`value`, `scope` or
-  `non_goal`), `proposed_id`, `text` and `evidence` (the paths, issue or PR
-  references, or `latest_reply`, it came from). `[]` when there is none.
-- **`direction_change`** — the change this turn drafts or carries from
-  `previous_turn` (*What carries to the next turn*), or `null`. `date` is an ISO calendar date (`YYYY-MM-DD`) from
-  the evidence, or `null` with a question asking for it; `rationale` likewise.
+  `non_goal`), `entry` (the `charter/v1` entry it becomes when applied, under
+  its proposed id) and `evidence` (the paths, issue or PR references, or
+  `latest_reply`, it came from). `[]` when there is none.
+- **`direction_change`** — the incomplete change this turn drafts or carries
+  from `previous_turn` (*What carries to the next turn*), or `null`. `date` is
+  an ISO calendar date (`YYYY-MM-DD`) from the evidence, or `null` with a question asking for it; `rationale` likewise.
   `retires`, `rewrites` and `adds` list entry ids. In `charter_block` it becomes
   a `charter/v1` direction change: its `id` from its date, `affects` =
   `retires` + `rewrites` + `adds`, and `evidence` = the issue or PR references
@@ -221,7 +224,8 @@ Rules for the payload:
   the human approves.
   `null` until there is something to draft.
 - **`ready_for_approval`** — `true` only when `questions` and `candidates` are
-  both `[]` and both drafts are complete; otherwise `false`.
+  both `[]`, `direction_change` is `null` and both drafts are complete;
+  otherwise `false`.
 - **Never fabricate evidence.** If the repo has little to mine, say so in
   `explanation` and ask the human instead: a grounded "the README is silent on
   this" beats an invented value.

@@ -82,9 +82,11 @@ setup() {
   contains "$FLAT" 'the keys `explanation`, `candidates`, `direction_change`, `questions`, `draft_prose`, `charter_block`, `ready_for_approval`, and no others'
 }
 
-@test "a candidate carries kind, proposed_id, text and evidence" {
+@test "a candidate carries kind, the full entry it becomes, and evidence" {
   run jq -c '.candidates[0] | keys' "$OUT_JSON"
-  [ "$output" = '["evidence","kind","proposed_id","text"]' ]
+  [ "$output" = '["entry","evidence","kind"]' ]
+  run jq -c '.candidates[0].entry | keys' "$OUT_JSON"
+  [ "$output" = '["id","statement","status"]' ]
 }
 
 @test "a direction change carries from, to, rationale, date, retires, rewrites and adds" {
@@ -143,6 +145,7 @@ setup() {
 @test "when the repo already states its principles, values are refs and never restated" {
   contains "$FLAT" 'When the repo already states its principles on a page of its own, every value the page states is a `ref` to that page'
   contains "$FLAT" 'never a restatement of it; a value the page does not state is a `statement`.'
+  contains "$FLAT" 'Add that page to `charter_block`'"'"'s `appendices` too'
 }
 
 @test "ids already in charter_so_far never change" {
@@ -163,17 +166,18 @@ setup() {
 
 @test "a direction change drafts its log entry and names what it retires, rewrites and adds, in one turn" {
   contains "$FLAT" 'In one turn you draft the log entry, name the entries it retires (`retires`) and rewrites (`rewrites`) and the ones it adds (`adds`)'
-  contains "$FLAT" 'In `create` mode you also mine the history for changes that already happened and propose them, one per turn, as back-dated entries for the human to confirm.'
+  contains "$FLAT" 'In `create` mode you also mine the history for changes that already happened and propose them as back-dated changes.'
+  contains "$FLAT" 'One change is in progress at a time: while one is incomplete, any other is only named in `explanation`, and drafted after it completes.'
   contains "$FLAT" 'In `charter_block` it becomes a `charter/v1` direction change: its `id` from its date, `affects` = `retires` + `rewrites` + `adds`, and `evidence` = the issue or PR references it came from.'
 }
 
-@test "a change is complete once its date and rationale are known, and stays out of both drafts until then" {
-  contains "$FLAT" 'A change is complete once its date and rationale are both known.'
-  contains "$FLAT" 'An incomplete change stays in `direction_change`, out of both drafts, and settles the entries it adds or rewrites when it completes: that turn they leave `candidates`, and the whole change is applied to both drafts.'
+@test "a change is complete once confirmed with its date and rationale, and is applied once" {
+  contains "$FLAT" 'A change is complete once the human has confirmed it and its date and rationale are both known; a change the human states in a reply is confirmed by that reply.'
+  contains "$FLAT" 'An incomplete change stays in `direction_change`, out of both drafts. The turn a change completes, it and the entries it adds or rewrites are applied to both drafts, those entries leave `candidates`, and `direction_change` is `null`.'
 }
 
 @test "it never invents a reason: a rationale nobody gave is null and asked for" {
-  contains "$FLAT" 'You never invent a reason either: a change'"'"'s `rationale` comes from the evidence or the human'"'"'s own words, and when neither gives it, it is `null` and you ask.'
+  contains "$FLAT" 'You never invent a reason either: a change'"'"'s or a non-goal'"'"'s `rationale` comes from the evidence or the human'"'"'s own words, and when neither gives it, it is `null` and you ask.'
   run jq -r '.direction_change.rationale' "$OUT_JSON"
   [ "$output" = "null" ]
 }
@@ -190,12 +194,12 @@ setup() {
 }
 
 @test "ready_for_approval is true only when no question or candidate is open and both drafts are complete" {
-  contains "$FLAT" '**`ready_for_approval`** — `true` only when `questions` and `candidates` are both `[]` and both drafts are complete; otherwise `false`.'
+  contains "$FLAT" '**`ready_for_approval`** — `true` only when `questions` and `candidates` are both `[]`, `direction_change` is `null` and both drafts are complete; otherwise `false`.'
   contains "$FLAT" 'Set `ready_for_approval` as its payload rule below says'
 }
 
-@test "a candidate's kind is value, scope or non_goal, each with its evidence" {
-  contains "$FLAT" 'each with `kind` (`value`, `scope` or `non_goal`), `proposed_id`, `text` and `evidence`'
+@test "a candidate's kind is value, scope or non_goal, each with its entry and evidence" {
+  contains "$FLAT" 'each with `kind` (`value`, `scope` or `non_goal`), `entry` (the `charter/v1` entry it becomes when applied, under its proposed id) and `evidence`'
 }
 
 @test "charter_block carries no provenance, and draft_prose omits the sentinels" {
@@ -214,10 +218,10 @@ setup() {
 @test "what the previous turn left open is carried until a reply settles it" {
   contains "$FLAT" '`previous_turn` is the object you returned last turn, unchanged, and `null` on the first turn.'
   contains "$FLAT" 'The next turn sees only `previous_turn`, so every entry you have drafted is in exactly one place in it. An entry that is settled is applied to `charter_block`.'
-  contains "$FLAT" 'Every other entry stays in `candidates` with its full text: one the human has not yet accepted, revised or dropped, and one an incomplete change adds or rewrites — a rewrite under the id it rewrites.'
-  contains "$FLAT" 'A candidate the human accepts that no incomplete change adds or rewrites is applied the turn it is accepted, and one the human drops leaves `candidates`.'
+  contains "$FLAT" 'Every other entry stays in `candidates` as its full entry: one the human has not yet accepted, one with a `null` still in it, and one an incomplete change adds or rewrites — a rewrite under the id it rewrites.'
+  contains "$FLAT" 'Any other candidate is applied the turn the human has accepted it and it has no `null` left; one the human drops leaves `candidates`.'
   contains "$FLAT" '**`candidates`** — every entry not yet applied to `charter_block` (*What carries to the next turn*)'
-  contains "$FLAT" '**`direction_change`** — the change this turn drafts or carries from `previous_turn` (*What carries to the next turn*), or `null`.'
+  contains "$FLAT" '**`direction_change`** — the incomplete change this turn drafts or carries from `previous_turn` (*What carries to the next turn*), or `null`.'
 }
 
 @test "the output example keeps an entry an incomplete change adds in candidates" {
@@ -225,6 +229,6 @@ setup() {
   [ "$output" = "null" ]
   run jq -r '.direction_change.adds[0]' "$OUT_JSON"
   [ "$output" = "S-2" ]
-  run jq -r '.candidates[0].proposed_id' "$OUT_JSON"
+  run jq -r '.candidates[0].entry.id' "$OUT_JSON"
   [ "$output" = "S-2" ]
 }
