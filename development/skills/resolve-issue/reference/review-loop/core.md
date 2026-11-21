@@ -258,7 +258,7 @@ no group fails at once, and a group shared with the session never ends:
 ```bash
 until [ -e "$G/gate.done" ]; do
   if ! kill -0 -- "-$(cat "$G/gate.pgid" 2>/dev/null)" 2>/dev/null; then
-    [ -e "$G/gate.done" ] && break
+    sleep 2; [ -e "$G/gate.done" ] && break
     echo "gate-gone: the process group ended without gate.done"; exit 3
   fi
   sleep 20
@@ -267,11 +267,22 @@ echo "gate-done: gate.done exists"
 ```
 
 `gate-done` takes step 4's verdict read, and `gate-gone` — an unreadable
-`gate.pgid` included — is step 4's signal-never-arrived arm. A **verdict-file
+`gate.pgid` included — is step 4's signal-never-arrived arm. The two-second
+re-check before `gate-gone` covers a launch whose `gate.done` writer sits outside
+the group and lands just after it ends. A **verdict-file
 loop** waits on a file a subagent writes (`subagents.md`); it ends when the file
 exists or when its stall bound passes, and the bound is the only clock it
 carries. One call, never one probe per turn. **A call that returns without its signal is not a retry**:
-judge by re-testing the condition, never by the call's exit status, and take the
+judge by re-testing the condition, never by the call's exit status, and decide
+by the loop's **last printed line**, never by the missing file alone. A loop
+that printed `gate-gone` takes the signal-never-arrived arm, and one that
+printed `verdict-stalled` takes `subagents.md`'s stall arm. A call that returns
+with neither line is a **waiter that died**: re-test both conditions, the signal
+(`gate.done`, or the verdict file) and, for the gate, `kill -0 -- -<pgid>` on
+`gate.pgid`. A signal now present takes its own arm. A gate still alive, or a
+verdict file still missing, re-arms the same loop **once**; a second early
+return is report-and-stop, and the conductor does **not** stop the gate or the
+subagent then. Only a gate whose group is gone with no `gate.done` takes the
 boundary's own signal-never-arrived arm instead of blocking again.
 
 <!-- moved: round-protocol-head -->

@@ -358,7 +358,8 @@ _roster_hits() {
   contains "$body" "the loop is only ever the waiter, never the gate's launch: the suite must not die with its waiter."
   # the handle the loop probes is a suite-owned process group, never a pid
   contains "$body" 'gate.pgid holds the id of a process group the launch created for the suite (setsid, or perl'"'"'s setpgrp), never a plain pid and never the reference shape'"'"'s printed pid'
-  contains "$body" '[ -e "$G/gate.done" ] && break'
+  contains "$body" 'sleep 2; [ -e "$G/gate.done" ] && break'
+  contains "$body" 'The two-second re-check before gate-gone covers a launch whose gate.done writer sits outside the group and lands just after it ends.'
   # #3044 AC2: the gate loop ends on BOTH terminal states and says which
   contains "$body" 'The loop exits on every terminal state, never only the happy path, and its last line says which one it reached.'
   contains "$body" 'until [ -e "$G/gate.done" ]; do'
@@ -371,6 +372,10 @@ _roster_hits() {
   # expiry without saying how to detect it sends a healthy round to report-and-stop.
   contains "$body" 'A call that returns without its signal is not a retry'
   contains "$body" "judge by re-testing the condition, never by the call's exit status"
+  # #3044 round 6: the last printed line decides, and a waiter that died re-arms once
+  contains "$body" 'decide by the loop'"'"'s last printed line, never by the missing file alone.'
+  contains "$body" 'A call that returns with neither line is a waiter that died: re-test both conditions'
+  contains "$body" 're-arms the same loop once; a second early return is report-and-stop, and the conductor does not stop the gate or the subagent then.'
   # the bound, spelled as the thing it excludes — the exception is worthless if
   # "one call" can be read as "one call per turn"
   contains "$body" 'One call, never one probe per turn.'
@@ -963,7 +968,7 @@ _gate_loop() {
     armed && /^```bash$/      { inside = 1; next }
     inside && /^```$/         { exit }
     inside                    { print }
-  ' "$CORE" | sed 's/sleep 20$/sleep 0.1/'
+  ' "$CORE" | sed -e 's/sleep 20$/sleep 0.1/' -e 's/sleep 2; /sleep 0.1; /'
 }
 
 @test "#3044 AC2 the gate loop is extracted from core.md, with both exit lines" {
@@ -1008,6 +1013,19 @@ _gate_loop() {
   [ "$status" -eq 3 ]
   [ "$output" = "gate-gone: the process group ended without gate.done" ]
   [ ! -e "$G/gate.done" ]
+}
+
+@test "#3044 AC2 the gate loop ends gate-done when gate.done lands just after the group ends" {
+  # The grace re-check, driven: a `kill` stub stands in for a group that has
+  # just ended (returns 1) and for a gate.done writer outside it that lands at
+  # that moment (creates the file). Without the re-check, or with it after the
+  # gate-gone echo, the loop reports a finished gate as gone.
+  local G="$BATS_TEST_TMPDIR/g-late"
+  mkdir -p "$G"
+  echo 4242 > "$G/gate.pgid"
+  G="$G" run bash -c 'kill() { : > "$G/gate.done"; return 1; }; '"$(_gate_loop)"
+  [ "$status" -eq 0 ]
+  [ "$output" = "gate-done: gate.done exists" ]
 }
 
 @test "#3044 AC2 the gate loop ends gate-gone when gate.pgid is missing" {
@@ -1075,6 +1093,9 @@ _verdict_loop() {
     lacks "$(prose_body "$f")" 'end your turn, and the harness'
     # a dispatch with no verdict file has no loop to wait on: it is stopped, never left running unarmed
     contains "$(prose_body "$f")" 'has no loop to wait on: stop it, and once it has ended write'
+    # one it cannot stop: the turn ends unverdicted and the harness wakes it, never a Bash kill
+    contains "$(prose_body "$f")" 'When you cannot stop it, end your turn without writing a verdict: that ending is a wait'
+    contains "$(prose_body "$f")" 'since the harness wakes you when the subagent ends, and you then write that verdict. Never stop it through Bash.'
   done
   contains "$(prose_body "$REPO_ROOT/development/agents/refine-step.md")" 'such as the issue-refiner, has no loop to wait on'
   contains "$(prose_body "$REPO_ROOT/development/agents/resolve-step.md")" 'such as the readiness gate, has no loop to wait on'
@@ -1086,6 +1107,8 @@ _verdict_loop() {
   contains "$body" 'A verdict-file loop waits on a file a subagent writes (subagents.md); it ends when the file exists or when its stall bound passes, and the bound is the only clock it carries.'
   body="$(prose_body "$SUBAGENTS")"
   contains "$body" 'The loop ends when the file exists, printing verdict-written, or when its stall bound passes, printing verdict-stalled:'
+  contains "$body" 'A call that returns with neither line is a waiter that died, not a stall: re-test the verdict file, read it when it is there, and otherwise re-arm the same loop once.'
+  contains "$body" 'A second early return is report-and-stop, with the background dispatch left running.'
   body="$(prose_body "$INDEX")"
   contains "$body" "two more cut out core.md's step 4 and wait paragraph (#3044)."
 }

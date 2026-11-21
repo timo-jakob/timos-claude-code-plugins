@@ -43,7 +43,10 @@ turn ending and its retry included. Never write the "no chain-result document"
 verdict before it has ended. Wait on its verdict file with one background Bash
 until loop, never Monitor and never a foreground poll (#3044). One that writes
 no verdict file, such as the issue-refiner, has no loop to wait on: stop it,
-and once it has ended write the "no chain-result document" verdict above. Write
-that verdict too when the rule stops the skill. Which verdict each outcome writes, and what the
+and once it has ended write the "no chain-result document" verdict above. When
+you cannot stop it, end your turn without writing a verdict: that ending is a
+wait, not the step's end, since the harness wakes you when the subagent ends,
+and you then write that verdict. Never stop it through Bash. Write that verdict
+too when the rule stops the skill. Which verdict each outcome writes, and what the
 root does with it, is the resolve-issue skill's `reference/chain-steps.md`
 § The chained refinement step (#2940).

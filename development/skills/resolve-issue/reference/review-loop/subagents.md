@@ -176,6 +176,13 @@ done
 echo "verdict-written: $V"
 ```
 
+The loop's last printed line decides, as `core.md`'s wait rule says:
+`verdict-written` takes the `read-verdict` read, and `verdict-stalled` takes the
+stall below. A call that returns with neither line is a waiter that died, not a
+stall: re-test the verdict file, read it when it is there, and otherwise re-arm
+the same loop once. A second early return is report-and-stop, with the
+background dispatch left running.
+
 The bound is an elapsed-time ceiling inside the loop: set it generous enough
 for that kind's whole job — a panel, which fans out to reviewers, is routinely
 the longest — since a bound that expires on a healthy subagent spends the stall
