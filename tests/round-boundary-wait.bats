@@ -101,8 +101,8 @@ setup() {
   # so "(this section)" would be false there, and the between-the-pointers pin
   # below would then measure the wrong pair. #2034 narrowed it to the gate
   # alone: a round dispatch that launched in the background is waited on
-  # in-turn, never by ending the turn, which an E3 child conductor — itself a
-  # subagent — could never be re-invoked from.
+  # in-turn, never by a turn that ends with no loop armed, which an E3 child
+  # conductor — itself a subagent — could never be re-invoked from.
   SCOPE_POINTER='How to wait governs only the gate — it is not restated here'
   # The bare phrase, for the roster tripwire and the SKILL-wide count.
   # Deliberately WITHOUT the issue number, so the tripwire sees a new site that
@@ -429,12 +429,12 @@ _round_dispatch_carveout() {
   fi
   # Forward-only: the carve-out paragraph and nothing past the panel step.
   body="$(prose_window "$1" "$((ln + 2))" 2)"
-  contains "$body" "The end-the-turn wait that step 1's pointer names never covers a round subagent dispatch (#2113)." \
+  contains "$body" "The end-the-turn wait that step 1's pointer names covers a round subagent dispatch only through its loop (#2113)." \
     || return 1
   contains "$body" 'round-panel, round-fix, round-decide or round-risk dispatch that launched in the background' \
     || return 1
   contains "$body" 'is waited on in-turn, as A background round dispatch (Round subagents) says' || return 1
-  contains "$body" 'not by ending the turn' || return 1
+  lacks "$body" 'by ending the turn' || return 1
   # …and it stays a pointer at the #2034 paragraph, never a copy of that wait
   lacks "$body" 'one bounded Monitor call' || return 1
 }
@@ -768,7 +768,7 @@ _round_dispatch_carveout() {
   # block's opening paragraph landing between the carve-out and the sentinel.
   local F="$BATS_TEST_TMPDIR/step1-no-carveout.md" G="$BATS_TEST_TMPDIR/step1-moved-carveout.md"
   local H="$BATS_TEST_TMPDIR/step1-pushed-carveout.md" rc scope_para
-  perl -0pe 's/\*\*The end-the-turn wait that step 1.*?not by ending the turn\.\n\n//s' "$STEP1" > "$F"
+  perl -0pe 's/\*\*The end-the-turn wait that step 1.*?\(Round subagents\) says\.\n\n//s' "$STEP1" > "$F"
   # the mutation really happened — else the red below would prove nothing
   if cmp -s "$STEP1" "$F"; then
     printf 'removal fixture is identical to the source\n' >&2
@@ -782,7 +782,7 @@ _round_dispatch_carveout() {
   fi
   # RELOCATED past the panel step, to the end of the shard, wording intact —
   # the words pass, so only the position half (before the panel step) can red it.
-  perl -0pe 's/(\*\*The end-the-turn wait that step 1.*?not by ending the turn\.\n\n)//s and $p = $1;
+  perl -0pe 's/(\*\*The end-the-turn wait that step 1.*?\(Round subagents\) says\.\n\n)//s and $p = $1;
              s/\z/\n$p/' "$STEP1" > "$G"
   if cmp -s "$STEP1" "$G"; then
     printf 'relocation fixture is identical to the source\n' >&2

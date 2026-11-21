@@ -84,18 +84,18 @@ load_fix_brief() {
 }
 
 # #2034: a round dispatch that launched in the background anyway is waited on
-# in-turn for its verdict file — never by ending the turn, which on an E3 child
-# returns the child conductor to its parent mid-round — and a verdict still
-# missing at the bound is a stall. Asserted over $1 rather than $section so the
-# mutation controls below drive the SAME pins over a mutated copy. Every line
-# carries `|| return 1`: under `run` a failed helper must end the function, not
-# fall through to a later passing pin.
+# in-turn by its verdict-file loop — never by a turn that ends with none armed,
+# which on an E3 child returns the child conductor to its parent mid-round —
+# and a verdict still missing at the bound is a stall. Asserted over $1 rather
+# than $section so the mutation controls below drive the SAME pins over a
+# mutated copy. Every line carries `|| return 1`: under `run` a failed helper
+# must end the function, not fall through to a later passing pin.
 _background_wait_pins() {
   local s="$1"
   # the scope pointer hands the background case here, not to How to wait
   contains "$s" '**How to wait** governs only the gate — it is not restated here. A round dispatch that launched in the background anyway is waited on in-turn, as *A background round dispatch* below says.' || return 1
   lacks "$s" 'governs only the gate and a dispatch that did launch in the background' || return 1
-  contains "$s" '**A background round dispatch is waited on in-turn, never by ending the turn (#2034).**' || return 1
+  contains "$s" '**A background round dispatch is waited on in-turn (#2034).**' || return 1
   contains "$s" 'the conductor waits for that dispatch'"'"'s `<work-dir>/verdict-<R>-<kind>.json` with the verdict-file loop of `core.md`'"'"'s end-the-turn wait rule — one background `until` loop on that file, never `Monitor` and never a foreground Bash poll (#3044) — then reads it with `round-handoff.zsh read-verdict`.' || return 1
   contains "$s" 'This holds on the single-issue flow and the epic E3 child flow alike: an E3 child conductor is itself a subagent, and one that ended its turn would return to its parent mid-round' || return 1
   contains "$s" 'When a `round-panel`, `round-fix`, `round-decide` or `round-risk` dispatch launched in the background anyway — the flag left out, or ignored — the conductor waits' || return 1
@@ -196,7 +196,7 @@ _background_wait_pins() {
 @test "#2034 AC3 non-vacuity: a background round dispatch that ends the turn reds the pins" {
   load_section
   local old new mutated
-  old='is waited on in-turn, never by ending the turn (#2034).'
+  old='is waited on in-turn (#2034).'
   new='is waited on by ending the turn (#2034).'
   mutated="${section/"$old"/"$new"}"
   [ "$mutated" != "$section" ]

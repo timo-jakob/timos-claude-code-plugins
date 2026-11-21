@@ -1,10 +1,10 @@
 <!-- Shard of reference/review-loop.md (#2055), read in its index's order:
      round step 1, the review panel. -->
 
-**The end-the-turn wait that step 1's pointer names never covers a round
-subagent dispatch (#2113).** A `round-panel`, `round-fix`, `round-decide` or
-`round-risk` dispatch that launched in the background is waited on in-turn, as
-*A background round dispatch* (Round subagents) says — not by ending the turn.
+**The end-the-turn wait that step 1's pointer names covers a round subagent
+dispatch only through its loop (#2113).** A `round-panel`, `round-fix`,
+`round-decide` or `round-risk` dispatch that launched in the background is
+waited on in-turn, as *A background round dispatch* (Round subagents) says.
 
 1. **Review panel, in-session.** Get the dispatch plan (`review-dispatch.zsh
    plan`, §#560) and spawn the reviewers of the skill it names in

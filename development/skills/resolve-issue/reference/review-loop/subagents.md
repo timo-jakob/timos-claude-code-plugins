@@ -157,9 +157,9 @@ then report-and-stop — a fresh subagent with a freshly written handoff. A
 verdict that validates but is not `ok` is not a stall, and recovery dispatches
 (#1937's) don't count against the retry.
 
-**A background round dispatch is waited on in-turn, never by ending the turn
-(#2034).** When a `round-panel`, `round-fix`, `round-decide` or `round-risk`
-dispatch launched in the background anyway — the flag left out, or ignored —
+**A background round dispatch is waited on in-turn (#2034).** When a
+`round-panel`, `round-fix`, `round-decide` or `round-risk` dispatch launched in
+the background anyway — the flag left out, or ignored —
 the conductor waits for that dispatch's `<work-dir>/verdict-<R>-<kind>.json`
 with the verdict-file loop of `core.md`'s end-the-turn wait rule — one background
 `until` loop on that file, never `Monitor` and never a foreground Bash poll
