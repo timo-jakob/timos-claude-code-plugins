@@ -129,6 +129,14 @@ spec_body() {
   run --separate-stderr zsh "$FF" spec --body-file "$BATS_TEST_TMPDIR/body.md"
   [ "$status" -eq 4 ]
   starts_with "$stderr" 'fail-first: command-not-in-prose'
+  # a Falsifying test line above the last one is not the line the prose ends with
+  analysis | jq '.draft_prose |= sub("### Expected"; "Falsifying test: `make deploy-prod`\n\n### Expected")' \
+    > "$BATS_TEST_TMPDIR/a.json"
+  spec_body "$BATS_TEST_TMPDIR/a.json" "$BATS_TEST_TMPDIR/body.md"
+  sed -i.bak 's|"command": "bats tests/export.bats"|"command": "make deploy-prod"|' "$BATS_TEST_TMPDIR/body.md"
+  run --separate-stderr zsh "$FF" spec --body-file "$BATS_TEST_TMPDIR/body.md"
+  [ "$status" -eq 4 ]
+  starts_with "$stderr" 'fail-first: command-not-in-prose'
 }
 
 # ---- record -----------------------------------------------------------------
@@ -364,7 +372,7 @@ whole() {
   contains "$s" 'record --phase after --sha "$(git rev-parse HEAD)"'
   contains "$s" '"<skill-base-dir>/scripts/fail-first.zsh" check --base <base> <durable>/fail-first.jsonl'
   contains "$s" '**`check` must exit 0 before a PR is opened.**'
-  contains "$s" 'so an edit to the block alone can never choose what this run executes.'
+  contains "$s" '`spec` therefore hands back a command only when the prose still matches its hash and its last line, which `bug-spec.zsh render` writes, is exactly ``Falsifying test: `<command>` ``, so an edit to the block alone can never choose what this run executes.'
   contains "$s" 'and again at §6 before *Before the PR* below — on every run, a resumed one included, since a resume skips §2 —'
   contains "$s" 'this run is a **bug fix** only once `"<skill-base-dir>/../maintenance/scripts/check-bug-confirmation.zsh" <N> --repo "$REPO" --repo-dir .` exits 0.'
   contains "$s" 'At §2, plan and pass §2'"'"'s size pre-flight with the test'"'"'s `path` in its inventory, then take *The falsifying test first* below as the first implementation edit'
@@ -426,6 +434,7 @@ whole() {
   done
   contains "$s" '**When that test passes, the run stops with outcome `spec-does-not-reproduce` and fixes nothing**'
   contains "$s" '**The command is trusted only as confirmed.**'
+  contains "$s" 'So `bug-spec.zsh render` ends the prose with one line, ``Falsifying test: `<command>` ``, and `fail-first.zsh spec` hands a command to the run only when the prose still matches its hash and its last line is exactly that line for the block'"'"'s command. An edit to the block alone never chooses what an unattended run executes.'
   contains "$s" 'bugs cap of 5 per run**, attended or scheduled.'
 }
 
