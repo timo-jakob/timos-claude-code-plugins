@@ -256,6 +256,8 @@ pid and never the reference shape's printed pid — `kill -0` on a pid that lead
 no group fails at once, and a group shared with the session never ends:
 
 ```bash
+G=<the round's gate dir>   # the literal path: this call starts in a fresh shell
+[ -n "$G" ] || { echo "gate-dir-unset: G is empty, which is not a dead gate"; exit 2; }
 until [ -e "$G/gate.done" ]; do
   if ! kill -0 -- "-$(cat "$G/gate.pgid" 2>/dev/null)" 2>/dev/null; then
     sleep 2; [ -e "$G/gate.done" ] && break

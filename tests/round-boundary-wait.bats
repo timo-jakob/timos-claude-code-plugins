@@ -362,6 +362,9 @@ _roster_hits() {
   contains "$body" 'The two-second re-check before gate-gone covers a launch whose gate.done writer sits outside the group and lands just after it ends.'
   # #3044 AC2: the gate loop ends on BOTH terminal states and says which
   contains "$body" 'The loop exits on every terminal state, never only the happy path, and its last line says which one it reached.'
+  # #3044 round 10: the block binds G on its own first line, as the verdict
+  # loop binds V, because the waiter starts in a fresh shell
+  contains "$body" "G=<the round's gate dir> # the literal path: this call starts in a fresh shell"
   contains "$body" 'until [ -e "$G/gate.done" ]; do'
   contains "$body" 'if ! kill -0 -- "-$(cat "$G/gate.pgid" 2>/dev/null)" 2>/dev/null; then'
   contains "$body" 'echo "gate-gone: the process group ended without gate.done"; exit 3'
@@ -960,21 +963,26 @@ _monitor_sweep_files() {
 
 # --- #3044 AC2: the gate loop, DRIVEN ----------------------------------------
 # The loop is extracted from core.md as written, so the text a driver copies is
-# the code under test. Only its poll interval is shortened, so the cases run in
-# well under a second each.
+# the code under test. Its G placeholder is substituted with the gate dir ($1),
+# as a driver substitutes it, and its poll interval is shortened, so the cases
+# run in well under a second each.
 _gate_loop() {
   awk '
     /The \*\*gate loop\*\*, with/ { armed = 1 }
     armed && /^```bash$/      { inside = 1; next }
     inside && /^```$/         { exit }
     inside                    { print }
-  ' "$CORE" | sed -e 's/sleep 20$/sleep 0.1/' -e 's/sleep 2; /sleep 0.1; /'
+  ' "$CORE" | sed -e "s|^G=<the round's gate dir>|G=\"$1\"|" \
+    -e 's/sleep 20$/sleep 0.1/' -e 's/sleep 2; /sleep 0.1; /'
 }
 
 @test "#3044 AC2 the gate loop is extracted from core.md, with both exit lines" {
-  local code
-  code="$(_gate_loop)"
+  local code first
+  code="$(_gate_loop /x/g)"
   [ -n "$code" ]
+  # the block's first line binds G, so a verbatim copy never runs with it unset
+  first="$(printf '%s\n' "$code" | head -n 1)"
+  [ "${first%%#*}" = 'G="/x/g"   ' ]
   contains "$code" 'until [ -e "$G/gate.done" ]; do'
   contains "$code" 'echo "gate-gone: the process group ended without gate.done"; exit 3'
   contains "$code" 'echo "gate-done: gate.done exists"'
@@ -983,7 +991,7 @@ _gate_loop() {
 @test "#3044 AC2 the gate loop ends gate-done when gate.done is already there" {
   local G="$BATS_TEST_TMPDIR/g-done"
   mkdir -p "$G"; : > "$G/gate.done"
-  G="$G" run bash -c "$(_gate_loop)"
+  run bash -c "$(_gate_loop "$G")"
   [ "$status" -eq 0 ]
   [ "$output" = "gate-done: gate.done exists" ]
 }
@@ -999,7 +1007,7 @@ _gate_loop() {
   local pg; pg="$(cat "$G/gate.pgid")"
   kill -0 -- "-$pg"
   ( sleep 1; : > "$G/gate.done" ) &
-  G="$G" run bash -c "$(_gate_loop)"
+  run bash -c "$(_gate_loop "$G")"
   kill -- "-$pg" 2>/dev/null || true
   [ "$status" -eq 0 ]
   [ "$output" = "gate-done: gate.done exists" ]
@@ -1009,7 +1017,7 @@ _gate_loop() {
   local G="$BATS_TEST_TMPDIR/g-gone"
   mkdir -p "$G"
   perl -e 'if (my $p = fork) { setpgrp($p, $p); print "$p\n"; exit 0 } setpgrp(0, 0); exec "sleep", "1"' > "$G/gate.pgid"
-  G="$G" run bash -c "$(_gate_loop)"
+  run bash -c "$(_gate_loop "$G")"
   [ "$status" -eq 3 ]
   [ "$output" = "gate-gone: the process group ended without gate.done" ]
   [ ! -e "$G/gate.done" ]
@@ -1023,7 +1031,7 @@ _gate_loop() {
   local G="$BATS_TEST_TMPDIR/g-late"
   mkdir -p "$G"
   echo 4242 > "$G/gate.pgid"
-  G="$G" run bash -c 'kill() { : > "$G/gate.done"; return 1; }; '"$(_gate_loop)"
+  run bash -c 'kill() { : > "$G/gate.done"; return 1; }; '"$(_gate_loop "$G")"
   [ "$status" -eq 0 ]
   [ "$output" = "gate-done: gate.done exists" ]
 }
@@ -1031,9 +1039,18 @@ _gate_loop() {
 @test "#3044 AC2 the gate loop ends gate-gone when gate.pgid is missing" {
   local G="$BATS_TEST_TMPDIR/g-nopgid"
   mkdir -p "$G"
-  G="$G" run bash -c "$(_gate_loop)"
+  run bash -c "$(_gate_loop "$G")"
   [ "$status" -eq 3 ]
   [ "$output" = "gate-gone: the process group ended without gate.done" ]
+}
+
+@test "#3044 round 10 the gate loop refuses an unset G with exit 2, never as gate-gone" {
+  # A driver that leaves G empty must not read as a dead gate: gate-gone sends
+  # the round to the signal-never-arrived arm, which stops a healthy suite.
+  run env -u G bash -c "$(_gate_loop "")"
+  [ "$status" -eq 2 ]
+  [ -n "$output" ]
+  lacks "$output" 'gate-gone'
 }
 
 # --- #3044: the verdict-file loop, DRIVEN -------------------------------------
