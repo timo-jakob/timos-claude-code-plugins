@@ -162,7 +162,8 @@ Emit exactly one fenced `json` block and no other prose. The object has the keys
     "date": null,
     "retires": ["NG-1"],
     "rewrites": [],
-    "adds": ["S-2"]
+    "adds": ["S-2"],
+    "evidence": []
   },
   "questions": [
     {
@@ -211,6 +212,8 @@ Rules for the payload:
   a `charter/v1` direction change: its `id` from its date, `affects` =
   `retires` + `rewrites` + `adds`, and `evidence` = the issue or PR references
   it came from.
+  Its own `evidence` lists those references, `[]` when the change came only
+  from the human's reply, and the log entry's `evidence` is copied from it.
 - **`questions`** — the questions still genuinely open, each with an `id`, its
   `text` and `why` the evidence cannot answer it. `[]` when nothing is left to
   ask. Never re-ask what the reply or the evidence already answered.

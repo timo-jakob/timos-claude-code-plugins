@@ -89,9 +89,10 @@ setup() {
   [ "$output" = '["id","statement","status"]' ]
 }
 
-@test "a direction change carries from, to, rationale, date, retires, rewrites and adds" {
+@test "a direction change carries from, to, rationale, date, retires, rewrites, adds and evidence" {
   run jq -c '.direction_change | keys' "$OUT_JSON"
-  [ "$output" = '["adds","date","from","rationale","retires","rewrites","to"]' ]
+  [ "$output" = '["adds","date","evidence","from","rationale","retires","rewrites","to"]' ]
+  contains "$FLAT" 'Its own `evidence` lists those references, `[]` when the change came only from the human'"'"'s reply, and the log entry'"'"'s `evidence` is copied from it.'
 }
 
 @test "a question carries id, text and why" {
