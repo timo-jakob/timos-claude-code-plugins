@@ -12,8 +12,9 @@
 #   bug-spec.zsh read [--body-file <file>]
 #       Read a body (--body-file, else stdin) and print one JSON object:
 #       {"block": <the bug-spec/v1 JSON mirror>, "prose_sha256": <the hash of
-#       the prose region as it reads now>}. A caller compares the two hashes to
-#       tell whether the prose was edited since the block was generated.
+#       the prose region as it reads now>, "prose": <that region's text>}. A
+#       caller compares the two hashes to tell whether the prose was edited
+#       since the block was generated.
 #
 # The region, in this order, ends the body:
 #   <!-- bug-spec:prose:start -->
@@ -28,7 +29,8 @@
 #   0  printed
 #   1  render: the analysis is not a usable bug-analyst object (a key missing,
 #      a verdict or reclassify_as outside its enum, draft_prose lacking one of
-#      the four headings), or the body holds a spec region with no end marker;
+#      the four headings or the falsifying test's command), or the body holds
+#      a spec region with no end marker;
 #      read: no spec, or a spec whose block is missing, unparseable or not
 #      bug-spec/v1 — either way there is no usable spec
 #   2  usage
@@ -111,7 +113,7 @@ if [[ "$mode" == read ]]; then
     exit 1
   fi
   now="$(prose_hash "$prose")" || exit 3
-  jq -cn --argjson block "$block" --arg h "$now" '{block: $block, prose_sha256: $h}'
+  jq -cn --argjson block "$block" --arg h "$now" --arg prose "$prose" '{block: $block, prose_sha256: $h, prose: $prose}'
   exit 0
 fi
 
@@ -139,6 +141,13 @@ for h in "${HEADINGS[@]}"; do
   fi
   rest="${rest#*"$h"}"
 done
+# The falsifying test's command is run by the fix step (fail-first.zsh, #3213),
+# which trusts it only as written in the hashed prose a code owner confirms.
+cmd="$(print -r -- "$a" | jq -r '.falsifying_test.command? // ""')"
+if [[ -n "$cmd" && "$prose" != *"$cmd"* ]]; then
+  print -u2 "$me: draft_prose does not carry the falsifying test's command verbatim"
+  exit 1
+fi
 
 if [[ "$body" == *"$START"* ]]; then
   if [[ "$body" != *"$START"*"$END"* ]]; then

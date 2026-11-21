@@ -442,7 +442,12 @@ fallback above into a typed refusal.
 
 ### 2. Implement
 
-**First — consume the `story-spec/v1` block if the issue carries one (#577).** A
+**A bug fix proves itself fail-first (#3213).** For an issue whose body carries a `bug-spec/v1` block, §2 first adds
+the falsifying test and records its result at the branch base; when that test passes, the run stops with outcome
+`spec-does-not-reproduce` and fixes nothing. An issue without the block is untouched by all of this:
+see `reference/fail-first.md` § Detect the bug spec (#3213)
+
+**Then — consume the `story-spec/v1` block if the issue carries one (#577).** A
 refined issue (via `/development:refine-issue`) has a machine-readable
 `story-spec/v1` block appended to its body (a collapsed `<details>` holding a
 fenced `json` object, per the ARCHITECTURE.md *Story-spec contract*). When
@@ -979,6 +984,10 @@ left as it is — never post a second origin comment.
 **Before open-pr (#2903):** see `reference/ask-branches.md` § RS-09 — the parked follow-up default (#2903)
 **When the fallback review panel engaged (#2909):**
 see `reference/ask-branches.md` § RS-06a — the fallback review panel default (#2909)
+
+**Bug evidence (#3213).** On a bug fix, the run records the falsifying test again after the fix; `fail-first.zsh check`
+must exit 0 before a PR is opened, and `render`'s **Bug evidence** section goes into the PR body:
+see `reference/fail-first.md` § Before the PR — record it again and check (#3213)
 
 **Joint closure of the story + its test-case issues (#696).** When the same-PR test-case lifecycle ran (Step 2's planner
 exited 0), the PR body carries **one `Closes #N` per issue** — the story **and** every linked `test-case` issue from the

@@ -1,13 +1,20 @@
-# The bugs concern — analysis and confirmation (#3212)
+# The bugs concern — fix, analysis and confirmation (#3212, #3213)
 
 The procedure the maintenance orchestrator (`development/skills/maintenance/SKILL.md`)
 runs for the `bugs` concern: under `--concern=bugs`, and in an unscoped run at
 the bugs position of the concern order (Phase 8). A bug moves through two
 steps with a human between them: **analysis** writes a bug spec onto the issue,
 a code owner **confirms** it with the `confirmed` label, and only then may a
-later run **fix** it. This file is the analysis step and the confirmation rule;
-the fix step is a later story of the scheduled-maintenance epic (#3210). The
-bug spec's format is ARCHITECTURE.md, *Bug spec contract (`bug-spec/v1`)*.
+later run **fix** it (#3213). This file is the fix step, the analysis step and
+the confirmation rule. The bug spec's format is ARCHITECTURE.md, *Bug spec
+contract (`bug-spec/v1`)*.
+
+**The bugs cap: at most 5 bugs per run, attended or scheduled.** Each fix and
+each analysis counts one, fixes first, in the order `list-bugs.zsh` printed.
+Each fix is a whole `resolve-issue` run that can take hours, so a run typed by
+hand is capped too. Under `--concern=bugs`, `--batch=N` sets the cap to `N`
+instead. A bug the cap leaves is listed as "deferred by the cap" and waits for
+the next run.
 
 **Analysis writes to the issue only.** It changes no file in the repository,
 creates no branch and opens no PR. The falsifying test is part of the spec's
@@ -60,19 +67,54 @@ What each state means for this step:
 
 | `state` | This step |
 | --- | --- |
-| `needs-analysis` | analyse it (section 2) |
+| `needs-analysis` | analyse it (section 3) |
 | `awaiting-confirmation` | nothing; list it with its reason — it waits for a code owner |
 | `not-a-bug` | nothing; its comment already proposed the reclassification or said the report does not reproduce |
-| `confirmed` | nothing here; the fix step takes it |
+| `confirmed` | fix it (section 2) |
 | `held` | nothing; list it with its reason (a hold label, or the open PR) |
 | `not-eligible` | nothing; list it as "needs a code owner to re-file" |
 
-## 2. Analyse each `needs-analysis` bug, in order
+## 2. Fix each `confirmed` bug, in order
 
 A `--dry-run` stops at Phase 5 and a `--no-merge` run skips Phase 8, so
 neither reaches this file.
 
-For each `needs-analysis` bug, in the order `list-bugs.zsh` printed:
+For each `confirmed` bug, in the order `list-bugs.zsh` printed, **one after
+another** — never two at once — while the cap allows:
+
+1. **Re-check the confirmation immediately before the fix.** A code owner may
+   have removed the label, or someone edited the spec, since `list-bugs.zsh`
+   read it:
+
+   ```bash
+   "<skill-base-dir>/scripts/check-bug-confirmation.zsh" <N> --repo "$REPO" --repo-dir .
+   ```
+
+   Exit 0 → fix it (step 2). Exit 1 → do not fix it: list it with the stderr
+   reason and go on to the next bug. Exit 3 decided nothing: list it as
+   "confirmation could not be checked" and go on. Neither counts against the
+   cap.
+2. **Run `/development:resolve-issue <N>`** (Skill tool) in this session. It is
+   the maintenance pipeline's run, so it is unattended: its session mode is
+   `unattended` and it asks no one. It writes the falsifying test first, and
+   records it failing before the fix and passing after it; it opens a PR only
+   then, with the **Bug evidence** section in the body
+   (`development/skills/resolve-issue/reference/fail-first.md`).
+3. **Record how the run ended** and start the next bug, whatever the ending:
+   - a PR — its number, and whether it merged;
+   - a **clean stop** — the clean-stop comment on the issue; a later attended
+     `--resume` continues it;
+   - **`spec-does-not-reproduce`** — the falsifying test passed on the code
+     before the fix, so nothing was fixed; the issue now carries
+     `needs-human-decision` and is `held` on later runs;
+   - any other stop — the reason the run reported.
+
+   No ending of one bug stops the concern: the next bug starts.
+
+## 3. Analyse each `needs-analysis` bug, in order
+
+For each `needs-analysis` bug, in the order `list-bugs.zsh` printed, while the
+cap allows:
 
 1. **Dispatch `development:bug-analyst`** (Task tool, foreground), naming the
    repo, the checkout's path and the issue number. It returns one JSON object;
@@ -119,7 +161,7 @@ For each `needs-analysis` bug, in the order `list-bugs.zsh` printed:
      --description "A code owner confirmed this bug's spec" 2>/dev/null || true
    ```
 
-## 3. Confirmation
+## 4. Confirmation
 
 A bug is fixable only when
 `"<skill-base-dir>/scripts/check-bug-confirmation.zsh" <N> --repo "$REPO" --repo-dir .`
@@ -131,8 +173,10 @@ label. Exit 1 names the first check that failed on one stderr line,
 either answer. The confirmation is what makes a bug fixable, not the absence of
 a human at the keyboard, so an attended run applies the same rule.
 
-## 4. Report
+## 5. Report
 
-The Phase 9 summary gets one `Bugs` block: the bugs analysed this run (with
-their verdicts), and the counts and numbers of every other state, each with
-its reason. A bug whose analysis failed is listed with why.
+The Phase 9 summary gets one `Bugs` block: the bugs fixed this run (each with
+how its run ended, section 2), the bugs analysed this run (with their
+verdicts), the bugs deferred by the cap, and the counts and numbers of every
+other state, each with its reason. A bug whose analysis failed is listed with
+why.
