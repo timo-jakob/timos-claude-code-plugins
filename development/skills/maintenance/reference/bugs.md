@@ -75,9 +75,9 @@ For each `needs-analysis` bug, in the order `list-bugs.zsh` printed:
    either `gh` call failing, is a tooling failure, listed the same way and never
    commented on. **Exit 2** is your own malformed call: fix it and re-run once.
 3. **Comment once.** Post one comment carrying the marker
-   `<!-- bug-spec-awaiting/v1 -->`, unless a comment on the issue already
-   carries it (`gh issue view <N> --json comments` — a re-analysis does not
-   comment twice):
+   `<!-- bug-spec-awaiting/v1 <verdict> -->`, unless a comment on the issue
+   already carries it with this verdict (`gh issue view <N> --json comments` —
+   a re-analysis comments again only when its verdict changed):
    - verdict `bug`: the spec is on the issue and awaits a code owner's
      `confirmed` label; a code owner confirms it by applying that label,
      removing and re-applying it if it is already on, and any edit to the issue
