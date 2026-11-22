@@ -87,6 +87,10 @@ spec_body() {
   run --separate-stderr zsh "$BATS_TEST_TMPDIR/a/b/c/fail-first.zsh" spec <<< 'A plain feature request.'
   [ "$status" -eq 3 ]
   starts_with "$stderr" 'fail-first: the bug-spec reader failed'
+  # a body file that cannot be read is exit 3 too, never read as no spec
+  run --separate-stderr zsh "$FF" spec --body-file "$BATS_TEST_TMPDIR/absent.md"
+  [ "$status" -eq 3 ]
+  starts_with "$stderr" 'fail-first: cannot read:'
 }
 
 @test "spec: edited prose is exit 4 spec-prose-edited" {
