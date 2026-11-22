@@ -457,6 +457,21 @@ pin_of() {
   contains "$(tr -s '[:space:]' ' ' < "$REPO_ROOT/docs/how-to/write-and-send-your-product-charter.md")" "needs pandoc ${min_pandoc} or newer and Typst ${min_typst} or newer"
 }
 
+@test "the charter how-to states the skill's guarantees, files and nav line" {
+  local page
+  page="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/docs/how-to/write-and-send-your-product-charter.md")"
+  contains "$page" 'the skill still writes the charter, then stops before rendering'
+  contains "$page" 'Nothing is half-rendered'
+  contains "$page" 'Nothing is written before you approve'
+  contains "$page" 'It never commits, pushes or opens a PR'
+  contains "$page" 'Entries are never deleted and their ids never change'
+  contains "$page" '| `dist/product/charter.pdf` | The rendered PDF | No |'
+  contains "$page" 'never edits your site configuration'
+  contains "$page" '- Product charter: product/charter.md'
+  contains "$page" 'stops without writing anything'
+  contains "$page" 'keeps the DRAFT mark while the charter or one of its appendices has uncommitted changes'
+}
+
 @test "define-personas renders the registry after its write and reports both paths" {
   local step
   step="$(sed -n '/^## Step 3 — render the registry/,/^## /p' "$SKILL" | tr -s '[:space:]' ' ')"
