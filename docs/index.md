@@ -31,6 +31,7 @@ separate.
 - [Read your pipeline telemetry](how-to/read-pipeline-telemetry.md)
 - [Switch fable agents to opus when the fable budget runs out](how-to/switch-fable-agents-to-opus.md)
 - [Set a corner-case risk threshold](how-to/set-a-corner-case-risk-threshold.md)
+- [Write and send your product charter (PDF + ePub)](how-to/write-and-send-your-product-charter.md)
 - [Maintain this repo (quarterly template refresh)](how-to/maintain-this-repo.md)
 - [Contribute (signed commits, branch protection)](how-to/contributing.md)
 - [Add support for a new language plugin](adding-a-language-plugin.md)

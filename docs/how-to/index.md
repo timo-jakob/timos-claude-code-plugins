@@ -22,6 +22,7 @@ what you want to achieve.
 - [Run resolve-issue unattended, so it never waits on a prompt](run-resolve-issue-unattended.md)
 - [See how long a running test gate has left](see-how-long-a-gate-has-left.md)
 - [Let refine-issue answer the questions it is sure about](let-refine-issue-answer-confident-questions.md)
+- [Write and send your product charter (PDF + ePub)](write-and-send-your-product-charter.md)
 - [Maintain this repo (quarterly template refresh)](maintain-this-repo.md)
 - [Contribute (signed commits, branch protection)](contributing.md)
 - [Add support for a new language plugin](../adding-a-language-plugin.md)

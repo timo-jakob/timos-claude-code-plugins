@@ -39,7 +39,10 @@ shipped. Every change, whichever skill produced it, ships the same way.
    workflows, scanners, hooks, the docs stack — and opens it as a PR ([How bootstrap works](workflow-bootstrap.md)).
    `/product:define-personas`, from the `product` plugin, writes the persona registry, `docs/personas.md`. Personas are
    optional, but they are what lets refinement write test data that looks like real input
-   ([Personas](#personas-who-a-story-serves) below).
+   ([Personas](#personas-who-a-story-serves) below). `/product:define-charter`, from the same plugin, writes the
+   product charter, `docs/product/charter.md`: what the product is for, who it serves and what it deliberately does not
+   build, rendered to a PDF and an ePub you can send
+   ([Write and send your product charter](../how-to/write-and-send-your-product-charter.md)).
 2. **Specify.** You file an issue or an epic, as you would for a human colleague, and start
    `/development:resolve-issue` on it. Before anything is built, its first steps check that no open blocker stands in
    the way and have the `story-readiness` agent judge whether the story is specified well enough. In a run you started,
@@ -100,6 +103,7 @@ the one each agent's frontmatter names.
 | `story-readiness` | fable | resolve-issue, refine-issue | Judge whether a story is specified well enough to build; propose or validate its story spec; raise persona advisories |
 | `issue-refiner` | fable | refine-issue | One refinement turn: explain each objection, ask scored questions, draft the rewrite and the story spec |
 | `persona-definer` | fable | define-personas | One elicitation turn: propose personas from repo evidence, challenge coverage gaps, draft the registry |
+| `charter-definer` | fable | define-charter | One charter turn: propose values, scope and non-goals from repo evidence, draft direction changes and the charter |
 | `resolve-step` | opus | resolve-issue | Run one issue's Single-issue flow as a step of a human-started run, and write its step verdict |
 | `refine-step` | opus | resolve-issue | Run one chained refinement as a step of a human-started run, and write its step verdict |
 | `round-panel` | opus | resolve-issue | Run one review round's panel: one reviewer per dimension of the repo type's review |
@@ -161,6 +165,8 @@ Each workflow is defined by its skill; when a page here and a skill disagree, th
   [`development/skills/refine-issue/SKILL.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development/skills/refine-issue/SKILL.md)
 - `/product:define-personas` (in the `product` plugin) —
   [`product/skills/define-personas/SKILL.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/product/skills/define-personas/SKILL.md)
+- `/product:define-charter` (in the `product` plugin) —
+  [`product/skills/define-charter/SKILL.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/product/skills/define-charter/SKILL.md)
 - `/development:resolve-issue` —
   [`development/skills/resolve-issue/SKILL.md`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/development/skills/resolve-issue/SKILL.md)
 - `/development:bootstrap` —
