@@ -99,6 +99,7 @@ whole() {
   contains "$s" 'A `bug` verdict has `reclassify_as: null`.'
   contains "$s" '`intentional_per` is `null` unless a clause or position makes the behaviour intentional.'
   contains "$s" 'You edit no file, create no file, run no command that writes, and post nothing to GitHub'
+  contains "$s" '**Write no `Falsifying test:` line yourself**: the render ends the prose with one carrying `falsifying_test.command`, and the fix step runs only the command that line names.' # #3213
 }
 
 @test "reference/bugs.md: analysis writes to the issue only, comments once, and never analyses a non-owner's bug" {
@@ -113,7 +114,8 @@ whole() {
   contains "$s" '> <scratch>/bug-<N>-new-body.md && gh issue edit <N>'
   contains "$s" '`<!-- bug-spec-awaiting/v1 <verdict> -->`, where `<verdict>` is the analysis'"'"'s `verdict` (`bug` or `not-a-bug`), unless a comment on the issue already carries it with this verdict'
   contains "$s" 'it never relabels it and never fixes it.'
-  contains "$s" 'or the body holds a spec cut short: write nothing, list the bug as "analysis failed" with the stderr line, post no comment, and go on to the next bug.'
+  contains "$s" 'or the body'"'"'s own text would hide the spec (an unclosed code fence above it): write nothing, list the bug as "analysis failed" with the stderr line, post no comment, and go on to the next bug.'
+  contains "$s" 'replaces the spec a previous analysis wrote — the last one, its sentinels on lines of their own; a sentinel the reporter merely quotes stays text.'
   contains "$s" '**Dispatch `development:bug-analyst`** (Task tool, foreground), naming the repo, the checkout'"'"'s path and the issue number.'
   contains "$s" 'exit 3 decided nothing and is never read as either answer.'
   contains "$s" 'The confirmation is what makes a bug fixable, not the absence of a human at the keyboard'

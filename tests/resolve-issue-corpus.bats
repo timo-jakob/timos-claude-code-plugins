@@ -39,7 +39,7 @@ setup() {
   # copy outside the helper, and it is what makes the "roster changed" case below
   # a real assertion rather than a tautology.
   EXPECTED_REFS=(review-loop.md residue.md escalation.md interactive.md checkpoint.md ask-branches.md sequential.md telemetry.md epic-telemetry.md epic-tree.md
-    readiness-cache.md chain-steps.md)
+    readiness-cache.md chain-steps.md fail-first.md)
   # #2055 split review-loop.md into shards under reference/review-loop/; the
   # shard roster is transcribed once here for the same reason, in the index's
   # read order.
@@ -102,7 +102,8 @@ _synth() {
     "$base/reference/epic-telemetry.md" \
     "$base/reference/epic-tree.md" \
     "$base/reference/readiness-cache.md" \
-    "$base/reference/chain-steps.md")"
+    "$base/reference/chain-steps.md" \
+    "$base/reference/fail-first.md")"
   [ "$output" = "$want" ]
 }
 
@@ -213,7 +214,7 @@ _synth() {
   for s in "${EXPECTED_SHARDS[@]}"; do shard_bodies+="body of $s"$'\n\n'; done
   for s in "${EXPECTED_RESIDUE_SHARDS[@]}"; do residue_bodies+="body of $s"$'\n\n'; done
   for s in "${EXPECTED_INTERACTIVE_SHARDS[@]}"; do interactive_bodies+="body of $s"$'\n\n'; done
-  want="$(printf 'conductor\n\nbody of review-loop.md\n\n%sbody of residue.md\n\n%sbody of escalation.md\n\nbody of interactive.md\n\n%sbody of checkpoint.md\n\nbody of ask-branches.md\n\nbody of sequential.md\n\nbody of telemetry.md\n\nbody of epic-telemetry.md\n\nbody of epic-tree.md\n\nbody of readiness-cache.md\n\nbody of chain-steps.md\n' "$shard_bodies" "$residue_bodies" "$interactive_bodies")"
+  want="$(printf 'conductor\n\nbody of review-loop.md\n\n%sbody of residue.md\n\n%sbody of escalation.md\n\nbody of interactive.md\n\n%sbody of checkpoint.md\n\nbody of ask-branches.md\n\nbody of sequential.md\n\nbody of telemetry.md\n\nbody of epic-telemetry.md\n\nbody of epic-tree.md\n\nbody of readiness-cache.md\n\nbody of chain-steps.md\n\nbody of fail-first.md\n' "$shard_bodies" "$residue_bodies" "$interactive_bodies")"
   [ "$(cat "$out")" = "$want" ]
 }
 

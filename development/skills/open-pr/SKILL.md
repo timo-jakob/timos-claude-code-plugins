@@ -247,6 +247,16 @@ GH_TOKEN="$(cat "$TOKEN_FILE")" "<skill-base-dir>/../maintenance/scripts/retrigg
 activity type — they do when `types:` is unset, GitHub's default. A workflow
 pinned to `types: [opened, synchronize]` would not re-run on the nudge.)
 
+**Bug evidence (#3213).** When the caller is a resolve-issue bug fix (its
+`reference/fail-first.md`), it records the falsifying test at this branch's
+HEAD after Step 1b and before Step 2, and hands over the **Bug evidence**
+section `fail-first.zsh render` printed once `fail-first.zsh check` exited 0.
+Put that section in the PR body **once**, after the Test plan and before the
+Review dossier: it shows the command, the test's exit before the fix and with
+it, and both commits. A bug fix whose `check` did not exit 0 has no section to
+hand over and opens no PR, so never open one without it; when the caller hands
+none, the body is as it was.
+
 **Review dossier (#563).** When the caller ran the local review loop (#562) and
 it ended **`CONVERGED`** (exit 0), the only review-loop ending that opens a PR,
 append the **Review dossier** to the PR body, after the Test plan — it is the

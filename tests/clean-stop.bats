@@ -382,7 +382,7 @@ flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
   skill="$(flat "$REPO_ROOT/development/skills/resolve-issue/SKILL.md")"
   esc="$(flat "$REPO_ROOT/development/skills/resolve-issue/reference/escalation.md")"
   ext="$(flat "$REPO_ROOT/development/skills/resolve-issue/reference/interactive/extension.md")"
-  contains "$skill" '**Without `--resume`**, an unattended run always runs `"<skill-base-dir>/scripts/clean-stop.zsh" clear --repo-dir <worktree> --issue <N>` before round 1, whether or not a marker exists, so it never adopts a stopped run'"'"'s work-dir, status file or grant ledger.'
+  contains "$skill" '**Without `--resume`**, an unattended run always runs `"<skill-base-dir>/scripts/clean-stop.zsh" clear --repo-dir <worktree> --issue <N>` before §2, whether or not a marker exists, so it never adopts a stopped run'"'"'s work-dir, status file or grant ledger.'
   contains "$skill" 'An attended run moves any kept state aside instead, deleting nothing.'
   contains "$esc" 'Write the marker beside the durable work-dir the run has been using (`clean-stop.zsh dir`, §3.5):'
   contains "$esc" 'An exit 2 is your own call: a passing verdict without `--cap-reached` was a grant, not a stop.'

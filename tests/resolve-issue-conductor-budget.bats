@@ -408,9 +408,13 @@ _unreached_reference_files() {
   #
   # THIRTY-FOUR since #3146: the promotion gate shard was deleted, taking its
   # one `##` heading.
+  #
+  # THIRTY-SEVEN since #3213: reference/fail-first.md carries *Detect the bug
+  # spec (#3213)*, *The falsifying test first (#3213)* and *Before the PR —
+  # record it again and check (#3213)*, which §2 and §6 point at.
   local n
   n="$(_ref_headings | grep -c .)"
-  [ "$n" -eq 34 ]
+  [ "$n" -eq 37 ]
 }
 
 # --- pointers resolve -------------------------------------------------------
@@ -477,9 +481,10 @@ _unreached_reference_files() {
   # until chain-steps.md's issue step pointed at its deferred follow-ups shard,
   # reference/chain-steps/deferred-follow-ups.md (#3127), and 37 until §3.5 stopped
   # pointing at the promotion gate shard (#3128), and 36 until subagents.md
-  # pointed at its new recovery-arms.md shard (#3293).
-  if [ "$rows" -ne 37 ]; then
-    printf 'the skill carries %s pointer(s), expected 37.\n' "$rows" >&2
+  # pointed at its new recovery-arms.md shard (#3293), and 39 since §2 and §6
+  # point at reference/fail-first.md (#3213).
+  if [ "$rows" -ne 39 ]; then
+    printf 'the skill carries %s pointer(s), expected 39.\n' "$rows" >&2
     printf 'A pointer was added or removed — update this count in the same PR,\n' >&2
     printf 'and check the step that gained or lost one still reaches its procedure.\n' >&2
     _all_pointers >&2

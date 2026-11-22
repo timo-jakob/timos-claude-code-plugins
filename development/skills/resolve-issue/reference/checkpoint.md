@@ -96,7 +96,7 @@ The run's record passes the marker's `work_dir` as `--loop-work-dir`.
 
 A run without `--resume` never adopts kept state. An unattended one has already
 cleared the durable folder (§0a); an attended one deletes nothing. Once §1 has
-cut the branch, and before round 1, either one runs:
+cut the branch, and before §2, either one runs:
 
 ```bash
 "<skill-base-dir>/scripts/checkpoint.zsh" supersede --repo-dir <worktree> --issue <N> --branch <branch>

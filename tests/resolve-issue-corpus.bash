@@ -60,7 +60,8 @@ resolve_issue_files() {
   # ending after a review loop reads (#2903), then the run's own telemetry
   # (#1226), which every ending reaches last, then the
   # epic tree walk's procedure (#2857), which only an epic run reads, then the
-  # readiness-verdict cache (#2955), which step 0b and E1b read. This
+  # readiness-verdict cache (#2955), which step 0b and E1b read, then the chain
+  # steps (#2940), then a bug fix's fail-first procedure (#3213). This
   # same array is both what the tripwire compares against AND what is emitted, so
   # there is no second transcription for a maintainer to update in isolation.
   # (An earlier cut had a separate `expected` list: satisfying the tripwire by
@@ -70,7 +71,7 @@ resolve_issue_files() {
   # later.)
   local -a ordered
   ordered=(review-loop.md residue.md escalation.md interactive.md checkpoint.md ask-branches.md sequential.md telemetry.md epic-telemetry.md epic-tree.md
-    readiness-cache.md chain-steps.md)
+    readiness-cache.md chain-steps.md fail-first.md)
 
   # #2055 split review-loop.md into shards under reference/review-loop/ and left
   # the old path as an INDEX. The shards are members too — a sweep over the
