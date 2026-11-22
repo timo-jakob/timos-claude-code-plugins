@@ -396,7 +396,7 @@ whole() {
   local s
   s="$(whole "$REPO_ROOT/development/skills/resolve-issue/reference/fail-first.md")"
   contains "$s" 'Its exit 1 edits nothing and stops, the run'"'"'s record `failed` and a step'"'"'s verdict `stopped`, cause `failed`, with its stderr line as the reason; its exit 3 is Exit 3'"'"'s stop.'
-  contains "$s" '**Exit 4** — a bug spec this run cannot fix from; stderr names the reason (`unreadable-spec`, `spec-prose-edited`, `not-a-bug`, `no-falsifying-test`, `command-not-in-prose`). Edit nothing, and post one comment carrying `<!-- fail-first/v1 <reason> -->`'
+  contains "$s" '**Exit 4** — a bug spec this run cannot fix from; stderr names the reason (`unreadable-spec`, `spec-prose-edited`, `not-a-bug`, `no-falsifying-test`, `command-not-in-prose`). Edit nothing. On `spec-prose-edited` or `not-a-bug`, stop as the confirmation'"'"'s exit 1 above does, so the bug'"'"'s analysis decides again. On the others, post one comment carrying `<!-- fail-first/v1 <reason> -->`'
   contains "$s" 'a step'"'"'s verdict is `stopped`, cause `failed`, with the stderr line as its reason.'
   contains "$s" 'A non-zero exit must be the test'"'"'s own assertion failing, as `<durable>/fail-first.log` shows it.'
   contains "$s" 'Only the last `before` record counts.'
@@ -407,7 +407,7 @@ whole() {
   contains "$s" 'A resumed run skips §1 and takes the full id `git rev-parse <the branch'"'"'s first wip(resolve-issue #<N>) commit>^` instead.'
   contains "$s" '**Exit 3** decided nothing — the issue body could not be read or the spec reader failed. Report the stderr, emit the run'"'"'s record as `failed` and stop: a step'"'"'s verdict is `stopped`, cause `tooling`. **Exit 2** is your own malformed call: fix it and re-run once.'
   contains "$s" 'Exit 3 is a tooling stop: report the stderr, emit the record as `failed`, and end a step `stopped` with cause `tooling`.'
-  contains "$s" 'A test that cannot run (a syntax error, a missing tool) proves nothing: rewrite it and record again.'
+  contains "$s" 'A test that cannot run (a syntax error, a missing tool) proves nothing: rewrite it and record again, at most twice, then stop as step 4 does, with `test-cannot-run` in place of `spec-does-not-reproduce`.'
 }
 
 @test "open-pr SKILL.md: the Bug evidence section goes into the body once, after the Test plan" {

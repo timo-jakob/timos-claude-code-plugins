@@ -35,7 +35,9 @@ gh issue view <N> --json body -q .body > <scratch>/issue-<N>-body.md
   as the first implementation edit; at §6, take *Before the PR*.
 - **Exit 4** — a bug spec this run cannot fix from; stderr names the reason
   (`unreadable-spec`, `spec-prose-edited`, `not-a-bug`, `no-falsifying-test`,
-  `command-not-in-prose`). Edit nothing, and post one comment carrying
+  `command-not-in-prose`). Edit nothing. On `spec-prose-edited` or
+  `not-a-bug`, stop as the confirmation's exit 1 above does, so the bug's
+  analysis decides again. On the others, post one comment carrying
   `<!-- fail-first/v1 <reason> -->` with the stderr line, then apply
   `needs-human-decision` (created idempotently, as below). Emit the run's
   record as `failed` (§7) and stop: a step's verdict is `stopped`, cause
@@ -59,7 +61,10 @@ branch was cut from. A resumed run skips §1 and takes the full id
 `git rev-parse <the branch's first wip(resolve-issue #<N>) commit>^` instead.
 The record file lives in `<durable>`, the run's durable folder — the `base` path
 `clean-stop.zsh dir --repo-dir <worktree> --issue <N>` prints (create it when
-absent) — so a resumed run finds it:
+absent) — so a resumed run finds it. Any stop below while the test is still
+uncommitted first discards it (`git clean -f -- <path>`, or
+`git checkout -- <path>` when it extended an existing file), so the next run
+starts from a clean tree:
 
 1. **Write the falsifying test, and nothing else.** The first implementation
    edit adds the test named `name` at `path`. No source file changes yet.
@@ -78,7 +83,9 @@ absent) — so a resumed run finds it:
 3. **Read the result** — the last line's `exit` in `<durable>/fail-first.jsonl`.
    A non-zero exit must be the test's own assertion failing, as
    `<durable>/fail-first.log` shows it. A test that cannot run (a syntax error,
-   a missing tool) proves nothing: rewrite it and record again. Only the last
+   a missing tool) proves nothing: rewrite it and record again, at most twice,
+   then stop as step 4 does, with `test-cannot-run` in place of
+   `spec-does-not-reproduce`. Only the last
    `before` record counts.
 4. **When the test passes on the base, the spec does not reproduce.** The run
    **fixes nothing**: it changes no source file, pushes nothing and opens no PR.
@@ -97,8 +104,10 @@ absent) — so a resumed run finds it:
 
    Emit the run's record as `failed` (§7) and stop. A step's verdict is
    `stopped`, cause `failed`, reason `spec-does-not-reproduce`.
-5. **Otherwise fix the bug**, and go on with §3's gate and §3.5's loop as
-   usual. The falsifying test stays in the change.
+5. **When it fails on its own assertion, fix the bug**, and go on with §3's
+   gate and §3.5's loop as usual. The falsifying test stays in the change,
+   unchanged after its last `before` record: changing it means recording
+   `before` again at the base, with the fix set aside.
 
 ## Before the PR — record it again and check (#3213)
 
