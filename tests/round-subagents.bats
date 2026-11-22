@@ -29,6 +29,8 @@ setup() {
   # subagents section is subagents.md plus the four briefs/*.md, in that order.
   RL="$REF/review-loop"
   SUBS="$RL/subagents.md"
+  # #3293 moved the verdict recovery arms out of subagents.md into their own shard.
+  ARMS="$RL/recovery-arms.md"
   BRIEFS="$RL/briefs"
   AGENTS="$REPO_ROOT/development/agents"
   HEADING='### Round subagents — the conductor reads only verdicts (#1935)'
@@ -692,7 +694,7 @@ load_decided_pass() {
 # One test per acceptance criterion of #1937, anchored like the rest.
 
 load_arms() {
-  arms="$(section_of "$SUBS" '#### Verdict recovery arms (#1937)' '#### |### |## ' | squeeze)"
+  arms="$(section_of "$ARMS" '#### Verdict recovery arms (#1937)' '#### |### |## ' | squeeze)"
   [ -n "$arms" ]
 }
 load_carry_section() {
@@ -700,16 +702,36 @@ load_carry_section() {
   [ -n "$carry" ]
 }
 
-@test "#1937 AC1: the Verdict recovery arms sub-heading sits once inside the Round subagents section, outside every frozen span" {
+@test "#1937 AC1: the Verdict recovery arms sub-heading sits once, in its own shard, outside every frozen span" {
   [ "$(loop_count '#### Verdict recovery arms (#1937)')" -eq 1 ]
-  [ "$(grep -cxF '#### Verdict recovery arms (#1937)' "$SUBS")" -eq 1 ]
-  load_section
-  contains "$section" '#### Verdict recovery arms (#1937)'
-  # #2055: subagents.md, which holds the arms, carries no frozen-span sentinel.
-  no_sentinels "$SUBS"
+  # #3293: the arms moved to recovery-arms.md; subagents.md no longer holds them
+  [ "$(grep -cxF '#### Verdict recovery arms (#1937)' "$ARMS")" -eq 1 ]
+  [ "$(grep -cxF '#### Verdict recovery arms (#1937)' "$SUBS")" -eq 0 ]
+  # ...and subagents.md ends by pointing at the new shard, on a line of its own
+  [ "$(tail -n 1 "$SUBS")" = 'see `reference/review-loop/recovery-arms.md` § Verdict recovery arms (#1937)' ]
+  # the index lists the new shard directly after subagents.md
+  local s a
+  s="$(grep -nF '`reference/review-loop/subagents.md`' "$PROTO" | cut -d: -f1)"
+  a="$(grep -nF '`reference/review-loop/recovery-arms.md`' "$PROTO" | cut -d: -f1)"
+  [ -n "$s" ]
+  [ -n "$a" ]
+  [ "$a" -eq $(( s + 1 )) ]
+  # #2055: the shard that holds the arms carries no frozen-span sentinel.
+  no_sentinels "$ARMS"
   load_arms
   contains "$arms" 'This is the one statement of what the conductor does with a non-`ok` panel verdict, and with the loop'"'"'s CARRY-UNACCOUNTED, CADENCE and never-ran refusals.'
   contains "$arms" 'for its reasoning read that arm, which is not restated here'
+}
+
+@test "#3293: the index lists subagents.md, recovery-arms.md, estimates.md and the briefs, in that order" {
+  local idx
+  idx="$(squeeze < "$PROTO")"
+  contains "$idx" '12. `reference/review-loop/subagents.md` — round subagents. 13. `reference/review-loop/recovery-arms.md` — the verdict recovery arms. 14. `reference/review-loop/estimates.md`'
+  contains "$idx" '15. `reference/review-loop/briefs/` — `panel.md`, `fix.md`, `decide.md` and `risk.md`, one brief per round subagent.'
+  # both shards stay well under the 20,000-byte shard limit, the index keeps 200 bytes spare
+  [ "$(wc -c < "$SUBS")" -lt 16000 ]
+  [ "$(wc -c < "$ARMS")" -lt 16000 ]
+  [ "$(wc -c < "$PROTO")" -le 2800 ]
 }
 
 @test "#1937 AC2: review-loop.md says 'until #1937' nowhere" {
@@ -784,6 +806,7 @@ load_carry_section() {
 
 @test "#1937 AC8: a stalled carry-redispatch is restored from its pre-carry snapshots" {
   load_arms
+  contains "$arms" '**A stalled `carry-redispatch` is restored, not re-merged.** Before that dispatch, copy'
   contains "$arms" 'copy `findings-round-<R>.json` and `carry-lines-<R>.txt` to `<work-dir>/findings-round-<R>.pre-carry.json` and `<work-dir>/carry-lines-<R>.pre-carry.txt` without opening them'
   contains "$arms" 'before its stall re-dispatch restore both over the originals, so the retry merges and appends exactly once. A failed copy or restore is report-and-stop.'
   contains "$arms" '`carry-repair` takes no snapshot'
@@ -970,7 +993,7 @@ load_risk_pass() {
 
 @test "#3129 AC1: the review-loop shards and the checkpoint reference no longer mention the promotion sub-loop" {
   local f t n
-  for f in "$BRIEFS/decide.md" "$BRIEFS/risk.md" "$RL/risk-pass.md" "$SUBS" "$REF/checkpoint.md"; do
+  for f in "$BRIEFS/decide.md" "$BRIEFS/risk.md" "$RL/risk-pass.md" "$SUBS" "$ARMS" "$REF/checkpoint.md"; do
     t="$(squeeze < "$f")"
     for n in 'promotion sub-loop' 'promoted item' 'promoted: true'; do
       lacks "$t" "$n"

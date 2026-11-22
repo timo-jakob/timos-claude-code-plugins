@@ -5,7 +5,7 @@
 # loop's hook-mode engagement — is pinned behaviourally in
 # tests/review-dispatch.bats and tests/resolve-story-loop.bats. This suite pins
 # the prose half: the panel brief's routing and fallback-unavailable sentences,
-# the subagents.md `not-applicable` row, the RS-06a / RS-06b inventory rows,
+# the recovery-arms.md `not-applicable` row (in subagents.md until #3293), the RS-06a / RS-06b inventory rows,
 # the note after the exit-2 frozen span, and that span's bytes.
 
 bats_require_minimum_version 1.5.0
@@ -17,7 +17,7 @@ setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   REF="$REPO_ROOT/development/skills/resolve-issue/reference"
   BRIEF="$REF/review-loop/briefs/panel.md"
-  SUB="$REF/review-loop/subagents.md"
+  SUB="$REF/review-loop/recovery-arms.md"
   EXIT2="$REF/review-loop/exit-2-stale-findings.md"
   INV="$REF/ask-branches.md"
   flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
@@ -52,7 +52,7 @@ setup() {
   lacks "$t" '| the language panel reported NOT APPLICABLE on a full round |'
 }
 
-@test "the subagents.md not-applicable row fires only when the fallback is NOT APPLICABLE or unavailable (#2909)" {
+@test "the recovery-arms.md not-applicable row fires only when the fallback is NOT APPLICABLE or unavailable (#2909)" {
   run grep -F '| `not-applicable` | `not_applicable` |' "$SUB"
   [ "$status" -eq 0 ]
   [ "${#lines[@]}" -eq 1 ]
@@ -66,7 +66,7 @@ setup() {
   run grep -E '^\| RS-06a \|' "$INV"
   [ "${#lines[@]}" -eq 2 ]
   contains "${lines[0]}" '| reference/review-loop/briefs/panel.md | `Route a full-round NOT APPLICABLE to the fallback panel (#2909)` | implementation | **default:** run the fallback panel'
-  contains "${lines[1]}" '| reference/review-loop/subagents.md | `fires only when the fallback panel is NOT APPLICABLE or unavailable` | implementation |'
+  contains "${lines[1]}" '| reference/review-loop/recovery-arms.md | `fires only when the fallback panel is NOT APPLICABLE or unavailable` | implementation |'
   run grep -E '^\| RS-06b \|' "$INV"
   [ "${#lines[@]}" -eq 2 ]
   contains "${lines[0]}" '| `put it to the human as three options` | intent | human-owned: the fallback is NOT APPLICABLE or unavailable'
@@ -86,7 +86,7 @@ setup() {
   contains "$t" 'choice: the fallback panel, `development-claude-plugin:review` in fallback mode, from round `<the marker'"'"'s round>` on;'
   contains "$t" 'On an ending with no PR body, the entry goes in the run'"'"'s report.'
   contains "$t" 'Who prints it depends on the wiring: in step mode the conductor prints it on the round the fallback engages, from the line the panel subagent returns beside its `ok` verdict (`reference/review-loop/briefs/panel.md`, step 5); in hook mode `resolve-story-loop.zsh` prints it on stderr as it engages the fallback.'
-  contains "$(flat "$SUB")" 'When an `ok` panel verdict comes with the line naming both panels, the fallback engaged this round (#2909): print that line first, as `reference/ask-branches.md` § RS-06a says.'
+  contains "$(flat "$REF/review-loop/subagents.md")" 'When an `ok` panel verdict comes with the line naming both panels, the fallback engaged this round (#2909): print that line first, as `reference/ask-branches.md` § RS-06a says.'
   # and §6 reaches the procedure
   contains "$(flat "$REPO_ROOT/development/skills/resolve-issue/SKILL.md")" '**When the fallback review panel engaged (#2909):** see `reference/ask-branches.md` § RS-06a — the fallback review panel default (#2909)'
 }
