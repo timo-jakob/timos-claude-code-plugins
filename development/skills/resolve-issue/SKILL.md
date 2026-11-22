@@ -986,7 +986,8 @@ left as it is — never post a second origin comment.
 see `reference/ask-branches.md` § RS-06a — the fallback review panel default (#2909)
 
 **Bug evidence (#3213).** Every run, a resumed one included, detects the bug spec again here; on a bug fix it records
-the falsifying test again after the fix; `fail-first.zsh check` must exit 0 before a PR is opened, and `render`'s **Bug evidence** section goes into the PR body:
+the falsifying test again after the fix; `fail-first.zsh check` must exit 0 before a PR is opened, and `render`'s
+**Bug evidence** section goes into the PR body:
 see `reference/fail-first.md` § Before the PR — record it again and check (#3213)
 
 **Joint closure of the story + its test-case issues (#696).** When the same-PR test-case lifecycle ran (Step 2's planner
