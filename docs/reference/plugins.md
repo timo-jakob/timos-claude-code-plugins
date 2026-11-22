@@ -1079,22 +1079,31 @@ no maintenance dispatcher, no resolve profile and no review panel, so
 `development` refers to it only by command name. ARCHITECTURE.md's section
 *The `product` plugin — outside the language/topic model* states the boundary.
 
-**What's built (v0.2).** The plugin shell — its manifest, its marketplace entry
-and `product/scripts/prose-hash.zsh`, a byte-identical copy of `refine-issue`'s
-story-spec prose-hash script that a test keeps equal — and the persona registry:
-the `/product:define-personas` skill and its `persona-definer` agent, which moved
-here from `development`. The charter and rendering skills land in the stories
-that follow
-([#3202](https://github.com/timo-jakob/timos-claude-code-plugins/issues/3202)).
+**What's built.** The product charter — the `/product:define-charter` skill,
+its `charter-definer` agent and `product/scripts/validate-charter.zsh`, which
+checks a `docs/product/charter.md` against the `charter/v1` contract. The
+persona registry — the `/product:define-personas` skill and its
+`persona-definer` agent, which moved here from `development`. The renderer —
+`product/scripts/render-document.zsh`, which turns one product document into a
+PDF and an ePub in one house style (pandoc and Typst, templates in
+`product/templates/`). The product-document lookup —
+`product/scripts/resolve-product-doc.zsh`, which finds a product document in
+the repo itself or in the first linked submodule that carries it. And
+`product/scripts/prose-hash.zsh`, a byte-identical copy of `refine-issue`'s
+story-spec prose-hash script that a test keeps equal. How to write a charter
+and send it:
+[Write and send your product charter](../how-to/write-and-send-your-product-charter.md).
 
 **Skills:**
 
 | Skill | Command | Description |
 | ------- | --------- | ------------- |
+| Define Charter | `/product:define-charter` | **Interactive** — writes or updates a product's `charter/v1` document (`docs/product/charter.md`): what the product is for, who it serves, what wins when goals conflict, what it builds and deliberately does not, and how that direction has changed. Loops the `charter-definer` agent with you (evidence-grounded candidate values, scope items and non-goals, plus questions), then writes the **human-approved** prose + machine block to the working tree, validates it and renders it to a PDF and an ePub. Two modes, inferred: create, and update (refine it or record a direction change). It does not commit or push. Ships in the `product` plugin. |
 | Define Personas | `/product:define-personas` | **Interactive** — creates or updates a repo's `personas/v1` registry (`docs/personas.md`): who actually uses each surface and what they type into it. Loops the `persona-definer` agent with you (repo-grounded candidate personas + Socratic questions), then writes back the **human-approved** prose + machine block to the working tree (lands via the normal PR flow). The registry feeds `refine-issue`'s realistic test-data generation and the readiness gate's advisory persona-reference check. Ships in the `product` plugin. |
 
 **Agents:**
 
 | Agent | Model | Focus |
 | ------- | ------- | ------- |
+| Charter Definer | fable | Per-turn engine for `/product:define-charter` — mines the repo for evidence, drafts the charter prose and its `charter/v1` block, proposes candidate values, scope items and non-goals (each marked with its evidence), drafts a direction change whenever an entry's meaning changes, and asks only what the evidence cannot answer; never invents a date or a reason, never renumbers an id; pure function, no writes |
 | Persona Definer | fable | Per-turn elicitation engine for `/product:define-personas` — proposes repo-grounded candidate personas, asks Socratic questions to extract tacit knowledge, and returns a draft `personas/v1` registry update; challenges gaps (missing kinds, uncovered surfaces) rather than only confirming; pure function, no writes |
