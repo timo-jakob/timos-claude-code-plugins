@@ -844,11 +844,15 @@ PY
   [ "$status" -ne 0 ]
   run grep -qE -- '^<!-- /?moved: ' "$ref/review-loop/step-1-panel.md"
   [ "$status" -ne 0 ]
-  # ...and the index's preamble says step 1 is outside the byte proof now
-  local flat_idx
+  # ...and the script header says step 1 is outside the byte proof now; the
+  # index (#3293) no longer narrates the blocks and points at the script instead
+  local flat_idx flat_v
   flat_idx="$(tr '\n' ' ' < "$ref/review-loop.md" | tr -s ' ')"
-  contains "$flat_idx" "the whole of \`step-1-panel.md\`, step 3's narration paragraph, the notes after each moved block"
-  contains "$flat_idx" 'cut into seven such blocks: three in `core.md`, then `round-protocol-step-2`'
+  contains "$flat_idx" 'Every `<!-- moved: … -->` block in those shards is byte-identical to the text it was carved out of: `scripts/verify-reference-move.zsh` proves it, and its `MANIFEST` names the frozen blocks. Text outside those blocks is outside that proof.'
+  grep -qxF 'typeset -a MANIFEST' "$v"
+  lacks "$flat_idx" 'cut into seven such blocks'
+  flat_v="$(tr '\n' ' ' < "$v" | tr -s ' ')"
+  contains "$flat_v" 'the #1582 gap inside `round-protocol`, which since # #3168 runs on through the whole of round step 1, and the #3169 gap holding # step 3'"'"'s narration paragraph'
   # ...nor does a CUT_GROUPS entry still name it, and the group ends where the
   # #3169 gap begins
   grep -qF -- '  "round-protocol-step-2 round-protocol-recover round-protocol-step-3-head"' "$v"

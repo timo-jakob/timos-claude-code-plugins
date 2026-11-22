@@ -122,7 +122,7 @@ flat() {
 
 @test "#2583 the NOT APPLICABLE options point at the helper" {
   contains "$(flat "$REF/review-loop/exit-2-stale-findings.md")" "$POINTER"
-  contains "$(flat "$REF/review-loop/subagents.md")" "$POINTER"
+  contains "$(flat "$REF/review-loop/recovery-arms.md")" "$POINTER"
 }
 
 @test "#2583 the escalation terminal points at the helper" {

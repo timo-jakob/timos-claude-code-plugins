@@ -45,7 +45,7 @@ setup() {
   # read order.
   EXPECTED_SHARDS=(core.md scope-block.md step-1-panel.md step-2-invocation.md
     exit-2-stale-findings.md exit-20-awaiting-fix.md delta-rounds.md
-    topic-panels.md decided-pass.md risk-pass.md carry.md subagents.md estimates.md
+    topic-panels.md decided-pass.md risk-pass.md carry.md subagents.md recovery-arms.md estimates.md
     briefs/panel.md briefs/fix.md briefs/decide.md briefs/risk.md)
   # #2056 split residue.md into reference/residue/, in that index's read order.
   EXPECTED_RESIDUE_SHARDS=(risk-threshold.md)

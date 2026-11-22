@@ -25,28 +25,14 @@ each at most 20,000 bytes (#2055). Read order:
 10. `reference/review-loop/risk-pass.md` — the risk pass.
 11. `reference/review-loop/carry.md` — carry accounting and carry-driven
     dispatch.
-12. `reference/review-loop/subagents.md` — round subagents and their verdict
-    recovery arms.
-13. `reference/review-loop/estimates.md` — narrating long waits with a sourced
+12. `reference/review-loop/subagents.md` — round subagents.
+13. `reference/review-loop/recovery-arms.md` — the verdict recovery arms.
+14. `reference/review-loop/estimates.md` — narrating long waits with a sourced
     estimate or none.
-14. `reference/review-loop/briefs/` — `panel.md`, `fix.md`, `decide.md` and
+15. `reference/review-loop/briefs/` — `panel.md`, `fix.md`, `decide.md` and
     `risk.md`, one brief per round subagent.
 
 Every `<!-- moved: … -->` block in those shards is byte-identical to the text it
-was carved out of; `scripts/verify-reference-move.zsh` proves that against the
-pinned pre-move commit. The round protocol's frozen span is cut into seven such
-blocks: three in `core.md`, then `round-protocol-step-2`,
-`round-protocol-recover`, `round-protocol-step-3-head` and
-`round-protocol-steps-3-4` across the step shards.
-Round step 1 (`step-1-panel.md`) was the `round-protocol-tail` block until #3168
-edited it, so none of it stays frozen. An indented sentinel pair cuts step 3's
-narration paragraph out of the frozen text (#3169); two more cut out
-`core.md`'s step 4 and wait paragraph (#3044).
-
-**Everything outside those blocks is outside that proof** — new prose the gate
-does not check. That is the whole of `scope-block.md` (#1582's reviewer-path
-rule, which the gate guards only by asserting that no original line migrated into
-it), the whole of `step-1-panel.md`, step 3's narration paragraph, the notes
-after each moved block, and every shard from `delta-rounds.md` on. Those rules
-had to correct or extend what a byte-frozen span says. Edit them knowing the
-byte check does not cover them.
+was carved out of: `scripts/verify-reference-move.zsh` proves it, and its
+`MANIFEST` names the frozen blocks. Text outside those blocks is outside that
+proof.
