@@ -466,6 +466,7 @@ pin_of() {
   contains "$page" 'It never commits, pushes or opens a PR'
   contains "$page" 'Entries are never deleted and their ids never change'
   contains "$page" '| `dist/product/charter.pdf` | The rendered PDF | No |'
+  contains "$page" 'adds `dist/product/` to `.gitignore` when that subtree is not already ignored'
   contains "$page" 'never edits your site configuration'
   contains "$page" '- Product charter: product/charter.md'
   contains "$page" 'stops without writing anything'
