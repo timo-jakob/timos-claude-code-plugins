@@ -233,3 +233,19 @@ setup() {
   run jq -r '.candidates[0].entry.id' "$OUT_JSON"
   [ "$output" = "S-2" ]
 }
+
+# --- the output example keeps its own one-place rule (#3282) -----------------
+
+@test "every sentence of the output example's explanation that names a non-goal names it by id" {
+  run jq -r '[.explanation | split(". ")[] | select(test("non-goal")) | select(test("\\bNG-[0-9]+\\b") | not)] | length' "$OUT_JSON"
+  [ "$status" -eq 0 ]
+  [ "$output" = "0" ]
+}
+
+@test "every entry id the output example's explanation names is drafted in exactly one place" {
+  run jq -r '([.charter_block.values[]?, .charter_block.scope[]?, .charter_block.non_goals[]?, .candidates[].entry] | map(.id)) as $all | [.explanation | scan("\\b(?:V|S|NG)-[0-9]+\\b")] | unique | map(. as $x | select(([$all[] | select(. == $x)] | length) != 1)) | length' "$OUT_JSON"
+  [ "$status" -eq 0 ]
+  [ "$output" = "0" ]
+  run jq -r '[.explanation | scan("\\bNG-[0-9]+\\b")] | length' "$OUT_JSON"
+  [ "$output" != "0" ]
+}

@@ -147,7 +147,7 @@ Emit exactly one fenced `json` block and no other prose. The object has the keys
 
 ```json
 {
-  "explanation": "Closed issue #57 and the README both say Jotter is for one writer, so team workspaces stay a non-goal. The reply changes NG-1: sharing one note is now in scope. S-2 waits in candidates until the change has its date and its reason.",
+  "explanation": "Closed issue #57 and the README both say Jotter is for one writer, which is why the non-goal NG-1 rules out sharing. The reply changes NG-1: sharing one note is now in scope. S-2 waits in candidates until the change has its date and its reason.",
   "candidates": [
     {
       "kind": "scope",
