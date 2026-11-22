@@ -3,7 +3,7 @@
 
 ## The round protocol
 
-<!-- moved: round-protocol-head -->
+<!-- moved: round-protocol-boundary -->
 **The round boundary is concurrent — one minted tree, two readers (#1497).**
 The full-suite gate and the reviewer panel are both **readers** of the working
 tree, so the boundary starts them together instead of making the panel queue
@@ -98,15 +98,27 @@ The ordering, and it is the whole of it:
    not move the tree**: there the round is still a no-fix round, so re-dispatch
    against the same held `T` and mint nothing — a fresh mint would forfeit the
    held `--gate-attest`, which is the self-attestation the invariant forbids.
+
+   <!-- /moved: round-protocol-boundary -->
+
 4. **Observe the gate's completion before consolidating** — wait for step 2's
-   signal, **with a generous bound** (a full suite runs minutes, not hours),
-   then read the verdict it recorded. What is banned is a poll that runs **while
+   signal with the **gate loop** below, in the end-the-turn wait rule (#3044),
+   then read the
+   verdict it recorded. The loop has **no fixed bound**: a whole suite on a
+   shared host can run for more than an hour, and the loop ends on its own when
+   the signal appears or the gate's process group dies without it. Where a
+   ceiling is wanted, take it from `gate-eta.zsh`'s estimate, never a fixed
+   figure. What is banned is a poll that runs **while
    the panel could have been running**: that spends the overlap this boundary
-   exists to buy. A gate whose signal **never arrives**, or whose recorded
+   exists to buy. A gate whose signal **never arrives** — the loop's
+   `gate-gone` line — or whose recorded
    verdict cannot be read, is neither green nor red: stop it with step 3's
    handle, do **not** consolidate, and **report and stop** — never read a
    missing verdict as step 5's empty-`tree` arm. Never consolidate a gate that
    has not returned.
+
+   <!-- moved: round-protocol-boundary-steps-5-7 -->
+
 5. **Green** → consolidate (the *Each round* loop-invocation step below),
    passing `--findings-tree "$T"`. Whether `--gate-attest "$T"` rides along is
    decided by what the gate **reported**, in four arms:
@@ -206,6 +218,7 @@ you re-pass the **held** `--gate-attest` (it mismatches, so the loop re-runs the
 gate, which is correct) or omit it — never pass the fresh mint as
 `--gate-attest`, which would skip a gate that never ran on the post-fix tree.
 That is the one recovery the *no fix pass ran* case above excludes.
+<!-- /moved: round-protocol-boundary-steps-5-7 -->
 
 **How to wait — end the turn (#1513).** Once the boundary has dispatched — the
 gate started out of band, the panel's agents spawned — there is nothing left for
@@ -213,7 +226,7 @@ this turn to do, so **end it**. Every reviewer's result arrives as a harness
 notification that re-invokes you, and the harness queues them, so the boundary
 resumes when the last one lands. **The gate is not one of these**: step 2 puts
 it out of band, so its completion is the file case below, collected by the one
-bounded call where the boundary says to observe it. A turn that has
+background loop where the boundary says to observe it. A turn that has
 dispatched and has nothing else to do **ends**: it does not run `date`, `sleep`,
 `echo`, `git status` or any other heartbeat to hold itself open, and it does not
 schedule short wake-ups to poll work the harness already tracks. That
@@ -221,12 +234,60 @@ busy-poll is not hypothetical — on the #1497 session it took **366 of 1 159
 assistant turns and 235M of 658M input tokens**, a third of each, spent
 learning nothing, and the run then hit the weekly limit mid-round. The one
 sanctioned in-turn wait is for a signal the harness does **not** deliver — the
-gate's own marker, or another file a process writes — and it is **one bounded
-blocking call**: `Monitor`, with a timeout generous enough for the wait the
-step that ordered it describes. One call, never one probe per turn. **A call that returns without its signal is not a retry**:
-judge by re-testing the condition, never by the call's exit status, and take the
+gate's own marker, or another file a process writes — and it is **one
+background `until` loop (#3044)**: one Bash call with `run_in_background: true`
+whose command exits once its condition holds, so its exit is the single
+completion notice. The harness keeps that command running across turns and
+re-invokes the agent that launched it, a subagent included, when it exits; that
+is the behaviour this wait relies on, so once the loop is launched the turn
+**ends** and the loop's notice resumes it. Step 2's #811 note records a harness
+that killed such a command at turn end, which is why the loop is only ever the
+waiter, never the gate's launch: the suite must not die with its waiter.
+**Never `Monitor` for a marker-file wait**: it caps every
+bound at thirty minutes, a whole suite on a shared host runs longer, and a step
+whose turn ended on one that expired was never woken by its notice. The loop
+exits on **every** terminal state, never only the happy path, and its last line
+says which one it reached. The **gate loop**, with `G` the out-of-repo
+directory step 2's launch writes its signal (`gate.done`) and its handle
+(`gate.pgid`) into. Those names and the handle's form are requirements on that
+launch, beside step 2's four: `gate.pgid` holds the id of a **process group the
+launch created for the suite** (`setsid`, or perl's `setpgrp`), never a plain
+pid and never the reference shape's printed pid — `kill -0` on a pid that leads
+no group fails at once, and a group shared with the session never ends:
+
+```bash
+G=<the round's gate dir>   # the literal path: this call starts in a fresh shell
+[ -n "$G" ] || { echo "gate-dir-unset: G is empty, which is not a dead gate"; exit 2; }
+until [ -e "$G/gate.done" ]; do
+  if ! kill -0 -- "-$(cat "$G/gate.pgid" 2>/dev/null)" 2>/dev/null; then
+    sleep 2; [ -e "$G/gate.done" ] && break
+    echo "gate-gone: the process group ended without gate.done"; exit 3
+  fi
+  sleep 20
+done
+echo "gate-done: gate.done exists"
+```
+
+`gate-done` takes step 4's verdict read, and `gate-gone` — an unreadable
+`gate.pgid` included — is step 4's signal-never-arrived arm. The two-second
+re-check before `gate-gone` covers a launch whose `gate.done` writer sits outside
+the group and lands just after it ends. A **verdict-file
+loop** waits on a file a subagent writes (`subagents.md`); it ends when the file
+exists or when its stall bound passes, and the bound is the only clock it
+carries. One call, never one probe per turn. **A call that returns without its signal is not a retry**:
+judge by re-testing the condition, never by the call's exit status, and decide
+by the loop's **last printed line**, never by the missing file alone. A loop
+that printed `gate-gone` takes the signal-never-arrived arm, and one that
+printed `verdict-stalled` takes `subagents.md`'s stall arm. A call that returns
+with neither line is a **waiter that died**: re-test both conditions, the signal
+(`gate.done`, or the verdict file) and, for the gate, `kill -0 -- -<pgid>` on
+`gate.pgid`. A signal now present takes its own arm. A gate still alive, or a
+verdict file still missing, re-arms the same loop **once**; a second early
+return is report-and-stop, and the conductor does **not** stop the gate or the
+subagent then. Only a gate whose group is gone with no `gate.done` takes the
 boundary's own signal-never-arrived arm instead of blocking again.
 
+<!-- moved: round-protocol-head -->
 Each round:
 <!-- /moved: round-protocol-head -->
 

@@ -24,8 +24,9 @@
 # separately; see #1548.) Nor does it prove anything about text sitting BETWEEN
 # two chunks of a SPLIT span — the #1582 gap inside `round-protocol`, which since
 # #3168 runs on through the whole of round step 1, and the #3169 gap holding
-# step 3's narration paragraph — which is verified by nothing; see the manifest
-# comment below.
+# step 3's narration paragraph, and the two #3044 gaps in review-loop/core.md
+# holding round step 4 and the *How to wait* paragraph — which is verified by
+# nothing; see the manifest comment below.
 #
 # Normalisation, stated so the claim is honest: leading and trailing BLANK or
 # WHITESPACE-ONLY lines are stripped from BOTH sides before comparison (they are
@@ -58,7 +59,7 @@
 #      round-protocol-step-2's first anchor no longer adjacent to round step 1 in
 #      the pinned commit (#1582, #3168), a re-cut span's seam leaving an
 #      original line uncovered or out of order (#2055), or a gapped seam whose
-#      gap is no longer exactly the paragraph it was opened for (#3169).
+#      gap is no longer exactly the paragraph it was opened for (#3169, #3044).
 #      Chunk differences and sweep failures are counted and reported separately
 #      — they are different defects — but both land here.
 #   2  usage error
@@ -212,6 +213,21 @@ fi
 # on, stays where it was. The paragraph between them is verified by nothing, and
 # the gapped-seam check below pins that gap to exactly that paragraph.
 #
+# #3044 cut the old `round-protocol-head` span twice, because it replaced the
+# marker-file wait in two places inside it: round step 4, and the *How to wait*
+# paragraph just above `Each round:`. The span is now three chunks:
+#   - `round-protocol-boundary`, from the boundary's banner through round step
+#     3, closed by an INDENTED sentinel inside step 3's list item (#3169's
+#     form, so the list is unbroken);
+#   - `round-protocol-boundary-steps-5-7`, from step 5 through the attestation
+#     invariant's paragraph, opened by an indented sentinel at the end of step 4;
+#   - `round-protocol-head`, now the single line `Each round:`. It keeps the old
+#     name and its column-0 closer, which the adjacency check below and other
+#     suites anchor on. `Each round:` occurs once in the pinned commit, so a
+#     one-line range whose two anchors are equal extracts exactly it.
+# Step 4 and the *How to wait* paragraph sit in the two gaps, verified by
+# nothing; the gapped-seam check below pins each gap to exactly that text.
+#
 # One anchor that looks obvious is UNUSABLE, recorded so nobody re-derives it:
 # `   **How to wait** (this section) governs the wait — it is not restated here.`
 # occurs TWICE in the pinned pre-move SKILL.md, and `extract_range` starts at the
@@ -221,7 +237,11 @@ typeset -a MANIFEST
 MANIFEST=(
 "interactive-remediation	interactive/remediation.md	Applies **only** with a human present, and only to a **shape (i)**	  what the gate exists to prevent.
 "
-"round-protocol-head	review-loop/core.md	**The round boundary is concurrent — one minted tree, two readers (#1497).**	Each round:
+"round-protocol-boundary	review-loop/core.md	**The round boundary is concurrent — one minted tree, two readers (#1497).**	   held \`--gate-attest\`, which is the self-attestation the invariant forbids.
+"
+"round-protocol-boundary-steps-5-7	review-loop/core.md	5. **Green** → consolidate (the *Each round* loop-invocation step below),	That is the one recovery the *no fix pass ran* case above excludes.
+"
+"round-protocol-head	review-loop/core.md	Each round:	Each round:
 "
 "round-protocol-step-2	review-loop/step-2-invocation.md	2. **One loop invocation.**	     actually read. The stderr names both identities and the files that moved.
 "
@@ -655,33 +675,46 @@ for cgroup in "${CUT_GROUPS[@]}"; do
 done
 
 # --- a gapped seam holds exactly the paragraph it was opened for (#3169) -----
-# `round-protocol-step-3-head` and `round-protocol-steps-3-4` are not adjacent:
-# step 3's narration paragraph sits between them, verified by nothing. The
-# hazard is the seam check's own: move the head's LAST anchor up, or the next
-# chunk's FIRST anchor down, and more original lines join the unverified gap with
-# every comparison green. So the non-blank lines between the two anchors in the
-# pinned commit must begin with GAP_FIRST and end with GAP_LAST, the first and
-# last lines of that paragraph. The pinned commit is immutable, so the gap moves
-# only when a manifest anchor does, and the anchors are read out of the
-# manifest, so the assertion moves with the edit it exists to catch. The two
-# constants are the paragraph's own bounds, which no manifest edit can move.
-typeset -r GAP_PREV=round-protocol-step-3-head GAP_NEXT=round-protocol-steps-3-4
-typeset -r GAP_FIRST='   Otherwise blockers remain and budget is left:'
-typeset -r GAP_LAST="   fresh problems or re-read the last fix pass's own edits)."
-typeset gap_prev_last="" gap_next_first="" gap_text
-for mrow in "${MANIFEST[@]}"; do
-  mrow="${mrow%$'\n'}"
-  typeset mrow_tabs="${mrow//[^$'\t']/}"
-  (( ${#mrow_tabs} >= 3 )) || continue
-  case "${mrow%%$'\t'*}" in
-    "$GAP_PREV") gap_prev_last="${${${mrow#*$'\t'}#*$'\t'}#*$'\t'}" ;;
-    "$GAP_NEXT") gap_next_first="${${mrow#*$'\t'}#*$'\t'}"; gap_next_first="${gap_next_first%%$'\t'*}" ;;
-  esac
-done
-if [[ -z "$gap_prev_last" || -z "$gap_next_first" ]]; then
-  print -u2 -- "FAIL: the manifest no longer declares both $GAP_PREV and $GAP_NEXT, so their gapped seam cannot be checked"
-  (( sweep_failures++ ))
-else
+# Each gapped seam is a pair of chunks that are NOT adjacent: original text sits
+# between them, verified by nothing. #3169 opened the first, around step 3's
+# narration paragraph (`round-protocol-step-3-head` → `round-protocol-steps-3-4`);
+# #3044 opened two more inside the old round-protocol head, around round step 4
+# and around the *How to wait* paragraph. The hazard is the seam check's own:
+# move the earlier chunk's LAST anchor up, or the later chunk's FIRST anchor
+# down, and more original lines join the unverified gap with every comparison
+# green. So the non-blank lines between the two anchors in the pinned commit
+# must begin with the gap's FIRST line and end with its LAST line, the bounds of
+# the text the gap was opened for. The pinned commit is immutable, so a gap
+# moves only when a manifest anchor does, and the anchors are read out of the
+# manifest, so the assertion moves with the edit it exists to catch. The gap
+# bounds are constants here, which no manifest edit can move.
+#
+# GAPPED_SEAMS: one row per gap, PREV<TAB>NEXT<TAB>GAP_FIRST<TAB>GAP_LAST.
+typeset -a GAPPED_SEAMS=(
+  "round-protocol-boundary	round-protocol-boundary-steps-5-7	4. **Observe the gate's completion before consolidating** — wait for step 2's	   has not returned."
+  "round-protocol-boundary-steps-5-7	round-protocol-head	**How to wait — end the turn (#1513).** Once the boundary has dispatched — the	boundary's own signal-never-arrived arm instead of blocking again."
+  "round-protocol-step-3-head	round-protocol-steps-3-4	   Otherwise blockers remain and budget is left:	   fresh problems or re-read the last fix pass's own edits)."
+)
+typeset gap_row gap_prev gap_next gap_first gap_last gap_prev_last gap_next_first gap_text
+for gap_row in "${GAPPED_SEAMS[@]}"; do
+  gap_prev="${gap_row%%$'\t'*}";  gap_row="${gap_row#*$'\t'}"
+  gap_next="${gap_row%%$'\t'*}";  gap_row="${gap_row#*$'\t'}"
+  gap_first="${gap_row%%$'\t'*}"; gap_last="${gap_row#*$'\t'}"
+  gap_prev_last="" gap_next_first=""
+  for mrow in "${MANIFEST[@]}"; do
+    mrow="${mrow%$'\n'}"
+    typeset mrow_tabs="${mrow//[^$'\t']/}"
+    (( ${#mrow_tabs} >= 3 )) || continue
+    case "${mrow%%$'\t'*}" in
+      "$gap_prev") gap_prev_last="${${${mrow#*$'\t'}#*$'\t'}#*$'\t'}" ;;
+      "$gap_next") gap_next_first="${${mrow#*$'\t'}#*$'\t'}"; gap_next_first="${gap_next_first%%$'\t'*}" ;;
+    esac
+  done
+  if [[ -z "$gap_prev_last" || -z "$gap_next_first" ]]; then
+    print -u2 -- "FAIL: the manifest no longer declares both $gap_prev and $gap_next, so their gapped seam cannot be checked"
+    (( sweep_failures++ ))
+    continue
+  fi
   awk_rc=0
   gap_text=$(awk -v h="$gap_prev_last" -v t="$gap_next_first" '
     !seen && $0 == h { seen = 1; next }
@@ -690,14 +723,14 @@ else
     END { if (!seen || !done) exit 3 }
   ' <<< "$pre") || awk_rc=$?
   if (( awk_rc )); then
-    print -u2 -- "FAIL: the gapped seam $GAP_PREV → $GAP_NEXT is not in order in ${base}:${SKILL_REL} — last <<${gap_prev_last}>>, first <<${gap_next_first}>>"
+    print -u2 -- "FAIL: the gapped seam $gap_prev → $gap_next is not in order in ${base}:${SKILL_REL} — last <<${gap_prev_last}>>, first <<${gap_next_first}>>"
     (( sweep_failures++ ))
-  elif [[ "${gap_text%%$'\n'*}" != "$GAP_FIRST" || "${gap_text##*$'\n'}" != "$GAP_LAST" ]]; then
-    print -u2 -- "FAIL: the gapped seam $GAP_PREV → $GAP_NEXT no longer holds exactly its paragraph in ${base}:${SKILL_REL} — original lines between the two chunks:"
+  elif [[ "${gap_text%%$'\n'*}" != "$gap_first" || "${gap_text##*$'\n'}" != "$gap_last" ]]; then
+    print -u2 -- "FAIL: the gapped seam $gap_prev → $gap_next no longer holds exactly its paragraph in ${base}:${SKILL_REL} — original lines between the two chunks:"
     print -u2 -- "$gap_text"
     (( sweep_failures++ ))
   fi
-fi
+done
 
 # An EMPTIED MANIFEST (a bad merge, a botched edit to the multi-line array
 # literal) would otherwise leave every counter at 0 and print "all 0 declared

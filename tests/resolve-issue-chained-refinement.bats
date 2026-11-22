@@ -608,7 +608,7 @@ fm() { awk -v k="$2" 'NR == 1 && /^---$/ { f = 1; next } f && /^---$/ { exit } f
 @test "#3014 the refine-step agent feeds its conversion a saved document and writes a verdict when none is printed" {
   local t; t="$(flat "$FSTEP")"
   contains "$t" 'save that document verbatim to `<scratch_dir>/chain-result-<N>.json` with the Write tool, never through a shell string'
-  contains "$t" 'never end it without a verdict file.'
+  contains "$t" 'never end it without a verdict file. Never dispatch a step'
   local doc
   doc="$(perl -0ne 'print $1 if /`(\{"schema": "step-verdict\/v1", "issue": <N>, "verdict": "stopped", "follow_ups": \[\], "reason": "no chain-result document"\})`/s' "$FSTEP")"
   [ -n "$doc" ]
@@ -620,10 +620,18 @@ fm() { awk -v k="$2" 'NR == 1 && /^---$/ { f = 1; next } f && /^---$/ { exit } f
 @test "#3014 the refine-step agent dispatches its skill's subagents in the foreground and waits on a background one" {
   local t; t="$(flat "$FSTEP")"
   contains "$t" 'Dispatch each in the foreground (`run_in_background: false`).'
-  contains "$t" 'When one runs in the background anyway, wait for its result in your turn; never end your turn while it runs, and never write the "no chain-result document" verdict before it has ended.'
-  contains "$t" 'Wait with one bounded Monitor call, never a Bash poll.'
-  contains "$t" 'When the bound expires, the resolve-issue skill'"'"'s `reference/review-loop/subagents.md` rule *A background round dispatch is waited on in-turn* governs the retry; follow it as written.'
-  contains "$t" 'Write the "no chain-result document" verdict above only when that rule stops the skill.'
+  contains "$t" 'When one runs in the background anyway, wait for it as the resolve-issue skill'"'"'s `reference/review-loop/subagents.md` rule *A background round dispatch is waited on in-turn* says; follow it as written, its turn ending and its retry included.'
+  contains "$t" 'Never write the "no chain-result document" verdict before it has ended.'
+  contains "$t" 'Wait on its verdict file with one background Bash until loop, never Monitor and never a foreground poll (#3044).'
+  lacks "$t" 'Wait with one bounded Monitor call'
+  contains "$t" 'One that writes no verdict file, such as the issue-refiner, has no loop to wait on: stop it, and once it has ended write the "no chain-result document" verdict above.'
+  contains "$t" 'Write the "no chain-result document" verdict too when the rule stops the skill.'
+  contains "$t" 'Which verdict each outcome writes, and what the root does with it, is the resolve-issue skill'"'"'s `reference/chain-steps.md` § The chained refinement step (#2940).'
+  # the section it points at exists
+  grep -qxF '## The chained refinement step (#2940)' "$STEPS"
+  # the turn ending is the rule's own: the agent points at it and carries no exception of its own
+  lacks "$t" 'never end your turn'
+  lacks "$t" 'arms no loop'
   # the retry sequence is the rule's own: the agent points at it and never restates it
   lacks "$t" 're-dispatch it once'
 }
@@ -632,10 +640,14 @@ fm() { awk -v k="$2" 'NR == 1 && /^---$/ { f = 1; next } f && /^---$/ { exit } f
   local t; t="$(flat "$RSTEP")"
   contains "$t" '`<N>` in its name is the issue you work on.'
   contains "$t" '`FLAGS=<flags>`, only when the root was given any: its telemetry flags and its `--no-review`.'
-  contains "$t" 'Dispatch each in the foreground (`run_in_background: false`). When one runs in the background, wait for its result in your turn; never end your turn while it runs.'
-  contains "$t" 'Wait with one bounded Monitor call, never a Bash poll.'
-  contains "$t" 'When the bound expires, the resolve-issue skill'"'"'s `reference/review-loop/subagents.md` rule *A background round dispatch is waited on in-turn* governs the retry; follow it as written.'
-  contains "$t" 'Write a stopped verdict, cause tooling, only when that rule stops the run.'
+  contains "$t" 'Dispatch each in the foreground (`run_in_background: false`). When one runs in the background, wait for it as the resolve-issue skill'"'"'s `reference/review-loop/subagents.md` rule *A background round dispatch is waited on in-turn* says; follow it as written, its turn ending and its retry included.'
+  contains "$t" 'Wait on its verdict file with one background Bash until loop, never Monitor and never a foreground poll (#3044).'
+  lacks "$t" 'Wait with one bounded Monitor call'
+  contains "$t" 'One that writes no verdict file, such as the readiness gate, has no loop to wait on: stop it, and once it has ended write a stopped verdict, cause tooling.'
+  contains "$t" 'Write that verdict too when the rule stops the run.'
+  # the turn ending is the rule's own: the agent points at it and carries no exception of its own
+  lacks "$t" 'never end your turn'
+  lacks "$t" 'arms no loop'
   # the retry sequence is the rule's own: the agent points at it and never restates it
   lacks "$t" 're-dispatch it once'
   contains "$t" 'Which verdict each ending writes is `reference/chain-steps.md` § The issue step (#2940).'

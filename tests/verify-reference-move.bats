@@ -332,10 +332,10 @@ _gap_text() {  # $1 = the reference/review-loop/ directory
 
 # --- the happy path, and that it is not vacuous ------------------------------
 
-@test "#1547 the real tree verifies, reporting all eleven declared chunks" {
+@test "#1547 the real tree verifies, reporting all thirteen declared chunks" {
   _require_pre_move_commit
   run -0 zsh "$VERIFY" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
-  contains "$output" "all 11 declared chunks are byte-identical"
+  contains "$output" "all 13 declared chunks are byte-identical"
 }
 
 @test "#1547 --quiet suppresses the ok lines and the summary, leaving stdout empty" {
@@ -366,7 +366,7 @@ _gap_text() {  # $1 = the reference/review-loop/ directory
   _require_pre_move_commit
   cd "$BATS_TEST_TMPDIR"
   run -0 zsh "$VERIFY" --base "$PRE_MOVE_SHA"
-  contains "$output" "all 11 declared chunks are byte-identical"
+  contains "$output" "all 13 declared chunks are byte-identical"
 }
 
 # --- per-chunk failures ------------------------------------------------------
@@ -789,7 +789,11 @@ PY
   # The ANCHORS, in full — not just the row prefixes. The head's LAST_LINE bounds
   # the verified head, so pinning only the prefix would let it be moved
   # (shrinking the chunk) with every assertion here still green.
-  grep -qF -- "	**The round boundary is concurrent — one minted tree, two readers (#1497).**	Each round:" "$v"
+  # #3044 cut the old head into three: the boundary through step 3, steps 5-7
+  # through the attestation paragraph, and the one-line head `Each round:`.
+  grep -qF -- '"round-protocol-boundary	review-loop/core.md	**The round boundary is concurrent — one minted tree, two readers (#1497).**	   held \`--gate-attest\`, which is the self-attestation the invariant forbids.' "$v"
+  grep -qF -- '"round-protocol-boundary-steps-5-7	review-loop/core.md	5. **Green** → consolidate (the *Each round* loop-invocation step below),	That is the one recovery the *no fix pass ran* case above excludes.' "$v"
+  grep -qF -- '"round-protocol-head	review-loop/core.md	Each round:	Each round:' "$v"
   # #2055 re-cut the tail into four chunks (tail, step-2, recover, steps-3-4) and
   # #3168 retired the first, so step-2's FIRST anchor now opens what is left of
   # the old tail span and the steps-3-4 row's LAST anchor is its end — pinned in
@@ -806,7 +810,9 @@ PY
   # its manifest row names — `extract_chunk` and the stray-sentinel sweep both
   # match that way.
   local n shard
-  for n in round-protocol-head:core.md \
+  for n in round-protocol-boundary:core.md \
+           round-protocol-boundary-steps-5-7:core.md \
+           round-protocol-head:core.md \
            round-protocol-step-2:step-2-invocation.md \
            round-protocol-recover:exit-2-stale-findings.md \
            round-protocol-step-3-head:exit-20-awaiting-fix.md \
@@ -824,6 +830,14 @@ PY
   [ "$(grep -cxF -- '   <!-- moved: round-protocol-steps-3-4 -->' "$x20")" -eq 1 ]
   [ "$(grep -cxF -- '<!-- moved: round-protocol-step-3-head -->' "$x20")" -eq 1 ]
   [ "$(grep -cxF -- '<!-- /moved: round-protocol-steps-3-4 -->' "$x20")" -eq 1 ]
+  # #3044: the two cuts around round step 4 are the indented pair inside the
+  # list; the head's sentinels and the boundary's opener stay at column 0
+  local core="$ref/review-loop/core.md"
+  [ "$(grep -cxF -- '   <!-- /moved: round-protocol-boundary -->' "$core")" -eq 1 ]
+  [ "$(grep -cxF -- '   <!-- moved: round-protocol-boundary-steps-5-7 -->' "$core")" -eq 1 ]
+  [ "$(grep -cxF -- '<!-- moved: round-protocol-boundary -->' "$core")" -eq 1 ]
+  [ "$(grep -cxF -- '<!-- /moved: round-protocol-boundary-steps-5-7 -->' "$core")" -eq 1 ]
+  [ "$(grep -cxF -- '<!-- moved: round-protocol-head -->' "$core")" -eq 1 ]
   # ...and neither old sentinel survives anywhere in reference/, nor the tail's
   # #3168 retired: step 1 carries no moved: sentinel at all
   run grep -rqE -- '^<!-- /?moved: round-protocol-tail -->$' "$ref"
@@ -834,7 +848,7 @@ PY
   local flat_idx
   flat_idx="$(tr '\n' ' ' < "$ref/review-loop.md" | tr -s ' ')"
   contains "$flat_idx" "the whole of \`step-1-panel.md\`, step 3's narration paragraph, the notes after each moved block"
-  contains "$flat_idx" 'cut into five such blocks: `round-protocol-head` in `core.md`, then `round-protocol-step-2`'
+  contains "$flat_idx" 'cut into seven such blocks: three in `core.md`, then `round-protocol-step-2`'
   # ...nor does a CUT_GROUPS entry still name it, and the group ends where the
   # #3169 gap begins
   grep -qF -- '  "round-protocol-step-2 round-protocol-recover round-protocol-step-3-head"' "$v"
@@ -901,8 +915,9 @@ PY
   # check, which is backwards on both counts.
 }
 
-@test "#1582 the split still verifies byte-identical, at eleven chunks" {
-  # Eleven since #3169 cut steps-3-4 around step 3's narration paragraph; ten
+@test "#1582 the split still verifies byte-identical, at thirteen chunks" {
+  # Thirteen since #3044 cut the round-protocol head into three around round
+  # step 4 and the How to wait paragraph; eleven since #3169 cut steps-3-4 around step 3's narration paragraph; ten
   # after #3168 retired the round-protocol tail; eleven after #3146 deleted the five suggestion-promotion chunks with their
   # shards; sixteen after #3121 re-cut the interactive-extension intro and its steps 2-4
   # apart; fifteen after #2601 deleted the residue branch's last chunk with its shard;
@@ -914,10 +929,12 @@ PY
   # tail into four.
   _require_pre_move_commit
   run -0 zsh "$VERIFY" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
-  contains "$output" "all 11 declared chunks are byte-identical"
+  contains "$output" "all 13 declared chunks are byte-identical"
   # every round-protocol chunk accounted for, IN its shard, so a row silently
   # dropped from the manifest cannot leave this green
-  contains "$output" "ok   round-protocol-head"
+  contains "$output" "ok   round-protocol-boundary — "
+  contains "$output" "ok   round-protocol-boundary-steps-5-7 — "
+  contains "$output" "ok   round-protocol-head — 1 lines"
   contains "$output" "→ reference/review-loop/core.md"
   lacks "$output" "round-protocol-tail"
   contains "$output" "ok   round-protocol-step-2"
@@ -1137,10 +1154,47 @@ PY
   _require_pre_move_commit
   local mutant="$BATS_TEST_TMPDIR/verify-gap-norow.zsh"
   sed 's|^"round-protocol-step-3-head	|"round-protocol-renamed	|' "$VERIFY" > "$mutant"
-  run ! grep -qF '"round-protocol-step-3-head	' "$mutant"
+  run ! grep -qE '^"round-protocol-step-3-head	' "$mutant"
   run zsh "$mutant" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
   [ "$status" -eq 1 ]
   contains "$stderr$output" "the manifest no longer declares both round-protocol-step-3-head and round-protocol-steps-3-4, so their gapped seam cannot be checked"
+}
+
+# --- #3044: the gapped seams around round step 4 and How to wait -------------
+
+@test "#3044 the gapped seam FIRES when round-protocol-boundary's last anchor moves up" {
+  _require_pre_move_commit
+  local mutant="$BATS_TEST_TMPDIR/verify-gap-step4-up.zsh"
+  _mutate_anchor "$mutant" '   held \`--gate-attest\`, which is the self-attestation the invariant forbids.' \
+    '   not move the tree**: there the round is still a no-fix round, so re-dispatch'
+  run zsh "$mutant" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
+  [ "$status" -eq 1 ]
+  contains "$stderr$output" "the gapped seam round-protocol-boundary → round-protocol-boundary-steps-5-7 no longer holds exactly its paragraph"
+  contains "$stderr$output" '   held `--gate-attest`, which is the self-attestation the invariant forbids.'
+}
+
+@test "#3044 the gapped seam FIRES when round-protocol-head's first anchor moves up into How to wait" {
+  # The head is one line, so its first anchor moving up is the way the How to
+  # wait gap shrinks from below: the paragraph's last line joins the head, and
+  # the seam check names the changed gap.
+  _require_pre_move_commit
+  local mutant="$BATS_TEST_TMPDIR/verify-gap-wait-up.zsh"
+  OLD='Each round:' NEW="boundary's own signal-never-arrived arm instead of blocking again." \
+    perl -pe 'BEGIN { $o = $ENV{OLD}; $n = $ENV{NEW} } s/^("round-protocol-head\t[^\t]*)\t\Q$o\E\t/$1\t$n\t/' "$VERIFY" > "$mutant"
+  grep -qF -- "	boundary's own signal-never-arrived arm instead of blocking again.	Each round:" "$mutant"
+  run zsh "$mutant" --base "$PRE_MOVE_SHA" --repo "$REPO_ROOT"
+  [ "$status" -eq 1 ]
+  contains "$stderr$output" "the gapped seam round-protocol-boundary-steps-5-7 → round-protocol-head no longer holds exactly its paragraph"
+}
+
+@test "#3044 the indented pair really bounds the chunks: an edit inside round-protocol-boundary still fails" {
+  _require_pre_move_commit
+  local fake; fake="$(_fake_tree boundary-edit)"
+  local core="$fake/development/skills/resolve-issue/reference/review-loop/core.md"
+  perl -0pi -e 's/which is the self-attestation the invariant forbids\.\n/which is the self attestation the invariant forbids.\n/' "$core"
+  grep -qF 'which is the self attestation the invariant forbids.' "$core"
+  run -1 zsh "$VERIFY" --base "$PRE_MOVE_SHA" --repo "$fake"
+  contains "$output" "FAIL round-protocol-boundary:"
 }
 
 @test "#3169 an INDENTED undeclared sentinel is swept like a column-0 one" {
@@ -1443,7 +1497,10 @@ _mutate_anchor() {
   # A mutated copy of the SCRIPT with the head row's last anchor moved inward to
   # a line that really does sit earlier inside the head chunk.
   local mutant="$BATS_TEST_TMPDIR/verify-anchor-moved.zsh"
-  sed 's|	Each round:$|	The ordering, and it is the whole of it:|' "$VERIFY" > "$mutant"
+  # Since #3044 the head is the one line `Each round:`, so both of its anchors
+  # move together, to the last line of the chunk above it.
+  OLD='Each round:' NEW='That is the one recovery the *no fix pass ran* case above excludes.' \
+    perl -pe 'BEGIN { $o = $ENV{OLD}; $n = $ENV{NEW} } s/\t\Q$o\E(?=\t|$)/\t$n/g' "$VERIFY" > "$mutant"
   # the mutation must have applied, or this case proves nothing. `run !`, not a
   # bare `!` — the latter is inert in bats (#829).
   run ! grep -qF '	Each round:' "$mutant"

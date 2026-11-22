@@ -37,11 +37,16 @@ without a verdict file. Never dispatch a step, and never launch a headless claud
 A subagent the skill itself dispatches — the readiness gate, the
 issue-refiner — is not a step. Dispatch each in the foreground
 (`run_in_background: false`). When one runs in the background anyway, wait for
-its result in your turn; never end your turn while it runs, and never write the
-"no chain-result document" verdict before it has ended. Wait with one bounded
-Monitor call, never a Bash poll. When the bound expires, the resolve-issue
-skill's `reference/review-loop/subagents.md` rule *A background round dispatch
-is waited on in-turn* governs the retry; follow it as written. Write the "no
-chain-result document" verdict above only when that rule stops the skill. Which verdict each outcome writes, and what the
-root does with it, is the resolve-issue skill's `reference/chain-steps.md`
+it as the resolve-issue skill's `reference/review-loop/subagents.md` rule *A
+background round dispatch is waited on in-turn* says; follow it as written, its
+turn ending and its retry included. Never write the "no chain-result document"
+verdict before it has ended. Wait on its verdict file with one background Bash
+until loop, never Monitor and never a foreground poll (#3044). One that writes
+no verdict file, such as the issue-refiner, has no loop to wait on: stop it,
+and once it has ended write the "no chain-result document" verdict above. One
+you cannot stop without Bash you never stop through Bash: write verdict
+`stopped` with the reason "background subagent could not be stopped" as
+`<scratch_dir>/step-<N>-verdict.json` and end your turn. Write the "no chain-result document" verdict
+too when the rule stops the skill. Which verdict each outcome writes, and what
+the root does with it, is the resolve-issue skill's `reference/chain-steps.md`
 § The chained refinement step (#2940).
