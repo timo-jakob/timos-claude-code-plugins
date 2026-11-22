@@ -20,14 +20,20 @@ setup() {
   REC="$BATS_TEST_TMPDIR/fail-first.jsonl"
   BASE=1111111111111111111111111111111111111111
   FIXED=2222222222222222222222222222222222222222
+  # the falsifying test's file every `record` here hashes, relative to the cwd
+  cd "$BATS_TEST_TMPDIR"
+  printf '@test "an umlaut survives the export" { false; }\n' > export.bats
+  TSHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 }
 
-# One record line: phase $1, sha $2, exit $3, then the command's words.
+# One record line: phase $1, sha $2, exit $3, then the command's words. The
+# test's hash is $TSHA, so a test can change it between two records.
 rec() {
   local phase="$1" sha="$2" rc="$3"
   shift 3
-  printf '%s\0' "$@" | jq -cRs --arg p "$phase" --arg s "$sha" --argjson e "$rc" \
-    '{phase: $p, sha: $s, command: (split("\u0000") | .[:-1]), exit: $e, at: "2026-11-21T03:00:00Z"}' >> "$REC"
+  printf '%s\0' "$@" | jq -cRs --arg p "$phase" --arg s "$sha" --argjson e "$rc" --arg th "$TSHA" \
+    '{phase: $p, sha: $s, command: (split("\u0000") | .[:-1]), test: ["export.bats"], test_sha256: $th,
+      exit: $e, at: "2026-11-21T03:00:00Z"}' >> "$REC"
 }
 
 # The bug-analyst analysis a confirmed spec is rendered from; $1 is the
@@ -73,11 +79,31 @@ spec_body() {
   run --separate-stderr zsh "$FF" spec --body-file "$BATS_TEST_TMPDIR/body.md"
   [ "$status" -eq 4 ]
   starts_with "$stderr" 'fail-first: unreadable-spec'
-  # a sentinel merely quoted before the body's end is no spec at all
+  # a sentinel merely quoted, inline or in a fenced block, is no spec at all
   printf 'Body quoting `<!-- bug-spec:prose:start -->` and `<!-- bug-spec:end -->`.\nMore.\n' \
     > "$BATS_TEST_TMPDIR/body.md"
   run --separate-stderr zsh "$FF" spec --body-file "$BATS_TEST_TMPDIR/body.md"
   [ "$status" -eq 1 ]
+  printf 'Body\n```\n<!-- bug-spec:prose:start -->\n<!-- bug-spec:prose:end -->\n<!-- bug-spec:end -->\n```\n' \
+    > "$BATS_TEST_TMPDIR/body.md"
+  run --separate-stderr zsh "$FF" spec --body-file "$BATS_TEST_TMPDIR/body.md"
+  [ "$status" -eq 1 ]
+  # a broken spec region with text after it is still a spec, never read as none
+  printf 'Body\n<!-- bug-spec:prose:start -->\n### Observed\n<!-- bug-spec:prose:end -->\n<!-- bug-spec:end -->\n\nA later note.\n' \
+    > "$BATS_TEST_TMPDIR/body.md"
+  run --separate-stderr zsh "$FF" spec --body-file "$BATS_TEST_TMPDIR/body.md"
+  [ "$status" -eq 4 ]
+  starts_with "$stderr" 'fail-first: unreadable-spec'
+}
+
+@test "spec: a confirmed spec below a reporter's quoted sentinels is still read" {
+  analysis > "$BATS_TEST_TMPDIR/a.json"
+  printf 'See `<!-- bug-spec:prose:start -->`.\n<!-- bug-spec:prose:start -->\n' > "$BATS_TEST_TMPDIR/orig.md"
+  zsh "$SPEC" render --analysis "$BATS_TEST_TMPDIR/a.json" --body-file "$BATS_TEST_TMPDIR/orig.md" \
+    --generated-at 2026-11-01T10:00:00Z > "$BATS_TEST_TMPDIR/body.md"
+  run --separate-stderr zsh "$FF" spec --body-file "$BATS_TEST_TMPDIR/body.md"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .command <<< "$output")" = 'bats tests/export.bats' ]
 }
 
 @test "spec: a failing bug-spec reader is exit 3, never read as no spec" {
@@ -154,10 +180,10 @@ spec_body() {
 
 # ---- record -----------------------------------------------------------------
 
-@test "record: appends {phase, sha, command, exit, at} and exits 0 whatever the command exits" {
-  run --separate-stderr zsh "$FF" record --phase before --sha "$BASE" --out "$REC" -- sh -c 'exit 7'
+@test "record: appends {phase, sha, command, test, test_sha256, exit, at} and exits 0 whatever the command exits" {
+  run --separate-stderr zsh "$FF" record --phase before --sha "$BASE" --test export.bats --out "$REC" -- sh -c 'exit 7'
   [ "$status" -eq 0 ]
-  run --separate-stderr zsh "$FF" record --phase after --sha "$FIXED" --out "$REC" -- sh -c 'exit 0'
+  run --separate-stderr zsh "$FF" record --phase after --sha "$FIXED" --test export.bats --out "$REC" -- sh -c 'exit 0'
   [ "$status" -eq 0 ]
   [ "$(wc -l < "$REC" | tr -d ' ')" -eq 2 ]
   [ "$(sed -n 1p "$REC" | jq -c '[.phase, .sha, .command, .exit]')" = "[\"before\",\"$BASE\",[\"sh\",\"-c\",\"exit 7\"],7]" ]
@@ -165,30 +191,75 @@ spec_body() {
   sed -n 1p "$REC" | jq -e '.at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$")'
 }
 
+@test "record: the falsifying test's files are named and hashed, path and bytes, in sorted order" {
+  printf 'helper\n' > helper.bash
+  zsh "$FF" record --phase before --sha "$BASE" --test export.bats --test helper.bash --out "$REC" -- sh -c 'exit 1'
+  [ "$(jq -c '.test' "$REC")" = '["export.bats","helper.bash"]' ]
+  local want
+  want="$(printf '%s  %s\n%s  %s\n' "$(shasum -a 256 < export.bats | awk '{print $1}')" export.bats \
+    "$(shasum -a 256 < helper.bash | awk '{print $1}')" helper.bash | shasum -a 256 | awk '{print $1}')"
+  [ "$(jq -r '.test_sha256' "$REC")" = "$want" ]
+  # the order the files are given in does not change the hash
+  zsh "$FF" record --phase after --sha "$FIXED" --test helper.bash --test export.bats --out "$REC" -- sh -c 'exit 0'
+  [ "$(sed -n 2p "$REC" | jq -r '.test_sha256')" = "$want" ]
+}
+
+@test "record: no --test is a usage error, and an unreadable test is exit 3 that runs nothing" {
+  run --separate-stderr zsh "$FF" record --phase before --sha "$BASE" --out "$REC" -- true
+  [ "$status" -eq 2 ]
+  run --separate-stderr zsh "$FF" record --phase before --sha "$BASE" --test absent.bats --out "$REC" \
+    -- sh -c "touch '$BATS_TEST_TMPDIR/ran'"
+  [ "$status" -eq 3 ]
+  starts_with "$stderr" 'fail-first: cannot read the test: absent.bats'
+  [ ! -e "$BATS_TEST_TMPDIR/ran" ]
+  [ ! -e "$REC" ]
+}
+
+@test "check: an unchanged test from before to after passes; a test changed after its last before is test-changed" {
+  zsh "$FF" record --phase before --sha "$BASE" --test export.bats --out "$REC" -- sh -c 'test -e fixed'
+  touch fixed
+  zsh "$FF" record --phase after --sha "$FIXED" --test export.bats --out "$REC" -- sh -c 'test -e fixed'
+  run --separate-stderr zsh "$FF" check --base "$BASE" "$REC"
+  [ "$status" -eq 0 ]
+  # the test is edited after its before record: the after record hashes the edit
+  printf '@test "an umlaut survives the export" { true; }\n' > export.bats
+  zsh "$FF" record --phase after --sha "$FIXED" --test export.bats --out "$REC" -- sh -c 'test -e fixed'
+  run --separate-stderr zsh "$FF" check --base "$BASE" "$REC"
+  [ "$status" -eq 1 ]
+  [ "$stderr" = 'fail-first: test-changed' ]
+  # recording before again with the edited test, at the base, makes the pair whole
+  rm fixed
+  zsh "$FF" record --phase before --sha "$BASE" --test export.bats --out "$REC" -- sh -c 'test -e fixed'
+  touch fixed
+  zsh "$FF" record --phase after --sha "$FIXED" --test export.bats --out "$REC" -- sh -c 'test -e fixed'
+  run --separate-stderr zsh "$FF" check --base "$BASE" "$REC"
+  [ "$status" -eq 0 ]
+}
+
 @test "record: the command's output goes to --log, never to stdout" {
-  run --separate-stderr zsh "$FF" record --phase before --sha "$BASE" --out "$REC" \
+  run --separate-stderr zsh "$FF" record --phase before --sha "$BASE" --test export.bats --out "$REC" \
     --log "$BATS_TEST_TMPDIR/ff.log" -- sh -c 'echo loud; echo louder >&2; exit 1'
   [ "$status" -eq 0 ]
   [ -z "$output" ]
   contains "$(cat "$BATS_TEST_TMPDIR/ff.log")" 'loud'
   contains "$(cat "$BATS_TEST_TMPDIR/ff.log")" 'louder'
   # a second record appends to the log, never overwrites it
-  zsh "$FF" record --phase after --sha "$FIXED" --out "$REC" --log "$BATS_TEST_TMPDIR/ff.log" -- sh -c 'echo again'
+  zsh "$FF" record --phase after --sha "$FIXED" --test export.bats --out "$REC" --log "$BATS_TEST_TMPDIR/ff.log" -- sh -c 'echo again'
   [ "$(grep -c -e '^loud$' -e '^again$' "$BATS_TEST_TMPDIR/ff.log")" -eq 2 ]
 }
 
 @test "record: a command not found is recorded as a failing run, exit 127" {
-  run --separate-stderr zsh "$FF" record --phase before --sha "$BASE" --out "$REC" -- no-such-command-3213
+  run --separate-stderr zsh "$FF" record --phase before --sha "$BASE" --test export.bats --out "$REC" -- no-such-command-3213
   [ "$status" -eq 0 ]
   [ "$(jq -r '.exit' "$REC")" -eq 127 ]
 }
 
 @test "record: an unwritable --out or --log is exit 3 and runs nothing" {
-  run --separate-stderr zsh "$FF" record --phase before --sha "$BASE" --out "$BATS_TEST_TMPDIR/no/such/dir/r" \
+  run --separate-stderr zsh "$FF" record --phase before --sha "$BASE" --test export.bats --out "$BATS_TEST_TMPDIR/no/such/dir/r" \
     -- sh -c "touch '$BATS_TEST_TMPDIR/ran'"
   [ "$status" -eq 3 ]
   [ ! -e "$BATS_TEST_TMPDIR/ran" ]
-  run --separate-stderr zsh "$FF" record --phase before --sha "$BASE" --out "$REC" \
+  run --separate-stderr zsh "$FF" record --phase before --sha "$BASE" --test export.bats --out "$REC" \
     --log "$BATS_TEST_TMPDIR/no/such/dir/l" -- sh -c "touch '$BATS_TEST_TMPDIR/ran'"
   [ "$status" -eq 3 ]
   [ ! -e "$BATS_TEST_TMPDIR/ran" ]
@@ -196,18 +267,18 @@ spec_body() {
 }
 
 @test "record: a bad phase, a bad sha or no command is a usage error, exit 2" {
-  run --separate-stderr zsh "$FF" record --phase during --sha "$BASE" --out "$REC" -- true
+  run --separate-stderr zsh "$FF" record --phase during --sha "$BASE" --test export.bats --out "$REC" -- true
   [ "$status" -eq 2 ]
-  run --separate-stderr zsh "$FF" record --phase before --sha main --out "$REC" -- true
+  run --separate-stderr zsh "$FF" record --phase before --sha main --test export.bats --out "$REC" -- true
   [ "$status" -eq 2 ]
-  run --separate-stderr zsh "$FF" record --phase before --sha "$BASE" --out "$REC" --
+  run --separate-stderr zsh "$FF" record --phase before --sha "$BASE" --test export.bats --out "$REC" --
   [ "$status" -eq 2 ]
   [ ! -e "$REC" ]
 }
 
 @test "record: a command containing quotes and spaces round-trips through check and render" {
-  zsh "$FF" record --phase before --sha "$BASE" --out "$REC" -- sh -c 'test "a b" = "a  b"'
-  zsh "$FF" record --phase after --sha "$FIXED" --out "$REC" -- sh -c 'test "a b" = "a b"'
+  zsh "$FF" record --phase before --sha "$BASE" --test export.bats --out "$REC" -- sh -c 'test "a b" = "a  b"'
+  zsh "$FF" record --phase after --sha "$FIXED" --test export.bats --out "$REC" -- sh -c 'test "a b" = "a b"'
   [ "$(sed -n 1p "$REC" | jq -r '.command[2]')" = 'test "a b" = "a  b"' ]
   [ "$(sed -n 1p "$REC" | jq -r '.exit')" -eq 1 ]
   [ "$(sed -n 2p "$REC" | jq -r '.exit')" -eq 0 ]
@@ -216,8 +287,8 @@ spec_body() {
   [ "$status" -eq 1 ]
   [ "$stderr" = 'fail-first: command-differs' ]
   : > "$REC"
-  zsh "$FF" record --phase before --sha "$BASE" --out "$REC" -- sh -c "[ \"\$(printf '%s' 'it'\\''s')\" = nope ]"
-  zsh "$FF" record --phase after --sha "$FIXED" --out "$REC" -- sh -c "[ \"\$(printf '%s' 'it'\\''s')\" = \"it's\" ]"
+  zsh "$FF" record --phase before --sha "$BASE" --test export.bats --out "$REC" -- sh -c "[ \"\$(printf '%s' 'it'\\''s')\" = nope ]"
+  zsh "$FF" record --phase after --sha "$FIXED" --test export.bats --out "$REC" -- sh -c "[ \"\$(printf '%s' 'it'\\''s')\" = \"it's\" ]"
   [ "$(sed -n 1p "$REC" | jq -r '.command[2]')" = "[ \"\$(printf '%s' 'it'\\''s')\" = nope ]" ]
   [ "$(sed -n 2p "$REC" | jq -r '.exit')" -eq 0 ]
   # the command render shows, run as a shell line, is the command that was recorded
@@ -303,8 +374,22 @@ spec_body() {
   [ "$stderr" = 'fail-first: command-differs' ]
 }
 
+@test "check: test-changed — the after record's test hash is not the last before's" {
+  rec before "$BASE" 1 bats tests/export.bats
+  TSHA=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  rec after "$FIXED" 0 bats tests/export.bats
+  run --separate-stderr zsh "$FF" check --base "$BASE" "$REC"
+  [ "$status" -eq 1 ]
+  [ "$stderr" = 'fail-first: test-changed' ]
+}
+
 @test "check: a malformed record file is exit 3, never an answer" {
   printf '{"phase":"before"}\n' > "$REC"
+  run --separate-stderr zsh "$FF" check --base "$BASE" "$REC"
+  [ "$status" -eq 3 ]
+  # a record without the test's hash is malformed, never read as an unchanged test
+  rec before "$BASE" 1 bats tests/export.bats
+  jq -c 'del(.test_sha256)' "$REC" > "$REC.new" && mv "$REC.new" "$REC"
   run --separate-stderr zsh "$FF" check --base "$BASE" "$REC"
   [ "$status" -eq 3 ]
   printf 'not json\n' > "$REC"
@@ -378,11 +463,11 @@ whole() {
   contains "$s" '**An issue without the block is untouched by all of this**'
   contains "$s" '"<skill-base-dir>/scripts/fail-first.zsh" spec --body-file <scratch>/issue-<N>-body.md'
   contains "$s" '**Write the falsifying test, and nothing else.**'
-  contains "$s" 'record --phase before --sha <base>'
+  contains "$s" 'record --phase before --sha <base> \ --test "$(jq -r .path <scratch>/bug-test-<N>.json)"'
   contains "$s" '**When the test passes on the base, the spec does not reproduce.** The run **fixes nothing**: it changes no source file, pushes nothing and opens no PR. Its outcome is `spec-does-not-reproduce`.'
   contains "$s" '`<!-- fail-first/v1 spec-does-not-reproduce -->`'
   contains "$s" 'gh issue edit <N> --add-label needs-human-decision'
-  contains "$s" 'record --phase after --sha "$(git rev-parse HEAD)"'
+  contains "$s" 'record --phase after --sha "$(git rev-parse HEAD)" \ --test "$(jq -r .path <scratch>/bug-test-<N>.json)"'
   contains "$s" '"<skill-base-dir>/scripts/fail-first.zsh" check --base <base> <durable>/fail-first.jsonl'
   contains "$s" '**`check` must exit 0 before a PR is opened.**'
   contains "$s" '`spec` therefore hands back a command only when the prose still matches its hash and its last line, which `bug-spec.zsh render` writes, is exactly ``Falsifying test: `<command>` ``, so an edit to the block alone can never choose what this run executes.'
@@ -401,13 +486,41 @@ whole() {
   contains "$s" 'A non-zero exit must be the test'"'"'s own assertion failing, as `<durable>/fail-first.log` shows it.'
   contains "$s" 'Only the last `before` record counts.'
   contains "$s" 'A step'"'"'s verdict is `stopped`, cause `failed`, reason `spec-does-not-reproduce`.'
-  contains "$s" 'Exit 1 names the reason on stderr (`fail-first: <reason>`): open no PR, emit the record as `failed` and stop'
-  contains "$s" 'Exit 3 is the same stop with cause `tooling`.'
+  contains "$s" 'Exit 1 names the reason on stderr (`fail-first: <reason>`): open no PR, and **hold the bug**'
+  contains "$s" 'Exit 3 decided nothing, so it holds nothing: a plain stop with cause `tooling`.'
   contains "$s" 'Note the **base**: the `base` §1'"'"'s branch script printed, the commit this branch was cut from.'
   contains "$s" 'A resumed run skips §1 and takes the full id `git rev-parse <the branch'"'"'s first wip(resolve-issue #<N>) commit>^` instead.'
   contains "$s" '**Exit 3** decided nothing — the issue body could not be read or the spec reader failed. Report the stderr, emit the run'"'"'s record as `failed` and stop: a step'"'"'s verdict is `stopped`, cause `tooling`. **Exit 2** is your own malformed call: fix it and re-run once.'
   contains "$s" 'Exit 3 is a tooling stop: report the stderr, emit the record as `failed`, and end a step `stopped` with cause `tooling`.'
   contains "$s" 'A test that cannot run (a syntax error, a missing tool) proves nothing: rewrite it and record again, at most twice, then stop as step 4 does, with `test-cannot-run` in place of `spec-does-not-reproduce`.'
+}
+
+@test "reference/fail-first.md: an edited test records before again in a scratch worktree of the merge-base" {
+  local s
+  s="$(whole "$REPO_ROOT/development/skills/resolve-issue/reference/fail-first.md")"
+  lacks "$s" 'with the fix set aside'
+  contains "$s" 'every record hashes the test'"'"'s file, and `check` refuses with `test-changed` when the test the PR ships is not the one that last failed at the base.'
+  contains "$s" '**An edit to the test at `path` records `before` again at once** — whether it comes from the fix, §3'"'"'s gate or a §3.5 finding.'
+  contains "$s" 'run the edited test in a scratch `git worktree` of the branch'"'"'s merge-base with `origin/main`, with only the test'"'"'s file copied in, then remove that worktree.'
+  contains "$s" 'merge_base="$(git merge-base HEAD origin/main)"'
+  contains "$s" 'git worktree add --detach "$base_wt" "$merge_base"'
+  contains "$s" 'cp -- "$test_path" "$base_wt/$test_path"'
+  contains "$s" '( cd "$base_wt" && "<skill-base-dir>/scripts/fail-first.zsh" record --phase before \ --sha "$merge_base" --test "$test_path" '"\\"
+  contains "$s" 'git worktree remove --force "$base_wt"'
+  contains "$s" 'Remove the worktree whatever the record exited.'
+}
+
+@test "a failed check at §6 holds the bug: fail-first.md, bugs.md and list-bugs.zsh agree" {
+  local s b
+  s="$(whole "$REPO_ROOT/development/skills/resolve-issue/reference/fail-first.md")"
+  contains "$s" 'open no PR, and **hold the bug**, so a later maintenance run does not rebuild it. Post one comment carrying `<!-- fail-first/v1 <reason> -->` that names the failed check (`fail-first.zsh check`) and its stderr line, then apply `needs-human-decision`'
+  contains "$s" 'which `list-bugs.zsh` reports as `held` until a human clears the hold by removing the label.'
+  contains "$s" 'A render that exits 1 holds the bug and stops as a failed `check` does'
+  b="$(whole "$REPO_ROOT/development/skills/maintenance/reference/bugs.md")"
+  contains "$b" '| `held` | nothing; list it with its reason (a hold label — `needs-refinement`, `blocked` or `needs-human-decision` — or the open PR) |'
+  contains "$b" '**a failed fail-first check** — `fail-first.zsh check` (or `render`) refused the fix before the PR, so no PR was opened; the run posted one `<!-- fail-first/v1 <reason> -->` comment naming the check and its reason and applied `needs-human-decision`, so the bug is `held` on later runs and is not rebuilt until a human clears the hold;'
+  # the label the hold applies is one list-bugs.zsh reads as a hold
+  contains "$(cat "$REPO_ROOT/development/skills/maintenance/scripts/list-bugs.zsh")" '"needs-human-decision"'
 }
 
 @test "open-pr SKILL.md: the Bug evidence section goes into the body once, after the Test plan" {
@@ -442,18 +555,20 @@ whole() {
   s="$(awk '/^## Fail-first evidence \(#3213\)$/ { on = 1; print; next } on && /^## / { exit } on { print }' \
     "$REPO_ROOT/ARCHITECTURE.md" | tr -s '[:space:]' ' ')"
   [ -n "$s" ]
-  for r in no-before before-passed before-not-at-base no-after after-failed command-differs; do
+  for r in no-before before-passed before-not-at-base no-after after-failed command-differs test-changed; do
     contains "$s" "\`$r\`"
   done
   contains "$s" '**When that test passes, the run stops with outcome `spec-does-not-reproduce` and fixes nothing**'
   contains "$s" '**The command is trusted only as confirmed.**'
   contains "$s" 'So `bug-spec.zsh render` ends the prose with one line, ``Falsifying test: `<command>` ``, and `fail-first.zsh spec` hands a command to the run only when the prose still matches its hash and its last line is exactly that line for the block'"'"'s command. An edit to the block alone never chooses what an unattended run executes.'
   contains "$s" 'bugs cap of 5 per run**, attended or scheduled.'
+  contains "$s" '**the test the PR ships is the one that failed at the base**, enforced by the script rather than by prose.'
+  contains "$s" '**A failed `check` holds the bug.**'
 }
 
 @test "the reasons fail-first.zsh decides are the ones its procedure and contract name" {
   local r
-  for r in no-before before-passed before-not-at-base no-after after-failed command-differs; do
+  for r in no-before before-passed before-not-at-base no-after after-failed command-differs test-changed; do
     contains "$(cat "$FF")" "\"$r\""
   done
   for r in unreadable-spec spec-prose-edited not-a-bug no-falsifying-test command-not-in-prose; do

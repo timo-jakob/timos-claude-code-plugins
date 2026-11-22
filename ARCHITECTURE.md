@@ -8348,6 +8348,11 @@ written:
 <!-- bug-spec:end -->
 ```
 
+Each sentinel stands on a line of its own, outside any code fence, and the
+spec is the **last** such region in the body. A sentinel the reporter's text
+merely quotes — inline, in a code span, in a fenced block or on a line above
+the region — is never read as the spec, and a re-render keeps it as text.
+
 The prose is what a code owner reads and confirms, under exactly these four
 headings, in this order:
 
@@ -8454,15 +8459,23 @@ executes.
 
 ```json
 {"phase": "before", "sha": "<the branch base>", "command": ["zsh", "-c", "bats tests/export.bats"],
- "exit": 1, "at": "2026-11-21T03:00:00Z"}
+ "test": ["tests/export.bats"], "test_sha256": "<64 hex>", "exit": 1, "at": "2026-11-21T03:00:00Z"}
 ```
 
 `phase` is `before` or `after`; `command` is the argv, so a command with quotes
-and spaces round-trips exactly. `check --base <sha>` judges the last `before`
+and spaces round-trips exactly. `test` names the falsifying test's file(s) and
+`test_sha256` hashes their paths and bytes as the record ran them, so **the
+test the PR ships is the one that failed at the base**, enforced by the script
+rather than by prose. `check --base <sha>` judges the last `before`
 record and the last `after` record after it, and exits 1 with the first of
 these reasons that holds: `no-before`, `before-passed`, `before-not-at-base`,
-`no-after`, `after-failed`, `command-differs`. `render` prints the PR body's
+`no-after`, `after-failed`, `command-differs`, `test-changed`. `render` prints the PR body's
 **Bug evidence** section: the command, both exits and both commits.
+
+**A failed `check` holds the bug.** Its exit 1 opens no PR: the run posts one
+comment naming the failed check and its reason and applies
+`needs-human-decision`, so `list-bugs.zsh` reports the bug `held` and no later
+maintenance run rebuilds it until a human clears the hold.
 
 ## Readiness stamp contract (`readiness-stamp/v1`)
 

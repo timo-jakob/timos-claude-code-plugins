@@ -269,12 +269,89 @@ confirmed_issue() {
   contains "$stderr" 'not a usable bug-analyst object'
 }
 
-@test "bug-spec: render refuses a body whose spec region has no end marker, exit 1" {
+@test "bug-spec: a body quoting prose:start before the region keeps it on render and read ignores it" {
+  analysis bug > "$BATS_TEST_TMPDIR/a.json"
+  # inline, in a code span, and on a line of its own, all above where the region goes
+  printf '%s\n' 'The format opens with <!-- bug-spec:prose:start --> inline,' \
+    'and quoted `<!-- bug-spec:prose:start -->` and `<!-- bug-spec:end -->`.' \
+    '<!-- bug-spec:prose:start -->' 'Text between the quotes.' > "$BATS_TEST_TMPDIR/orig.md"
+  run --separate-stderr zsh "$SPEC" render --analysis "$BATS_TEST_TMPDIR/a.json" \
+    --body-file "$BATS_TEST_TMPDIR/orig.md" --generated-at 2026-11-01T10:00:00Z
+  [ "$status" -eq 0 ]
+  starts_with "$output" "$(cat "$BATS_TEST_TMPDIR/orig.md")"$'\n\n<!-- bug-spec:prose:start -->\n### Observed'
+  printf '%s\n' "$output" > "$BATS_TEST_TMPDIR/body.md"
+  run --separate-stderr zsh "$SPEC" read --body-file "$BATS_TEST_TMPDIR/body.md"
+  [ "$status" -eq 0 ]
+  lacks "$(jq -r .prose <<< "$output")" 'Text between the quotes.'
+  [ "$(jq -r '.prose_sha256 == .block.provenance.prose_sha256' <<< "$output")" = true ]
+}
+
+@test "bug-spec: a body quoting the whole region inside a fence keeps it on render and read ignores it" {
+  analysis bug > "$BATS_TEST_TMPDIR/a.json"
+  printf '%s\n' 'A body that quotes the format:' '```markdown' '<!-- bug-spec:prose:start -->' 'quoted prose' \
+    '<!-- bug-spec:prose:end -->' '<!-- bug-spec:end -->' '```' 'After the fence.' > "$BATS_TEST_TMPDIR/orig.md"
+  # the fence alone is no spec
+  run --separate-stderr zsh "$SPEC" read --body-file "$BATS_TEST_TMPDIR/orig.md"
+  [ "$status" -eq 1 ]
+  [ "$stderr" = 'bug-spec: no bug spec' ]
+  run --separate-stderr zsh "$SPEC" render --analysis "$BATS_TEST_TMPDIR/a.json" \
+    --body-file "$BATS_TEST_TMPDIR/orig.md" --generated-at 2026-11-01T10:00:00Z
+  [ "$status" -eq 0 ]
+  starts_with "$output" "$(cat "$BATS_TEST_TMPDIR/orig.md")"$'\n\n<!-- bug-spec:prose:start -->'
+  printf '%s\n' "$output" > "$BATS_TEST_TMPDIR/body.md"
+  run --separate-stderr zsh "$SPEC" read --body-file "$BATS_TEST_TMPDIR/body.md"
+  [ "$status" -eq 0 ]
+  lacks "$(jq -r .prose <<< "$output")" 'quoted prose'
+}
+
+@test "bug-spec: a re-render of a body quoting the sentinels keeps the reporter's text, byte for byte" {
+  analysis bug > "$BATS_TEST_TMPDIR/a.json"
+  printf '%s\n' 'Quoting `<!-- bug-spec:prose:start -->` and `<!-- bug-spec:end -->` inline.' \
+    '<!-- bug-spec:prose:start -->' '```' '<!-- bug-spec:prose:start -->' '<!-- bug-spec:prose:end -->' \
+    '<!-- bug-spec:end -->' '```' 'Last reporter line.' > "$BATS_TEST_TMPDIR/orig.md"
+  zsh "$SPEC" render --analysis "$BATS_TEST_TMPDIR/a.json" --body-file "$BATS_TEST_TMPDIR/orig.md" \
+    --generated-at 2026-11-01T10:00:00Z > "$BATS_TEST_TMPDIR/first.md"
+  analysis not-a-bug > "$BATS_TEST_TMPDIR/second.json"
+  run --separate-stderr zsh "$SPEC" render --analysis "$BATS_TEST_TMPDIR/second.json" \
+    --body-file "$BATS_TEST_TMPDIR/first.md" --generated-at 2026-11-03T10:00:00Z
+  [ "$status" -eq 0 ]
+  starts_with "$output" "$(cat "$BATS_TEST_TMPDIR/orig.md")"$'\n\n<!-- bug-spec:prose:start -->\n### Observed'
+  # one region replaced, not stacked: the reporter's two own-line starts plus the region's
+  [ "$(grep -c '^<!-- bug-spec:prose:start -->$' <<< "$output")" -eq 3 ]
+  printf '%s\n' "$output" > "$BATS_TEST_TMPDIR/second.md"
+  [ "$(zsh "$SPEC" read --body-file "$BATS_TEST_TMPDIR/second.md" | jq -r '.block.verdict')" = not-a-bug ]
+}
+
+@test "bug-spec: a start sentinel with no end after it is reporter text, and render appends a fresh spec" {
   analysis bug > "$BATS_TEST_TMPDIR/a.json"
   printf 'Body\n<!-- bug-spec:prose:start -->\n### Observed\n' > "$BATS_TEST_TMPDIR/cut.md"
   run --separate-stderr zsh "$SPEC" render --analysis "$BATS_TEST_TMPDIR/a.json" --body-file "$BATS_TEST_TMPDIR/cut.md"
+  [ "$status" -eq 0 ]
+  starts_with "$output" $'Body\n<!-- bug-spec:prose:start -->\n### Observed\n\n<!-- bug-spec:prose:start -->'
+}
+
+@test "bug-spec: render refuses a body whose unclosed fence would hide the spec it writes, exit 1" {
+  analysis bug > "$BATS_TEST_TMPDIR/a.json"
+  printf 'Body\n```\nan unclosed fence\n' > "$BATS_TEST_TMPDIR/open.md"
+  run --separate-stderr zsh "$SPEC" render --analysis "$BATS_TEST_TMPDIR/a.json" --body-file "$BATS_TEST_TMPDIR/open.md"
   [ "$status" -eq 1 ]
-  contains "$stderr" 'no end marker'
+  [ -z "$output" ]
+  contains "$stderr" 'hides the spec region'
+}
+
+@test "bug-spec: read fails with exit 3 when it cannot print the spec, never exit 0 with no output" {
+  spec_body bug "$BATS_TEST_TMPDIR/body.md"
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  # a jq that works for every call but read's last, the one that prints the spec
+  cat > "$BATS_TEST_TMPDIR/bin/jq" <<EOF
+#!/bin/sh
+for a in "\$@"; do [ "\$a" = '{block: \$block, prose_sha256: \$h, prose: \$prose}' ] && exit 5; done
+exec "$(command -v jq)" "\$@"
+EOF
+  chmod +x "$BATS_TEST_TMPDIR/bin/jq"
+  run --separate-stderr env PATH="$BATS_TEST_TMPDIR/bin:$PATH" zsh "$SPEC" read --body-file "$BATS_TEST_TMPDIR/body.md"
+  [ "$status" -eq 3 ]
+  contains "$stderr" 'could not print the bug spec'
 }
 
 @test "bug-spec: read on a body with no spec, or with an unparseable block, is exit 1" {

@@ -73,11 +73,13 @@ starts from a clean tree:
 
    ```bash
    "<skill-base-dir>/scripts/fail-first.zsh" record --phase before --sha <base> \
+     --test "$(jq -r .path <scratch>/bug-test-<N>.json)" \
      --out <durable>/fail-first.jsonl --log <durable>/fail-first.log \
      -- zsh -c "$(jq -r .command <scratch>/bug-test-<N>.json)"
    ```
 
-   Exit 0 recorded it, whatever the test exited. Exit 3 is a tooling stop:
+   Exit 0 recorded it, whatever the test exited, with a hash of the test's file
+   as it is now. Exit 3 is a tooling stop:
    report the stderr, emit the record as `failed`, and end a step `stopped`
    with cause `tooling`. Exit 2 is your own call: fix it and re-run once.
 3. **Read the result** — the last line's `exit` in `<durable>/fail-first.jsonl`.
@@ -106,8 +108,37 @@ starts from a clean tree:
    `stopped`, cause `failed`, reason `spec-does-not-reproduce`.
 5. **When it fails on its own assertion, fix the bug**, and go on with §3's
    gate and §3.5's loop as usual. The falsifying test stays in the change,
-   unchanged after its last `before` record: changing it means recording
-   `before` again at the base, with the fix set aside.
+   unchanged after its last `before` record. The script enforces it: every
+   record hashes the test's file, and `check` refuses with `test-changed` when
+   the test the PR ships is not the one that last failed at the base.
+6. **An edit to the test at `path` records `before` again at once** — whether
+   it comes from the fix, §3's gate or a §3.5 finding. Never record it from the
+   working tree, which holds the fix, and never `git stash` the fix: run the
+   edited test in a scratch `git worktree` of the branch's merge-base with
+   `origin/main`, with only the test's file copied in, then remove that
+   worktree. From the repository root, `<scratch>` and `<durable>` being
+   absolute paths:
+
+   ```bash
+   test_path="$(jq -r .path <scratch>/bug-test-<N>.json)"
+   merge_base="$(git merge-base HEAD origin/main)"
+   base_wt="$(mktemp -d)/base"
+   git worktree add --detach "$base_wt" "$merge_base"
+   mkdir -p "$base_wt/$(dirname -- "$test_path")"
+   cp -- "$test_path" "$base_wt/$test_path"
+   ( cd "$base_wt" && "<skill-base-dir>/scripts/fail-first.zsh" record --phase before \
+       --sha "$merge_base" --test "$test_path" \
+       --out <durable>/fail-first.jsonl --log <durable>/fail-first.log \
+       -- zsh -c "$(jq -r .command <scratch>/bug-test-<N>.json)" )
+   git worktree remove --force "$base_wt"
+   ```
+
+   Remove the worktree whatever the record exited. The merge-base is the base
+   noted above unless the branch has taken `origin/main` in since; the record
+   names the commit it really ran at, and `check` refuses one that is not the
+   base. Read the result as step 3 does. A pass means the edit made the test
+   stop reproducing the bug: undo the edit to the test and record `before`
+   again the same way, so the last `before` record is a failing one.
 
 ## Before the PR — record it again and check (#3213)
 
@@ -117,17 +148,25 @@ carries, from the repository root:
 
 ```bash
 "<skill-base-dir>/scripts/fail-first.zsh" record --phase after --sha "$(git rev-parse HEAD)" \
+  --test "$(jq -r .path <scratch>/bug-test-<N>.json)" \
   --out <durable>/fail-first.jsonl --log <durable>/fail-first.log \
   -- zsh -c "$(jq -r .command <scratch>/bug-test-<N>.json)"
 "<skill-base-dir>/scripts/fail-first.zsh" check --base <base> <durable>/fail-first.jsonl
 ```
 
 **`check` must exit 0 before a PR is opened.** Exit 1 names the reason on
-stderr (`fail-first: <reason>`): open no PR, emit the record as `failed` and
-stop, a step ending `stopped`, cause `failed`, with that line as its reason.
-Exit 3 is the same stop with cause `tooling`.
+stderr (`fail-first: <reason>`): open no PR, and **hold the bug**, so a later
+maintenance run does not rebuild it. Post one comment carrying
+`<!-- fail-first/v1 <reason> -->` that names the failed check
+(`fail-first.zsh check`) and its stderr line, then apply
+`needs-human-decision` — step 4's three commands, with this comment — which
+`list-bugs.zsh` reports as `held` until a human clears the hold by removing the
+label. Then emit the record as `failed` and stop, a step ending `stopped`,
+cause `failed`, with that line as its reason. Exit 3 decided nothing, so it
+holds nothing: a plain stop with cause `tooling`.
 
 On exit 0, `render <durable>/fail-first.jsonl` prints the **Bug evidence**
 section — the command, both exits and both commits. It goes into the PR body
 once, as open-pr's *Bug evidence (#3213)* paragraph places it. A render that
-exits non-zero stops the PR the same way.
+exits 1 holds the bug and stops as a failed `check` does, its comment naming
+`fail-first.zsh render`; its exit 3 is the plain tooling stop.

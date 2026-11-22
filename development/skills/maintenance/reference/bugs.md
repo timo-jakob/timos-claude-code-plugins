@@ -70,7 +70,7 @@ What each state means for this step:
 | `awaiting-confirmation` | nothing; list it with its reason — it waits for a code owner |
 | `not-a-bug` | nothing; its comment already proposed the reclassification or said the report does not reproduce |
 | `confirmed` | fix it (section 2) |
-| `held` | nothing; list it with its reason (a hold label, or the open PR) |
+| `held` | nothing; list it with its reason (a hold label — `needs-refinement`, `blocked` or `needs-human-decision` — or the open PR) |
 | `not-eligible` | nothing; list it as "needs a code owner to re-file" |
 
 ## 2. Fix each `confirmed` bug, in order
@@ -106,6 +106,11 @@ another** — never two at once — while the cap allows:
    - **`spec-does-not-reproduce`** — the falsifying test passed on the code
      before the fix, so nothing was fixed; the issue now carries
      `needs-human-decision` and is `held` on later runs;
+   - **a failed fail-first check** — `fail-first.zsh check` (or `render`)
+     refused the fix before the PR, so no PR was opened; the run posted one
+     `<!-- fail-first/v1 <reason> -->` comment naming the check and its reason
+     and applied `needs-human-decision`, so the bug is `held` on later runs
+     and is not rebuilt until a human clears the hold;
    - any other stop — the reason the run reported.
 
    No ending of one bug stops the concern: the next bug starts.
@@ -130,9 +135,12 @@ cap allows:
    ```
 
    `render` keeps every byte of the reporter's text and appends the spec, or
-   replaces the spec a previous analysis wrote. **Exit 1** means the analysis is
+   replaces the spec a previous analysis wrote — the last one, its sentinels
+   on lines of their own; a sentinel the reporter merely quotes stays text.
+   **Exit 1** means the analysis is
    unusable (a key missing, a value outside its enum, a heading missing from
-   the prose) or the body holds a spec cut short: write nothing, list the bug
+   the prose) or the body's own text would hide the spec (an unclosed code
+   fence above it): write nothing, list the bug
    as "analysis failed" with the stderr line, post no comment, and go on to the
    next bug. **Exit 3**, or either `gh` call failing, is a tooling failure,
    handled the same way. **Exit 2** is your own malformed call: fix it and re-run once.

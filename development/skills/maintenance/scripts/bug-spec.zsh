@@ -8,7 +8,8 @@
 #       Print the issue body with the bug spec written into it. <analysis> is
 #       the bug-analyst agent's JSON object; --body-file is the current body
 #       (absent: an empty body). An existing spec region is replaced, so a
-#       re-analysis never stacks two specs; every byte outside it is kept.
+#       re-analysis never stacks two specs; every byte outside it is kept,
+#       a sentinel the reporter merely quotes included (see locate below).
 #   bug-spec.zsh read [--body-file <file>]
 #       Read a body (--body-file, else stdin) and print one JSON object:
 #       {"block": <the bug-spec/v1 JSON mirror>, "prose_sha256": <the hash of
@@ -16,7 +17,8 @@
 #       caller compares the two hashes to tell whether the prose was edited
 #       since the block was generated.
 #
-# The region, in this order, ends the body:
+# The region, in this order, each sentinel on a line of its own — render
+# appends it at the body's end; text added below it later is kept as text:
 #   <!-- bug-spec:prose:start -->
 #   ### Observed / ### Expected / ### Verdict / ### Fixed when   (the prose,
 #   ending, when the analysis names a falsifying test, with the line
@@ -31,12 +33,14 @@
 #   0  printed
 #   1  render: the analysis is not a usable bug-analyst object (a key missing,
 #      a verdict or reclassify_as outside its enum, draft_prose lacking one of
-#      the four headings), or the body holds
-#      a spec region with no end marker;
-#      read: no spec, or a spec whose block is missing, unparseable or not
-#      bug-spec/v1 — either way there is no usable spec
+#      the four headings), or the body's own text would hide the region it
+#      gets (an unclosed code fence above it);
+#      read: no spec, stderr `bug-spec: no bug spec`, or a spec region whose
+#      block is missing, unparseable or not bug-spec/v1 — either way there is
+#      no usable spec
 #   2  usage
-#   3  runtime: jq missing, an unreadable file, the prose hash failed
+#   3  runtime: jq missing, an unreadable file, the prose hash failed, the
+#      region could not be located or the result could not be printed
 
 emulate -L zsh
 set -uo pipefail
@@ -87,6 +91,49 @@ else
 fi
 body="${body//$'\r'/}"
 
+# The spec region of a body: print "<start> <prose-end> <end>", the line
+# numbers of its three sentinels, or nothing when the body has none. The region
+# is the one render writes — each sentinel on a line of its own, outside any
+# closed code fence — and it is the LAST complete one: the last start sentinel
+# followed by a prose-end sentinel and then an end sentinel, each the first of
+# its kind after the one before. So a sentinel a reporter merely quotes — inline,
+# in a code span, in a fenced block, or on a line of its own above the region
+# or after it — is never taken for the region, and render keeps it as text.
+locate() {
+  print -r -- "$1" | awk -v S="$START" -v P="$PEND" -v E="$END" '
+    function own(l, want) { sub(/^ ? ? ?/, "", l); sub(/[ \t]+$/, "", l); return l == want }
+    { L[NR] = $0 }
+    END {
+      # mask the lines of every closed fence; an unclosed one masks nothing
+      open = 0
+      for (i = 1; i <= NR; i++) {
+        l = L[i]; ind = match(l, /[^ ]/) - 1
+        if (ind < 0 || ind > 3) continue
+        t = substr(l, ind + 1)
+        if (!open) {
+          c = substr(t, 1, 1)
+          if (c != "`" && c != "~") continue
+          n = 0; while (substr(t, n + 1, 1) == c) n++
+          if (n < 3 || (c == "`" && index(substr(t, n + 1), "`"))) continue
+          open = i; fc = c; fn = n
+        } else {
+          sub(/[ \t]+$/, "", t)
+          n = 0; while (substr(t, n + 1, 1) == fc) n++
+          if (n >= fn && n == length(t)) { for (k = open; k <= i; k++) M[k] = 1; open = 0 }
+        }
+      }
+      for (s = NR; s >= 1; s--) {
+        if (M[s] || !own(L[s], S)) continue
+        p = 0; for (i = s + 1; i <= NR; i++) if (!M[i] && own(L[i], P)) { p = i; break }
+        if (!p) continue
+        e = 0; for (i = p + 1; i <= NR; i++) if (!M[i] && own(L[i], E)) { e = i; break }
+        if (!e) continue
+        print s, p, e
+        exit
+      }
+    }'
+}
+
 prose_hash() {
   local h
   h="$(print -r -- "$1" | zsh "$hash_script")" && [[ "$h" == [0-9a-f](#c64) ]] 2>/dev/null || {
@@ -99,11 +146,17 @@ prose_hash() {
 # ---- read ------------------------------------------------------------------
 
 if [[ "$mode" == read ]]; then
-  [[ "$body" == *"$START"*"$PEND"*"$END"* ]] || { print -u2 "$me: no bug spec"; exit 1; }
-  prose="${body#*"$START"}"
-  prose="${prose%%"$PEND"*}"
-  tail_part="${body#*"$PEND"}"
-  tail_part="${tail_part%%"$END"*}"
+  region="$(locate "$body")" || { print -u2 "$me: could not locate the spec region"; exit 3; }
+  [[ -n "$region" ]] || { print -u2 "$me: no bug spec"; exit 1; }
+  read -r s p e <<< "$region"
+  lines=("${(@f)body}")
+  # the prose region: the bytes between the two sentinel lines, newlines included
+  if (( p > s + 1 )); then
+    prose=$'\n'"${(pj:\n:)lines[s+1,p-1]}"$'\n'
+  else
+    prose=$'\n'
+  fi
+  tail_part="${(pj:\n:)lines[p+1,e-1]}"
   # the one ```json block between the prose end and the end marker
   json="$(print -r -- "$tail_part" | awk '
     /^[[:space:]]*```json[[:space:]]*$/ && !seen { on = 1; seen = 1; next }
@@ -115,7 +168,8 @@ if [[ "$mode" == read ]]; then
     exit 1
   fi
   now="$(prose_hash "$prose")" || exit 3
-  jq -cn --argjson block "$block" --arg h "$now" --arg prose "$prose" '{block: $block, prose_sha256: $h, prose: $prose}'
+  jq -cn --argjson block "$block" --arg h "$now" --arg prose "$prose" '{block: $block, prose_sha256: $h, prose: $prose}' \
+    || { print -u2 "$me: could not print the bug spec"; exit 3; }
   exit 0
 fi
 
@@ -148,13 +202,14 @@ done
 cmd="$(print -r -- "$a" | jq -r '.falsifying_test.command? // ""')"
 [[ -n "$cmd" ]] && prose="${prose%%[[:space:]]#}"$'\n\n'"Falsifying test: \`$cmd\`"
 
-if [[ "$body" == *"$START"* ]]; then
-  if [[ "$body" != *"$START"*"$END"* ]]; then
-    print -u2 "$me: the body holds a bug spec with no end marker; refusing to rewrite it"
-    exit 1
-  fi
-  before="${body%%"$START"*}"
-  after="${body#*"$END"}"
+# The region a previous analysis wrote is replaced; every other byte, a sentinel
+# the reporter merely quotes included, is kept.
+region="$(locate "$body")" || { print -u2 "$me: could not locate the spec region"; exit 3; }
+if [[ -n "$region" ]]; then
+  read -r s p e <<< "$region"
+  lines=("${(@f)body}")
+  before="${(pj:\n:)lines[1,s-1]}"
+  after="${(pj:\n:)lines[e+1,-1]}"
   body="${before%%[[:space:]]#}"
   after="${after##[[:space:]]#}"
   [[ -n "$after" ]] && body="$body"$'\n\n'"$after"
@@ -168,17 +223,17 @@ mirror="$(print -r -- "$a" | jq --arg h "$h" --arg at "$generated_at" '{
   provenance: {generated_by: "bug-analyst via /development:maintenance", generated_at: $at, prose_sha256: $h},
   verdict, reclassify_as, falsifying_test, repro_steps, cites, fixed_when}')" || exit 3
 
-[[ -n "$body" ]] && print -r -- "$body"$'\n'
-print -r -- "$START"
-print -r -- "$prose"
-print -r -- "$PEND"
-print
-print -r -- '<details>'
-print -r -- '<summary>machine-readable bug spec (<code>bug-spec/v1</code>) — generated, do not hand-edit</summary>'
-print
-print -r -- '```json'
-print -r -- "$mirror"
-print -r -- '```'
-print
-print -r -- '</details>'
-print -r -- "$END"
+spec_region="$START"$'\n'"$prose"$'\n'"$PEND"$'\n\n''<details>'$'\n'
+spec_region+='<summary>machine-readable bug spec (<code>bug-spec/v1</code>) — generated, do not hand-edit</summary>'$'\n\n'
+spec_region+='```json'$'\n'"$mirror"$'\n''```'$'\n\n''</details>'$'\n'"$END"
+if [[ -n "$body" ]]; then out="$body"$'\n\n'"$spec_region"; else out="$spec_region"; fi
+
+# The region written must be the one read finds: reporter text that would hide
+# it (an unclosed code fence opened above it, say) is refused, never stacked.
+want=("${(@f)out}") own_lines=("${(@f)spec_region}")
+region="$(locate "$out")" || { print -u2 "$me: could not locate the spec region"; exit 3; }
+if [[ "$region" != "$(( ${#want} - ${#own_lines} + 1 )) "*" ${#want}" ]]; then
+  print -u2 "$me: the body's own text hides the spec region it would get; refusing to rewrite it"
+  exit 1
+fi
+print -r -- "$out"
