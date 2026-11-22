@@ -1123,7 +1123,7 @@ _verdict_loop() {
   contains "$(prose_body "$REPO_ROOT/development/agents/resolve-step.md")" 'such as the readiness gate, has no loop to wait on'
 }
 
-@test "#3044 the verdict-file loop and the index's gap record are stated" {
+@test "#3044 the verdict-file loop and the move verifier's gap record are stated" {
   local body
   body="$(prose_body "$CORE")"
   contains "$body" 'A verdict-file loop waits on a file a subagent writes (subagents.md); it ends when the file exists or when its stall bound passes, and the bound is the only clock it carries.'
@@ -1132,6 +1132,8 @@ _verdict_loop() {
   contains "$body" 'A call that returns with neither line is a waiter that died, not a stall: re-test the verdict file, read it when it is there, and otherwise re-arm the same loop once.'
   contains "$body" 'A second early return is report-and-stop, with the background dispatch left running.'
   contains "$body" 'A dispatch completion notice is not a call that returns with neither line, and it never re-arms the loop.'
-  body="$(prose_body "$INDEX")"
-  contains "$body" "two more cut out core.md's step 4 and wait paragraph (#3044)."
+  # The gap record lives in the move verifier's header since #3293 cut the
+  # index's moved-block narration down to a pointer at that script.
+  body="$(prose_body "$REPO_ROOT/development/skills/resolve-issue/scripts/verify-reference-move.zsh")"
+  contains "$body" 'the two #3044 gaps in review-loop/core.md holding round step 4 and the How to wait paragraph'
 }

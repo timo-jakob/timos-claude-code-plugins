@@ -476,9 +476,10 @@ _unreached_reference_files() {
   # §6 pointed at checkpoint.md's test-case body reconciliation (#3079), and 36
   # until chain-steps.md's issue step pointed at its deferred follow-ups shard,
   # reference/chain-steps/deferred-follow-ups.md (#3127), and 37 until §3.5 stopped
-  # pointing at the promotion gate shard (#3128).
-  if [ "$rows" -ne 36 ]; then
-    printf 'the skill carries %s pointer(s), expected 36.\n' "$rows" >&2
+  # pointing at the promotion gate shard (#3128), and 36 until subagents.md
+  # pointed at its new recovery-arms.md shard (#3293).
+  if [ "$rows" -ne 37 ]; then
+    printf 'the skill carries %s pointer(s), expected 37.\n' "$rows" >&2
     printf 'A pointer was added or removed — update this count in the same PR,\n' >&2
     printf 'and check the step that gained or lost one still reaches its procedure.\n' >&2
     _all_pointers >&2
