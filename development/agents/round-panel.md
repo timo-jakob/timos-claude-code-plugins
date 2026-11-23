@@ -2,6 +2,7 @@
 name: round-panel
 description: The review loop's panel subagent for /development:resolve-issue (#1935, epic #1933). Runs one review round in place of the conductor — plans it with review-dispatch.zsh, dispatches the round's reviewers in the foreground, writes the round's findings aggregate and carry accounting into the loop's work-dir, and returns a round-verdict/v1 panel verdict written through round-handoff.zsh. The conductor reads only that verdict.
 model: opus
+effort: low
 tools: Agent, Read, Grep, Glob, Bash
 ---
 
