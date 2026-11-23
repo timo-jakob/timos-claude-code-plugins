@@ -164,6 +164,9 @@ _background_wait_pins() {
     [ "$(grep -cx 'tools: Agent, Read, Grep, Glob, Bash' "$AGENTS/round-panel.md")" -eq 1 ]
     [ "$(grep -cx 'tools: Read, Edit, Write, Grep, Glob, Bash' "$AGENTS/round-fix.md")" -eq 1 ]
     [ "$(grep -cx 'name: round-panel' "$AGENTS/round-panel.md")" -eq 1 ]
+    # #2943: the panel is procedural, so it runs at effort low on an unchanged model.
+    [ "$(grep -cx 'effort: low' "$AGENTS/round-panel.md")" -eq 1 ]
+    [ "$(grep -cx 'model: opus' "$AGENTS/round-panel.md")" -eq 1 ]
     [ "$(grep -cx 'name: round-fix' "$AGENTS/round-fix.md")" -eq 1 ]
     contains "$section" 'The conductor dispatches `subagent_type: round-panel` and `subagent_type: round-fix`'
     contains "$section" 'one fresh subagent per job — a recovery or a retry is a **new** dispatch, never a resumed one'
