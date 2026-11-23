@@ -2,6 +2,7 @@
 name: claude-plugin-prose-logic
 description: Reviews skill/agent instructions as behaviour — missing failure branches, unstated assumptions presented as verified fact, contradictions between sections, and model-ambiguous decision rules. The prose_logic dimension of /development-claude-plugin:review; severity is bounded by an explicit behavioural bar so the review loop converges instead of drowning in wording nitpicks.
 model: fable
+effort: high
 tools: Read, Grep, Glob
 ---
 

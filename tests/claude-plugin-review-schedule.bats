@@ -33,8 +33,8 @@ step1_rows() {
     /^## Step 1:/ { on = 1; next }
     /^## / && on { exit }
     on && /^\| (claude-plugin-|check-manifests)/ {
-      for (i = 2; i <= 6; i++) { gsub(/^ +| +$/, "", $i) }
-      printf "%s\t%s\t%s\t%s\n", $2, $3, $5, $6
+      for (i = 2; i <= 7; i++) { gsub(/^ +| +$/, "", $i) }
+      printf "%s\t%s\t%s\t%s\n", $2, $3, $6, $7
     }' "$SKILL"
 }
 
@@ -208,4 +208,48 @@ NO_CONTRACT="manifest prose_logic script_quality tests"
   contains "$(cat "$ARCH")" '`manifest_bump` (`claude-plugin-manifest-check`) are its extension, while `tests`'
   contains "$(cat "$ARCH")" 'six claude-plugin dimensions in total (#2008)'
   lacks "$(tr '\n' ' ' < "$ARCH")" 'five claude-plugin dimensions in total'
+}
+
+# fm_field <agent file> <key> -> the frontmatter value of <key>, empty if absent
+fm_field() {
+  awk -v k="$2" '/^---$/ { d++; next } d == 1 && index($0, k ": ") == 1 { print substr($0, length(k) + 3); exit }' "$1"
+}
+
+@test "#3310 every development-claude-plugin agent declares the effort its class gets" {
+  local expected="claude-plugin-version-sync:low claude-plugin-manifest-check:high
+claude-plugin-structure-validator:low claude-plugin-skill-validator:low
+claude-plugin-reference-checker:medium claude-plugin-script-quality:medium
+claude-plugin-contract-integrity:high claude-plugin-test-reviewer:high
+claude-plugin-script-reviewer:high claude-plugin-prose-logic:high claude-plugin-approver:high"
+  local agents_dir="$REPO_ROOT/development-claude-plugin/agents" pair f n=0
+  for pair in $expected; do
+    f="$agents_dir/${pair%%:*}.md"
+    [ "$(fm_field "$f" effort)" = "${pair##*:}" ] || {
+      printf '%s declares effort %s, expected %s\n' "${pair%%:*}" "$(fm_field "$f" effort)" "${pair##*:}" >&2
+      return 1
+    }
+    n=$((n + 1))
+  done
+  # every agent in the directory is covered, so a new agent cannot ship without one
+  [ "$n" -eq "$(find "$agents_dir" -name '*.md' | wc -l | tr -d ' ')" ]
+}
+
+@test "#3310 the Step 1 table's Model and Effort cells equal each agent's frontmatter" {
+  local rows reviewer model effort f n=0
+  rows="$(awk -F'|' '
+    /^## Step 1:/ { on = 1; next }
+    /^## / && on { exit }
+    on && /^\| claude-plugin-/ {
+      for (i = 2; i <= 5; i++) { gsub(/^ +| +$/, "", $i) }
+      printf "%s\t%s\t%s\n", $2, $4, $5
+    }' "$SKILL")"
+  # the header names the column, so the cells read are the Effort column's
+  grep -qE '^\| Reviewer \| Kind \| Model \| Effort \| Dimension \| Runs \|$' "$SKILL"
+  while IFS=$'\t' read -r reviewer model effort; do
+    f="$REPO_ROOT/development-claude-plugin/agents/$reviewer.md"
+    [ "$model" = "$(fm_field "$f" model)" ] || { echo "$reviewer: Model cell $model differs from frontmatter" >&2; return 1; }
+    [ "$effort" = "$(fm_field "$f" effort)" ] || { echo "$reviewer: Effort cell $effort differs from frontmatter" >&2; return 1; }
+    n=$((n + 1))
+  done <<<"$rows"
+  [ "$n" -eq 5 ]
 }

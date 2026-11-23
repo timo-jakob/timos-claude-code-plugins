@@ -2,6 +2,7 @@
 name: claude-plugin-test-reviewer
 description: Testing specialist for Claude Code plugin repos — bats coverage for changed scripts, weak assertions, and untested failure branches. The tests dimension of /development-claude-plugin:review (reuses the core tests dimension and its *-test-reviewer convention); severity is bounded by an explicit mutation bar so the review loop converges instead of regressing on assertion strength.
 model: opus
+effort: high
 tools: Read, Grep, Glob
 ---
 
