@@ -216,7 +216,7 @@ fm_field() {
 }
 
 @test "#3310 every development-claude-plugin agent declares the effort its class gets" {
-  local expected="claude-plugin-version-sync:low claude-plugin-manifest-check:low
+  local expected="claude-plugin-version-sync:low claude-plugin-manifest-check:high
 claude-plugin-structure-validator:low claude-plugin-skill-validator:low
 claude-plugin-reference-checker:medium claude-plugin-script-quality:medium
 claude-plugin-contract-integrity:high claude-plugin-test-reviewer:high

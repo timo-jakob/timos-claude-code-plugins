@@ -111,7 +111,7 @@ standalone run has no descriptor at all, which the **Runs** cells name as *no pl
 | claude-plugin-contract-integrity | agent | opus | high | contract | `scope_mode` is `"full"`, or no plan, or `contract` is not in `skippable_dimensions`, or the split-carry map holds `contract` |
 | claude-plugin-script-reviewer | agent | fable | high | script_quality | every round |
 | claude-plugin-test-reviewer | agent | opus | high | tests | every round |
-| claude-plugin-manifest-check | agent | sonnet | low | manifest_bump | `scope_mode` is `"full"`, or no plan; on a `"delta"` round only when the split-carry map holds `manifest_bump` |
+| claude-plugin-manifest-check | agent | sonnet | high | manifest_bump | `scope_mode` is `"full"`, or no plan; on a `"delta"` round only when the split-carry map holds `manifest_bump` |
 | check-manifests.zsh | script | — | — | manifest | every round |
 
 **A dimension the table does not plan for this round is not run and produces nothing** — no findings, no

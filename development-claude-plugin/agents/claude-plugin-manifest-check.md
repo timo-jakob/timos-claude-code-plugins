@@ -2,7 +2,7 @@
 name: claude-plugin-manifest-check
 description: Reviews plugin version bumps on a change for judgment the manifest script cannot make — semver bump SIZE (patch vs minor vs major against what the diff actually changes). The manifest_bump dimension of /development-claude-plugin:review; the deterministic manifest checks (bump presence, needless bumps, lockstep, X.Y.Z) are the manifest dimension's script, check-manifests.zsh.
 model: sonnet
-effort: low
+effort: high
 tools: Read, Grep, Glob
 ---
 
