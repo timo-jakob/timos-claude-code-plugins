@@ -6,6 +6,8 @@
 # validator (and only it) reports the expected finding. This is the regression
 # net the coverage-misreporting incident (#258/#259) showed these scripts need.
 
+load assertions
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   GATHER="$REPO_ROOT/development/skills/maintenance/scripts/gather-claude-plugin-findings.zsh"
@@ -103,6 +105,40 @@ only_peer_flagged() {
   add_bogus_peer
   run only_peer_flagged "$WORK"
   [ "$status" -eq 0 ]
+}
+
+# effort_section -> ARCHITECTURE.md's "Reasoning effort (#3309)" section, from
+# its heading to the next heading, with line breaks folded to single spaces so a
+# needle may span a wrapped line.
+effort_section() {
+  awk '/^### Reasoning effort \(#3309\)$/{on=1; print; next} on && /^#/{exit} on{print}' \
+    "$REPO_ROOT/ARCHITECTURE.md" | tr '\n' ' ' | tr -s ' '
+}
+
+@test "ARCHITECTURE.md effort section: documented level list matches the gather's case arm (#3309)" {
+  run grep -Eo '^ *[a-z|]+\) ;;$' "$GATHER"
+  [ "$status" -eq 0 ]
+  arm="$(printf '%s\n' "$output" | grep -F 'xhigh' | tr -d ' ;)')"
+  [ "$arm" = "low|medium|high|xhigh|max" ]
+  run effort_section
+  contains "$output" "must be one of \`low\`, \`medium\`, \`high\`, \`xhigh\` or \`max\`."
+}
+
+@test "ARCHITECTURE.md effort section: pins the invalid_effort finding contract (#3309)" {
+  run effort_section
+  contains "$output" "### Reasoning effort (#3309)"
+  contains "$output" "reports any other value as an \`invalid_effort\` finding, shaped like \`invalid_model\`"
+  contains "$output" "(id \`skill:<file>:effort\`, \`field: \"effort\"\`)"
+  contains "$output" "an agent without it runs at the default effort"
+}
+
+@test "ARCHITECTURE.md effort section: pins the per-agent-class effort rules (#3309)" {
+  run effort_section
+  contains "$output" "**Judgement agents** — reviewers, approvers, migrations — keep the model the table above gives them and run at \`high\`."
+  contains "$output" "They are not raised to \`xhigh\` or \`max\` by default."
+  contains "$output" "This bullet takes precedence over the next: a reviewer, approver or migration agent is a judgement agent even when its fallback is to escalate to a human."
+  contains "$output" "take the cheapest model that does the job first, and then \`low\` effort."
+  contains "$output" "is a decision made on a measurement of what it does to review quality (#2945), never on a guess."
 }
 
 @test "orphaned reference: reference_checking reports orphan_command" {
