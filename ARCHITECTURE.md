@@ -9017,15 +9017,17 @@ than silently ignored.
 Effort is the cheaper of the two knobs: a lower effort keeps the same model and
 the same prompt cache and only trims deliberation. Choose it with the model:
 
-- **Judgement agents** — reviewers, approvers, migrations — keep the model the
-  table above gives them and run at `high`. They are not raised to `xhigh` or
-  `max` by default. This bullet takes precedence over the next: a reviewer,
-  approver or migration agent is a judgement agent even when its fallback is to
-  escalate to a human.
+- **Judgement agents** — any agent whose output is a decision no deterministic
+  check verifies: reviewers, approvers, migrations, triage (a Snyk finding, a CI
+  failure, whether a vulnerability is exploitable) and the like — keep the model
+  the table above gives them and run at `high`. They are not raised to `xhigh`
+  or `max` by default. This bullet takes precedence over the next: a judgement
+  agent stays one even when its fallback is to escalate to a human.
 - **Mechanical or decision-tree agents** — those whose output a deterministic
   check verifies, or whose default answer is to escalate — take the cheapest
   model that does the job first, and then `low` effort. Extra deliberation buys
-  them nothing but tool calls and preamble.
+  them nothing but tool calls and preamble. This bullet never moves an agent's
+  model below the row the table above gives its task.
 - **Lowering a reviewer below `high`** is a decision made on a measurement of
   what it does to review quality (#2945), never on a guess.
 

@@ -134,10 +134,11 @@ effort_section() {
 
 @test "ARCHITECTURE.md effort section: pins the per-agent-class effort rules (#3309)" {
   run effort_section
-  contains "$output" "**Judgement agents** — reviewers, approvers, migrations — keep the model the table above gives them and run at \`high\`."
+  contains "$output" "**Judgement agents** — any agent whose output is a decision no deterministic check verifies: reviewers, approvers, migrations, triage (a Snyk finding, a CI failure, whether a vulnerability is exploitable) and the like — keep the model the table above gives them and run at \`high\`."
   contains "$output" "They are not raised to \`xhigh\` or \`max\` by default."
-  contains "$output" "This bullet takes precedence over the next: a reviewer, approver or migration agent is a judgement agent even when its fallback is to escalate to a human."
+  contains "$output" "This bullet takes precedence over the next: a judgement agent stays one even when its fallback is to escalate to a human."
   contains "$output" "take the cheapest model that does the job first, and then \`low\` effort."
+  contains "$output" "This bullet never moves an agent's model below the row the table above gives its task."
   contains "$output" "is a decision made on a measurement of what it does to review quality (#2945), never on a guess."
 }
 
