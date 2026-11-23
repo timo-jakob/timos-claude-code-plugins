@@ -133,6 +133,7 @@ fi
 # all plugins. SKILL.md (skills/<name>/SKILL.md) requires name + description and
 # `name` must match <name>. Agent files (agents/<name>.md) additionally require
 # model (haiku|sonnet|opus|fable) + tools, and `name` must match the filename.
+# An agent's optional `effort:` must be one of low|medium|high|xhigh|max (#3309).
 local has_skill_validation="false"
 local skill_findings="[]"
 
@@ -147,7 +148,7 @@ if (( ${#md_targets} )); then
     jq --argjson f "$1" '. + [$f]' "$sf" > "$sf.tmp" && mv "$sf.tmp" "$sf"
   }
 
-  local file kind expected fm body name_val model_val key
+  local file kind expected fm body name_val model_val effort_val key
   for file in "${md_targets[@]}"; do
     if [[ "$file" == */agents/*.md ]]; then
       kind="agent"; expected="${file:t:r}"      # filename without .md
@@ -205,6 +206,22 @@ if (( ${#md_targets} )); then
             files: [$file] }')"
           ;;
       esac
+
+      # effort is optional (#3309); when present it must be a known level.
+      if grep -qE '^effort:' <<< "$fm"; then
+        effort_val=$(grep -E '^effort:' <<< "$fm" | head -1 | sed -E 's/^effort:[[:space:]]*//; s/[[:space:]]*$//')
+        case "$effort_val" in
+          low|medium|high|xhigh|max) ;;
+          *)
+            add_skill_finding "$(jq -n --arg file "$file" --arg got "$effort_val" '{
+              id: ("skill:" + $file + ":effort"), tool: "skill_validation", type: "invalid_effort",
+              severity: "medium", file: $file, kind: "agent", field: "effort",
+              message: ("agent \($file): effort “\($got)” is not one of low|medium|high|xhigh|max"),
+              fix: "set effort to low, medium, high, xhigh, or max (or remove the line)",
+              files: [$file] }')"
+            ;;
+        esac
+      fi
     fi
 
     if [[ -z "${body//[[:space:]]/}" ]]; then

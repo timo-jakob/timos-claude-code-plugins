@@ -6,6 +6,8 @@
 # validator (and only it) reports the expected finding. This is the regression
 # net the coverage-misreporting incident (#258/#259) showed these scripts need.
 
+load assertions
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   GATHER="$REPO_ROOT/development/skills/maintenance/scripts/gather-claude-plugin-findings.zsh"
@@ -50,6 +52,94 @@ type0() { zsh "$GATHER" "$1" | jq -r ".findings_by_tool.$2[0].type"; }
   [ "$(count "$WORK" skill_validation)" -ge 1 ]
   run bash -c "zsh '$GATHER' '$WORK' | jq -e '[.findings_by_tool.skill_validation[].type] | index(\"missing_field\")'"
   [ "$status" -eq 0 ]
+}
+
+# set_effort <value> -> add an `effort:` line to the helper agent's frontmatter
+set_effort() {
+  awk -v e="$1" '/^effort:/{next} {print} $0=="model: haiku"{print "effort: " e}' \
+    "$WORK/development-fixture/agents/helper.md" > "$WORK/t"
+  mv "$WORK/t" "$WORK/development-fixture/agents/helper.md"
+  grep -qx "effort: $1" "$WORK/development-fixture/agents/helper.md"
+}
+
+# add_bogus_peer -> a second agent whose effort is invalid. Paired with a
+# valid or absent effort on helper.md, it proves the validator ran (the peer is
+# flagged) and that it passed over helper.md, so the "no finding" cases fail
+# when the effort check is reverted rather than passing vacuously.
+add_bogus_peer() {
+  printf -- '---\nname: peer\ndescription: A second fixture agent.\nmodel: haiku\neffort: bogus\ntools: Read\n---\n\nPeer body.\n' \
+    > "$WORK/development-fixture/agents/peer.md"
+}
+# only_peer_flagged <repo> -> exit 0 when the sole skill_validation finding is
+# the peer's invalid_effort
+only_peer_flagged() {
+  zsh "$GATHER" "$1" | jq -e '.findings_by_tool.skill_validation
+    | length == 1 and .[0].type == "invalid_effort"
+      and .[0].file == "development-fixture/agents/peer.md"'
+}
+
+@test "valid agent effort: skill_validation reports no finding (#3309)" {
+  # every accepted level: low|medium|high|xhigh|max
+  for level in low medium high xhigh max; do
+    set_effort "$level"
+    [ "$(count "$WORK" skill_validation)" -eq 0 ]
+  done
+  add_bogus_peer
+  run only_peer_flagged "$WORK"
+  [ "$status" -eq 0 ]
+}
+
+@test "invalid agent effort: skill_validation reports one invalid_effort (#3309)" {
+  set_effort bogus
+  run gather "$WORK"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '[.findings_by_tool.skill_validation[] | select(.type == "invalid_effort")] | length == 1'
+  echo "$output" | jq -e '.findings_by_tool.skill_validation | length == 1'
+  echo "$output" | jq -e '.findings_by_tool.skill_validation[0] | .id == "skill:development-fixture/agents/helper.md:effort" and .field == "effort" and .kind == "agent" and .file == "development-fixture/agents/helper.md"'
+}
+
+@test "absent agent effort: skill_validation reports no finding (#3309)" {
+  run grep -c '^effort:' "$WORK/development-fixture/agents/helper.md"
+  [ "$output" = "0" ]
+  [ "$(count "$WORK" skill_validation)" -eq 0 ]
+  add_bogus_peer
+  run only_peer_flagged "$WORK"
+  [ "$status" -eq 0 ]
+}
+
+# effort_section -> ARCHITECTURE.md's "Reasoning effort (#3309)" section, from
+# its heading to the next heading, with line breaks folded to single spaces so a
+# needle may span a wrapped line.
+effort_section() {
+  awk '/^### Reasoning effort \(#3309\)$/{on=1; print; next} on && /^#/{exit} on{print}' \
+    "$REPO_ROOT/ARCHITECTURE.md" | tr '\n' ' ' | tr -s ' '
+}
+
+@test "ARCHITECTURE.md effort section: documented level list matches the gather's case arm (#3309)" {
+  run grep -Eo '^ *[a-z|]+\) ;;$' "$GATHER"
+  [ "$status" -eq 0 ]
+  arm="$(printf '%s\n' "$output" | grep -F 'xhigh' | tr -d ' ;)')"
+  [ "$arm" = "low|medium|high|xhigh|max" ]
+  run effort_section
+  contains "$output" "must be one of \`low\`, \`medium\`, \`high\`, \`xhigh\` or \`max\`."
+}
+
+@test "ARCHITECTURE.md effort section: pins the invalid_effort finding contract (#3309)" {
+  run effort_section
+  contains "$output" "### Reasoning effort (#3309)"
+  contains "$output" "reports any other value as an \`invalid_effort\` finding, shaped like \`invalid_model\`"
+  contains "$output" "(id \`skill:<file>:effort\`, \`field: \"effort\"\`)"
+  contains "$output" "an agent without it runs at the default effort"
+}
+
+@test "ARCHITECTURE.md effort section: pins the per-agent-class effort rules (#3309)" {
+  run effort_section
+  contains "$output" "**Judgement agents** — any agent whose output is a decision no deterministic check verifies: reviewers, approvers, migrations, triage (a Snyk finding, a CI failure, whether a vulnerability is exploitable) and the like — keep the model the table above gives them and run at \`high\`."
+  contains "$output" "They are not raised to \`xhigh\` or \`max\` by default."
+  contains "$output" "This bullet takes precedence over the next: an agent that makes any decision no deterministic check verifies is a judgement agent, even if some of its branches escalate."
+  contains "$output" "**Mechanical or decision-tree agents** — any agent that makes no unverified decision of its own: every branch either applies a deterministic rule or hands the case to a human unchanged — take the cheapest model that does the job first, and then \`low\` effort."
+  contains "$output" "This bullet never moves an agent's model below the row the table above gives its task."
+  contains "$output" "is a decision made on a measurement of what it does to review quality (#2945), never on a guess."
 }
 
 @test "orphaned reference: reference_checking reports orphan_command" {
