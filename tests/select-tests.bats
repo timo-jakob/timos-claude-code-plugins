@@ -13,7 +13,8 @@
 #   * the map-completeness guard, and a mutation showing it bites;
 #   * on THIS repo, a development-go-only change does not select
 #     tests/resolve-story-loop-step.bats (the parallel floor the 50% target
-#     depends on), and every tests/*.bats file is mapped or always-run.
+#     depends on), every tests/*.bats file is mapped or always-run, and a
+#     diagram-only change selects workflow-diagrams.bats (#3083).
 
 bats_require_minimum_version 1.5.0
 load assertions
@@ -563,6 +564,17 @@ usage_is() {  # $1 = expected stderr fragment, then the arguments
   run --separate-stderr zsh "$S" --repo "$REPO_ROOT" --tests-dir tests --changed "$CHANGED"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.selection == "selected" and (.files | index("tests/opentofu-review-panel.bats"))'
+}
+
+@test "this repo: a diagram-only change selects workflow-diagrams.bats, not the full suite (#3083)" {
+  # workflow-diagrams.bats finds the diagrams with a runtime glob, so only its
+  # `# covers:` header maps them. The paths are built here, never spelled out:
+  # a bats file that spelled one would map it by extraction and mask the header.
+  local dir="docs/explanation/diagrams"
+  printf '%s\n' "$dir/maintenance.svg" "$dir/maintenance.mmd" "$dir/a-new-diagram.svg" > "$CHANGED"
+  run --separate-stderr zsh "$S" --repo "$REPO_ROOT" --tests-dir tests --changed "$CHANGED"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.selection == "selected" and (.files | index("tests/workflow-diagrams.bats"))'
 }
 
 @test "this repo: a development-go-only change does not select resolve-story-loop-step.bats" {

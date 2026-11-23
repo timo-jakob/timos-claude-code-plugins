@@ -18,6 +18,11 @@
 #
 # They do NOT render or build anything — that needs docker and two large
 # images; the docs workflow is the end-to-end check.
+#
+# Most diagrams are found by a runtime `git ls-files` glob, so their paths are
+# never spelled out for select-tests.zsh to extract; this header maps the
+# whole tree (#3083).
+# covers: docs/explanation/diagrams
 
 load assertions
 
