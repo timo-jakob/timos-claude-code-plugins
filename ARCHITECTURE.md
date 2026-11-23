@@ -9021,11 +9021,13 @@ the same prompt cache and only trims deliberation. Choose it with the model:
   check verifies: reviewers, approvers, migrations, triage (a Snyk finding, a CI
   failure, whether a vulnerability is exploitable) and the like — keep the model
   the table above gives them and run at `high`. They are not raised to `xhigh`
-  or `max` by default. This bullet takes precedence over the next: a judgement
-  agent stays one even when its fallback is to escalate to a human.
-- **Mechanical or decision-tree agents** — those whose output a deterministic
-  check verifies, or whose default answer is to escalate — take the cheapest
-  model that does the job first, and then `low` effort. Extra deliberation buys
+  or `max` by default. This bullet takes precedence over the next: an agent that
+  makes any decision no deterministic check verifies is a judgement agent, even
+  if some of its branches escalate.
+- **Mechanical or decision-tree agents** — any agent that makes no unverified
+  decision of its own: every branch either applies a deterministic rule or
+  hands the case to a human unchanged — take the cheapest model that does the
+  job first, and then `low` effort. Extra deliberation buys
   them nothing but tool calls and preamble. This bullet never moves an agent's
   model below the row the table above gives its task.
 - **Lowering a reviewer below `high`** is a decision made on a measurement of
