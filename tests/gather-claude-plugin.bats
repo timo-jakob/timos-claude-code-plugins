@@ -52,6 +52,59 @@ type0() { zsh "$GATHER" "$1" | jq -r ".findings_by_tool.$2[0].type"; }
   [ "$status" -eq 0 ]
 }
 
+# set_effort <value> -> add an `effort:` line to the helper agent's frontmatter
+set_effort() {
+  awk -v e="$1" '/^effort:/{next} {print} $0=="model: haiku"{print "effort: " e}' \
+    "$WORK/development-fixture/agents/helper.md" > "$WORK/t"
+  mv "$WORK/t" "$WORK/development-fixture/agents/helper.md"
+  grep -qx "effort: $1" "$WORK/development-fixture/agents/helper.md"
+}
+
+# add_bogus_peer -> a second agent whose effort is invalid. Paired with a
+# valid or absent effort on helper.md, it proves the validator ran (the peer is
+# flagged) and that it passed over helper.md, so the "no finding" cases fail
+# when the effort check is reverted rather than passing vacuously.
+add_bogus_peer() {
+  printf -- '---\nname: peer\ndescription: A second fixture agent.\nmodel: haiku\neffort: bogus\ntools: Read\n---\n\nPeer body.\n' \
+    > "$WORK/development-fixture/agents/peer.md"
+}
+# only_peer_flagged <repo> -> exit 0 when the sole skill_validation finding is
+# the peer's invalid_effort
+only_peer_flagged() {
+  zsh "$GATHER" "$1" | jq -e '.findings_by_tool.skill_validation
+    | length == 1 and .[0].type == "invalid_effort"
+      and .[0].file == "development-fixture/agents/peer.md"'
+}
+
+@test "valid agent effort: skill_validation reports no finding (#3309)" {
+  # every accepted level: low|medium|high|xhigh|max
+  for level in low medium high xhigh max; do
+    set_effort "$level"
+    [ "$(count "$WORK" skill_validation)" -eq 0 ]
+  done
+  add_bogus_peer
+  run only_peer_flagged "$WORK"
+  [ "$status" -eq 0 ]
+}
+
+@test "invalid agent effort: skill_validation reports one invalid_effort (#3309)" {
+  set_effort bogus
+  run gather "$WORK"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '[.findings_by_tool.skill_validation[] | select(.type == "invalid_effort")] | length == 1'
+  echo "$output" | jq -e '.findings_by_tool.skill_validation | length == 1'
+  echo "$output" | jq -e '.findings_by_tool.skill_validation[0] | .id == "skill:development-fixture/agents/helper.md:effort" and .field == "effort" and .kind == "agent" and .file == "development-fixture/agents/helper.md"'
+}
+
+@test "absent agent effort: skill_validation reports no finding (#3309)" {
+  run grep -c '^effort:' "$WORK/development-fixture/agents/helper.md"
+  [ "$output" = "0" ]
+  [ "$(count "$WORK" skill_validation)" -eq 0 ]
+  add_bogus_peer
+  run only_peer_flagged "$WORK"
+  [ "$status" -eq 0 ]
+}
+
 @test "orphaned reference: reference_checking reports orphan_command" {
   printf '\nSee /development-fixture:nonexistent for details.\n' >> "$WORK/development-fixture/skills/demo/SKILL.md"
   [ "$(count "$WORK" reference_checking)" -eq 1 ]

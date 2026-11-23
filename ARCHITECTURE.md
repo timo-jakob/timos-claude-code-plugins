@@ -9004,6 +9004,29 @@ try most often. A wrong haiku output costs more than the haiku tokens
 saved — agents that frequently come back with "I need more context"
 should move up the ladder.
 
+### Reasoning effort (#3309)
+
+An agent may also declare `effort:` in its frontmatter, beside `model:`. It is
+optional — an agent without it runs at the default effort — but when present it
+must be one of `low`, `medium`, `high`, `xhigh` or `max`. The `skill_validation`
+gather (`gather-claude-plugin-findings.zsh`) reports any other value as an
+`invalid_effort` finding, shaped like `invalid_model` (id
+`skill:<file>:effort`, `field: "effort"`), so a mistyped level is caught rather
+than silently ignored.
+
+Effort is the cheaper of the two knobs: a lower effort keeps the same model and
+the same prompt cache and only trims deliberation. Choose it with the model:
+
+- **Mechanical or decision-tree agents** — those whose output a deterministic
+  check verifies, or whose default answer is to escalate — take the cheapest
+  model that does the job first, and then `low` effort. Extra deliberation buys
+  them nothing but tool calls and preamble.
+- **Judgement agents** — reviewers, approvers, migrations — keep the model the
+  table above gives them and run at `high`. They are not raised to `xhigh` or
+  `max` by default.
+- **Lowering a reviewer below `high`** is a decision made on a measurement of
+  what it does to review quality (#2945), never on a guess.
+
 ### Runtime override: `switch_fable_to_opus` (#1017)
 
 Frontmatter is the *declared* model, but it is no longer the sole determinant of
