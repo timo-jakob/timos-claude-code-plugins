@@ -2,6 +2,7 @@
 name: claude-plugin-version-sync
 description: Sync `.claude-plugin/marketplace.json` version entries to match each plugin's `plugin.json` (the source of truth). Mechanical for plain version mismatches; escalates add/remove-entry decisions to human review. Used by development-claude-plugin:maintenance.
 model: haiku
+effort: low
 tools: Bash, Read, Edit
 ---
 

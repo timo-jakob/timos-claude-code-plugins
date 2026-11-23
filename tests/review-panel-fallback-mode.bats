@@ -69,7 +69,7 @@ setup() {
   # the normal table still plans all six dimensions
   local d
   for d in prose_logic contract script_quality tests manifest_bump manifest; do
-    grep -qE "^\| [a-z.-]+ +\| (agent|script) +\| [a-z—]+ +\| ${d} +\|" "$SKILL"
+    grep -qE "^\| [a-z.-]+ +\| (agent|script) +\| [a-z—]+ +\| [a-z—]+ +\| ${d} +\|" "$SKILL"
   done
 }
 

@@ -2,6 +2,7 @@
 name: claude-plugin-structure-validator
 description: For each structure_validation finding (plugin directory-layout violations — missing/misnamed plugin.json, wrong skills/agents layout, marketplace source mismatch), fix the mechanically-safe case (marketplace source path) and escalate the rest, since the others move files or change a published plugin identity. Used by development-claude-plugin:maintenance.
 model: opus
+effort: low
 tools: Read, Edit, Bash, Grep
 ---
 

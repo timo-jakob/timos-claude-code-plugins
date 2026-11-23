@@ -2,6 +2,7 @@
 name: claude-plugin-contract-integrity
 description: Reviews cross-artifact integrity in a Claude Code plugin repo — dangling skill/agent/script references, prose-vs-script flag and subcommand drift, and drift against the schema contracts documented in ARCHITECTURE.md. The contract dimension of /development-claude-plugin:review; severity is bounded by an explicit consumer bar so the review loop converges instead of blocking on every incomplete restatement.
 model: opus
+effort: high
 tools: Read, Grep, Glob
 ---
 

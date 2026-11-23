@@ -2,6 +2,7 @@
 name: claude-plugin-skill-validator
 description: For each skill_validation finding (SKILL.md / agent .md frontmatter that breaks the plugin file contract), fix the mechanically-safe cases (name that doesn't match its location) and escalate the ones that need authored content (missing description/tools/model, missing frontmatter, empty body, wrong model). Used by development-claude-plugin:maintenance.
 model: opus
+effort: low
 tools: Read, Edit, Bash, Grep
 ---
 

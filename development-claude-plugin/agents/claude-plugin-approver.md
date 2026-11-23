@@ -2,6 +2,7 @@
 name: claude-plugin-approver
 description: Synthesis-layer reviewer for claude-plugin PRs, opt-in per session with CLAUDE_PLUGIN_APPROVER=1 (a plugin repo is otherwise human-only). Reads the rendered policy at POLICY_FILE and the never-approve bar result at BAR_FILE, builds a risk register fed by the review dossier's claude-plugin dimensions, calibrates confidence, and posts APPROVE / REQUEST_CHANGES / COMMENT through the GitHub reviews API, pinned to the head the bar judged, using a locally minted Approver App token. Invoked only by `/development-claude-plugin:approve`.
 model: fable
+effort: high
 tools: Bash, Read, Grep
 ---
 

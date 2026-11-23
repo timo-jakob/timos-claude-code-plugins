@@ -105,14 +105,14 @@ reviewer runs this round exactly when its **Runs** cell holds. Read `scope_mode`
 descriptor (in hook mode, `$REVIEW_SCOPE_MODE`), and the split-carry map as the carry preamble above says; a
 standalone run has no descriptor at all, which the **Runs** cells name as *no plan*.
 
-| Reviewer | Kind | Model | Dimension | Runs |
-| --------------------------------- | ------ | ------ | -------------- | ---- |
-| claude-plugin-prose-logic | agent | fable | prose_logic | every round |
-| claude-plugin-contract-integrity | agent | opus | contract | `scope_mode` is `"full"`, or no plan, or `contract` is not in `skippable_dimensions`, or the split-carry map holds `contract` |
-| claude-plugin-script-reviewer | agent | fable | script_quality | every round |
-| claude-plugin-test-reviewer | agent | opus | tests | every round |
-| claude-plugin-manifest-check | agent | sonnet | manifest_bump | `scope_mode` is `"full"`, or no plan; on a `"delta"` round only when the split-carry map holds `manifest_bump` |
-| check-manifests.zsh | script | — | manifest | every round |
+| Reviewer | Kind | Model | Effort | Dimension | Runs |
+| --------------------------------- | ------ | ------ | ------ | -------------- | ---- |
+| claude-plugin-prose-logic | agent | fable | high | prose_logic | every round |
+| claude-plugin-contract-integrity | agent | opus | high | contract | `scope_mode` is `"full"`, or no plan, or `contract` is not in `skippable_dimensions`, or the split-carry map holds `contract` |
+| claude-plugin-script-reviewer | agent | fable | high | script_quality | every round |
+| claude-plugin-test-reviewer | agent | opus | high | tests | every round |
+| claude-plugin-manifest-check | agent | sonnet | low | manifest_bump | `scope_mode` is `"full"`, or no plan; on a `"delta"` round only when the split-carry map holds `manifest_bump` |
+| check-manifests.zsh | script | — | — | manifest | every round |
 
 **A dimension the table does not plan for this round is not run and produces nothing** — no findings, no
 triple — and that is not a dimension that failed to run. Two cells vary. The `manifest_bump` row: round 1 and
