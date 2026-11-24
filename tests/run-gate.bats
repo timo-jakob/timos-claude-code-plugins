@@ -891,6 +891,88 @@ SH
   echo "$output" | jq -e '.scope == "full"'
 }
 
+# ---- --files-from: one leg of CI's sharded suite (#3084) --------------------
+# A leg runs exactly the files its list names. Every way the list can be wrong
+# is a usage error before the suite starts — never a quiet fall-back to the
+# whole suite, which would hide a broken split behind a slow green leg.
+
+files_gate() {  # run-gate in $proj with --files-from LIST (plus extra args)
+  run --separate-stderr env -u GATE_NPROC -u GATE_PARALLEL_BIN \
+    GATE_BATS_BIN="$STUB" CALLS="$CALLS" ARGV="$ARGV" TAPFIX="$TAPFIX" \
+    zsh "$S" --tests-dir tests "$@"
+}
+
+@test "--files-from: runs ONLY the listed files, scope selected, tree selected:<hex>" {
+  mk_gitproj
+  touch "$proj/tests/a.bats" "$proj/tests/b.bats" "$proj/tests/c.bats"
+  printf 'tests/a.bats\n\ntests/c.bats\n' > "$BATS_TEST_TMPDIR/leg"
+  cd "$proj"
+  local want; want="$(zsh "$REPO_ROOT/development/skills/resolve-issue/scripts/git-tree-id.zsh" .)"
+  files_gate --files-from "$BATS_TEST_TMPDIR/leg"
+  [ "$status" -eq 0 ]
+  [ "$(calls)" -eq 1 ]
+  echo "$output" | jq -e --arg t "selected:$want" '.scope == "selected" and .tree == $t'
+  contains "$stderr" "running the 2 bats file(s) --files-from lists (#3084)"
+  # bats got the two listed files, the blank line dropped, and NOT the tests dir
+  grep -qE 'tests/a\.bats tests/c\.bats$' "$ARGV"
+  run ! grep -q 'tests/b.bats' "$ARGV"
+  run ! grep -qE '(^| )tests$' "$ARGV"
+}
+
+@test "--files-from: a listed path that is not a file is a usage error, and no suite runs" {
+  mk_gitproj
+  touch "$proj/tests/a.bats"
+  printf 'tests/a.bats\ntests/gone.bats\n' > "$BATS_TEST_TMPDIR/leg"
+  cd "$proj"
+  files_gate --files-from "$BATS_TEST_TMPDIR/leg"
+  [ "$status" -eq 2 ]
+  [ ! -e "$CALLS" ]
+  contains "$stderr" "--files-from lists a path that is not a file: tests/gone.bats"
+}
+
+@test "--files-from: a list with no paths is a usage error, never a full run" {
+  mk_gitproj
+  touch "$proj/tests/a.bats"
+  printf '\n  \n' > "$BATS_TEST_TMPDIR/leg"
+  cd "$proj"
+  files_gate --files-from "$BATS_TEST_TMPDIR/leg"
+  [ "$status" -eq 2 ]
+  [ ! -e "$CALLS" ]
+  contains "$stderr" "--files-from lists no files"
+}
+
+@test "--files-from: a missing list, a missing value, or --select-base beside it is a usage error" {
+  mk_gitproj
+  touch "$proj/tests/a.bats"
+  printf 'tests/a.bats\n' > "$BATS_TEST_TMPDIR/leg"
+  cd "$proj"
+  files_gate --files-from "$BATS_TEST_TMPDIR/no-such-list"
+  [ "$status" -eq 2 ]
+  contains "$stderr" "--files-from list not readable"
+  files_gate --files-from
+  [ "$status" -eq 2 ]
+  contains "$stderr" "--files-from needs a file"
+  files_gate --files-from --tap-out x
+  [ "$status" -eq 2 ]
+  contains "$stderr" "--files-from needs a file"
+  files_gate --files-from "$BATS_TEST_TMPDIR/leg" --select-base origin/main
+  [ "$status" -eq 2 ]
+  contains "$stderr" "mutually exclusive"
+  [ ! -e "$CALLS" ]
+}
+
+@test "--files-from: a RED leg keeps the suite's exit and is unattestable" {
+  mk_gitproj
+  touch "$proj/tests/a.bats"
+  printf 'tests/a.bats\n' > "$BATS_TEST_TMPDIR/leg"
+  cd "$proj"
+  run --separate-stderr env -u GATE_NPROC -u GATE_PARALLEL_BIN \
+    GATE_BATS_BIN="$STUB" CALLS="$CALLS" ARGV="$ARGV" TAPFIX="$TAPFIX" STUB_EXIT=1 \
+    zsh "$S" --tests-dir tests --files-from "$BATS_TEST_TMPDIR/leg"
+  [ "$status" -eq 1 ]
+  echo "$output" | jq -e '.scope == "selected" and .tree == "" and .exit == 1'
+}
+
 # ---- the stderr start line and the count line's wall_s (#2196) --------------
 # gate-eta.zsh reads run-gate's captured stderr, so two lines there are a
 # contract: one unconditional `run-gate: start …` line before the suite runs,

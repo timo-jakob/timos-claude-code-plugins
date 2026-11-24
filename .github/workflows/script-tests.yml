@@ -152,16 +152,36 @@ permissions:
   contents: read
 
 jobs:
+  # The suite runs SHARDED (#3084): each `bats` leg runs a disjoint share of
+  # tests/*.bats, and `bats-required` below is the one check branch protection
+  # requires. One job ran 21-31 min (median ~26) on the 15 green runs before
+  # this change, against a 1800 s merge-pr-cycle settle bound; four legs run
+  # the same suite in about a quarter of the test time each, plus the setup
+  # every leg repeats (~1 min). Standard runners cost nothing on a public repo,
+  # so the repeated setup is the whole price.
   bats:
+    # Each leg reports under its own name, never the required one: a leg named
+    # `bats (ubuntu-latest)` would let one green leg satisfy branch protection.
+    name: bats leg ${{ matrix.leg }} (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
         # DEACTIVATED, not removed (#1407): restore `macos-latest` to this list
-        # to bring the bash-3.2 lane back — that one edit is the whole re-enable,
-        # which is why every macOS-specific step below is left in place and
-        # working rather than deleted. #1408 tracks doing it.
+        # to bring the bash-3.2 lane back, which is why every macOS-specific step
+        # below is left in place and working rather than deleted. #1408 tracks
+        # doing it. Since #3084 that edit is no longer the whole re-enable: the
+        # macOS legs would also feed `bats-required`, whose name says ubuntu, so
+        # the re-enable decides how the required check is named and gated.
         #   os: [ubuntu-latest, macos-latest]
         os: [ubuntu-latest]
+        # The legs (#3084). Four, measured: the suite's test step took 1272-
+        # 1898 s on those runs, so a quarter is ~5-8 min per leg, under the
+        # 12 min target with room for a slow runner. This list and the
+        # `--legs` the run step passes MUST name the same count; the split
+        # script plans `--legs` legs and each leg runs its own number, so a
+        # mismatch drops or double-runs a share — tests/split-bats-shards.bats
+        # holds the two together.
+        leg: [1, 2, 3, 4]
     runs-on: ${{ matrix.os }}
     # 25, not 15 (#1206). The macos leg is the binding one and it had been
     # running at 94% of the old budget: 14m05s against 15m on the last green
@@ -209,7 +229,15 @@ jobs:
     # its first re-run; PR #2224's run 37641035696 was cancelled the same way.
     # 54 still stops a genuine hang well short of GitHub's 6-hour default.
     # Re-measure when green runs get close to 54.
-    timeout-minutes: 54
+    #
+    # 30 on 2026-11-24, per LEG (#3084) — so read the 54 above as the budget of
+    # the one unsharded job, history now. A leg runs a quarter of the suite:
+    # ~5-8 min of tests plus ~1 min of setup. The binding case is the setup,
+    # not the suite: the dependency-install step has taken 7 and 22 min on
+    # green runs (a slow apt mirror), and a leg must survive that, since a
+    # timed-out leg fails the required check. Re-measure when a green leg
+    # gets close to 30.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
@@ -369,7 +397,46 @@ jobs:
           # Silence GNU parallel's citation notice so it never leaks into the TAP
           # stream (#980).
           mkdir -p ~/.parallel && touch ~/.parallel/will-cite
-          # Run the suite through the blessed gate helper: it parallelises via
-          # `bats --jobs $(nproc)`, runs the suite ONCE, and exits with bats' real
+          # This leg's share (#3084). Every leg plans the same split from the
+          # same checkout and the committed per-file timings, then CHECKS that
+          # the legs together cover tests/*.bats exactly once before it runs
+          # anything: a file no leg would run fails every leg, so the required
+          # check can never go green over a silently dropped file.
+          plan="$RUNNER_TEMP/bats-shards.json"
+          leg_files="$RUNNER_TEMP/bats-leg-files"
+          zsh scripts/split-bats-shards.zsh plan --legs 4 --tests-dir tests \
+            --timings tests/bats-timings.json > "$plan"
+          zsh scripts/split-bats-shards.zsh check --plan "$plan" --tests-dir tests
+          zsh scripts/split-bats-shards.zsh files --plan "$plan" --leg "$LEG" > "$leg_files"
+          echo "leg $LEG of $(jq '.legs' "$plan") ($(jq -r '.basis' "$plan")): $(wc -l < "$leg_files") bats files"
+          # Run the share through the blessed gate helper: it parallelises via
+          # `bats --jobs $(nproc)`, runs its files ONCE, and exits with bats' real
           # code — the same single-run parallel path skills use, dogfooded here.
-          zsh development/skills/resolve-issue/scripts/run-gate.zsh --tests-dir tests
+          zsh development/skills/resolve-issue/scripts/run-gate.zsh --tests-dir tests --files-from "$leg_files"
+        env:
+          LEG: ${{ matrix.leg }}
+
+  # The ONE required check (#3084). Branch protection, merge-pr-cycle.zsh and
+  # the Approver all key on the context `bats (ubuntu-latest)` — the name the
+  # unsharded job reported — so this job carries that name and is green only
+  # when every leg is. `always()`, not `!cancelled()`: a job whose `if` is
+  # false reports SKIPPED, and branch protection accepts a skipped required
+  # check as passing — so on a cancelled run this job must still run and fail
+  # rather than skip. A leg that timed out or was cancelled is not a success,
+  # and fails it the same way.
+  bats-required:
+    name: bats (ubuntu-latest)
+    needs: bats
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every leg passed
+        env:
+          LEGS_RESULT: ${{ needs.bats.result }}
+        run: |
+          echo "bats legs: $LEGS_RESULT"
+          if [ "$LEGS_RESULT" != "success" ]; then
+            echo "::error::a bats leg did not pass ($LEGS_RESULT)"
+            exit 1
+          fi

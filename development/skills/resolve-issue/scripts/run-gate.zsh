@@ -48,7 +48,7 @@
 # takes every core, as before the registry existed, and says so on stderr.
 #
 # Usage:
-#   run-gate.zsh [--tests-dir DIR] [--tap-out FILE] [--select-base REF]
+#   run-gate.zsh [--tests-dir DIR] [--tap-out FILE] [--select-base REF | --files-from FILE]
 #     --tests-dir DIR   directory of .bats files to run (default: tests), given
 #                       relative to the repo root when --select-base is used
 #     --tap-out FILE    where to tee the TAP stream (default: a mktemp file)
@@ -57,6 +57,13 @@
 #                       round 1 or a delta review round (#1973, #2926). When the
 #                       selector falls back to the whole suite, or fails, the run
 #                       is an ordinary full run and reports "scope":"full".
+#     --files-from FILE run only the bats files FILE lists, one path per line
+#                       (blank lines ignored) — for one leg of CI's sharded
+#                       suite (#3084), whose legs together run every file.
+#                       Reports "scope":"selected", since one leg is a subset.
+#                       A listed path that is not a regular file, a list with
+#                       no paths, or combining it with --select-base is a
+#                       usage error (2) — never a fall-back to the full suite.
 #
 # Output:
 #   stdout — ONE JSON summary object (machine-readable), e.g.
@@ -65,7 +72,8 @@
 #      "tree":"<40-hex or empty>","files":[{"file":"tests/a.bats","wall_s":3.1}],
 #      "flaky":[]}
 #     mode is one of: "parallel" | "sequential" | "sequential-degraded".
-#     scope is "full" (the whole --tests-dir) or "selected" (a subset, #1973).
+#     scope is "full" (the whole --tests-dir) or "selected" (a subset, #1973:
+#     a --select-base selection, or a --files-from list, #3084).
 #     wall_s is the whole run's wall-clock seconds; `files` lists every bats
 #     file the run ran with the time bats' JUnit report gives it (empty when no
 #     report was written — a timing gap, never a verdict).
@@ -154,12 +162,13 @@ local t_start=$EPOCHREALTIME
 
 die_usage() { print -u2 -- "run-gate: $1"; exit 2 }
 
-local tests_dir="tests" tap_out="" select_base=""
+local tests_dir="tests" tap_out="" select_base="" files_from=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
   --tests-dir) (( $# >= 2 )) || die_usage "--tests-dir needs a value"; tests_dir="$2"; shift 2 ;;
   --tap-out)   { (( $# >= 2 )) && [[ -n "$2" ]]; } || die_usage "--tap-out needs a non-empty value"; tap_out="$2"; shift 2 ;;
   --select-base) { (( $# >= 2 )) && [[ -n "$2" && "$2" != -* ]]; } || die_usage "--select-base needs a ref"; select_base="$2"; shift 2 ;;
+  --files-from) { (( $# >= 2 )) && [[ -n "$2" && "$2" != -* ]]; } || die_usage "--files-from needs a file"; files_from="$2"; shift 2 ;;
   -h|--help) awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"; exit 0 ;;
   *) die_usage "unknown argument: $1" ;;
   esac
@@ -170,6 +179,22 @@ command -v "$bats_bin" >/dev/null 2>&1 \
   || { print -u2 -- "run-gate: bats binary not found ('$bats_bin'). Install it (brew install bats-core)."; exit 127 }
 
 [[ -d "$tests_dir" ]] || die_usage "tests dir not found: $tests_dir"
+
+# --files-from (#3084): read and validate the list up front, before any slot or
+# suite exists. Every failure is a usage error — a leg that silently ran the
+# whole suite instead would hide a broken split behind a slow green.
+local -a listed_files=()
+if [[ -n "$files_from" ]]; then
+  [[ -z "$select_base" ]] || die_usage "--files-from and --select-base are mutually exclusive"
+  [[ -f "$files_from" && -r "$files_from" ]] || die_usage "--files-from list not readable: $files_from"
+  local lf
+  for lf in "${(@f)$(<"$files_from")}"; do
+    [[ -n "${lf//[[:space:]]/}" ]] || continue
+    [[ -f "$lf" ]] || die_usage "--files-from lists a path that is not a file: $lf"
+    listed_files+=("$lf")
+  done
+  (( ${#listed_files} )) || die_usage "--files-from lists no files: $files_from"
+fi
 
 # --- cleanup: our slot, the rc file, and the suite on a signal ---------------
 # Set BEFORE the slot exists, so no window leaves a slot behind. zsh defers a
@@ -286,13 +311,18 @@ else
 fi
 
 # --- what to run: the whole --tests-dir, or a selection (#1973) ---------------
-# Only --select-base narrows the run. Every way the selection can fail — the
-# selector missing, erroring, printing something unreadable, or choosing the
-# whole suite itself — is an ordinary FULL run (the fail-safe direction), and it
-# reports "scope":"full" with a bare tree, because the whole suite is what ran.
+# Only --select-base and --files-from narrow the run. --files-from was
+# validated above, so it always runs exactly its list (#3084). Every way the
+# selection can fail — the selector missing, erroring, printing something
+# unreadable, or choosing the whole suite itself — is an ordinary FULL run (the
+# fail-safe direction), and it reports "scope":"full" with a bare tree, because
+# the whole suite is what ran.
 local scope="full"
 local -a targets=("$tests_dir")
-if [[ -n "$select_base" ]]; then
+if (( ${#listed_files} )); then
+  scope="selected"; targets=( "${listed_files[@]}" )
+  print -u2 -- "run-gate: running the ${#listed_files} bats file(s) --files-from lists (#3084)"
+elif [[ -n "$select_base" ]]; then
   local select_bin="${GATE_SELECT_BIN:-${self_dir}/select-tests.zsh}" sel="" sel_kind=""
   local -a sel_files=()
   if sel="$("$select_bin" --repo . --tests-dir "$tests_dir" --base "$select_base" 2>/dev/null)" \

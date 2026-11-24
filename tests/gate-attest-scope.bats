@@ -706,7 +706,9 @@ selected_section() {
 }
 
 @test "CI: script-tests.yml passes no selection flag or env var to the bats run" {
+  # Each leg runs its shard of the whole suite (#3084), never a diff selection:
+  # the legs together are the full suite, which select-base would subset.
   local wf="$REPO_ROOT/.github/workflows/script-tests.yml"
-  grep -qE '^ *zsh development/skills/resolve-issue/scripts/run-gate\.zsh --tests-dir tests$' "$wf"
+  grep -qE '^ *zsh development/skills/resolve-issue/scripts/run-gate\.zsh --tests-dir tests --files-from "\$leg_files"$' "$wf"
   run ! grep -nE 'select-base|select-tests|GATE_SELECT' "$wf"
 }
