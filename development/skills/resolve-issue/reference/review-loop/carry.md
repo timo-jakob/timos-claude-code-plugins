@@ -177,10 +177,9 @@ whatever the carry holds. A dimension dispatched only for its carry still
 reviews the round's scope like any other reviewer; the carry is why it runs,
 not a limit on what it may raise.
 
-Where it applies today: the claude-plugin panel's `manifest_bump` dimension
-(`claude-plugin-manifest-check`), which runs on full rounds and, on a delta
-round, only by this rule; and its `contract` dimension on a delta round the plan
-marks skippable (*Skippable dimensions*, below). A panel that adds another
+Where it applies today: each of the claude-plugin panel's five agent
+dimensions on a delta round the plan marks it skippable (*Skippable
+dimensions*, below). A panel that adds another
 delta-skipped dimension cites this subsection rather than restating it.
 
 ### Skippable dimensions (#2009)
@@ -202,10 +201,7 @@ deleted, renamed or copied shipped file, no removed heading in a shipped
 `.md`). Any input it cannot judge, and any failure to decide, leaves the
 dimension out of the field: it runs. Beside it the plan emits
 `dimension_reasons`, each dimension's `carried`, `touched`, `undecided` or
-`none` (`full` on a full round). Until the panel's Step 1 table reads the wider
-field (#2925 part 3b), the panel honours only `contract` from it, and it leaves
-`manifest_bump` out of every delta round whose carry does not hold it, whatever
-the field says.
+`none` (`full` on a full round).
 Hook mode exports it as `$REVIEW_SKIPPABLE_DIMENSIONS`.
 
 The plan only **offers** the skip; the panel's Step 1 table decides, and a
@@ -223,9 +219,9 @@ when none. It also records `skip_reasons` (#3311): the plan's
 per round in `<work-dir>/skippable-<R>.json` and
 `<work-dir>/skip-reasons-<R>.json`, and `build-telemetry-record.zsh` reports
 the history as `skipped_dimensions_by_round`. Both record the plan's offer,
-not what the panel ran: until #2925 part 3b the panel honours only a `contract`
-entry, and it leaves `manifest_bump` out of every delta round whose carry does
-not hold it, whatever the entry or its reason says, `touched` included.
+not what the panel ran: until #2925 part 3b the panel honoured only a `contract`
+entry, and it left `manifest_bump` out of every delta round whose carry did
+not hold it, whatever the entry or its reason said, `touched` included.
 
 ### The third histogram state — present, below the threshold (#1510)
 

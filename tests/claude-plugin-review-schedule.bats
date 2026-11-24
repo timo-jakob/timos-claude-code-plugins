@@ -23,8 +23,13 @@ setup() {
   LOOP_REF="$LOOP_DIR/carry.md"
   LOOP_BRIEF="$LOOP_DIR/briefs/panel.md"
   ARCH="$REPO_ROOT/ARCHITECTURE.md"
-  BUMP_CELL='`scope_mode` is `"full"`, or no plan; on a `"delta"` round only when the split-carry map holds `manifest_bump`'
-  CONTRACT_CELL='`scope_mode` is `"full"`, or no plan, or `contract` is not in `skippable_dimensions`, or the split-carry map holds `contract`'
+  CONTRACT_CELL="$(skip_cell contract)"
+}
+
+# skip_cell <dimension> -> the Runs cell every agent row carries since #2925
+# part 3b: the #2009 contract cell's shape, naming the row's own dimension.
+skip_cell() {
+  printf '`scope_mode` is `"full"`, or no plan, or `%s` is not in `skippable_dimensions`, or the split-carry map holds `%s`' "$1" "$1"
 }
 
 # Step 1's table rows as "reviewer<TAB>kind<TAB>dimension<TAB>runs".
@@ -43,20 +48,18 @@ step1_rows() {
 planned() {
   local mode="$1" keys=",$2," skippable=",${3:-}," reviewer kind dim runs out=()
   while IFS=$'\t' read -r reviewer kind dim runs; do
-    case "$runs" in
-    "every round") out+=("$dim") ;;
-    "$BUMP_CELL")
-      if [ "$mode" = full ] || [ "$mode" = none ] \
-        || { [ "$mode" = delta ] && [[ "$keys" == *",manifest_bump,"* ]]; }; then
+    # only the script row runs every round; an agent row must carry the skip
+    # cell naming its OWN dimension, or the cell is unknown and the case fails
+    if [ "$kind" = script ] && [ "$runs" = "every round" ]; then
+      out+=("$dim")
+    elif [ "$kind" = agent ] && [ "$runs" = "$(skip_cell "$dim")" ]; then
+      if [ "$mode" = full ] || [ "$mode" = none ] || [[ "$skippable" != *",$dim,"* ]] \
+        || [[ "$keys" == *",$dim,"* ]]; then
         out+=("$dim")
-      fi ;;
-    "$CONTRACT_CELL")
-      if [ "$mode" = full ] || [ "$mode" = none ] || [[ "$skippable" != *",contract,"* ]] \
-        || [[ "$keys" == *",contract,"* ]]; then
-        out+=("$dim")
-      fi ;;
-    *) echo "unknown Runs cell for $reviewer: $runs" >&2; return 1 ;;
-    esac
+      fi
+    else
+      echo "unknown Runs cell for $reviewer: $runs" >&2; return 1
+    fi
   done < <(step1_rows)
   printf '%s\n' "${out[@]}" | LC_ALL=C sort | paste -sd' ' -
 }
@@ -80,13 +83,14 @@ NO_BUMP="contract manifest prose_logic script_quality tests"
   [ "$(planned full "manifest_bump")" = "$ALL6" ]
 }
 
-@test "a delta round with no manifest_bump carry runs the script but not the agent" {
-  [ "$(planned delta "")" = "$NO_BUMP" ]
-  [ "$(planned delta "manifest,tests")" = "$NO_BUMP" ]
+@test "a delta round offering manifest_bump, with no manifest_bump carry, runs the script but not the agent" {
+  [ "$(planned delta "" "manifest_bump")" = "$NO_BUMP" ]
+  [ "$(planned delta "manifest,tests" "manifest_bump")" = "$NO_BUMP" ]
 }
 
 @test "a delta round whose split-carry map holds manifest_bump runs the script and the agent" {
   [ "$(planned delta "manifest_bump")" = "$ALL6" ]
+  [ "$(planned delta "manifest_bump" "manifest_bump")" = "$ALL6" ]
 }
 
 @test "a standalone run (no plan) plans all six dimensions" {
@@ -95,7 +99,7 @@ NO_BUMP="contract manifest prose_logic script_quality tests"
 
 # --- #2009: the contract row
 
-NO_CONTRACT="manifest prose_logic script_quality tests"
+NO_CONTRACT="manifest manifest_bump prose_logic script_quality tests"
 
 @test "the contract row carries the #2009 dispatch condition" {
   [ "$(step1_rows | awk -F'\t' '$1 == "claude-plugin-contract-integrity" { print $2 "/" $3 "/" $4 }')" = "agent/contract/$CONTRACT_CELL" ]
@@ -107,11 +111,11 @@ NO_CONTRACT="manifest prose_logic script_quality tests"
 }
 
 @test "a delta round whose split-carry map holds contract plans contract even when the plan says skippable" {
-  [ "$(planned delta "contract" "contract")" = "$NO_BUMP" ]
+  [ "$(planned delta "contract" "contract")" = "$ALL6" ]
 }
 
-@test "a triggering delta round (skippable_dimensions []) plans contract" {
-  [ "$(planned delta "" "")" = "$NO_BUMP" ]
+@test "a triggering delta round (skippable_dimensions []) plans every dimension" {
+  [ "$(planned delta "" "")" = "$ALL6" ]
 }
 
 @test "a full round and a standalone run plan contract whatever skippable_dimensions holds" {
@@ -119,10 +123,72 @@ NO_CONTRACT="manifest prose_logic script_quality tests"
   [ "$(planned none "" "contract")" = "$ALL6" ]
 }
 
+# --- #2925 part 3b: every agent row honours skippable_dimensions
+
+SKIPPABLE5="prose_logic,contract,script_quality,tests,manifest_bump"
+
+@test "#2925 part 3b: every agent row carries the skip cell naming its own dimension" {
+  local dim
+  for dim in prose_logic contract script_quality tests manifest_bump; do
+    [ "$(step1_rows | awk -F'\t' -v d="$dim" '$2 == "agent" && $3 == d { print $4 }')" = "$(skip_cell "$dim")" ] || {
+      echo "the $dim row does not carry its skip cell" >&2; return 1
+    }
+  done
+}
+
+@test "#2925 part 3b: the check-manifests.zsh row still runs every round, whatever the plan offers" {
+  [ "$(planned delta "" "$SKIPPABLE5")" = "manifest" ]
+  [ "$(planned delta "" "$SKIPPABLE5,manifest")" = "manifest" ]
+}
+
+@test "#2925 part 3b: a delta round leaves out each dimension the plan offers and its carry does not hold" {
+  [ "$(planned delta "" "prose_logic")" = "contract manifest manifest_bump script_quality tests" ]
+  [ "$(planned delta "" "script_quality")" = "contract manifest manifest_bump prose_logic tests" ]
+  [ "$(planned delta "" "tests")" = "contract manifest manifest_bump prose_logic script_quality" ]
+  [ "$(planned delta "" "prose_logic,tests,manifest_bump")" = "contract manifest script_quality" ]
+}
+
+@test "#2925 part 3b: a carried entry brings its offered dimension back on a delta round" {
+  [ "$(planned delta "prose_logic" "$SKIPPABLE5")" = "manifest prose_logic" ]
+  [ "$(planned delta "script_quality" "$SKIPPABLE5")" = "manifest script_quality" ]
+  [ "$(planned delta "tests" "$SKIPPABLE5")" = "manifest tests" ]
+  [ "$(planned delta "manifest_bump,tests" "$SKIPPABLE5")" = "manifest manifest_bump tests" ]
+}
+
+@test "#2925 part 3b: a full round and a standalone run plan all six whatever the plan offers" {
+  [ "$(planned full "" "$SKIPPABLE5")" = "$ALL6" ]
+  [ "$(planned none "" "$SKIPPABLE5")" = "$ALL6" ]
+}
+
+@test "#2925 part 3b: Step 1 states the shared condition and the script row's every-round run" {
+  local flat; flat="$(tr '\n' ' ' < "$SKILL")"
+  contains "$flat" 'The five agent rows share one condition (#2009, #2925 part 3b): each runs on every full round'
+  contains "$flat" 'and on a `"delta"` round unless the plan'"'"'s `skippable_dimensions` holds its dimension.'
+  contains "$flat" 'Only the `check-manifests.zsh` row runs every round.'
+  contains "$flat" 'round 1 and every closing sweep plan with `scope_mode: "full"`'
+  contains "$flat" 'The plan offers a dimension there when the round'"'"'s fix pass touched nothing in its class and its carry holds none of its entries'
+  contains "$flat" 'for the other four, no file of the class `reference/review-loop/carry.md` in the resolve-issue skill names under *Skippable dimensions (#2009)*.'
+  contains "$flat" 'Manifests, plus each of Prose Logic, Contract Integrity, Script Quality, Tests and'
+  lacks "$flat" 'Two cells vary.'
+  lacks "$flat" 'brings it back only to account for its own carried entries'
+}
+
+@test "#2925 part 3b: the Fallback mode table is unchanged" {
+  local table
+  table="$(sed -n '/^## Fallback mode/,/^## /p' "$SKILL" | grep '^|')"
+  [ "$(printf '%s\n' "$table" | wc -l | tr -d ' ')" -eq 5 ]
+  contains "$table" '| Reviewer | Dimension | In-scope files |'
+  contains "$table" '| claude-plugin-script-reviewer | script_quality | `*.sh`, `*.zsh`, `*.bash`, and extensionless files with a sh, bash or zsh shebang |'
+  contains "$table" '| claude-plugin-test-reviewer | tests | `*.bats` |'
+  contains "$table" '| claude-plugin-prose-logic | prose_logic | `*.md` |'
+  lacks "$table" 'skippable_dimensions'
+}
+
 @test "Step 1 states where skippable_dimensions is read, hook mode included (#2009)" {
-  contains "$(cat "$SKILL")" 'The `contract` row (#2009): it runs on every full round, and on a'
-  contains "$(cat "$SKILL")" 'dispatch descriptor (in hook mode, `$REVIEW_SKIPPABLE_DIMENSIONS`, a JSON array string); a standalone run has'
-  contains "$(cat "$SKILL")" 'neither, which is the *no plan* case. A carried `contract` entry still brings it back, by the same'
+  local flat; flat="$(tr '\n' ' ' < "$SKILL")"
+  contains "$flat" 'Read `skippable_dimensions` from the dispatch descriptor (in hook mode, `$REVIEW_SKIPPABLE_DIMENSIONS`, a JSON array string); a standalone run has neither, which is the *no plan* case.'
+  contains "$flat" 'A carried entry still brings its dimension back, by that file'"'"'s *Carry-driven dispatch (#2008)* rule.'
+  contains "$flat" 'for `contract`, a pure selector finds no contract surface touched'
 }
 
 @test "review-loop.md documents skippable_dimensions and cites Carry-driven dispatch (#2008) (#2009)" {
@@ -149,9 +215,8 @@ NO_CONTRACT="manifest prose_logic script_quality tests"
   contains "$sec" 'carry, or the fix pass touched a file in its class: a `*.sh` / `*.zsh` /'
   contains "$sec" 'dimension out of the field: it runs. Beside it the plan emits'
   contains "$sec" '`dimension_reasons`, each dimension'"'"'s `carried`, `touched`, `undecided` or'
-  contains "$sec" '`none` (`full` on a full round). Until the panel'"'"'s Step 1 table reads the wider'
-  contains "$sec" 'field (#2925 part 3b), the panel honours only `contract` from it, and it leaves'
-  contains "$sec" '`manifest_bump` out of every delta round whose carry does not hold it, whatever'
+  contains "$sec" '`none` (`full` on a full round).'
+  lacks "$sec" 'the panel honours only'
   lacks "$sec" 'only `contract` is actually left out'
   contains "$sec" 'Each round'"'"'s line in `<work-dir>/history.jsonl` records `skipped_dimensions`:'
   contains "$sec" 'the plan'"'"'s field less every dimension the round'"'"'s carry forced back in, `[]`'
@@ -160,9 +225,10 @@ NO_CONTRACT="manifest prose_logic script_quality tests"
   contains "$sec" '`carried`, `{}` when the plan named none. The loop keeps the plan'"'"'s two fields'
   contains "$sec" '`<work-dir>/skip-reasons-<R>.json`'
   contains "$sec" 'the history as `skipped_dimensions_by_round`. Both record the plan'"'"'s offer,'
-  contains "$sec" 'not what the panel ran: until #2925 part 3b the panel honours only a `contract`'
-  contains "$sec" 'entry, and it leaves `manifest_bump` out of every delta round whose carry does'
-  contains "$sec" 'not hold it, whatever the entry or its reason says, `touched` included.'
+  contains "$sec" 'not what the panel ran: until #2925 part 3b the panel honoured only a `contract`'
+  contains "$sec" 'entry, and it left `manifest_bump` out of every delta round whose carry did'
+  contains "$sec" 'not hold it, whatever the entry or its reason said, `touched` included.'
+  lacks "$(cat "$LOOP_REF")" 'only by this rule'
   lacks "$sec" 'dimension the panel actually left out'
 }
 
@@ -176,10 +242,11 @@ NO_CONTRACT="manifest prose_logic script_quality tests"
   contains "$arch" 'round'"'"'s plan offered to leave out — the plan'"'"'s `skippable_dimensions` less any'
   contains "$arch" '(#3311) is the plan'"'"'s `dimension_reasons` for that round, with every dimension'
   contains "$arch" '`null` for a history line that predates the key. It is the plan'"'"'s offer, not'
-  contains "$arch" '(#2925 part 3b), the panel honours only a `contract` entry from it, and it'
-  contains "$arch" 'leaves `manifest_bump` out of every delta round whose carry does not hold it,'
-  contains "$arch" 'whatever the entry or its reason says, `touched` included. It joins the'
-  contains "$arch" 'honours only `contract` from the field, and it leaves `manifest_bump` out of'
+  contains "$arch" 'what the panel ran: until #2925 part 3b the panel honoured only a `contract`'
+  contains "$arch" 'entry from it, and it left `manifest_bump` out of every delta round whose carry'
+  contains "$arch" 'did not hold it, whatever the entry or its reason said, `touched` included. It'
+  lacks "$arch" 'honours only `contract` from the field'
+  lacks "$arch" 'the panel honours only a `contract` entry'
   lacks "$arch" 'is a dimension the panel actually left'
   lacks "$arch" 'it honours only `contract` until the panel'
   lacks "$arch" 'this script never reads the file'
@@ -194,7 +261,8 @@ NO_CONTRACT="manifest prose_logic script_quality tests"
 }
 
 @test "ARCHITECTURE.md's claude-plugin panel passage states the contract schedule (#2009)" {
-  contains "$(cat "$ARCH")" '`contract` (#2009) has a schedule of'
+  contains "$(cat "$ARCH")" 'judgment, bump size, as `manifest_bump`. The five agent dimensions share one'
+  lacks "$(cat "$ARCH")" '`contract` (#2009) has a schedule of'
   contains "$(cat "$ARCH")" '`select-contract-dimension.zsh` finds that the fix pass touched no contract'
   contains "$(cat "$ARCH")" '`skippable_dimensions` (#2009) is always present: the dimensions this round'"'"'s'
 }

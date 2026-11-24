@@ -3896,19 +3896,17 @@ deterministic manifest check (bump presence, needless bumps, `plugin.json` ↔
 `X.Y.Z` well-formedness), runs on every round at script cost, emits its findings
 at their real severity, and accounts for its own carried entries — re-raising
 or confirming each, never `unconfirmed`. The agent keeps only what needs
-judgment, bump size, as `manifest_bump`: it runs on every
-full round (round 1 and every closing sweep) and, on a delta round, only when
-the split-carry map holds `manifest_bump` —
-`development/skills/resolve-issue/reference/review-loop/carry.md`'s *Carry-driven
-dispatch (#2008)* states that rule once. `contract` (#2009) has a schedule of
-its own: it runs on round 1 and on every closing full sweep (`scope_mode:
-"full"`, the residue-promoted sweep and the grant beyond the ceiling included);
-on a delta round it runs unless the plan's `skippable_dimensions` holds
-`contract`, which `review-dispatch.zsh plan` emits only when the pure selector
+judgment, bump size, as `manifest_bump`. The five agent dimensions share one
+schedule (#2009, #2925 part 3b): each runs on round 1 and on every closing full
+sweep (`scope_mode: "full"`, the residue-promoted sweep and the grant beyond
+the ceiling included); on a delta round it runs unless the plan's
+`skippable_dimensions` holds its dimension — for `contract`, which
+`review-dispatch.zsh plan` emits only when the pure selector
 `select-contract-dimension.zsh` finds that the fix pass touched no contract
 surface — failing closed, so a delta it cannot judge runs it; and a carried
-`contract` entry brings it back by that same *Carry-driven dispatch (#2008)*
-rule. The review skill's Step 1 table is the round's plan.
+entry brings its dimension back by
+`development/skills/resolve-issue/reference/review-loop/carry.md`'s *Carry-driven
+dispatch (#2008)* rule. The review skill's Step 1 table is the round's plan.
 
 `development-react` (#959) is the first **topic** panel: `review-dispatch.zsh
 plan` lists `development-react:review` in `topic_review_skills` when
@@ -4479,9 +4477,7 @@ cannot mint a second artifact path for the same round:
   deleted file is classed by its prior path, a rename by both. Every full round
   and every other repo type is `[]`, and any failure to decide leaves the
   dimension out of it, so it runs. The claude-plugin panel's schedule above is
-  its one reader. Until its Step 1 table reads the rest (#2925 part 3b), it
-  honours only `contract` from the field, and it leaves `manifest_bump` out of
-  every delta round whose carry does not hold it, whatever the field says.
+  its one reader.
   `dimension_reasons` (#3311) is always present, directly after it: an object
   naming why each dimension runs or is skipped. On a claude-plugin delta round
   each of the five is `carried`, `touched`, `undecided` (a failure to decide:
@@ -6444,10 +6440,10 @@ nothing, and `null` for a history line that predates the key. `skip_reasons`
 (#3311) is the plan's `dimension_reasons` for that round, with every dimension
 the carry forced back in named `carried`; `{}` when the plan named none, and
 `null` for a history line that predates the key. It is the plan's offer, not
-what the panel ran: until the panel's Step 1 table reads the wider field
-(#2925 part 3b), the panel honours only a `contract` entry from it, and it
-leaves `manifest_bump` out of every delta round whose carry does not hold it,
-whatever the entry or its reason says, `touched` included. It joins the
+what the panel ran: until #2925 part 3b the panel honoured only a `contract`
+entry from it, and it left `manifest_bump` out of every delta round whose carry
+did not hold it, whatever the entry or its reason said, `touched` included. It
+joins the
 findings on `round`.
 `possible_false_trip_auto_continues` (#1498) is copied from the status JSON with
 the same always-present reading stated there.
