@@ -868,13 +868,14 @@ _skippable_dimensions() {
   [[ -n "$tmp" ]] && rm -rf -- "$tmp"
 
   for d in "${plugin_dimensions[@]}"; do
-    if (( ${carried[(Ie)$d]} )); then kv+=( "$d" carried )
-    elif [[ -n "${touched[$d]:-}" ]]; then kv+=( "$d" touched )
-    elif [[ -n "${undecided[$d]:-}" ]]; then kv+=( "$d" undecided )
-    else kv+=( "$d" none )
+    if (( ${carried[(Ie)$d]} )); then kv+=( "$d=carried" )
+    elif [[ -n "${touched[$d]:-}" ]]; then kv+=( "$d=touched" )
+    elif [[ -n "${undecided[$d]:-}" ]]; then kv+=( "$d=undecided" )
+    else kv+=( "$d=none" )
     fi
   done
-  jq -nc '[ $ARGS.positional | _nwise(2) | {(.[0]): .[1]} ] | add
+  # one `<dimension>=<reason>` word each (jq 1.8 dropped the `_nwise` builtin)
+  jq -nc '[ $ARGS.positional[] | split("=") | {(.[0]): .[1]} ] | add
           | {skippable: [ to_entries[] | select(.value == "none") | .key ], reasons: .}' --args "${kv[@]}" \
     || print -r -- '{"skippable":[],"reasons":{}}'
 }
