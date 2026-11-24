@@ -210,9 +210,18 @@ timings() {
     = '${{ matrix.leg }}' ]
   local run_step
   run_step="$(yq -r '.jobs.bats.steps[] | select(.name == "Run shell-script behavioral tests") | .run' "$WF")"
-  contains "$run_step" 'split-bats-shards.zsh check --plan "$plan" --tests-dir tests'
-  contains "$run_step" 'split-bats-shards.zsh files --plan "$plan" --leg "$LEG" > "$leg_files"'
-  contains "$run_step" 'run-gate.zsh --tests-dir tests --files-from "$leg_files"'
+  # whole-line anchors: a `|| true` (or any suffix) on the check line would
+  # stop a dropped file failing the leg, and a substring match would miss it
+  local check_ln files_ln gate_ln
+  check_ln="$(grep -nE '^ *zsh scripts/split-bats-shards\.zsh check --plan "\$plan" --tests-dir tests$' <<< "$run_step" | cut -d: -f1)"
+  files_ln="$(grep -nE '^ *zsh scripts/split-bats-shards\.zsh files --plan "\$plan" --leg "\$LEG" > "\$leg_files"$' <<< "$run_step" | cut -d: -f1)"
+  gate_ln="$(grep -nE '^ *zsh development/skills/resolve-issue/scripts/run-gate\.zsh --tests-dir tests --files-from "\$leg_files"$' <<< "$run_step" | cut -d: -f1)"
+  [ -n "$check_ln" ]
+  [ -n "$files_ln" ]
+  [ -n "$gate_ln" ]
+  # the coverage check runs before the leg's files are listed and run
+  [ "$check_ln" -lt "$files_ln" ]
+  [ "$files_ln" -lt "$gate_ln" ]
 }
 
 @test "one required check: the aggregating job carries the required name and fails unless every leg passed" {
