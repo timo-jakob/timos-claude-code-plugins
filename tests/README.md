@@ -117,8 +117,14 @@ toolchain: a stubbed test stops proving the thing it exists to prove.
 CI runs them on every PR via `.github/workflows/script-tests.yml` (natively — the
 runner is already disposable; Docker is only for local isolation). Its entry
 point is not this script: the workflow drives
-`development/skills/resolve-issue/scripts/run-gate.zsh --tests-dir tests`, which
-runs the whole suite once in parallel and exits with bats' real status.
+`development/skills/resolve-issue/scripts/run-gate.zsh`, which runs bats once in
+parallel and exits with bats' real status. Since #3084 the suite is sharded
+across four legs. `scripts/split-bats-shards.zsh` splits the `*.bats` files by
+the per-file times in `bats-timings.json`, every leg checks that the legs cover
+each file exactly once, and each leg runs its share with `--files-from`. One
+aggregating job, `bats (ubuntu-latest)`, is the required check and is green only
+when every leg is. A new file needs no entry in `bats-timings.json`: it is
+weighed at the mean until the file is refreshed (the script's header says how).
 
 ## Layout
 
@@ -126,6 +132,8 @@ runs the whole suite once in parallel and exits with bats' real status.
 | --- | --- |
 | `Dockerfile` | Disposable image — the declared test dependencies; see the file's own header rather than a list that drifts |
 | `run-script-tests.zsh` | Runner — Docker by default, `--local` for host bats |
+| `bats-timings.json` | Per-file wall times from a green CI run, which `scripts/split-bats-shards.zsh` balances CI's legs by (#3084) |
+| `split-bats-shards.bats` | Tests the CI shard split — every file in one leg, balance by time, the count fallback, the coverage check, and the workflow's legs and required check (#3084) |
 | `run-script-tests.bats` | Tests the runner's Docker wiring — the IaC toolchain cache mount, its precedence and its guards (#1199); the read-only git dir + git common dir mounts, in a plain clone and in a worktree (#1360) |
 | `no-inert-permission-barriers.bats` | Repo-wide suite lint (#1360) — bans an *unguarded* permission-barrier `chmod` (root bypasses it, so the denial path never runs) and a backticked `@test` description (bats evaluates descriptions) |
 | `assertions.bash` | Shared assertion helpers (`load assertions`) — the sanctioned way to assert (#1011) |

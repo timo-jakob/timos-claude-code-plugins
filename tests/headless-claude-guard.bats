@@ -31,11 +31,14 @@ _needle_re() {
 }
 
 # Tier 1: whole files. A trailing `/` allows the tree beneath it.
+# tests/bats-timings.json is data: CI's per-file times, naming every bats file,
+# tests/run-headless.bats among them, so a refresh moves no entry here (#3084).
 _tier1() {
   printf '%s\n' \
     'development-claude-plugin/skills/test/' \
     'development-claude-plugin/docs/test-harness.md' \
     'tests/run-headless.bats' \
+    'tests/bats-timings.json' \
     'development-claude-plugin/.claude-plugin/plugin.json' \
     '.claude-plugin/marketplace.json' \
     'docs/reference/commands.md' \
