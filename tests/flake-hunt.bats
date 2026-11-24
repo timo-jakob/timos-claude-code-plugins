@@ -57,6 +57,9 @@ ps -A -o ppid=,pgid=,command= \
   | awk -v p="$PPID" '$1 == p && /flake-hunt-load/ { print $2 }' > "$d/load.pgid"
 ps -A -o pgid=,stat= | awk -v g="$(cat "$d/load.pgid")" \
   '$1 == g { all++; if ($2 ~ /^R/) run++ } END { print all + 0, run + 0 }' > "$d/load.procs"
+# the niceness of this run and of every process in the load group
+ps -o nice= -p "$$" | tr -d ' ' > "$d/bats.nice"
+ps -A -o pgid=,nice= | awk -v g="$(cat "$d/load.pgid")" '$1 == g { print $2 }' | sort -u > "$d/load.nice"
 ls "$TMPDIR" > "$d/tmpdir.during"
 # each pid file is written whole (temp + mv), so a reader never sees it empty
 if [ -n "${STUB_STRAY:-}" ]; then
@@ -431,6 +434,84 @@ prints_header_only() {
   [ "$(cat "$BATS_TEST_TMPDIR/hunt.rc")" = 141 ]
   [ -s "$STUB/load.pgid" ]
   group_gone "$(cat "$STUB/load.pgid")"
+  [ -z "$(ls -A "$TMPDIR")" ]
+}
+
+# The gate can start the suite at niceness 20: `run-gate.zsh` adds `nice -n 10`
+# on top of a detached launcher's background jobs, each +5 under zsh's BG_NICE
+# (#3322). At 20, every `&` of a zsh with BG_NICE on fails its nice(5) on macOS
+# and prints "nice(5) failed: operation not permitted" to stderr. That stray
+# line was the early reader's first byte, so the harness's next write hit the
+# closed pipe somewhere the test never meant it to, and a burner that warned
+# after the reader left died of SIGPIPE before the load ever started.
+@test "flake-hunt: started at niceness 20, it writes no BG_NICE warning to stderr" {
+  run --separate-stderr nice -n 20 zsh "$HUNT" --iterations 1 "$A"
+  [ "$status" -eq 0 ]
+  lacks "$stderr" "nice("
+  contains "$stderr" "load process group"
+}
+
+# BG_NICE is off (#3322), so the launches lower their own priority: a bats run
+# 5 levels below the harness, its load 10.
+@test "flake-hunt: a bats run runs 5 nice levels below the harness and its load 10" {
+  # relative to whatever niceness the gate runs this test at, capped at the
+  # host's ceiling: 20 on macOS, 19 on Linux, where setpriority clamps there
+  local h max
+  max=$(nice -n 40 sh -c 'ps -o nice= -p $$' | tr -d ' ')
+  h=$(( $(ps -o nice= -p "$$") + 3 )); (( h > max )) && h=$max
+  run --separate-stderr nice -n 3 zsh "$HUNT" --iterations 1 "$A"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$STUB/bats.nice")" = $(( h + 5 > max ? max : h + 5 )) ]
+  [ "$(cat "$STUB/load.nice")" = $(( h + 10 > max ? max : h + 10 )) ]
+}
+
+@test "flake-hunt: started at niceness 20, a reader that closes the pipe early does not strand the load" {
+  { perl -e '$SIG{PIPE} = "DEFAULT"; exec @ARGV' nice -n 20 zsh "$HUNT" --iterations 3 "$A" \
+      && echo 0 > "$BATS_TEST_TMPDIR/hunt.rc" \
+      || echo "$?" > "$BATS_TEST_TMPDIR/hunt.rc"; } 2>&1 >/dev/null | head -c 1 >/dev/null
+  [ "$(cat "$BATS_TEST_TMPDIR/hunt.rc")" = 141 ]
+  [ -s "$STUB/load.pgid" ]
+  group_gone "$(cat "$STUB/load.pgid")"
+  [ -z "$(ls -A "$TMPDIR")" ]
+}
+
+# Runs the rest of the line with stderr a pipe nobody reads, so the harness's
+# first write to stderr raises SIGPIPE wherever that write is (#3322).
+broken_stderr() {
+  perl -e 'pipe(my $r, my $w) or die; close $r; open(STDERR, ">&", $w) or die;
+    $SIG{PIPE} = "DEFAULT"; exec @ARGV or die' "$@"
+}
+
+@test "flake-hunt: a SIGPIPE on its first stderr write still ends the load, exit 141" {
+  # the stub bats never runs and stderr is unread, so a PATH-first perl records
+  # the load's group id: its own pid, the launch's $!, before exec'ing the real one
+  local real_perl
+  real_perl="$(command -v perl)"
+  mkdir -p "$BATS_TEST_TMPDIR/perlbin"
+  cat > "$BATS_TEST_TMPDIR/perlbin/perl" <<EOF
+#!/bin/bash
+case "\$*" in *flake-hunt-load*) echo "\$\$" > '$STUB/load.pgid' ;; esac
+exec '$real_perl' "\$@"
+EOF
+  chmod +x "$BATS_TEST_TMPDIR/perlbin/perl"
+  run broken_stderr env PATH="$BATS_TEST_TMPDIR/perlbin:$PATH" zsh "$HUNT" --iterations 1 "$A"
+  [ "$status" -eq 141 ]
+  [ ! -f "$STUB/count" ]
+  [ -s "$STUB/load.pgid" ]
+  group_gone "$(cat "$STUB/load.pgid")"
+  [ -z "$(ls -A "$TMPDIR")" ]
+}
+
+@test "flake-hunt: a SIGPIPE inside a function's write (the load-never-started exit) ends the run, exit 141" {
+  # the die_runtime print is the first stderr write: a trap that fires inside a
+  # function, then writes again, must not loop on the same closed pipe for ever
+  mkdir -p "$BATS_TEST_TMPDIR/nozsh"
+  for t in perl ps awk sleep mktemp grep sed rm getconf head cat; do
+    ln -s "$(command -v "$t")" "$BATS_TEST_TMPDIR/nozsh/$t"
+  done
+  run broken_stderr env PATH="$BATS_TEST_TMPDIR/nozsh" "$(command -v zsh)" "$HUNT" --iterations 1 "$A"
+  [ "$status" -eq 141 ]
+  [ ! -f "$STUB/count" ]
   [ -z "$(ls -A "$TMPDIR")" ]
 }
 

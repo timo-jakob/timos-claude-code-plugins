@@ -65,7 +65,13 @@
 #   FLAKE_HUNT_NPROC         the CPU count (burner count and --jobs base)
 
 emulate -L zsh
-setopt nounset pipefail
+# no_bg_nice (#3322): under BG_NICE every `&` below also calls nice(5), and a
+# shell already at niceness 20 — the gate's `nice -n 10` on top of a detached
+# launcher's background jobs — fails that call on macOS and prints "nice(5)
+# failed" to stderr. The load group's own shell sets it too, for the same reason.
+# BG_NICE was also what ran the bats runs and the load below the harness, so the
+# launches below lower their own priority instead, silently (see $setpgrp).
+setopt nounset pipefail no_bg_nice
 zmodload zsh/parameter
 
 die_usage() { print -u2 -- "flake-hunt: $1"; exit 2 }
@@ -215,8 +221,9 @@ local -a seen_groups
 cleanup() {
   (( cleaned )) && return 0
   cleaned=1
-  # A second Ctrl-C while cleanup waits must not cut it short before the KILL.
-  trap '' INT TERM HUP
+  # A second Ctrl-C while cleanup waits must not cut it short before the KILL,
+  # and neither may a SIGPIPE from a reader that left (#3322).
+  trap '' INT TERM HUP PIPE
   end_group "$bats_pg" "${seen_groups[@]}"
   end_group "$load_pg"
   [[ -n "$work" ]] && rm -rf -- "$work"
@@ -224,16 +231,20 @@ cleanup() {
 }
 # Traps are set at top level only: `emulate -L` turns LOCAL_TRAPS on, so a trap
 # set inside a function would be undone when it returns.
+# The PIPE trap ignores PIPE before anything else (#3322): once the reader has
+# gone, every later write to stderr raises it again, and a SIGPIPE that lands
+# inside a function's write (die_runtime's, say) otherwise re-entered this trap
+# on zsh's own write-error warning, spinning for ever with TERM ignored.
 trap cleanup EXIT
 trap 'cleanup; exit 130' INT
 trap 'cleanup; exit 143' TERM
 trap 'cleanup; exit 129' HUP
-trap 'cleanup; exit 141' PIPE
+trap 'trap "" PIPE; cleanup; exit 141' PIPE
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/flake-hunt.XXXXXX")" \
   || die_runtime "could not create a work directory"
 
-# `perl -e "$setpgrp" -- CMD… &` starts CMD as the leader of a new process group,
+# `perl -e "$setpgrp" -- N CMD… &` starts CMD as the leader of a new process group,
 # so its pid ($!) is the group id. perl, because a non-interactive zsh cannot
 # switch job control on. Always launch it as a plain command, never through a
 # shell function: a backgrounded function runs in a forked subshell, and $! would
@@ -243,14 +254,23 @@ work="$(mktemp -d "${TMPDIR:-/tmp}/flake-hunt.XXXXXX")" \
 # and acts on it once the new group is recorded: acting at once would end the
 # harness with a group that cleanup cannot yet reach, and ignoring it would lose
 # the Ctrl-C. (Inline, not a function: see the LOCAL_TRAPS note above.)
-local setpgrp='setpgrp(0, 0); exec @ARGV or die "exec $ARGV[0]: $!\n"'
+#
+# The first argument is how many nice levels the new group drops below the
+# harness, capped at 20 and never reported (Linux's kernel clamps the request
+# at its own ceiling of 19): a process already at the ceiling stays there
+# without a word, where BG_NICE's nice(5) would warn on stderr (#3322). A bats
+# run drops 5 and the load 10, so the burners mostly take idle CPU and stay
+# below the run under test, as they did under BG_NICE.
+local setpgrp='my $by = shift; setpgrp(0, 0); my $p = getpriority(0, 0);
+  setpriority(0, 0, $p + $by > 20 ? 20 : $p + $by) if $p < 20;
+  exec @ARGV or die "exec $ARGV[0]: $!\n"'
 
 trap 'pending=130' INT; trap 'pending=143' TERM; trap 'pending=129' HUP; trap 'pending=141' PIPE
-perl -e "$setpgrp" -- zsh -fc 'repeat $1 { { while :; do :; done } & }; wait' flake-hunt-load "$nproc" &
+perl -e "$setpgrp" -- 10 zsh -fc 'setopt no_bg_nice; repeat $1 { { while :; do :; done } & }; wait' flake-hunt-load "$nproc" &
 load_pg=$!
 note_group "$load_pg"
 trap 'cleanup; exit 130' INT; trap 'cleanup; exit 143' TERM
-trap 'cleanup; exit 129' HUP; trap 'cleanup; exit 141' PIPE
+trap 'cleanup; exit 129' HUP; trap 'trap "" PIPE; cleanup; exit 141' PIPE
 (( pending )) && { cleanup; exit $pending }
 # Iteration 1 must not start before the contention does: wait (up to ~10s) until
 # the group holds its leader and all $nproc burners.
@@ -314,11 +334,11 @@ local i rc total not_ok plan tap line rest key keep
 for (( i = 1; i <= iterations; i++ )); do
   tap="$work/$i.tap"
   trap 'pending=130' INT; trap 'pending=143' TERM; trap 'pending=129' HUP; trap 'pending=141' PIPE
-  perl -e "$setpgrp" -- env LC_ALL=C "$bats_bin" --jobs "$jobs" --tap "${targets[@]}" >"$tap" 2>"$work/$i.err" &
+  perl -e "$setpgrp" -- 5 env LC_ALL=C "$bats_bin" --jobs "$jobs" --tap "${targets[@]}" >"$tap" 2>"$work/$i.err" &
   bats_pg=$!
   note_group "$bats_pg"
   trap 'cleanup; exit 130' INT; trap 'cleanup; exit 143' TERM
-  trap 'cleanup; exit 129' HUP; trap 'cleanup; exit 141' PIPE
+  trap 'cleanup; exit 129' HUP; trap 'trap "" PIPE; cleanup; exit 141' PIPE
   (( pending )) && { cleanup; exit $pending }
   # Sample the groups below the run while it lives: once bats and GNU parallel
   # have exited, a leftover in a per-job group has no parent left to find it by.
