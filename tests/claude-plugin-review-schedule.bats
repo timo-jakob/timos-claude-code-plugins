@@ -142,6 +142,57 @@ NO_CONTRACT="manifest prose_logic script_quality tests"
   contains "$sec" '`skipped_dimensions_by_round`'
 }
 
+@test "review-loop carry.md states the widened skippable field, its reasons and skip_reasons (#3311)" {
+  local sec
+  sec="$(sed -n '/^### Skippable dimensions (#2009)$/,/^### /p' "$LOOP_REF")"
+  contains "$sec" 'it offers each of `prose_logic`, `contract`, `script_quality`, `tests` and'
+  contains "$sec" 'carry, or the fix pass touched a file in its class: a `*.sh` / `*.zsh` /'
+  contains "$sec" 'dimension out of the field: it runs. Beside it the plan emits'
+  contains "$sec" '`dimension_reasons`, each dimension'"'"'s `carried`, `touched`, `undecided` or'
+  contains "$sec" '`none` (`full` on a full round). Until the panel'"'"'s Step 1 table reads the wider'
+  contains "$sec" 'field (#2925 part 3b), the panel honours only `contract` from it, and it leaves'
+  contains "$sec" '`manifest_bump` out of every delta round whose carry does not hold it, whatever'
+  lacks "$sec" 'only `contract` is actually left out'
+  contains "$sec" 'Each round'"'"'s line in `<work-dir>/history.jsonl` records `skipped_dimensions`:'
+  contains "$sec" 'the plan'"'"'s field less every dimension the round'"'"'s carry forced back in, `[]`'
+  contains "$sec" 'when none. It also records `skip_reasons` (#3311): the plan'"'"'s'
+  contains "$sec" '`dimension_reasons`, with every dimension the carry forced back in named'
+  contains "$sec" '`carried`, `{}` when the plan named none. The loop keeps the plan'"'"'s two fields'
+  contains "$sec" '`<work-dir>/skip-reasons-<R>.json`'
+  contains "$sec" 'the history as `skipped_dimensions_by_round`. Both record the plan'"'"'s offer,'
+  contains "$sec" 'not what the panel ran: until #2925 part 3b the panel honours only a `contract`'
+  contains "$sec" 'entry, and it leaves `manifest_bump` out of every delta round whose carry does'
+  contains "$sec" 'not hold it, whatever the entry or its reason says, `touched` included.'
+  lacks "$sec" 'dimension the panel actually left out'
+}
+
+@test "ARCHITECTURE.md states the widened skippable field, dimension_reasons and skip_reasons as the plan's offer (#3311)" {
+  local arch; arch="$(cat "$ARCH")"
+  contains "$arch" 'it, and since #3311 it offers every panel dimension'
+  contains "$arch" 'deleted file is classed by its prior path, a rename by both.'
+  contains "$arch" '`dimension_reasons` (#3311) is always present, directly after it: an object'
+  contains "$arch" 'panel needs; the script reads the file only on a claude-plugin delta round,'
+  contains "$arch" 'leaves every dimension `undecided`.'
+  contains "$arch" 'round'"'"'s plan offered to leave out — the plan'"'"'s `skippable_dimensions` less any'
+  contains "$arch" '(#3311) is the plan'"'"'s `dimension_reasons` for that round, with every dimension'
+  contains "$arch" '`null` for a history line that predates the key. It is the plan'"'"'s offer, not'
+  contains "$arch" '(#2925 part 3b), the panel honours only a `contract` entry from it, and it'
+  contains "$arch" 'leaves `manifest_bump` out of every delta round whose carry does not hold it,'
+  contains "$arch" 'whatever the entry or its reason says, `touched` included. It joins the'
+  contains "$arch" 'honours only `contract` from the field, and it leaves `manifest_bump` out of'
+  lacks "$arch" 'is a dimension the panel actually left'
+  lacks "$arch" 'it honours only `contract` until the panel'
+  lacks "$arch" 'this script never reads the file'
+  lacks "$arch" 'claude-plugin schedule actually skipped, and why'
+}
+
+@test "the telemetry how-to states skipped_dimensions_by_round as the plan's offer (#3311)" {
+  local page; page="$(cat "$REPO_ROOT/docs/how-to/read-pipeline-telemetry.md")"
+  contains "$page" '(until #2925 part 3b only `contract` was honoured from this list, and `manifest_bump` was left out of every delta round that did not carry it, whatever its entry or reason)'
+  contains "$page" '`skip_reasons`, each dimension'"'"'s reason (`carried`, `touched`, `undecided`, `none` or `full`)'
+  lacks "$page" 'only a `contract` entry was actually left out'
+}
+
 @test "ARCHITECTURE.md's claude-plugin panel passage states the contract schedule (#2009)" {
   contains "$(cat "$ARCH")" '`contract` (#2009) has a schedule of'
   contains "$(cat "$ARCH")" '`select-contract-dimension.zsh` finds that the fix pass touched no contract'

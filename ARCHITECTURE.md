@@ -4431,6 +4431,7 @@ cannot mint a second artifact path for the same round:
   "delta_files": null,
   "delta_hunks": null,
   "skippable_dimensions": [],
+  "dimension_reasons": {},
   "fix_verification_path": null,
   "self_check_path": null
 }
@@ -4465,13 +4466,29 @@ cannot mint a second artifact path for the same round:
   inherits its normalisation and exclusions instead of restating them. It feeds
   the test reviewer's delta-round rule (*Terminating severity bars*).
   `skippable_dimensions` (#2009) is always present: the dimensions this round's
-  panel may leave out. Only a `claude-plugin` repo on a `"delta"` round consults
-  `select-contract-dimension.zsh`, whose two inputs `plan` builds from
-  `--prior-tree` (a `-U0` patch, with agents and SKILL.md files at whole-file
-  context so their frontmatter fences are visible); it emits `["contract"]` when
-  the selector says `skip`. Every full round, every other repo type and every
-  failure to decide is `[]`. The claude-plugin panel's schedule above is its one
-  reader.
+  panel may leave out. Only a `claude-plugin` repo on a `"delta"` round decides
+  it, and since #3311 it offers every panel dimension — `prose_logic`,
+  `contract`, `script_quality`, `tests` and `manifest_bump` — unless the
+  dimension owns an entry in the `--fix-verification` carry, or the delta
+  touches a file in its class: `*.sh` / `*.zsh` / `*.bash` or a shell-shebang
+  file for `script_quality`, `*.bats` for `tests`, `*.md` for `prose_logic`,
+  `plugin.json` / `marketplace.json` for `manifest_bump`, and for `contract`
+  whatever `select-contract-dimension.zsh` answers `run` for (its two inputs
+  `plan` builds from `--prior-tree`: a `-U0` patch, with agents and SKILL.md
+  files at whole-file context so their frontmatter fences are visible). A
+  deleted file is classed by its prior path, a rename by both. Every full round
+  and every other repo type is `[]`, and any failure to decide leaves the
+  dimension out of it, so it runs. The claude-plugin panel's schedule above is
+  its one reader. Until its Step 1 table reads the rest (#2925 part 3b), it
+  honours only `contract` from the field, and it leaves `manifest_bump` out of
+  every delta round whose carry does not hold it, whatever the field says.
+  `dimension_reasons` (#3311) is always present, directly after it: an object
+  naming why each dimension runs or is skipped. On a claude-plugin delta round
+  each of the five is `carried`, `touched`, `undecided` (a failure to decide:
+  an unreadable or malformed carry, a delta that could not be listed, a first
+  line that could not be read, a selector that did not answer) or `none`
+  (skippable), the first that holds; on a claude-plugin full round each is
+  `full`; for every other repo type it is `{}`.
   `scope_empty` is `changed_files == []`, always present,
   and it exists for **callers**: the driving session plans its own panel and
   needs to know a delta came back empty *before* it spawns reviewers. The **loop
@@ -4482,8 +4499,10 @@ cannot mint a second artifact path for the same round:
   handed nothing. Round 1's "a scope that is only
   artifacts yields an empty `changed_files`, not an error" behaviour is
   untouched either way. `--fix-verification` is **echoed through** as
-  `fix_verification_path` — this script never reads the file, so one descriptor
-  value carries everything a round's panel needs. `plan` takes no
+  `fix_verification_path`, so one descriptor value carries everything a round's
+  panel needs; the script reads the file only on a claude-plugin delta round,
+  for the dimensions that own a carried entry, and a carry it cannot read there
+  leaves every dimension `undecided`. `plan` takes no
   waived-suggestion flag and emits no path for that list (#3168): no panel
   reads it, so the flag is refused as unknown (exit 2).
   `--self-check` (#2014) is echoed through the same way as `self_check_path`,
@@ -6417,12 +6436,19 @@ below is untouched, and the two join on `round`.
 under *Per-round step telemetry*, and `null` for a history line that predates
 the key. It is separate from `findings_by_round` for the same reason, and joins
 it on `round`.
-`skipped_dimensions_by_round` (#2009) is `[{round, skipped_dimensions}]`, read
-from the same `history[]` lines: the dimensions that round's panel was planned
-to leave out — the plan's `skippable_dimensions` less any dimension the round's
-carry forced back in — `[]` for a round that skipped nothing, and `null` for a
-history line that predates the key. It is how often the claude-plugin
-`contract` schedule actually skipped, joined to the findings on `round`.
+`skipped_dimensions_by_round` (#2009) is `[{round, skipped_dimensions,
+skip_reasons}]`, read from the same `history[]` lines: the dimensions that
+round's plan offered to leave out — the plan's `skippable_dimensions` less any
+dimension the round's carry forced back in — `[]` for a round that offered
+nothing, and `null` for a history line that predates the key. `skip_reasons`
+(#3311) is the plan's `dimension_reasons` for that round, with every dimension
+the carry forced back in named `carried`; `{}` when the plan named none, and
+`null` for a history line that predates the key. It is the plan's offer, not
+what the panel ran: until the panel's Step 1 table reads the wider field
+(#2925 part 3b), the panel honours only a `contract` entry from it, and it
+leaves `manifest_bump` out of every delta round whose carry does not hold it,
+whatever the entry or its reason says, `touched` included. It joins the
+findings on `round`.
 `possible_false_trip_auto_continues` (#1498) is copied from the status JSON with
 the same always-present reading stated there.
 The payload carries no `promotion_phase` and no per-round `promoted` count

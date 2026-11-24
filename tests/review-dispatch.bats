@@ -2582,7 +2582,7 @@ EOF
   plan '{"languages":["python"]}' --round 1
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r 'keys_unsorted | join(",")')" = \
-    "repo_type,review_skill,topic_review_skills,round,base,findings_path,changed_files,worktree_root,original_root,scope_abs,scope_mode,scope_empty,prior_tree,delta_files,delta_hunks,skippable_dimensions,fix_verification_path,self_check_path" ]
+    "repo_type,review_skill,topic_review_skills,round,base,findings_path,changed_files,worktree_root,original_root,scope_abs,scope_mode,scope_empty,prior_tree,delta_files,delta_hunks,skippable_dimensions,dimension_reasons,fix_verification_path,self_check_path" ]
 }
 
 @test "#2014 plan echoes --self-check as self_check_path, the last key, null when absent" {
@@ -3793,4 +3793,251 @@ tplan() {  # $1 = topic table ; $2 = detect json ; rest = extra flags
   plan '{"languages":["python"]}' --fallback
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -c '[keys_unsorted[-3:][]]')" = '["self_check_path","fallback_for","review_mode"]' ]
+}
+
+# ---- #3311: every claude-plugin dimension is skippable on a delta round
+#
+# On a claude-plugin "delta" round, `plan` offers each of prose_logic, contract,
+# script_quality, tests and manifest_bump in skippable_dimensions unless it owns
+# a carried entry or the delta touches a file in its class, and names why in
+# dimension_reasons. The contract selector is stubbed (SELECT_CONTRACT_BIN) so
+# the contract class is decided by $SEL_ANSWER, not by the real selector.
+
+p3311_setup() {
+  SEL3311="$BATS_TEST_TMPDIR/sel-3311.zsh"
+  printf '%s\n' '#!/usr/bin/env zsh' \
+    'print -r -- "{\"contract\":\"${SEL_ANSWER:-skip}\",\"triggers\":[]}"' > "$SEL3311"
+  chmod +x "$SEL3311"
+  mkdir -p "$R/tests" "$R/dev/scripts" "$R/dev/.claude-plugin" "$R/.claude-plugin"
+  printf '#!/usr/bin/env bats\n' > "$R/tests/a.bats"
+  printf '#!/usr/bin/env zsh\nprint hi\n' > "$R/dev/scripts/tool"
+  printf 'print hi\n' > "$R/dev/scripts/lib.zsh"
+  printf '{"version":"1.0.0"}\n' > "$R/dev/.claude-plugin/plugin.json"
+  printf '{"plugins":[]}\n' > "$R/.claude-plugin/marketplace.json"
+  git -C "$R" add -A
+  git -C "$R" commit -qm fixture
+  T1="$(zsh "$REPO_ROOT/development/skills/resolve-issue/scripts/git-tree-id.zsh" "$R")"
+}
+
+PLUGIN3311='{"languages":[],"is_claude_plugin":true}'
+
+p3311() {  # rest = extra flags; a delta round against $T1 unless given its own
+  run --separate-stderr env DETECT_STACK_BIN="$STUB" DETECT_LANGS_JSON="${LANGS3311:-$PLUGIN3311}" \
+    SELECT_CONTRACT_BIN="$SEL3311" zsh "$S" plan --repo "$R" --base main "$@"
+}
+
+reason() { echo "$output" | jq -r --arg d "$1" '.dimension_reasons[$d]'; }
+offered() { echo "$output" | jq -r --arg d "$1" '.skippable_dimensions | index($d) != null'; }
+
+@test "#3311 a delta touching no class and carrying nothing offers every dimension, reason none" {
+  p3311_setup
+  echo changed >> "$R/legacy.py"
+  p3311 --round 3 --prior-tree "$T1"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .scope_mode)" = "delta" ]
+  [ "$(echo "$output" | jq -c .skippable_dimensions)" = '["prose_logic","contract","script_quality","tests","manifest_bump"]' ]
+  [ "$(echo "$output" | jq -c .dimension_reasons)" = '{"prose_logic":"none","contract":"none","script_quality":"none","tests":"none","manifest_bump":"none"}' ]
+}
+
+@test "#3311 a dimension owning a carried entry is not offered, reason carried" {
+  p3311_setup
+  echo changed >> "$R/legacy.py"
+  printf '[{"file":"legacy.py","dimension":"tests","title":"T"},{"file":"x","dimension":"contract","title":"U"}]\n' \
+    > "$BATS_TEST_TMPDIR/carry.json"
+  p3311 --round 3 --prior-tree "$T1" --fix-verification "$BATS_TEST_TMPDIR/carry.json"
+  [ "$status" -eq 0 ]
+  [ "$(reason tests)" = "carried" ]
+  [ "$(reason contract)" = "carried" ]
+  [ "$(echo "$output" | jq -c .skippable_dimensions)" = '["prose_logic","script_quality","manifest_bump"]' ]
+}
+
+@test "#3311 carried wins over touched when both hold" {
+  p3311_setup
+  echo '# more' >> "$R/README.md"
+  printf '[{"file":"README.md","dimension":"prose_logic","title":"T"}]\n' > "$BATS_TEST_TMPDIR/carry.json"
+  p3311 --round 3 --prior-tree "$T1" --fix-verification "$BATS_TEST_TMPDIR/carry.json"
+  [ "$status" -eq 0 ]
+  [ "$(reason prose_logic)" = "carried" ]
+}
+
+@test "#3311 file class script_quality: a *.sh, *.zsh, *.bash or shell-shebang file keeps it, reason touched" {
+  p3311_setup
+  local f
+  for f in dev/scripts/new.sh dev/scripts/lib.zsh dev/scripts/new.bash dev/scripts/tool; do
+    git -C "$R" checkout -q -- . && git -C "$R" clean -qfd
+    echo 'print more' >> "$R/$f"
+    p3311 --round 3 --prior-tree "$T1"
+    [ "$status" -eq 0 ]
+    [ "$(reason script_quality)" = "touched" ]
+    [ "$(offered script_quality)" = false ]
+    [ "$(reason tests)" = "none" ]
+  done
+  for f in '#!/bin/sh' '#!/bin/bash -e'; do
+    git -C "$R" checkout -q -- . && git -C "$R" clean -qfd
+    printf '%s\nexit 0\n' "$f" > "$R/dev/scripts/sh-tool"
+    p3311 --round 3 --prior-tree "$T1"
+    [ "$(reason script_quality)" = "touched" ]
+  done
+}
+
+@test "#3311 a non-shell shebang (bats, python) does not touch script_quality" {
+  p3311_setup
+  printf '#!/usr/bin/env python3\nprint(1)\n' > "$R/dev/scripts/py-tool"
+  p3311 --round 3 --prior-tree "$T1"
+  [ "$status" -eq 0 ]
+  [ "$(reason script_quality)" = "none" ]
+  [ "$(offered script_quality)" = true ]
+}
+
+@test "#3311 file class tests: a *.bats file keeps it, reason touched" {
+  p3311_setup
+  echo 'load x' >> "$R/tests/a.bats"
+  p3311 --round 3 --prior-tree "$T1"
+  [ "$status" -eq 0 ]
+  [ "$(reason tests)" = "touched" ]
+  [ "$(offered tests)" = false ]
+  # the bats shebang is not a shell one
+  [ "$(reason script_quality)" = "none" ]
+}
+
+@test "#3311 file class prose_logic: a *.md file keeps it, reason touched" {
+  p3311_setup
+  echo more >> "$R/README.md"
+  p3311 --round 3 --prior-tree "$T1"
+  [ "$status" -eq 0 ]
+  [ "$(reason prose_logic)" = "touched" ]
+  [ "$(offered prose_logic)" = false ]
+}
+
+@test "#3311 file class manifest_bump: a plugin.json or a marketplace.json keeps it, reason touched" {
+  p3311_setup
+  printf '{"version":"1.0.1"}\n' > "$R/dev/.claude-plugin/plugin.json"
+  p3311 --round 3 --prior-tree "$T1"
+  [ "$status" -eq 0 ]
+  [ "$(reason manifest_bump)" = "touched" ]
+  [ "$(offered manifest_bump)" = false ]
+  git -C "$R" checkout -q -- .
+  printf '{"plugins":[1]}\n' > "$R/.claude-plugin/marketplace.json"
+  p3311 --round 3 --prior-tree "$T1"
+  [ "$status" -eq 0 ]
+  [ "$(reason manifest_bump)" = "touched" ]
+}
+
+@test "#3311 file class contract: what the selector answers run for keeps it, reason touched" {
+  p3311_setup
+  echo changed >> "$R/legacy.py"
+  SEL_ANSWER=run p3311 --round 3 --prior-tree "$T1"
+  [ "$status" -eq 0 ]
+  [ "$(reason contract)" = "touched" ]
+  [ "$(offered contract)" = false ]
+}
+
+@test "#3311 a deleted file is classed by its prior path, a rename by both paths" {
+  p3311_setup
+  git -C "$R" rm -q tests/a.bats
+  p3311 --round 3 --prior-tree "$T1"
+  [ "$status" -eq 0 ]
+  [ "$(reason tests)" = "touched" ]
+  git -C "$R" reset -q --hard
+  git -C "$R" rm -q dev/scripts/tool
+  p3311 --round 3 --prior-tree "$T1"
+  [ "$(reason script_quality)" = "touched" ]
+  git -C "$R" reset -q --hard
+  git -C "$R" mv legacy.py legacy.md
+  p3311 --round 3 --prior-tree "$T1"
+  [ "$(reason prose_logic)" = "touched" ]
+  git -C "$R" reset -q --hard
+  git -C "$R" mv dev/scripts/tool dev/scripts/tool-renamed
+  p3311 --round 3 --prior-tree "$T1"
+  [ "$status" -eq 0 ]
+  [ "$(reason script_quality)" = "touched" ]
+  git -C "$R" reset -q --hard
+  git -C "$R" mv README.md README.txt
+  p3311 --round 3 --prior-tree "$T1"
+  [ "$status" -eq 0 ]
+  [ "$(reason prose_logic)" = "touched" ]
+}
+
+@test "#3311 round 1 and --final never skip: skippable_dimensions [] and every reason full" {
+  p3311_setup
+  echo more >> "$R/legacy.py"
+  p3311 --round 1
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c .skippable_dimensions)" = '[]' ]
+  [ "$(echo "$output" | jq -c .dimension_reasons)" = '{"prose_logic":"full","contract":"full","script_quality":"full","tests":"full","manifest_bump":"full"}' ]
+  p3311 --round 4 --final --prior-tree "$T1"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r .scope_mode)" = "full" ]
+  [ "$(echo "$output" | jq -c .skippable_dimensions)" = '[]' ]
+  [ "$(echo "$output" | jq -c '[.dimension_reasons[]] | unique')" = '["full"]' ]
+}
+
+@test "#3311 fail-closed: an unreadable or malformed carry leaves every dimension runnable, reason undecided" {
+  p3311_setup
+  echo changed >> "$R/legacy.py"
+  p3311 --round 3 --prior-tree "$T1" --fix-verification "$BATS_TEST_TMPDIR/missing.json"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c .skippable_dimensions)" = '[]' ]
+  [ "$(echo "$output" | jq -c '[.dimension_reasons[]] | unique')" = '["undecided"]' ]
+  contains "$stderr" 'could not be read (fail-closed: every dimension runs)'
+  printf '[{"file":"x"}]\n' > "$BATS_TEST_TMPDIR/bad.json"
+  p3311 --round 3 --prior-tree "$T1" --fix-verification "$BATS_TEST_TMPDIR/bad.json"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c .skippable_dimensions)" = '[]' ]
+  # a 0-byte carry and an object-shaped carry are not arrays of entries
+  : > "$BATS_TEST_TMPDIR/zero.json"
+  p3311 --round 3 --prior-tree "$T1" --fix-verification "$BATS_TEST_TMPDIR/zero.json"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c .skippable_dimensions)" = '[]' ]
+  [ "$(echo "$output" | jq -c '[.dimension_reasons[]] | unique')" = '["undecided"]' ]
+  printf '{"k":{"dimension":"tests"}}\n' > "$BATS_TEST_TMPDIR/object.json"
+  p3311 --round 3 --prior-tree "$T1" --fix-verification "$BATS_TEST_TMPDIR/object.json"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c .skippable_dimensions)" = '[]' ]
+  [ "$(echo "$output" | jq -c '[.dimension_reasons[]] | unique')" = '["undecided"]' ]
+  # an empty carry array is a readable carry of nothing
+  printf '[]\n' > "$BATS_TEST_TMPDIR/empty.json"
+  p3311 --round 3 --prior-tree "$T1" --fix-verification "$BATS_TEST_TMPDIR/empty.json"
+  [ "$status" -eq 0 ]
+  [ "$(reason tests)" = "none" ]
+}
+
+@test "#3311 fail-closed: a delta that cannot be listed leaves every dimension runnable, reason undecided" {
+  p3311_setup
+  echo changed >> "$R/legacy.py"
+  # a git wrapper whose name-status diff-tree fails, every other call passing through
+  local g="$BATS_TEST_TMPDIR/git-wrap.sh" real; real="$(command -v git)"
+  printf '%s\n' '#!/usr/bin/env bash' \
+    'for a in "$@"; do [ "$a" = "--name-status" ] && exit 1; done' \
+    "exec \"$real\" \"\$@\"" > "$g"
+  chmod +x "$g"
+  GIT_BIN="$g" p3311 --round 3 --prior-tree "$T1"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c .skippable_dimensions)" = '[]' ]
+  [ "$(echo "$output" | jq -c '[.dimension_reasons[]] | unique')" = '["undecided"]' ]
+  contains "$stderr" 'the delta could not be listed (fail-closed: every dimension runs)'
+  # a first line that cannot be read leaves script_quality undecided
+  printf '%s\n' '#!/usr/bin/env bash' \
+    'for a in "$@"; do [ "$a" = "cat-file" ] && exit 1; done' \
+    "exec \"$real\" \"\$@\"" > "$g"
+  GIT_BIN="$g" p3311 --round 3 --prior-tree "$T1"
+  [ "$(reason script_quality)" = "undecided" ]
+}
+
+@test "#3311 another repo type: skippable_dimensions [] and dimension_reasons {}, delta or full" {
+  p3311_setup
+  echo changed >> "$R/legacy.py"
+  LANGS3311='{"languages":["python"]}' p3311 --round 3 --prior-tree "$T1"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c '[.skippable_dimensions, .dimension_reasons]')" = '[[],{}]' ]
+  LANGS3311='{"languages":["python"]}' p3311 --round 1
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c '[.skippable_dimensions, .dimension_reasons]')" = '[[],{}]' ]
+}
+
+@test "#3311 dimension_reasons sits directly after skippable_dimensions" {
+  p3311_setup
+  p3311 --round 1
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c '[keys_unsorted[]] | index("dimension_reasons") - index("skippable_dimensions")')" = 1 ]
 }

@@ -4236,14 +4236,18 @@ plugin_loop() {
   [ "$status" -eq 0 ]
   [ "$(jq -r '.status' "$BATS_TEST_TMPDIR/st.json")" = "CONVERGED" ]
   [ "$(cat "$BATS_TEST_TMPDIR/skip-1.json")" = '[]' ]
-  [ "$(cat "$BATS_TEST_TMPDIR/skip-2.json")" = '["contract"]' ]
+  # #3311: round 2's fix pass touched only app.py (no dimension's class) and
+  # its carry holds the `tests` blocker, so every other dimension is skippable
+  [ "$(cat "$BATS_TEST_TMPDIR/skip-2.json")" = '["prose_logic","contract","script_quality","manifest_bump"]' ]
   [ "$(cat "$BATS_TEST_TMPDIR/skip-3.json")" = '[]' ]
-  [ "$(cat "$WD/skippable-2.json")" = '["contract"]' ]
-  [ "$(jq -sc '[.[] | .skipped_dimensions]' "$WD/history.jsonl")" = '[[],["contract"],[]]' ]
-  [ "$(jq -c '[.history[] | .skipped_dimensions]' "$BATS_TEST_TMPDIR/st.json")" = '[[],["contract"],[]]' ]
+  [ "$(cat "$WD/skippable-2.json")" = '["prose_logic","contract","script_quality","manifest_bump"]' ]
+  [ "$(jq -sc '[.[] | .skipped_dimensions]' "$WD/history.jsonl")" = '[[],["prose_logic","contract","script_quality","manifest_bump"],[]]' ]
+  [ "$(jq -c '[.history[] | .skipped_dimensions]' "$BATS_TEST_TMPDIR/st.json")" = '[[],["prose_logic","contract","script_quality","manifest_bump"],[]]' ]
+  # #3311: each history line carries the plan's reasons as skip_reasons
+  [ "$(jq -sc '[.[] | .skip_reasons]' "$WD/history.jsonl")" = '[{"prose_logic":"full","contract":"full","script_quality":"full","tests":"full","manifest_bump":"full"},{"prose_logic":"none","contract":"none","script_quality":"none","tests":"carried","manifest_bump":"none"},{"prose_logic":"full","contract":"full","script_quality":"full","tests":"full","manifest_bump":"full"}]' ]
 }
 
-@test "#2009 hook mode: a carried contract entry forces contract back in — owner-accounted, it passes and nothing is recorded skipped" {
+@test "#2009 hook mode: a carried contract entry forces contract back in — owner-accounted, it passes and contract is not recorded skipped" {
   WD="$BATS_TEST_TMPDIR/wd"
   local cblock="${CRIT/\"bugs\"/\"contract\"}"
   # the selector said skip, but the split-carry map holds `contract`, so
@@ -4255,9 +4259,11 @@ plugin_loop() {
   [ "$status" -eq 0 ]
   [ "$(jq -r '.status' "$BATS_TEST_TMPDIR/st.json")" = "CONVERGED" ]
   [ "$(jq -c 'keys' "$BATS_TEST_TMPDIR/map-2.json")" = '["contract"]' ]
-  [ "$(cat "$WD/skippable-2.json")" = '["contract"]' ]
+  # #3311: the plan reads the carry itself, so contract is not offered
+  [ "$(cat "$WD/skippable-2.json")" = '["prose_logic","script_quality","tests","manifest_bump"]' ]
   [ "$(jq -c '.round_changelists[1].carry_accounting.confirmed' "$BATS_TEST_TMPDIR/st.json")" = '[{"file":"app.py","dimension":"contract","title":"T"}]' ]
-  [ "$(jq -sc '[.[] | .skipped_dimensions]' "$WD/history.jsonl")" = '[[],[],[]]' ]
+  [ "$(jq -sc '[.[] | .skipped_dimensions]' "$WD/history.jsonl")" = '[[],["prose_logic","script_quality","tests","manifest_bump"],[]]' ]
+  [ "$(jq -sc '.[1].skip_reasons.contract' "$WD/history.jsonl")" = '"carried"' ]
 }
 
 @test "#2009 hook mode: the same skipped round with contract-integrity absent is refused CARRY-UNACCOUNTED" {
@@ -4280,6 +4286,7 @@ plugin_loop() {
   [ "$status" -eq 0 ]
   [ "$(cat "$WD/skippable-2.json")" = '[]' ]
   [ "$(jq -sc '[.[] | .skipped_dimensions]' "$WD/history.jsonl")" = '[[],[],[]]' ]
+  [ "$(jq -sc '[.[] | .skip_reasons]' "$WD/history.jsonl")" = '[{},{},{}]' ]
 }
 
 # ---------------------------------------------------------------------------

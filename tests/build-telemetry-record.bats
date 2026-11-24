@@ -120,9 +120,21 @@ EOF
     '"round_changelists":[],"final_changelist":{"blocking":[]}}' > "$ST"
   run zsh "$S" --status "$ST"
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.skipped_dimensions_by_round == [
+  echo "$output" | jq -e '[.skipped_dimensions_by_round[] | {round, skipped_dimensions}] == [
     {round:1, skipped_dimensions:[]}, {round:2, skipped_dimensions:["contract"]},
     {round:3, skipped_dimensions:[]}, {round:4, skipped_dimensions:[]}]'
+}
+
+@test "#3311 skipped_dimensions_by_round entries carry skip_reasons from history[], beside unchanged fields" {
+  printf '%s\n' '{"status":"CONVERGED","rounds":2,"max_rounds":5,"history":[' \
+    '{"round":1,"blocking":2,"skipped_dimensions":[],"skip_reasons":{"prose_logic":"full","tests":"full"}},' \
+    '{"round":2,"blocking":0,"skipped_dimensions":["tests"],"skip_reasons":{"prose_logic":"touched","tests":"none"}}],' \
+    '"round_changelists":[],"final_changelist":{"blocking":[]}}' > "$ST"
+  run zsh "$S" --status "$ST"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.skipped_dimensions_by_round == [
+    {round:1, skipped_dimensions:[], skip_reasons:{prose_logic:"full", tests:"full"}},
+    {round:2, skipped_dimensions:["tests"], skip_reasons:{prose_logic:"touched", tests:"none"}}]'
 }
 
 @test "skipped_dimensions_by_round: a history line predating the key reads null, never []; no history is []" {
@@ -130,7 +142,7 @@ EOF
     '"round_changelists":[],"final_changelist":{"blocking":[]}}' > "$ST"
   run zsh "$S" --status "$ST"
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.skipped_dimensions_by_round == [{round:1, skipped_dimensions:null}]'
+  echo "$output" | jq -e '.skipped_dimensions_by_round == [{round:1, skipped_dimensions:null, skip_reasons:null}]'
   printf '%s\n' '{"status":"SKIPPED","rounds":0,"max_rounds":5}' > "$ST"
   run zsh "$S" --status "$ST"
   [ "$status" -eq 0 ]
