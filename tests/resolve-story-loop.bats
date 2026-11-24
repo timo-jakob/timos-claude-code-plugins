@@ -4266,28 +4266,6 @@ plugin_loop() {
   [ "$(jq -sc '.[1].skip_reasons.contract' "$WD/history.jsonl")" = '"carried"' ]
 }
 
-@test "#3311 skip_reasons names a dimension the carry forced back in as carried, even when the plan said none" {
-  WD="$BATS_TEST_TMPDIR/wd"
-  local cblock="${CRIT/\"bugs\"/\"contract\"}"
-  # a dispatch wrapper that hides the carry from the real plan (split-carry
-  # still sees it), so the plan offers contract and names it `none`; the
-  # loop's carry still holds it
-  local wrap="$BATS_TEST_TMPDIR/dispatch-wrap.zsh"
-  printf '%s\n' '#!/usr/bin/env zsh' 'local -a a=()' \
-    '[[ $1 == plan ]] || exec zsh "$REAL_DISPATCH" "$@"' \
-    'while (( $# )); do if [[ $1 == --fix-verification ]]; then shift 2; else a+=( "$1" ); shift; fi; done' \
-    'exec zsh "$REAL_DISPATCH" "${a[@]}"' > "$wrap"
-  chmod +x "$wrap"
-  REAL_DISPATCH="$REPO_ROOT/development/skills/resolve-issue/scripts/review-dispatch.zsh" RESOLVE_LOOP_DISPATCH_BIN="$wrap" \
-  plugin_loop --max-rounds 3 --status-file "$BATS_TEST_TMPDIR/st.json" \
-    --review-cmd 'if [ "$REVIEW_ROUND" = 1 ]; then printf "%s" '"'"$cblock"'"' > "$REVIEW_FINDINGS"; else printf "[]" > "$REVIEW_FINDINGS"; jq "[.[] | {file, dimension, title, confirmed: [\"claude-plugin-contract-integrity\"], re_raised: [], unconfirmed: []}]" "$REVIEW_FIX_VERIFICATION" > "$REVIEW_FINDINGS.carry.json"; fi' \
-    --fix-cmd 'echo "print(2)" >> "$REVIEW_REPO/app.py"'
-  [ "$status" -eq 0 ]
-  [ "$(jq -r '.contract' "$WD/skip-reasons-2.json")" = "none" ]
-  [ "$(jq -sc '.[1].skipped_dimensions' "$WD/history.jsonl")" = '["prose_logic","script_quality","tests","manifest_bump"]' ]
-  [ "$(jq -sc '.[1].skip_reasons.contract' "$WD/history.jsonl")" = '"carried"' ]
-}
-
 @test "#2009 hook mode: the same skipped round with contract-integrity absent is refused CARRY-UNACCOUNTED" {
   WD="$BATS_TEST_TMPDIR/wd"
   local cblock="${CRIT/\"bugs\"/\"contract\"}"

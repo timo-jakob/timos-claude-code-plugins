@@ -3872,6 +3872,12 @@ offered() { echo "$output" | jq -r --arg d "$1" '.skippable_dimensions | index($
     [ "$(offered script_quality)" = false ]
     [ "$(reason tests)" = "none" ]
   done
+  for f in '#!/bin/sh' '#!/bin/bash -e'; do
+    git -C "$R" checkout -q -- . && git -C "$R" clean -qfd
+    printf '%s\nexit 0\n' "$f" > "$R/dev/scripts/sh-tool"
+    p3311 --round 3 --prior-tree "$T1"
+    [ "$(reason script_quality)" = "touched" ]
+  done
 }
 
 @test "#3311 a non-shell shebang (bats, python) does not touch script_quality" {
@@ -3932,6 +3938,14 @@ offered() { echo "$output" | jq -r --arg d "$1" '.skippable_dimensions | index($
   p3311 --round 3 --prior-tree "$T1"
   [ "$status" -eq 0 ]
   [ "$(reason tests)" = "touched" ]
+  git -C "$R" reset -q --hard
+  git -C "$R" rm -q dev/scripts/tool
+  p3311 --round 3 --prior-tree "$T1"
+  [ "$(reason script_quality)" = "touched" ]
+  git -C "$R" reset -q --hard
+  git -C "$R" mv legacy.py legacy.md
+  p3311 --round 3 --prior-tree "$T1"
+  [ "$(reason prose_logic)" = "touched" ]
   git -C "$R" reset -q --hard
   git -C "$R" mv dev/scripts/tool dev/scripts/tool-renamed
   p3311 --round 3 --prior-tree "$T1"
@@ -4002,6 +4016,12 @@ offered() { echo "$output" | jq -r --arg d "$1" '.skippable_dimensions | index($
   [ "$(echo "$output" | jq -c .skippable_dimensions)" = '[]' ]
   [ "$(echo "$output" | jq -c '[.dimension_reasons[]] | unique')" = '["undecided"]' ]
   contains "$stderr" 'the delta could not be listed (fail-closed: every dimension runs)'
+  # a first line that cannot be read leaves script_quality undecided
+  printf '%s\n' '#!/usr/bin/env bash' \
+    'for a in "$@"; do [ "$a" = "cat-file" ] && exit 1; done' \
+    "exec \"$real\" \"\$@\"" > "$g"
+  GIT_BIN="$g" p3311 --round 3 --prior-tree "$T1"
+  [ "$(reason script_quality)" = "undecided" ]
 }
 
 @test "#3311 another repo type: skippable_dimensions [] and dimension_reasons {}, delta or full" {

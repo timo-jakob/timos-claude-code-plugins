@@ -3367,19 +3367,13 @@ while (( round <= effective_max )); do
       -- "$work_dir/skippable-$round.json" 2>/dev/null) || skipped_rec='[]'
     [[ -n "$skipped_rec" ]] || skipped_rec='[]'
   fi
-  # skip_reasons (#3311): the plan's dimension_reasons for this round, with
-  # every dimension the carry forced back in named `carried`, so it agrees with
-  # skipped_dimensions. `{}` when the plan named none; an unreadable file or
-  # carry reads as `{}` / no carry, never a lost line.
+  # skip_reasons (#3311): the plan's dimension_reasons for this round, as the
+  # plan wrote them — the plan already names a carried dimension `carried` on a
+  # delta round, and every dimension `full` on a full one. `{}` when the plan
+  # named none; an unreadable file reads as `{}`, never a lost line.
   reasons_rec='{}'
   if [[ -s "$work_dir/skip-reasons-$round.json" ]]; then
-    carry_dims='[]'
-    if [[ -n "$fix_verification" && -s "$fix_verification" ]]; then
-      carry_dims=$(jq -c '[ .[]? | .dimension? // empty ] | unique' -- "$fix_verification" 2>/dev/null) || carry_dims='[]'
-      [[ -n "$carry_dims" ]] || carry_dims='[]'
-    fi
-    reasons_rec=$(jq -ce --argjson carried "$carry_dims" \
-      'if type == "object" then with_entries(.key as $k | if any($carried[]; . == $k) then .value = "carried" else . end) else empty end' \
+    reasons_rec=$(jq -ce 'if type == "object" then . else empty end' \
       -- "$work_dir/skip-reasons-$round.json" 2>/dev/null) || reasons_rec='{}'
     [[ -n "$reasons_rec" ]] || reasons_rec='{}'
   fi
