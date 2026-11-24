@@ -1,0 +1,268 @@
+#!/usr/bin/env bats
+#
+# Behavioural tests for profile-gate.zsh (#3004), the gate profiler. What these
+# pin down:
+#   * the PATH shim counts exactly the processes a test starts — jq twice and
+#     git once for tests/fixtures/profile-gate/sample.bats — with bats' own
+#     per-test processes subtracted, and the real tools still run;
+#   * the report carries, per test: file, name, wall ms, process count and the
+#     counts by executable; per file: the totals, the fork estimate and a class;
+#   * the shim directory and its logs live in a mktemp dir outside the
+#     repository and are removed on exit, and on SIGTERM;
+#   * usage errors exit 2 with an empty stdout, and a red bats file is recorded,
+#     not a profiler failure.
+#
+# The profiler runs the real bats on small fixture files, so each case takes a
+# second or two. Fixture files with tests in them are written with printf, never
+# a heredoc, so this file's own parser never sees their test lines.
+
+bats_require_minimum_version 1.5.0
+load assertions
+
+setup() {
+  unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE
+  REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+  S="$REPO_ROOT/development/skills/resolve-issue/scripts/profile-gate.zsh"
+  SAMPLE="$REPO_ROOT/tests/fixtures/profile-gate/sample.bats"
+  export TMPDIR="$BATS_TEST_TMPDIR/tmp"; mkdir -p "$TMPDIR"
+  OUT="$BATS_TEST_TMPDIR/out"
+}
+
+# One fixture bats file: _fixture NAME BODY-LINE... writes one test per call.
+_fixture() {
+  local f="$BATS_TEST_TMPDIR/$1.bats"; shift
+  printf '@test "%s" {\n%s\n}\n' "$1" "$2" >> "$f"
+  printf '%s\n' "$f"
+}
+
+# The profiler's workdir, from its first stderr line.
+_workdir() {
+  sed -n 's/^profile-gate: workdir=//p' "$1"
+}
+
+@test "sample: jq twice and git once, bats' own processes subtracted, the real tools ran" {
+  export SAMPLE_OUT="$BATS_TEST_TMPDIR/sample.out"
+  run --separate-stderr "$S" --out "$OUT" "$SAMPLE"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run jq -c '[.tests[] | select(.number == 1) | .by_exe]' "$OUT/report.json"
+  [ "$output" = '[{"git":1,"jq":2}]' ]
+  run jq -r '.tests[] | select(.number == 1) | .processes' "$OUT/report.json"
+  [ "$output" = 3 ]
+  run jq -c '[.tests[] | select(.number == 2) | .processes, .by_exe]' "$OUT/report.json"
+  [ "$output" = '[0,{}]' ]
+  # the tools' output is what they print without the shim
+  printf '%s\n' 2 ledger-export "$(git --version)" > "$BATS_TEST_TMPDIR/direct.out"
+  cmp "$SAMPLE_OUT" "$BATS_TEST_TMPDIR/direct.out"
+  run jq -r '.files[0] | "\(.exit) \(.tests) \(.processes) \(.by_exe.jq) \(.by_exe.git)"' "$OUT/report.json"
+  [ "$output" = "0 2 3 2 1" ]
+}
+
+@test "every test row carries file, number, name, wall_ms, processes and by_exe" {
+  run --separate-stderr "$S" --out "$OUT" "$SAMPLE"
+  [ "$status" -eq 0 ]
+  run jq -r '.schema' "$OUT/report.json"
+  [ "$output" = gate-profile/v1 ]
+  run jq -e --arg f "$SAMPLE" '.tests | length == 2 and all(
+      (keys == ["by_exe","file","name","number","processes","wall_ms"])
+      and .file == $f and (.wall_ms | type == "number" and . >= 0)
+      and (.processes | type == "number"))' "$OUT/report.json"
+  [ "$status" -eq 0 ]
+  run jq -r '[.tests[].name] | join("|")' "$OUT/report.json"
+  [ "$output" = "jq twice and git once|starts nothing" ]
+}
+
+@test "the file row carries the totals, the fork estimate and its split, and the measured costs" {
+  run --separate-stderr "$S" --out "$OUT" "$SAMPLE"
+  [ "$status" -eq 0 ]
+  run jq -e '.files[0] | (.processes_per_test == 1.5)
+      and (.fork_split_ms | keys == ["git","interpreter","jq","other"])
+      and (.fork_split_ms.jq > 0) and (.fork_split_ms.git > 0)
+      and (.fork_split_ms.interpreter == 0) and (.fork_split_ms.other == 0)
+      and (.fork_ms_est > 0) and (.shim_overhead_ms_est >= 0)
+      and (.class | IN("fork-bound","wait-bound","compute-bound"))' "$OUT/report.json"
+  [ "$status" -eq 0 ]
+  run jq -e '(.startup_ms | keys == ["awk","bash","git","jq","other","sed","zsh"])
+      and (.startup_ms.jq > 0) and (.shim_ms >= 0) and (.jobs == 1)
+      and (.unseen | length == 3)' "$OUT/report.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "a test that runs a tool bats also runs keeps its own count after the subtraction" {
+  local f; f=$(_fixture dates "one date" '  date >/dev/null')
+  run --separate-stderr "$S" --out "$OUT" "$f"
+  [ "$status" -eq 0 ]
+  run jq -c '.tests[0].by_exe' "$OUT/report.json"
+  [ "$output" = '{"date":1}' ]
+  run jq -r '.bats_baseline.date' "$OUT/report.json"
+  [ "$output" -ge 1 ]
+}
+
+@test "an exec by absolute path is not counted, and the file's static references are" {
+  local f; f=$(_fixture abs "absolute" '  /usr/bin/true')
+  run --separate-stderr "$S" --out "$OUT" "$f"
+  [ "$status" -eq 0 ]
+  run jq -c '[.tests[0].processes, .files[0].absolute_path_refs]' "$OUT/report.json"
+  [ "$output" = '[0,1]' ]
+}
+
+@test "sleep is summed into sleep_s and a sleeping file is wait-bound" {
+  local f; f=$(_fixture slow "sleeps" '  sleep 2')
+  run --separate-stderr "$S" --out "$OUT" "$f"
+  [ "$status" -eq 0 ]
+  run jq -r '.files[0] | "\(.sleep_s) \(.class) \(.by_exe.sleep)"' "$OUT/report.json"
+  [ "$output" = "2 wait-bound 1" ]
+}
+
+@test "a file that only computes in the shell is compute-bound" {
+  local f; f=$(_fixture busy "busy" '  local end=$((SECONDS + 2)); while [ "$SECONDS" -lt "$end" ]; do :; done')
+  run --separate-stderr "$S" --out "$OUT" "$f"
+  [ "$status" -eq 0 ]
+  run jq -r '.files[0] | "\(.processes) \(.class)"' "$OUT/report.json"
+  [ "$output" = "0 compute-bound" ]
+}
+
+@test "a file that mostly starts processes is fork-bound" {
+  local f; f=$(_fixture forks "forks" '  local i; for i in $(seq 400); do env true; done')
+  run --separate-stderr "$S" --out "$OUT" "$f"
+  [ "$status" -eq 0 ]
+  run jq -r '.files[0] | "\(.by_exe.env) \(.by_exe.true) \(.class)"' "$OUT/report.json"
+  [ "$output" = "400 400 fork-bound" ]
+}
+
+@test "a red bats file is recorded in its exit, and the profiler still exits 0" {
+  local f; f=$(_fixture red "fails" '  false')
+  run --separate-stderr "$S" --out "$OUT" "$f"
+  [ "$status" -eq 0 ]
+  run jq -r '.files[0].exit' "$OUT/report.json"
+  [ "$output" -ne 0 ]
+  run grep -c '(exit ' "$OUT/report.md"
+  [ "$output" = 1 ]
+}
+
+@test "--jobs 2 counts the same, files are sorted heaviest first, and --top bounds the table" {
+  local f; f=$(_fixture slow "sleeps" '  sleep 1')
+  run --separate-stderr "$S" --out "$OUT" --jobs 2 --top 1 "$SAMPLE" "$f"
+  [ "$status" -eq 0 ]
+  run jq -c '[.jobs, [.files[].file] == [$f, $s]]' --arg f "$f" --arg s "$SAMPLE" "$OUT/report.json"
+  [ "$output" = '[2,true]' ]
+  run jq -c '[.tests[] | select(.file == $s and .number == 1) | .by_exe]' --arg s "$SAMPLE" "$OUT/report.json"
+  [ "$output" = '[{"git":1,"jq":2}]' ]
+  run grep -c '^| .*\.bats |' "$OUT/report.md"
+  [ "$output" = 1 ]
+  run grep -c '^| File | Wall s | Tests | Procs/test | jq | git | interp | other | Fork est | Sleep s | Class |$' "$OUT/report.md"
+  [ "$output" = 1 ]
+}
+
+@test "the workdir is a mktemp dir under TMPDIR, outside the repository, removed on exit" {
+  run --separate-stderr "$S" --out "$OUT" "$SAMPLE"
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$stderr" > "$BATS_TEST_TMPDIR/err"
+  local w; w=$(_workdir "$BATS_TEST_TMPDIR/err")
+  [ -n "$w" ]
+  case "$w" in "$(cd "$TMPDIR" && pwd -P)"/profile-gate.*) ;; *) false ;; esac
+  case "$w" in "$REPO_ROOT"/*) false ;; esac
+  [ ! -e "$w" ]
+  run ls -A "$TMPDIR"
+  [ -z "$output" ]
+  run ls -A "$OUT"
+  [ "$output" = "$(printf '%s\n' report.json report.md)" ]
+}
+
+@test "SIGTERM mid-run ends the run, removes the workdir, writes no report, exits 143" {
+  local f; f=$(_fixture hang "hangs" '  sleep 30')
+  "$S" --out "$OUT" "$f" 2> "$BATS_TEST_TMPDIR/err" &
+  local pid=$!
+  local i=0
+  until grep -q '^profile-gate: \[1/1\]' "$BATS_TEST_TMPDIR/err"; do
+    i=$((i + 1)); [ "$i" -lt 200 ]; sleep 0.1
+  done
+  local w; w=$(_workdir "$BATS_TEST_TMPDIR/err")
+  [ -d "$w" ]
+  sleep 1
+  kill -TERM "$pid"
+  local rc=0; wait "$pid" || rc=$?
+  [ "$rc" -eq 143 ]
+  [ ! -e "$w" ]
+  [ ! -e "$OUT/report.json" ]
+  run pgrep -f "$f"
+  [ "$status" -ne 0 ]
+}
+
+@test "usage errors exit 2 with an empty stdout" {
+  run --separate-stderr "$S" "$SAMPLE"
+  [ "$status" -eq 2 ]; [ -z "$output" ]
+  run --separate-stderr "$S" --out "$OUT"
+  [ "$status" -eq 2 ]; [ -z "$output" ]
+  run --separate-stderr "$S" --out "$OUT" "$BATS_TEST_TMPDIR/missing.bats"
+  [ "$status" -eq 2 ]; [ -z "$output" ]
+  run --separate-stderr "$S" --out "$OUT" --jobs 0 "$SAMPLE"
+  [ "$status" -eq 2 ]; [ -z "$output" ]
+  run --separate-stderr "$S" --out "$OUT" --top x "$SAMPLE"
+  [ "$status" -eq 2 ]; [ -z "$output" ]
+  run --separate-stderr "$S" --out "$OUT" --bogus "$SAMPLE"
+  [ "$status" -eq 2 ]; [ -z "$output" ]
+  touch "$BATS_TEST_TMPDIR/file"
+  run --separate-stderr "$S" --out "$BATS_TEST_TMPDIR/file/sub" "$SAMPLE"
+  [ "$status" -eq 2 ]; [ -z "$output" ]
+  [ ! -e "$OUT/report.json" ]
+}
+
+@test "--help prints the header and exits 0" {
+  run --separate-stderr "$S" --help
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "profile-gate.zsh — attribute the bats gate's time to files, tests and the" ]
+}
+
+# A PATH holding only zsh, and jq or bats when asked, so the other is missing.
+_bin_without() {
+  local b="$BATS_TEST_TMPDIR/bin-$1"; mkdir -p "$b"
+  ln -s "$(command -v zsh)" "$b/zsh"
+  [ "$1" = jq ] || ln -s "$(command -v jq)" "$b/jq"
+  [ "$1" = bats ] || ln -s "$(command -v bats)" "$b/bats"
+  printf '%s\n' "$b"
+}
+
+@test "bats or jq missing from PATH exits 127 with an empty stdout and no report" {
+  local b; b=$(_bin_without bats)
+  run -127 --separate-stderr env PATH="$b" "$S" --out "$OUT" "$SAMPLE"
+  [ "$status" -eq 127 ]; [ -z "$output" ]
+  [ "$stderr" = "profile-gate: bats not found" ]
+  b=$(_bin_without jq)
+  run -127 --separate-stderr env PATH="$b" "$S" --out "$OUT" "$SAMPLE"
+  [ "$status" -eq 127 ]; [ -z "$output" ]
+  [ "$stderr" = "profile-gate: jq not found" ]
+  [ ! -e "$OUT/report.json" ]
+}
+
+@test "a stub ahead of the shim that calls back into it by absolute path reaches the real tool" {
+  # the shape of tests/marker-find-stub.bash: the stub captured `command -v`
+  # with the shim first on PATH, so it delegates to the shim's own entry. The
+  # shim must resolve past its own directory, never back to the stub; the stub
+  # gives up at depth 3 so a regression reds instead of hanging.
+  local f; f=$(_fixture stubbed "stub delegates" '  local stub="$BATS_TEST_TMPDIR/stub" real
+  mkdir -p "$stub"; real=$(command -v jq)
+  printf '"'"'#!/bin/bash\nn=$((${STUB_DEPTH:-0} + 1)); [ "$n" -le 3 ] || exit 99\nSTUB_DEPTH=$n exec "%s" "$@"\n'"'"' "$real" > "$stub/jq"
+  chmod +x "$stub/jq"
+  run env PATH="$stub:$PATH" jq -n 7
+  [ "$status" -eq 0 ]
+  [ "$output" = 7 ]')
+  run --separate-stderr "$S" --out "$OUT" "$f"
+  [ "$status" -eq 0 ]
+  run jq -r '"\(.files[0].exit) \(.tests[0].by_exe.jq)"' "$OUT/report.json"
+  [ "$output" = "0 1" ]
+}
+
+@test "--jobs 2 starts the next file as soon as one ends, while another still runs" {
+  # A waits for a mark only C writes; with two slots, C can start only once B
+  # ends while A still runs. A scheduler that waits for A first fails A.
+  export PG_MARK="$BATS_TEST_TMPDIR/mark"
+  local a b c
+  a=$(_fixture a "waits for c" '  local i=0; while [ ! -e "$PG_MARK" ]; do i=$((i + 1)); [ "$i" -lt 300 ]; sleep 0.1; done')
+  b=$(_fixture b "quick" '  :')
+  c=$(_fixture c "writes the mark" '  touch "$PG_MARK"')
+  run --separate-stderr "$S" --out "$OUT" --jobs 2 "$a" "$b" "$c"
+  [ "$status" -eq 0 ]
+  run jq -cS '[.files[] | {key: (.file | sub(".*/"; "")), value: .exit}] | from_entries' "$OUT/report.json"
+  [ "$output" = '{"a.bats":0,"b.bats":0,"c.bats":0}' ]
+}
