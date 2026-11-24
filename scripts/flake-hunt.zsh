@@ -256,7 +256,8 @@ work="$(mktemp -d "${TMPDIR:-/tmp}/flake-hunt.XXXXXX")" \
 # the Ctrl-C. (Inline, not a function: see the LOCAL_TRAPS note above.)
 #
 # The first argument is how many nice levels the new group drops below the
-# harness, capped at 20 and never reported: a process already at 20 stays there
+# harness, capped at 20 and never reported (Linux's kernel clamps the request
+# at its own ceiling of 19): a process already at the ceiling stays there
 # without a word, where BG_NICE's nice(5) would warn on stderr (#3322). A bats
 # run drops 5 and the load 10, so the burners mostly take idle CPU and stay
 # below the run under test, as they did under BG_NICE.

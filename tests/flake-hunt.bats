@@ -454,13 +454,15 @@ prints_header_only() {
 # BG_NICE is off (#3322), so the launches lower their own priority: a bats run
 # 5 levels below the harness, its load 10.
 @test "flake-hunt: a bats run runs 5 nice levels below the harness and its load 10" {
-  # relative to whatever niceness the gate runs this test at, capped at 20
-  local h
-  h=$(( $(ps -o nice= -p "$$") + 3 )); (( h > 20 )) && h=20
+  # relative to whatever niceness the gate runs this test at, capped at the
+  # host's ceiling: 20 on macOS, 19 on Linux, where setpriority clamps there
+  local h max
+  max=$(nice -n 40 sh -c 'ps -o nice= -p $$' | tr -d ' ')
+  h=$(( $(ps -o nice= -p "$$") + 3 )); (( h > max )) && h=$max
   run --separate-stderr nice -n 3 zsh "$HUNT" --iterations 1 "$A"
   [ "$status" -eq 0 ]
-  [ "$(cat "$STUB/bats.nice")" = $(( h + 5 > 20 ? 20 : h + 5 )) ]
-  [ "$(cat "$STUB/load.nice")" = $(( h + 10 > 20 ? 20 : h + 10 )) ]
+  [ "$(cat "$STUB/bats.nice")" = $(( h + 5 > max ? max : h + 5 )) ]
+  [ "$(cat "$STUB/load.nice")" = $(( h + 10 > max ? max : h + 10 )) ]
 }
 
 @test "flake-hunt: started at niceness 20, a reader that closes the pipe early does not strand the load" {
