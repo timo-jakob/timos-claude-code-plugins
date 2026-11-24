@@ -107,23 +107,23 @@ standalone run has no descriptor at all, which the **Runs** cells name as *no pl
 
 | Reviewer | Kind | Model | Effort | Dimension | Runs |
 | --------------------------------- | ------ | ------ | ------ | -------------- | ---- |
-| claude-plugin-prose-logic | agent | fable | high | prose_logic | every round |
+| claude-plugin-prose-logic | agent | fable | high | prose_logic | `scope_mode` is `"full"`, or no plan, or `prose_logic` is not in `skippable_dimensions`, or the split-carry map holds `prose_logic` |
 | claude-plugin-contract-integrity | agent | opus | high | contract | `scope_mode` is `"full"`, or no plan, or `contract` is not in `skippable_dimensions`, or the split-carry map holds `contract` |
-| claude-plugin-script-reviewer | agent | fable | high | script_quality | every round |
-| claude-plugin-test-reviewer | agent | opus | high | tests | every round |
-| claude-plugin-manifest-check | agent | sonnet | high | manifest_bump | `scope_mode` is `"full"`, or no plan; on a `"delta"` round only when the split-carry map holds `manifest_bump` |
+| claude-plugin-script-reviewer | agent | fable | high | script_quality | `scope_mode` is `"full"`, or no plan, or `script_quality` is not in `skippable_dimensions`, or the split-carry map holds `script_quality` |
+| claude-plugin-test-reviewer | agent | opus | high | tests | `scope_mode` is `"full"`, or no plan, or `tests` is not in `skippable_dimensions`, or the split-carry map holds `tests` |
+| claude-plugin-manifest-check | agent | sonnet | high | manifest_bump | `scope_mode` is `"full"`, or no plan, or `manifest_bump` is not in `skippable_dimensions`, or the split-carry map holds `manifest_bump` |
 | check-manifests.zsh | script | — | — | manifest | every round |
 
 **A dimension the table does not plan for this round is not run and produces nothing** — no findings, no
-triple — and that is not a dimension that failed to run. Two cells vary. The `manifest_bump` row: round 1 and
-every closing sweep plan with `scope_mode: "full"`, so the agent judges bump size on both, and a delta round
-brings it back only to account for its own carried entries (`reference/review-loop/carry.md` in the resolve-issue
-skill, *Carry-driven dispatch (#2008)*). The `contract` row (#2009): it runs on every full round, and on a
-`"delta"` round unless the plan's `skippable_dimensions` holds `contract` — the plan puts it there when a pure
-selector finds that the round's fix pass touched no contract surface. Read `skippable_dimensions` from the
-dispatch descriptor (in hook mode, `$REVIEW_SKIPPABLE_DIMENSIONS`, a JSON array string); a standalone run has
-neither, which is the *no plan* case. A carried `contract` entry still brings it back, by the same
-*Carry-driven dispatch (#2008)* rule.
+triple — and that is not a dimension that failed to run. The five agent rows share one condition (#2009, #2925
+part 3b): each runs on every full round — round 1 and every closing sweep plan with `scope_mode: "full"` — and on
+a `"delta"` round unless the plan's `skippable_dimensions` holds its dimension. The plan offers a dimension there
+when the round's fix pass touched nothing in its class and its carry holds none of its entries: for `contract`, a
+pure selector finds no contract surface touched; for the other four, no file of the class
+`reference/review-loop/carry.md` in the resolve-issue skill names under *Skippable dimensions (#2009)*. Read
+`skippable_dimensions` from the dispatch descriptor (in hook mode, `$REVIEW_SKIPPABLE_DIMENSIONS`, a JSON array
+string); a standalone run has neither, which is the *no plan* case. A carried entry still brings its dimension
+back, by that file's *Carry-driven dispatch (#2008)* rule. Only the `check-manifests.zsh` row runs every round.
 
 **Run the script first, with Bash.** It is this skill's
 `scripts/check-manifests.zsh`, in the same plugin cache directory as this `SKILL.md`:

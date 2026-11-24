@@ -23,8 +23,13 @@ setup() {
   LOOP_REF="$LOOP_DIR/carry.md"
   LOOP_BRIEF="$LOOP_DIR/briefs/panel.md"
   ARCH="$REPO_ROOT/ARCHITECTURE.md"
-  BUMP_CELL='`scope_mode` is `"full"`, or no plan; on a `"delta"` round only when the split-carry map holds `manifest_bump`'
-  CONTRACT_CELL='`scope_mode` is `"full"`, or no plan, or `contract` is not in `skippable_dimensions`, or the split-carry map holds `contract`'
+  CONTRACT_CELL="$(skip_cell contract)"
+}
+
+# skip_cell <dimension> -> the Runs cell every agent row carries since #2925
+# part 3b: the #2009 contract cell's shape, naming the row's own dimension.
+skip_cell() {
+  printf '`scope_mode` is `"full"`, or no plan, or `%s` is not in `skippable_dimensions`, or the split-carry map holds `%s`' "$1" "$1"
 }
 
 # Step 1's table rows as "reviewer<TAB>kind<TAB>dimension<TAB>runs".
@@ -43,20 +48,18 @@ step1_rows() {
 planned() {
   local mode="$1" keys=",$2," skippable=",${3:-}," reviewer kind dim runs out=()
   while IFS=$'\t' read -r reviewer kind dim runs; do
-    case "$runs" in
-    "every round") out+=("$dim") ;;
-    "$BUMP_CELL")
-      if [ "$mode" = full ] || [ "$mode" = none ] \
-        || { [ "$mode" = delta ] && [[ "$keys" == *",manifest_bump,"* ]]; }; then
+    # only the script row runs every round; an agent row must carry the skip
+    # cell naming its OWN dimension, or the cell is unknown and the case fails
+    if [ "$kind" = script ] && [ "$runs" = "every round" ]; then
+      out+=("$dim")
+    elif [ "$kind" = agent ] && [ "$runs" = "$(skip_cell "$dim")" ]; then
+      if [ "$mode" = full ] || [ "$mode" = none ] || [[ "$skippable" != *",$dim,"* ]] \
+        || [[ "$keys" == *",$dim,"* ]]; then
         out+=("$dim")
-      fi ;;
-    "$CONTRACT_CELL")
-      if [ "$mode" = full ] || [ "$mode" = none ] || [[ "$skippable" != *",contract,"* ]] \
-        || [[ "$keys" == *",contract,"* ]]; then
-        out+=("$dim")
-      fi ;;
-    *) echo "unknown Runs cell for $reviewer: $runs" >&2; return 1 ;;
-    esac
+      fi
+    else
+      echo "unknown Runs cell for $reviewer: $runs" >&2; return 1
+    fi
   done < <(step1_rows)
   printf '%s\n' "${out[@]}" | LC_ALL=C sort | paste -sd' ' -
 }
@@ -80,13 +83,14 @@ NO_BUMP="contract manifest prose_logic script_quality tests"
   [ "$(planned full "manifest_bump")" = "$ALL6" ]
 }
 
-@test "a delta round with no manifest_bump carry runs the script but not the agent" {
-  [ "$(planned delta "")" = "$NO_BUMP" ]
-  [ "$(planned delta "manifest,tests")" = "$NO_BUMP" ]
+@test "a delta round offering manifest_bump, with no manifest_bump carry, runs the script but not the agent" {
+  [ "$(planned delta "" "manifest_bump")" = "$NO_BUMP" ]
+  [ "$(planned delta "manifest,tests" "manifest_bump")" = "$NO_BUMP" ]
 }
 
 @test "a delta round whose split-carry map holds manifest_bump runs the script and the agent" {
   [ "$(planned delta "manifest_bump")" = "$ALL6" ]
+  [ "$(planned delta "manifest_bump" "manifest_bump")" = "$ALL6" ]
 }
 
 @test "a standalone run (no plan) plans all six dimensions" {
@@ -95,7 +99,7 @@ NO_BUMP="contract manifest prose_logic script_quality tests"
 
 # --- #2009: the contract row
 
-NO_CONTRACT="manifest prose_logic script_quality tests"
+NO_CONTRACT="manifest manifest_bump prose_logic script_quality tests"
 
 @test "the contract row carries the #2009 dispatch condition" {
   [ "$(step1_rows | awk -F'\t' '$1 == "claude-plugin-contract-integrity" { print $2 "/" $3 "/" $4 }')" = "agent/contract/$CONTRACT_CELL" ]
@@ -107,11 +111,11 @@ NO_CONTRACT="manifest prose_logic script_quality tests"
 }
 
 @test "a delta round whose split-carry map holds contract plans contract even when the plan says skippable" {
-  [ "$(planned delta "contract" "contract")" = "$NO_BUMP" ]
+  [ "$(planned delta "contract" "contract")" = "$ALL6" ]
 }
 
-@test "a triggering delta round (skippable_dimensions []) plans contract" {
-  [ "$(planned delta "" "")" = "$NO_BUMP" ]
+@test "a triggering delta round (skippable_dimensions []) plans every dimension" {
+  [ "$(planned delta "" "")" = "$ALL6" ]
 }
 
 @test "a full round and a standalone run plan contract whatever skippable_dimensions holds" {
@@ -119,10 +123,68 @@ NO_CONTRACT="manifest prose_logic script_quality tests"
   [ "$(planned none "" "contract")" = "$ALL6" ]
 }
 
+# --- #2925 part 3b: every agent row honours skippable_dimensions
+
+SKIPPABLE5="prose_logic,contract,script_quality,tests,manifest_bump"
+
+@test "#2925 part 3b: every agent row carries the skip cell naming its own dimension" {
+  local dim
+  for dim in prose_logic contract script_quality tests manifest_bump; do
+    [ "$(step1_rows | awk -F'\t' -v d="$dim" '$2 == "agent" && $3 == d { print $4 }')" = "$(skip_cell "$dim")" ] || {
+      echo "the $dim row does not carry its skip cell" >&2; return 1
+    }
+  done
+}
+
+@test "#2925 part 3b: the check-manifests.zsh row still runs every round, whatever the plan offers" {
+  [ "$(planned delta "" "$SKIPPABLE5")" = "manifest" ]
+  [ "$(planned delta "" "$SKIPPABLE5,manifest")" = "manifest" ]
+}
+
+@test "#2925 part 3b: a delta round leaves out each dimension the plan offers and its carry does not hold" {
+  [ "$(planned delta "" "prose_logic")" = "contract manifest manifest_bump script_quality tests" ]
+  [ "$(planned delta "" "script_quality")" = "contract manifest manifest_bump prose_logic tests" ]
+  [ "$(planned delta "" "tests")" = "contract manifest manifest_bump prose_logic script_quality" ]
+  [ "$(planned delta "" "prose_logic,tests,manifest_bump")" = "contract manifest script_quality" ]
+}
+
+@test "#2925 part 3b: a carried entry brings its offered dimension back on a delta round" {
+  [ "$(planned delta "prose_logic" "$SKIPPABLE5")" = "manifest prose_logic" ]
+  [ "$(planned delta "script_quality" "$SKIPPABLE5")" = "manifest script_quality" ]
+  [ "$(planned delta "tests" "$SKIPPABLE5")" = "manifest tests" ]
+  [ "$(planned delta "manifest_bump,tests" "$SKIPPABLE5")" = "manifest manifest_bump tests" ]
+}
+
+@test "#2925 part 3b: a full round and a standalone run plan all six whatever the plan offers" {
+  [ "$(planned full "" "$SKIPPABLE5")" = "$ALL6" ]
+  [ "$(planned none "" "$SKIPPABLE5")" = "$ALL6" ]
+}
+
+@test "#2925 part 3b: Step 1 states the shared condition and the script row's every-round run" {
+  local flat; flat="$(tr '\n' ' ' < "$SKILL")"
+  contains "$flat" 'The five agent rows share one condition (#2009, #2925 part 3b): each runs on every full round'
+  contains "$flat" 'and on a `"delta"` round unless the plan'"'"'s `skippable_dimensions` holds its dimension.'
+  contains "$flat" 'Only the `check-manifests.zsh` row runs every round.'
+  lacks "$flat" 'Two cells vary.'
+  lacks "$flat" 'brings it back only to account for its own carried entries'
+}
+
+@test "#2925 part 3b: the Fallback mode table is unchanged" {
+  local table
+  table="$(sed -n '/^## Fallback mode/,/^## /p' "$SKILL" | grep '^|')"
+  [ "$(printf '%s\n' "$table" | wc -l | tr -d ' ')" -eq 5 ]
+  contains "$table" '| Reviewer | Dimension | In-scope files |'
+  contains "$table" '| claude-plugin-script-reviewer | script_quality | `*.sh`, `*.zsh`, `*.bash`, and extensionless files with a sh, bash or zsh shebang |'
+  contains "$table" '| claude-plugin-test-reviewer | tests | `*.bats` |'
+  contains "$table" '| claude-plugin-prose-logic | prose_logic | `*.md` |'
+  lacks "$table" 'skippable_dimensions'
+}
+
 @test "Step 1 states where skippable_dimensions is read, hook mode included (#2009)" {
-  contains "$(cat "$SKILL")" 'The `contract` row (#2009): it runs on every full round, and on a'
-  contains "$(cat "$SKILL")" 'dispatch descriptor (in hook mode, `$REVIEW_SKIPPABLE_DIMENSIONS`, a JSON array string); a standalone run has'
-  contains "$(cat "$SKILL")" 'neither, which is the *no plan* case. A carried `contract` entry still brings it back, by the same'
+  local flat; flat="$(tr '\n' ' ' < "$SKILL")"
+  contains "$flat" 'Read `skippable_dimensions` from the dispatch descriptor (in hook mode, `$REVIEW_SKIPPABLE_DIMENSIONS`, a JSON array string); a standalone run has neither, which is the *no plan* case.'
+  contains "$flat" 'A carried entry still brings its dimension back, by that file'"'"'s *Carry-driven dispatch (#2008)* rule.'
+  contains "$flat" 'for `contract`, a pure selector finds no contract surface touched'
 }
 
 @test "review-loop.md documents skippable_dimensions and cites Carry-driven dispatch (#2008) (#2009)" {
