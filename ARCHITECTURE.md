@@ -4498,8 +4498,10 @@ cannot mint a second artifact path for the same round:
   handed nothing. Round 1's "a scope that is only
   artifacts yields an empty `changed_files`, not an error" behaviour is
   untouched either way. `--fix-verification` is **echoed through** as
-  `fix_verification_path` — this script never reads the file, so one descriptor
-  value carries everything a round's panel needs. `plan` takes no
+  `fix_verification_path`, so one descriptor value carries everything a round's
+  panel needs; the script reads the file only on a claude-plugin delta round,
+  for the dimensions that own a carried entry, and a carry it cannot read there
+  leaves every dimension `undecided`. `plan` takes no
   waived-suggestion flag and emits no path for that list (#3168): no panel
   reads it, so the flag is refused as unknown (exit 2).
   `--self-check` (#2014) is echoed through the same way as `self_check_path`,
@@ -6435,14 +6437,15 @@ the key. It is separate from `findings_by_round` for the same reason, and joins
 it on `round`.
 `skipped_dimensions_by_round` (#2009) is `[{round, skipped_dimensions,
 skip_reasons}]`, read from the same `history[]` lines: the dimensions that
-round's panel was planned to leave out — the plan's `skippable_dimensions` less
-any dimension the round's carry forced back in — `[]` for a round that skipped
+round's plan offered to leave out — the plan's `skippable_dimensions` less any
+dimension the round's carry forced back in — `[]` for a round that offered
 nothing, and `null` for a history line that predates the key. `skip_reasons`
 (#3311) is the plan's `dimension_reasons` for that round, with every dimension
 the carry forced back in named `carried`; `{}` when the plan named none, and
-`null` for a history line that predates the key. It is how often the
-claude-plugin schedule actually skipped, and why, joined to the findings on
-`round`.
+`null` for a history line that predates the key. It is the plan's offer, not
+what the panel ran: until the panel's Step 1 table reads the wider field
+(#2925 part 3b), only a `contract` entry is a dimension the panel actually left
+out. It joins the findings on `round`.
 `possible_false_trip_auto_continues` (#1498) is copied from the status JSON with
 the same always-present reading stated there.
 The payload carries no `promotion_phase` and no per-round `promoted` count

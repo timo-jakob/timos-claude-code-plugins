@@ -220,7 +220,9 @@ when none. It also records `skip_reasons` (#3311): the plan's
 `carried`, `{}` when the plan named none. The loop keeps the plan's two fields
 per round in `<work-dir>/skippable-<R>.json` and
 `<work-dir>/skip-reasons-<R>.json`, and `build-telemetry-record.zsh` reports
-the history as `skipped_dimensions_by_round`.
+the history as `skipped_dimensions_by_round`. Both record the plan's offer,
+not what the panel ran: until #2925 part 3b only a `contract` entry is a
+dimension the panel actually left out.
 
 ### The third histogram state — present, below the threshold (#1510)
 

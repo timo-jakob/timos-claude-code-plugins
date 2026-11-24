@@ -157,6 +157,23 @@ NO_CONTRACT="manifest prose_logic script_quality tests"
   contains "$sec" '`dimension_reasons`, with every dimension the carry forced back in named'
   contains "$sec" '`carried`, `{}` when the plan named none. The loop keeps the plan'"'"'s two fields'
   contains "$sec" '`<work-dir>/skip-reasons-<R>.json`'
+  contains "$sec" 'the history as `skipped_dimensions_by_round`. Both record the plan'"'"'s offer,'
+  contains "$sec" 'not what the panel ran: until #2925 part 3b only a `contract` entry is a'
+}
+
+@test "ARCHITECTURE.md states the widened skippable field, dimension_reasons and skip_reasons as the plan's offer (#3311)" {
+  local arch; arch="$(cat "$ARCH")"
+  contains "$arch" 'it, and since #3311 it offers every panel dimension'
+  contains "$arch" 'deleted file is classed by its prior path, a rename by both.'
+  contains "$arch" '`dimension_reasons` (#3311) is always present, directly after it: an object'
+  contains "$arch" 'panel needs; the script reads the file only on a claude-plugin delta round,'
+  contains "$arch" 'leaves every dimension `undecided`.'
+  contains "$arch" 'round'"'"'s plan offered to leave out — the plan'"'"'s `skippable_dimensions` less any'
+  contains "$arch" '(#3311) is the plan'"'"'s `dimension_reasons` for that round, with every dimension'
+  contains "$arch" '`null` for a history line that predates the key. It is the plan'"'"'s offer, not'
+  contains "$arch" '(#2925 part 3b), only a `contract` entry is a dimension the panel actually left'
+  lacks "$arch" 'this script never reads the file'
+  lacks "$arch" 'claude-plugin schedule actually skipped, and why'
 }
 
 @test "ARCHITECTURE.md's claude-plugin panel passage states the contract schedule (#2009)" {

@@ -3970,6 +3970,17 @@ offered() { echo "$output" | jq -r --arg d "$1" '.skippable_dimensions | index($
   p3311 --round 3 --prior-tree "$T1" --fix-verification "$BATS_TEST_TMPDIR/bad.json"
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -c .skippable_dimensions)" = '[]' ]
+  # a 0-byte carry and an object-shaped carry are not arrays of entries
+  : > "$BATS_TEST_TMPDIR/zero.json"
+  p3311 --round 3 --prior-tree "$T1" --fix-verification "$BATS_TEST_TMPDIR/zero.json"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c .skippable_dimensions)" = '[]' ]
+  [ "$(echo "$output" | jq -c '[.dimension_reasons[]] | unique')" = '["undecided"]' ]
+  printf '{"k":{"dimension":"tests"}}\n' > "$BATS_TEST_TMPDIR/object.json"
+  p3311 --round 3 --prior-tree "$T1" --fix-verification "$BATS_TEST_TMPDIR/object.json"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c .skippable_dimensions)" = '[]' ]
+  [ "$(echo "$output" | jq -c '[.dimension_reasons[]] | unique')" = '["undecided"]' ]
   # an empty carry array is a readable carry of nothing
   printf '[]\n' > "$BATS_TEST_TMPDIR/empty.json"
   p3311 --round 3 --prior-tree "$T1" --fix-verification "$BATS_TEST_TMPDIR/empty.json"
