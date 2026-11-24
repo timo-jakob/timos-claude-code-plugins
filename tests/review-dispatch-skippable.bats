@@ -2,7 +2,8 @@
 #
 # review-dispatch.zsh plan's `skippable_dimensions` (#2009): always present;
 # a claude-plugin DELTA round builds the contract selector's two inputs from
-# --prior-tree and emits ["contract"] when it says skip, [] otherwise; every
+# --prior-tree and offers contract when it says skip, never otherwise (#3311
+# widened the field to every dimension: tests/review-dispatch.bats); every
 # full round and every other repo type emits [] without calling it. The
 # SELECT_CONTRACT_BIN seam swaps in a stub that records each call and keeps the
 # inputs it was handed, so "not called" and "built with whole-file context" are
@@ -79,22 +80,23 @@ calls() { [ -f "$CAP/calls" ] && wc -l < "$CAP/calls" | tr -d ' ' || echo 0; }
   [ "$(calls)" = 0 ]
 }
 
-@test "a skipping delta (bats-only fix pass) emits [\"contract\"]" {
+@test "a skipping delta (bats-only fix pass) offers contract, and every dimension but tests (#3311)" {
   printf 'print new\n' >> "$R/dev/scripts/tool.zsh"
   local t1; t1="$(tree_id)"
   printf 'load x\n' >> "$R/tests/a.bats"
   plan "$PLUGIN" "$REAL_SEL" --round 3 --prior-tree "$t1"
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | jq -r .scope_mode)" = "delta" ]
-  [ "$(echo "$output" | jq -c .skippable_dimensions)" = '["contract"]' ]
+  [ "$(echo "$output" | jq -c .skippable_dimensions)" = '["prose_logic","contract","script_quality","manifest_bump"]' ]
 }
 
-@test "a triggering delta (a usage line in a shipped script) emits []" {
+@test "a triggering delta (a usage line in a shipped script) does not offer contract" {
   local t1; t1="$(tree_id)"
   printf 'print -u2 "usage: tool"\n' >> "$R/dev/scripts/tool.zsh"
   plan "$PLUGIN" "$REAL_SEL" --round 3 --prior-tree "$t1"
   [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq -c .skippable_dimensions)" = '[]' ]
+  [ "$(echo "$output" | jq -r .dimension_reasons.contract)" = "touched" ]
+  [ "$(echo "$output" | jq -c .skippable_dimensions)" = '["prose_logic","tests","manifest_bump"]' ]
 }
 
 @test "a non-claude-plugin delta emits [] and never calls the selector" {
@@ -124,23 +126,27 @@ calls() { [ -f "$CAP/calls" ] && wc -l < "$CAP/calls" | tr -d ' ' || echo 0; }
   script_hunks="$(awk '/^diff --git /{on = ($0 ~ /tool\.zsh/)} on && /^@@ /' "$CAP/patch.diff")"
   [ "$(printf '%s\n' "$script_hunks" | wc -l | tr -d ' ')" = 1 ]
   starts_with "$script_hunks" "@@ -21 +21 @@"
-  # the stub answered skip, so the plan says so
-  [ "$(echo "$output" | jq -c .skippable_dimensions)" = '["contract"]' ]
+  # the stub answered skip, so the plan says so; the two touched files keep
+  # their classes' dimensions (#3311)
+  [ "$(echo "$output" | jq -c .skippable_dimensions)" = '["contract","tests","manifest_bump"]' ]
 }
 
-@test "fail-closed: a selector that fails or answers anything but skip leaves skippable_dimensions []" {
+@test "fail-closed: a selector that fails or answers anything but skip leaves contract out of skippable_dimensions" {
   local t1; t1="$(tree_id)"
   printf 'load x\n' >> "$R/tests/a.bats"
   STUB_EXIT=1 plan "$PLUGIN" "$STUB_SEL" --round 3 --prior-tree "$t1"
   [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq -c .skippable_dimensions)" = '[]' ]
+  [ "$(echo "$output" | jq -c .skippable_dimensions)" = '["prose_logic","script_quality","manifest_bump"]' ]
+  [ "$(echo "$output" | jq -r .dimension_reasons.contract)" = "undecided" ]
   contains "$stderr" 'the contract selector could not decide (fail-closed: contract runs)'
   STUB_ANSWER='not json' plan "$PLUGIN" "$STUB_SEL" --round 3 --prior-tree "$t1"
   [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq -c .skippable_dimensions)" = '[]' ]
+  [ "$(echo "$output" | jq -c .skippable_dimensions)" = '["prose_logic","script_quality","manifest_bump"]' ]
+  [ "$(echo "$output" | jq -r .dimension_reasons.contract)" = "undecided" ]
   STUB_ANSWER='{"contract":"run","triggers":["heading"]}' plan "$PLUGIN" "$STUB_SEL" --round 3 --prior-tree "$t1"
   [ "$status" -eq 0 ]
-  [ "$(echo "$output" | jq -c .skippable_dimensions)" = '[]' ]
+  [ "$(echo "$output" | jq -c .skippable_dimensions)" = '["prose_logic","script_quality","manifest_bump"]' ]
+  [ "$(echo "$output" | jq -r .dimension_reasons.contract)" = "touched" ]
   lacks "$stderr" 'could not decide'
 }
 

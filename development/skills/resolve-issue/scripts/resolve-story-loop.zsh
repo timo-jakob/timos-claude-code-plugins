@@ -374,7 +374,8 @@
 #                 skippable_dimensions as a JSON array string (`[]` on every
 #                 full round and every non-claude-plugin repo); the round's
 #                 line in history.jsonl records it as skipped_dimensions, less
-#                 any dimension the carry forced back in. Missing/empty
+#                 any dimension the carry forced back in, and the plan's
+#                 dimension_reasons as skip_reasons (#3311). Missing/empty
 #                 output is treated as "no findings" on a DELTA round only; on
 #                 a FULL round it is refused as STALE_FINDINGS (#1434), since
 #                 zero blockers there is the CONVERGED condition. A full round
@@ -2582,7 +2583,7 @@ local fix_base_tree=""
 local digest="" prev_digest_file=""
 local prev_findings_empty=0
 local blocking=0 conflict=0 nonconv=0 nconf=0 verdict="" ftrips=0
-local gate_rec='null' skippable_json='[]' skipped_rec='[]' carry_dims='[]'
+local gate_rec='null' skippable_json='[]' skipped_rec='[]' carry_dims='[]' reasons_json='{}' reasons_rec='{}'
 local step_rec=''
 local cur_tree="" prior_tree="" prior_tree_file="" fix_verification=""
 local scope_mode="" replanned_scope_mode="" carried=0
@@ -2869,6 +2870,13 @@ while (( round <= effective_max )); do
     print -u2 -- "resolve-story-loop: could not read skippable_dimensions at round $round"; exit 1 }
   print -r -- "$skippable_json" > "$work_dir/skippable-$round.json" || {
     print -u2 -- "resolve-story-loop: could not write $work_dir/skippable-$round.json"; exit 1 }
+  # dimension_reasons (#3311), kept beside it for the history line's
+  # skip_reasons. Telemetry, so it never costs the round: a descriptor
+  # predating the field, or one whose value is not an object, keeps `{}`.
+  reasons_json=$(print -r -- "$rp" | jq -c 'if (.dimension_reasons | type) == "object" then .dimension_reasons else {} end' 2>/dev/null) \
+    || reasons_json='{}'
+  [[ -n "$reasons_json" ]] || reasons_json='{}'
+  print -r -- "$reasons_json" > "$work_dir/skip-reasons-$round.json" 2>/dev/null || true
 
   # Whether this round's panel was handed an EMPTY scope — derived once, HERE,
   # for both wirings (#1485). It used to be set only inside the step-mode arm
@@ -3359,6 +3367,22 @@ while (( round <= effective_max )); do
       -- "$work_dir/skippable-$round.json" 2>/dev/null) || skipped_rec='[]'
     [[ -n "$skipped_rec" ]] || skipped_rec='[]'
   fi
+  # skip_reasons (#3311): the plan's dimension_reasons for this round, with
+  # every dimension the carry forced back in named `carried`, so it agrees with
+  # skipped_dimensions. `{}` when the plan named none; an unreadable file or
+  # carry reads as `{}` / no carry, never a lost line.
+  reasons_rec='{}'
+  if [[ -s "$work_dir/skip-reasons-$round.json" ]]; then
+    carry_dims='[]'
+    if [[ -n "$fix_verification" && -s "$fix_verification" ]]; then
+      carry_dims=$(jq -c '[ .[]? | .dimension? // empty ] | unique' -- "$fix_verification" 2>/dev/null) || carry_dims='[]'
+      [[ -n "$carry_dims" ]] || carry_dims='[]'
+    fi
+    reasons_rec=$(jq -ce --argjson carried "$carry_dims" \
+      'if type == "object" then with_entries(.key as $k | if any($carried[]; . == $k) then .value = "carried" else . end) else empty end' \
+      -- "$work_dir/skip-reasons-$round.json" 2>/dev/null) || reasons_rec='{}'
+    [[ -n "$reasons_rec" ]] || reasons_rec='{}'
+  fi
   # step_wall_s (#2197): telemetry like `gate`, so _step_wall_rec never fails —
   # and a capture that somehow comes back empty is all-null, never a lost line.
   step_rec=$(_step_wall_rec "$round" "$hook_panel_s" "$hook_fix_s")
@@ -3366,9 +3390,9 @@ while (( round <= effective_max )); do
   hook_panel_s="" hook_fix_s=""
   jq -c --argjson r "$round" --argjson b "$blocking" --argjson c "$nconf" --argjson nc "$nonconv" \
      --argjson ft "$ftrips" --argjson g "$gate_rec" --argjson sk "$skipped_rec" \
-     --argjson sw "$step_rec" \
+     --argjson sw "$step_rec" --argjson sr "$reasons_rec" \
      '{round:$r, blocking:$b, conflicts:$c, non_converging:($nc==1), false_trips:$ft,
-       gate:$g, skipped_dimensions:$sk, step_wall_s:$sw}' <<< '{}' >> "$history_file" || {
+       gate:$g, skipped_dimensions:$sk, skip_reasons:$sr, step_wall_s:$sw}' <<< '{}' >> "$history_file" || {
     print -u2 -- "resolve-story-loop: could not append the round $round history line to $history_file"; exit 1 }
 
   # 4. decide the round's fate. In step mode a survivable round (blockers,

@@ -142,6 +142,23 @@ NO_CONTRACT="manifest prose_logic script_quality tests"
   contains "$sec" '`skipped_dimensions_by_round`'
 }
 
+@test "review-loop carry.md states the widened skippable field, its reasons and skip_reasons (#3311)" {
+  local sec
+  sec="$(sed -n '/^### Skippable dimensions (#2009)$/,/^### /p' "$LOOP_REF")"
+  contains "$sec" 'it offers each of `prose_logic`, `contract`, `script_quality`, `tests` and'
+  contains "$sec" 'carry, or the fix pass touched a file in its class: a `*.sh` / `*.zsh` /'
+  contains "$sec" 'dimension out of the field: it runs. Beside it the plan emits'
+  contains "$sec" '`dimension_reasons`, each dimension'"'"'s `carried`, `touched`, `undecided` or'
+  contains "$sec" '`none` (`full` on a full round). Until the panel'"'"'s Step 1 table reads the wider'
+  contains "$sec" 'field (#2925 part 3b), only `contract` is actually left out.'
+  contains "$sec" 'Each round'"'"'s line in `<work-dir>/history.jsonl` records `skipped_dimensions`:'
+  contains "$sec" 'the plan'"'"'s field less every dimension the round'"'"'s carry forced back in, `[]`'
+  contains "$sec" 'when none. It also records `skip_reasons` (#3311): the plan'"'"'s'
+  contains "$sec" '`dimension_reasons`, with every dimension the carry forced back in named'
+  contains "$sec" '`carried`, `{}` when the plan named none. The loop keeps the plan'"'"'s two fields'
+  contains "$sec" '`<work-dir>/skip-reasons-<R>.json`'
+}
+
 @test "ARCHITECTURE.md's claude-plugin panel passage states the contract schedule (#2009)" {
   contains "$(cat "$ARCH")" '`contract` (#2009) has a schedule of'
   contains "$(cat "$ARCH")" '`select-contract-dimension.zsh` finds that the fix pass touched no contract'

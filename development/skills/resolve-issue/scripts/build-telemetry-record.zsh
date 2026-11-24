@@ -236,9 +236,12 @@ jq -c '
       # plan s skippable_dimensions less any the carry forced back in), read
       # from the same per-round history lines. [] is a round that skipped
       # nothing; null is a history line that predates the key, never read as
-      # [] because nobody recorded what that round skipped.
+      # [] because nobody recorded what that round skipped. #3311: each entry
+      # also carries skip_reasons, the round s per-dimension reasons ({} when
+      # the plan named none), null on a history line that predates the key.
       skipped_dimensions_by_round: [ ($s.history // [])[] | select(type == "object")
-                                     | {round, skipped_dimensions: (.skipped_dimensions // null)} ],
+                                     | {round, skipped_dimensions: (.skipped_dimensions // null),
+                                        skip_reasons: (.skip_reasons // null)} ],
       fixed:  ( [ $seen[]
                   | select(.priority=="Critical" or .priority=="High")
                   | ("\(.file)|\(.line)|\(.dimension)|\(.title)") as $k

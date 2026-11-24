@@ -188,13 +188,22 @@ delta-skipped dimension cites this subsection rather than restating it.
 `review-dispatch.zsh plan` always emits `skippable_dimensions`, a JSON array of
 the dimensions this round's panel may leave out. It is `[]` on every full round
 and for every repo type but `claude-plugin`. On a claude-plugin **delta** round
-the plan runs `select-contract-dimension.zsh` — a pure selector over the delta's
-name-status list and its patch — and emits `["contract"]` when the fix pass
-touched no contract surface (no `ARCHITECTURE.md`, no `.claude-plugin/` path, no
-agent or SKILL.md frontmatter, no script flag, subcommand, exit code, output key
-or env seam, no added, deleted, renamed or copied shipped file, no removed
-heading in a shipped `.md`). Any input it cannot judge, and any failure to
-decide, leaves the field `[]`: the dimension runs.
+it offers each of `prose_logic`, `contract`, `script_quality`, `tests` and
+`manifest_bump` (#3311) unless that dimension owns an entry in the round's
+carry, or the fix pass touched a file in its class: a `*.sh` / `*.zsh` /
+`*.bash` or shell-shebang file for `script_quality`, a `*.bats` file for
+`tests`, a `*.md` file for `prose_logic`, a `plugin.json` or `marketplace.json`
+for `manifest_bump`. For `contract` the plan runs `select-contract-dimension.zsh`
+— a pure selector over the delta's name-status list and its patch — which
+answers `skip` when the fix pass touched no contract surface (no
+`ARCHITECTURE.md`, no `.claude-plugin/` path, no agent or SKILL.md frontmatter,
+no script flag, subcommand, exit code, output key or env seam, no added,
+deleted, renamed or copied shipped file, no removed heading in a shipped
+`.md`). Any input it cannot judge, and any failure to decide, leaves the
+dimension out of the field: it runs. Beside it the plan emits
+`dimension_reasons`, each dimension's `carried`, `touched`, `undecided` or
+`none` (`full` on a full round). Until the panel's Step 1 table reads the wider
+field (#2925 part 3b), only `contract` is actually left out.
 Hook mode exports it as `$REVIEW_SKIPPABLE_DIMENSIONS`.
 
 The plan only **offers** the skip; the panel's Step 1 table decides, and a
@@ -206,9 +215,12 @@ own. A round whose table planned `contract` and did not run it is still the
 
 Each round's line in `<work-dir>/history.jsonl` records `skipped_dimensions`:
 the plan's field less every dimension the round's carry forced back in, `[]`
-when none. The loop keeps the plan's field per round in
-`<work-dir>/skippable-<R>.json`, and `build-telemetry-record.zsh` reports the
-history as `skipped_dimensions_by_round`.
+when none. It also records `skip_reasons` (#3311): the plan's
+`dimension_reasons`, with every dimension the carry forced back in named
+`carried`, `{}` when the plan named none. The loop keeps the plan's two fields
+per round in `<work-dir>/skippable-<R>.json` and
+`<work-dir>/skip-reasons-<R>.json`, and `build-telemetry-record.zsh` reports
+the history as `skipped_dimensions_by_round`.
 
 ### The third histogram state — present, below the threshold (#1510)
 

@@ -59,7 +59,8 @@
 #         { repo_type, review_skill, topic_review_skills[], round, base,
 #           findings_path, changed_files[], worktree_root, original_root, scope_abs[],
 #           scope_mode, scope_empty, prior_tree, delta_files, delta_hunks,
-#           skippable_dimensions, fix_verification_path, self_check_path }
+#           skippable_dimensions, dimension_reasons, fix_verification_path,
+#           self_check_path }
 #       worktree_root / original_root / scope_abs are the #1582 path rail. A
 #       reviewer that resolves a repo-relative path against its own cwd reads the
 #       ORIGINAL checkout whenever the run is in a linked worktree — which is how
@@ -104,15 +105,25 @@
 #       delta_files appear, so the two can never disagree about normalisation or
 #       the #909 exclusions. The test reviewer's delta-round rule reads it, via
 #       the review skill's `Fix-pass hunks (delta round):` prompt line.
-#       skippable_dimensions (#2009) is always present, a JSON array of the
-#       dimensions this round's panel may leave out. Only a `claude-plugin`
-#       repo on a `"delta"` round consults select-contract-dimension.zsh — it
-#       builds the selector's two inputs from --prior-tree and emits
-#       `["contract"]` when it says `skip`. Every full round and every other
-#       repo type is `[]`, the selector not called; any failure to decide is
-#       `[]` too (fail-closed: the dimension runs). The review skill's Step 1
-#       table reads it, and *Carry-driven dispatch (#2008)* still brings a
-#       skipped dimension back for its carried entries.
+#       skippable_dimensions (#2009, #3311) is always present, a JSON array of
+#       the dimensions this round's panel may leave out. Only a `claude-plugin`
+#       repo on a `"delta"` round decides it: each of prose_logic, contract,
+#       script_quality, tests and manifest_bump is in it unless it owns an
+#       entry in the --fix-verification carry, or the delta touches a file in
+#       its class (script_quality: *.sh/*.zsh/*.bash or a shell-shebang file;
+#       tests: *.bats; prose_logic: *.md; manifest_bump: plugin.json or
+#       marketplace.json; contract: what select-contract-dimension.zsh, built
+#       from --prior-tree, answers `run` for). Any failure to decide leaves
+#       the dimension out of it (fail-closed: the dimension runs). Every full
+#       round and every other repo type is `[]`, the selector not called. The
+#       review skill's Step 1 table reads it, and *Carry-driven dispatch
+#       (#2008)* still brings a skipped dimension back for its carried entries.
+#       dimension_reasons (#3311) is always present, directly after it: an
+#       object naming, per dimension, why it runs or is skipped. On a
+#       claude-plugin delta round each of the five dimensions is `carried`,
+#       `touched`, `undecided` (a failure to decide) or `none` (skippable),
+#       the first that holds; on a claude-plugin full round each is `full`;
+#       for every other repo type it is `{}`.
 #       scope_empty is `changed_files == []`; it is always present, and it exists
 #       for CALLERS — the driving session plans its own panel and must know a
 #       delta came back empty BEFORE it spawns reviewers. The loop deliberately
@@ -123,8 +134,10 @@
 #       nothing). Round 1's existing "a scope that is ONLY artifacts yields empty
 #       changed_files, not an error" behaviour stands either way.
 #       --fix-verification is echoed through as fix_verification_path (null
-#       when absent) — this script never reads the file; the loop writes it and
-#       the reviewers consume it. `plan` takes no --adjudicated and emits no
+#       when absent) — the loop writes the file and the reviewers consume it;
+#       this script reads it only on a claude-plugin delta round, for the
+#       dimensions that own a carried entry, and a carry it cannot read there
+#       leaves every dimension `undecided`. `plan` takes no --adjudicated and emits no
 #       adjudicated_path key (#3168): no panel reads the waived-suggestion list
 #       any more, so the plan no longer hands it to one, and --adjudicated is an
 #       unknown flag (exit 2). --self-check (#2014) is echoed through as self_check_path the
@@ -713,19 +726,42 @@ _delta_hunks() {
       }'
 }
 
-# --- the dimensions a claude-plugin delta round may skip (#2009) -------------
-# Prints `skippable_dimensions` as a JSON array: `["contract"]` when the pure
-# selector (select-contract-dimension.zsh) says the delta touched no contract
-# surface, `[]` otherwise. Called ONLY for a claude-plugin delta round; every
-# other round and repo type emits `[]` without it.
+# --- the dimensions a claude-plugin delta round may skip (#2009, #3311) ------
+# The claude-plugin panel's reviewer dimensions, in the order `plan` reports
+# them. `manifest` (check-manifests.zsh, a script) is not one: it runs every
+# round and is never offered as skippable.
+local -a plugin_dimensions=( prose_logic contract script_quality tests manifest_bump )
+
+# A first line that names a shell interpreter: `#!/bin/sh`, `#!/usr/bin/env
+# zsh`, `#!/bin/bash -e`. `#!/usr/bin/env bats` is not one.
+local shell_shebang_re='^#!.*[/[:space:]](ba|z|k|da)?sh([[:space:]]|$)'
+
+# Prints one JSON object, `{skippable, reasons}`: `skippable` becomes the plan's
+# `skippable_dimensions` and `reasons` its `dimension_reasons`. Called ONLY for a
+# claude-plugin delta round; cmd_plan builds every other round and repo type
+# without it.
 #
-# FAIL-CLOSED throughout: any failure to build the inputs, a selector that exits
-# non-zero, or an answer that is not exactly `skip` prints `[]` — the dimension
-# runs. A failure here is never a plan failure, because running a reviewer the
+# Each dimension in plugin_dimensions gets exactly one reason, the first of
+# these that holds:
+#   carried   — it owns an entry in the --fix-verification carry (#2008: a
+#               dimension holding a carried entry runs whatever the plan says);
+#   touched   — the delta touches a file in its class: script_quality a
+#               *.sh / *.zsh / *.bash file or one whose first line is a shell
+#               shebang; tests a *.bats file; prose_logic a *.md file;
+#               manifest_bump a plugin.json or marketplace.json; contract
+#               whatever select-contract-dimension.zsh answers `run` for;
+#   undecided — something needed to decide it failed: an unreadable or
+#               malformed carry, a delta that could not be listed, a file whose
+#               first line could not be read, a contract selector that failed
+#               or answered neither `skip` nor `run`;
+#   none      — none of the above: the dimension is skippable.
+# Only `none` is skippable. FAIL-CLOSED throughout: running a reviewer the
 # round could have skipped costs tokens, while skipping one it needed costs a
-# missed defect.
+# missed defect, so a failure here is never a plan failure.
 #
-# The two inputs, written to a private temp dir:
+# A file the delta deleted is classed by its prior-tree path and content, a
+# rename or copy by both its paths. The contract selector's two inputs, written
+# to a private temp dir:
 #   files.json  `diff-tree --name-status -M` of the delta as [{status, path}],
 #               the status reduced to its letter (`R100` → `R`) and a rename or
 #               copy naming its NEW path;
@@ -735,54 +771,112 @@ _delta_hunks() {
 #               any of them that changed, so each of their sections is one hunk
 #               starting at line 1 on both sides and the selector can see both
 #               frontmatter fences.
-# Both apply `_normalise_paths`' artifact exclusions (`.review/`,
+# Every listing applies `_normalise_paths`' artifact exclusions (`.review/`,
 # `.claude/telemetry/`) as pathspecs, so the loop's own state never reads as a
 # changed shipped file.
 _skippable_dimensions() {
-  local repo="$1" prior="$2" cur="$3" tmp="" verdict="" max=0 n=0 bad=0
+  local repo="$1" prior="$2" cur="$3" carry="$4" tmp="" verdict="" max=0 n=0 bad=0
   local -a excl=( ':(exclude).review/' ':(exclude).claude/telemetry/' )
   local -a docs=( ':(glob)**/agents/*.md' ':(glob)**/skills/*/SKILL.md' )
   local -a ndocs=( ':(exclude,glob)**/agents/*.md' ':(exclude,glob)**/skills/*/SKILL.md' )
-  local st p1 p2
-  tmp=$(mktemp -d "${TMPDIR:-/tmp}/review-dispatch-select.XXXXXX") || { print -r -- '[]'; return 0 }
-  {
-    "$git_bin" -C "$repo" -c core.quotePath=false diff-tree -r --name-status -M "$prior" "$cur" -- . "${excl[@]}" \
-      | jq -Rnc '[ inputs | split("\t") | {status: .[0][0:1], path: .[-1]} ]' > "$tmp/files.json" \
-    && "$git_bin" -C "$repo" -c core.quotePath=false diff-tree -r -p -M -U0 "$prior" "$cur" \
-         -- . "${ndocs[@]}" "${excl[@]}" > "$tmp/patch.diff" \
-    && "$git_bin" -C "$repo" -c core.quotePath=false diff-tree -r --name-status -M "$prior" "$cur" \
-         -- "${docs[@]}" "${excl[@]}" > "$tmp/docs.tsv" \
-    && {
-      # the largest line count of any changed agent/SKILL.md, in either tree;
-      # `+ 1` covers a last line with no trailing newline, which `wc -l` misses
-      while IFS=$'\t' read -r st p1 p2; do
-        [[ -n "$st" ]] || continue
-        if [[ "$st" != A* ]]; then
-          n=$("$git_bin" -C "$repo" cat-file -p "$prior:$p1" | wc -l) || { bad=1; break }
-          (( n + 1 > max )) && max=$(( n + 1 ))
-        fi
-        if [[ "$st" != D* ]]; then
-          n=$("$git_bin" -C "$repo" cat-file -p "$cur:${p2:-$p1}" | wc -l) || { bad=1; break }
-          (( n + 1 > max )) && max=$(( n + 1 ))
-        fi
-      done < "$tmp/docs.tsv"
-      # a failed count fails the group (never `return`: the temp dir must go)
-      (( ! bad )) && {
-        [[ ! -s "$tmp/docs.tsv" ]] \
-          || "$git_bin" -C "$repo" -c core.quotePath=false diff-tree -r -p -M --unified="$max" "$prior" "$cur" \
-               -- "${docs[@]}" "${excl[@]}" >> "$tmp/patch.diff"
-      }
-    } \
-    && verdict=$("$select_bin" --files "$tmp/files.json" --patch "$tmp/patch.diff" | jq -r '.contract')
-  } || verdict=""
-  rm -rf -- "$tmp"
-  if [[ "$verdict" == "skip" ]]; then
-    print -r -- '["contract"]'
-  else
-    [[ "$verdict" == "run" ]] || \
-      print -u2 -- "review-dispatch: the contract selector could not decide (fail-closed: contract runs)"
-    print -r -- '[]'
+  local -a carried=() kv=() pairs=()
+  local -A touched=() undecided=()
+  local st p1 p2 d t p first carried_out=""
+
+  # the carry: which dimensions own a carried entry. No --fix-verification is
+  # no carry; a named carry that is missing, empty or not an array of entries
+  # that each name a dimension decides nothing, so every dimension it could
+  # have named is undecided.
+  if [[ -n "$carry" ]]; then
+    if carried_out=$(jq -re 'if type == "array" and all(.[]; type == "object" and (.dimension | type == "string"))
+                             then (map(.dimension) | unique | .[]), "" else error end' -- "$carry" 2>/dev/null); then
+      carried=( ${(f)carried_out} )
+    else
+      for d in "${plugin_dimensions[@]}"; do undecided[$d]=1; done
+      print -u2 -- "review-dispatch: the carry $carry could not be read (fail-closed: every dimension runs)"
+    fi
   fi
+
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/review-dispatch-select.XXXXXX") || tmp=""
+  if [[ -z "$tmp" ]] || ! "$git_bin" -C "$repo" -c core.quotePath=false diff-tree -r --name-status -M "$prior" "$cur" \
+       -- . "${excl[@]}" > "$tmp/ns.tsv"; then
+    for d in "${plugin_dimensions[@]}"; do undecided[$d]=1; done
+    print -u2 -- "review-dispatch: the delta could not be listed (fail-closed: every dimension runs)"
+  else
+    # the file classes
+    while IFS=$'\t' read -r st p1 p2; do
+      [[ -n "$st" ]] || continue
+      case "$st" in
+      D*) pairs=( "$prior" "$p1" ) ;;
+      [RC]*) pairs=( "$prior" "$p1" "$cur" "$p2" ) ;;
+      *) pairs=( "$cur" "$p1" ) ;;
+      esac
+      for t p in "${pairs[@]}"; do
+        case "$p" in
+        *.md) touched[prose_logic]=1 ;;
+        *.bats) touched[tests]=1 ;;
+        *.sh|*.zsh|*.bash) touched[script_quality]=1 ;;
+        plugin.json|*/plugin.json|marketplace.json|*/marketplace.json) touched[manifest_bump]=1 ;;
+        *)
+          [[ -n "${touched[script_quality]:-}" ]] && continue
+          if first=$("$git_bin" -C "$repo" cat-file -p "$t:$p" 2>/dev/null | sed -n 1p); then
+            [[ "$first" =~ $shell_shebang_re ]] && touched[script_quality]=1
+          else
+            undecided[script_quality]=1
+          fi ;;
+        esac
+      done
+    done < "$tmp/ns.tsv"
+
+    # the contract selector
+    {
+      jq -Rnc '[ inputs | split("\t") | {status: .[0][0:1], path: .[-1]} ]' < "$tmp/ns.tsv" > "$tmp/files.json" \
+      && "$git_bin" -C "$repo" -c core.quotePath=false diff-tree -r -p -M -U0 "$prior" "$cur" \
+           -- . "${ndocs[@]}" "${excl[@]}" > "$tmp/patch.diff" \
+      && "$git_bin" -C "$repo" -c core.quotePath=false diff-tree -r --name-status -M "$prior" "$cur" \
+           -- "${docs[@]}" "${excl[@]}" > "$tmp/docs.tsv" \
+      && {
+        # the largest line count of any changed agent/SKILL.md, in either tree;
+        # `+ 1` covers a last line with no trailing newline, which `wc -l` misses
+        while IFS=$'\t' read -r st p1 p2; do
+          [[ -n "$st" ]] || continue
+          if [[ "$st" != A* ]]; then
+            n=$("$git_bin" -C "$repo" cat-file -p "$prior:$p1" | wc -l) || { bad=1; break }
+            (( n + 1 > max )) && max=$(( n + 1 ))
+          fi
+          if [[ "$st" != D* ]]; then
+            n=$("$git_bin" -C "$repo" cat-file -p "$cur:${p2:-$p1}" | wc -l) || { bad=1; break }
+            (( n + 1 > max )) && max=$(( n + 1 ))
+          fi
+        done < "$tmp/docs.tsv"
+        # a failed count fails the group (never `return`: the temp dir must go)
+        (( ! bad )) && {
+          [[ ! -s "$tmp/docs.tsv" ]] \
+            || "$git_bin" -C "$repo" -c core.quotePath=false diff-tree -r -p -M --unified="$max" "$prior" "$cur" \
+                 -- "${docs[@]}" "${excl[@]}" >> "$tmp/patch.diff"
+        }
+      } \
+      && verdict=$("$select_bin" --files "$tmp/files.json" --patch "$tmp/patch.diff" | jq -r '.contract')
+    } || verdict=""
+    case "$verdict" in
+    skip) : ;;
+    run) touched[contract]=1 ;;
+    *) undecided[contract]=1
+       print -u2 -- "review-dispatch: the contract selector could not decide (fail-closed: contract runs)" ;;
+    esac
+  fi
+  [[ -n "$tmp" ]] && rm -rf -- "$tmp"
+
+  for d in "${plugin_dimensions[@]}"; do
+    if (( ${carried[(Ie)$d]} )); then kv+=( "$d" carried )
+    elif [[ -n "${touched[$d]:-}" ]]; then kv+=( "$d" touched )
+    elif [[ -n "${undecided[$d]:-}" ]]; then kv+=( "$d" undecided )
+    else kv+=( "$d" none )
+    fi
+  done
+  jq -nc '[ $ARGS.positional | _nwise(2) | {(.[0]): .[1]} ] | add
+          | {skippable: [ to_entries[] | select(.value == "none") | .key ], reasons: .}' --args "${kv[@]}" \
+    || print -r -- '{"skippable":[],"reasons":{}}'
 }
 
 # --- base ref must resolve before it scopes anything (#910) -----------------
@@ -1155,9 +1249,10 @@ cmd_plan() {
     # #2909: plan the fallback panel (claude-plugin's fallback mode). Boolean.
     --fallback) fallback=1; shift ;;
     --prior-tree) need_value "plan" "$@"; prior_tree="$2"; prior_tree_given=1; shift 2 ;;
-    # Echoed through, never read here: the loop writes the file and the
-    # reviewers consume it. Keeping it in the descriptor is what lets one
-    # value (the plan) carry everything a round's panel needs.
+    # Echoed through: the loop writes the file and the reviewers consume it.
+    # Keeping it in the descriptor is what lets one value (the plan) carry
+    # everything a round's panel needs. A claude-plugin delta round also reads
+    # it, for the dimensions that own a carried entry (#3311).
     --fix-verification) need_value "plan" "$@"; fix_verification="$2"; shift 2 ;;
     # #2014: the round-1 self-check waiver file, echoed through the same way.
     --self-check) need_value "plan" "$@"; self_check="$2"; shift 2 ;;
@@ -1340,13 +1435,19 @@ cmd_plan() {
   local changed_json="$full_json"
   [[ "$scope_mode" == "delta" ]] && changed_json="$delta_json"
 
-  # skippable_dimensions (#2009): always present; only a claude-plugin DELTA
-  # round consults the selector, every other round and repo type is `[]`. A
-  # delta round always has `cur_tree` — the --round > 1 guard above requires
-  # --prior-tree for it.
-  local skippable_json='[]'
+  # skippable_dimensions (#2009, #3311) and dimension_reasons: always present.
+  # Only a claude-plugin DELTA round decides them per dimension; a claude-plugin
+  # full round names every dimension `full`, and every other repo type is `[]`
+  # and `{}`. A delta round always has `cur_tree` — the --round > 1 guard above
+  # requires --prior-tree for it.
+  local skippable_json='[]' reasons_json='{}' skip_obj=""
   if [[ "$repo_type" == "claude-plugin" && "$scope_mode" == "delta" ]]; then
-    skippable_json=$(_skippable_dimensions "$repo" "$prior_tree" "$cur_tree")
+    skip_obj=$(_skippable_dimensions "$repo" "$prior_tree" "$cur_tree" "$fix_verification")
+    skippable_json=$(print -r -- "$skip_obj" | jq -c '.skippable') || skippable_json='[]'
+    reasons_json=$(print -r -- "$skip_obj" | jq -c '.reasons') || reasons_json='{}'
+  elif [[ "$repo_type" == "claude-plugin" ]]; then
+    reasons_json=$(jq -nc '[ $ARGS.positional[] | {(.): "full"} ] | add' --args "${plugin_dimensions[@]}") \
+      || reasons_json='{}'
   fi
 
   # the descriptor emitter is checked like every other jq call (#1177). It is the
@@ -1368,6 +1469,7 @@ cmd_plan() {
     --argjson delta "$delta_json" \
     --argjson hunks "$hunks_json" \
     --argjson skippable "$skippable_json" \
+    --argjson reasons "$reasons_json" \
     --arg fixver "$fix_verification" \
     --arg selfchk "$self_check" \
     --argjson fallback "$fallback" \
@@ -1383,6 +1485,7 @@ cmd_plan() {
       delta_files:$delta,
       delta_hunks:$hunks,
       skippable_dimensions:$skippable,
+      dimension_reasons:$reasons,
       fix_verification_path:(if $fixver=="" then null else $fixver end),
       self_check_path:(if $selfchk=="" then null else $selfchk end)}
      | if $fallback == 1 then
