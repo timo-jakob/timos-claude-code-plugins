@@ -57,6 +57,9 @@ ps -A -o ppid=,pgid=,command= \
   | awk -v p="$PPID" '$1 == p && /flake-hunt-load/ { print $2 }' > "$d/load.pgid"
 ps -A -o pgid=,stat= | awk -v g="$(cat "$d/load.pgid")" \
   '$1 == g { all++; if ($2 ~ /^R/) run++ } END { print all + 0, run + 0 }' > "$d/load.procs"
+# the niceness of this run and of every process in the load group
+ps -o nice= -p "$$" | tr -d ' ' > "$d/bats.nice"
+ps -A -o pgid=,nice= | awk -v g="$(cat "$d/load.pgid")" '$1 == g { print $2 }' | sort -u > "$d/load.nice"
 ls "$TMPDIR" > "$d/tmpdir.during"
 # each pid file is written whole (temp + mv), so a reader never sees it empty
 if [ -n "${STUB_STRAY:-}" ]; then
@@ -448,6 +451,18 @@ prints_header_only() {
   contains "$stderr" "load process group"
 }
 
+# BG_NICE is off (#3322), so the launches lower their own priority: a bats run
+# 5 levels below the harness, its load 10.
+@test "flake-hunt: a bats run runs 5 nice levels below the harness and its load 10" {
+  # relative to whatever niceness the gate runs this test at, capped at 20
+  local h
+  h=$(( $(ps -o nice= -p "$$") + 3 )); (( h > 20 )) && h=20
+  run --separate-stderr nice -n 3 zsh "$HUNT" --iterations 1 "$A"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$STUB/bats.nice")" = $(( h + 5 > 20 ? 20 : h + 5 )) ]
+  [ "$(cat "$STUB/load.nice")" = $(( h + 10 > 20 ? 20 : h + 10 )) ]
+}
+
 @test "flake-hunt: started at niceness 20, a reader that closes the pipe early does not strand the load" {
   { perl -e '$SIG{PIPE} = "DEFAULT"; exec @ARGV' nice -n 20 zsh "$HUNT" --iterations 3 "$A" \
       && echo 0 > "$BATS_TEST_TMPDIR/hunt.rc" \
@@ -466,9 +481,22 @@ broken_stderr() {
 }
 
 @test "flake-hunt: a SIGPIPE on its first stderr write still ends the load, exit 141" {
-  run broken_stderr zsh "$HUNT" --iterations 1 "$A"
+  # the stub bats never runs and stderr is unread, so a PATH-first perl records
+  # the load's group id: its own pid, the launch's $!, before exec'ing the real one
+  local real_perl
+  real_perl="$(command -v perl)"
+  mkdir -p "$BATS_TEST_TMPDIR/perlbin"
+  cat > "$BATS_TEST_TMPDIR/perlbin/perl" <<EOF
+#!/bin/bash
+case "\$*" in *flake-hunt-load*) echo "\$\$" > '$STUB/load.pgid' ;; esac
+exec '$real_perl' "\$@"
+EOF
+  chmod +x "$BATS_TEST_TMPDIR/perlbin/perl"
+  run broken_stderr env PATH="$BATS_TEST_TMPDIR/perlbin:$PATH" zsh "$HUNT" --iterations 1 "$A"
   [ "$status" -eq 141 ]
   [ ! -f "$STUB/count" ]
+  [ -s "$STUB/load.pgid" ]
+  group_gone "$(cat "$STUB/load.pgid")"
   [ -z "$(ls -A "$TMPDIR")" ]
 }
 
