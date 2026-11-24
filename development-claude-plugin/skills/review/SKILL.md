@@ -264,8 +264,8 @@ Brief summary of what was reviewed and overall plugin health assessment.
   reviewer's — confirmed, else re-raised when that re-raise is in the findings
   file, else unconfirmed; reproduce each reviewer's per-entry
   lines under this line — they are the source of the accounting records)
-- **Areas reviewed:** Prose Logic, Script Quality, Tests, Manifests, and Contract Integrity and Bump Size
-  when the round planned them
+- **Areas reviewed:** Manifests, plus each of Prose Logic, Contract Integrity, Script Quality, Tests and
+  Bump Size that this round's Step 1 table planned
 
 ## Verdict
 One-paragraph overall assessment with the most important action items.

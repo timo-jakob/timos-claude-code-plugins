@@ -165,6 +165,10 @@ SKIPPABLE5="prose_logic,contract,script_quality,tests,manifest_bump"
   contains "$flat" 'The five agent rows share one condition (#2009, #2925 part 3b): each runs on every full round'
   contains "$flat" 'and on a `"delta"` round unless the plan'"'"'s `skippable_dimensions` holds its dimension.'
   contains "$flat" 'Only the `check-manifests.zsh` row runs every round.'
+  contains "$flat" 'round 1 and every closing sweep plan with `scope_mode: "full"`'
+  contains "$flat" 'The plan offers a dimension there when the round'"'"'s fix pass touched nothing in its class and its carry holds none of its entries'
+  contains "$flat" 'for the other four, no file of the class `reference/review-loop/carry.md` in the resolve-issue skill names under *Skippable dimensions (#2009)*.'
+  contains "$flat" 'Manifests, plus each of Prose Logic, Contract Integrity, Script Quality, Tests and'
   lacks "$flat" 'Two cells vary.'
   lacks "$flat" 'brings it back only to account for its own carried entries'
 }
@@ -211,9 +215,8 @@ SKIPPABLE5="prose_logic,contract,script_quality,tests,manifest_bump"
   contains "$sec" 'carry, or the fix pass touched a file in its class: a `*.sh` / `*.zsh` /'
   contains "$sec" 'dimension out of the field: it runs. Beside it the plan emits'
   contains "$sec" '`dimension_reasons`, each dimension'"'"'s `carried`, `touched`, `undecided` or'
-  contains "$sec" '`none` (`full` on a full round). Until the panel'"'"'s Step 1 table reads the wider'
-  contains "$sec" 'field (#2925 part 3b), the panel honours only `contract` from it, and it leaves'
-  contains "$sec" '`manifest_bump` out of every delta round whose carry does not hold it, whatever'
+  contains "$sec" '`none` (`full` on a full round).'
+  lacks "$sec" 'the panel honours only'
   lacks "$sec" 'only `contract` is actually left out'
   contains "$sec" 'Each round'"'"'s line in `<work-dir>/history.jsonl` records `skipped_dimensions`:'
   contains "$sec" 'the plan'"'"'s field less every dimension the round'"'"'s carry forced back in, `[]`'
@@ -222,9 +225,10 @@ SKIPPABLE5="prose_logic,contract,script_quality,tests,manifest_bump"
   contains "$sec" '`carried`, `{}` when the plan named none. The loop keeps the plan'"'"'s two fields'
   contains "$sec" '`<work-dir>/skip-reasons-<R>.json`'
   contains "$sec" 'the history as `skipped_dimensions_by_round`. Both record the plan'"'"'s offer,'
-  contains "$sec" 'not what the panel ran: until #2925 part 3b the panel honours only a `contract`'
-  contains "$sec" 'entry, and it leaves `manifest_bump` out of every delta round whose carry does'
-  contains "$sec" 'not hold it, whatever the entry or its reason says, `touched` included.'
+  contains "$sec" 'not what the panel ran: until #2925 part 3b the panel honoured only a `contract`'
+  contains "$sec" 'entry, and it left `manifest_bump` out of every delta round whose carry did'
+  contains "$sec" 'not hold it, whatever the entry or its reason said, `touched` included.'
+  lacks "$(cat "$LOOP_REF")" 'only by this rule'
   lacks "$sec" 'dimension the panel actually left out'
 }
 
@@ -238,10 +242,11 @@ SKIPPABLE5="prose_logic,contract,script_quality,tests,manifest_bump"
   contains "$arch" 'round'"'"'s plan offered to leave out — the plan'"'"'s `skippable_dimensions` less any'
   contains "$arch" '(#3311) is the plan'"'"'s `dimension_reasons` for that round, with every dimension'
   contains "$arch" '`null` for a history line that predates the key. It is the plan'"'"'s offer, not'
-  contains "$arch" '(#2925 part 3b), the panel honours only a `contract` entry from it, and it'
-  contains "$arch" 'leaves `manifest_bump` out of every delta round whose carry does not hold it,'
-  contains "$arch" 'whatever the entry or its reason says, `touched` included. It joins the'
-  contains "$arch" 'honours only `contract` from the field, and it leaves `manifest_bump` out of'
+  contains "$arch" 'what the panel ran: until #2925 part 3b the panel honoured only a `contract`'
+  contains "$arch" 'entry from it, and it left `manifest_bump` out of every delta round whose carry'
+  contains "$arch" 'did not hold it, whatever the entry or its reason said, `touched` included. It'
+  lacks "$arch" 'honours only `contract` from the field'
+  lacks "$arch" 'the panel honours only a `contract` entry'
   lacks "$arch" 'is a dimension the panel actually left'
   lacks "$arch" 'it honours only `contract` until the panel'
   lacks "$arch" 'this script never reads the file'
@@ -256,7 +261,8 @@ SKIPPABLE5="prose_logic,contract,script_quality,tests,manifest_bump"
 }
 
 @test "ARCHITECTURE.md's claude-plugin panel passage states the contract schedule (#2009)" {
-  contains "$(cat "$ARCH")" '`contract` (#2009) has a schedule of'
+  contains "$(cat "$ARCH")" 'judgment, bump size, as `manifest_bump`. The five agent dimensions share one'
+  lacks "$(cat "$ARCH")" '`contract` (#2009) has a schedule of'
   contains "$(cat "$ARCH")" '`select-contract-dimension.zsh` finds that the fix pass touched no contract'
   contains "$(cat "$ARCH")" '`skippable_dimensions` (#2009) is always present: the dimensions this round'"'"'s'
 }
