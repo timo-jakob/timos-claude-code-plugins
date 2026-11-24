@@ -150,7 +150,9 @@ NO_CONTRACT="manifest prose_logic script_quality tests"
   contains "$sec" 'dimension out of the field: it runs. Beside it the plan emits'
   contains "$sec" '`dimension_reasons`, each dimension'"'"'s `carried`, `touched`, `undecided` or'
   contains "$sec" '`none` (`full` on a full round). Until the panel'"'"'s Step 1 table reads the wider'
-  contains "$sec" 'field (#2925 part 3b), only `contract` is actually left out.'
+  contains "$sec" 'field (#2925 part 3b), the panel honours only `contract` from it, and it leaves'
+  contains "$sec" '`manifest_bump` out of every delta round whose carry does not hold it, whatever'
+  lacks "$sec" 'only `contract` is actually left out'
   contains "$sec" 'Each round'"'"'s line in `<work-dir>/history.jsonl` records `skipped_dimensions`:'
   contains "$sec" 'the plan'"'"'s field less every dimension the round'"'"'s carry forced back in, `[]`'
   contains "$sec" 'when none. It also records `skip_reasons` (#3311): the plan'"'"'s'
@@ -158,7 +160,10 @@ NO_CONTRACT="manifest prose_logic script_quality tests"
   contains "$sec" '`carried`, `{}` when the plan named none. The loop keeps the plan'"'"'s two fields'
   contains "$sec" '`<work-dir>/skip-reasons-<R>.json`'
   contains "$sec" 'the history as `skipped_dimensions_by_round`. Both record the plan'"'"'s offer,'
-  contains "$sec" 'not what the panel ran: until #2925 part 3b only a `contract` entry is a'
+  contains "$sec" 'not what the panel ran: until #2925 part 3b the panel honours only a `contract`'
+  contains "$sec" 'entry, and it leaves `manifest_bump` out of every delta round whose carry does'
+  contains "$sec" 'not hold it, whatever the entry or its reason says, `touched` included.'
+  lacks "$sec" 'dimension the panel actually left out'
 }
 
 @test "ARCHITECTURE.md states the widened skippable field, dimension_reasons and skip_reasons as the plan's offer (#3311)" {
@@ -171,9 +176,21 @@ NO_CONTRACT="manifest prose_logic script_quality tests"
   contains "$arch" 'round'"'"'s plan offered to leave out — the plan'"'"'s `skippable_dimensions` less any'
   contains "$arch" '(#3311) is the plan'"'"'s `dimension_reasons` for that round, with every dimension'
   contains "$arch" '`null` for a history line that predates the key. It is the plan'"'"'s offer, not'
-  contains "$arch" '(#2925 part 3b), only a `contract` entry is a dimension the panel actually left'
+  contains "$arch" '(#2925 part 3b), the panel honours only a `contract` entry from it, and it'
+  contains "$arch" 'leaves `manifest_bump` out of every delta round whose carry does not hold it,'
+  contains "$arch" 'whatever the entry or its reason says, `touched` included. It joins the'
+  contains "$arch" 'honours only `contract` from the field, and it leaves `manifest_bump` out of'
+  lacks "$arch" 'is a dimension the panel actually left'
+  lacks "$arch" 'it honours only `contract` until the panel'
   lacks "$arch" 'this script never reads the file'
   lacks "$arch" 'claude-plugin schedule actually skipped, and why'
+}
+
+@test "the telemetry how-to states skipped_dimensions_by_round as the plan's offer (#3311)" {
+  local page; page="$(cat "$REPO_ROOT/docs/how-to/read-pipeline-telemetry.md")"
+  contains "$page" '(until #2925 part 3b only `contract` was honoured from this list, and `manifest_bump` was left out of every delta round that did not carry it, whatever its entry or reason)'
+  contains "$page" '`skip_reasons`, each dimension'"'"'s reason (`carried`, `touched`, `undecided`, `none` or `full`)'
+  lacks "$page" 'only a `contract` entry was actually left out'
 }
 
 @test "ARCHITECTURE.md's claude-plugin panel passage states the contract schedule (#2009)" {

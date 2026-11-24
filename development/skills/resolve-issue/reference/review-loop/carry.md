@@ -203,7 +203,9 @@ deleted, renamed or copied shipped file, no removed heading in a shipped
 dimension out of the field: it runs. Beside it the plan emits
 `dimension_reasons`, each dimension's `carried`, `touched`, `undecided` or
 `none` (`full` on a full round). Until the panel's Step 1 table reads the wider
-field (#2925 part 3b), only `contract` is actually left out.
+field (#2925 part 3b), the panel honours only `contract` from it, and it leaves
+`manifest_bump` out of every delta round whose carry does not hold it, whatever
+the field says.
 Hook mode exports it as `$REVIEW_SKIPPABLE_DIMENSIONS`.
 
 The plan only **offers** the skip; the panel's Step 1 table decides, and a
@@ -221,8 +223,9 @@ when none. It also records `skip_reasons` (#3311): the plan's
 per round in `<work-dir>/skippable-<R>.json` and
 `<work-dir>/skip-reasons-<R>.json`, and `build-telemetry-record.zsh` reports
 the history as `skipped_dimensions_by_round`. Both record the plan's offer,
-not what the panel ran: until #2925 part 3b only a `contract` entry is a
-dimension the panel actually left out.
+not what the panel ran: until #2925 part 3b the panel honours only a `contract`
+entry, and it leaves `manifest_bump` out of every delta round whose carry does
+not hold it, whatever the entry or its reason says, `touched` included.
 
 ### The third histogram state — present, below the threshold (#1510)
 

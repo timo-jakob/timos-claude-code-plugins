@@ -2864,7 +2864,7 @@ while (( round <= effective_max )); do
   # descriptor the round actually ran with: an empty-delta round re-planned with
   # --final is a full round, whose field is
   # `[]`. Persisted per round so the history line below can record what this
-  # round actually skipped, and exported to a hook-mode panel. A descriptor
+  # round's plan offered to skip, and exported to a hook-mode panel. A descriptor
   # predating the field reads `[]` — nothing skipped, the fail-closed answer.
   skippable_json=$(print -r -- "$rp" | jq -c '.skippable_dimensions // []') || {
     print -u2 -- "resolve-story-loop: could not read skippable_dimensions at round $round"; exit 1 }
