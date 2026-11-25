@@ -142,6 +142,7 @@ write_unmarked_release() {
   [ "$status" -eq 0 ]
   [ "$(jq -r '[.[] | select(.file == ".github/workflows/release.yml") | .severity] | join(",")' <<< "$output")" = 'unknown_provenance' ]
   contains "$stderr" 'detect-stack.sh failed; keeping .github/workflows/release.yml reported'
+  contains "$stderr" 'detect-stack: the kubernetes marker search did not complete'
 }
 
 @test "the §3l IaC workflow is TRACKED, so its drift is reported (#1154)" {
