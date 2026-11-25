@@ -72,7 +72,10 @@
 #     outside any test is not in it.
 #     class, on wall_ms less shim_overhead_ms_est: "wait-bound" when sleep_s is
 #     at least 30% of it, else "fork-bound" when fork_ms_est is at least 50%,
-#     else "compute-bound". It is a pointer for a human's recommendation, not
+#     else "compute-bound". Both estimates sum per-process costs, so processes
+#     that overlap (a pipeline, a background job) can make shim_overhead_ms_est
+#     reach wall_ms: that file is "fork-bound", and report.md shows its share as
+#     "overlap", since no share of a non-positive time means anything. It is a pointer for a human's recommendation, not
 #     the recommendation itself.
 #   report.md: a table of the top N files by wall time.
 #   stderr: `profile-gate: workdir=<dir>` first, then one line per file.
@@ -323,12 +326,13 @@ for f in "${files[@]}"; do
         | [([$log[] | select(.t == ($t.number | tostring) and .n == "sleep") | .a | tonumber? // 0] | add // 0),
            $t.wall_ms / 1000] | min] | add // 0 | . * 1000 | round / 1000) as $sleep
     | ($procs * $shim | . * 10 | round / 10) as $shim_over
-    | ([$wall - $shim_over, 1] | max) as $net
+    | ($wall - $shim_over) as $net
     | {file: $file, exit: $rc, wall_ms: $wall, tests: ($tests | length), processes: $procs,
        processes_per_test: (if ($tests | length) > 0 then ($procs / ($tests | length) * 10 | round / 10) else 0 end),
        by_exe: $by_exe, outside_tests: $outside, sleep_s: $sleep, fork_ms_est: $fork,
        fork_split_ms: $split, shim_overhead_ms_est: $shim_over,
-       class: (if $sleep * 1000 >= 0.3 * $net then "wait-bound"
+       class: (if $net <= 0 then "fork-bound"
+               elif $sleep * 1000 >= 0.3 * $net then "wait-bound"
                elif $fork >= 0.5 * $net then "fork-bound" else "compute-bound" end),
        absolute_path_refs: $refs, test_rows: $tests}' > "$work/file.$i.json" || die "cannot summarise $f"
 done
@@ -347,7 +351,7 @@ done
 
 "$jq_bin" -r --argjson top "$top" '
   def r1: . * 10 | round / 10;
-  def pct($a; $b): if $b > 0 then ($a / $b * 100 | round | tostring) + "%" else "-" end;
+  def pct($a; $b): if $b > 0 then ($a / $b * 100 | round | tostring) + "%" else "overlap" end;
   "# Gate profile",
   "",
   "Start-up cost per process (ms): " + (.startup_ms | to_entries | map("\(.key) \(.value)") | join(", "))
@@ -356,10 +360,10 @@ done
   "| File | Wall s | Tests | Procs/test | jq | git | interp | other | Fork est | Sleep s | Class |",
   "|---|---|---|---|---|---|---|---|---|---|---|",
   (.files[:$top][] |
-    ([.wall_ms - .shim_overhead_ms_est, 1] | max) as $net |
+    (.wall_ms - .shim_overhead_ms_est) as $net |
     "| \(.file) | \(.wall_ms / 1000 | r1) | \(.tests) | \(.processes_per_test) | \(.by_exe.jq // 0) | \(.by_exe.git // 0) | \((.by_exe.zsh // 0) + (.by_exe.bash // 0) + (.by_exe.sh // 0)) | \(.processes - (.by_exe.jq // 0) - (.by_exe.git // 0) - (.by_exe.zsh // 0) - (.by_exe.bash // 0) - (.by_exe.sh // 0)) | \(.fork_ms_est / 1000 | . * 100 | round / 100) s (\(pct(.fork_ms_est; $net))) | \(.sleep_s) | \(.class)\(if .exit != 0 then " (exit \(.exit))" else "" end) |"),
   "",
-  "jq, git, interp and other are process counts over the whole file; Fork est is count × start-up cost, as a share of wall time less the shim overhead. Sleep s is the sleep the tests asked for, capped per test at its wall time. A row whose Class carries an exit code failed under the shim, so its counts describe a failed run."
+  "jq, git, interp and other are process counts over the whole file; Fork est is count × start-up cost, as a share of wall time less the shim overhead; `overlap` where that overhead reaches the wall time, because processes ran side by side. Sleep s is the sleep the tests asked for, capped per test at its wall time. A row whose Class carries an exit code failed under the shim, so its counts describe a failed run."
   ' "$out/report.json" > "$out/report.md" || die "cannot write $out/report.md"
 
 print -ru2 -- "profile-gate: report $out/report.json"

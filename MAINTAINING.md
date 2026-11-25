@@ -623,7 +623,12 @@ report is written, even when a profiled file failed: a file whose `exit` is not
 0 (`(exit N)` in the table) failed under the shim, and its counts and class
 describe a failed run. Draw no decision from that row. Run the file alone with
 plain `bats` to tell a real red from one the shim caused, and say which it was
-on the issue.
+on the issue. On a green row, every count and the fork estimate are lower
+bounds: the shim misses what the header lists as unseen, such as a test that
+replaces PATH. `compute-bound` is the class left when neither estimate reaches
+its threshold, so it never shows that process creation is cheap in that file.
+Decide against batching or a rewrite from such a row only after reading the
+file's tests for a replaced PATH and its `absolute_path_refs` in `report.json`.
 
 ## Propagation invariants
 

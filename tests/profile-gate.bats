@@ -56,6 +56,9 @@ _workdir() {
   cmp "$SAMPLE_OUT" "$BATS_TEST_TMPDIR/direct.out"
   run jq -r '.files[0] | "\(.exit) \(.tests) \(.processes) \(.by_exe.jq) \(.by_exe.git)"' "$OUT/report.json"
   [ "$output" = "0 2 3 2 1" ]
+  # report.md's row: tests, procs/test, then jq, git, interp and other in that order
+  run grep -c "^| $SAMPLE | [0-9.]* | 2 | 1.5 | 2 | 1 | 0 | 0 | " "$OUT/report.md"
+  [ "$output" = 1 ]
 }
 
 @test "every test row carries file, number, name, wall_ms, processes and by_exe" {
@@ -132,8 +135,11 @@ _workdir() {
   [ "$output" = '[0,1]' ]
 }
 
-@test "sleep is summed into sleep_s and a sleeping file is wait-bound" {
+@test "sleep is summed into sleep_s, and a file that sleeps for 30% of its time or more is wait-bound" {
+  # 2 s slept of a little over 4 s: under half, so a threshold above 50% would
+  # not call it wait-bound.
   local f; f=$(_fixture slow "sleeps" '  sleep 2')
+  _fixture slow "busy" '  local end=$((SECONDS + 2)); while [ "$SECONDS" -lt "$end" ]; do :; done' >/dev/null
   run --separate-stderr "$S" --out "$OUT" "$f"
   [ "$status" -eq 0 ]
   run jq -r '.files[0] | "\(.sleep_s) \(.class) \(.by_exe.sleep)"' "$OUT/report.json"
@@ -167,6 +173,17 @@ _workdir() {
   [ "$output" = "400 400 fork-bound" ]
 }
 
+@test "a file whose fork estimate is under half its time is compute-bound" {
+  # 200 jq starts beside 3 s of shell work: the estimate is well over 5% of the
+  # time and under 50%.
+  local f; f=$(_fixture some "forks and computes" '  local i; for i in $(seq 200); do jq -n 1 >/dev/null; done
+  local end=$((SECONDS + 3)); while [ "$SECONDS" -lt "$end" ]; do :; done')
+  run --separate-stderr "$S" --out "$OUT" "$f"
+  [ "$status" -eq 0 ]
+  run jq -r '.files[0] | "\(.by_exe.jq) \(.fork_ms_est >= 0.05 * (.wall_ms - .shim_overhead_ms_est)) \(.class)"' "$OUT/report.json"
+  [ "$output" = "200 true compute-bound" ]
+}
+
 @test "a red bats file is recorded in its exit, and the profiler still exits 0" {
   local f; f=$(_fixture red "fails" '  false')
   run --separate-stderr "$S" --out "$OUT" "$f"
@@ -185,10 +202,24 @@ _workdir() {
   [ "$output" = '[2,true]' ]
   run jq -c '[.tests[] | select(.file == $s and .number == 1) | .by_exe]' --arg s "$SAMPLE" "$OUT/report.json"
   [ "$output" = '[{"git":1,"jq":2}]' ]
+  # the one row is the heaviest file's
   run grep -c '^| .*\.bats |' "$OUT/report.md"
+  [ "$output" = 1 ]
+  run grep -c "^| $f | " "$OUT/report.md"
   [ "$output" = 1 ]
   run grep -c '^| File | Wall s | Tests | Procs/test | jq | git | interp | other | Fork est | Sleep s | Class |$' "$OUT/report.md"
   [ "$output" = 1 ]
+}
+
+@test "without --top the table holds the 20 heaviest files" {
+  local -a fs=(); local i
+  for i in $(seq 21); do fs+=("$(_fixture "f$i" "quick" '  :')"); done
+  run --separate-stderr "$S" --out "$OUT" --jobs 4 "${fs[@]}"
+  [ "$status" -eq 0 ]
+  run jq -r '.files | length' "$OUT/report.json"
+  [ "$output" = 21 ]
+  run grep -c '^| .*\.bats |' "$OUT/report.md"
+  [ "$output" = 20 ]
 }
 
 @test "the workdir is a mktemp dir under TMPDIR, outside the repository, removed on exit" {
@@ -336,4 +367,17 @@ _bin_without() {
   [ "$status" -eq 0 ]
   run jq -c '[.files[0].exit, .tests[0].by_exe.jq]' "$OUT/report.json"
   [ "$output" = '[0,1]' ]
+}
+
+@test "processes that overlap past the wall time make the file fork-bound with its share shown as overlap" {
+  # 400 short processes started side by side: their summed shim cost (about
+  # 4 s) exceeds the file's wall time, so wall less shim overhead is not
+  # positive and no share of it means anything.
+  local f; f=$(_fixture overlap "side by side" '  local i; for i in $(seq 200); do env true & done; wait')
+  run --separate-stderr "$S" --out "$OUT" "$f"
+  [ "$status" -eq 0 ]
+  run jq -r '.files[0] | "\(.class) \(.shim_overhead_ms_est >= .wall_ms)"' "$OUT/report.json"
+  [ "$output" = "fork-bound true" ]
+  run grep -c '(overlap) | 0 | fork-bound |$' "$OUT/report.md"
+  [ "$output" = 1 ]
 }
