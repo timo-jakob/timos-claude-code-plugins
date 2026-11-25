@@ -31,7 +31,7 @@
 # ending. Detection is stubbed and nothing reaches GitHub, so these
 # run offline. The default gate's tests/story-telemetry.bats,
 # tests/build-story-telemetry-record.bats and the #1226 block of
-# tests/resolve-story-loop.bats cover the same criteria.
+# tests/resolve-story-loop-telemetry.bats cover the same criteria.
 
 bats_require_minimum_version 1.5.0
 load ../../assertions
