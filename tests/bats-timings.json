@@ -1,5 +1,5 @@
 {
-  "source": "script-tests run 45358377612 on main (ubuntu-latest, jobs=4); refresh as scripts/split-bats-shards.zsh describes (#3084)",
+  "source": "script-tests run 45358377612 on main (ubuntu-latest, jobs=4), except the seven resolve-story-loop*.bats entries, which are a local jobs=4 run of the #3085 split scaled by 0.2406 (the two suites' 154.925 + 141.307 s in that CI run over their 645 + 586 s local baseline); refresh as scripts/split-bats-shards.zsh describes (#3084)",
   "files": [
     {"file":"tests/add-blocked-by-edges.bats","wall_s":1.040},
     {"file":"tests/api-styleguide-ruleset.bats","wall_s":4.755},
@@ -222,8 +222,13 @@
     {"file":"tests/resolve-profile-contract.bats","wall_s":11.651},
     {"file":"tests/resolve-session-pointers.bats","wall_s":0.457},
     {"file":"tests/resolve-session.bats","wall_s":0.648},
-    {"file":"tests/resolve-story-loop-step.bats","wall_s":141.307},
-    {"file":"tests/resolve-story-loop.bats","wall_s":154.925},
+    {"file":"tests/resolve-story-loop-carry.bats","wall_s":40.502},
+    {"file":"tests/resolve-story-loop-fix-touched.bats","wall_s":20.452},
+    {"file":"tests/resolve-story-loop-grant.bats","wall_s":28.339},
+    {"file":"tests/resolve-story-loop-panel.bats","wall_s":11.924},
+    {"file":"tests/resolve-story-loop-step.bats","wall_s":43.162},
+    {"file":"tests/resolve-story-loop-telemetry.bats","wall_s":19.813},
+    {"file":"tests/resolve-story-loop.bats","wall_s":21.144},
     {"file":"tests/retrigger-pr-ci.bats","wall_s":1.137},
     {"file":"tests/review-dispatch-skippable.bats","wall_s":2.092},
     {"file":"tests/review-dispatch-split-carry.bats","wall_s":0.319},
