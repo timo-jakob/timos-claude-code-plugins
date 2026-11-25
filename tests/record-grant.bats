@@ -8,8 +8,7 @@
 #
 # The reader half (adoption, the four refusal arms, the fresh-run clear, the
 # adoption order against #1434, and the end-to-end write-then-resume) lives in
-# tests/resolve-story-loop.bats. It is deliberately NOT in
-# resolve-story-loop-step.bats, which is the gate's wall-clock floor.
+# tests/resolve-story-loop-grant.bats, written against the hook-mode seam.
 
 bats_require_minimum_version 1.5.0
 load assertions

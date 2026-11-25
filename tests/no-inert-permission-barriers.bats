@@ -218,7 +218,7 @@ function clause_is_barrier(c,   subj, perms) {
 # still seen as a barrier. Each barrier occurrence is recorded separately.
 function count_barriers(s,   rest, tok, n) {
   # Quoted spans are masked ONLY on a `skip` line. Four skip MESSAGES in
-  # tests/resolve-story-loop.bats spell out `chmod a-w` in prose ("runs as root:
+  # tests/resolve-story-loop-telemetry.bats spell out `chmod a-w` in prose ("runs as root:
   # chmod a-w cannot make the sink unwritable"), and counting those would make the
   # reported site count disagree with the number of barriers actually executed —
   # which is what the anti-vacuity floor is calibrated against.
@@ -558,7 +558,7 @@ scan_backticks() {
   # ...and the only file whose barriers are SYMBOLIC (`chmod a-w`), so a
   # regression in that branch reds by name instead of hiding inside the floor's
   # margin — the four sites it contributes take 49 to exactly 45.
-  contains "$(grep '^OK' "$report")" 'tests/resolve-story-loop.bats'
+  contains "$(grep '^OK' "$report")" 'tests/resolve-story-loop-telemetry.bats'
   # ...and the FILE dimension, not just the site count: a truncation that loses
   # one mid-sized file drops only a few sites and would clear the floor above,
   # which is exactly how the herestring bug hid. 15 files measured.
@@ -846,7 +846,7 @@ scan_backticks() {
 
 @test "a chmod quoted inside a skip MESSAGE is not a site (negative self-test, #1360)" {
   # The other side of the same narrowing, and the reason it exists: four skip
-  # messages in tests/resolve-story-loop.bats spell out `chmod a-w` in prose.
+  # messages in tests/resolve-story-loop-telemetry.bats spell out `chmod a-w` in prose.
   printf '@test "guarded, message names the mode" {\n  [ "$(id -u)" -ne 0 ] || skip "runs as root: chmod a-w cannot make the sink unwritable"\n  chmod a-w "$BAD"\n  [ ! -w "$BAD" ]\n}\n' \
     > "$BATS_TEST_TMPDIR/skipmsg.bats"
   run awk -v FILE=sm.bats -f "$DETECTOR" "$BATS_TEST_TMPDIR/skipmsg.bats"

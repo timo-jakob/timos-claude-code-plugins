@@ -3,7 +3,7 @@
 # A full round's NOT APPLICABLE routes to the fallback review panel (#2909,
 # epic #2898). The script half — `review-dispatch.zsh plan --fallback` and the
 # loop's hook-mode engagement — is pinned behaviourally in
-# tests/review-dispatch.bats and tests/resolve-story-loop.bats. This suite pins
+# tests/review-dispatch.bats and tests/resolve-story-loop-panel.bats. This suite pins
 # the prose half: the panel brief's routing and fallback-unavailable sentences,
 # the recovery-arms.md `not-applicable` row (in subagents.md until #3293), the RS-06a / RS-06b inventory rows,
 # the note after the exit-2 frozen span, and that span's bytes.

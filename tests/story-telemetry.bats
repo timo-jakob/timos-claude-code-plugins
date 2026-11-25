@@ -4,7 +4,7 @@
 # the sink flags out of $ARGUMENTS, pre-minting the run_id, and the never-fatal
 # build + emit through the shared emitter. The payload's own shape is
 # tests/build-story-telemetry-record.bats; the review loop's --parent-run-id /
-# --telemetry-dir forwarding is tests/resolve-story-loop.bats.
+# --telemetry-dir forwarding is tests/resolve-story-loop-telemetry.bats.
 
 bats_require_minimum_version 1.5.0
 load assertions
