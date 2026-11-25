@@ -183,7 +183,7 @@ if (( ${#md_targets} )); then
       fi
     done
 
-    name_val=$(grep -E '^name:' <<< "$fm" | head -1 | sed -E 's/^name:[[:space:]]*//; s/[[:space:]]*$//')
+    name_val=$(grep -E '^name:' <<< "$fm" | head -1 | sed -E 's/^name:[[:space:]]*//; s/[[:space:]]*$//') || true
     if [[ -n "$name_val" && "$name_val" != "$expected" ]]; then
       add_skill_finding "$(jq -n --arg file "$file" --arg kind "$kind" --arg got "$name_val" --arg want "$expected" '{
         id: ("skill:" + $file + ":name"), tool: "skill_validation", type: "name_mismatch",
@@ -194,7 +194,7 @@ if (( ${#md_targets} )); then
     fi
 
     if [[ "$kind" == "agent" ]]; then
-      model_val=$(grep -E '^model:' <<< "$fm" | head -1 | sed -E 's/^model:[[:space:]]*//; s/[[:space:]]*$//')
+      model_val=$(grep -E '^model:' <<< "$fm" | head -1 | sed -E 's/^model:[[:space:]]*//; s/[[:space:]]*$//') || true
       case "$model_val" in
         ""|haiku|sonnet|opus|fable) ;;   # empty already reported as missing_field
         *)
