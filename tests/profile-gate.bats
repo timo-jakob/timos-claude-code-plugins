@@ -59,6 +59,10 @@ _workdir() {
   # report.md's row: tests, procs/test, then jq, git, interp and other in that order
   run grep -c "^| $SAMPLE | [0-9.]* | 2 | 1.5 | 2 | 1 | 0 | 0 | " "$OUT/report.md"
   [ "$output" = 1 ]
+  # the Fork est share: the fork estimate over wall time less the shim overhead
+  pct="$(jq -r '.files[0] | (.fork_ms_est / (.wall_ms - .shim_overhead_ms_est) * 100 | round | tostring) + "%"' "$OUT/report.json")"
+  run grep -c "^| $SAMPLE | .* ($pct) | " "$OUT/report.md"
+  [ "$output" = 1 ]
 }
 
 @test "every test row carries file, number, name, wall_ms, processes and by_exe" {
