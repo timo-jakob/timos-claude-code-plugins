@@ -66,6 +66,10 @@
 #     (`other` for one not measured; sh costs as bash). The shim's own cost,
 #     shim_ms per process, is estimated apart as shim_overhead_ms_est, and wall
 #     times include it.
+#     sleep_s is the sleep the file's tests asked for (each `sleep`'s first
+#     argument), capped per test at that test's wall time, since a sleep that
+#     is killed early or runs beside another never waited that long. A sleep
+#     outside any test is not in it.
 #     class, on wall_ms less shim_overhead_ms_est: "wait-bound" when sleep_s is
 #     at least 30% of it, else "fork-bound" when fork_ms_est is at least 50%,
 #     else "compute-bound". It is a pointer for a human's recommendation, not
@@ -75,7 +79,8 @@
 #
 # Exit codes:
 #   0    the report was written (a red bats file is recorded in its `exit`,
-#        and is not a profiler failure)
+#        and is not a profiler failure; its counts and class describe a failed
+#        run, so draw no decision from that row)
 #   1    internal failure (no shim, calibration failed, a report not written)
 #   2    usage error (bad flag, no files, a file that is not a regular file,
 #        an unwritable --out)
@@ -164,13 +169,18 @@ fi
 # Resolve past the shim directory only: the entries before it were already
 # passed over by the lookup that reached the shim, and one of them may be a stub
 # that calls back into the shim by absolute path. With no shim entry on PATH
-# (the shim was called by absolute path), search every other entry.
+# (the shim was called by absolute path), search every other entry. A candidate
+# that is this shim again (a link a test made to it, or the shim directory's
+# own entry when `env -i` dropped PROFILE_GATE_SHIM) is never the real tool. The
+# profiler's own PATH is searched last, for a test PATH that holds such links
+# only.
 set -f; IFS=:
 past=1
 case ":$PATH:" in *":${PROFILE_GATE_SHIM:-/nonexistent}:"*) past= ;; esac
-for d in $PATH; do
+for d in $PATH ${PROFILE_GATE_PATH:-}; do
   if [ "$d" = "${PROFILE_GATE_SHIM:-}" ]; then past=1; continue; fi
   [ -n "$past" ] || continue
+  [ "$d/$n" -ef "$0" ] && continue
   [ -f "$d/$n" ] && [ -x "$d/$n" ] && exec "$d/$n" "$@"
 done
 printf 'profile-gate shim: %s: not found\n' "$n" >&2
@@ -217,7 +227,7 @@ shim_ms=$(LC_ALL=C printf '%.3f' $(( $(PATH="$shim:$PATH" PROFILE_GATE_SHIM="$sh
 run_one() {
   local i=$1 file=$2 t0=$EPOCHREALTIME rc
   : > "$work/log.$i"
-  PATH="$shim:$PATH" PROFILE_GATE_SHIM="$shim" PROFILE_GATE_LOG="$work/log.$i" LC_ALL=C \
+  PROFILE_GATE_PATH="$PATH" PATH="$shim:$PATH" PROFILE_GATE_SHIM="$shim" PROFILE_GATE_LOG="$work/log.$i" LC_ALL=C \
     "$bats_bin" --tap --timing "$file" > "$work/tap.$i" 2>"$work/err.$i"
   rc=$?
   print -r -- "$rc $(LC_ALL=C printf '%.0f' $(( (EPOCHREALTIME - t0) * 1000.0 )))" >| "$work/rc.$i"
@@ -302,7 +312,9 @@ for f in "${files[@]}"; do
         + ($parts | group_by(.k) | map({key: .[0].k, value: (map(.ms) | add)}) | from_entries)
         | map_values(. * 10 | round / 10)) as $split
     | ($split | total | . * 10 | round / 10) as $fork
-    | ([$log[] | select(.t != "" and .n == "sleep") | .a | tonumber? // 0] | add // 0) as $sleep
+    | ([$tap[0][] | . as $t
+        | [([$log[] | select(.t == ($t.number | tostring) and .n == "sleep") | .a | tonumber? // 0] | add // 0),
+           $t.wall_ms / 1000] | min] | add // 0 | . * 1000 | round / 1000) as $sleep
     | ($procs * $shim | . * 10 | round / 10) as $shim_over
     | ([$wall - $shim_over, 1] | max) as $net
     | {file: $file, exit: $rc, wall_ms: $wall, tests: ($tests | length), processes: $procs,
@@ -340,7 +352,7 @@ done
     ([.wall_ms - .shim_overhead_ms_est, 1] | max) as $net |
     "| \(.file) | \(.wall_ms / 1000 | r1) | \(.tests) | \(.processes_per_test) | \(.by_exe.jq // 0) | \(.by_exe.git // 0) | \((.by_exe.zsh // 0) + (.by_exe.bash // 0) + (.by_exe.sh // 0)) | \(.processes - (.by_exe.jq // 0) - (.by_exe.git // 0) - (.by_exe.zsh // 0) - (.by_exe.bash // 0) - (.by_exe.sh // 0)) | \(.fork_ms_est / 1000 | . * 100 | round / 100) s (\(pct(.fork_ms_est; $net))) | \(.sleep_s) | \(.class)\(if .exit != 0 then " (exit \(.exit))" else "" end) |"),
   "",
-  "jq, git, interp and other are process counts over the whole file; Fork est is count × start-up cost, as a share of wall time less the shim overhead."
+  "jq, git, interp and other are process counts over the whole file; Fork est is count × start-up cost, as a share of wall time less the shim overhead. Sleep s is the sleep the tests asked for, capped per test at its wall time. A row whose Class carries an exit code failed under the shim, so its counts describe a failed run."
   ' "$out/report.json" > "$out/report.md" || die "cannot write $out/report.md"
 
 print -ru2 -- "profile-gate: report $out/report.json"

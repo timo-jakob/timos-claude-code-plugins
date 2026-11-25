@@ -618,7 +618,12 @@ It runs one file at a time by default, so contention does not distort the wall
 times; `--jobs N` is faster and still counts exactly. To pick the files, take
 the heaviest from a full gate's summary: `jq -r '.files | sort_by(-.wall_s) |
 .[:20][].file'` on `run-gate.zsh`'s stdout. Record a decision drawn from a
-report on its own issue, citing the report.
+report on its own issue, citing the report. The profiler exits 0 once the
+report is written, even when a profiled file failed: a file whose `exit` is not
+0 (`(exit N)` in the table) failed under the shim, and its counts and class
+describe a failed run. Draw no decision from that row. Run the file alone with
+plain `bats` to tell a real red from one the shim caused, and say which it was
+on the issue.
 
 ## Propagation invariants
 
