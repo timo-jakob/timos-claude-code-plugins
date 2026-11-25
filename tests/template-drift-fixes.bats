@@ -4,6 +4,9 @@
 # Drives detect-template-drift.zsh against a fixture target repo, with a
 # fixture changelog injected via the TEMPLATE_CHANGELOG seam.
 
+# Flags on `run` need this declaration, or bats emits BW02 for every one of them.
+bats_require_minimum_version 1.5.0
+
 load assertions
 
 setup() {

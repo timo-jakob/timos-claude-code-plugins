@@ -133,9 +133,15 @@ typeset -a findings=()
 # its exit contract binds here: on a non-zero exit, or output that is not JSON, the
 # file stays reported as unknown_provenance (fail-closed — never skip a file on a
 # detection that never ran), with detect-stack's stderr forwarded verbatim.
+# detect-stack.sh runs without GitHub credentials (an empty GH_CONFIG_DIR, no
+# token), so its `gh auth status` fails, its GitHub API probes are skipped, and
+# this detector stays off the network.
 release_template_ships_for_repo() {
-  local detect_stack="${plugin_dir}/skills/bootstrap/scripts/detect-stack.sh" langs lang
-  if ! langs=$(cd "$repo" && bash "$detect_stack" | jq -r '.languages[]'); then
+  local detect_stack="${plugin_dir}/skills/bootstrap/scripts/detect-stack.sh" langs lang gh_cfg rc=0
+  gh_cfg=$(mktemp -d)
+  langs=$(cd "$repo" && GH_TOKEN= GITHUB_TOKEN= GH_CONFIG_DIR="$gh_cfg" bash "$detect_stack" | jq -r '.languages[]') || rc=$?
+  rm -rf "$gh_cfg"
+  if (( rc != 0 )); then
     print -u2 "detect-template-drift.zsh: detect-stack.sh failed; keeping .github/workflows/release.yml reported"
     return 0
   fi
