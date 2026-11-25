@@ -171,6 +171,14 @@ _workdir() {
   [ "$output" = "2 true compute-bound" ]
 }
 
+@test "a profiled run keeps the caller's priority: the background job is not niced" {
+  export NICE_OUT="$BATS_TEST_TMPDIR/nice.out"
+  local f; f=$(_fixture nice "nice" '  ps -o nice= -p $$ | tr -d " " > "$NICE_OUT"')
+  run --separate-stderr "$S" --out "$OUT" "$f"
+  [ "$status" -eq 0 ]
+  [ "$(<"$NICE_OUT")" = "$(ps -o nice= -p $$ | tr -d ' ')" ]
+}
+
 @test "a file that only computes in the shell is compute-bound" {
   local f; f=$(_fixture busy "busy" '  local end=$((SECONDS + 2)); while [ "$SECONDS" -lt "$end" ]; do :; done')
   run --separate-stderr "$S" --out "$OUT" "$f"

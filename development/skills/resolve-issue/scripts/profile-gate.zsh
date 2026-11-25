@@ -96,7 +96,9 @@
 #        removed, and no report is written
 
 emulate -L zsh
-setopt nounset pipefail extendedglob
+# no_bg_nice: the bats runs are background jobs, and must run at the priority
+# the start-up costs are measured at.
+setopt nounset pipefail extendedglob no_bg_nice
 zmodload -F zsh/datetime p:EPOCHREALTIME
 zmodload -F zsh/parameter p:commands
 zmodload -F zsh/files b:zf_ln
