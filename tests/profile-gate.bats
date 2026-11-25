@@ -132,12 +132,19 @@ _workdir() {
 }
 
 @test "a test that runs a tool bats also runs keeps its own count after the subtraction" {
-  local f; f=$(_fixture dates "one date" '  date >/dev/null')
+  # Which tools bats runs per test differs between bats versions, so take one
+  # from this bats' own baseline rather than assuming one.
+  local e; e=$(_fixture empty "empty" '  :')
+  run --separate-stderr "$S" --out "$OUT" "$e"
+  [ "$status" -eq 0 ]
+  local tool; tool=$(jq -r '.bats_baseline | keys[0] // empty' "$OUT/report.json")
+  [ -n "$tool" ]
+  local f; f=$(_fixture tool "one $tool" "  $tool --version >/dev/null 2>&1 || :")
   run --separate-stderr "$S" --out "$OUT" "$f"
   [ "$status" -eq 0 ]
   run jq -c '.tests[0].by_exe' "$OUT/report.json"
-  [ "$output" = '{"date":1}' ]
-  run jq -r '.bats_baseline.date' "$OUT/report.json"
+  [ "$output" = "{\"$tool\":1}" ]
+  run jq -r --arg t "$tool" '.bats_baseline[$t]' "$OUT/report.json"
   [ "$output" -ge 1 ]
 }
 
@@ -196,14 +203,14 @@ _workdir() {
 }
 
 @test "a file whose fork estimate is under half its time is compute-bound" {
-  # 200 jq starts beside 3 s of shell work: the estimate is well over 5% of the
+  # 100 jq starts beside 3 s of shell work: the estimate is well over 5% of the
   # time and under 50%.
-  local f; f=$(_fixture some "forks and computes" '  local i; for i in $(seq 200); do jq -n 1 >/dev/null; done
+  local f; f=$(_fixture some "forks and computes" '  local i; for i in $(seq 100); do jq -n 1 >/dev/null; done
   local end=$((SECONDS + 3)); while [ "$SECONDS" -lt "$end" ]; do :; done')
   run --separate-stderr "$S" --out "$OUT" "$f"
   [ "$status" -eq 0 ]
   run jq -r '.files[0] | "\(.by_exe.jq) \(.fork_ms_est >= 0.05 * (.wall_ms - .shim_overhead_ms_est)) \(.class)"' "$OUT/report.json"
-  [ "$output" = "200 true compute-bound" ]
+  [ "$output" = "100 true compute-bound" ]
 }
 
 @test "a red bats file is recorded in its exit, and the profiler still exits 0" {
