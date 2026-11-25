@@ -4,6 +4,9 @@
 # Drives detect-template-drift.zsh against a fixture target repo, with a
 # fixture changelog injected via the TEMPLATE_CHANGELOG seam.
 
+# Flags on `run` need this declaration, or bats emits BW02 for every one of them.
+bats_require_minimum_version 1.5.0
+
 load assertions
 
 setup() {
@@ -78,6 +81,68 @@ JSON
 @test "the shipped changelog is valid JSON" {
   run jq empty "$REPO_ROOT/development/skills/maintenance/reference/template-changelog.json"
   [ "$status" -eq 0 ]
+}
+
+# --- #3291: an unmarked release.yml is the consumer's own unless a language ships one ---
+
+# write an unmarked release.yml, the consumer's own release workflow
+write_unmarked_release() {
+  printf 'name: release\non:\n  push:\n    tags: ["v*"]\n' > "$REPO/.github/workflows/release.yml"
+}
+
+@test "#3291 a Go-only repo's unmarked release.yml is the consumer's own: no finding" {
+  printf 'module example.com/svc\n\ngo 1.22\n' > "$REPO/go.mod"
+  write_unmarked_release
+  run --separate-stderr zsh "$DRIFT" "$REPO"
+  [ "$status" -eq 0 ]
+  [ "$output" = '[]' ]
+}
+
+@test "#3291 a repo with no detected language skips its unmarked release.yml too" {
+  write_unmarked_release
+  run --separate-stderr zsh "$DRIFT" "$REPO"
+  [ "$status" -eq 0 ]
+  [ "$output" = '[]' ]
+}
+
+@test "#3291 a Java repo's unmarked release.yml is still unknown_provenance" {
+  printf 'plugins { java }\n' > "$REPO/build.gradle.kts"
+  write_unmarked_release
+  run --separate-stderr zsh "$DRIFT" "$REPO"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '[.[] | select(.file == ".github/workflows/release.yml") | .severity] | join(",")' <<< "$output")" = 'unknown_provenance' ]
+}
+
+@test "#3291 a Go+Java repo keeps reporting its unmarked release.yml: one language with a template is enough" {
+  printf 'module example.com/svc\n' > "$REPO/go.mod"
+  printf '<project/>\n' > "$REPO/pom.xml"
+  write_unmarked_release
+  run --separate-stderr zsh "$DRIFT" "$REPO"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '[.[] | select(.file == ".github/workflows/release.yml") | .severity] | join(",")' <<< "$output")" = 'unknown_provenance' ]
+}
+
+@test "#3291 a MARKED release.yml in a Go repo is still read for drift" {
+  printf 'module example.com/svc\n' > "$REPO/go.mod"
+  printf '# claude-bootstrap: rendered from languages/java/.github/workflows/release.yml.tmpl @ v0.1.0 sha256:deadbeef\nname: release\n' \
+    > "$REPO/.github/workflows/release.yml"
+  run --separate-stderr zsh "$DRIFT" "$REPO"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '[.[] | select(.file == ".github/workflows/release.yml") | .severity] | join(",")' <<< "$output")" = 'drifted' ]
+}
+
+@test "#3291 a language detection that cannot complete keeps the unmarked release.yml reported (fail-closed)" {
+  [ "$(id -u)" -ne 0 ] || skip "root reads a mode-000 directory"
+  printf 'module example.com/svc\n' > "$REPO/go.mod"
+  write_unmarked_release
+  mkdir "$REPO/locked"
+  chmod 000 "$REPO/locked"
+  run --separate-stderr zsh "$DRIFT" "$REPO"
+  chmod 755 "$REPO/locked"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '[.[] | select(.file == ".github/workflows/release.yml") | .severity] | join(",")' <<< "$output")" = 'unknown_provenance' ]
+  contains "$stderr" 'detect-stack.sh failed; keeping .github/workflows/release.yml reported'
+  contains "$stderr" 'detect-stack: the kubernetes marker search did not complete'
 }
 
 @test "the §3l IaC workflow is TRACKED, so its drift is reported (#1154)" {

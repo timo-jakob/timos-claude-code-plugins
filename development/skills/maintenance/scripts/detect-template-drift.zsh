@@ -123,6 +123,34 @@ typeset -a tracked=(
 
 typeset -a findings=()
 
+# Does any of the repo's detected languages ship a `release.yml` template (#3291)?
+# Exit 0 when one does, or when detection cannot complete; exit 1 when none does.
+# Only Java ships one today, so an unmarked release.yml in a repo of any other
+# language is the consumer's own release workflow, which bootstrap never rendered
+# and which no re-bootstrap can stamp. The template set is read from disk, so a
+# language that gains a release.yml template is covered without editing this.
+# Detection is detect-stack.sh's (bootstrap's canonical language detector), and
+# its exit contract binds here: on a non-zero exit, or output that is not JSON, the
+# file stays reported as unknown_provenance (fail-closed — never skip a file on a
+# detection that never ran), with detect-stack's stderr forwarded verbatim.
+# detect-stack.sh runs without GitHub credentials (an empty GH_CONFIG_DIR, no
+# token), so its `gh auth status` fails, its GitHub API probes are skipped, and
+# this detector stays off the network.
+release_template_ships_for_repo() {
+  local detect_stack="${plugin_dir}/skills/bootstrap/scripts/detect-stack.sh" langs lang gh_cfg rc=0
+  gh_cfg=$(mktemp -d)
+  langs=$(cd "$repo" && GH_TOKEN= GITHUB_TOKEN= GH_CONFIG_DIR="$gh_cfg" bash "$detect_stack" | jq -r '.languages[]') || rc=$?
+  rm -rf "$gh_cfg"
+  if (( rc != 0 )); then
+    print -u2 "detect-template-drift.zsh: detect-stack.sh failed; keeping .github/workflows/release.yml reported"
+    return 0
+  fi
+  for lang in ${(f)langs}; do
+    [[ -f "${templates_root}/languages/${lang}/.github/workflows/release.yml.tmpl" ]] && return 0
+  done
+  return 1
+}
+
 for target_rel in "${tracked[@]}"; do
   target_abs="${repo}/${target_rel}"
   if [[ ! -f "$target_abs" ]]; then
@@ -147,6 +175,13 @@ for target_rel in "${tracked[@]}"; do
     # an unmarked copy is the consumer's own
     hooks/pre-commit|scripts/go-gate.zsh)
       [[ -n "$(head -10 "$target_abs" | grep "^# claude-bootstrap: rendered from languages/go/" || true)" ]] \
+        || continue ;;
+    # an unmarked release.yml is the consumer's own when none of the repo's
+    # languages ships a release.yml template (#3291) — the same ownership rule as
+    # the Go gate pair above; a Java repo's unmarked copy is still reported
+    .github/workflows/release.yml)
+      [[ -n "$(head -10 "$target_abs" | grep "^# claude-bootstrap: rendered from " || true)" ]] \
+        || release_template_ships_for_repo \
         || continue ;;
   esac
 
