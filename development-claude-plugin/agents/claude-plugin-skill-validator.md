@@ -55,6 +55,12 @@ recommendation — do **not** invent values:
   it be written.
 - **`invalid_model`** — the model string isn't `haiku|sonnet|opus|fable`. Recommend the
   closest valid tier but don't guess silently — escalate so a human confirms.
+- **`invalid_effort`** — the agent's `effort:` is present but isn't
+  `low|medium|high|xhigh|max`. Never rewrite the line: recommend a level by the
+  ARCHITECTURE.md *Agent model selection* effort rule (*Reasoning effort*) —
+  `high` for a judgement agent (reviewers, approvers, migrations, triage),
+  `low` for a mechanical or decision-tree agent — and escalate so a human
+  confirms.
 
 ## What you do
 
