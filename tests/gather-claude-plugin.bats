@@ -142,6 +142,36 @@ effort_section() {
   contains "$output" "is a decision made on a measurement of what it does to review quality (#2945), never on a guess."
 }
 
+# validator_escalate -> the skill validator agent's "### Escalate" section, from
+# its heading to the next heading, with line breaks folded to single spaces.
+validator_escalate() {
+  awk '/^### Escalate /{on=1; print; next} on && /^#/{exit} on{print}' \
+    "$REPO_ROOT/development-claude-plugin/agents/claude-plugin-skill-validator.md" | tr '\n' ' ' | tr -s ' '
+}
+
+@test "skill validator: invalid_effort is an Escalate arm beside invalid_model (#3315)" {
+  run validator_escalate
+  contains "$output" "- **\`invalid_model\`** —"
+  contains "$output" "- **\`invalid_effort\`** — the agent's \`effort:\` is present but isn't \`low|medium|high|xhigh|max\`."
+  contains "$output" "Never rewrite the line: recommend a level by the ARCHITECTURE.md *Agent model selection* effort rule (*Reasoning effort*)"
+  contains "$output" "and escalate so a human confirms."
+}
+
+@test "skill validator: invalid_effort's level list matches the gather's case arm (#3315)" {
+  run grep -Eo '^ *[a-z|]+\) ;;$' "$GATHER"
+  arm="$(printf '%s\n' "$output" | grep -F 'xhigh' | tr -d ' ;)')"
+  run validator_escalate
+  contains "$output" "isn't \`$arm\`."
+}
+
+@test "skill validator: only name_mismatch is a Fix arm, so invalid_effort never auto-fixes (#3315)" {
+  run awk '/^### Fix /{on=1; next} on && /^#/{exit} on && /^- \*\*`/{print}' \
+    "$REPO_ROOT/development-claude-plugin/agents/claude-plugin-skill-validator.md"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c .)" -eq 1 ]
+  contains "$output" "**\`name_mismatch\`**"
+}
+
 @test "orphaned reference: reference_checking reports orphan_command" {
   printf '\nSee /development-fixture:nonexistent for details.\n' >> "$WORK/development-fixture/skills/demo/SKILL.md"
   [ "$(count "$WORK" reference_checking)" -eq 1 ]
