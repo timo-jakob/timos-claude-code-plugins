@@ -121,6 +121,16 @@ _workdir() {
   [ "$output" = '[{"jq":1},{}]' ]
 }
 
+@test "a two-test file with no setup_file has an empty outside_tests: the bash bats starts per test is subtracted per test" {
+  # bats starts each test with a bash that has no test number yet, so it is
+  # logged outside the tests: a one-test baseline would leave one per further
+  # test in outside_tests.
+  run --separate-stderr "$S" --out "$OUT" "$SAMPLE"
+  [ "$status" -eq 0 ]
+  run jq -c '[.files[0].tests, .files[0].outside_tests]' "$OUT/report.json"
+  [ "$output" = '[2,{}]' ]
+}
+
 @test "a test that runs a tool bats also runs keeps its own count after the subtraction" {
   local f; f=$(_fixture dates "one date" '  date >/dev/null')
   run --separate-stderr "$S" --out "$OUT" "$f"

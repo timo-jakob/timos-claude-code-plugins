@@ -35,7 +35,11 @@
 # calibration file, takes its per-test counts as `bats_baseline`, and subtracts
 # them from every test (never below zero). Processes started outside any test
 # (bats start-up, setup_file, teardown_file) are reported per file as
-# `outside_tests`, with the calibration file's outside counts subtracted too.
+# `outside_tests`, with bats' own outside processes subtracted too. Some of
+# those bats starts once per test before the test has its number (the bash that
+# runs the test), so a second, two-test calibration file splits them into a
+# fixed part and a part per test, and the part per test is subtracted once for
+# each of the file's tests.
 #
 # Usage:
 #   profile-gate.zsh --out DIR [--jobs N] [--top N] FILE.bats [FILE.bats ...]
@@ -243,12 +247,19 @@ run_one() {
   print -r -- "$rc $(LC_ALL=C printf '%.0f' $(( (EPOCHREALTIME - t0) * 1000.0 )))" >| "$work/rc.$i"
 }
 
-# Calibration: bats' own processes around one empty test.
+# Calibration: bats' own processes around one empty test, then around two, so
+# what bats starts outside the tests splits into a fixed part and a part per
+# test.
 print -r -- '@test "calibration" { :; }' > "$work/calibration.bats"
 run_one calib "$work/calibration.bats" &
 pids=($!); wait $!; pids=()
 [[ "$(<$work/rc.calib)" == "0 "* ]] && grep -q '^ok 1 calibration in [0-9]*ms$' "$work/tap.calib" \
   || die "the calibration run failed: $(<$work/err.calib)"
+print -rl -- '@test "calibration" { :; }' '@test "calibration two" { :; }' > "$work/calibration2.bats"
+run_one calib2 "$work/calibration2.bats" &
+pids=($!); wait $!; pids=()
+[[ "$(<$work/rc.calib2)" == "0 "* ]] && grep -q '^ok 2 calibration two in [0-9]*ms$' "$work/tap.calib2" \
+  || die "the calibration run failed: $(<$work/err.calib2)"
 
 local -i i=0 n=${#files}
 local -a live=(); local p
@@ -284,6 +295,7 @@ costs_json=$("$jq_bin" -n --arg zsh "${cost[zsh]}" --arg bash "${cost[bash]}" --
   '{zsh: ($zsh|tonumber), bash: ($bash|tonumber), jq: ($jq|tonumber), git: ($git|tonumber),
     sed: ($sed|tonumber), awk: ($awk|tonumber), other: ($other|tonumber)}') || die "cannot build the cost table"
 logjson "$work/log.calib" > "$work/calib.json" || die "cannot read the calibration log"
+logjson "$work/log.calib2" > "$work/calib2.json" || die "cannot read the calibration log"
 
 local rc_line refs
 i=0
@@ -295,12 +307,15 @@ for f in "${files[@]}"; do
   tapjson "$work/tap.$i" > "$work/tapj.$i" || die "cannot read the TAP of $f"
   "$jq_bin" -n --arg file "$f" --argjson rc "${rc_line% *}" --argjson wall "${rc_line#* }" \
     --argjson refs "$refs" --argjson cost "$costs_json" --argjson shim "$shim_ms" \
-    --slurpfile calib "$work/calib.json" --slurpfile log "$work/logj.$i" --slurpfile tap "$work/tapj.$i" '
+    --slurpfile calib "$work/calib.json" --slurpfile calib2 "$work/calib2.json" \
+    --slurpfile log "$work/logj.$i" --slurpfile tap "$work/tapj.$i" '
     def counts: group_by(.n) | map({key: .[0].n, value: length}) | from_entries;
     def minus($b): with_entries(.value -= ($b[.key] // 0)) | with_entries(select(.value > 0));
     def total: [.[]] | add // 0;
     ($calib[0] | map(select(.t != "")) | counts) as $base_test
     | ($calib[0] | map(select(.t == "")) | counts) as $base_out
+    | ($calib2[0] | map(select(.t == "")) | counts | minus($base_out)) as $per_test_out
+    | ($base_out | minus($per_test_out)) as $fixed_out
     | ($log[0]) as $log
     | ($tap[0] | map(. as $t
         | ($log | map(select(.t == ($t.number | tostring))) | counts | minus($base_test)) as $by
@@ -308,7 +323,10 @@ for f in "${files[@]}"; do
            processes: ($by | total), by_exe: $by})) as $tests
     | ([$tests[].by_exe | to_entries[]] | group_by(.key)
         | map({key: .[0].key, value: (map(.value) | add)}) | from_entries) as $by_exe
-    | ($log | map(select(.t == "")) | counts | minus($base_out)) as $outside
+    | ($tap[0] | length) as $ntests
+    | ($log | map(select(.t == "")) | counts
+        | with_entries(.value -= (($fixed_out[.key] // 0) + ($per_test_out[.key] // 0) * $ntests))
+        | with_entries(select(.value > 0))) as $outside
     | ($by_exe | total) as $procs
     | ($by_exe | to_entries | map(
         if .key == "zsh" then {k: "interpreter", ms: (.value * $cost.zsh)}
