@@ -95,13 +95,13 @@ _workdir() {
   [ "$status" -eq 0 ]
 }
 
-@test "zsh and bash are costed as interpreter, each at its own start-up cost" {
-  local f; f=$(_fixture interp "one zsh, one bash" '  zsh -c :; bash -c :')
+@test "zsh, bash and sh are costed as interpreter: zsh at its own start-up cost, sh at bash's" {
+  local f; f=$(_fixture interp "one zsh, one bash, one sh" '  zsh -c :; bash -c :; sh -c :')
   run --separate-stderr "$S" --out "$OUT" "$f"
   [ "$status" -eq 0 ]
   run jq -c '.files[0].by_exe' "$OUT/report.json"
-  [ "$output" = '{"bash":1,"zsh":1}' ]
-  run jq -e '.files[0].fork_split_ms.interpreter == ((.startup_ms.zsh + .startup_ms.bash) * 10 | round / 10)' "$OUT/report.json"
+  [ "$output" = '{"bash":1,"sh":1,"zsh":1}' ]
+  run jq -e '.files[0].fork_split_ms.interpreter == ((.startup_ms.zsh + 2 * .startup_ms.bash) * 10 | round / 10)' "$OUT/report.json"
   [ "$status" -eq 0 ]
 }
 
@@ -283,22 +283,26 @@ _bin_without() {
   [ ! -e "$OUT/report.json" ]
 }
 
-@test "a stub ahead of the shim that calls back into it by absolute path reaches the real tool" {
+@test "a stub that calls back into the shim by absolute path reaches the real tool, with the shim on PATH or not" {
   # the shape of tests/marker-find-stub.bash: the stub captured `command -v`
   # with the shim first on PATH, so it delegates to the shim's own entry. The
-  # shim must resolve past its own directory, never back to the stub; the stub
-  # gives up at depth 3 so a regression reds instead of hanging.
+  # shim must never resolve back to the stub, whether PATH still holds the shim
+  # directory or dropped it; the stub gives up at depth 3 so a regression reds
+  # instead of hanging.
   local f; f=$(_fixture stubbed "stub delegates" '  local stub="$BATS_TEST_TMPDIR/stub" real
   mkdir -p "$stub"; real=$(command -v jq)
   printf '"'"'#!/bin/bash\nn=$((${STUB_DEPTH:-0} + 1)); [ "$n" -le 3 ] || exit 99\nSTUB_DEPTH=$n exec "%s" "$@"\n'"'"' "$real" > "$stub/jq"
   chmod +x "$stub/jq"
   run env PATH="$stub:$PATH" jq -n 7
   [ "$status" -eq 0 ]
+  [ "$output" = 7 ]
+  run env PATH="$stub:/usr/bin:/bin" jq -n 7
+  [ "$status" -eq 0 ]
   [ "$output" = 7 ]')
   run --separate-stderr "$S" --out "$OUT" "$f"
   [ "$status" -eq 0 ]
   run jq -r '"\(.files[0].exit) \(.tests[0].by_exe.jq)"' "$OUT/report.json"
-  [ "$output" = "0 1" ]
+  [ "$output" = "0 2" ]
 }
 
 @test "--jobs 2 starts the next file as soon as one ends, while another still runs" {

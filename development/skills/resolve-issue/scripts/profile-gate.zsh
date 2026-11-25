@@ -11,7 +11,7 @@
 # How it counts. A PATH shim directory holds one symlink per executable name
 # found on PATH, all pointing at a single bash shim. The shim appends one line
 # (the bats file, the test number, the executable name) to a log, then `exec`s
-# the real tool: the first file of that name on PATH outside the shim directory.
+# the real tool: the first file of that name on PATH after the shim directory.
 # Every process a test starts through PATH is counted, and its children too,
 # because PATH still holds the shim. bash is the shim's interpreter because it
 # starts fastest here and, unlike zsh, passes exported bash functions on to the
@@ -159,26 +159,32 @@ print -ru2 -- "profile-gate: workdir=$work"
 # --- the shim -----------------------------------------------------------------
 local shim="$work/shim"
 mkdir -p "$shim" || die "cannot create the shim directory"
-cat > "$shim/.profile-gate-shim" <<'EOF' || die "cannot write the shim"
-#!/bin/bash
+# The shim directory and the profiler's own PATH are written into the shim, so
+# it knows both whatever environment a test hands it.
+{
+  print -r -- '#!/bin/bash'
+  print -r -- "S=${(qq)shim} P=${(qq)PATH}"
+  cat <<'EOF'
 n=${0##*/}
 if [ -n "${PROFILE_GATE_LOG:-}" ]; then
   a=; [ "$n" = sleep ] && a=${1:-}
   printf '%s\t%s\t%s\n' "${BATS_TEST_NUMBER:-}" "$n" "$a" >> "$PROFILE_GATE_LOG"
 fi
-# Resolve past the shim directory only: the entries before it were already
-# passed over by the lookup that reached the shim, and one of them may be a stub
-# that calls back into the shim by absolute path. With no shim entry on PATH
-# (the shim was called by absolute path), search every other entry. A candidate
-# that is this shim again (a link a test made to it, or the shim directory's
-# own entry when `env -i` dropped PROFILE_GATE_SHIM) is never the real tool. The
-# profiler's own PATH is searched last, for a test PATH that holds such links
-# only.
+# With the shim directory on PATH, resolve past it only: the entries before it
+# were already passed over by the lookup that reached the shim, and one of them
+# may be a stub that calls back into the shim by absolute path. The profiler's
+# own PATH follows, for a test PATH that holds links to the shim only. With no
+# shim entry on PATH (a stub or a link a test made reached the shim by absolute
+# path), the profiler's own PATH comes first: it is what the test's `command -v`
+# stood for, and no test's stub is on it. A candidate that is this shim again is
+# never the real tool.
 set -f; IFS=:
-past=1
-case ":$PATH:" in *":${PROFILE_GATE_SHIM:-/nonexistent}:"*) past= ;; esac
-for d in $PATH ${PROFILE_GATE_PATH:-}; do
-  if [ "$d" = "${PROFILE_GATE_SHIM:-}" ]; then past=1; continue; fi
+case ":$PATH:" in
+*":$S:"*) past=; dirs="$PATH:$P" ;;
+*) past=1; dirs="$P:$PATH" ;;
+esac
+for d in $dirs; do
+  if [ "$d" = "$S" ]; then past=1; continue; fi
   [ -n "$past" ] || continue
   [ "$d/$n" -ef "$0" ] && continue
   [ -f "$d/$n" ] && [ -x "$d/$n" ] && exec "$d/$n" "$@"
@@ -186,6 +192,7 @@ done
 printf 'profile-gate shim: %s: not found\n' "$n" >&2
 exit 127
 EOF
+} > "$shim/.profile-gate-shim" || die "cannot write the shim"
 chmod +x "$shim/.profile-gate-shim"
 local d x
 for d in $path; do
@@ -218,7 +225,7 @@ for x in zsh bash jq git sed awk true; do
   esac
 done
 local shim_ms
-shim_ms=$(LC_ALL=C printf '%.3f' $(( $(PATH="$shim:$PATH" PROFILE_GATE_SHIM="$shim" measure "$shim/true") - cost[true] )))
+shim_ms=$(LC_ALL=C printf '%.3f' $(( $(PATH="$shim:$PATH" measure "$shim/true") - cost[true] )))
 (( shim_ms < 0 )) && shim_ms=0
 
 # --- one bats run under the shim ----------------------------------------------
@@ -227,7 +234,7 @@ shim_ms=$(LC_ALL=C printf '%.3f' $(( $(PATH="$shim:$PATH" PROFILE_GATE_SHIM="$sh
 run_one() {
   local i=$1 file=$2 t0=$EPOCHREALTIME rc
   : > "$work/log.$i"
-  PROFILE_GATE_PATH="$PATH" PATH="$shim:$PATH" PROFILE_GATE_SHIM="$shim" PROFILE_GATE_LOG="$work/log.$i" LC_ALL=C \
+  PATH="$shim:$PATH" PROFILE_GATE_LOG="$work/log.$i" LC_ALL=C \
     "$bats_bin" --tap --timing "$file" > "$work/tap.$i" 2>"$work/err.$i"
   rc=$?
   print -r -- "$rc $(LC_ALL=C printf '%.0f' $(( (EPOCHREALTIME - t0) * 1000.0 )))" >| "$work/rc.$i"
