@@ -172,6 +172,74 @@ validator_escalate() {
   contains "$output" "**\`name_mismatch\`**"
 }
 
+# strict_copy -> path of a copy of the gather with the exact line `emulate -L zsh`
+# filtered out, so the script's own `setopt err_exit nounset pipefail` is in
+# effect (#3317). The script does not resolve its own location, so the copy runs
+# identically; it stays strict once #1223 reorders the two lines.
+strict_copy() {
+  local copy="$BATS_TEST_TMPDIR/gather-strict.zsh"
+  grep -qx 'emulate -L zsh' "$GATHER" || return 1
+  grep -vx 'emulate -L zsh' "$GATHER" > "$copy" || return 1
+  grep -qx 'emulate -L zsh' "$copy" && return 1
+  grep -qx 'setopt err_exit nounset pipefail' "$copy" || return 1
+  printf '%s\n' "$copy"
+}
+# drop_key <file> <key> -> remove the `<key>:` line from a fixture file
+drop_key() {
+  grep -v "^$2:" "$WORK/$1" > "$WORK/t" || return 1
+  mv "$WORK/t" "$WORK/$1" || return 1
+  grep -q "^$2:" "$WORK/$1" && return 1
+  return 0
+}
+# only_missing <field> -> exit 0 when $output is valid JSON whose sole
+# skill_validation finding is missing_field for <field>, with no invalid_model
+only_missing() {
+  echo "$output" | jq -e --arg f "$1" '.findings_by_tool.skill_validation
+    | length == 1 and .[0].type == "missing_field" and .[0].field == $f
+      and all(.type != "invalid_model")'
+}
+
+@test "missing name: shipped gather reports one missing_field name (#3317)" {
+  drop_key development-fixture/skills/demo/SKILL.md name
+  run zsh "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  run only_missing name
+  [ "$status" -eq 0 ]
+}
+
+@test "missing model: shipped gather reports one missing_field model, no invalid_model (#3317)" {
+  drop_key development-fixture/agents/helper.md model
+  run zsh "$GATHER" "$WORK"
+  [ "$status" -eq 0 ]
+  run only_missing model
+  [ "$status" -eq 0 ]
+}
+
+@test "strict copy: clean fixture exits 0 with zero skill_validation findings (#3317)" {
+  copy="$(strict_copy)"
+  run zsh "$copy" "$WORK"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '(.findings_by_tool.skill_validation // []) == []'
+}
+
+@test "strict copy: missing name does not abort the gather (#3317)" {
+  copy="$(strict_copy)"
+  drop_key development-fixture/skills/demo/SKILL.md name
+  run zsh "$copy" "$WORK"
+  [ "$status" -eq 0 ]
+  run only_missing name
+  [ "$status" -eq 0 ]
+}
+
+@test "strict copy: missing model does not abort the gather (#3317)" {
+  copy="$(strict_copy)"
+  drop_key development-fixture/agents/helper.md model
+  run zsh "$copy" "$WORK"
+  [ "$status" -eq 0 ]
+  run only_missing model
+  [ "$status" -eq 0 ]
+}
+
 @test "orphaned reference: reference_checking reports orphan_command" {
   printf '\nSee /development-fixture:nonexistent for details.\n' >> "$WORK/development-fixture/skills/demo/SKILL.md"
   [ "$(count "$WORK" reference_checking)" -eq 1 ]
