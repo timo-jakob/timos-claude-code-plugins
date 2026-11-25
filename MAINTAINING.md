@@ -598,6 +598,38 @@ gate on the same machine. When it exits, including on Ctrl-C or a closed pipe,
 it ends every process group it started. Its header names the one narrow case a
 process can still escape.
 
+## Profiling the gate
+
+Before deciding to batch a script's `jq` calls or to move it out of zsh, measure
+where the gate's time goes. `development/skills/resolve-issue/scripts/profile-gate.zsh`
+runs the `.bats` files you name under a PATH shim and writes `report.json` and
+`report.md` to `--out`: per test, the wall time and the processes it started by
+executable; per file, the totals, an estimate of the fork overhead (process
+count × the start-up cost it measured) and a class, `fork-bound`,
+`wait-bound` or `compute-bound`. It is a measuring tool, never a gate. Its
+header documents the flags, the report and what the shim cannot see (#3004).
+
+```sh
+development/skills/resolve-issue/scripts/profile-gate.zsh --out /tmp/gate-profile \
+  tests/resolve-story-loop.bats tests/resolve-story-loop-step.bats
+```
+
+It runs one file at a time by default, so contention does not distort the wall
+times; `--jobs N` is faster and still counts exactly. To pick the files, take
+the heaviest from a full gate's summary: `jq -r '.files | sort_by(-.wall_s) |
+.[:20][].file'` on `run-gate.zsh`'s stdout. Record a decision drawn from a
+report on its own issue, citing the report. The profiler exits 0 once the
+report is written, even when a profiled file failed: a file whose `exit` is not
+0 (`(exit N)` in the table) failed under the shim, and its counts and class
+describe a failed run. Draw no decision from that row. Run the file alone with
+plain `bats` to tell a real red from one the shim caused, and say which it was
+on the issue. On a green row, every count and the fork estimate are lower
+bounds: the shim misses what the header lists as unseen, such as a test that
+replaces PATH. `compute-bound` is the class left when neither estimate reaches
+its threshold, so it never shows that process creation is cheap in that file.
+Decide against batching or a rewrite from such a row only after reading the
+file's tests for a replaced PATH and its `absolute_path_refs` in `report.json`.
+
 ## Propagation invariants
 
 This repo deliberately **restates** each cross-cutting rule in many artifacts —
