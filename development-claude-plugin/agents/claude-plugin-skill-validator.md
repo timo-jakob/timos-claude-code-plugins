@@ -46,11 +46,14 @@ recommendation — do **not** invent values:
 
 - **`missing_frontmatter`** — the whole frontmatter block is missing. Recommend
   the required keys for that file kind.
-- **`missing_field`** (`description`, `tools`, `model`, `name`) — you can't
-  author a description, choose a tools list, or pick a model tier on the author's
-  behalf. For `model`, recommend the tier by task character (haiku =
-  mechanical, sonnet = light comprehension with bounded output, opus =
-  judgment, fable = high-stakes).
+- **`missing_field`** (`description`, `tools`, `model`, `name`, `effort`) — you
+  can't author a description, choose a tools list, or pick a model tier or a
+  reasoning effort on the author's behalf. For `model`, recommend the tier by
+  task character (haiku = mechanical, sonnet = light comprehension with bounded
+  output, opus = judgment, fable = high-stakes). For `effort` — an `effort:`
+  line whose value is empty — recommend a level by the same effort rule the
+  `invalid_effort` arm below names, and leave it to a human to fill the value or
+  remove the line.
 - **`empty_body`** — the instruction/agent body is the actual content; recommend
   it be written.
 - **`invalid_model`** — the model string isn't `haiku|sonnet|opus|fable`. Recommend the
