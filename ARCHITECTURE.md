@@ -346,11 +346,15 @@ The `development` side finds one in two steps (#3351).
   keeps the two equal.
 - **The pinned version.** The pinned version of a linked document is the commit the superproject records:
   the gitlink that `HEAD` holds for the submodule the document came from, never
-  whatever happens to be checked out there.
+  whatever happens to be checked out there. Only commits are compared: a
+  document edited in place or untracked in the submodule's checkout is not
+  detected, and `pinned_commit` then names the checkout's commit, not those
+  bytes.
 - **The marker.** A linked repository is marked in `.gitmodules` by the key `reference-docs = true` on its
   submodule's entry. The lookup reads every declared submodule and ignores the
-  key; it tells maintenance which pins are its to move, so a code submodule is
-  never touched.
+  key; it will tell maintenance which pins are its to move, so a code submodule
+  is never touched (planned, #3198: nothing reads the key yet, and no pin is
+  moved for you).
 - **The interface.** `development/scripts/reference-docs/resolve-reference-doc.zsh [--repo-dir <dir>] <relative-path>`
   prints one JSON object: `path` (absolute), `origin` (`own` or `linked`),
   `submodule` and `pinned_commit`, both null for the repo's own file and, for a
@@ -360,7 +364,8 @@ The `development` side finds one in two steps (#3351).
   holding the file is checked out at a commit other than the pinned one, and 1
   on an internal failure, which includes a linked hit whose gitlink is not
   committed yet, since it has no pinned version. Exits 2 to 6 print nothing on
-  stdout. Exits 4 and 6 name the `git submodule update --init` line on stderr.
+  stdout. Exits 4 and 6 name the `git submodule update --init` line on stderr;
+  exit 6 says so instead when a different pin is staged but not committed.
 
 ## Polyrepo, contracts, and the cross-repo big picture
 

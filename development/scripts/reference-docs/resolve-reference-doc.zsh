@@ -10,7 +10,10 @@
 # submodule declared in `.gitmodules` that holds the file at the same relative
 # path. This script adds the pinned version of a linked hit: the commit of the
 # gitlink the superproject's `HEAD` records for that submodule, never whatever
-# happens to be checked out. `--repo-dir` defaults to the current directory.
+# happens to be checked out. Only commits are compared: a document edited in
+# place or untracked in the submodule's checkout is not detected, and
+# `pinned_commit` then names the checkout's commit, not those bytes.
+# `--repo-dir` defaults to the current directory.
 #
 # stdout on success, one JSON object:
 #   {"path": "<absolute path>", "origin": "own" | "linked",
@@ -30,7 +33,9 @@
 #   5 the path lies under a submodule's mount
 #   6 the submodule holding the file is checked out at a commit other than the
 #     pinned one (stderr names both short SHAs and the
-#     `git submodule update --init -- <path>` line)
+#     `git submodule update --init -- <path>` line; when a different pin is
+#     staged but not committed, it says so, since that line alone would check
+#     the staged one out)
 
 emulate -L zsh
 set -uo pipefail
@@ -61,6 +66,7 @@ while (( $# > 0 )); do
 done
 
 (( have_rel == 1 )) && [[ -n "$rel" ]] || { print -r -- "$me: a relative path is required" >&2; usage; }
+[[ "$rel" != /* ]] || { print -r -- "$me: the path must be relative to the repo: $rel" >&2; usage; }
 [[ -d "$repo" ]] || { print -r -- "$me: --repo-dir is not a directory: $repo" >&2; usage; }
 command -v jq >/dev/null 2>&1 || { print -r -- "$me: jq is not on PATH" >&2; exit 1; }
 [[ -r "$lookup" ]] || { print -r -- "$me: the lookup is missing: $lookup" >&2; exit 1; }
@@ -110,7 +116,17 @@ if [[ -z "$checked" ]]; then
 fi
 if [[ "$checked" != "$pinned" ]]; then
   print -r -- "reference-doc: submodule $sub is checked out at ${checked[1,12]}, not at its pinned ${pinned[1,12]}" >&2
-  print -r -- "  run: git submodule update --init -- ${(q-)sub}" >&2
+  # `git submodule update` checks out the gitlink in the index, not in HEAD: with
+  # a different pin staged, the plain line would leave this exit standing.
+  local staged
+  staged="$(git -C "$repo" --literal-pathspecs ls-files -s -z -- "$sub" 2>/dev/null)" || staged=""
+  staged="${${staged#160000 }%% *}"
+  if [[ "$staged" =~ '^[0-9a-f]{40}([0-9a-f]{24})?$' && "$staged" != "$pinned" ]]; then
+    print -r -- "  the pin for $sub is staged at ${staged[1,12]} but not committed: commit it to read that version" >&2
+    print -r -- "  or, to keep the pinned one, run: git restore --staged -- ${(q-)sub} && git submodule update --init -- ${(q-)sub}" >&2
+  else
+    print -r -- "  run: git submodule update --init -- ${(q-)sub}" >&2
+  fi
   exit 6
 fi
 

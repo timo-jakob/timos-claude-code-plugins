@@ -160,6 +160,11 @@ linked() {
   [ "$status" -eq 2 ]
   [ -z "$output" ]
   contains "$stderr" 'more than one path given'
+  run --separate-stderr zsh "$S" --repo-dir "$R" "/abs/$DOC"
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  contains "$stderr" "resolve-reference-doc.zsh: the path must be relative to the repo: /abs/$DOC"
+  contains "$stderr" 'usage: resolve-reference-doc.zsh [--repo-dir <dir>] <relative-path>'
 }
 
 @test "not found exits 3 with nothing on stdout" {
@@ -210,6 +215,22 @@ linked() {
   [ "$status" -eq 6 ]
   [ -z "$output" ]
   contains "$stderr" "run: git submodule update --init -- 'linked docs'"
+}
+
+@test "exit 6 with a different pin staged but not committed names the staged pin, not the bare init line" {
+  linked arch-docs
+  local moved
+  printf 'v2\n' >> "$R/arch-docs/$DOC"
+  g -C "$R/arch-docs" commit -q -am "v2"
+  moved="$(git -C "$R/arch-docs" rev-parse HEAD)"
+  g -C "$R" update-index --cacheinfo 160000 "$moved" arch-docs
+  run --separate-stderr zsh "$S" --repo-dir "$R" "$DOC"
+  [ "$status" -eq 6 ]
+  [ -z "$output" ]
+  contains "$stderr" "the pin for arch-docs is staged at ${moved:0:12} but not committed: commit it"
+  contains "$stderr" 'run: git restore --staged -- arch-docs && git submodule update --init -- arch-docs'
+  run grep -c '^  run: git submodule update' <<<"$stderr"
+  [ "$output" -eq 0 ]
 }
 
 # --- no pinned version: exit 1 ----------------------------------------------
