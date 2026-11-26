@@ -9034,7 +9034,13 @@ must be one of `low`, `medium`, `high`, `xhigh` or `max`. The `skill_validation`
 gather (`gather-claude-plugin-findings.zsh`) reports any other value as an
 `invalid_effort` finding, shaped like `invalid_model` (id
 `skill:<file>:effort`, `field: "effort"`), so a mistyped level is caught rather
-than silently ignored.
+than silently ignored. The gather reads the value bare, as it reads `name:` and
+`model:` (#3347): one pair of matching quotes and a trailing comment (a `#`
+after whitespace, outside the quotes) are stripped first. An `effort:` line whose value is empty after stripping one pair
+of quotes and a trailing comment is reported as `missing_field`
+(`field: "effort"`), never as `invalid_effort`. Teaching
+`claude-plugin-skill-validator` that finding is the follow-up
+[#3348](https://github.com/timo-jakob/timos-claude-code-plugins/issues/3348).
 
 Effort is the cheaper of the two knobs: a lower effort keeps the same model and
 the same prompt cache and only trims deliberation. Choose it with the model:

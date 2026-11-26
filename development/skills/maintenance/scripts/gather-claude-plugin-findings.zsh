@@ -148,6 +148,56 @@ if (( ${#md_targets} )); then
     jq --argjson f "$1" '. + [$f]' "$sf" > "$sf.tmp" && mv "$sf.tmp" "$sf"
   }
 
+  # fm_value <key> — print the bare value of the first `<key>:` line of $fm
+  # (#3347). After trimming: a value opening with " or ' whose same quote recurs
+  # later followed only by optional whitespace, or by whitespace plus `#...`, is
+  # the text between that pair, taken literally (a `#` inside is kept, no escape
+  # is processed). Otherwise the value is cut at the first `#` that starts it or
+  # follows whitespace, then trimmed; an unmatched quote stays. Prints nothing
+  # and returns 0 when the key is absent, so it is safe under err_exit/pipefail.
+  # Block scalars and multi-line values are out of scope.
+  fm_value() {
+    setopt local_options extended_glob
+    local key="$1" v q tail
+    local -a lines=( ${(M)${(f)fm}:#${key}:*} )
+    (( ${#lines} )) || return 0
+    v="${lines[1]#${key}:}"
+    v="${v##[[:space:]]#}"; v="${v%%[[:space:]]#}"
+    local -i i
+    if [[ "$v" == [\"\']* ]]; then
+      q="${v[1]}"
+      for (( i = 2; i <= ${#v}; i++ )); do
+        [[ "${v[i]}" == "$q" ]] || continue
+        tail="${v[i+1,-1]}"
+        if [[ -z "$tail" || "$tail" == [[:space:]]## || "$tail" == [[:space:]]##\#* ]]; then
+          print -r -- "${v[2,i-1]}"
+          return 0
+        fi
+      done
+    fi
+    for (( i = 1; i <= ${#v}; i++ )); do
+      [[ "${v[i]}" == "#" ]] || continue
+      if (( i == 1 )) || [[ "${v[i-1]}" == [[:space:]] ]]; then
+        v="${v[1,i-1]}"; v="${v%%[[:space:]]#}"
+        break
+      fi
+    done
+    print -r -- "$v"
+  }
+
+  # add_empty_value_finding <kind> <file> <key> <fix> — the missing_field for a
+  # key that is present but whose value is empty after fm_value strips it (#3347).
+  # Same id/type/severity/field/files as the absent-key finding; only the
+  # wording differs.
+  add_empty_value_finding() {
+    add_skill_finding "$(jq -n --arg kind "$1" --arg file "$2" --arg key "$3" --arg fix "$4" '{
+      id: ("skill:" + $file + ":" + $key), tool: "skill_validation", type: "missing_field",
+      severity: "high", file: $file, kind: $kind, field: $key,
+      message: ("\($kind) \($file): frontmatter key “\($key)” has no value"),
+      fix: $fix,
+      files: [$file] }')"
+  }
+
   local file kind expected fm body name_val model_val effort_val key
   for file in "${md_targets[@]}"; do
     if [[ "$file" == */agents/*.md ]]; then
@@ -183,7 +233,10 @@ if (( ${#md_targets} )); then
       fi
     done
 
-    name_val=$(grep -E '^name:' <<< "$fm" | head -1 | sed -E 's/^name:[[:space:]]*//; s/[[:space:]]*$//') || true
+    name_val=$(fm_value name)
+    if [[ -z "$name_val" ]] && grep -qE '^name:' <<< "$fm"; then
+      add_empty_value_finding "$kind" "$file" name "give “name:” a value"
+    fi
     if [[ -n "$name_val" && "$name_val" != "$expected" ]]; then
       add_skill_finding "$(jq -n --arg file "$file" --arg kind "$kind" --arg got "$name_val" --arg want "$expected" '{
         id: ("skill:" + $file + ":name"), tool: "skill_validation", type: "name_mismatch",
@@ -194,7 +247,10 @@ if (( ${#md_targets} )); then
     fi
 
     if [[ "$kind" == "agent" ]]; then
-      model_val=$(grep -E '^model:' <<< "$fm" | head -1 | sed -E 's/^model:[[:space:]]*//; s/[[:space:]]*$//') || true
+      model_val=$(fm_value model)
+      if [[ -z "$model_val" ]] && grep -qE '^model:' <<< "$fm"; then
+        add_empty_value_finding agent "$file" model "give “model:” a value"
+      fi
       case "$model_val" in
         ""|haiku|sonnet|opus|fable) ;;   # empty already reported as missing_field
         *)
@@ -207,11 +263,16 @@ if (( ${#md_targets} )); then
           ;;
       esac
 
-      # effort is optional (#3309); when present it must be a known level.
+      # effort is optional (#3309); when present it must be a known level, and a
+      # line whose value is empty after stripping is a missing_field (#3347).
       if grep -qE '^effort:' <<< "$fm"; then
-        effort_val=$(grep -E '^effort:' <<< "$fm" | head -1 | sed -E 's/^effort:[[:space:]]*//; s/[[:space:]]*$//')
+        effort_val=$(fm_value effort)
         case "$effort_val" in
           low|medium|high|xhigh|max) ;;
+          "")
+            add_empty_value_finding agent "$file" effort \
+              "give “effort:” one of low, medium, high, xhigh or max (or remove the line)"
+            ;;
           *)
             add_skill_finding "$(jq -n --arg file "$file" --arg got "$effort_val" '{
               id: ("skill:" + $file + ":effort"), tool: "skill_validation", type: "invalid_effort",

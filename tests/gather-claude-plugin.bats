@@ -262,3 +262,175 @@ only_missing() {
   run bash -c "zsh '$GATHER' '$WORK' | jq -e '.coverage == null'"
   [ "$status" -eq 0 ]
 }
+
+# --- bare frontmatter values through fm_value (#3347) -------------------------
+
+SKILL_MD=development-fixture/skills/demo/SKILL.md
+AGENT_MD=development-fixture/agents/helper.md
+
+# set_line <file> <key> <rest> -> make the fixture's `<key>:` line read exactly
+# `<key>:<rest>`; an `effort:` line the agent lacks is added after its model line.
+set_line() {
+  local f="$WORK/$1"
+  KEY="$2" REST="$3" awk '
+    BEGIN { k = ENVIRON["KEY"]; line = k ":" ENVIRON["REST"] }
+    index($0, k ":") == 1 { print line; done = 1; next }
+    { print }
+    k == "effort" && !done && index($0, "model:") == 1 { print line; done = 1 }
+  ' "$f" > "$WORK/t" || return 1
+  mv "$WORK/t" "$f" || return 1
+  grep -qxF -- "$2:$3" "$f"
+}
+
+# sv_run -> run the gather; the caller asserts exit 0 and reads $output
+sv_run() { run zsh "$GATHER" "$WORK"; }
+
+# sv_is <jq-predicate> -> exit 0 when the predicate holds on skill_validation
+sv_is() { echo "$output" | jq -e --arg skill "$SKILL_MD" --arg agent "$AGENT_MD" "(.findings_by_tool.skill_validation // []) | $1" >/dev/null; }
+
+# expect_clean <file> <key> <rest> -> exit 0 and zero skill_validation findings
+expect_clean() {
+  set_line "$1" "$2" "$3"
+  sv_run
+  [ "$status" -eq 0 ] || { echo "exit $status for $2:$3"; return 1; }
+  sv_is 'length == 0' || { echo "findings for $2:$3: $output"; return 1; }
+}
+
+@test "fm_value: one shared helper, no per-key grep|head|sed value pipeline left (#3347)" {
+  [ "$(grep -cE '^ *fm_value\(\) \{' "$GATHER")" -eq 1 ]
+  [ "$(grep -cE "\^(name|model|effort):.*\| *head .*\| *sed" "$GATHER")" -eq 0 ]
+  [ "$(grep -cE '(name|model|effort)_val=\$\(fm_value (name|model|effort)\)' "$GATHER")" -eq 3 ]
+}
+
+@test "fm_value: double-quoted valid name, model and effort give zero findings (#3347)" {
+  expect_clean "$SKILL_MD" name ' "demo"'
+  expect_clean "$AGENT_MD" model ' "opus"'
+  expect_clean "$AGENT_MD" effort ' "high"'
+}
+
+@test "fm_value: single-quoted valid name, model and effort give zero findings (#3347)" {
+  expect_clean "$SKILL_MD" name " 'demo'"
+  expect_clean "$AGENT_MD" model " 'opus'"
+  expect_clean "$AGENT_MD" effort " 'high'"
+}
+
+@test "fm_value: a trailing comment outside quotes is dropped (#3347)" {
+  expect_clean "$SKILL_MD" name ' demo # note'
+  expect_clean "$AGENT_MD" model ' opus # note'
+  expect_clean "$AGENT_MD" effort ' high # note'
+  expect_clean "$SKILL_MD" name ' "demo" # note'
+}
+
+@test "fm_value: trailing whitespace on an unquoted value is trimmed (#3347)" {
+  expect_clean "$SKILL_MD" name ' demo   '
+  expect_clean "$AGENT_MD" model ' opus  '
+}
+
+# expect_one <file> <key> <rest> <type> <needle> -> exit 0, exactly one
+# skill_validation finding, of <type>, whose message contains <needle>
+expect_one() {
+  set_line "$1" "$2" "$3"
+  sv_run
+  [ "$status" -eq 0 ] || { echo "exit $status for $2:$3"; return 1; }
+  sv_is "length == 1 and .[0].type == \"$4\"" || { echo "for $2:$3: $output"; return 1; }
+  echo "$output" | jq -e --arg n "$5" '.findings_by_tool.skill_validation[0].message | contains($n)' >/dev/null \
+    || { echo "message lacks [$5]: $output"; return 1; }
+}
+
+@test "fm_value: a # inside a quote pair is part of the value (#3347)" {
+  expect_one "$SKILL_MD" name ' "de # mo"' name_mismatch 'de # mo'
+}
+
+@test "fm_value: an unmatched quote is not stripped (#3347)" {
+  expect_one "$SKILL_MD" name ' "demo' name_mismatch '"demo'
+}
+
+@test "fm_value: a # with no whitespace before it starts no comment (#3347)" {
+  expect_one "$SKILL_MD" name ' demo#x' name_mismatch 'demo#x'
+}
+
+@test "fm_value: a wrong quoted name with a comment is reported bare (#3347)" {
+  expect_one "$SKILL_MD" name ' "other" # note' name_mismatch '“other”'
+  sv_is '.[0] | .id == ("skill:" + $skill + ":name") and .severity == "high" and .field == "name"'
+  sv_is '.[0].message | (contains("\"") or contains("note")) | not'
+}
+
+@test "fm_value: a wrong quoted model with a comment is reported bare (#3347)" {
+  expect_one "$AGENT_MD" model ' "gpt" # note' invalid_model '“gpt”'
+  sv_is '.[0] | .id == ("skill:" + $agent + ":model") and .severity == "medium" and .field == "model"'
+  sv_is '.[0].message | (contains("\"") or contains("note")) | not'
+}
+
+@test "fm_value: a wrong quoted effort with a comment is reported bare (#3347)" {
+  expect_one "$AGENT_MD" effort " 'bogus' # note" invalid_effort '“bogus”'
+  sv_is '.[0] | .id == ("skill:" + $agent + ":effort") and .severity == "medium" and .field == "effort"'
+  sv_is ".[0].message | (contains(\"'\") or contains(\"note\")) | not"
+}
+
+# expect_empty <file> <key> <rest> -> exit 0 and exactly one finding: the
+# missing_field for <key>, with its id and field
+expect_empty() {
+  set_line "$1" "$2" "$3"
+  sv_run
+  [ "$status" -eq 0 ] || { echo "exit $status for $2:$3"; return 1; }
+  sv_is "length == 1 and .[0].type == \"missing_field\" and .[0].field == \"$2\" and .[0].id == (\"skill:$1:$2\")" \
+    || { echo "for $2:$3: $output"; return 1; }
+}
+
+@test "empty value: name in each empty form gives one missing_field (#3347)" {
+  for rest in '' ' ""' " ''" ' # todo'; do expect_empty "$SKILL_MD" name "$rest"; done
+}
+
+@test "empty value: model in each empty form gives one missing_field, no invalid_model (#3347)" {
+  for rest in '' ' ""' " ''" ' # todo'; do expect_empty "$AGENT_MD" model "$rest"; done
+}
+
+@test "empty value: effort in each empty form gives one missing_field, never invalid_effort (#3347)" {
+  for rest in '' ' ""' " ''" ' # todo'; do expect_empty "$AGENT_MD" effort "$rest"; done
+}
+
+@test "no duplicate missing_field: absent and empty name or model each give exactly one (#3347)" {
+  drop_key "$SKILL_MD" name
+  drop_key "$AGENT_MD" model
+  sv_run
+  [ "$status" -eq 0 ]
+  sv_is 'length == 2 and all(.type == "missing_field") and (group_by(.id) | all(length == 1))'
+  cp -R "$REPO_ROOT/tests/fixtures/clean/development-fixture/." "$WORK/development-fixture/"
+  set_line "$SKILL_MD" name ''
+  set_line "$AGENT_MD" model ' # todo'
+  sv_run
+  [ "$status" -eq 0 ]
+  sv_is 'length == 2 and all(.type == "missing_field") and (group_by(.id) | all(length == 1))'
+}
+
+@test "empty value: missing_field wording for a present-but-empty key (#3347)" {
+  set_line "$SKILL_MD" name ''
+  set_line "$AGENT_MD" model ' ""'
+  set_line "$AGENT_MD" effort " ''"
+  sv_run
+  [ "$status" -eq 0 ]
+  sv_is 'length == 3 and all(.severity == "high" and .type == "missing_field" and .files == [.file])'
+  sv_is 'any(.field == "name" and .kind == "skill" and .message == "skill \($skill): frontmatter key “name” has no value" and .fix == "give “name:” a value")'
+  sv_is 'any(.field == "model" and .kind == "agent" and .message == "agent \($agent): frontmatter key “model” has no value" and .fix == "give “model:” a value")'
+  sv_is 'any(.field == "effort" and .kind == "agent" and .message == "agent \($agent): frontmatter key “effort” has no value" and .fix == "give “effort:” one of low, medium, high, xhigh or max (or remove the line)")'
+}
+
+@test "absent key: missing_field wording is unchanged (#3347)" {
+  drop_key "$SKILL_MD" name
+  sv_run
+  [ "$status" -eq 0 ]
+  sv_is 'length == 1 and .[0].message == "skill \($skill) is missing required frontmatter key “name”" and .[0].fix == "add “name:” to the frontmatter" and .[0].severity == "high"'
+}
+
+@test "empty description or tools value gives no missing_field (#3347)" {
+  set_line "$SKILL_MD" description ''
+  set_line "$AGENT_MD" tools ' # todo'
+  sv_run
+  [ "$status" -eq 0 ]
+  sv_is 'length == 0'
+}
+
+@test "ARCHITECTURE.md effort section: an empty effort value is a missing_field (#3347)" {
+  run effort_section
+  contains "$output" "An \`effort:\` line whose value is empty after stripping one pair of quotes and a trailing comment is reported as \`missing_field\` (\`field: \"effort\"\`), never as \`invalid_effort\`."
+}
