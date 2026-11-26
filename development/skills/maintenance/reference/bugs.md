@@ -13,7 +13,10 @@ contract (`bug-spec/v1`)*.
 each analysis counts one, fixes first, in the order `list-bugs.zsh` printed.
 Each fix is a whole `resolve-issue` run that can take hours, so a run typed by
 hand is capped too. A bug the cap leaves is listed as "deferred by the cap" and waits for
-the next run.
+the next run. A repo's `.maintenance.yml` may set another figure as
+`budget.caps.bugs` (`reference/scheduled.md` § 2). Under `--scheduled` the
+cutoff and the open queue are also checked before each bug starts
+(`reference/scheduled.md` § 4).
 
 **Analysis writes to the issue only.** It changes no file in the repository,
 creates no branch and opens no PR. The falsifying test is part of the spec's

@@ -151,3 +151,26 @@ code-quality work. The coverage pre-flight (Stage 0) stays ahead of
 everything, because the planner must rank against a `main` that already holds
 it. The tool-to-concern mapping lives only in `scripts/concern-of.zsh`;
 `scripts/order-groups.zsh` applies the order.
+
+## Why a scheduled run has a budget, and what the open queue counts
+
+A run started by a scheduler has nobody watching it, so it has to stop on its
+own (#3214). Three limits do that, all applied by `scripts/apply-run-budget.zsh`
+(`reference/scheduled.md` § 2):
+
+- **The per-concern caps** keep one concern from spending the night. A concern
+  that reaches its cap yields to the next, so a long code-quality backlog
+  never starves the topic checks behind it. A run typed by hand is capped only
+  for bugs: each bug fix is a whole `resolve-issue` run that can take hours,
+  and nobody typing the command should otherwise get less than before.
+- **The open-queue cap** keeps a nightly run from flooding a maintainer who has
+  not approved for a week. It counts only open PRs the Maintenance App
+  authored that still have no approving review (`scripts/count-open-queue.zsh`).
+  Vendor PRs never count: six parked major bumps must not stop maintenance for
+  good. For the same reason a full queue stops only the groups that would open
+  a PR; triage and merging of standing vendor PRs go on, except for a language
+  whose Stage 0 the budget deferred (SKILL.md, *Stage 0*).
+- **The cutoff** keeps the run inside its window. It is checked between groups,
+  never inside one: a group whose agent has started finishes, its CI cycle and
+  approval gate included, because a half-done stage leaves a branch or a PR
+  nobody will pick up before the next night.

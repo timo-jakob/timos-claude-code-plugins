@@ -76,7 +76,7 @@ record() { tail -n 1 "$SINK"; }
   contains "$doc" '**Under `--no-merge`, Stage 0 does not run** (no push, no PR, no CI cycle, no merge), and the plugin is **not** re-invoked'
   contains "$doc" "Keep the improver's worktree branch for Phase 9's manual-review list."
   contains "$doc" '<lang>: planner did not run — the coverage pre-flight waits on the merge of <improver branch>.'
-  contains "$doc" '**An improver-only language under `--no-merge` is never reported clean.**'
+  contains "$doc" '**An improver-only language under `--no-merge`, or whose Stage 0 the budget deferred, is never reported clean.**'
   run_maintenance
   write_state '.coverage_preflight = {spawned: true, languages: ["python"]}'
   emit_record

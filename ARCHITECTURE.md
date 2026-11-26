@@ -9459,6 +9459,48 @@ worktree merges, which can re-stale them under `strict` branch protection;
 that churn is accepted so that a security-relevant update never waits
 behind code-quality work.
 
+### The run budget and `--scheduled` (#3214)
+
+Every run puts its concern-ordered queue through
+`development/skills/maintenance/scripts/apply-run-budget.zsh` before the
+`--batch=N` cap. Each group carries `opens_pr`: `true` unless its
+`isolation` is `false` (a vendor-PR stage) or it is `advisory`. The script
+returns `{run, deferred}`, each deferred group tagged with `deferred_by`:
+
+- **`cap`** — its concern already has its cap's worth of groups in `run`.
+  The caps are security 5, dependencies 5, bugs 5, codequality 10, topic 10.
+  Without `--scheduled` only the bugs cap applies.
+- **`queue`** — under `--scheduled`, a group that opens a PR while the open
+  queue is at or above its cap of 5. The queue is
+  `development/skills/maintenance/scripts/count-open-queue.zsh`'s count: open
+  PRs the Maintenance App authored with no approving review. Vendor PRs
+  never count, and a group that only triages or merges vendor PRs is never
+  deferred by `queue`, though it is not planned at all for a language whose
+  Stage 0 the budget deferred (`development/skills/maintenance/SKILL.md`,
+  *Stage 0*).
+- **`cutoff`** — under `--scheduled`, every group once the clock is at or
+  past `MAINTENANCE_CUTOFF_EPOCH`, the window's cutoff the scheduler exports.
+
+Under `--scheduled` the same script checks each group again before it
+starts, so a group in progress always finishes and nothing new starts after
+the cutoff. A repo overrides the figures in the optional `budget:` block of
+`.maintenance.yml` (`caps.<concern>`, `queue_cap`); with no block every
+default holds. `--scheduled` also makes the run never ask: each prompt of the
+skill has a scheduled path in `development/skills/maintenance/reference/scheduled.md`
+§ 1, and `tests/maintenance-scheduled-prose.bats` sweeps the skill for a
+prompt without one. The maintenance telemetry record deliberately does not
+record `--scheduled` yet: `run_modifiers` has no key for it, and every
+deferral of a scheduled run folds under Table A's `deferred` row as a
+`--batch=N` deferral does, until #3303 extends that closed contract.
+
+*Rationale:* a run nobody watches must stop on its own. The caps keep one
+concern from spending the night, the open-queue cap keeps a nightly run from
+flooding a maintainer who has not approved for a week — vendor PRs stay out
+of it, so parked major bumps never stop maintenance for good — and the
+cutoff keeps the run inside its window. A run typed by hand keeps every
+group it had before except bugs, since each bug fix is a whole
+`resolve-issue` run.
+
 ### From worktrees to PRs
 
 The Agent runtime returns the worktree branch name when the agent made

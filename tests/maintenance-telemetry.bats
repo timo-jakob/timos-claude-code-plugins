@@ -368,7 +368,7 @@ never_fatal() {  # asserts exit 0, the advisory, and an untouched sink
   contains "$doc" '2. **Otherwise**, run Stage 0 of Phase 8 first (push the improver'"'"'s branch, open a PR, monitor CI, merge, sync local main). Then **re-invoke the plugin with the same payload** to get the plan. The second invocation sees post-merge coverage and naturally lands on Phase B.'
   contains "$doc" '`coverage_preflight` — whether a dispatcher returned `improver_result` in **this invocation**, and for which languages. That holds under `--no-merge` too, where the improver ran but Stage 0 did not, so `pr` is `null` (#2151).'
   contains "$doc" '<lang>: planner did not run — the coverage pre-flight waits on the merge of <improver branch>.'
-  contains "$doc" '**An improver-only language under `--no-merge` is never reported clean.**'
+  contains "$doc" '**An improver-only language under `--no-merge`, or whose Stage 0 the budget deferred, is never reported clean.**'
   contains "$doc" "Its planner never ran, so nothing was planned for it; the line above, with the improver's branch in the manual-review list, is what it reports instead."
   doc="$(tr -s '[:space:]' ' ' < "$REPO_ROOT/docs/explanation/workflow-maintenance.md")"
   contains "$doc" 'Under `--no-merge` there is no Stage 0: the improver'"'"'s branch stays local, the target is not planned, and the summary names the branch whose merge it waits on'

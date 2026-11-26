@@ -94,6 +94,15 @@ Supported flags in `$ARGUMENTS`:
   last completed phase without asking; `--fresh` discards the checkpoint
   and starts over. Mutually exclusive (halt if both). Rejected together
   with `--dry-run` — a dry run neither writes nor consumes checkpoints.
+- `--scheduled` — the run nobody watches (#3214). It **never asks**: every
+  place this skill would ask takes the path `reference/scheduled.md` § 1 gives
+  it — a missing tool or runtime skips the work that needed it and is reported
+  (nothing is installed), an earlier run's checkpoint is discarded and reported, and any
+  other prompt takes the choice that changes nothing, reported. It also turns
+  on the whole run budget (`reference/scheduled.md` § 2): the per-concern caps,
+  the open-queue cap and the cutoff. Without it only the bugs cap applies.
+  Rejected together with `--resume` — a scheduled run never resumes. Combinable
+  with every other flag.
 - `--telemetry-file PATH` / `--telemetry-dir DIR` — where the run's one
   `telemetry/v1` record goes (#1228; see *Telemetry — stamp the run's start*
   below). Each takes a value — halt on a missing, empty or `--`-shaped one, or
@@ -119,6 +128,9 @@ as it does for `--tool`. For `bugs` that set is empty, so no language gets a
 payload and Phase 8's queue is empty; the bugs concern then runs at its
 position in Phase 8, `reference/bugs.md`. If **both** `--tool` and `--concern`
 are passed, halt with: "Pass --tool or --concern, not both."
+
+When `--scheduled` and `--resume` are both passed, halt with: "--scheduled
+never resumes an interrupted run; drop --resume."
 
 When `--batch=N` is set, validate that `N` parses as an integer ≥ 1. On a
 mismatch (non-numeric, zero, or negative), halt with: "Invalid --batch
@@ -154,7 +166,8 @@ worktrees, so it survives the session). Before Phase 1, check for one:
     A run resumed past `phase4-payload` reads its payloads from the
     `payload-<target>.json` copies in `checkpoint.zsh dir`, never from
     `<payload-dir>` or `/tmp`; it creates no `<payload-dir>` of its own.
-    Restore the **recorded flags**: a resumed run keeps its original
+    Restore the **recorded flags** except `--scheduled`, so a resumed run
+    is always attended: it keeps its original
     scope; if this invocation passes a *different* `--tool`/`--concern`/
     `--batch`, halt — changing scope requires `--fresh`. Continue at the
     first phase not recorded; phases without a checkpoint of their own
@@ -172,7 +185,9 @@ worktrees, so it survives the session). Before Phase 1, check for one:
   - **`--fresh`** (or the user picks fresh) → `checkpoint.zsh clear`,
     then Phase 1 as normal.
   - **Neither flag** → ask the user: resume from `last=<phase>` or start
-    fresh (name the checkpoint's age and phases).
+    fresh (name the checkpoint's age and phases). Under `--scheduled` there
+    is no question: take the `--fresh` path and report the discarded
+    checkpoint's last phase and age (`reference/scheduled.md` § 1).
 - **`--dry-run`** never writes checkpoints and never offers resume — it
   performs no outward actions and must not leave state a later real run
   would resume into.
@@ -326,7 +341,7 @@ model" for the rationale.
 
 **Checkpoint `phase1-detect`** (skip under `--dry-run`): save the detection
 result — everything later phases derive from — plus `base_sha` (the resume
-entry's staleness reference) and this run's flags (a resume restores them):
+entry's staleness reference) and this run's flags (a resume restores all but `--scheduled`):
 
 ```bash
 print -r -- "{\"languages\":[…],\"topics\":[…],\"primary\":\"…\",\"default_branch\":\"…\",
@@ -815,9 +830,9 @@ marker prose and then quietly skipped:
 **Each `unsupported_topics` entry is `{topic, note}`** — the note says *which*
 condition failed, because Phase 9 renders it verbatim and "we couldn't tell" must
 never be reported as "nothing to do". The same shape applies to an `unsupported`
-**language** entry. Three conditions are decided here in the partition; three more
-producers write into the same bucket later (Phase 3's gather, Phase 4's manifest
-listing, Phase 6's dispatch), so treat this table as open, not closed:
+**language** entry. Three conditions are decided here in the partition; four more
+producers write into the same bucket later (Phase 3's gather, Phase 3's state
+pre-flight under `--scheduled`, Phase 4's manifest listing, Phase 6's dispatch), so treat this table as open, not closed:
 
 | Condition that failed | Note |
 | --- | --- |
@@ -825,6 +840,7 @@ listing, Phase 6's dispatch), so treat this table as open, not closed:
 | required language absent | `marker present but required language <lang> is not in the supported set (not detected, or no gather script)` |
 | marker not evaluable | the marker's own reason — a preflight's (`jq not on PATH: the React marker could not be evaluated`) or a recipe's own stderr on a non-0/1 exit (`kubernetes marker: search did not complete — the topic was not evaluated`) |
 | gather failed (Phase 3) | `gather failed: <error>` |
+| required language skipped under `--scheduled` (Phase 3 pre-flight) | `marker present but required language <lang> was skipped under --scheduled` |
 | manifest listing did not complete (Phase 4) | `manifest listing did not complete: <stderr>` |
 | dispatch failed (Phase 6) | `dispatch failed: <error>` |
 
@@ -1193,8 +1209,8 @@ parse stdout/stderr to guess intent; trust the exit code.
 | --- | --- | --- |
 | `0`, no stdout | State is fine, no action needed | Proceed to the gather script |
 | `0`, stdout is JSON `{"recovered": true, "action": ...}` | State was rebuilt successfully. `action` says which: **`"created"`** — there was no local env, so one was **bootstrapped from scratch** (e.g. Python had no `.venv`; #624); **`"recreated"`** — an existing env was on the wrong toolchain and was rebuilt. The JSON also carries what was installed (Python: `install_target`, e.g. `.[dev]`). | Proceed to the gather script. Include the JSON in the run summary so the user knows their local env changed — word it per `action` (a freshly **created** venv vs a **recreated** one). This is a **local-only** change (no remote mutation) and is therefore acceptable under `--dry-run` too — surface it in the dry-run summary's notes exactly the same way, so the user knows dry-run touched their local env. |
-| `1`, message on stderr | User must intervene; cannot recover autonomously (typically: a tool isn't installed) | **Halt the run.** Forward the stderr message to the user verbatim. |
-| `2`, stdout JSON `{"recreate_failed": true, ...}` (or other "tried, failed" shapes) | Recovery attempt failed mid-flight; user needs to choose | Invoke the **R.4 fallback** below: surface the JSON details via `AskUserQuestion` and act on the choice. |
+| `1`, message on stderr | User must intervene; cannot recover autonomously (typically: a tool isn't installed) | **Halt the run.** Forward the stderr message to the user verbatim. Under `--scheduled`, skip that language instead — drop it from `supported` and record it in `unsupported`, noted `skipped under --scheduled` — and move every `supported_topics` entry that requires it to `unsupported_topics`, noted `marker present but required language <lang> was skipped under --scheduled`; report the stderr, and go on with the others. |
+| `2`, stdout JSON `{"recreate_failed": true, ...}` (or other "tried, failed" shapes) | Recovery attempt failed mid-flight; user needs to choose | Invoke the **R.4 fallback** below: surface the JSON details via `AskUserQuestion` and act on the choice. Under `--scheduled`, no question: skip that language as for exit 1 and report the blockers. |
 
 Anything else (non-zero with no JSON, etc.) → halt and forward stderr.
 Treat unknown failure modes as user-intervention paths rather than
@@ -1206,7 +1222,9 @@ The recovery attempt found a problem it couldn't auto-fix (typically:
 a dep cascade exhausted before the venv would install). The state
 script's JSON payload identifies the blockers; surface them via
 `AskUserQuestion` with three options that work for any language's
-state model:
+state model. Under `--scheduled` none of this runs: the language is skipped,
+with every topic that requires it, and its blockers reported
+(`reference/scheduled.md` § 1).
 
 ```text
 Question: "Local <lang> state can't be reconciled with main's declared
@@ -1765,6 +1783,8 @@ The orchestrator only needs to handle the three response shapes:
      would re-run the coverage pre-flight against an unchanged main and
      spawn a second improver. Keep the improver's worktree branch for
      Phase 9's manual-review list. This target planned no groups (#2151).
+     The same holds under `--scheduled` once the budget defers Stage 0
+     (Phase 8, *Stage 0*).
   2. **Otherwise**, run Stage 0 of Phase 8 first (push the improver's
      branch, open a PR, monitor CI, merge, sync local main). Then
      **re-invoke the plugin with the same payload** to get the plan. The
@@ -1965,7 +1985,8 @@ number), after each CI-fixer invocation (increment `ci_fix_count`), and
 at the stage's terminal state (the post-merge sync for `merged`; the
 approval gate's outcomes for the rest). A group the `--batch=N` cap
 defers is recorded too, `{ "group": …, "status": "deferred" }` with no
-`pr`. `pr` is only ever a PR the stage **opened**: a vendor-PR stage acts on
+`pr`, and so is a group the run budget defers, with its `"deferred_by"`
+beside the status (#3214). `pr` is only ever a PR the stage **opened**: a vendor-PR stage acts on
 standing PRs and keeps `pr: null`. This record is also the Phase 9
 telemetry emit's stage input, which counts groups and PRs from it.
 
@@ -2098,6 +2119,15 @@ Phase B**. The improver's worktree branch + path are in the response;
 both are returned by the Claude Code runtime because the improver
 spawned with `isolation="worktree"`.
 
+Under `--scheduled`, check the budget first, as `reference/scheduled.md` § 3
+checks a group, with the group
+`{"tool": "coverage", "concern": "codequality", "opens_pr": true}`. When it
+defers Stage 0, nothing is pushed or opened and the plugin is not re-invoked,
+as under `--no-merge`, so its language's planner never runs and none of its
+groups run, vendor-PR triage included: `phase8-stages` records no `stage0`, Phase 9's
+*"Deferred by the budget"* list names it with its `deferred_by`, and the
+improver's branch is kept for Phase 9's manual-review list.
+
 1. **Push the branch** to origin **from the improver's worktree, not
    `<repo.path>`** (#644). A pre-push hook runs wherever the push runs,
    and the project's `coverage-floor` pre-push hook needs the build
@@ -2197,7 +2227,9 @@ each with a `tool`: a gap in the mapping or in your own call, never a
 reason to guess a concern. Fix your call if it is yours; otherwise walk
 the groups in the order they came in, and name the unknown tool in the
 Phase 9 summary as a defect in `concern-of.zsh`. **Exit 1** (jq) is the
-same fallback, quoting its stderr. Why this order is
+same fallback, quoting its stderr. That queue carries no `concern`, so the
+run budget takes `reference/scheduled.md` § 2's arm for a budget that
+decided nothing. Why this order is
 `reference/pr-cycle.md` § *Why a full run works the concerns in a fixed order*.
 
 **The bugs concern has no groups; it runs at its position (#3212).** In an
@@ -2208,8 +2240,22 @@ such stage, before the first `topic` stage, else after the last stage). It
 reads the repo's open bug issues, writes a bug spec onto each eligible one
 that has none, and leaves its own `Bugs` block for the Phase 9 summary.
 
+**Run budget — every run (#3214).** Before the batch cap, pipe the ordered
+queue, each group given an `opens_pr`, through
+`"<skill-base-dir>/scripts/apply-run-budget.zsh"` as `reference/scheduled.md`
+§ 2 says: it splits the queue into `run` and `deferred`. Without
+`--scheduled` only the bugs cap applies, so an attended run keeps every other
+group. Under `--scheduled` the per-concern caps, the open-queue cap
+(`scripts/count-open-queue.zsh`) and the cutoff (`MAINTENANCE_CUTOFF_EPOCH`)
+apply too. Record each deferred group as a `deferred` stage in
+`phase8-stages`, with its `deferred_by`, for the Phase 9 *"Deferred by the
+budget"* list; the rest of this phase works `run` alone. Under `--scheduled`,
+check the budget again **before each group starts** (`reference/scheduled.md`
+§ 3): once the cutoff has passed nothing new starts, and a full queue stops
+every group that would open a PR; a group already started finishes.
+
 **Batch cap — `--batch=N` (when set).** Before applying the ordering rule
-below, decide which groups run this round. Sort the merged queue by
+below, decide which groups run this round. Sort the budget's `run` list by
 `priority_score` (descending) and keep the **top N**; the remaining `M − N`
 groups are **deferred** — not dispatched, no PR opened, no agent spawned.
 Record each deferred group (tool, description, finding count, priority
@@ -2217,7 +2263,7 @@ score) for the Phase 9 *"Deferred this batch"* list, and as a `deferred`
 stage in `phase8-stages` (§ Per-stage checkpoint records). The cap counts
 **planner groups only** — Stage 0 (the coverage pre-flight, already merged
 above) is never counted against `N`. When `--batch` is absent the batch is
-the whole plan, so this step is a no-op. Selection is by **priority**;
+all of `run`, so this step is a no-op. Selection is by **priority**;
 *execution order* among the selected groups is still set by the ordering
 rule below (priority ranks what matters most; the rule sequences the chosen
 work — the two are independent).
@@ -2289,7 +2335,13 @@ conflicts (#653).** When Phase 2.5's inventory recorded `conflicting_bot_prs`
 (open `claude-maintenance`-authored PRs at `mergeable: CONFLICTING` — a
 `--update` can't fix those; only a rebase with conflict resolution can),
 remediate them in the **standing-PR slot** — once the queue's last stage
-has run, so the rebase lands on a `main` no later stage moves. One PR at a time:
+has run, so the rebase lands on a `main` no later stage moves. One PR at a
+time; under `--scheduled`, none starts once the cutoff has passed. Check
+each PR before it starts as `reference/scheduled.md` § 3 checks a group, with
+the group `{"tool": "conflicting_bot_pr", "concern": "codequality", "opens_pr": false}`:
+a rebase opens no PR, so only the cutoff can defer it. A PR not started
+because of the cutoff is left untouched and recorded as a `deferred` stage
+with `deferred_by: cutoff`; the next run picks it up:
 
 1. **Scratch worktree on the PR head** — never the session worktree (#643):
 
@@ -2328,10 +2380,11 @@ Authorship guard — this step touches **only** `claude-maintenance`-authored
 PRs. Conflicting **vendor** PRs use their vendor mechanisms in the vendor
 stage; conflicting **human** PRs are reported, never rebased. And the run
 summary never presents a bot PR's conflict as a manual to-do — after this
-step it is either merged/armed or `escalated` with a concrete reason.
+step it is either merged/armed, `escalated` with a concrete reason, or, under
+`--scheduled`, `deferred` by `cutoff`.
 
-For each entry in the **selected batch** (the whole plan when `--batch` is
-absent; the top-N groups when it is set), in the order the ordering rule
+For each entry in the **selected batch** (all of `run` when `--batch` is
+absent; its top-N groups when it is set), in the order the ordering rule
 above sets:
 
 1. **Determine the effective base branch** — the user's current branch
@@ -2468,7 +2521,11 @@ above sets:
    - **Available** (exit 0) → spawn the agent, adding
      `<prompt_field>: <modes.available>` to its prompt, and proceed
      normally.
-   - **Missing** (exit 1) → **ask the user** via `AskUserQuestion`,
+   - **Missing** (exit 1), under `--scheduled` → no question and nothing
+     installed: the group is not started, and neither is any later group of
+     its concern for the same target. Record each `deferred` and report the
+     hook's `label` as missing (`reference/scheduled.md` § 1).
+   - **Missing** (exit 1), otherwise → **ask the user** via `AskUserQuestion`,
      naming `<label>` in the question, with exactly these three options:
 
      1. **"Install `<label>` now"** — orchestrator runs the script's
@@ -3061,7 +3118,11 @@ After pushing and opening the PR:
 
    Handle the exit code per Phase 3's script-contract table. The R.4
    fallback applies here too — the script's exit-2 JSON drives the
-   `AskUserQuestion` shape.
+   `AskUserQuestion` shape. Under `--scheduled` there is no question and no
+   halt: on exit 1 or 2 the language's remaining stages, and those of every
+   topic that requires the language, are not started, each is recorded
+   `deferred`, and the stderr or blockers are reported
+   (`reference/scheduled.md` § 1).
 
    **In-memory skip flag.** If R.4's option 1 ("fall back to previous
    configuration locally") was chosen earlier in this run, set a
@@ -3381,6 +3442,9 @@ run start; the 🚀 PRs section below shows what was tackled.>
   <For an escalated one:>
   - PR #<pr> ("<title>") — rebase attempted but <suite red on the rebased
     head | lease conflict>; left untouched, recorded escalated: <reason>
+  <For one the cutoff deferred under --scheduled:>
+  - PR #<pr> ("<title>") — not rebased: the window closed at <time>; the
+    next run picks it up
   (Never render a bot PR's conflict as a manual-rebase to-do — the pipeline
   owns its own PRs' conflicts.)
 
@@ -3411,6 +3475,23 @@ run start; the 🚀 PRs section below shows what was tackled.>
 
 --- end <lang> ---
 
+<If the run budget deferred any group (reference/scheduled.md § 2):>
+⏸ Deferred by the budget — not processed (K):
+  - <lang or topic> [<tool>] <description> — <cap: the <concern> cap of <n> was reached |
+    queue: <q> maintenance PRs wait for a human, at the cap of <n> |
+    cutoff: the window closed at <time>>
+  - ...
+
+<If --scheduled recorded any group `deferred` with no `deferred_by` (reference/scheduled.md § 1, § 2):>
+⏸ Deferred under --scheduled — not processed (K):
+  - <lang or topic> [<tool>] <description> — <budget not applied: <stderr> |
+    runtime <label> missing | pre-flight failed: <stderr or blockers>>
+  - ...
+
+<If any prompt took its --scheduled path (reference/scheduled.md § 1):>
+🌙 Scheduled run — no questions asked (K):
+  - <the prompt> → <what the run did instead>
+
 <If the bugs concern ran (unscoped or --concern=bugs, Phase 8 reached it):>
 --- Bugs ---
   <the Bugs block reference/bugs.md section 5 defines, or the list-bugs.zsh
@@ -3440,17 +3521,18 @@ Notes from the gather step:
   - <note 1>
   - <note 2>
 
-<If --no-merge:>
-Worktree branches available for manual review (no PRs opened):
-  - <branch>: <summary>
+<If --no-merge, or the budget deferred Stage 0:>
+Worktree branches available for manual review:
+  - <branch not pushed this run>: <summary>
   - ...
-  <For each language whose first dispatch returned improver_result (#2151):>
+  <For each language whose first dispatch returned improver_result and whose
+   Stage 0 did not run (#2151):>
   <lang>: planner did not run — the coverage pre-flight waits on the merge
     of <improver branch>. Merge it, then re-run to plan <lang>.
 ```
 
-**An improver-only language under `--no-merge` is never reported clean.** Its
-planner never ran, so nothing was planned for it; the line above, with the
+**An improver-only language under `--no-merge`, or whose Stage 0 the
+budget deferred, is never reported clean.** Its planner never ran, so nothing was planned for it; the line above, with the
 improver's branch in the manual-review list, is what it reports instead.
 
 Keep the tone factual. If everything was clean, say so: "No issues
