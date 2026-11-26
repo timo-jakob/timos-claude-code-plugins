@@ -267,9 +267,14 @@ linked() {
   contains "$section" 'lookup rule stated in [The `product` plugin](#the-product-plugin--outside-the-languagetopic-model)'
   contains "$section" 'The pinned version of a linked document is the commit the superproject records:'
   contains "$section" 'A linked repository is marked in `.gitmodules` by the key `reference-docs = true` on its'
+  contains "$section" "submodule's entry. The lookup reads every declared submodule and ignores the"
+  contains "$section" 'is never touched (planned, #3198: nothing reads the key yet, and no pin is'
   contains "$section" '`development/scripts/reference-docs/resolve-reference-doc.zsh [--repo-dir <dir>] <relative-path>`'
   contains "$section" 'It exits 0 found, 2 usage, 3 not found, 4 a declared submodule is not'
   contains "$section" 'holding the file is checked out at a commit other than the pinned one, and 1'
+  contains "$section" 'committed yet, since it has no pinned version. Exits 2 to 6 print nothing on'
+  contains "$section" 'stdout. Exits 4 and 6 name the `git submodule update --init` line on stderr;'
+  contains "$section" 'exit 6 says so instead when a different pin is staged but not committed.'
 }
 
 @test "docs/reference/repo-scripts.md lists both scripts" {
