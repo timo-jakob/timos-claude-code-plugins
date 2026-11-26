@@ -321,6 +321,11 @@ expect_clean() {
   expect_clean "$SKILL_MD" name ' "demo" # note'
 }
 
+@test "fm_value: trailing whitespace on an unquoted value is trimmed (#3347)" {
+  expect_clean "$SKILL_MD" name ' demo   '
+  expect_clean "$AGENT_MD" model ' opus  '
+}
+
 # expect_one <file> <key> <rest> <type> <needle> -> exit 0, exactly one
 # skill_validation finding, of <type>, whose message contains <needle>
 expect_one() {
