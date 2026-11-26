@@ -331,6 +331,37 @@ than how its code is built and kept healthy.
   `provenance.generated_by` names `/development:define-personas` stays valid.
   The string is informational, and no validator may reject the old value.
 
+### Linked reference documents
+
+A repo can link the reference documents it is built against, such as a target
+architecture or a styleguide, from a docs repository its owner controls (#3198).
+The `development` side finds one in two steps (#3351).
+
+- **The lookup.** A `development` script finds a reference document by the
+  lookup rule stated in [The `product` plugin](#the-product-plugin--outside-the-languagetopic-model),
+  and the rule is not restated here. `development` may not name a path into
+  `product/`, so it carries its own copy of the lookup,
+  `development/scripts/reference-docs/resolve-product-doc.zsh`, byte-identical
+  to the product one; a `cmp` test (`tests/development-resolve-reference-doc.bats`)
+  keeps the two equal.
+- **The pinned version.** The pinned version of a linked document is the commit the superproject records:
+  the gitlink that `HEAD` holds for the submodule the document came from, never
+  whatever happens to be checked out there.
+- **The marker.** A linked repository is marked in `.gitmodules` by the key `reference-docs = true` on its
+  submodule's entry. The lookup reads every declared submodule and ignores the
+  key; it tells maintenance which pins are its to move, so a code submodule is
+  never touched.
+- **The interface.** `development/scripts/reference-docs/resolve-reference-doc.zsh [--repo-dir <dir>] <relative-path>`
+  prints one JSON object: `path` (absolute), `origin` (`own` or `linked`),
+  `submodule` and `pinned_commit`, both null for the repo's own file and, for a
+  linked one, the submodule's path and the full SHA of its gitlink in `HEAD`.
+  It exits 0 found, 2 usage, 3 not found, 4 a declared submodule is not
+  initialised, 5 the path lies under a submodule's mount, 6 the submodule
+  holding the file is checked out at a commit other than the pinned one, and 1
+  on an internal failure, which includes a linked hit whose gitlink is not
+  committed yet, since it has no pinned version. Exits 2 to 6 print nothing on
+  stdout. Exits 4 and 6 name the `git submodule update --init` line on stderr.
+
 ## Polyrepo, contracts, and the cross-repo big picture
 
 The plugin family is *about* a single repo at a time — bootstrap runs in
