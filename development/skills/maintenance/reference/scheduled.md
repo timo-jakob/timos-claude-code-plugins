@@ -21,8 +21,8 @@ prompt and what the run did instead.
 - **A missing tool or runtime → skip the work that needed it and report.**
   That work, which its row below names, is not done this run, and nothing is
   installed.
-- **An earlier run's checkpoint → discard it when it is older than ~24h,
-  start fresh and report; a younger one ends the run untouched, reported.**
+- **An earlier run's checkpoint → discard it past the age its row below
+  gives, start fresh and report; a younger one ends the run untouched, reported.**
   The run never resumes. Of the PRs the interrupted run left open, only those Phase
   2.5's inventory or the standing-PR slot collects are picked up; any other is
   not reconciled, and its group can be planned and opened again.
@@ -32,7 +32,7 @@ The sites, in the order a run meets them:
 
 | Site | Without `--scheduled` | Under `--scheduled` |
 | --- | --- | --- |
-| Resume entry, a checkpoint and neither `--resume` nor `--fresh` | asks: resume or start fresh | `age=` beyond ~24h: `checkpoint.zsh clear`, then Phase 1; report the discarded checkpoint's last phase and age. Younger: a run may still be going, so end this run with the checkpoint untouched and report its last phase and age. Under `--dry-run`, the checkpoint is left as it is |
+| Resume entry, a checkpoint and neither `--resume` nor `--fresh` | asks: resume or start fresh | `age=` beyond 6h, since a live run saves at every stage transition: `checkpoint.zsh clear`, then Phase 1; report the discarded checkpoint's last phase and age. Younger: a run may still be going, so end this run with the checkpoint untouched and report its last phase and age. Under `--dry-run`, the checkpoint is left as it is |
 | Phase 3 state pre-flight, exit 1 (a tool is not installed) | halts the run | skip that language: drop it from `supported` and record it in `unsupported`, noted `skipped under --scheduled`, and move every topic that requires it to `unsupported_topics`; report its stderr; the other languages go on |
 | Phase 3 state pre-flight, exit 2 (R.4) | `AskUserQuestion` with three options | no question and none of the options: skip that language and the topics that require it as for exit 1, reporting the script's blockers |
 | Phase 8 step 8, the post-merge pre-flight exits 1 or 2 (R.4) | halts on exit 1; `AskUserQuestion` on exit 2, as in Phase 3 | the remaining stages of the language and of every topic that requires it are not started: each is recorded `deferred` and reported with the stderr or blockers |

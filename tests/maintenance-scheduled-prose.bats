@@ -60,7 +60,7 @@ unclaused_prompts() {
 @test "scheduled.md: an earlier run's checkpoint is discarded when stale, the run starts fresh, and it is reported" {
   local text
   text="$(flat "$SCHEDULED")"
-  contains "$text" "**An earlier run's checkpoint → discard it when it is older than ~24h, start fresh and report; a younger one ends the run untouched, reported.**"
+  contains "$text" "**An earlier run's checkpoint → discard it past the age its row below gives, start fresh and report; a younger one ends the run untouched, reported.**"
   contains "$text" "never resumes"
   contains "$text" '`checkpoint.zsh clear`, then Phase 1; report the discarded checkpoint'
 }
@@ -79,7 +79,7 @@ unclaused_prompts() {
   contains "$text" "| Phase 8 step 8, the post-merge pre-flight exits 1 or 2 (R.4) |"
   contains "$text" "| Phase 8 pre-dispatch hook, the runtime is missing |"
   contains "$text" "never \`install\`"
-  contains "$text" "| asks: resume or start fresh | \`age=\` beyond ~24h:"
+  contains "$text" "| asks: resume or start fresh | \`age=\` beyond 6h, since a live run saves at every stage transition:"
   contains "$text" "Younger: a run may still be going, so end this run with the checkpoint untouched and report its last phase and age."
   contains "$text" "Under \`--dry-run\`, the checkpoint is left as it is"
 }
@@ -167,7 +167,7 @@ unclaused_prompts() {
   local text
   text="$(flat "$SKILL")"
   contains "$text" "It also turns on the whole run budget (\`reference/scheduled.md\` § 2): the per-concern caps, the open-queue cap and the cutoff."
-  contains "$text" "Under \`--scheduled\` there is no question: when its \`age=\` is beyond ~24h, take the \`--fresh\` path and report the discarded checkpoint's last phase and age; otherwise a run may still be going, so end this one with the checkpoint untouched"
+  contains "$text" "Under \`--scheduled\` there is no question: its \`age=\` picks the path \`reference/scheduled.md\` § 1 gives, the \`--fresh\` path or ending this run with the checkpoint untouched, and either is reported."
   contains "$text" "Under \`--dry-run\` neither applies: the dry run leaves the checkpoint as it is."
   contains "$text" "Under \`--scheduled\`, skip that language instead — drop it from \`supported\` and record it in \`unsupported\`, noted \`skipped under --scheduled\` — and move every \`supported_topics\` entry that requires it to \`unsupported_topics\`, noted \`marker present but required language <lang> was skipped under --scheduled\`; report the stderr, and go on with the others."
   contains "$text" "Under \`--scheduled\`, no question: skip that language as for exit 1 and report the blockers."
@@ -180,7 +180,8 @@ unclaused_prompts() {
   local text
   text="$(flat "$SKILL")"
   contains "$text" "- \`--scheduled\` — the run nobody watches (#3214). It **never asks**"
-  contains "$text" "an earlier run's checkpoint older than ~24h is discarded and reported, a younger one ends the run untouched (a run may still be going)"
+  contains "$text" "an earlier run's checkpoint past the age § 1 gives is discarded and reported, a younger one ends the run untouched (a run may still be going)"
+  contains "$text" "Restore the **recorded flags**, \`--scheduled\` included: a resumed run keeps its original scope"
   contains "$text" "When \`--scheduled\` and \`--resume\` are both passed, halt with: \"--scheduled never resumes an interrupted run; drop --resume.\""
 }
 
@@ -191,6 +192,7 @@ unclaused_prompts() {
   contains "$text" "scripts/apply-run-budget.zsh"
   contains "$text" "scripts/count-open-queue.zsh"
   contains "$text" "check the budget again **before each group starts**"
+  contains "$text" "On a resume, *Resuming into Phase 8* reconciles the recorded stages first, and only groups with no recorded stage go through the budget: a recorded stage is never re-split."
   contains "$text" "Record each deferred group as a \`deferred\` stage in \`phase8-stages\`, with its \`deferred_by\`"
   contains "$text" "the rest of this phase works \`run\` alone"
   contains "$text" "and so is a group the run budget defers, with its \`\"deferred_by\"\` beside the status"

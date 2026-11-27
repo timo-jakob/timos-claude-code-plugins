@@ -97,8 +97,8 @@ Supported flags in `$ARGUMENTS`:
 - `--scheduled` — the run nobody watches (#3214). It **never asks**: every
   place this skill would ask takes the path `reference/scheduled.md` § 1 gives
   it — a missing tool or runtime skips the work that needed it and is reported
-  (nothing is installed), an earlier run's checkpoint older than ~24h is
-  discarded and reported, a younger one ends the run untouched (a run may
+  (nothing is installed), an earlier run's checkpoint past the age § 1 gives
+  is discarded and reported, a younger one ends the run untouched (a run may
   still be going), and any
   other prompt takes the choice that changes nothing, reported. It also turns
   on the whole run budget (`reference/scheduled.md` § 2): the per-concern caps,
@@ -188,10 +188,9 @@ worktrees, so it survives the session). Before Phase 1, check for one:
     then Phase 1 as normal.
   - **Neither flag** → ask the user: resume from `last=<phase>` or start
     fresh (name the checkpoint's age and phases). Under `--scheduled` there
-    is no question: when its `age=` is beyond ~24h, take the `--fresh` path
-    and report the discarded checkpoint's last phase and age; otherwise a run
-    may still be going, so end this one with the checkpoint untouched and
-    report its last phase and age (`reference/scheduled.md` § 1). Under
+    is no question: its `age=` picks the path `reference/scheduled.md` § 1
+    gives, the `--fresh` path or ending this run with the checkpoint
+    untouched, and either is reported. Under
     `--dry-run` neither applies: the dry run leaves the checkpoint as it is.
 - **`--dry-run`** never writes checkpoints and never offers resume — it
   performs no outward actions and must not leave state a later real run
@@ -2012,8 +2011,8 @@ says what *is*:
 - `agent_spawned` with no `pr` → the interrupted session's worktree is
   gone; re-spawn the group's agent off the current merged tip — nothing
   outward happened, so this is safe.
-- `status: deferred` (with or without `deferred_by`) → drop the record;
-  this run's budget and batch decide the group again.
+- `status: deferred` (with or without `deferred_by`) → keep it deferred;
+  a resumed run keeps its original scope, so the group is not decided again.
 - **Never** re-open an existing PR, re-dispatch a group whose PR merged,
   or spawn a second agent for a stage that has an open PR.
 - Mark every restored stage that already **merged**, already records a
