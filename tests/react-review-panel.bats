@@ -389,6 +389,7 @@ react-styleguide-reviewer|opus|react_styleguide" ]
   contains "$w" 'A `styleguide` submodule that the reviewed tree'"'"'s `.gitmodules` declares but whose directory is missing or empty is not an absent checklist.'
   contains "$w" 'your report says that the styleguide submodule is not initialised (`git submodule update --init`) and that `react_styleguide` was not reviewed'
   contains "$w" 'A full round on which neither agent is launched is NOT APPLICABLE, as above.'
+  contains "$w" 'Beside a language panel that verdict is this panel'"'"'s own: on a full round that the language panel reports NOT APPLICABLE (a stylesheet or `index.html` with no JavaScript or TypeScript file)'
   contains "$w" 'its verdict decides the round and the driving session joins none of this panel'"'"'s findings (#3372)'
 }
 
