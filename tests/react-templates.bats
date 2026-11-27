@@ -999,5 +999,5 @@ GATE="$BATS_TEST_DIRNAME/../development/skills/bootstrap/templates/languages/jav
   contains "$section" 'Every other file renders under its ordinary rules, so the app gains `ui-gates.json`, the reporting and the default-view test, whose own scan uses the tag set.'
   contains "$section" 'Write it whenever the overlay applies, even when the skips below withhold the gate files.'
   contains "$section" 'take the `vitest.config.ts` skip consequences below and name the missing setup module in the Step 5 item.'
-  contains "$section" 'so ask before rendering `src/test/setup.ts` and the canary: idempotency rule 3'"'"'s diff prompt for a file on disk, and a render-or-skip question that defaults to skip for an absent one. A skip keeps the withholding above.'
+  contains "$section" 'On a re-run whose `ui-gates.json` already holds an `a11y` key, the `own-axe` rule cannot tell the app'"'"'s own axe package from the one an earlier run of this step installed, so ask before rendering `src/test/setup.ts` and the canary: idempotency rule 3'"'"'s diff prompt for a file on disk, and a render-or-skip question that defaults to skip for an absent one. A skip keeps the withholding above.'
 }
