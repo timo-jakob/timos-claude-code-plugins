@@ -438,6 +438,18 @@ Both checks block a review round, and the reviewer reports nothing below them. T
 hooks check is aligned with the rules-of-hooks rule the bootstrap overlay's ESLint
 config enforces, so the reviewer and a bootstrapped repo agree.
 
+**The styleguide check
+([#3019](https://github.com/timo-jakob/timos-claude-code-plugins/issues/3019)).**
+When the repo has the platform styleguide's `styleguide/CHECKLIST.md` at its root
+and a change touches a UI file (`.jsx`, `.tsx`, `.css`, `.scss` or `index.html`),
+the panel also runs `react-styleguide-reviewer` under a second dimension,
+`react_styleguide`. It reads the checklist on every run and checks the change
+against each item tagged `[review]`, the rules no linter can decide, and against
+WCAG 2.2 AA. Each violation it can show in the source is a `WARNING` that quotes
+the item's text and names its `STYLEGUIDE.md` rule. `[design]` and `[mechanical]`
+items are left to the design step and to CI. Without the checklist the panel runs
+as before.
+
 **Bootstrap overlay
 ([#957](https://github.com/timo-jakob/timos-claude-code-plugins/issues/957)).**
 When the React marker matches, `/development:bootstrap` layers the common React
@@ -456,13 +468,14 @@ replacing it. The templates live with every other bootstrap template, in
 | Skill | Command | Description |
 | ------- | --------- | ------------- |
 | Maintenance dispatcher | (dispatch target of `/development:maintenance`) | Topic dispatcher for React findings. Validates the v2 payload and returns a plan from the executable `plan-dispatch.zsh`. Routes `a11y` and `lighthouse_budget` to `react-webui-quality-advisor`, one group per tool ([#1948](https://github.com/timo-jakob/timos-claude-code-plugins/issues/1948)). |
-| Review | `/development-react:review [paths]` | Runs `react-idioms-reviewer` over the change — the `react_idioms` dimension. `/development:resolve-issue` runs it beside `/development-javascript:review` on a React repo ([#959](https://github.com/timo-jakob/timos-claude-code-plugins/issues/959)) |
+| Review | `/development-react:review [paths]` | Runs `react-idioms-reviewer` over the change — the `react_idioms` dimension — and, on a repo with `styleguide/CHECKLIST.md`, `react-styleguide-reviewer` — the `react_styleguide` dimension (#3019). `/development:resolve-issue` runs it beside `/development-javascript:review` on a React repo ([#959](https://github.com/timo-jakob/timos-claude-code-plugins/issues/959)) |
 
 **Agents:**
 
 | Agent | Model | Focus |
 | ------- | ------- | ------- |
 | react-idioms-reviewer | opus | Rules of Hooks and stale closures (CRITICAL), server state outside TanStack Query (WARNING) (#959) |
+| react-styleguide-reviewer | opus | The `[review]` items of `styleguide/CHECKLIST.md` and WCAG 2.2 AA violations shown in the source (WARNING) (#3019) |
 | react-webui-quality-advisor | opus | Triages `a11y` and `lighthouse_budget` findings: a narrow setup-file matcher import and `jq` edits to `lighthouserc.json` budgets and timing gates are fixed; a missing axe package, a missing or invalid config and a preset are escalated (#1948) |
 
 ## development-kubernetes

@@ -499,15 +499,16 @@ write_pkg() {
   [ "$status" -eq 1 ]
 }
 
-@test "the development-react plugin.json exists at v0.3.x and marketplace.json matches it in lockstep" {
-  # The slice label is pinned (0.3.), the patch digit is not: a content change
+@test "the development-react plugin.json exists at v0.4.x and marketplace.json matches it in lockstep" {
+  # The slice label is pinned (0.4.), the patch digit is not: a content change
   # to the react panel moves only the patch (#2010), and an exact pin here would
-  # red on every one of them. Lockstep is asserted as equality between the two.
+  # red on every one of them. The label moves only when the slice grows — the
+  # styleguide reviewer (#3019) moved it from 0.3. to 0.4. Lockstep is asserted as equality between the two.
   plugin="$REPO_ROOT/development-react/.claude-plugin/plugin.json"
   [ -f "$plugin" ]
   run jq -er '.version' "$plugin"
   [ "$status" -eq 0 ]
-  printf '%s\n' "$output" | grep -Eq '^0\.3\.[0-9]+$'
+  printf '%s\n' "$output" | grep -Eq '^0\.4\.[0-9]+$'
   local pv="$output"
 
   run jq -er '.plugins[] | select(.name == "development-react") | .version' \

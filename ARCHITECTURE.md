@@ -331,6 +331,42 @@ than how its code is built and kept healthy.
   `provenance.generated_by` names `/development:define-personas` stays valid.
   The string is informational, and no validator may reject the old value.
 
+### Linked reference documents
+
+A repo can link the reference documents it is built against, such as a target
+architecture or a styleguide, from a docs repository its owner controls (#3198).
+The `development` side finds one in two steps (#3351).
+
+- **The lookup.** A `development` script finds a reference document by the
+  lookup rule stated in [The `product` plugin](#the-product-plugin--outside-the-languagetopic-model),
+  and the rule is not restated here. `development` may not name a path into
+  `product/`, so it carries its own copy of the lookup,
+  `development/scripts/reference-docs/resolve-product-doc.zsh`, byte-identical
+  to the product one; a `cmp` test (`tests/development-resolve-reference-doc.bats`)
+  keeps the two equal.
+- **The pinned version.** The pinned version of a linked document is the commit the superproject records:
+  the gitlink that `HEAD` holds for the submodule the document came from, never
+  whatever happens to be checked out there. Only commits are compared: a
+  document edited in place or untracked in the submodule's checkout is not
+  detected, and `pinned_commit` then names the checkout's commit, not those
+  bytes.
+- **The marker.** A linked repository is marked in `.gitmodules` by the key `reference-docs = true` on its
+  submodule's entry. The lookup reads every declared submodule and ignores the
+  key; it will tell maintenance which pins are its to move, so a code submodule
+  is never touched (planned, #3198: nothing reads the key yet, and no pin is
+  moved for you).
+- **The interface.** `development/scripts/reference-docs/resolve-reference-doc.zsh [--repo-dir <dir>] <relative-path>`
+  prints one JSON object: `path` (absolute), `origin` (`own` or `linked`),
+  `submodule` and `pinned_commit`, both null for the repo's own file and, for a
+  linked one, the submodule's path and the full SHA of its gitlink in `HEAD`.
+  It exits 0 found, 2 usage, 3 not found, 4 a declared submodule is not
+  initialised, 5 the path lies under a submodule's mount, 6 the submodule
+  holding the file is checked out at a commit other than the pinned one, and 1
+  on an internal failure, which includes a linked hit whose gitlink is not
+  committed yet, since it has no pinned version. Exits 2 to 6 print nothing on
+  stdout. Exits 4 and 6 name the `git submodule update --init` line on stderr;
+  exit 6 says so instead when a different pin is staged but not committed.
+
 ## Polyrepo, contracts, and the cross-repo big picture
 
 The plugin family is *about* a single repo at a time — bootstrap runs in
@@ -3912,16 +3948,26 @@ dispatch (#2008)* rule. The review skill's Step 1 table is the round's plan.
 plan` lists `development-react:review` in `topic_review_skills` when
 `is_react` fires, and it runs beside the JavaScript language panel rather than
 instead of it (*Review-panel invocation contract*, below). It extends the enum with
-exactly one dimension, **`react_idioms`** (`react-idioms-reviewer`), and carries
-none of the core five: the JavaScript panel beside it reviews those. The name
+two dimensions, **`react_idioms`** (`react-idioms-reviewer`) and
+**`react_styleguide`** (`react-styleguide-reviewer`, #3019), and carries
+none of the core five: the JavaScript panel beside it reviews those. Each name
 carries the topic prefix every topic-panel dimension must carry, so it can never
 collide with a language panel's dimension in the one round both join. Its
 severity is **fixed per check** in the reviewer itself, so the loop converges:
 a Rules of Hooks violation (including a stale closure the reviewer can show) is
 `CRITICAL`, server state fetched outside TanStack Query (ad-hoc `useEffect`
 fetching, or an alternative server-state library) is `WARNING`; the reviewer
-has no other check. Like every non-core dimension it inherits the `build-dossier.zsh` `$core`
-gap (#1148).
+has no other check. `react_styleguide` runs only when the reviewed repo has
+`styleguide/CHECKLIST.md` at its root and the round's scope holds a UI file, or
+when the carry holds one of its entries. On a full round that the language
+panel reports NOT APPLICABLE, the loop joins none of its findings (#3372). Its bar is
+one row: a violated
+`[review]` item of that checklist, read from the file on every run and quoted
+verbatim with its `STYLEGUIDE.md#<anchor>` rule, and a WCAG 2.2 AA violation the
+reviewer can show in the source, are each `WARNING`, whatever the repo's
+accessibility gate does; `[design]` and `[mechanical]` items are never checked,
+and a tool-verdict claim is capped by the evidence rule. Like every non-core
+dimension each inherits the `build-dossier.zsh` `$core` gap (#1148).
 
 ### Scope-bounded severity (#982)
 
