@@ -67,7 +67,7 @@ the reason:
 
 | Reason | What to do |
 | --- | --- |
-| `not an absolute URL` | pass the full URL or an absolute path; a relative one such as `../styleguide.git` is refused |
+| `not an absolute URL` | pass the repository's full URL (`https://…` or `git@host:org/repo.git`); a relative one such as `../styleguide.git` is refused |
 | `unreachable` | check the URL and your access to it, then re-run bootstrap |
 | `no vX.Y.Z tag` | tag a release in the styleguide repository, then re-run |
 | `styleguide/ exists and is not a submodule` | move your own `styleguide/` directory out of the way, then re-run |

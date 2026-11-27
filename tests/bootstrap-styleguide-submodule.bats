@@ -279,6 +279,14 @@ tagged_commit() { git -C "$1" rev-parse "refs/tags/$2^{commit}"; }
   [ "$output" = "styleguide: present" ]
 }
 
+@test "styleguide: a .gitmodules path written with a trailing slash still reads as present" {
+  make_app "$W/app"
+  printf '[submodule "ui"]\n\tpath = styleguide/\n\turl = %s\n' "$W/no-such-remote" > "$W/app/.gitmodules"
+  run zsh "$SCRIPT" --repo "$W/app" --url "$W/no-such-remote"
+  [ "$status" -eq 0 ]
+  [ "$output" = "styleguide: present" ]
+}
+
 @test "styleguide: a submodule name or path holding a space is compared whole, never word-split" {
   make_app "$W/app"
   printf '[submodule "UI styleguide"]\n\tpath = styleguide\n\turl = %s\n' "$W/no-such-remote" > "$W/app/.gitmodules"
