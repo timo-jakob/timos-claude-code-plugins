@@ -89,10 +89,12 @@ page, a layout, a style — read `styleguide/STYLEGUIDE.md` and build to its
 rules. Before you declare UI work done, check the change against
 `styleguide/CHECKLIST.md` and fix every item it fails.
 
-If `styleguide/` is empty, the submodule is not checked out yet: run
-`git submodule update --init styleguide` first. The styleguide is read-only
-here — a change to it belongs in its own repository, and a new version reaches
-this one as a bump of the submodule's pin.
+If `styleguide/` is empty, or `git status` lists `styleguide` as modified, the
+checkout is not at the pinned commit: run
+`git submodule update --init styleguide` before you read it. The styleguide is
+read-only here — a change to it belongs in its own repository, and a new
+version reaches this one as a bump of the submodule's pin. Never stage
+`styleguide` in a commit of your own: only a pin-bump PR moves it.
 <!-- --- STYLEGUIDE-END --- -->
 
 ## Who decides what

@@ -210,6 +210,16 @@ tagged_commit() { git -C "$1" rev-parse "refs/tags/$2^{commit}"; }
     [ "$status" -eq 0 ]
     cmp -s "$f" "$W/prior" || { echo "appended after '$present'"; false; }
   done
+  # a line that only holds the heading text is not the heading: the section is appended
+  local mention
+  for mention in 'See `## Read the styleguide before UI changes` below.' '### Read the styleguide before UI changes'; do
+    printf '# Ours\n\n%s\n' "$mention" > "$f"
+    cp "$f" "$W/prior"
+    run zsh "$SCRIPT" --repo "$W/app"
+    [ "$status" -eq 0 ]
+    [ "$(grep -cx '## Read the styleguide before UI changes' "$f")" -eq 1 ] || { echo "no section after '$mention'"; false; }
+    head -c "$(wc -c < "$W/prior" | tr -d ' ')" "$f" | cmp -s - "$W/prior"
+  done
 }
 
 # --- present: the re-run --------------------------------------------------------
