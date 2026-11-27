@@ -1441,6 +1441,34 @@ them blocks.
   Blocking on its static reading of someone else's config would put a heuristic
   where the app's own CI already holds the real verdict.
 
+**The per-repo gate switch (#3018).** A UI repo carries a committed
+`ui-gates.json` at its root, `{"schema": "ui-gates/v1", "a11y": "warn" | "block"}`,
+written by bootstrap. `block` fails the build on a violation; `warn` reports it as
+a PR annotation and in the job summary and keeps the job green. A missing file or
+key means `block`; any other value fails the check, naming the file, the key and
+the allowed values. Later gates add their own key to the same file. *Rationale:*
+the mode must be readable by a local test run and reviewable in a pull request,
+which a repository variable is not.
+
+**Blocking by default, `warn` as a declared on-ramp (#3018).** The axe matcher
+reads the repo's `a11y` mode. In `block`, the mode a freshly bootstrapped app
+gets, a violation fails the pull request. In `warn`, the mode bootstrap gives a
+repo that already has UI code, the same violation is annotated on the pull
+request and counted in the job summary, and the job stays green. The a11y canary
+does not follow the mode: it turns red in both when the matcher is unwired.
+
+**Fresh or existing (#3018).** A repo has UI code when it holds at least one
+`.tsx` or `.jsx` file outside tests other than `src/main.tsx` and `src/App.tsx`,
+the two files create-vite generates. Bootstrap writes `warn` for such a repo and
+`block` for one holding only those two.
+
+The gate counts only violations of rules tagged `wcag2a`, `wcag2aa`, `wcag21a`,
+`wcag21aa` or `wcag22aa`, in the matcher and in the default-view test's page scan
+alike; axe's best-practice rules are not part of it. Bootstrap's
+`ui-gates-mode.zsh` decides the mode it writes and states the full rule order:
+an app bootstrapped before #3018 keeps `block`, and an app with its own axe setup
+gets `warn`.
+
 The audit accepts **exactly the layout #1946 renders**, and reads only root
 files: a monorepo whose React app lives below the root is a known gap, judged
 against the root. Every finding is

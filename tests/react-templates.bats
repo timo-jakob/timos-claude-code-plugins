@@ -27,9 +27,10 @@ setup() {
   mkdir -p "$OUT"
 }
 
-# The seventeen template sources, repo-relative to the react/ overlay: #957's six,
-# the four React Query binding files (#958, SKILL.md §3k.6) and the seven WebUI
-# gate files (#1946). Sorted as `LC_ALL=C sort` orders them.
+# The twenty template sources, repo-relative to the react/ overlay: #957's six,
+# the four React Query binding files (#958, SKILL.md §3k.6), the seven WebUI
+# gate files (#1946) and the WCAG gate switch's three (#3018). Sorted as
+# `LC_ALL=C sort` orders them.
 REACT_FILES=(
   .github/workflows/webui-quality-noop.yml.tmpl
   .github/workflows/webui-quality.yml.tmpl
@@ -38,13 +39,16 @@ REACT_FILES=(
   eslint.config.js
   gitignore
   lighthouserc.json
+  scripts/a11y-report.mjs
   src/Greeting.test.tsx
   src/api/hooks.test.tsx
   src/api/hooks.ts
   src/api/index.ts
   src/test/a11y-canary.test.tsx
+  src/test/a11y-gate.ts
   src/test/query-wrapper.tsx
   src/test/setup.ts
+  tests/e2e/default-view.spec.ts
   tests/e2e/playwright.config.ts
   tests/e2e/smoke.spec.ts
   vitest.config.ts
@@ -54,8 +58,11 @@ REACT_FILES=(
 # blocks list them. `gitignore` is merged, never rendered, so it is not here.
 WEBUI_FILES=(
   src/test/a11y-canary.test.tsx
+  src/test/a11y-gate.ts
+  scripts/a11y-report.mjs
   tests/e2e/playwright.config.ts
   tests/e2e/smoke.spec.ts
+  tests/e2e/default-view.spec.ts
   lighthouserc.json
   .github/workflows/webui-quality.yml.tmpl
   .github/workflows/webui-quality-noop.yml.tmpl
@@ -102,7 +109,7 @@ has() {
   grep -qF -- "$2" "$1" || { echo "missing in ${1#"$REPO_ROOT"/}: $2"; return 1; }
 }
 
-@test "react: the template tree contains exactly the seventeen blessed files" {
+@test "react: the template tree contains exactly the twenty blessed files" {
   local expected actual
   expected="$(printf '%s\n' "${REACT_FILES[@]}")"
   # .DS_Store is Finder litter, not a template (the kubernetes skeleton false red)
@@ -119,8 +126,9 @@ has() {
     [ "$status" -eq 0 ] || { echo "render $v: $output"; false; }
     run grep -rqE '\{\{[A-Z_][A-Z0-9_]*\}\}' "$OUT/$v"
     [ "$status" -eq 1 ]
-    for f in src/test/setup.ts src/Greeting.test.tsx src/test/a11y-canary.test.tsx \
-      tests/e2e/playwright.config.ts tests/e2e/smoke.spec.ts lighthouserc.json; do
+    for f in src/test/setup.ts src/Greeting.test.tsx src/test/a11y-canary.test.tsx src/test/a11y-gate.ts \
+      scripts/a11y-report.mjs tests/e2e/playwright.config.ts tests/e2e/smoke.spec.ts \
+      tests/e2e/default-view.spec.ts lighthouserc.json; do
       cmp -s "$OUT/$v/languages/javascript/react/$f" "$RX/$f" || { echo "$v: $f differs from source"; false; }
     done
     # the two workflows lose .tmpl and carry the default branch; nothing else changes
@@ -654,7 +662,7 @@ WQN="webui-quality-noop.yml.tmpl"
       contains "$body" "languages/javascript/react/$f"
     done
   done
-  contains "$section" 'axe-core @playwright/test @lhci/cli'
+  contains "$section" 'axe-core @playwright/test @lhci/cli @axe-core/playwright @types/node'
 }
 
 @test "webui: lighthouserc.json gates only the two byte budgets, at error, with filesystem upload" {
@@ -680,17 +688,19 @@ WQN="webui-quality-noop.yml.tmpl"
   has "$c" 'import axe from "axe-core";'
   has "$c" 'render(<img src="/logo.svg" />);'
   has "$c" 'expect(results.violations.length).toBeGreaterThanOrEqual(1);'
-  has "$c" 'expect(results).not.toHaveNoViolations();'
+  # the canary forces block and never reports, so it is red-on-unwired in warn
+  # too and its deliberate violation is never counted (#3018)
+  has "$c" 'expect(results).not.toHaveNoViolations({ mode: "block", report: false });'
   # the matcher is family-owned, built on bare axe-core, and registered in setup.ts
   has "$s" 'import type { AxeResults } from "axe-core";'
   grep -qxF 'expect.extend({' "$s"
-  grep -qxF '  toHaveNoViolations(results: AxeResults) {' "$s"
-  has "$s" 'pass: violations.length === 0,'
+  grep -qxF '  toHaveNoViolations(results: AxeResults, options: A11yGateOptions = {}) {' "$s"
+  has "$s" 'pass: mode === "warn" || violations.length === 0,'
   # the type augmentation the canary's matcher call needs under `tsc -b`, in
   # Vitest 5's two-parameter shape
   grep -qxF 'declare module "vitest" {' "$s"
   grep -qxF '  interface Matchers<R, T> {' "$s"
-  grep -qxF '    toHaveNoViolations: () => R;' "$s"
+  grep -qxF '    toHaveNoViolations: (options?: A11yGateOptions) => R;' "$s"
   # no wrapper package is imported anywhere in the overlay (comments may name them)
   run grep -rlE 'from "(vitest|jest)-axe' "$RX"
   [ "$status" -eq 1 ]
@@ -745,7 +755,7 @@ WQN="webui-quality-noop.yml.tmpl"
 
 @test "webui: the React gitignore fragment ignores the Playwright and Lighthouse output" {
   local g="$RX/gitignore" e
-  for e in playwright-report/ test-results/ .lighthouseci/; do
+  for e in playwright-report/ test-results/ .lighthouseci/ a11y-report.jsonl; do
     grep -qxF "$e" "$g" || { echo "gitignore lacks $e"; false; }
   done
   # merged by §3k.5, like any language fragment
@@ -825,7 +835,7 @@ WQN="webui-quality-noop.yml.tmpl"
   local section script total
   section="$(react_step)"
   ends_with "$section" "$STEP_END"
-  contains "$section" 'So is a missing `.github/workflows/webui-quality.yml` or `.github/workflows/webui-quality-noop.yml` — a React app bootstrapped before the WebUI gates (#1946), or one that lost the noop.'
+  contains "$section" 'So is a missing `.github/workflows/webui-quality.yml` or `.github/workflows/webui-quality-noop.yml` — a React app bootstrapped before the WebUI gates (#1946), or one that lost the noop —'
   contains "$section" '**The two jobs are required contexts:** `branch-protection.sh` adds `e2e (playwright)` and `lighthouse (budgets)` whenever **both** `.github/workflows/webui-quality.yml` and its noop are on disk'
   # the prose budgets are the JSON's, so neither can drift alone
   script="$(jq -r '.ci.assert.assertions["resource-summary:script:size"][1].maxNumericValue' "$RX/lighthouserc.json")"
@@ -839,10 +849,141 @@ WQN="webui-quality-noop.yml.tmpl"
   local section
   section="$(react_step)"
   ends_with "$section" "$STEP_END"
-  contains "$section" '**Withhold the whole WebUI gate set with them**: the a11y canary, `tests/e2e/playwright.config.ts`, `tests/e2e/smoke.spec.ts`, `lighthouserc.json` and both `webui-quality*.yml` workflows.'
+  contains "$section" '**Withhold the whole WebUI gate set with them**: the a11y canary, `src/test/a11y-gate.ts`, `scripts/a11y-report.mjs`, `tests/e2e/playwright.config.ts`, `tests/e2e/smoke.spec.ts`, `tests/e2e/default-view.spec.ts`, `lighthouserc.json` and both `webui-quality*.yml` workflows.'
   contains "$section" 'with the workflows absent `branch-protection.sh` requires neither WebUI context.'
   contains "$section" '**except the a11y canary whenever `src/test/setup.ts` does not end up as the variant'"'"'s template** (its own prompt resolved to skip)'
   contains "$section" 'drop the withheld paths from the list before running it.'
   # a pre-#1946 app's family files reach that skip branch through a prompt, not an overwrite
   contains "$section" 'Neither is a known predecessor, so each takes the rule-3 prompt below, whose diff is exactly those additions; a skip withholds the gates as the skip paragraph below says.'
+}
+
+# --- the WCAG gate switch (#3018) ---------------------------------------------
+
+GATE="$BATS_TEST_DIRNAME/../development/skills/bootstrap/templates/languages/javascript/react/src/test/a11y-gate.ts"
+
+@test "wcag: the gate module names exactly the five WCAG tags, wcag22aa included, and filters by them" {
+  grep -qxF 'export const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"] as const;' "$GATE"
+  # exactly one tag list: no best-practice tag sneaks in anywhere in the module
+  run grep -c 'wcag2a' "$GATE"
+  [ "$output" = 1 ]
+  run grep -E 'best-practice"|"(section508|experimental|cat\.)' "$GATE"
+  [ "$status" -eq 1 ]
+  has "$GATE" 'return violations.filter((v) => v.tags.some((tag) => (WCAG_TAGS as readonly string[]).includes(tag)));'
+  # the matcher and the page scan both count through the filter
+  has "$RX/src/test/setup.ts" 'const violations = wcagViolations(results.violations);'
+  has "$RX/tests/e2e/default-view.spec.ts" '.withTags([...WCAG_TAGS])'
+  has "$RX/tests/e2e/default-view.spec.ts" 'const violations = wcagViolations(results.violations);'
+}
+
+@test "wcag: the mode is read from ui-gates.json — missing means block, any other value fails naming file, key and values" {
+  has "$GATE" 'const gatesFile = resolve(process.cwd(), "ui-gates.json");'
+  has "$GATE" 'if (!existsSync(gatesFile)) return "block";'
+  has "$GATE" 'if (value === undefined) return "block";'
+  has "$GATE" 'if (value === "warn" || value === "block") return value;'
+  has "$GATE" "const allowed = 'the \"a11y\" key in ui-gates.json must be \"warn\" or \"block\"';"
+  has "$GATE" 'throw new Error(`${allowed}, got ${JSON.stringify(value)}`);'
+  # read at load, so an invalid value fails every component test file and the Playwright run
+  grep -qxF 'const repoMode = readA11yMode();' "$RX/src/test/setup.ts"
+  grep -qxF 'const mode = readA11yMode();' "$RX/tests/e2e/default-view.spec.ts"
+}
+
+@test "wcag: warn passes and reports, block fails; the canary alone opts out of the report" {
+  local s="$RX/src/test/setup.ts"
+  has "$s" 'const mode = options.mode ?? repoMode;'
+  has "$s" 'if (options.report !== false) {'
+  has "$s" 'recordViolations(violations, "vitest", this.currentTestName ?? "", mode);'
+  has "$s" 'pass: mode === "warn" || violations.length === 0,'
+  # the report record carries rule id, selector and success criterion
+  has "$GATE" 'rule: v.id,'
+  has "$GATE" 'selector: selectorOf(node),'
+  has "$GATE" 'criteria: successCriteria(v.tags),'
+  has "$GATE" 'const m = /^wcag(\d)(\d)(\d+)$/.exec(tag);'
+  # only the canary passes report: false
+  run grep -rlF 'report: false' "$RX"
+  [ "$output" = "$RX/src/test/a11y-canary.test.tsx" ]
+}
+
+@test "wcag: the default-view spec mocks before navigating, never interacts, and checks #root and page errors" {
+  local d="$RX/tests/e2e/default-view.spec.ts" route goto
+  route="$(grep -n 'await page.route(' "$d" | cut -d: -f1)"
+  goto="$(grep -n 'await page.goto("/");' "$d" | cut -d: -f1)"
+  [ -n "$route" ] && [ -n "$goto" ]
+  [ "$route" -lt "$goto" ]
+  # exactly one mocked response
+  [ "$(grep -c 'page.route(' "$d")" = 1 ]
+  # code lines only: the comment that states the rule names the verbs it bans
+  run grep -nE '\.(click|dblclick|tap|press|pressSequentially|type|fill|hover|check|selectOption|dragTo)\(|mouse\.|keyboard\.|touchscreen\.|scroll|wheel' \
+    <(grep -vE '^[[:space:]]*//' "$d")
+  [ "$status" -eq 1 ] || { echo "interaction in default-view: $output"; false; }
+  has "$d" 'page.locator("#root *").filter({ hasText: /\S/, visible: true });'
+  has "$d" 'await expect(content.first()).toBeVisible();'
+  has "$d" 'expect(pageErrors).toEqual([]);'
+  has "$d" 'import AxeBuilder from "@axe-core/playwright";'
+  has "$d" 'recordViolations(violations, "playwright", test.info().title, mode);'
+  has "$d" 'if (mode === "block") {'
+}
+
+@test "wcag: the report step runs after the tests in both jobs, in both modes, never on a cancel" {
+  local w="$RX/.github/workflows/$WQ" q
+  [ "$(yq -r '.jobs.e2e.steps[] | select(.name == "Accessibility report (axe)") | .if' "$w")" = '${{ !cancelled() }}' ]
+  [ "$(yq -r '.jobs.e2e.steps[] | select(.name == "Accessibility report (axe)") | .run' "$w")" \
+    = 'node scripts/a11y-report.mjs "default view (Playwright)"' ]
+  for q in public/.github/workflows/quality-public.yml.tmpl private/.github/workflows/quality-private.yml.tmpl; do
+    has "$TEMPLATES/$q" "if: \${{ !cancelled() && hashFiles('scripts/a11y-report.mjs') != '' }}"
+    has "$TEMPLATES/$q" 'run: node scripts/a11y-report.mjs "component tests"'
+    # after the vitest step, inside the JavaScript block
+    run awk '/name: Test \+ coverage \(vitest\)/{t=NR} /name: Accessibility report \(axe\)/{a=NR} /JAVASCRIPT-END/{e=NR} END{exit !(t && a > t && e > a)}' "$TEMPLATES/$q"
+    [ "$status" -eq 0 ] || { echo "report step misplaced in $q"; false; }
+  done
+}
+
+@test "wcag: the report script annotates each violation, counts them in the summary even at 0, and exits 0" {
+  local r="$RX/scripts/a11y-report.mjs" work
+  command -v node > /dev/null || skip "node not installed"
+  work="$BATS_TEST_TMPDIR/app"
+  mkdir -p "$work"
+  # no report file at all: a count of 0
+  run env -u GITHUB_STEP_SUMMARY sh -c "cd '$work' && node '$r' 'component tests'"
+  [ "$status" -eq 0 ]
+  contains "$output" '**0 violation(s)**, mode `block` (ui-gates.json).'
+  printf '{\n  "schema": "ui-gates/v1",\n  "a11y": "warn"\n}\n' > "$work/ui-gates.json"
+  # one violation, recorded twice (a Playwright retry): one annotation, one row, a count of 1
+  local rec='{"source":"vitest","test":"nameless button","mode":"warn","rule":"button-name","selector":"button","criteria":"4.1.2","impact":"critical","help":"Buttons must have discernible text","helpUrl":""}'
+  printf '%s\n%s\n' "$rec" "$rec" > "$work/a11y-report.jsonl"
+  : > "$work/summary.md"
+  run env GITHUB_STEP_SUMMARY="$work/summary.md" sh -c "cd '$work' && node '$r' 'component tests'"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^::warning ' <<< "$output")" = 1 ]
+  contains "$output" '::warning title=axe button-name (WCAG 4.1.2)::button: Buttons must have discernible text [nameless button]'
+  grep -qF '**1 violation(s)**, mode `warn` (ui-gates.json).' "$work/summary.md"
+  grep -qxF '| button-name | `button` | 4.1.2 | critical | nameless button |' "$work/summary.md"
+}
+
+@test "wcag: SKILL.md §3k.5 decides the mode in Step 2, writes ui-gates.json and states the own-axe and once-only rules" {
+  local section
+  section="$(react_step)"
+  ends_with "$section" "$STEP_END"
+  contains "$section" '**The a11y mode (#3018) is decided in Step 2 as well**'
+  contains "$section" '"<skill-base-dir>/scripts/ui-gates-mode.zsh" mode --repo .'
+  contains "$section" '"<skill-base-dir>/scripts/ui-gates-mode.zsh" write --repo . --mode <warn|block>'
+  contains "$section" 'An `a11y` value already in the file is never changed, and every other key in the file is preserved.'
+  contains "$section" '**The #1946 axe files are known predecessors (#3018).**'
+  contains "$section" '"<skill-base-dir>/scripts/ui-gates-mode.zsh" predecessor --file src/test/setup.ts'
+  contains "$section" 'A customised one takes idempotency rule 3'"'"'s diff prompt'
+  contains "$section" 'gets no second matcher: drop `src/test/setup.ts` and the a11y canary from the render list'
+  contains "$section" 'The switch does not govern the app'"'"'s own axe assertions.'
+  contains "$section" '**Generated once: `tests/e2e/default-view.spec.ts` (#3018).**'
+  contains "$section" 'An existing file is never overwritten, diffed or prompted for, and it is not compared with the template in State D. A deleted one is rendered again on the next run'
+  contains "$section" 'a missing `ui-gates.json` or `a11y` key in it, `src/test/a11y-gate.ts`, `scripts/a11y-report.mjs` or `tests/e2e/default-view.spec.ts`'
+  contains "$section" 'Keep the printed `mode` and `rule` for the render below, and list the mode in the plan.'
+  contains "$section" 'Exit 3 (a root `package.json` that is missing or not a JSON object) decides nothing: write no `ui-gates.json`'
+  contains "$section" 'A missing `ui-gates.json` reads as `block`, so the gate still blocks.'
+  contains "$section" '`@axe-core/playwright` runs the default-view test'"'"'s page scan, and `@types/node` types `src/test/a11y-gate.ts`'
+  contains "$section" 'Ask the script, never compare by eye:'
+  contains "$section" 'Either way the app gains the tag set, the reporting, the switch with the mode `mode` printed (`block` for such an app, by its `family-matcher` rule) and the default-view test.'
+  contains "$section" '**The per-repo switch, `ui-gates.json` (#3018).**'
+  contains "$section" 'It writes `{"schema": "ui-gates/v1", "a11y": "<mode>"}` only when the file or its `a11y` key is absent.'
+  contains "$section" 'Every other file renders under its ordinary rules, so the app gains `ui-gates.json`, the reporting and the default-view test, whose own scan uses the tag set.'
+  contains "$section" 'Write it whenever the overlay applies, even when the skips below withhold the gate files.'
+  contains "$section" 'take the `vitest.config.ts` skip consequences below and name the missing setup module in the Step 5 item.'
 }

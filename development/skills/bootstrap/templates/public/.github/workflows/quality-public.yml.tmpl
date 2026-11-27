@@ -87,6 +87,11 @@ jobs:
         run: npx prettier --check .
       - name: Test + coverage (vitest)
         run: npx vitest run --coverage
+      # A React app's axe gate (#3018): annotations plus the job summary's violation
+      # count, in both modes and after a failed test. Skipped where no report script exists.
+      - name: Accessibility report (axe)
+        if: ${{ !cancelled() && hashFiles('scripts/a11y-report.mjs') != '' }}
+        run: node scripts/a11y-report.mjs "component tests"
       # --- JAVASCRIPT-END --------------------------------------------------
 
       # --- PYTHON-START ----------------------------------------------------
