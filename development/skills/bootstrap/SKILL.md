@@ -4977,7 +4977,10 @@ State D a marker match is an **adoption gap** when any of these holds:
 example it is still a known predecessor). So is a missing
 `.github/workflows/webui-quality.yml` or `.github/workflows/webui-quality-noop.yml`
 — a React app bootstrapped before the WebUI gates (#1946), or one that lost the
-noop. Offer it in the plan and complete it as a fresh bootstrap would.
+noop — and a missing `ui-gates.json` or `a11y` key in it, `src/test/a11y-gate.ts`,
+`scripts/a11y-report.mjs` or `tests/e2e/default-view.spec.ts`: a React app
+bootstrapped before the WCAG gate switch (#3018), or one that deleted the
+default-view test. Offer it in the plan and complete it as a fresh bootstrap would.
 
 **Prerequisite — bootstrap augments a Vite app, it never creates one.** The
 blessed entry point is
@@ -5015,6 +5018,25 @@ alone, and §3k to decide whether it defers its whole config pair to this step.
 When it does not apply, nothing is deferred and those files are ordinary on-disk
 files to every step.
 
+**The a11y mode (#3018) is decided in Step 2 as well**, whenever the overlay
+applies, for the same reason: it reads the repo as the user left it, before this
+run renders a setup module, installs an axe package or adds a `.tsx` file.
+
+```bash
+"<skill-base-dir>/scripts/ui-gates-mode.zsh" mode --repo .
+# {"mode":"warn"|"block","rule":"family-matcher"|"own-axe"|"ui-code"|"fresh"}
+```
+
+The script's header states the four rules in their order; the first match
+decides. Keep the printed `mode` and `rule` for the render below, and list the
+mode in the plan. When `ui-gates.json` already holds an `a11y` key, list that
+value in the plan as kept, not the printed `mode`: `write` never changes it, and
+`mode` then supplies only the `rule` for the render. Exit 3 (a root
+`package.json` that is missing or not a JSON object) decides nothing: write no
+`ui-gates.json`, take the `fresh` rule's render set, and record a Step 5 item
+naming the file. A missing `ui-gates.json` reads as `block`, so the gate still
+blocks. Exit 2 is your own malformed call: fix it and re-run once.
+
 **Plan (Step 2).** List the overlay in the plan with its conditional variant —
 *consumer+React if §3k's machinery will be present, else plain React* — and the
 devDependencies the install below adds. The install edits `package.json` and
@@ -5028,7 +5050,7 @@ first **snapshot `package.json` and the lockfile**, since §3k's own
 shipping a manifest:
 
 ```text
-npm i -D vitest jsdom @testing-library/react @testing-library/dom @testing-library/jest-dom axe-core @playwright/test @lhci/cli
+npm i -D vitest jsdom @testing-library/react @testing-library/dom @testing-library/jest-dom axe-core @playwright/test @lhci/cli @axe-core/playwright @types/node
 npm i -D eslint-plugin-react-hooks eslint-plugin-react-refresh globals
 ```
 
@@ -5036,8 +5058,11 @@ Every package in **both** commands is installed **only if absent** from
 `package.json`'s dependencies and devDependencies, so an app keeps its own pins —
 create-vite 8 and earlier already list the second command's three (9+ does not),
 and a re-run on a bootstrapped repo already lists most of the first command's
-eight. Presence under any version range counts as listed: the step never compares
-a listed range against another package's peer requirements.
+ten. `@axe-core/playwright` runs the default-view test's page scan, and
+`@types/node` types `src/test/a11y-gate.ts`, which reads `ui-gates.json` (#3018);
+create-vite's own `react-ts` template already lists `@types/node`. Presence
+under any version range counts as listed: the step never compares a listed
+range against another package's peer requirements.
 **A kept `vitest` must be Vitest 5.** After the install, read the version
 `package-lock.json` resolves for `vitest`; when its major is not 5, or the
 lockfile resolves none, treat it as `vitest.config.ts`'s rule-3 prompt resolving
@@ -5099,7 +5124,10 @@ testing-library setup module, which also registers the family-owned
 | Source (under `react/`) | Target | Gate |
 |---|---|---|
 | `src/test/a11y-canary.test.tsx` | `src/test/a11y-canary.test.tsx` | axe, inside `test-and-coverage`: a known-bad render must report at least one violation, so an unwired matcher turns it red |
+| `src/test/a11y-gate.ts` | `src/test/a11y-gate.ts` | axe (#3018): the WCAG tag set, the mode read from `ui-gates.json` and the report writer, shared by the matcher and the page scan |
+| `scripts/a11y-report.mjs` | `scripts/a11y-report.mjs` | axe (#3018): one PR annotation per violation and the job summary's count, in both modes |
 | `tests/e2e/playwright.config.ts`, `tests/e2e/smoke.spec.ts` | the same paths | `e2e (playwright)`: the production build served by `vite preview` on port 4173 |
+| `tests/e2e/default-view.spec.ts` | the same path, **generated once** | `e2e (playwright)` (#3018): `/` shows content with no interaction, then the axe page scan under the repo's mode |
 | `lighthouserc.json` | `lighthouserc.json` | `lighthouse (budgets)`: `@lhci/cli` fails the build above 307200 bytes of script or 512000 bytes in total; LCP/TBT/CLS are collected, never asserted |
 | `.github/workflows/webui-quality.yml.tmpl` | `.github/workflows/webui-quality.yml` | runs both jobs, skipping the quality workflows' doc-only paths |
 | `.github/workflows/webui-quality-noop.yml.tmpl` | `.github/workflows/webui-quality-noop.yml` | reports both job names on exactly those doc-only paths |
@@ -5116,7 +5144,7 @@ its noop are on disk (with one missing, it warns and requires neither, since the
 PRs that half skips would never report them), and `SETUP.md` §4 names them.
 Merge `react/gitignore` into `.gitignore` the way §3d merges a language
 fragment (see *`.gitignore` merging*), so the app ignores `playwright-report/`,
-`test-results/` and `.lighthouseci/`. Merge `react/prettierignore` into
+`test-results/`, `.lighthouseci/` and the axe report `a11y-report.jsonl`. Merge `react/prettierignore` into
 `.prettierignore` the same way, with the same helper: a missing
 `.prettierignore` gets the fragment as-is, and an existing one keeps every line
 it had and gains `styleguide/` under §3d's header only when it lacks it; when
@@ -5136,8 +5164,11 @@ two workflows (`{{DEFAULT_BRANCH}}`) and the `vitest.config.ts` variant
   languages/javascript/react/src/test/setup.ts \
   languages/javascript/react/src/Greeting.test.tsx \
   languages/javascript/react/src/test/a11y-canary.test.tsx \
+  languages/javascript/react/src/test/a11y-gate.ts \
+  languages/javascript/react/scripts/a11y-report.mjs \
   languages/javascript/react/tests/e2e/playwright.config.ts \
   languages/javascript/react/tests/e2e/smoke.spec.ts \
+  languages/javascript/react/tests/e2e/default-view.spec.ts \
   languages/javascript/react/lighthouserc.json \
   languages/javascript/react/.github/workflows/webui-quality.yml.tmpl \
   languages/javascript/react/.github/workflows/webui-quality-noop.yml.tmpl
@@ -5152,8 +5183,11 @@ two workflows (`{{DEFAULT_BRANCH}}`) and the `vitest.config.ts` variant
   languages/javascript/react/src/test/setup.ts \
   languages/javascript/react/src/Greeting.test.tsx \
   languages/javascript/react/src/test/a11y-canary.test.tsx \
+  languages/javascript/react/src/test/a11y-gate.ts \
+  languages/javascript/react/scripts/a11y-report.mjs \
   languages/javascript/react/tests/e2e/playwright.config.ts \
   languages/javascript/react/tests/e2e/smoke.spec.ts \
+  languages/javascript/react/tests/e2e/default-view.spec.ts \
   languages/javascript/react/lighthouserc.json \
   languages/javascript/react/.github/workflows/webui-quality.yml.tmpl \
   languages/javascript/react/.github/workflows/webui-quality-noop.yml.tmpl
@@ -5214,6 +5248,64 @@ earlier `vitest.config.ts` (no `tests/e2e/**` exclude) and `src/test/setup.ts`
 prompt below, whose diff is exactly those additions; a skip withholds the gates
 as the skip paragraph below says.
 
+**The #1946 axe files are known predecessors (#3018).** An on-disk
+`src/test/setup.ts` or `src/test/a11y-canary.test.tsx` byte-identical to the
+template #1946 shipped is overwritten **without a prompt**. Ask the script,
+never compare by eye:
+
+```bash
+"<skill-base-dir>/scripts/ui-gates-mode.zsh" predecessor --file src/test/setup.ts
+# {"known":true,"template":"src/test/setup.ts"} → overwrite; {"known":false} → the ordinary rules
+```
+
+A customised one takes idempotency rule 3's diff prompt, with the skip
+consequences below. Either way the app gains the tag set, the reporting, the
+switch with the mode `mode` printed (`block` for such an app, by its
+`family-matcher` rule) and the default-view test.
+
+**The per-repo switch, `ui-gates.json` (#3018).** Write it at the repo root with
+the mode Step 2 decided:
+
+```bash
+"<skill-base-dir>/scripts/ui-gates-mode.zsh" write --repo . --mode <warn|block>
+# {"action":"written"|"kept","a11y":"<value>"}
+```
+
+It writes `{"schema": "ui-gates/v1", "a11y": "<mode>"}` only when the file or its
+`a11y` key is absent. An `a11y` value already in the file is never changed, and
+every other key in the file is preserved. Exit 3 (a file that is not a JSON
+object) leaves the file untouched: record a Step 5 item naming it. Write it
+whenever the overlay applies, even when the skips below withhold the gate files.
+
+**An app with its own axe setup** — Step 2's `own-axe` rule, mode `warn` — keeps
+its tests, its setup file and its dependency entries as they are, and gets no
+second matcher: drop `src/test/setup.ts`, the a11y canary and the example test
+from the render list, and leave an on-disk `src/test/setup.ts` untouched, with no
+prompt. The example test asserts with a jest-dom matcher that only the family
+setup module is sure to register, so record a Step 5 item naming it as withheld.
+Every other
+file renders under its ordinary rules, so the app gains `ui-gates.json`, the
+reporting and the default-view test, whose own scan uses the tag set. The switch
+does not govern the app's own axe assertions. The React `vitest.config.ts` names
+`./src/test/setup.ts` in `setupFiles`, so when that file is absent on such an
+app, take the `vitest.config.ts` skip consequences below and name the missing
+setup module in the Step 5 item. Treat that as `vitest.config.ts`'s rule-3
+prompt resolving to skip, as the Vitest 5 rule above does: a deferred §3k is
+aborted under *When a deferred §3k does not get its pair*, and its Step 5
+follow-up names the missing setup module. On a re-run whose `ui-gates.json`
+already holds an `a11y` key, the `own-axe` rule cannot tell the app's own axe
+package from the one an earlier run of this step installed, so ask before
+rendering `src/test/setup.ts` and the canary: idempotency rule 3's diff prompt
+for a file on disk, and a render-or-skip question that defaults to skip for an
+absent one. A skip keeps the withholding above.
+
+**Generated once: `tests/e2e/default-view.spec.ts` (#3018).** It is the app's
+own test to copy per view, not a family-owned file. Render it **only when the
+file is absent**: drop it from the render list when it is on disk. An existing
+file is never overwritten, diffed or prompted for, and it is not compared with
+the template in State D. A deleted one is rendered again on the next run, since
+bootstrap keeps no record of earlier runs.
+
 **The create-vite fingerprint** — stated once here, and the definition §3d and
 §3k point at. An **unmodified create-vite `eslint.config.js`** is the stock
 file create-vite 8 and earlier generate for `react-ts`, recognised by content
@@ -5239,8 +5331,10 @@ Step 5 item naming the React layers it lacks. If the prompt for
 `src/test/setup.ts` nor the example test** — without jsdom and the setup module
 the example cannot run — and record a Step 5 item naming the missing React test
 wiring and the files withheld. **Withhold the whole WebUI gate set with them**:
-the a11y canary, `tests/e2e/playwright.config.ts`, `tests/e2e/smoke.spec.ts`,
-`lighthouserc.json` and both `webui-quality*.yml` workflows. The user's config
+the a11y canary, `src/test/a11y-gate.ts`, `scripts/a11y-report.mjs`,
+`tests/e2e/playwright.config.ts`, `tests/e2e/smoke.spec.ts`,
+`tests/e2e/default-view.spec.ts`, `lighthouserc.json` and both
+`webui-quality*.yml` workflows. The user's config
 has no `tests/e2e/**` exclude, so Vitest would collect the Playwright spec, and
 no setup module registers the canary's matcher — either turns
 `test-and-coverage` red — and with the workflows absent `branch-protection.sh`
@@ -5261,8 +5355,10 @@ in place — rule 4, never delete what the user has.
 Really building the rendered tree — running the example test green, and
 passing ESLint + Prettier at 120 — is not asserted in this repo's suite; it is
 the render-and-build smoke check's job (#1063). So are the WebUI gates' rendered
-runs: the skeleton and the canary green, the e2e smoke green, and the
-over-budget fixture failing `lighthouse (budgets)`. That fixture lives in this
+runs: the skeleton and the canary green, the e2e smoke green, the over-budget
+fixture failing `lighthouse (budgets)`, and the axe gate's two modes (#3018) — a
+nameless `<button>` failing in `block`, and in `warn` passing with one
+annotation and a count of 1. That fixture lives in this
 repo under `tests/fixtures/react-webui/` and is never in a render list, because a
 rendered over-budget build would turn the blocking gate red from day one.
 

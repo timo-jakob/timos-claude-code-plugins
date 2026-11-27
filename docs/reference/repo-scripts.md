@@ -26,7 +26,8 @@ The `development` plugin ships these two scripts under
 ## Scripts bootstrap emits into a target repository
 
 The scripts above are this repository's own. `/development:bootstrap` also writes scripts
-**into the repositories it bootstraps**. This section documents the four gate scripts.
+**into the repositories it bootstraps**. This section documents the four gate scripts, the two
+stages they share and the axe report.
 
 ### `scripts/k8s-gate.zsh`
 
@@ -305,3 +306,27 @@ reference, after a probe proves the image still reports one. It needs `python3` 
 
 **Exit codes.** `0` built; `1` failed, the reason on stderr; `2` an unknown or malformed
 argument, including a missing or empty `--out`, or one that is not an existing directory.
+
+### `scripts/a11y-report.mjs` {#scriptsa11y-reportmjs}
+
+Emitted by the React overlay (#3018) from
+`templates/languages/javascript/react/scripts/a11y-report.mjs`, under bootstrap's ordinary
+idempotency rules. It is the reporting half of the axe gate, which counts violations of
+WCAG 2.2 A and AA rules only. The gate's mode is the repository's committed `ui-gates.json`,
+`{"schema": "ui-gates/v1", "a11y": "warn" | "block"}`: `block` fails the test on a
+violation, `warn` lets it pass. Change the mode with a one-line edit to that file.
+
+**Invocation.** `node scripts/a11y-report.mjs "<label>"`, from the repository root, after
+the tests. The `test-and-coverage` job runs it after Vitest and the `e2e (playwright)` job
+after Playwright, in both modes and after a failed test.
+
+**What it does.** It reads `a11y-report.jsonl`, the gitignored file the component tests'
+`toHaveNoViolations` matcher and the default-view test's page scan append one line to per
+violating element. It prints one `::warning` annotation per violation, naming the axe rule
+id, the element's selector and the WCAG success criterion, and appends a table of the same
+to the job summary under the violation count, which it states even when it is 0. A run in
+which no scan wrote a line says `No axe scan ran` instead of a count. A repeated
+line, such as one from a Playwright retry, is counted once. Local test runs append to the
+report file, so delete it to start a fresh count.
+
+**Exit codes.** `0` always: in `block` mode the failing test, not this script, fails the job.
