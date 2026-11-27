@@ -163,6 +163,7 @@ weighed at the mean until the file is refreshed (the script's header says how).
 | `check-styleguide-pin.bats` | Behaviour of `scripts/check-styleguide-pin.zsh` (#689 AC 8) against fixture trees with `npx`/`curl` stubbed on PATH — fully offline. Covers the case the script exists for: a pin that resolves but loads no rules must exit non-zero, not report a clean run |
 | `helpers/check-renovate-styleguide.py` | Not a bats file — executed BY `api-styleguide-ruleset.bats`. Runs `renovate.json`'s shipped customManager regex against the real shim and resolves which `packageRule` wins, so the pin cannot silently rejoin the batched github-actions PR |
 | `fixtures/api-styleguide/` | Eleven OpenAPI specs the styleguide suites lint — conforming, non-conforming, clause-isolating fixtures for error bodies, resource naming, pagination and header conventions, plus corner fixtures for collection detection, idempotent methods, trace headers, deprecated non-operations and path parameters |
+| `fixtures/react-styleguide/` | A byte-exact copy of the platform styleguide's `CHECKLIST.md` at tag `v0.1.1` (ten `[review]` items), which the React styleguide reviewer's suite reads |
 
 ## Adding a test
 
