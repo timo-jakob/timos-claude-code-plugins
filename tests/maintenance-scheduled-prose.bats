@@ -67,6 +67,7 @@ unclaused_prompts() {
 
 @test "scheduled.md: any other prompt takes the choice that changes nothing, reported" {
   contains "$(flat "$SCHEDULED")" "**Any other prompt → the choice that changes nothing, reported.**"
+  contains "$(flat "$SCHEDULED")" "Each is reported: the Phase 9 summary gets one line per prompt that took its scheduled path, naming the prompt and what the run did instead."
 }
 
 @test "scheduled.md: every prompt site has its row" {
@@ -90,14 +91,14 @@ unclaused_prompts() {
   contains "$text" "security 5, dependencies 5, bugs 5, codequality 10, topic 10"
   contains "$text" "Without \`--scheduled\` only the bugs cap applies"
   contains "$text" "The open-queue cap is 5"
-  contains "$text" "yq -o=json '.budget // {}' .maintenance.yml"
+  contains "$text" "yq -o=json '.budget' .maintenance.yml > <scratch>/budget.json"
   contains "$text" "\`--batch=N\` then applies to \`run\` alone"
   contains "$text" "pass \`--queue <the queue cap>\`, so no new PR opens while the queue cannot be read"
   contains "$text" "a window that cannot be read has to count as closed"
   contains "$text" "report its stderr and call it again without the refused part — the defaults for a refused block"
   contains "$text" "Any other exit 2 is your own malformed call: fix it and re-run once."
   contains "$text" "[[ -n \"\$caps\" ]] || caps='{}'"
-  contains "$text" "caps=\"\$(jq -c 'if type == \"object\" then (.caps // {}) else . end' <scratch>/budget.json)\" || caps=''"
+  contains "$text" "caps=\"\$(jq -c 'if . == null then {} elif type == \"object\" then (if .caps == null then {} else .caps end) else . end' <scratch>/budget.json)\" || caps=''"
   contains "$text" "A \`budget:\` block that is not a mapping — \`budget: off\`, say — reaches the script as it is, so the script refuses it"
   contains "$text" "Pass \`--scheduled\` and \`--queue\` only under \`--scheduled\`, and \`--cutoff-epoch\` only when \`MAINTENANCE_CUTOFF_EPOCH\` is set"
 }
@@ -116,6 +117,9 @@ unclaused_prompts() {
   contains "$text" "Count the queue afresh, as section 2 does, and pipe the one group through the same script."
   contains "$text" "The same failure arms as section 2 apply."
   contains "$text" "add to \`<q>\` each stage of \`phase8-stages\` whose \`pr\` is set and whose \`status\` is not \`merged\`"
+  contains "$text" "and each PR the \`Bugs\` block records and does not record as merged"
+  contains "$text" "the queue cap holds within one run only; the Phase 9 summary says so"
+  contains "$text" "for a refused cutoff, under \`--scheduled\`, start nothing new and record every group \`deferred\` by \`cutoff\`"
 }
 
 @test "scheduled.md: under --scheduled a full queue stops a bug fix but not an analysis" {
@@ -127,12 +131,12 @@ unclaused_prompts() {
   text="$(flat "$SCHEDULED")"
   contains "$text" "Every run applies the budget, attended or not, once Phase 8 holds the concern-ordered queue and before the \`--batch=N\` cap."
   contains "$text" "A repo overrides any of them in the optional \`budget:\` block of \`.maintenance.yml\`"
-  contains "$text" "Read it once per run, and only when \`.maintenance.yml\` exists at the repo root"
+  contains "$text" "Read it once per run, before the first budget check — Stage 0's when one runs, else Phase 8's — and only when \`.maintenance.yml\` exists at the repo root"
   contains "$text" "With no \`.maintenance.yml\`, or no \`budget:\` block, every default holds."
   contains "$text" "When \`yq\` is missing or fails on the file, every default holds too, and the summary reports why."
   contains "$text" "\`--caps\` is the block's \`caps\` object, \`{}\` when it has none; \`--queue-cap\` is its \`queue_cap\`, left out when it has none."
   contains "$text" "The bugs cap \`reference/bugs.md\` counts against is the same figure: \`caps.bugs\`, else 5."
-  contains "$text" "\`--fresh\` is accepted and changes nothing: it is what \`--scheduled\` does anyway."
+  contains "$text" "\`--fresh\` is accepted, and clears a checkpoint of any age."
 }
 
 @test "scheduled.md: a budget that cannot be applied never lets a scheduled run go uncapped" {
@@ -160,7 +164,8 @@ unclaused_prompts() {
   local text
   text="$(flat "$SKILL")"
   contains "$text" "It also turns on the whole run budget (\`reference/scheduled.md\` § 2): the per-concern caps, the open-queue cap and the cutoff."
-  contains "$text" "Under \`--scheduled\` there is no question: take the \`--fresh\` path and report the discarded checkpoint's last phase and age"
+  contains "$text" "Under \`--scheduled\` there is no question: when its \`age=\` is beyond ~24h, take the \`--fresh\` path and report the discarded checkpoint's last phase and age; otherwise a run may still be going, so end this one with the checkpoint untouched"
+  contains "$text" "Under \`--dry-run\` neither applies: the dry run leaves the checkpoint as it is."
   contains "$text" "Under \`--scheduled\`, skip that language instead — drop it from \`supported\` and record it in \`unsupported\`, noted \`skipped under --scheduled\` — and move every \`supported_topics\` entry that requires it to \`unsupported_topics\`, noted \`marker present but required language <lang> was skipped under --scheduled\`; report the stderr, and go on with the others."
   contains "$text" "Under \`--scheduled\`, no question: skip that language as for exit 1 and report the blockers."
   contains "$text" "Under \`--scheduled\` none of this runs: the language is skipped, with every topic that requires it, and its blockers reported"
@@ -172,8 +177,6 @@ unclaused_prompts() {
   local text
   text="$(flat "$SKILL")"
   contains "$text" "- \`--scheduled\` — the run nobody watches (#3214). It **never asks**"
-  contains "$text" "Restore the **recorded flags** except \`--scheduled\`, so a resumed run"
-  contains "$text" "a resume restores all but \`--scheduled\`"
   contains "$text" "When \`--scheduled\` and \`--resume\` are both passed, halt with: \"--scheduled never resumes an interrupted run; drop --resume.\""
 }
 
@@ -195,6 +198,9 @@ unclaused_prompts() {
   text="$(flat "$SKILL")"
   contains "$text" "Under \`--scheduled\`, check the budget first, as \`reference/scheduled.md\` § 3 checks a group, with the group \`{\"tool\": \"coverage\", \"concern\": \"codequality\", \"opens_pr\": true}\`."
   contains "$text" "When \`--batch\` is absent the batch is all of \`run\`, so this step is a no-op."
+  contains "$text" "Sort the budget's \`run\` list by \`priority_score\` (descending) and keep the **top N**"
+  contains "$text" "Without \`--scheduled\` only the bugs cap applies, so an attended run keeps every other group."
+  contains "$text" "the open-queue cap and the cutoff. Without it only the bugs cap applies."
   contains "$text" "Record each \`deferred\` and report the hook's \`label\` as missing (\`reference/scheduled.md\` § 1)."
 }
 
@@ -205,14 +211,14 @@ unclaused_prompts() {
   contains "$text" "Under \`--scheduled\`, count the open queue first, as its own call:"
   contains "$text" "The caps object reaches the script through \`\$caps\`, read from \`<scratch>/budget.json\` in the same command, and is never pasted into the command line"
   contains "$text" "Write the group, as JSON, to \`<scratch>/group.json\` with the Write tool first, never inline in the command"
-  contains "$text" "A group deferred with no \`deferred_by\` — here, or by § 1's missing runtime or failed pre-flight — is listed in the Phase 9 summary with its reason instead."
+  contains "$text" "A group deferred with no \`deferred_by\` — here, or by § 1's missing runtime or failed pre-flight, never by \`--batch=N\` — is listed in the Phase 9 summary with its reason instead."
 }
 
 @test "SKILL.md: a conflicting bot PR the cutoff stops is deferred, never escalated or dropped" {
   local text
   text="$(flat "$SKILL")"
   contains "$text" "with the group \`{\"tool\": \"conflicting_bot_pr\", \"concern\": \"codequality\", \"opens_pr\": false}\`: a rebase opens no PR, so only the cutoff can defer it."
-  contains "$text" "A PR not started because of the cutoff is left untouched and recorded as a \`deferred\` stage with \`deferred_by: cutoff\`"
+  contains "$text" "A PR not started because of the cutoff is left untouched and is no stage of \`phase8-stages\`, only a line of Phase 9's *Conflicting bot PRs remediated* block"
   contains "$text" "it is either merged/armed, \`escalated\` with a concrete reason, or, under \`--scheduled\`, \`deferred\` by \`cutoff\`."
   contains "$text" "not rebased: the window closed at <time>; the next run picks it up"
 }

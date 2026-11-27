@@ -31,15 +31,14 @@ The sites, in the order a run meets them:
 
 | Site | Without `--scheduled` | Under `--scheduled` |
 | --- | --- | --- |
-| Resume entry, a checkpoint and neither `--resume` nor `--fresh` | asks: resume or start fresh | `checkpoint.zsh clear`, then Phase 1; report the discarded checkpoint's last phase and age |
+| Resume entry, a checkpoint and neither `--resume` nor `--fresh` | asks: resume or start fresh | `age=` beyond ~24h: `checkpoint.zsh clear`, then Phase 1; report the discarded checkpoint's last phase and age. Younger: a run may still be going, so end this run with the checkpoint untouched and report its last phase and age. Under `--dry-run`, the checkpoint is left as it is |
 | Phase 3 state pre-flight, exit 1 (a tool is not installed) | halts the run | skip that language: drop it from `supported` and record it in `unsupported`, noted `skipped under --scheduled`, and move every topic that requires it to `unsupported_topics`; report its stderr; the other languages go on |
 | Phase 3 state pre-flight, exit 2 (R.4) | `AskUserQuestion` with three options | no question and none of the options: skip that language and the topics that require it as for exit 1, reporting the script's blockers |
 | Phase 8 step 8, the post-merge pre-flight exits 1 or 2 (R.4) | halts on exit 1; `AskUserQuestion` on exit 2, as in Phase 3 | the remaining stages of the language and of every topic that requires it are not started: each is recorded `deferred` and reported with the stderr or blockers |
 | Phase 8 pre-dispatch hook, the runtime is missing | `AskUserQuestion`: install, install it myself, skip | no question and never `install`: this group and every not-yet-started group of its concern for that target are recorded `deferred` and reported with the hook's `label` |
 
 `--scheduled` with `--resume` is refused in Phase 0, since a scheduled run never
-resumes. `--fresh` is accepted and changes nothing: it is what `--scheduled`
-does anyway.
+resumes. `--fresh` is accepted, and clears a checkpoint of any age.
 
 A prompt added to the skill later gets its row here and an "under
 `--scheduled`" clause beside it in the skill. `tests/maintenance-scheduled-prose.bats`
@@ -65,10 +64,11 @@ budget:
   queue_cap: 3
 ```
 
-Read it once per run, and only when `.maintenance.yml` exists at the repo root:
+Read it once per run, before the first budget check — Stage 0's when one
+runs, else Phase 8's — and only when `.maintenance.yml` exists at the repo root:
 
 ```bash
-yq -o=json '.budget // {}' .maintenance.yml > <scratch>/budget.json
+yq -o=json '.budget' .maintenance.yml > <scratch>/budget.json
 ```
 
 With no `.maintenance.yml`, or no `budget:` block, every default holds. When
@@ -86,7 +86,7 @@ queue first, as its own call:
 "<skill-base-dir>/scripts/count-open-queue.zsh"   # prints <q>
 caps=''
 if [[ -f <scratch>/budget.json ]]; then
-  caps="$(jq -c 'if type == "object" then (.caps // {}) else . end' <scratch>/budget.json)" || caps=''
+  caps="$(jq -c 'if . == null then {} elif type == "object" then (if .caps == null then {} else .caps end) else . end' <scratch>/budget.json)" || caps=''
 fi
 [[ -n "$caps" ]] || caps='{}'
 "<skill-base-dir>/scripts/apply-run-budget.zsh" --caps "$caps" [--queue-cap <n>] \
@@ -133,8 +133,8 @@ carry no `concern`, so never call the script on them; report the
 applied, and the bugs concern keeps its own count. Under `--scheduled`, start
 no group: record each `deferred` with no `deferred_by`, since a run nobody
 watches never works without its budget. A group deferred with no
-`deferred_by` — here, or by § 1's missing runtime or failed pre-flight — is
-listed in the Phase 9 summary with its reason instead.
+`deferred_by` — here, or by § 1's missing runtime or failed pre-flight, never
+by `--batch=N` — is listed in the Phase 9 summary with its reason instead.
 
 ## 3. Before each group starts — the cutoff and the queue again
 
@@ -145,7 +145,8 @@ same script. Stage 0, the coverage improver's PR, is checked the
 same way before it is pushed (SKILL.md, *Stage 0*), and so is each
 conflicting bot PR before the standing-PR slot rebases it, with the group
 `{"tool": "conflicting_bot_pr", "concern": "codequality", "opens_pr": false}`
-(SKILL.md, *Conflicting bot-PR remediation*). Write the group, as
+(SKILL.md, *Conflicting bot-PR remediation*, which says how one the cutoff
+stops is reported). Write the group, as
 JSON, to `<scratch>/group.json` with the Write tool first, never inline in the
 command: a group's free-text `description` can hold an apostrophe or a quote.
 

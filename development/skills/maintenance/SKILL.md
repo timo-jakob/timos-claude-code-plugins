@@ -166,8 +166,7 @@ worktrees, so it survives the session). Before Phase 1, check for one:
     A run resumed past `phase4-payload` reads its payloads from the
     `payload-<target>.json` copies in `checkpoint.zsh dir`, never from
     `<payload-dir>` or `/tmp`; it creates no `<payload-dir>` of its own.
-    Restore the **recorded flags** except `--scheduled`, so a resumed run
-    is always attended: it keeps its original
+    Restore the **recorded flags**: a resumed run keeps its original
     scope; if this invocation passes a *different* `--tool`/`--concern`/
     `--batch`, halt — changing scope requires `--fresh`. Continue at the
     first phase not recorded; phases without a checkpoint of their own
@@ -186,8 +185,11 @@ worktrees, so it survives the session). Before Phase 1, check for one:
     then Phase 1 as normal.
   - **Neither flag** → ask the user: resume from `last=<phase>` or start
     fresh (name the checkpoint's age and phases). Under `--scheduled` there
-    is no question: take the `--fresh` path and report the discarded
-    checkpoint's last phase and age (`reference/scheduled.md` § 1).
+    is no question: when its `age=` is beyond ~24h, take the `--fresh` path
+    and report the discarded checkpoint's last phase and age; otherwise a run
+    may still be going, so end this one with the checkpoint untouched and
+    report its last phase and age (`reference/scheduled.md` § 1). Under
+    `--dry-run` neither applies: the dry run leaves the checkpoint as it is.
 - **`--dry-run`** never writes checkpoints and never offers resume — it
   performs no outward actions and must not leave state a later real run
   would resume into.
@@ -341,7 +343,7 @@ model" for the rationale.
 
 **Checkpoint `phase1-detect`** (skip under `--dry-run`): save the detection
 result — everything later phases derive from — plus `base_sha` (the resume
-entry's staleness reference) and this run's flags (a resume restores all but `--scheduled`):
+entry's staleness reference) and this run's flags (a resume restores them):
 
 ```bash
 print -r -- "{\"languages\":[…],\"topics\":[…],\"primary\":\"…\",\"default_branch\":\"…\",
@@ -2340,8 +2342,8 @@ time; under `--scheduled`, none starts once the cutoff has passed. Check
 each PR before it starts as `reference/scheduled.md` § 3 checks a group, with
 the group `{"tool": "conflicting_bot_pr", "concern": "codequality", "opens_pr": false}`:
 a rebase opens no PR, so only the cutoff can defer it. A PR not started
-because of the cutoff is left untouched and recorded as a `deferred` stage
-with `deferred_by: cutoff`; the next run picks it up:
+because of the cutoff is left untouched and is no stage of `phase8-stages`,
+only a line of Phase 9's *Conflicting bot PRs remediated* block; the next run picks it up:
 
 1. **Scratch worktree on the PR head** — never the session worktree (#643):
 
@@ -3229,8 +3231,8 @@ Approver mode:       <ci | local | none — from the Phase 2.5 detection (#642);
   without --concern (or with the other concerns) to process them.
 <For each note Phase 4 recorded while limiting only_tools:>
   - <the note, e.g. "nothing in scope for swift under --concern=security">
-<If --batch=N was set AND the plan had more than N groups:>
-⚠ Batch-limited: processed the top <N> of <M> planned groups (by priority).
+<If --batch=N was set AND the budget's `run` had more than N groups:>
+⚠ Batch-limited: processed the top <N> of the <M> groups in the budget's `run` (by priority).
   The remaining <M−N> are deferred (listed below) — re-run
   /development:maintenance to process the next batch.
 
@@ -3409,7 +3411,7 @@ run start; the 🚀 PRs section below shows what was tackled.>
   - #<pr> [group 1: <tool>] <title> — <merged|escalated after 3 CI fixes>
   - ...
 
-<If --batch=N deferred any planner groups (M > N):>
+<If --batch=N deferred any planner groups (the budget's `run` had M > N):>
 ⏸ Deferred this batch — not processed (M−N):
   - [<tool>] <description> — <finding-count> finding(s), priority <score>
   - ...
@@ -3482,7 +3484,7 @@ run start; the 🚀 PRs section below shows what was tackled.>
     cutoff: the window closed at <time>>
   - ...
 
-<If --scheduled recorded any group `deferred` with no `deferred_by` (reference/scheduled.md § 1, § 2):>
+<If --scheduled recorded any group `deferred` with no `deferred_by` that --batch=N did not defer (reference/scheduled.md § 1, § 2):>
 ⏸ Deferred under --scheduled — not processed (K):
   - <lang or topic> [<tool>] <description> — <budget not applied: <stderr> |
     runtime <label> missing | pre-flight failed: <stderr or blockers>>

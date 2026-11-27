@@ -379,6 +379,7 @@ EOF
   [ "$output" = "0" ]
   contains "$(cat "$GH_LOG")" "--repo acme/widgets"
   contains "$(cat "$GH_LOG")" "--state open"
+  contains "$(cat "$GH_LOG")" "--limit 1000 --json number,author,latestReviews"
 }
 
 @test "queue: a failing gh, or output that is not one array, is exit 1 with nothing printed" {
