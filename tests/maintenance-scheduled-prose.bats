@@ -134,7 +134,7 @@ unclaused_prompts() {
   text="$(flat "$SCHEDULED")"
   contains "$text" "Every run applies the budget, attended or not, once Phase 8 holds the concern-ordered queue and before the \`--batch=N\` cap."
   contains "$text" "A repo overrides any of them in the optional \`budget:\` block of \`.maintenance.yml\`"
-  contains "$text" "Read it once per run, before the first budget check — Stage 0's when one runs, else Phase 8's — and only when \`.maintenance.yml\` exists at the repo root"
+  contains "$text" "Read it once per run, before the run's first budget check, whichever phase makes it, and only when \`.maintenance.yml\` exists at the repo root"
   contains "$text" "With no \`.maintenance.yml\`, or no \`budget:\` block, every default holds."
   contains "$text" "When \`yq\` is missing or fails on the file, every default holds too, and the summary reports why."
   contains "$text" "\`--caps\` is the block's \`caps\` object, \`{}\` when it has none; \`--queue-cap\` is its \`queue_cap\`, left out when it has none."

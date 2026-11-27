@@ -66,8 +66,8 @@ budget:
   queue_cap: 3
 ```
 
-Read it once per run, before the first budget check — Stage 0's when one
-runs, else Phase 8's — and only when `.maintenance.yml` exists at the repo root:
+Read it once per run, before the run's first budget check, whichever phase
+makes it, and only when `.maintenance.yml` exists at the repo root:
 
 ```bash
 yq -o=json '.budget' .maintenance.yml > <scratch>/budget.json
