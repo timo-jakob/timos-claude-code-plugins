@@ -41,6 +41,24 @@ Staleness is detected because the recomputed hash diverges the instant the
 human-authoritative prose is edited — the whole pull-based staleness mechanism,
 with no background job.
 
+## 2a. Where the registry is found (#3352)
+
+Neither consumer opens the registry by a fixed path. Both `story-readiness` and
+`issue-refiner` find it with the development-side lookup,
+`development/scripts/reference-docs/resolve-reference-doc.zsh --repo-dir <repo> docs/personas.md`,
+and read the file at the `path` it prints:
+
+| Lookup outcome | Consumer behaviour |
+| --- | --- |
+| exit 0, `origin` `own` | the repo's own registry, read as in sections 2 and 3 |
+| exit 0, `origin` `linked` | the registry in the linked docs repository, read the same way but read-only; a missing or wrong persona is routed to `/product:define-personas` run in that docs repository (`product` plugin) |
+| exit 3 | no registry: the `persona-registry-missing` advisory, as before |
+| exit 4 or 6 | an advisory carrying the lookup's fix line; never "no registry" |
+| exit 1, 2, 5 or any other | an advisory carrying the lookup's stderr; never "no registry" |
+
+Every outcome stays advisory: none turns a `READY` verdict into
+`NEEDS_REFINEMENT`.
+
 ## 3. `data_traits` → realistic outside-in payload (`refine-issue`)
 
 `dana-dispatcher`'s `data_traits` (`job_ref` like `JOB-2291`; `site_name` with

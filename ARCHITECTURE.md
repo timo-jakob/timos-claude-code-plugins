@@ -278,6 +278,12 @@ than how its code is built and kept healthy.
   internal failure: git missing, or a `.gitmodules` git cannot read.
   `/product:define-personas` stops without writing when the registry is
   `linked:…` or the lookup exits 5, and names where it lives.
+- **The development-side persona readers use the development copy (#3352).**
+  `story-readiness` and `issue-refiner` find the registry with
+  `development/scripts/reference-docs/resolve-reference-doc.zsh`, the
+  development copy of this lookup, never with the script above: no file under
+  `development/` names a path into `product/`. What each of its outcomes means
+  to them is stated in the *Persona registry contract*.
 - **How a product document is rendered (#3204).** One script,
   `product/scripts/render-document.zsh [--title <text>] [--appendix <path>]... <document.md>`,
   turns a product document into `<basename>.pdf` (pandoc with Typst as its
@@ -8744,6 +8750,21 @@ people who use *that* repo's surfaces — so the users of a product built with
 this family belong to that product repo's registry, never to this one. Seeding a
 starter registry into new repos at bootstrap time remains an explicit follow-up,
 out of scope here.
+
+**How the development-side readers find it (#3352).** `story-readiness` and
+`issue-refiner` never open `docs/personas.md` by a path of their own. They run
+the development copy of the lookup,
+`development/scripts/reference-docs/resolve-reference-doc.zsh` (see
+[Linked reference documents](#linked-reference-documents)), with
+`docs/personas.md`, and read the registry at the `path` it prints: the repo's
+own file (`origin` `own`), or one in a linked docs repository (`origin`
+`linked`), which they read but never edit, routing a missing or wrong persona
+to `/product:define-personas` run in that docs repository. Exit 3 is the
+no-registry advisory; exit 4 or 6 is an advisory carrying the lookup's fix line.
+When the lookup for `docs/personas.md` exits 1, 2, 5 or with any other non-zero
+code that is not 3, 4 or 6, the development-side persona readers raise an
+advisory that carries the script's stderr and never say the registry is absent.
+Only exit 3 means there is no registry. Every outcome stays advisory: none moves a readiness verdict.
 
 ### The registry file (`docs/personas.md`)
 

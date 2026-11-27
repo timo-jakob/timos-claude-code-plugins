@@ -88,9 +88,50 @@ gh issue view <N> --repo <owner/name> --json number,title,body,state,labels,url
   below) rather than demanding it.
 - **Validate persona references — advisory, never a hard fail** (#668). If the
   story-spec block references persona ids (a non-empty `personas` array),
-  validate them against the target repo's `personas/v1` registry
-  (`docs/personas.md`) and record any problem as an **advisory** (the
-  `advisories` output field), **never** as a check failure:
+  find the target repo's `personas/v1` registry with the lookup below, validate
+  the ids against it and record any problem as an **advisory** (the
+  `advisories` output field), **never** as a check failure.
+
+  **Find the registry with the lookup, never by a path of your own (#3352).**
+  The registry is the repo's own file, or one in a docs repository the repo
+  links as a submodule, and only the lookup knows which. Run it from the target
+  repo's root:
+
+  ```bash
+  zsh <resolved path> --repo-dir <target repo root> docs/personas.md
+  ```
+
+  It ships in this plugin, not in the target repo, so resolve its path with one
+  `Bash` call that takes the highest installed version:
+
+  ```bash
+  zsh -c 'print -r -- ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/cache/*/development/*/scripts/reference-docs/resolve-reference-doc.zsh(N.nOn[1])'
+  ```
+
+  An empty result means no installed copy; when the target repo is this
+  plugin's own repo, its working-tree copy at
+  `development/scripts/reference-docs/resolve-reference-doc.zsh` serves
+  instead. On exit 0 it prints one JSON object, and the registry is the file at
+  its `path`. Each outcome has one behaviour:
+
+  - **exit 0, `origin` `own`** — the repo's own registry: validate against the
+    file at `path`, as below.
+  - **exit 0, `origin` `linked`** — the registry lives in the linked docs
+    repository named by `submodule`: validate against the file at `path`, as
+    below. It is read-only here — never edit it. An advisory that names a
+    missing or ill-fitting persona routes the human to `/product:define-personas`
+    run in that docs repository; it ships in the `product` plugin.
+  - **exit 3** — the repo has no registry: the `persona-registry-missing`
+    advisory below, unchanged.
+  - **exit 4 or 6** — the registry could not be read at its pinned version: a
+    `persona-registry-unreadable` advisory whose message carries the fix line
+    the script printed on stderr. It never says the registry is absent.
+  - **exit 1, 2, 5 or any other non-zero exit**, or no copy of the lookup
+    anywhere — a `persona-registry-unreadable` advisory whose message carries
+    the script's stderr (or says the lookup was not found). It never says the
+    registry is absent. Only exit 3 means there is no registry.
+
+  Against a registry the lookup found:
   - **unknown id** (`kind: "persona-unknown"`) — a referenced id is absent from
     the registry's `personas/v1` block → advisory naming the id.
   - **stale registry** (`kind: "persona-registry-stale"`) — recompute the
@@ -100,10 +141,12 @@ gh issue view <N> --repo <owner/name> --json number,title,body,state,labels,url
     `provenance.prose_sha256`; a mismatch means the persona prose was edited
     after the block was generated → advisory.
   - **no registry** (`kind: "persona-registry-missing"`) — the story references
-    personas but `docs/personas.md` is absent → advisory that the ids can't be
+    personas but the lookup exited 3 → advisory that the ids can't be
     validated.
 
-  A persona-less story (empty or absent `personas`) is **silent** — no advisory.
+  A persona-less story (empty or absent `personas`) is **silent** — no lookup,
+  no advisory. **Persona checks stay advisory in every outcome of the lookup:
+  no outcome turns a `READY` verdict into `NEEDS_REFINEMENT`.**
   Persona references **never** move the verdict: they inform, they don't gate
   (personas are advisory by design, #573). When an advisory names a missing or
   ill-fitting persona, its message points the human at
@@ -438,11 +481,12 @@ Rules for the payload:
   with no `test_cases`) is **not** a gap — emit `[]`/`null` for it and judge the
   story on the applicable checks alone.
 - `advisories` is a list of **non-blocking** notes — persona reference
-  problems (unknown id, stale registry, no registry) found when validating a
-  story-spec block's `personas` against the target repo's `personas/v1`
-  registry (#668), and acceptance criteria that pin an implementation detail
-  (#2902). Each entry is `{ "kind": "persona-unknown" |
-  "persona-registry-stale" | "persona-registry-missing" |
+  problems (unknown id, stale registry, no registry, a registry the lookup
+  could not read) found when validating a story-spec block's `personas`
+  against the target repo's `personas/v1` registry (#668, #3352), and
+  acceptance criteria that pin an implementation detail (#2902). Each entry is
+  `{ "kind": "persona-unknown" | "persona-registry-stale" |
+  "persona-registry-missing" | "persona-registry-unreadable" |
   "implementation-pinned", "message": "…" }`. A persona advisory's `message`
   names the id and, where relevant, points the human at
   `/product:define-personas` (it ships in the `product` plugin); an
