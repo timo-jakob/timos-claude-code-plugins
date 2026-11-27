@@ -894,6 +894,7 @@ GATE="$BATS_TEST_DIRNAME/../development/skills/bootstrap/templates/languages/jav
   has "$s" 'recordViolations(violations, "vitest", this.testPath ?? "", this.currentTestName ?? "", mode);'
   has "$s" 'pass: mode === "warn" || violations.length === 0,'
   # the report record carries rule id, selector and success criterion
+  has "$GATE" 'appendFileSync(reportFile, `${JSON.stringify({ kind: "scan", ...where })}\n`);'
   has "$GATE" 'rule: v.id,'
   has "$GATE" 'selector: selectorOf(node),'
   has "$GATE" 'criteria: successCriteria(v.tags),'
@@ -943,9 +944,13 @@ GATE="$BATS_TEST_DIRNAME/../development/skills/bootstrap/templates/languages/jav
   command -v node > /dev/null || skip "node not installed"
   work="$BATS_TEST_TMPDIR/app"
   mkdir -p "$work"
-  # no report file at all: a count of 0
+  # no report file at all: no scan ran, which is never read as a count of 0
   run env -u GITHUB_STEP_SUMMARY sh -c "cd '$work' && node '$r' 'component tests'"
   [ "$status" -eq 0 ]
+  contains "$output" '**No axe scan ran**, mode `block` (ui-gates.json).'
+  # a clean scan: a count of 0
+  printf '%s\n' '{"kind":"scan","source":"vitest","file":"src/Save.test.tsx","test":"labelled button"}' > "$work/a11y-report.jsonl"
+  run env -u GITHUB_STEP_SUMMARY sh -c "cd '$work' && node '$r' 'component tests'"
   contains "$output" '**0 violation(s)**, mode `block` (ui-gates.json).'
   printf '{\n  "schema": "ui-gates/v1",\n  "a11y": "warn"\n}\n' > "$work/ui-gates.json"
   # one violation, recorded twice (a Playwright retry): one annotation, one row, a count of 1
@@ -994,5 +999,5 @@ GATE="$BATS_TEST_DIRNAME/../development/skills/bootstrap/templates/languages/jav
   contains "$section" 'Every other file renders under its ordinary rules, so the app gains `ui-gates.json`, the reporting and the default-view test, whose own scan uses the tag set.'
   contains "$section" 'Write it whenever the overlay applies, even when the skips below withhold the gate files.'
   contains "$section" 'take the `vitest.config.ts` skip consequences below and name the missing setup module in the Step 5 item.'
-  contains "$section" 'The `own-axe` rule withholds only on the run that writes the `a11y` key: on a re-run whose `ui-gates.json` already holds one, `src/test/setup.ts` and the canary take their ordinary rules'
+  contains "$section" 'so ask before rendering `src/test/setup.ts` and the canary: idempotency rule 3'"'"'s diff prompt for a file on disk, and a render-or-skip question that defaults to skip for an absent one. A skip keeps the withholding above.'
 }

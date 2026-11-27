@@ -324,7 +324,8 @@ after Playwright, in both modes and after a failed test.
 `toHaveNoViolations` matcher and the default-view test's page scan append one line to per
 violating element. It prints one `::warning` annotation per violation, naming the axe rule
 id, the element's selector and the WCAG success criterion, and appends a table of the same
-to the job summary under the violation count, which it states even when it is 0. A repeated
+to the job summary under the violation count, which it states even when it is 0. A run in
+which no scan wrote a line says `No axe scan ran` instead of a count. A repeated
 line, such as one from a Playwright retry, is counted once. Local test runs append to the
 report file, so delete it to start a fresh count.
 

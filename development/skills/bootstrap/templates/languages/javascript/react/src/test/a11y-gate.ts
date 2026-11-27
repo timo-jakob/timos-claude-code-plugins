@@ -90,6 +90,9 @@ export function recordViolations(
   test: string,
   mode: A11yMode,
 ): void {
+  // One scan line per call, a clean scan included, so the report can tell "0" from "no scan ran".
+  const where = { source, file: relative(process.cwd(), file), test };
+  appendFileSync(reportFile, `${JSON.stringify({ kind: "scan", ...where })}\n`);
   for (const v of violations) {
     for (const node of v.nodes) {
       const record = {

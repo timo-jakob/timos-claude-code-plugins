@@ -24,11 +24,16 @@ const readMode = () => {
 // A Playwright retry scans the same page again, so a repeated element is counted once.
 // The test file is part of the key: copies of one spec share their test title.
 const records = new Map();
+let scans = 0;
 if (existsSync(reportFile)) {
   for (const line of readFileSync(reportFile, "utf8").split("\n")) {
     if (line.trim() === "") continue;
     try {
       const r = JSON.parse(line);
+      if (r.kind === "scan") {
+        scans += 1;
+        continue;
+      }
       records.set([r.source, r.file, r.test, r.rule, r.selector].join("\u0000"), r);
     } catch {
       console.log(`::warning title=a11y report::skipped an unreadable line in ${reportFile}`);
@@ -50,7 +55,9 @@ for (const r of rows) {
 const summary = [
   `### Accessibility (axe, WCAG 2.2 AA): ${label}`,
   "",
-  `**${rows.length} violation(s)**, mode \`${mode}\` (ui-gates.json).`,
+  scans === 0 && rows.length === 0
+    ? `**No axe scan ran**, mode \`${mode}\` (ui-gates.json).`
+    : `**${rows.length} violation(s)**, mode \`${mode}\` (ui-gates.json).`,
   "",
 ];
 if (rows.length > 0) {

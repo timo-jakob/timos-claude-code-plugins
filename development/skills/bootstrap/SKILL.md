@@ -5258,10 +5258,12 @@ reporting and the default-view test, whose own scan uses the tag set. The switch
 does not govern the app's own axe assertions. The React `vitest.config.ts` names
 `./src/test/setup.ts` in `setupFiles`, so when that file is absent on such an
 app, take the `vitest.config.ts` skip consequences below and name the missing
-setup module in the Step 5 item. The `own-axe` rule withholds only on the run
-that writes the `a11y` key: on a re-run whose `ui-gates.json` already holds one,
-`src/test/setup.ts` and the canary take their ordinary rules, so a wiring an
-earlier run withheld is offered again through the rule-3 prompt.
+setup module in the Step 5 item. On a re-run whose `ui-gates.json` already holds
+an `a11y` key, the `own-axe` rule cannot tell the app's own axe package from the
+one an earlier run of this step installed, so ask before rendering
+`src/test/setup.ts` and the canary: idempotency rule 3's diff prompt for a file
+on disk, and a render-or-skip question that defaults to skip for an absent one.
+A skip keeps the withholding above.
 
 **Generated once: `tests/e2e/default-view.spec.ts` (#3018).** It is the app's
 own test to copy per view, not a family-owned file. Render it **only when the
