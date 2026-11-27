@@ -116,6 +116,23 @@ tagged_commit() { git -C "$1" rev-parse "refs/tags/$2^{commit}"; }
   [ "$(git -C "$W/app/styleguide" rev-parse HEAD)" = "$(tagged_commit "$W/sg" v0.1.10)" ]
 }
 
+@test "styleguide: the major field orders numerically too (v10.0.0 beats v9.0.0 and v2.0.0)" {
+  make_remote "$W/sg" v9.0.0 v10.0.0 v2.0.0
+  make_app "$W/app"
+  run zsh "$SCRIPT" --repo "$W/app" --url "$W/sg"
+  [ "$status" -eq 0 ]
+  [ "$output" = "styleguide: added $W/sg at v10.0.0" ]
+  [ "$(git -C "$W/app/styleguide" rev-parse HEAD)" = "$(tagged_commit "$W/sg" v10.0.0)" ]
+}
+
+@test "styleguide: a URL with a scheme is an absolute URL and mounts" {
+  make_remote "$W/sg" v0.1.0
+  make_app "$W/app"
+  run zsh "$SCRIPT" --repo "$W/app" --url "file://$W/sg"
+  [ "$status" -eq 0 ]
+  [ "$output" = "styleguide: added file://$W/sg at v0.1.0" ]
+}
+
 # --- CLAUDE.md -----------------------------------------------------------------
 
 @test "styleguide: an existing CLAUDE.md gets the section appended once, its prior bytes an unchanged prefix" {
