@@ -5253,8 +5253,11 @@ whenever the overlay applies, even when the skips below withhold the gate files.
 
 **An app with its own axe setup** — Step 2's `own-axe` rule, mode `warn` — keeps
 its tests, its setup file and its dependency entries as they are, and gets no
-second matcher: drop `src/test/setup.ts` and the a11y canary from the render list,
-and leave an on-disk `src/test/setup.ts` untouched, with no prompt. Every other
+second matcher: drop `src/test/setup.ts`, the a11y canary and the example test
+from the render list, and leave an on-disk `src/test/setup.ts` untouched, with no
+prompt. The example test asserts with a jest-dom matcher that only the family
+setup module is sure to register, so record a Step 5 item naming it as withheld.
+Every other
 file renders under its ordinary rules, so the app gains `ui-gates.json`, the
 reporting and the default-view test, whose own scan uses the tag set. The switch
 does not govern the app's own axe assertions. The React `vitest.config.ts` names
