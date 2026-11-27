@@ -76,7 +76,7 @@ setup() {
   contains "$SECTION" 'exactly one of `statement` (a string) or `ref` (`{ "path", "anchor", "title" }`: a page of the file'"'"'s own repository'
   contains "$SECTION" '**A change** has `id` (`TC-<yyyy>-<mm>-<n>`, the year and month of its `date`), `date`'
   contains "$SECTION" '`status` (`active` or `retired`) and exactly one'
-  contains "$SECTION" '`date` (an ISO calendar date, `YYYY-MM-DD`), `from`, `to`, `rationale`, `affects[]` (the ids of the clauses it introduced, changed or retired) and `evidence[]` (issue or PR references; may be empty).'
+  contains "$SECTION" '`date` (an ISO calendar date, `YYYY-MM-DD`), `from`, `to` and `rationale` (each a non-empty string; a change that introduces a clause says in `from` that nothing held before), `affects[]` (the ids of the clauses it introduced, changed or retired) and `evidence[]` (issue or PR references; may be empty).'
 }
 
 @test "the contract's rule table names exactly the validator's rules" {

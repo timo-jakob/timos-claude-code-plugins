@@ -409,9 +409,11 @@ states for `personas/v1`. This section does not restate it.
   of the file's own repository, where the clause is already stated, and the
   link's title).
 - **A change** has `id` (`TC-<yyyy>-<mm>-<n>`, the year and month of its
-  `date`), `date` (an ISO calendar date, `YYYY-MM-DD`), `from`, `to`,
-  `rationale`, `affects[]` (the ids of the clauses it introduced, changed or
-  retired) and `evidence[]` (issue or PR references; may be empty).
+  `date`), `date` (an ISO calendar date, `YYYY-MM-DD`), `from`, `to` and
+  `rationale` (each a non-empty string; a change that introduces a clause says
+  in `from` that nothing held before), `affects[]` (the ids of the clauses it
+  introduced, changed or retired) and `evidence[]` (issue or PR references;
+  may be empty).
 
 An invented example: a ferry-booking product with three clauses and one change
 that retires one of them. TA-3 shows how a page such as an API styleguide

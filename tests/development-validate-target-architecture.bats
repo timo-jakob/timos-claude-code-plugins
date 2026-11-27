@@ -177,7 +177,15 @@ only_rule() {
   run --separate-stderr zsh "$S" "$F"
   only_rule schema
   contains "$stderr" 'TC-2026-11-1: rationale is missing or empty'
-  edit_block '.changes[0].rationale = "Releases waited." | .changes[0].evidence = "#42"'
+  edit_block '.changes[0].rationale = "Releases waited." | .changes[0] |= del(.from)'
+  run --separate-stderr zsh "$S" "$F"
+  only_rule schema
+  contains "$stderr" 'TC-2026-11-1: from is missing or empty'
+  edit_block '.changes[0].from = "One shared database." | .changes[0] |= del(.to)'
+  run --separate-stderr zsh "$S" "$F"
+  only_rule schema
+  contains "$stderr" 'TC-2026-11-1: to is missing or empty'
+  edit_block '.changes[0].to = "One database each." | .changes[0].evidence = "#42"'
   run --separate-stderr zsh "$S" "$F"
   only_rule schema
   contains "$stderr" 'TC-2026-11-1: evidence is not an array of strings'
@@ -202,6 +210,13 @@ only_rule() {
   run --separate-stderr zsh "$S" "$F"
   only_rule duplicate-id
   contains "$stderr" 'TA-1 is used 2 times'
+}
+
+@test "duplicate-id: one id on two changes" {
+  edit_block '.changes += [.changes[0]]'
+  run --separate-stderr zsh "$S" "$F"
+  only_rule duplicate-id
+  contains "$stderr" 'TC-2026-11-1 is used 2 times'
 }
 
 @test "statement-and-ref: a clause with both" {
