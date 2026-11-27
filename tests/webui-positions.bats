@@ -472,3 +472,49 @@ banner_of() {
   contains "$banner" 'the one remaining framework topic'
   contains "$banner" '2026-07-27-mfe-app-family-design.md'
 }
+
+# --- the React WebUI gates position: the WCAG gate switch (#3018) -------------
+
+# The position's end anchor is the generic next `### `, pinned with `ends_with`
+# to the heading that follows it today, as arch_section does above.
+GATES_END='### Deployment — GitOps promotion and immutable references (#1189)'
+
+gates_section() {
+  extract "$ARCH" '^### React WebUI gates — blocking in the app, advisory in maintenance' '^### '
+}
+
+@test "ARCHITECTURE records the per-repo gate switch, ui-gates.json, with its rationale (#3018)" {
+  local section
+  section="$(gates_section)"
+  [ -n "$section" ]
+  ends_with "$section" "$GATES_END"
+  contains "$section" '**The per-repo gate switch (#3018).** A UI repo carries a committed `ui-gates.json` at its root, `{"schema": "ui-gates/v1", "a11y": "warn" | "block"}`, written by bootstrap.'
+  contains "$section" '`block` fails the build on a violation; `warn` reports it as a PR annotation and in the job summary and keeps the job green.'
+  contains "$section" 'A missing file or key means `block`; any other value fails the check, naming the file, the key and the allowed values.'
+  contains "$section" 'Later gates add their own key to the same file.'
+  contains "$section" '*Rationale:* the mode must be readable by a local test run and reviewable in a pull request, which a repository variable is not.'
+}
+
+@test "ARCHITECTURE records blocking by default with warn as a declared on-ramp, the canary outside the mode (#3018)" {
+  local section
+  section="$(gates_section)"
+  [ -n "$section" ]
+  ends_with "$section" "$GATES_END"
+  contains "$section" '**Blocking by default, `warn` as a declared on-ramp (#3018).** The axe matcher reads the repo'"'"'s `a11y` mode.'
+  contains "$section" 'In `block`, the mode a freshly bootstrapped app gets, a violation fails the pull request.'
+  contains "$section" 'In `warn`, the mode bootstrap gives a repo that already has UI code, the same violation is annotated on the pull request and counted in the job summary, and the job stays green.'
+  contains "$section" 'The a11y canary does not follow the mode: it turns red in both when the matcher is unwired.'
+}
+
+@test "ARCHITECTURE records what makes a repo fresh or existing, and the WCAG tag set (#3018)" {
+  local section
+  section="$(gates_section)"
+  [ -n "$section" ]
+  ends_with "$section" "$GATES_END"
+  contains "$section" '**Fresh or existing (#3018).** A repo has UI code when it holds at least one `.tsx` or `.jsx` file outside tests other than `src/main.tsx` and `src/App.tsx`, the two files create-vite generates.'
+  contains "$section" 'Bootstrap writes `warn` for such a repo and `block` for one holding only those two.'
+  contains "$section" 'The gate counts only violations of rules tagged `wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa` or `wcag22aa`'
+  contains "$section" 'axe'"'"'s best-practice rules are not part of it.'
+  # the original two-place position still stands beside the switch
+  contains "$section" '**Blocking: the bootstrapped app'"'"'s own CI (#1946).**'
+}

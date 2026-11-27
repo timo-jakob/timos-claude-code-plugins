@@ -2,3 +2,6 @@
 playwright-report/
 test-results/
 .lighthouseci/
+# The axe gate's violation report (#3018), read by scripts/a11y-report.mjs.
+# Local test runs append to it; delete it to start a fresh count.
+a11y-report.jsonl

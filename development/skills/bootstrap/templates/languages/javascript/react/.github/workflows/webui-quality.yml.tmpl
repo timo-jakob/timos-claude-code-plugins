@@ -6,8 +6,9 @@
 # to the required contexts whenever this file is on disk. GitHub reports a job
 # under its `name:`, which is why the names below are the contexts, not the ids.
 #
-# The axe accessibility gate is not here: it runs inside test-and-coverage
-# (Vitest), where the a11y canary proves the matcher is wired.
+# The axe component gate runs inside test-and-coverage (Vitest), where the a11y
+# canary proves the matcher is wired. The e2e job runs the default-view test's
+# page scan (#3018), under the mode in ui-gates.json, and reports its violations.
 #
 # It skips the same doc-only paths as the quality workflow. A required check
 # whose workflow was skipped would sit at `expected` forever, so
@@ -37,7 +38,8 @@ permissions:
   contents: read
 
 jobs:
-  # Browser smoke: the production build's root route loads in a real Chromium.
+  # Browser smoke and default view: the production build's root route loads in a
+  # real Chromium, shows content without interaction and passes the axe scan.
   e2e:
     name: e2e (playwright)
     runs-on: ubuntu-latest
@@ -54,8 +56,12 @@ jobs:
         run: npm run build
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
-      - name: Smoke test (Playwright)
+      - name: Smoke + default-view tests (Playwright)
         run: npx playwright test -c tests/e2e/playwright.config.ts
+      # In both modes, even after a failed test: annotations plus the job summary's count.
+      - name: Accessibility report (axe)
+        if: ${{ !cancelled() }}
+        run: node scripts/a11y-report.mjs "default view (Playwright)"
       - name: Upload the Playwright report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
