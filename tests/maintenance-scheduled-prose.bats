@@ -193,6 +193,7 @@ unclaused_prompts() {
   contains "$text" "scripts/count-open-queue.zsh"
   contains "$text" "check the budget again **before each group starts**"
   contains "$text" "On a resume, *Resuming into Phase 8* reconciles the recorded stages first, and only groups with no recorded stage go through the budget: a recorded stage is never re-split."
+  contains "$text" "\`status: deferred\` (with or without \`deferred_by\`) → keep it deferred; a resumed run keeps its original scope, so the group is not decided again."
   contains "$text" "Record each deferred group as a \`deferred\` stage in \`phase8-stages\`, with its \`deferred_by\`"
   contains "$text" "the rest of this phase works \`run\` alone"
   contains "$text" "and so is a group the run budget defers, with its \`\"deferred_by\"\` beside the status"
