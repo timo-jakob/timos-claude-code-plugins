@@ -5010,11 +5010,13 @@ run renders a setup module, installs an axe package or adds a `.tsx` file.
 
 The script's header states the four rules in their order; the first match
 decides. Keep the printed `mode` and `rule` for the render below, and list the
-mode in the plan. Exit 3 (a root `package.json` that is missing or not a JSON
-object) decides nothing: write no `ui-gates.json`, take the `fresh` rule's render
-set, and record a Step 5 item naming the file. A missing `ui-gates.json` reads
-as `block`, so the gate still blocks. Exit 2 is your own malformed call: fix it
-and re-run once.
+mode in the plan. When `ui-gates.json` already holds an `a11y` key, list that
+value in the plan as kept, not the printed `mode`: `write` never changes it, and
+`mode` then supplies only the `rule` for the render. Exit 3 (a root
+`package.json` that is missing or not a JSON object) decides nothing: write no
+`ui-gates.json`, take the `fresh` rule's render set, and record a Step 5 item
+naming the file. A missing `ui-gates.json` reads as `block`, so the gate still
+blocks. Exit 2 is your own malformed call: fix it and re-run once.
 
 **Plan (Step 2).** List the overlay in the plan with its conditional variant —
 *consumer+React if §3k's machinery will be present, else plain React* — and the
@@ -5258,12 +5260,15 @@ reporting and the default-view test, whose own scan uses the tag set. The switch
 does not govern the app's own axe assertions. The React `vitest.config.ts` names
 `./src/test/setup.ts` in `setupFiles`, so when that file is absent on such an
 app, take the `vitest.config.ts` skip consequences below and name the missing
-setup module in the Step 5 item. On a re-run whose `ui-gates.json` already holds
-an `a11y` key, the `own-axe` rule cannot tell the app's own axe package from the
-one an earlier run of this step installed, so ask before rendering
-`src/test/setup.ts` and the canary: idempotency rule 3's diff prompt for a file
-on disk, and a render-or-skip question that defaults to skip for an absent one.
-A skip keeps the withholding above.
+setup module in the Step 5 item. Treat that as `vitest.config.ts`'s rule-3
+prompt resolving to skip, as the Vitest 5 rule above does: a deferred §3k is
+aborted under *When a deferred §3k does not get its pair*, and its Step 5
+follow-up names the missing setup module. On a re-run whose `ui-gates.json`
+already holds an `a11y` key, the `own-axe` rule cannot tell the app's own axe
+package from the one an earlier run of this step installed, so ask before
+rendering `src/test/setup.ts` and the canary: idempotency rule 3's diff prompt
+for a file on disk, and a render-or-skip question that defaults to skip for an
+absent one. A skip keeps the withholding above.
 
 **Generated once: `tests/e2e/default-view.spec.ts` (#3018).** It is the app's
 own test to copy per view, not a family-owned file. Render it **only when the

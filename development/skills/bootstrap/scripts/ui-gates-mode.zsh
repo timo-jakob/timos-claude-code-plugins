@@ -10,7 +10,7 @@
 # file, and `write` when §3k.5 renders. ARCHITECTURE.md, "React WebUI gates —
 # blocking in the app, advisory in maintenance (#1946, #1947)", states the switch.
 #
-# mode — the a11y mode bootstrap writes for this repo, the first match of:
+# mode — the a11y mode bootstrap writes when no a11y value exists, the first match of:
 #   1. family-matcher: <dir>/src/test/setup.ts registers `toHaveNoViolations`
 #      through `expect.extend` and imports neither jest-axe nor vitest-axe (an
 #      app bootstrapped before #3018)                               → block

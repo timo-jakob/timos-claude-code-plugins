@@ -48,6 +48,17 @@ expect_mode() {
   expect_mode warn ui-code
 }
 
+@test "mode: --repo . from inside the app, as SKILL.md §3k.5 calls it, does not prune the root as a dot-directory" {
+  cd "$WORK"
+  ugm mode --repo .
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"mode":"block","rule":"fresh"}' ]
+  file src/pages/Orders.tsx
+  ugm mode --repo .
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"mode":"warn","rule":"ui-code"}' ]
+}
+
 @test "mode: test files, test directories, node_modules, build output and dot-directories are not UI code" {
   file src/Orders.test.tsx
   file src/Orders.spec.jsx

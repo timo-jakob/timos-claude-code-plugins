@@ -898,6 +898,12 @@ GATE="$BATS_TEST_DIRNAME/../development/skills/bootstrap/templates/languages/jav
   has "$GATE" 'rule: v.id,'
   has "$GATE" 'selector: selectorOf(node),'
   has "$GATE" 'criteria: successCriteria(v.tags),'
+  # ... and the five fields scripts/a11y-report.mjs reads for its dedup key, annotation and table
+  grep -qxF '        source,' "$GATE"
+  grep -qxF '        file: relative(process.cwd(), file),' "$GATE"
+  grep -qxF '        test,' "$GATE"
+  grep -qxF '        impact: v.impact ?? "n/a",' "$GATE"
+  grep -qxF '        help: v.help,' "$GATE"
   has "$GATE" 'const m = /^wcag(\d)(\d)(\d+)$/.exec(tag);'
   # only the canary passes report: false
   run grep -rlF 'report: false' "$RX"
@@ -989,6 +995,7 @@ GATE="$BATS_TEST_DIRNAME/../development/skills/bootstrap/templates/languages/jav
   contains "$section" 'An existing file is never overwritten, diffed or prompted for, and it is not compared with the template in State D. A deleted one is rendered again on the next run'
   contains "$section" 'a missing `ui-gates.json` or `a11y` key in it, `src/test/a11y-gate.ts`, `scripts/a11y-report.mjs` or `tests/e2e/default-view.spec.ts`'
   contains "$section" 'Keep the printed `mode` and `rule` for the render below, and list the mode in the plan.'
+  contains "$section" 'When `ui-gates.json` already holds an `a11y` key, list that value in the plan as kept, not the printed `mode`: `write` never changes it, and `mode` then supplies only the `rule` for the render.'
   contains "$section" 'Exit 3 (a root `package.json` that is missing or not a JSON object) decides nothing: write no `ui-gates.json`'
   contains "$section" 'A missing `ui-gates.json` reads as `block`, so the gate still blocks.'
   contains "$section" '`@axe-core/playwright` runs the default-view test'"'"'s page scan, and `@types/node` types `src/test/a11y-gate.ts`'
@@ -999,5 +1006,6 @@ GATE="$BATS_TEST_DIRNAME/../development/skills/bootstrap/templates/languages/jav
   contains "$section" 'Every other file renders under its ordinary rules, so the app gains `ui-gates.json`, the reporting and the default-view test, whose own scan uses the tag set.'
   contains "$section" 'Write it whenever the overlay applies, even when the skips below withhold the gate files.'
   contains "$section" 'take the `vitest.config.ts` skip consequences below and name the missing setup module in the Step 5 item.'
+  contains "$section" 'Treat that as `vitest.config.ts`'"'"'s rule-3 prompt resolving to skip, as the Vitest 5 rule above does: a deferred §3k is aborted under *When a deferred §3k does not get its pair*, and its Step 5 follow-up names the missing setup module.'
   contains "$section" 'On a re-run whose `ui-gates.json` already holds an `a11y` key, the `own-axe` rule cannot tell the app'"'"'s own axe package from the one an earlier run of this step installed, so ask before rendering `src/test/setup.ts` and the canary: idempotency rule 3'"'"'s diff prompt for a file on disk, and a render-or-skip question that defaults to skip for an absent one. A skip keeps the withholding above.'
 }
