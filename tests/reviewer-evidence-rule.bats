@@ -96,6 +96,7 @@ development-python/agents/python-resilience-reviewer.md
 development-python/agents/python-security-reviewer.md
 development-python/agents/python-test-reviewer.md
 development-react/agents/react-idioms-reviewer.md
+development-react/agents/react-styleguide-reviewer.md
 development-swift/agents/bug-hunter.md
 development-swift/agents/code-quality.md
 development-swift/agents/performance-reviewer.md
@@ -105,7 +106,7 @@ development-swift/agents/test-reviewer.md
 development/agents/bootstrap-config-consistency.md
 development/agents/bootstrap-idempotency-reviewer.md
 development/agents/bootstrap-security-reviewer.md"
-  EXPECTED_COUNT=45
+  EXPECTED_COUNT=46
 }
 
 # Print every tracked agent file in the git work tree $1, repo-relative, sorted.

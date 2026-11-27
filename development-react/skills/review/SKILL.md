@@ -1,21 +1,23 @@
 ---
 name: review
-description: Perform a React idioms review — Rules of Hooks and TanStack Query as the one server-state default — with one specialized agent. A topic panel — on a React repo the resolve-issue review loop runs it beside /development-javascript:review, never instead of it.
+description: Perform a React idioms review — Rules of Hooks and TanStack Query as the one server-state default — with one specialized agent, plus a styleguide review against the `[review]` items of `styleguide/CHECKLIST.md` and WCAG 2.2 AA with a second agent when the repo carries the checklist. A topic panel — on a React repo the resolve-issue review loop runs it beside /development-javascript:review, never instead of it.
 disable-model-invocation: false
 ---
 
-You are the React review orchestrator. You run **one** agent, `react-idioms-reviewer`, over a JavaScript or
-TypeScript change, and you report its findings under one dimension, `react_idioms`.
+You are the React review orchestrator. You run up to **two** agents over a JavaScript or TypeScript change:
+`react-idioms-reviewer`, whose findings you report under the dimension `react_idioms`, and
+`react-styleguide-reviewer`, whose findings you report under the dimension `react_styleguide`. The second one
+runs only on the rounds *When the styleguide agent is launched* (below) names.
 
 **You are a topic panel, not a language panel.** On a React repo the review loop (`/development:resolve-issue`
 §3.5) dispatches you **beside** the language panel `review-dispatch.zsh plan` chose as `review_skill` — normally
 `/development-javascript:review`, because a React repo detects as `javascript`. You join because `plan` lists you
 in `topic_review_skills`. It does that when detect-stack reports `is_react` true (ARCHITECTURE.md, *Review-panel
 invocation contract*). Bugs, security, performance, code quality, tests and resilience are the language
-panel's dimensions, not yours. Review React idioms only, and never repeat a finding a language reviewer owns.
-When the language panel beside you is **not** the JavaScript one (a repo that also holds another language and
-records it as `primary:`), say so in your report: no reviewer covers the JavaScript-generic dimensions of that
-change.
+panel's dimensions, not yours. Review React idioms and the styleguide only, and never repeat a finding a language
+reviewer owns. When the language panel beside you is **not** the JavaScript one (a repo that also holds another
+language and records it as `primary:`), say so in your report: no reviewer covers the JavaScript-generic dimensions
+of that change.
 
 **Scope:** $ARGUMENTS
 
@@ -110,7 +112,8 @@ them cannot be acted on. Say so if the scope named them explicitly.
 
 **A non-empty scope with no in-scope file is NOT APPLICABLE, not clean.** When the loop hands you files but none
 of them is in scope (a docs-only story, a workflow-only fix pass), the story changed nothing React. On a
-**full** round whose carry holds no `react_idioms` entry, report the round **not applicable** to the caller,
+**full** round whose carry holds no `react_idioms` entry, and on which the styleguide agent is not launched
+(*When the styleguide agent is launched*, below), report the round **not applicable** to the caller,
 naming the out-of-scope files, and write **nothing** to the findings path. A `[]` there would be the loop's
 CONVERGED condition over a change no agent read. Because you run as a topic panel, the driving session reads
 that verdict as a panel with nothing to add. It joins nothing for you, and the language panel's verdict alone
@@ -124,8 +127,26 @@ unaccounted, which `review-loop.md` answers by re-dispatching you into the same 
 
 **The carry is shared by every panel of the round.** An entry of another panel's dimension is that panel's to
 confirm or re-raise, and the driving session judges the accounting over every panel's per-entry lines together
-(`review-loop.md`, *Topic panels*, cited above). So when the carry holds **no** `react_idioms` entry, it counts
-as empty for this panel. The rules above about a non-empty carry apply only to this panel's own entries.
+(`review-loop.md`, *Topic panels*, cited above). So when the carry holds **no** `react_idioms` or
+`react_styleguide` entry, it counts as empty for this panel. The rules above about a non-empty carry apply only
+to this panel's own entries.
+
+**When the styleguide agent is launched.** `react-styleguide-reviewer` is launched when **either** holds:
+
+1. the reviewed repo has `styleguide/CHECKLIST.md` at its root **and** the round's scope holds a UI file — a
+   `.jsx` or `.tsx` source, a stylesheet (`.css`, `.scss`) or `index.html`; or
+2. the round's carry holds a `react_styleguide` entry — on either kind of round, whatever the checklist and the
+   scope, so that entry is accounted for, exactly as a carried `react_idioms` entry launches
+   `react-idioms-reviewer`.
+
+In every other case it is not launched, and the panel is unchanged: its report, its findings array and its
+carry accounting are what `react-idioms-reviewer` alone makes them, and the `react_styleguide` dimension adds
+no finding. Launched by its carry alone without the checklist (a fix pass removed the submodule, say), the
+agent accounts for its carried entries — confirmed, re-raised or unconfirmed — and raises no new finding; tell it
+so on its scope line. A stylesheet counts as in scope for this agent only: a round whose scope holds only
+stylesheets is not NOT APPLICABLE when this agent is launched, and `react-idioms-reviewer` then runs only when
+the scope holds a file of its own in-scope list above or the carry holds a `react_idioms` entry. A full round
+on which neither agent is launched is NOT APPLICABLE, as above.
 
 **Where you write, beside another panel.** Every panel of a round shares one descriptor, so one `findings_path`
 — and in hook mode one `$REVIEW_FINDINGS` and one `$REVIEW_FINDINGS.carry.json` sidecar. **Every** rule in this
@@ -145,14 +166,17 @@ an agent that has to guess should say so rather than assume the latest.
 
 ## Step 1: Launch the Review Agent
 
-Use the Task tool to spawn the agent below with `run_in_background: true`. It is defined in this plugin's
-`agents/` directory and already knows what to look for — just pass the review scope.
+Use the Task tool to spawn the agents below that this round launches, in parallel, with
+`run_in_background: true`. `react-idioms-reviewer` runs as the scope and carry rules above say, and
+`react-styleguide-reviewer` only as *When the styleguide agent is launched* (above) says. Each is defined in this
+plugin's `agents/` directory and already knows what to look for — just pass the review scope.
 
 | Agent | Model | Dimension |
-| --------------------- | ----- | ------------ |
+| ------------------------- | ----- | ---------------- |
 | react-idioms-reviewer | opus | react_idioms |
+| react-styleguide-reviewer | opus | react_styleguide |
 
-Use its name as the `subagent_type` (`subagent_type: react-idioms-reviewer`) so it runs on the model declared
+Use each name as the `subagent_type` (`subagent_type: react-idioms-reviewer`) so it runs on the model declared
 in its definition, and pass the prompt below — substituting its **Dimension** (from the table above) for
 `{DIMENSION}`, its **name** for `{AGENT NAME}`, and the current review **round** for `{ROUND}` (`1` for a
 standalone run). This is where the machine-readable JSON layer is wired in, so the reviewer definition stays
@@ -169,9 +193,12 @@ It is the only way a fix that silently did not land gets re-raised (a delta roun
 cannot re-derive it). Add the line below only when the plan names a **non-null**
 path for it — a standalone run has no descriptor at all, and on round 1 the
 loop's own caller passes no `--fix-verification`. The carry holds every panel's
-blockers, but the split-carry map (above) hands the agent only the `react_idioms` entries: the
+blockers, but the split-carry map (above) hands each agent only its own dimension's entries: its
 Fix verification line carries that path, never `fix_verification_path` itself,
-and is added only when the map holds `react_idioms` (#2010).
+and is added only when the map holds that agent's dimension (#2010).
+
+For `react-styleguide-reviewer`, add to the scope line whether the checklist is present — `checklist:
+styleguide/CHECKLIST.md` — or absent — `checklist: absent — account for the carry only, raise no new finding`.
 
 ```text
 Review scope: {the review scope}
@@ -184,24 +211,25 @@ Then, after the prose, emit those same findings once more as a single fenced `js
 
 ## Step 2: Collect Results
 
-Wait for the agent to complete, then read its output.
+Wait for every launched agent to complete, then read each one's output.
 
 **An agent that fails is not an agent that found nothing.** If it errors, times out, or returns prose with no
 fenced `json` block, re-launch it once. If it fails again:
 
-1. Name the missing `react_idioms` dimension in the Overview and in Metrics, and
+1. Name its missing dimension — `react_idioms` for `react-idioms-reviewer`, `react_styleguide` for
+   `react-styleguide-reviewer` — in the Overview and in Metrics, and
 2. **Do not write the findings file at all.** Report the round as **failed** to the caller, naming the dimension
    that did not run.
 
 As a topic panel, a failed round fails the whole loop round, exactly as the language panel failing does. The
 driving session never consolidates the JavaScript panel's findings as if this one had reported clean. This gate
-applies only once the agent was launched: an empty-delta round that carries nothing launches none and still
+applies only once an agent was launched: an empty-delta round that carries nothing launches none and still
 produces `[]` — written or returned exactly as *Where you write, beside another panel* says, and never to the
 round's shared `findings_path`, where a `[]` would replace the language panel's findings with a clean round.
 
 ## Step 3: Synthesize the Review
 
-Write the agent's findings up as one review report with this structure:
+Write the agents' findings up as one review report with this structure:
 
 ```text
 # React Review Summary
@@ -213,7 +241,7 @@ Brief summary of what was reviewed and the React health of the change.
 {every CRITICAL finding — normally Rules of Hooks violations}
 
 ## Warnings
-{every WARNING finding — normally server state outside TanStack Query}
+{every WARNING finding — normally server state outside TanStack Query, styleguide items and WCAG 2.2 AA}
 
 ## Suggested follow-ups and capped claims
 {only the SUGGESTION findings that carry a `follow-up:` or `decides:` line}
@@ -222,10 +250,13 @@ Brief summary of what was reviewed and the React health of the change.
 - **Total findings:** X (Y critical, Z warnings, W capped or follow-up suggestions)
 - **Carried entries:** confirmed N / re-raised M / unconfirmed K of TOTAL — required
   on any round whose `fix_verification_path` holds entries, whatever this
-  report's findings are (#1583, #2010: with one agent every entry is its own —
+  report's findings are (#1583, #2010: each agent accounts for its own
+  dimension's entries, so this line sums the agents' triples —
   reproduce each reviewer's per-entry lines under this line; they are the
   source of the accounting records)
-- **Areas reviewed:** React idioms (`react_idioms`) — on a failed round, **Areas not reviewed:** React idioms
+- **Areas reviewed:** React idioms (`react_idioms`), and React styleguide (`react_styleguide`) on a round that
+  launched its agent — on a failed round, **Areas not reviewed:** the dimension whose agent failed, React idioms
+  (`react_idioms`) or React styleguide (`react_styleguide`)
 
 ## Verdict
 One-paragraph overall assessment with the most important action items.
@@ -233,10 +264,10 @@ One-paragraph overall assessment with the most important action items.
 
 ## Step 4: Emit the machine-readable findings file
 
-Alongside the report, take the agent's fenced `json` block (schema: ARCHITECTURE.md → *Review finding schema*)
-as this round's findings array — **only when the agent completed** (Step 2 owns the failed case, and it does
-not reach here). Every finding already carries its own `reviewer`, `dimension` and `round`. Preserve every
-finding: the consolidator (#561) deduplicates downstream.
+Alongside the report, take each launched agent's fenced `json` block (schema: ARCHITECTURE.md → *Review finding
+schema*) and concatenate them as this round's findings array — **only when the agent completed**, every
+launched agent (Step 2 owns the failed case, and it does not reach here). Every finding already carries its own
+`reviewer`, `dimension` and `round`. Preserve every finding: the consolidator (#561) deduplicates downstream.
 
 Always include the array inline as one fenced `json` block under a `## Findings (JSON)` heading, so a caller
 reading stdout can pick it up. Then write it to a file under *Where you write, beside another panel* (above):

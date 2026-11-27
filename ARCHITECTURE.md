@@ -3912,16 +3912,24 @@ dispatch (#2008)* rule. The review skill's Step 1 table is the round's plan.
 plan` lists `development-react:review` in `topic_review_skills` when
 `is_react` fires, and it runs beside the JavaScript language panel rather than
 instead of it (*Review-panel invocation contract*, below). It extends the enum with
-exactly one dimension, **`react_idioms`** (`react-idioms-reviewer`), and carries
-none of the core five: the JavaScript panel beside it reviews those. The name
+two dimensions, **`react_idioms`** (`react-idioms-reviewer`) and
+**`react_styleguide`** (`react-styleguide-reviewer`, #3019), and carries
+none of the core five: the JavaScript panel beside it reviews those. Each name
 carries the topic prefix every topic-panel dimension must carry, so it can never
 collide with a language panel's dimension in the one round both join. Its
 severity is **fixed per check** in the reviewer itself, so the loop converges:
 a Rules of Hooks violation (including a stale closure the reviewer can show) is
 `CRITICAL`, server state fetched outside TanStack Query (ad-hoc `useEffect`
 fetching, or an alternative server-state library) is `WARNING`; the reviewer
-has no other check. Like every non-core dimension it inherits the `build-dossier.zsh` `$core`
-gap (#1148).
+has no other check. `react_styleguide` runs only when the reviewed repo has
+`styleguide/CHECKLIST.md` at its root and the round's scope holds a UI file, or
+when the carry holds one of its entries. Its bar is one row: a violated
+`[review]` item of that checklist, read from the file on every run and quoted
+verbatim with its `STYLEGUIDE.md#<anchor>` rule, and a WCAG 2.2 AA violation the
+reviewer can show in the source, are each `WARNING`, whatever the repo's
+accessibility gate does; `[design]` and `[mechanical]` items are never checked,
+and a tool-verdict claim is capped by the evidence rule. Like every non-core
+dimension each inherits the `build-dossier.zsh` `$core` gap (#1148).
 
 ### Scope-bounded severity (#982)
 
