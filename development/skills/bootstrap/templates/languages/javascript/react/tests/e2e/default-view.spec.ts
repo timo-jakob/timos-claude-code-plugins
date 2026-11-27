@@ -33,7 +33,7 @@ test("the default view shows content without any interaction", async ({ page }) 
 
   const results = await new AxeBuilder({ page }).withTags([...WCAG_TAGS]).analyze();
   const violations = wcagViolations(results.violations);
-  recordViolations(violations, "playwright", test.info().title, mode);
+  recordViolations(violations, "playwright", test.info().file, test.info().title, mode);
   if (mode === "block") {
     expect(violations, describeViolations(violations)).toEqual([]);
   }

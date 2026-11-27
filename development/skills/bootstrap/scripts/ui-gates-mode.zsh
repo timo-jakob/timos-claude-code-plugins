@@ -12,7 +12,8 @@
 #
 # mode — the a11y mode bootstrap writes for this repo, the first match of:
 #   1. family-matcher: <dir>/src/test/setup.ts registers `toHaveNoViolations`
-#      through `expect.extend` (an app bootstrapped before #3018)  → block
+#      through `expect.extend` and imports neither jest-axe nor vitest-axe (an
+#      app bootstrapped before #3018)                               → block
 #   2. own-axe: not a family app, and the root package.json's devDependencies
 #      carry an axe package — axe-core, vitest-axe, jest-axe or a name starting
 #      with @axe-core/ (the maintenance audit's definition)         → warn
@@ -163,7 +164,8 @@ fi
 emit() { jq -cn --arg m "$1" --arg r "$2" '{mode: $m, rule: $r}'; }
 
 setup="$repo/src/test/setup.ts"
-if [[ -f "$setup" ]] && grep -q 'expect\.extend' "$setup" && grep -q 'toHaveNoViolations' "$setup"; then
+if [[ -f "$setup" ]] && grep -q 'expect\.extend' "$setup" && grep -q 'toHaveNoViolations' "$setup" \
+	&& ! grep -Eq "(from|import|require\()[[:space:]]*[\"'](jest|vitest)-axe" "$setup"; then
 	emit block family-matcher
 	exit 0
 fi

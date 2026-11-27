@@ -27,7 +27,7 @@ expect.extend({
     const mode = options.mode ?? repoMode;
     const violations = wcagViolations(results.violations);
     if (options.report !== false) {
-      recordViolations(violations, "vitest", this.currentTestName ?? "", mode);
+      recordViolations(violations, "vitest", this.testPath ?? "", this.currentTestName ?? "", mode);
     }
     if (mode === "warn" && violations.length > 0) {
       console.warn(`a11y (warn mode): ${describeViolations(violations)}`);

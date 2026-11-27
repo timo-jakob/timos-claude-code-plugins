@@ -22,13 +22,14 @@ const readMode = () => {
 };
 
 // A Playwright retry scans the same page again, so a repeated element is counted once.
+// The test file is part of the key: copies of one spec share their test title.
 const records = new Map();
 if (existsSync(reportFile)) {
   for (const line of readFileSync(reportFile, "utf8").split("\n")) {
     if (line.trim() === "") continue;
     try {
       const r = JSON.parse(line);
-      records.set([r.source, r.test, r.rule, r.selector].join("\u0000"), r);
+      records.set([r.source, r.file, r.test, r.rule, r.selector].join("\u0000"), r);
     } catch {
       console.log(`::warning title=a11y report::skipped an unreadable line in ${reportFile}`);
     }
@@ -43,7 +44,7 @@ const mode = readMode();
 const rows = [...records.values()];
 for (const r of rows) {
   const title = escapeProperty(`axe ${r.rule} (WCAG ${r.criteria})`);
-  console.log(`::warning title=${title}::${escapeData(`${r.selector}: ${r.help} [${r.test}]`)}`);
+  console.log(`::warning title=${title}::${escapeData(`${r.selector}: ${r.help} [${r.file}: ${r.test}]`)}`);
 }
 
 const summary = [
@@ -53,9 +54,9 @@ const summary = [
   "",
 ];
 if (rows.length > 0) {
-  summary.push("| Rule | Selector | WCAG SC | Impact | Test |", "| --- | --- | --- | --- | --- |");
+  summary.push("| Rule | Selector | WCAG SC | Impact | File | Test |", "| --- | --- | --- | --- | --- | --- |");
   for (const r of rows) {
-    const cells = [r.rule, `\`${r.selector}\``, r.criteria, r.impact, r.test].map(cell);
+    const cells = [r.rule, `\`${r.selector}\``, r.criteria, r.impact, r.file, r.test].map(cell);
     summary.push(`| ${cells.join(" | ")} |`);
   }
 }

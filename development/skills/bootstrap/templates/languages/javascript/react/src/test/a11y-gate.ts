@@ -11,7 +11,7 @@
 //
 // Change the mode with a one-line edit to ui-gates.json, never here.
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { relative, resolve } from "node:path";
 
 export const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"] as const;
 
@@ -82,11 +82,19 @@ export function describeViolations(violations: GateViolation[]): string {
 }
 
 // One JSON line per violating element. Test workers append concurrently, one write per line.
-export function recordViolations(violations: GateViolation[], source: string, test: string, mode: A11yMode): void {
+// `file` is the test file's path: two files may hold tests of the same name.
+export function recordViolations(
+  violations: GateViolation[],
+  source: string,
+  file: string,
+  test: string,
+  mode: A11yMode,
+): void {
   for (const v of violations) {
     for (const node of v.nodes) {
       const record = {
         source,
+        file: relative(process.cwd(), file),
         test,
         mode,
         rule: v.id,

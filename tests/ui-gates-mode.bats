@@ -88,6 +88,12 @@ expect_mode() {
   done
 }
 
+@test "mode: a jest-axe setup.ts that extends expect with toHaveNoViolations is an own axe setup, not the family matcher" {
+  file src/test/setup.ts 'import { toHaveNoViolations } from "jest-axe"; expect.extend(toHaveNoViolations);'
+  printf '{"devDependencies": {"jest-axe": "^9.0.0"}}\n' > "$WORK/package.json"
+  expect_mode warn own-axe
+}
+
 @test "mode: an axe package outside devDependencies, or a near-miss name, is not an own axe setup" {
   printf '{"dependencies": {"axe-core": "^4.10.0"}, "devDependencies": {"axe-corey": "1", "my-axe-core": "1"}}\n' > "$WORK/package.json"
   expect_mode block fresh

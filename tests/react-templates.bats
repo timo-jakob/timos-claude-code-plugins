@@ -891,7 +891,7 @@ GATE="$BATS_TEST_DIRNAME/../development/skills/bootstrap/templates/languages/jav
   local s="$RX/src/test/setup.ts"
   has "$s" 'const mode = options.mode ?? repoMode;'
   has "$s" 'if (options.report !== false) {'
-  has "$s" 'recordViolations(violations, "vitest", this.currentTestName ?? "", mode);'
+  has "$s" 'recordViolations(violations, "vitest", this.testPath ?? "", this.currentTestName ?? "", mode);'
   has "$s" 'pass: mode === "warn" || violations.length === 0,'
   # the report record carries rule id, selector and success criterion
   has "$GATE" 'rule: v.id,'
@@ -919,8 +919,9 @@ GATE="$BATS_TEST_DIRNAME/../development/skills/bootstrap/templates/languages/jav
   has "$d" 'await expect(content.first()).toBeVisible();'
   has "$d" 'expect(pageErrors).toEqual([]);'
   has "$d" 'import AxeBuilder from "@axe-core/playwright";'
-  has "$d" 'recordViolations(violations, "playwright", test.info().title, mode);'
+  has "$d" 'recordViolations(violations, "playwright", test.info().file, test.info().title, mode);'
   has "$d" 'if (mode === "block") {'
+  has "$d" 'expect(violations, describeViolations(violations)).toEqual([]);'
 }
 
 @test "wcag: the report step runs after the tests in both jobs, in both modes, never on a cancel" {
@@ -948,15 +949,22 @@ GATE="$BATS_TEST_DIRNAME/../development/skills/bootstrap/templates/languages/jav
   contains "$output" '**0 violation(s)**, mode `block` (ui-gates.json).'
   printf '{\n  "schema": "ui-gates/v1",\n  "a11y": "warn"\n}\n' > "$work/ui-gates.json"
   # one violation, recorded twice (a Playwright retry): one annotation, one row, a count of 1
-  local rec='{"source":"vitest","test":"nameless button","mode":"warn","rule":"button-name","selector":"button","criteria":"4.1.2","impact":"critical","help":"Buttons must have discernible text","helpUrl":""}'
+  local rec='{"source":"vitest","file":"src/Save.test.tsx","test":"nameless button","mode":"warn","rule":"button-name","selector":"button","criteria":"4.1.2","impact":"critical","help":"Buttons must have discernible text","helpUrl":""}'
   printf '%s\n%s\n' "$rec" "$rec" > "$work/a11y-report.jsonl"
   : > "$work/summary.md"
   run env GITHUB_STEP_SUMMARY="$work/summary.md" sh -c "cd '$work' && node '$r' 'component tests'"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^::warning ' <<< "$output")" = 1 ]
-  contains "$output" '::warning title=axe button-name (WCAG 4.1.2)::button: Buttons must have discernible text [nameless button]'
+  contains "$output" '::warning title=axe button-name (WCAG 4.1.2)::button: Buttons must have discernible text [src/Save.test.tsx: nameless button]'
   grep -qF '**1 violation(s)**, mode `warn` (ui-gates.json).' "$work/summary.md"
-  grep -qxF '| button-name | `button` | 4.1.2 | critical | nameless button |' "$work/summary.md"
+  grep -qxF '| button-name | `button` | 4.1.2 | critical | src/Save.test.tsx | nameless button |' "$work/summary.md"
+  # the same rule on another element, and in another file's test of the same name, are violations of their own
+  { printf '%s\n' "$rec"; sed 's/"selector":"button"/"selector":"#save"/' <<< "$rec"; sed 's/Save\.test/Edit.test/' <<< "$rec"; } > "$work/a11y-report.jsonl"
+  : > "$work/summary.md"
+  run env GITHUB_STEP_SUMMARY="$work/summary.md" sh -c "cd '$work' && node '$r' 'component tests'"
+  [ "$(grep -c '^::warning ' <<< "$output")" = 3 ]
+  grep -qF '**3 violation(s)**' "$work/summary.md"
+  [ "$(grep -c '^| button-name ' "$work/summary.md")" = 3 ]
 }
 
 @test "wcag: SKILL.md §3k.5 decides the mode in Step 2, writes ui-gates.json and states the own-axe and once-only rules" {
@@ -986,4 +994,5 @@ GATE="$BATS_TEST_DIRNAME/../development/skills/bootstrap/templates/languages/jav
   contains "$section" 'Every other file renders under its ordinary rules, so the app gains `ui-gates.json`, the reporting and the default-view test, whose own scan uses the tag set.'
   contains "$section" 'Write it whenever the overlay applies, even when the skips below withhold the gate files.'
   contains "$section" 'take the `vitest.config.ts` skip consequences below and name the missing setup module in the Step 5 item.'
+  contains "$section" 'The `own-axe` rule withholds only on the run that writes the `a11y` key: on a re-run whose `ui-gates.json` already holds one, `src/test/setup.ts` and the canary take their ordinary rules'
 }
