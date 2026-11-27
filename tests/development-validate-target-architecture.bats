@@ -135,6 +135,13 @@ only_rule() {
   contains "$stderr" 'prose_sha256 is not 64 lowercase hex digits'
 }
 
+@test "schema: a block with no provenance" {
+  edit_block 'del(.provenance)'
+  run --separate-stderr zsh "$S" "$F"
+  only_rule schema
+  contains "$stderr" 'provenance is missing or not an object'
+}
+
 @test "schema: clauses or changes that are not an array of objects" {
   edit_block '.changes = {}'
   run --separate-stderr zsh "$S" "$F"

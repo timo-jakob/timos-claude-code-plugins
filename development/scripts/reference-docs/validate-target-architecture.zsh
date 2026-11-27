@@ -6,8 +6,9 @@
 # The contract is ARCHITECTURE.md, *Target architecture contract
 # (`target-architecture/v1`)*. This script is its single-file check: it reads
 # one file and judges it alone, so it cannot see an active clause reworded in
-# place, a clause deleted, or an id renumbered or reused, which only the file's
-# history would show.
+# place, a clause deleted, an id renumbered or reused, or a retired clause named
+# only by the change that introduced it, which only the file's history would
+# show.
 #
 # Every violation is reported, not only the first: one stderr line each,
 #   target-architecture: <rule>: <detail>

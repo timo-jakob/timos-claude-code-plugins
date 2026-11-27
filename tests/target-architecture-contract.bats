@@ -46,7 +46,20 @@ setup() {
 }
 
 @test "the contract states the validator's single-file limit" {
-  contains "$SECTION" '**The validator checks a single file, so it cannot see an active clause reworded in place, a clause deleted, or an id renumbered or reused.**'
+  contains "$SECTION" '**The validator checks a single file, so it cannot see an active clause reworded in place, a clause deleted, an id renumbered or reused, or a retired clause named only by the change that introduced it.**'
+  contains "$SECTION" 'Catching those means comparing the file with its earlier versions'
+  contains "$SECTION" "whoever changes a clause's meaning adds a change, and the human who approves the PR reads the diff for every one of them."
+}
+
+@test "the rule bullets on affects and ref paths are stated" {
+  contains "$SECTION" 'Every id in `affects` names a clause of the file.'
+  contains "$SECTION" 'A `ref` path is a file of the target architecture'"'"'s own repository. A path found only in a linked submodule does not count. The `ref` anchor is not checked.'
+}
+
+@test "the validator's exit codes and repo root are stated" {
+  contains "$SECTION" '`validate-target-architecture.zsh <file>` checks one file. It exits 0 on a valid file, printing `target-architecture: valid`, and 1 on an invalid one, with one stderr line `target-architecture: <rule>: <detail>` for every violation, not only the first.'
+  contains "$SECTION" 'It exits 2 on a usage error or an unreadable file; a missing `jq` and a lookup that fails internally exit 2 too, since neither is a verdict on the file.'
+  contains "$SECTION" 'The repo is the git work tree holding the file, or the current directory outside git.'
 }
 
 @test "provenance is the persona contract's mechanism, given as a link and not restated" {
@@ -62,6 +75,8 @@ setup() {
   contains "$SECTION" '**A clause** has `id` (`TA-<n>`), `area`'
   contains "$SECTION" 'exactly one of `statement` (a string) or `ref` (`{ "path", "anchor", "title" }`: a page of the file'"'"'s own repository'
   contains "$SECTION" '**A change** has `id` (`TC-<yyyy>-<mm>-<n>`, the year and month of its `date`), `date`'
+  contains "$SECTION" '`status` (`active` or `retired`) and exactly one'
+  contains "$SECTION" '`date` (an ISO calendar date, `YYYY-MM-DD`), `from`, `to`, `rationale`, `affects[]` (the ids of the clauses it introduced, changed or retired) and `evidence[]` (issue or PR references; may be empty).'
 }
 
 @test "the contract's rule table names exactly the validator's rules" {

@@ -477,7 +477,8 @@ file, or the current directory outside git. The rules:
 | `stale-prose` | `provenance.prose_sha256` does not match the prose |
 
 **The validator checks a single file, so it cannot see an active clause
-reworded in place, a clause deleted, or an id renumbered or reused.** Catching
+reworded in place, a clause deleted, an id renumbered or reused, or a retired
+clause named only by the change that introduced it.** Catching
 those means comparing the file with its earlier versions, which is a different
 tool. Until one exists, they are left to the change itself: whoever changes a
 clause's meaning adds a change, and the human who approves the PR reads the
