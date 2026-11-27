@@ -129,8 +129,7 @@ g() {
   gate="$(outcome_bullet "$GATE" 'exit 3**')"
   refiner="$(outcome_bullet "$REFINER" 'exit 3**')"
   contains "$gate" 'the repo has no registry: the `persona-registry-missing` advisory below, unchanged.'
-  contains "$refiner" 'the repo has no registry: leave `personas: []`'
-  contains "$refiner" 'unchanged.'
+  contains "$refiner" 'the repo has no registry: leave `personas: []` and route a story that needs a persona to `/product:define-personas`, as above, unchanged.'
   contains "$(flat "$GATE")" 'the story references personas but the lookup exited 3 → advisory that the ids can'"'"'t be validated.'
 }
 
@@ -165,6 +164,24 @@ g() {
       lacks "$rest" 'persona-registry-missing'
     done
   done
+}
+
+@test "the refiner's outcome bullets are pinned sentence by sentence, with the unchecked-id rule after them" {
+  local own linked four other t
+  own="$(outcome_bullet "$REFINER" 'exit 0, `origin` `own`**')"
+  linked="$(outcome_bullet "$REFINER" 'exit 0, `origin` `linked`**')"
+  four="$(outcome_bullet "$REFINER" 'exit 4 or 6**')"
+  other="$(outcome_bullet "$REFINER" 'exit 1, 2, 5 or any other non-zero exit**')"
+  t="$(flat "$REFINER")"
+  contains "$own" 'the repo'"'"'s own registry: read the file at `path` and reference personas from it, as above.'
+  contains "$linked" 'the registry lives in the linked docs repository named by `submodule`: read the file at `path` and reference personas from it, as above.'
+  contains "$linked" 'It is read-only here — never propose an edit to it in this repo.'
+  contains "$linked" 'A missing or ill-fitting persona is routed, in a `recommendations` entry, to `/product:define-personas` run in that docs repository; it ships in the `product` plugin.'
+  contains "$four" 'the registry could not be read at its pinned version: a `recommendations` entry that carries the fix line the script printed on stderr, and no new persona reference this turn.'
+  contains "$other" 'or no copy of the lookup anywhere — a `recommendations` entry that carries the script'"'"'s stderr (or says the lookup was not found), and no new persona reference this turn.'
+  contains "$t" 'On those last two outcomes the registry was not read, so nothing was checked.'
+  contains "$t" 'Carry every persona id already in `issue.body`'"'"'s story-spec block, or named by the human, unchanged, together with its accepted `persona_derivations` records, and derive nothing from it this turn.'
+  contains "$t" 'Such an id is unchecked, not an id that does not resolve: wherever this file routes a non-resolving id to `/product:define-personas`, that routing does not apply to it, and the `recommendations` entry above is the whole response.'
 }
 
 @test "story-readiness pins that persona checks stay advisory in every outcome" {
