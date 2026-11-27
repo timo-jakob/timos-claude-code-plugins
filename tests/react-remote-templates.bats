@@ -351,7 +351,7 @@ STEP_END='### 3k.10. MFE conformance (a remote'"'"'s contract check — #1126) '
   contains "$section" 'so no `{{PLACEHOLDER}}` survives'
   contains "$section" '**Withhold `src/remote/entry.test.ts`** unless `src/test/setup.ts` is on disk'
   contains "$section" 'Record every file this step writes under the `react_overlay` telemetry step key'
-  contains "$(cat "$SKILL")" '| `react_overlay` | 3k.5. React overlay, 3k.7. Shell overlay, 3k.8. Canvas overlay, 3k.9. Remote overlay, and 3k.10. MFE conformance |'
+  contains "$(cat "$SKILL")" '| `react_overlay` | 3k.5. React overlay, 3k.5a. Styleguide submodule, 3k.7. Shell overlay, 3k.8. Canvas overlay, 3k.9. Remote overlay, and 3k.10. MFE conformance |'
 }
 
 @test "remote: §3k.9 composes with the layers beneath it, and its one Vite-owned edit adds build:remote" {

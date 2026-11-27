@@ -71,9 +71,10 @@ tagged_commit() { git -C "$1" rev-parse "refs/tags/$2^{commit}"; }
   make_app "$W/app"
   local head_before
   head_before="$(git -C "$W/app" rev-parse HEAD)"
-  run zsh "$SCRIPT" --repo "$W/app" --url "$W/sg"
+  run --separate-stderr zsh "$SCRIPT" --repo "$W/app" --url "$W/sg"
   [ "$status" -eq 0 ]
   [ "$output" = "styleguide: added $W/sg at v0.10.0" ]
+  [ -z "$stderr" ]
   # checked out at v0.10.0's commit: not v0.9.0, not the rc, not nightly, not main
   [ "$(git -C "$W/app/styleguide" rev-parse HEAD)" = "$(tagged_commit "$W/sg" v0.10.0)" ]
   [ "$(git -C "$W/app" config -f .gitmodules submodule.styleguide.path)" = styleguide ]
@@ -104,6 +105,15 @@ tagged_commit() { git -C "$1" rev-parse "refs/tags/$2^{commit}"; }
   run zsh "$SCRIPT" --repo "$W/app" --url "$W/sg"
   [ "$status" -eq 0 ]
   ends_with "$output" " at v1.10.0"
+}
+
+@test "styleguide: the patch field orders numerically too (v0.1.10 beats v0.1.9 and v0.1.2)" {
+  make_remote "$W/sg" v0.1.2 v0.1.10 v0.1.9
+  make_app "$W/app"
+  run zsh "$SCRIPT" --repo "$W/app" --url "$W/sg"
+  [ "$status" -eq 0 ]
+  [ "$output" = "styleguide: added $W/sg at v0.1.10" ]
+  [ "$(git -C "$W/app/styleguide" rev-parse HEAD)" = "$(tagged_commit "$W/sg" v0.1.10)" ]
 }
 
 # --- CLAUDE.md -----------------------------------------------------------------
@@ -151,6 +161,38 @@ tagged_commit() { git -C "$1" rev-parse "refs/tags/$2^{commit}"; }
   [ ! -e "$W/app/CLAUDE.md" ]
 }
 
+@test "styleguide: --template supplies the appended section" {
+  make_remote "$W/sg" v0.1.0
+  make_app "$W/app" $'# Ours\n'
+  printf '%s\n\ncustom-template-marker\n' '## Read the styleguide before UI changes' > "$W/custom.tmpl"
+  run zsh "$SCRIPT" --repo "$W/app" --url "$W/sg" --template "$W/custom.tmpl"
+  [ "$status" -eq 0 ]
+  [ "$(tail -n 1 "$W/app/CLAUDE.md")" = custom-template-marker ]
+}
+
+@test "styleguide: a heading inside a fence is no section; trailing whitespace and case still match" {
+  make_app "$W/app"
+  printf '[submodule "styleguide"]\n\tpath = styleguide\n\turl = %s\n' "$W/no-such-remote" > "$W/app/.gitmodules"
+  local f="$W/app/CLAUDE.md" fence
+  for fence in '```' '~~~'; do
+    printf '# Ours\n\n%s\n%s\n%s\n' "$fence" '## Read the styleguide before UI changes' "$fence" > "$f"
+    cp "$f" "$W/prior"
+    run zsh "$SCRIPT" --repo "$W/app"
+    [ "$status" -eq 0 ]
+    # the fenced copy plus exactly one appended heading, the prior bytes a prefix
+    [ "$(grep -cx '## Read the styleguide before UI changes' "$f")" -eq 2 ] || { echo "$fence"; false; }
+    head -c "$(wc -c < "$W/prior" | tr -d ' ')" "$f" | cmp -s - "$W/prior"
+  done
+  local present
+  for present in '## Read the styleguide before UI changes  ' '## read the styleguide before ui changes'; do
+    printf '# Ours\n\n%s\n' "$present" > "$f"
+    cp "$f" "$W/prior"
+    run zsh "$SCRIPT" --repo "$W/app"
+    [ "$status" -eq 0 ]
+    cmp -s "$f" "$W/prior" || { echo "appended after '$present'"; false; }
+  done
+}
+
 # --- present: the re-run --------------------------------------------------------
 
 @test "styleguide: a re-run with the submodule contacts no remote, ignores --url and changes no byte" {
@@ -171,9 +213,10 @@ tagged_commit() { git -C "$1" rev-parse "refs/tags/$2^{commit}"; }
   mkdir -p "$W/bin"
   printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "%s/git.log"\nexec "%s" "$@"\n' "$W" "$real" > "$W/bin/git"
   chmod +x "$W/bin/git"
-  PATH="$W/bin:$PATH" run zsh "$SCRIPT" --repo "$W/app" --url "$W/no-such-remote"
+  PATH="$W/bin:$PATH" run --separate-stderr zsh "$SCRIPT" --repo "$W/app" --url "$W/no-such-remote"
   [ "$status" -eq 0 ]
   [ "$output" = "styleguide: present" ]
+  [ -z "$stderr" ]
   [ -f "$W/git.log" ]
   run grep -E 'ls-remote|fetch|clone|submodule (add|update)' "$W/git.log"
   [ "$status" -eq 1 ]
@@ -195,6 +238,24 @@ tagged_commit() { git -C "$1" rev-parse "refs/tags/$2^{commit}"; }
   [ "$(grep -cx '## Read the styleguide before UI changes' "$W/app/CLAUDE.md")" -eq 1 ]
 }
 
+@test "styleguide: present with a CLAUDE.md it cannot write or read fails naming CLAUDE.md, the submodule kept" {
+  [ "$(id -u)" != 0 ] || skip "root reads and writes any file"
+  make_app "$W/app" $'# Ours\n'
+  printf '[submodule "styleguide"]\n\tpath = styleguide\n\turl = %s\n' "$W/no-such-remote" > "$W/app/.gitmodules"
+  cp "$W/app/CLAUDE.md" "$W/cm" && cp "$W/app/.gitmodules" "$W/gm"
+  local mode reason
+  for mode in "a-w|cannot write CLAUDE.md" "200|cannot read CLAUDE.md"; do
+    reason="${mode#*|}"
+    chmod "${mode%%|*}" "$W/app/CLAUDE.md"
+    run --separate-stderr zsh "$SCRIPT" --repo "$W/app"
+    chmod 644 "$W/app/CLAUDE.md"
+    [ "$status" -eq 1 ] || { echo "$reason: status $status"; false; }
+    [ "$output" = "styleguide: failed — CLAUDE.md: $reason" ] || { echo "output: $output"; false; }
+    cmp -s "$W/app/CLAUDE.md" "$W/cm"
+    cmp -s "$W/app/.gitmodules" "$W/gm"
+  done
+}
+
 @test "styleguide: a .gitmodules declaring the submodule under another name still reads as present" {
   make_app "$W/app"
   printf '[submodule "ui"]\n\tpath = styleguide\n\turl = %s\n' "$W/no-such-remote" > "$W/app/.gitmodules"
@@ -209,9 +270,10 @@ tagged_commit() { git -C "$1" rev-parse "refs/tags/$2^{commit}"; }
   make_app "$W/app" $'# Ours\n'
   local before
   before="$(tree_state "$W/app")"
-  run zsh "$SCRIPT" --repo "$W/app"
+  run --separate-stderr zsh "$SCRIPT" --repo "$W/app"
   [ "$status" -eq 0 ]
   [ "$output" = "styleguide: skipped — no repository supplied; pass --styleguide-repo <url>" ]
+  [ -z "$stderr" ]
   [ "$(tree_state "$W/app")" = "$before" ]
   [ ! -e "$W/app/styleguide" ]
   [ ! -e "$W/app/.gitmodules" ]
@@ -226,14 +288,17 @@ tagged_commit() { git -C "$1" rev-parse "refs/tags/$2^{commit}"; }
 
 # --- failures, each undone as a unit ---------------------------------------------
 
-# Run the script expecting exit 1 and the reason $2, and nothing changed.
+# Run the script (with any extra arguments after $2) expecting exit 1 and the
+# reason $2 as its one stdout line, and nothing changed.
 assert_fails_cleanly() {
   local url="$1" reason="$2" before porcelain
+  shift 2
   before="$(tree_state "$W/app")"
   porcelain="$(git -C "$W/app" status --porcelain)"
-  run zsh "$SCRIPT" --repo "$W/app" --url "$url"
+  run --separate-stderr zsh "$SCRIPT" --repo "$W/app" --url "$url" "$@"
   [ "$status" -eq 1 ] || { echo "status $status: $output"; return 1; }
   [ "$output" = "styleguide: failed — $url: $reason" ] || { echo "output: $output"; return 1; }
+  [ -z "$stderr" ] || { echo "stderr: $stderr"; return 1; }
   [ "$(tree_state "$W/app")" = "$before" ] || { echo "the tree changed"; return 1; }
   [ "$(git -C "$W/app" status --porcelain)" = "$porcelain" ] || { echo "git status changed"; return 1; }
   [ ! -d "$W/app/.git/modules/styleguide" ] || { echo "a modules dir was left"; return 1; }
@@ -271,6 +336,73 @@ assert_fails_cleanly() {
   make_app "$W/app"
   printf 'x\n' > "$W/app/styleguide"
   assert_fails_cleanly "$W/sg" "styleguide/ exists and is not a submodule"
+}
+
+@test "styleguide: a dangling styleguide symlink is the user's and stays" {
+  make_remote "$W/sg" v0.1.0
+  make_app "$W/app"
+  ln -s "$W/nowhere" "$W/app/styleguide"
+  assert_fails_cleanly "$W/sg" "styleguide/ exists and is not a submodule"
+  [ -L "$W/app/styleguide" ]
+}
+
+@test "styleguide: a styleguide/ tracked in the index but deleted on disk is not a submodule either" {
+  make_remote "$W/sg" v0.1.0
+  make_app "$W/app"
+  mkdir "$W/app/styleguide"
+  printf 'x\n' > "$W/app/styleguide/x"
+  git -C "$W/app" add -A
+  git -C "$W/app" commit -qm x
+  rm -rf "$W/app/styleguide"
+  assert_fails_cleanly "$W/sg" "styleguide/ exists and is not a submodule"
+}
+
+@test "styleguide: a failed submodule add, checkout or staging undoes the whole add" {
+  make_remote "$W/sg" v0.1.0
+  make_app "$W/app" $'# Ours\n'
+  local real row
+  real="$(command -v git)"
+  mkdir -p "$W/bin"
+  # <the git call the wrapper intercepts>|<what it does instead>|<the reason>.
+  # The add really runs and then reports failure, so there is something to
+  # undo; exit 0 on the checkout leaves HEAD at the branch head, past the tag.
+  for row in \
+    'submodule --quiet add|"$real" "$@"; exit 1|git submodule add failed' \
+    'checkout --quiet --detach|exit 1|cannot check out v0.1.0' \
+    'checkout --quiet --detach|exit 0|the checkout is not at v0.1.0' \
+    'add -- .gitmodules|exit 1|cannot stage the submodule'; do
+    printf '#!/bin/sh\nreal="%s"\ncase "$*" in *"%s"*) %s ;; esac\nexec "$real" "$@"\n' \
+      "$real" "${row%%|*}" "$(printf '%s' "$row" | cut -d'|' -f2)" > "$W/bin/git"
+    chmod +x "$W/bin/git"
+    PATH="$W/bin:$PATH" assert_fails_cleanly "$W/sg" "${row##*|}" || { echo "$row"; false; }
+    [ ! -e "$W/app/styleguide" ]
+  done
+}
+
+@test "styleguide: a template with no styleguide section undoes the whole add" {
+  make_remote "$W/sg" v0.1.0
+  make_app "$W/app" $'# Ours\n'
+  printf '# A template\n\n## Who decides what\n' > "$W/bare.tmpl"
+  assert_fails_cleanly "$W/sg" "the CLAUDE.md template carries no usable styleguide section" --template "$W/bare.tmpl"
+  [ ! -e "$W/app/styleguide" ]
+}
+
+@test "styleguide: a file that cannot be snapshotted stops the run before any write" {
+  [ "$(id -u)" != 0 ] || skip "root reads any file"
+  make_remote "$W/sg" v0.1.0
+  make_app "$W/app" $'# Ours\n'
+  printf '[submodule "docs"]\n\tpath = docs\n\turl = https://example.invalid/docs.git\n' > "$W/app/.gitmodules"
+  local f
+  for f in .gitmodules CLAUDE.md; do
+    chmod 200 "$W/app/$f"
+    run --separate-stderr zsh "$SCRIPT" --repo "$W/app" --url "$W/sg"
+    chmod 644 "$W/app/$f"
+    [ "$status" -eq 1 ] || { echo "$f: status $status"; false; }
+    [ "$output" = "styleguide: failed — $W/sg: cannot snapshot $f" ] || { echo "output: $output"; false; }
+    [ "$(grep -c 'submodule' "$W/app/.gitmodules")" -eq 1 ]
+    [ "$(cat "$W/app/CLAUDE.md")" = "# Ours" ]
+    [ ! -e "$W/app/styleguide" ]
+  done
 }
 
 @test "styleguide: a failure after the add undoes the gitlink, .gitmodules, CLAUDE.md and the clone" {
@@ -311,10 +443,18 @@ assert_fails_cleanly() {
   [ "$status" -eq 2 ]
   run zsh "$SCRIPT" --repo "$W/app" --url
   [ "$status" -eq 2 ]
-  mkdir -p "$W/plain"
-  run zsh "$SCRIPT" --repo "$W/plain" --url "$W/sg"
+  run zsh "$SCRIPT" --repo
   [ "$status" -eq 2 ]
-  contains "$output" "not a git work tree"
+  contains "$output" "--repo needs a value"
+  run zsh "$SCRIPT" --repo "$W/app" --template
+  [ "$status" -eq 2 ]
+  contains "$output" "--template needs a value"
+  mkdir -p "$W/plain"
+  # the message goes to stderr; stdout carries status lines only
+  run --separate-stderr zsh "$SCRIPT" --repo "$W/plain" --url "$W/sg"
+  [ "$status" -eq 2 ]
+  contains "$stderr" "not a git work tree"
+  [ -z "$output" ]
   mkdir -p "$W/app/sub"
   run zsh "$SCRIPT" --repo "$W/app/sub" --url "$W/sg"
   [ "$status" -eq 2 ]
@@ -364,6 +504,8 @@ render_common() {
     [ "$output" = 0 ]
     run grep -c 'styleguide' "$W/out/common/CLAUDE.md"
     [ "$output" = 0 ]
+    # the stripped block leaves one blank line, not two (MD012)
+    [ -z "$(awk 'NR > 1 && prev == "" && $0 == "" { print NR } { prev = $0 }' "$W/out/common/CLAUDE.md")" ]
   done
 }
 
@@ -433,13 +575,13 @@ styleguide_step() { awk '/^### 3k\.5a\. /{on=1} on && /^### 3k\.6\. /{exit} on' 
   contains "$s" 'The step fails **as a unit**'
   contains "$s" 'It never falls back to the default branch head'
   contains "$s" '**continue the rest of bootstrap**'
-  contains "$(skill_flat)" '**The report relays the styleguide step'"'"'s line** (§3k.5a, #3016)'
+  contains "$(skill_flat)" '**The report relays the styleguide step'"'"'s line** (§3k.5a, #3016) whenever the step ran: `styleguide-submodule.zsh`'"'"'s one status line, verbatim — the `added`, `present`, `skipped` (naming `--styleguide-repo`) or `failed` line, the last naming the URL and the reason — plus, on `added` or `present` in a repo that keeps its own Renovate config, the line `styleguide: submodule bumps are not configured — this repo keeps its own Renovate config`.'
 }
 
 @test "skill: the Renovate repo gets no Dependabot entry and one not-configured line" {
   local s line='styleguide: submodule bumps are not configured — this repo keeps its own Renovate config'
   s="$(styleguide_step)"
-  contains "$s" '**A repo that keeps its own Renovate config** renders no `.github/dependabot.yml` (§3a): add no Dependabot entry, leave the Renovate config alone'
+  contains "$s" '**A repo that keeps its own Renovate config** renders no `.github/dependabot.yml` (§3a): add no Dependabot entry, leave the Renovate config alone, and on `added` or `present` print one Step 5 line, `styleguide: submodule bumps are not configured — this repo keeps its own Renovate config`.'
   contains "$s" "\`$line\`"
   contains "$(skill_flat)" "the line \`$line\`."
 }
@@ -447,10 +589,10 @@ styleguide_step() { awk '/^### 3k\.5a\. /{on=1} on && /^### 3k\.6\. /{exit} on' 
 @test "skill: §3a renders dependabot.yml and CLAUDE.md with --styleguide, and the block table teaches the tag" {
   local f
   f="$(skill_flat)"
-  contains "$f" 'Render it with `--styleguide true` exactly when `.gitmodules` declares the `styleguide` submodule once §3k.5a has run'
-  contains "$f" 'Render it through `render.zsh` with the same `--styleguide` value as `.github/dependabot.yml`'
+  contains "$f" 'Render it with `--styleguide true` exactly when `.gitmodules` declares the `styleguide` submodule once §3k.5a has run, else `--styleguide false`, so it gains one `gitsubmodule` entry (directory `/`, weekly) for a mounted styleguide and none otherwise — on a re-run too. On a React repo, render it after §3k.5a.'
+  contains "$f" 'Render it through `render.zsh` with `--styleguide true` exactly when `.gitmodules` declares the `styleguide` submodule once §3k.5a has run, whether or not this run renders `.github/dependabot.yml`, so its `STYLEGUIDE` block — the `## Read the styleguide before UI changes` section — is kept only for a mounted styleguide.'
   contains "$f" '| `STYLEGUIDE` | `--styleguide true`'
-  contains "$f" 'Merge `react/prettierignore` into `.prettierignore` the same way'
+  contains "$f" 'Merge `react/prettierignore` into `.prettierignore` the same way, with the same helper: a missing `.prettierignore` gets the fragment as-is, and an existing one keeps every line it had and gains `styleguide/` under §3d'"'"'s header only when it lacks it; when the helper prints nothing, append nothing (#3016).'
 }
 
 @test "render.zsh: STYLEGUIDE is a taught tag, and --styleguide refuses any value but true or false" {
@@ -476,15 +618,27 @@ styleguide_step() { awk '/^### 3k\.5a\. /{on=1} on && /^### 3k\.6\. /{exit} on' 
   s="$(styleguide_step)"
   contains "$f" 'The plugin names no styleguide of its own, so the URL is always yours.'
   contains "$f" 'Without the flag, bootstrap asks for it once (Q8), and only when the step would run and no `styleguide` submodule exists yet; with no URL the step is skipped.'
-  contains "$f" 'Ignored when `.gitmodules` already declares the submodule.'
+  contains "$f" 'Ignored when `.gitmodules` already declares the submodule, and on a repo the step does not run for.'
   contains "$f" 'Never on a re-run that has the submodule, and never on a repo the overlay does not apply to.'
   contains "$f" 'Which styleguide repository should it mount as its `styleguide/` submodule?'
   contains "$f" '| A URL becomes the step'"'"'s `--url`.'
-  contains "$f" 'An existing `CLAUDE.md` gets that section from §3k.5a'"'"'s script instead, appended once.'
+  contains "$f" 'Never append that block to an existing `CLAUDE.md`: it gets the section from §3k.5a'"'"'s script instead, appended once.'
   contains "$f" 'A `skipped` or `failed` line is an outstanding item; an `added` or `present` line is reported once and is not a TODO.'
   contains "$s" '`--styleguide-repo <url>`, else Q8'"'"'s one question, asked in Step 2 only when the step would run and `.gitmodules` declares no `styleguide` submodule.'
   contains "$s" '**exit 0, `styleguide: added <url> at <tag>`** — `styleguide/` is a new submodule checked out at the commit of the remote'"'"'s highest `vX.Y.Z` tag in semver order (`v0.10.0` beats `v0.9.0`; pre-release and other tags are ignored).'
   contains "$s" '`.gitmodules` carries `[submodule "styleguide"]` with `path = styleguide` and `url = <url>` and no `branch` line.'
-  contains "$s" 'The script contacts no remote, ignores `--url` and leaves the pin where it is; it only fills a missing `CLAUDE.md` section.'
+  contains "$s" 'The script contacts no remote, ignores `--url` and leaves the pin where it is; it only fills a missing `CLAUDE.md` section. Ask no question.'
   contains "$s" '**exit 1, `styleguide: failed — <url>: <reason>`** — the URL is unreachable, the remote has no `vX.Y.Z` tag, `styleguide/` exists and is not a submodule, or a git step failed.'
+  contains "$s" 'On a repo that already has the submodule the line is `styleguide: failed — CLAUDE.md: <reason>` instead: the missing section could not be appended, and the submodule stays mounted.'
+  contains "$s" '- **exit 2** — your own malformed call: fix it and re-run.'
+  contains "$s" '**Run the script** from the repository root, after §3k.5 and before §3a'"'"'s `.github/dependabot.yml` and `CLAUDE.md` renders, passing `--url` only when a URL was given:'
+  contains "$s" 'An existing `CLAUDE.md` gets it from the script, appended only when the heading is absent as its own line, with every existing byte unchanged'
+  contains "$s" 'A `CLAUDE.md` this run creates gets it from the template'"'"'s `STYLEGUIDE` block (§3a), so it appears exactly once either way.'
+  contains "$s" 'Render §3a'"'"'s `.github/dependabot.yml` with `--styleguide true` exactly when `.gitmodules` declares the `styleguide` submodule after this step, and `--styleguide false` otherwise, so it carries one `gitsubmodule` entry (directory `/`, weekly) for a mounted styleguide and none otherwise.'
+  contains "$s" '`detect-stack.sh` reports `is_react: true` and none of §3k.5'"'"'s skips holds — and the on-disk `eslint.config.js` and `vitest.config.ts` are the variants §3k.5 selects, which carry the `styleguide/` excludes. When they are not — §3k.5'"'"'s install failed, or a rule-3 prompt resolved to skip — mount nothing: §3k.5'"'"'s own Step 5 item stands.'
+  contains "$s" 'There the step is an **adoption gap** when the trigger holds and either a URL was given while `.gitmodules` declares no `styleguide` submodule, or `.gitmodules` declares it and an existing `CLAUDE.md` lacks the section'"'"'s heading or an existing `.github/dependabot.yml` lacks a `gitsubmodule` entry.'
+  contains "$s" 'State D asks Q8 under the same condition, before step 5a'"'"'s no-drift stop is decided.'
+  contains "$s" 'Step 5a'"'"'s no-drift stop does not swallow it. With no URL and no submodule it is not a gap: relay the `skipped` line and let the stop stand.'
+  contains "$f" 'So does a pending styleguide adoption gap (§3k.5a, #3016 — its Q8 is asked before this stop is decided): do not stop — continue to the Step 2 plan.'
+  contains "$s" 'Record every file this step writes under the `react_overlay` telemetry step key'
 }

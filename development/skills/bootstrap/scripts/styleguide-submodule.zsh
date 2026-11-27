@@ -32,6 +32,9 @@
 #             script did is undone: no `.gitmodules` entry, no gitlink, no
 #             `styleguide/` directory and no CLAUDE.md section is left, and a
 #             `styleguide/` that was already there is never touched.
+#   exit 1  styleguide: failed — CLAUDE.md: <reason>
+#             `.gitmodules` already declares the submodule and the missing
+#             CLAUDE.md section could not be appended. The submodule stays mounted.
 #   exit 2  usage error (on stderr): a bad flag, --repo not a git work tree's
 #           root, or a --template that does not exist
 #
@@ -129,7 +132,7 @@ fail() {
 
 if declares_styleguide; then
   reason=""
-  ensure_claude_md || fail "$reason"
+  ensure_claude_md || { print -r -- "styleguide: failed — CLAUDE.md: $reason"; exit 1; }
   print -r -- "styleguide: present"
   exit 0
 fi
@@ -164,10 +167,24 @@ index="$(g rev-parse --path-format=absolute --git-path index)" || fail "cannot l
 config="$(g rev-parse --path-format=absolute --git-path config)" || fail "cannot locate the git config"
 snap="$(mktemp -d "${TMPDIR:-/tmp}/styleguide-submodule.XXXXXX")" || fail "cannot create a scratch directory"
 had_index=0 had_gitmodules=0 had_claude=0
-[[ -f "$index" ]] && cp -p "$index" "$snap/index" && had_index=1
-cp -p "$config" "$snap/config" || { rm -rf "$snap"; fail "cannot snapshot the git config"; }
-[[ -f "$repo/.gitmodules" ]] && cp -p "$repo/.gitmodules" "$snap/gitmodules" && had_gitmodules=1
-[[ -f "$repo/CLAUDE.md" ]] && cp -p "$repo/CLAUDE.md" "$snap/CLAUDE.md" && had_claude=1
+# a copy that fails must stop the run here: undo would read it as "no such file"
+no_snapshot() {
+  rm -rf "$snap"
+  fail "cannot snapshot $1"
+}
+if [[ -f "$index" ]]; then
+  cp -p "$index" "$snap/index" 2>/dev/null || no_snapshot "the git index"
+  had_index=1
+fi
+cp -p "$config" "$snap/config" 2>/dev/null || no_snapshot "the git config"
+if [[ -f "$repo/.gitmodules" ]]; then
+  cp -p "$repo/.gitmodules" "$snap/gitmodules" 2>/dev/null || no_snapshot ".gitmodules"
+  had_gitmodules=1
+fi
+if [[ -f "$repo/CLAUDE.md" ]]; then
+  cp -p "$repo/CLAUDE.md" "$snap/CLAUDE.md" 2>/dev/null || no_snapshot "CLAUDE.md"
+  had_claude=1
+fi
 
 undo() {
   rm -rf "$repo/$SG" "$modules_dir"

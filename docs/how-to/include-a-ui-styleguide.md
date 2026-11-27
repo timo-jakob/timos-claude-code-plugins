@@ -43,9 +43,11 @@ The submodule is staged with the rest of bootstrap's files and lands in its one
 commit. Bootstrap's summary reports the step in one line, such as
 `styleguide: added https://github.com/timo-jakob/timos-platform-styleguide at v0.1.1`.
 
-Every React repo also ignores `styleguide/` in ESLint (`eslint.config.js`),
-Vitest (`vitest.config.ts`) and Prettier (`.prettierignore`), whether or not a
-styleguide is mounted. Without those ignores, Vitest would collect the
+The React configs bootstrap renders also ignore `styleguide/` in ESLint
+(`eslint.config.js`), Vitest (`vitest.config.ts`) and Prettier
+(`.prettierignore`), whether or not a styleguide is mounted. A repo that keeps
+its own ESLint or Vitest config instead gets no styleguide until it takes
+bootstrap's. Without those ignores, Vitest would collect the
 styleguide's own `node:test` suites and the repo's gate would go red.
 
 ## Take a newer styleguide version

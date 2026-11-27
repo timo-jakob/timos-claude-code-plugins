@@ -717,7 +717,8 @@ WQN="webui-quality-noop.yml.tmpl"
 
 @test "styleguide: the prettierignore fragment lists styleguide/, merged like the gitignore (#3016)" {
   grep -qxF 'styleguide/' "$RX/prettierignore"
-  contains "$(react_step)" 'Merge `react/prettierignore` into `.prettierignore` the same way'
+  contains "$(react_step)" 'Merge `react/prettierignore` into `.prettierignore` the same way, with the same helper: a missing `.prettierignore` gets the fragment as-is, and an existing one keeps every line it had and gains `styleguide/` under §3d'"'"'s header only when it lacks it; when the helper prints nothing, append nothing (#3016).'
+  contains "$(react_step)" 'and `styleguide/**`, so it never collects the styleguide submodule'"'"'s `node:test` suites; both eslint variants ignore `styleguide/` (#3016). The variants carry these exclusions whether or not §3k.5a mounts the submodule.'
   # the helper keeps an existing .prettierignore's lines and appends only the new one
   printf 'dist/\ncoverage/\n' > "$BATS_TEST_TMPDIR/pi"
   run bash "$REPO_ROOT/development/skills/bootstrap/scripts/merge-gitignore.sh" "$BATS_TEST_TMPDIR/pi" "$RX/prettierignore"
@@ -726,8 +727,8 @@ WQN="webui-quality-noop.yml.tmpl"
   printf 'dist/\nstyleguide/\n' > "$BATS_TEST_TMPDIR/pi2"
   run bash "$REPO_ROOT/development/skills/bootstrap/scripts/merge-gitignore.sh" "$BATS_TEST_TMPDIR/pi2" "$RX/prettierignore"
   [ "$status" -eq 0 ]
-  run grep -cx 'styleguide/' <<<"$output"
-  [ "$output" = 0 ]
+  # nothing to append: a re-run adds no line at all
+  [ -z "$output" ]
 }
 
 @test "webui: the Playwright harness serves vite preview on 4173 from tests/e2e, never tests/acceptance" {
