@@ -416,6 +416,25 @@ EOF
   run ! grep -q 'docker: yes' "$OUT/d"
 }
 
+@test "render: #3016 STYLEGUIDE block follows --styleguide, stripped by default" {
+  printf 'a\n# --- STYLEGUIDE-START ---\nsg: yes\n# --- STYLEGUIDE-END ---\n<!-- --- STYLEGUIDE-START --- -->\n## SG\n<!-- --- STYLEGUIDE-END --- -->\n' > "$T/s.tmpl"
+  run zsh "$SCRIPT" --templates "$T" --out "$OUT/on" --styleguide true s.tmpl
+  [ "$status" -eq 0 ]
+  grep -qx 'sg: yes' "$OUT/on/s"
+  grep -qx '## SG' "$OUT/on/s"
+  grep -q 'STYLEGUIDE-START' "$OUT/on/s"
+  local v
+  for v in false default; do
+    if [ "$v" = default ]; then
+      run zsh "$SCRIPT" --templates "$T" --out "$OUT/$v" s.tmpl
+    else
+      run zsh "$SCRIPT" --templates "$T" --out "$OUT/$v" --styleguide "$v" s.tmpl
+    fi
+    [ "$status" -eq 0 ]
+    [ "$(cat "$OUT/$v/s")" = a ]
+  done
+}
+
 @test "render: #1604 --gate-command defaults to make lint, and an explicit value replaces it verbatim" {
   printf 'run: {{GATE_COMMAND}}\n' > "$T/g.tmpl"
   run zsh "$SCRIPT" --templates "$T" --out "$OUT" g.tmpl

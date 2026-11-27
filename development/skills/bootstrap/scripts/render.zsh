@@ -170,6 +170,12 @@
 #                                 wraps only SETUP.md's public-only parts.
 #   --docker true|false           DOCKER block (default: false)
 #   --claude-plugin true|false    CLAUDE_PLUGIN block (default: false)
+#   --styleguide true|false       STYLEGUIDE block (default: false) — the
+#                                 styleguide/ submodule's Dependabot entry and
+#                                 CLAUDE.md section (#3016). The skill passes
+#                                 true exactly when .gitmodules declares the
+#                                 styleguide submodule once its step has run;
+#                                 any other value is a usage error (exit 2)
 #   --swift-build-system swiftpm|xcode
 #                                 SWIFT_SWIFTPM / SWIFT_XCODE blocks
 #                                 (default: swiftpm)
@@ -194,6 +200,7 @@ languages_set=0
 visibility="public"
 docker="false"
 claude_plugin="false"
+styleguide="false"
 swift_build_system="swiftpm"
 security_email=""
 security_email_set=0
@@ -257,6 +264,12 @@ while (($# > 0)); do
 	--visibility) visibility="$2" && shift 2 ;;
 	--docker) docker="$2" && shift 2 ;;
 	--claude-plugin) claude_plugin="$2" && shift 2 ;;
+	--styleguide)
+		# a typo must not silently strip the styleguide's entry and section (#3016)
+		[[ "${2-}" == true || "${2-}" == false ]] ||
+			{ print -u2 -- "render.zsh: --styleguide must be true or false, got: ${2-}" && usage; }
+		styleguide="$2" && shift 2
+		;;
 	--swift-build-system) swift_build_system="$2" && shift 2 ;;
 	--help | -h) usage ;;
 	--*) print -u2 -- "render.zsh: unknown flag: $1" && usage ;;
@@ -519,6 +532,8 @@ keep_block() {
 	DEFERRED_TOOLS) [[ "${vals[STATIC_ANALYSIS]:-}" == none || "${vals[VULNERABILITIES]:-}" == none ||
 		"${vals[CODE_SCANNING]:-}" == none ]] ;;
 	CLAUDE_PLUGIN) [[ "$claude_plugin" == "true" ]] ;;
+	# the styleguide/ submodule's Dependabot entry and CLAUDE.md section (#3016)
+	STYLEGUIDE) [[ "$styleguide" == "true" ]] ;;
 	SURFACE_CLI) has_surface cli ;;
 	SURFACE_REST) has_surface rest ;;
 	SURFACE_WEB_UI) has_surface web_ui ;;

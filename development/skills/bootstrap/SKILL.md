@@ -84,6 +84,13 @@ Supported flags:
     (`resolve-approval.zsh` reports it as `ignored_flag=`), since a default
     needs no warning — nothing was requested.
   See `docs/CLAUDE-APPS.md` for the design and the Apps' permissions.
+- `--styleguide-repo <url>` — the shared UI styleguide repository a React repo
+  mounts as its `styleguide/` submodule (§3k.5a, #3016). The plugin names no
+  styleguide of its own, so the URL is always yours. Without the flag, bootstrap
+  asks for it once (Q8), and only when the step would run and no `styleguide`
+  submodule exists yet; with no URL the step is skipped. Ignored when
+  `.gitmodules` already declares the submodule, and on a repo the step does not
+  run for.
 - `--telemetry-file PATH` / `--telemetry-dir DIR` — where this run's one
   telemetry record goes (#1229), in any position. Each takes a value — halt on a
   missing, empty or `--`-shaped one. Without either, the record lands in the
@@ -900,7 +907,9 @@ flow. Stop and ask for input wherever marked; do not guess.
       rule's adoption gap* in §3a's `CLAUDE.md` bullet, before this stop is
       decided): do not stop —
       continue to the Step 2 plan, and on confirmation its install is the
-      delta.)
+      delta.) So does a pending styleguide adoption gap (§3k.5a, #3016 — its Q8
+      is asked before this stop is decided): do not stop — continue to the
+      Step 2 plan.
 
       > **The sha256 is the drift signal — not the version label.** A marker
       > records both the template hash AND the plugin version at render time.
@@ -962,6 +971,7 @@ wording so behavior stays consistent:
 | **Q5: Dockerfile incoming?** | Whenever `has_dockerfile=false` and the user mentioned containers, OR proactively only if Q4 implies an image build | "Will this project ship a Dockerfile / container image? If yes, I'll wire up Snyk container / Trivy image scans now." | Determines whether to keep the `DOCKER` blocks in workflow templates. Default to "no, skip for now" if the user is unsure — they can re-run the skill later when they add a Dockerfile. |
 | **Q6: Security contact email** | Always (no detection signal) | "What email should appear in `SECURITY.md` as a fallback channel for security reports? Leave blank to use GitHub Security Advisories only." | Drives `{{SECURITY_CONTACT_BLOCK}}` substitution in `SECURITY.md`. See substitution rules below. |
 | **Q7: UI shape** | Never as a separate prompt: shown in the Step 2 plan only when `recommend-ui-shape.zsh` exits 0 (§3k.7). Exit 3 shows nothing, and on a `shape-marker` repo the shape step's own State D line stands. | "This React app will be scaffolded as a **shell** (the default: a single-page app that can later host remotes). To scaffold a remote instead, reply `remote: page` for a route-owned page or `remote: widget` for a canvas widget." | Approving the plan unchanged keeps §3k.7 Shell overlay (and §3k.8 as #1939 offers it). `remote: page` or `remote: widget` drops the §3k.7 and §3k.8 lines and adds §3k.9 Remote overlay with that kind. |
+| **Q8: Styleguide repository** | Only when the styleguide step (§3k.5a) would run — the React overlay applies — **and** no `--styleguide-repo` was passed **and** `.gitmodules` declares no `styleguide` submodule. Never on a re-run that has the submodule, and never on a repo the overlay does not apply to. Asked at most once per run. | "This is a React app. Which styleguide repository should it mount as its `styleguide/` submodule? Give its URL, or leave blank to skip." | A URL becomes the step's `--url`. Blank skips the step, and the Step 5 report says so in its one line. |
 
 ### After the decision tree
 
@@ -1735,6 +1745,7 @@ in the same PR:
 | `DEFERRED_STATIC_ANALYSIS` / `DEFERRED_VULNERABILITIES` / `DEFERRED_CODE_SCANNING` | that category is `none` (#2121) — its entry in `SETUP.md`'s deferred-tools block; `DEFERRED_VULNERABILITIES` also carries the secrets table under `SETUP.md`'s *Add secrets to GitHub* heading and the `image` job's scanner-less `container_re` |
 | `DEFERRED_TOOLS` | any category is `none` — `SETUP.md`'s `DEFERRED-TOOLS-START`/`END` block, omitted when nothing is deferred |
 | `CLAUDE_PLUGIN` | `--claude-plugin true` |
+| `STYLEGUIDE` | `--styleguide true` — `.gitmodules` declares the `styleguide` submodule once §3k.5a has run (#3016): the `gitsubmodule` entry in `.github/dependabot.yml` and the `## Read the styleguide before UI changes` section of `CLAUDE.md` |
 | `SURFACE_CLI` | `cli` in `--acceptance-interfaces` |
 | `SURFACE_REST` | `rest` in `--acceptance-interfaces` |
 | `SURFACE_WEB_UI` | `web-ui` in `--acceptance-interfaces` |
@@ -1833,7 +1844,10 @@ Copy from `templates/common/`:
   `CLAUDE_PLUGIN` block only when `--claude-plugin true`) — **not on the §3l IaC path**, whose hook is the
   version-controlled `hooks/pre-push` (#1604)
 - **Dependency updates — pick ONE:**
-  - default → `.github/dependabot.yml` (add an `updates:` entry per detected language ecosystem).
+  - default → `.github/dependabot.yml` (add an `updates:` entry per detected language ecosystem). Render it with
+    `--styleguide true` exactly when `.gitmodules` declares the `styleguide` submodule once §3k.5a has run, else
+    `--styleguide false`, so it gains one `gitsubmodule` entry (directory `/`, weekly) for a mounted styleguide and
+    none otherwise — on a re-run too. On a React repo, render it after §3k.5a.
   - `--claude-plugin true` → copy `renovate.json` instead (static, no substitution) and **do NOT render
     `.github/dependabot.yml`**. A plugin repo is templates, not production dependency manifests; Renovate's
     github-actions manager (plus the `.tmpl` customManager in the config) covers its real moving surface.
@@ -1903,7 +1917,11 @@ Copy from `templates/common/`:
 - `.github/PULL_REQUEST_TEMPLATE.md`
 - `CONTRIBUTING.md`
 - `SETUP.md` (manual steps the user must do after bootstrap)
-- `CLAUDE.md` (shift-left agent guidance — append a section if one already exists)
+- `CLAUDE.md` (shift-left agent guidance — append a section if one already exists). Render it through `render.zsh`
+  with `--styleguide true` exactly when `.gitmodules` declares the `styleguide` submodule once §3k.5a has run,
+  whether or not this run renders `.github/dependabot.yml`, so its `STYLEGUIDE` block — the
+  `## Read the styleguide before UI changes` section — is kept only for a mounted styleguide. Never append that
+  block to an existing `CLAUDE.md`: it gets the section from §3k.5a's script instead, appended once.
 
   *State D — the decision-rights rule's adoption gap (#2905).* The template's
   `## Who decides what` section is the decision-rights rule: it tells every
@@ -4951,9 +4969,10 @@ restate or loosen it here. Its three outcomes:
   no-match: nothing was decided. Skip the step and record a Step 5 item saying
   the React overlay was not evaluated and why.
 
-`detect-stack.sh` carries no React field, so, like §3k, this detection happens
-outside it. In State D a marker match is an **adoption gap** when any of these
-holds: `src/test/setup.ts` is missing, or the on-disk `eslint.config.js` or
+`detect-stack.sh` reports the same marker as `is_react` (#959), the field
+§3k.5a's trigger reads; this step, like §3k, evaluates the recipe itself. In
+State D a marker match is an **adoption gap** when any of these holds:
+`src/test/setup.ts` is missing, or the on-disk `eslint.config.js` or
 `vitest.config.ts` is not the React variant the selection table below picks (for
 example it is still a known predecessor). So is a missing
 `.github/workflows/webui-quality.yml` or `.github/workflows/webui-quality-noop.yml`
@@ -5114,7 +5133,10 @@ testing-library setup module, which also registers the family-owned
 | `.github/workflows/webui-quality-noop.yml.tmpl` | `.github/workflows/webui-quality-noop.yml` | reports both job names on exactly those doc-only paths |
 
 Both vitest variants exclude `tests/e2e/**`, so `test-and-coverage` never
-collects the Playwright spec, and the harness never writes into
+collects the Playwright spec, and `styleguide/**`, so it never collects the
+styleguide submodule's `node:test` suites; both eslint variants ignore
+`styleguide/` (#3016). The variants carry these exclusions whether or not
+§3k.5a mounts the submodule. The harness never writes into
 `tests/acceptance/web/` (the deployed-UI spine, #702). **The two jobs are
 required contexts:** `branch-protection.sh` adds `e2e (playwright)` and
 `lighthouse (budgets)` whenever **both** `.github/workflows/webui-quality.yml` and
@@ -5122,7 +5144,11 @@ its noop are on disk (with one missing, it warns and requires neither, since the
 PRs that half skips would never report them), and `SETUP.md` §4 names them.
 Merge `react/gitignore` into `.gitignore` the way §3d merges a language
 fragment (see *`.gitignore` merging*), so the app ignores `playwright-report/`,
-`test-results/`, `.lighthouseci/` and the axe report `a11y-report.jsonl`. Two kinds of file carry a placeholder: the
+`test-results/`, `.lighthouseci/` and the axe report `a11y-report.jsonl`. Merge `react/prettierignore` into
+`.prettierignore` the same way, with the same helper: a missing
+`.prettierignore` gets the fragment as-is, and an existing one keeps every line
+it had and gains `styleguide/` under §3d's header only when it lacks it; when
+the helper prints nothing, append nothing (#3016). Two kinds of file carry a placeholder: the
 two workflows (`{{DEFAULT_BRANCH}}`) and the `vitest.config.ts` variant
 (`{{VITE_CONFIG_FILE}}`, the Vite config file name found above, passed as
 `--vite-config-file`); `render.zsh`'s leftover check proves every one resolved:
@@ -5335,6 +5361,102 @@ nameless `<button>` failing in `block`, and in `warn` passing with one
 annotation and a count of 1. That fixture lives in this
 repo under `tests/fixtures/react-webui/` and is never in a render list, because a
 rendered over-budget build would turn the blocking gate red from day one.
+
+### 3k.5a. Styleguide submodule (a React repo — #3016)
+
+Mounts a shared UI styleguide — design and usage rules, plus the design tokens
+a UI builds to — as the `styleguide/` git submodule, pinned to its newest
+release, and binds it in `CLAUDE.md`. Bootstrap ships no styleguide URL of its
+own: the plugin is public and every user has their own.
+
+**Trigger.** The step applies exactly when the React overlay (§3k.5) applies —
+`detect-stack.sh` reports `is_react: true` and none of §3k.5's skips holds.
+That is decided once, in Step 2, and it is what "the step would run" means for
+the flag, Q8, the plan and the State D gap. At its place in Step 3, after
+§3k.5, mount only when the on-disk `eslint.config.js` and `vitest.config.ts`
+are the variants §3k.5 selects, which carry the `styleguide/` excludes. When
+they are not — §3k.5's install failed, or a rule-3 prompt resolved to skip —
+mount nothing: §3k.5's own Step 5 item stands. A `web-ui` entry in `interfaces`
+alone does not trigger it: a server-rendered Flask + Jinja repo, a plain
+JavaScript library with no `react` dependency and a repo where `is_react` is
+`null` get no submodule, no `CLAUDE.md` section and no `gitsubmodule` entry,
+and are never asked for the URL.
+
+**The URL.** `--styleguide-repo <url>`, else Q8's one question, asked in Step 2
+only when the step would run and `.gitmodules` declares no `styleguide`
+submodule. No URL skips the step.
+
+**Plan (Step 2) and State D.** List `.gitmodules`, `styleguide/` and the
+`CLAUDE.md` section in the plan whenever a URL was given. State D asks Q8 under
+the same condition, before step 5a's no-drift stop is decided. There the step
+is an **adoption gap** when the step applies and either a URL was given while
+`.gitmodules` declares no `styleguide` submodule, or `.gitmodules` declares it
+and an existing `CLAUDE.md` lacks the section's heading or an existing
+`.github/dependabot.yml` lacks a `gitsubmodule` entry. Offer it in the plan and
+complete it as a fresh bootstrap would: the script below, then
+`.github/dependabot.yml` re-rendered as *The Dependabot entry* below says and
+handed to the `bootstrap-idempotency-reviewer` as step 5b does. Step 5a's no-drift stop does
+not swallow it. With no URL and no submodule it is not a gap: relay the
+`skipped` line and let the stop stand.
+
+**Run the script** from the repository root, after §3k.5 and before §3a's
+`.github/dependabot.yml` and `CLAUDE.md` renders, passing `--url` only when a
+URL was given:
+
+```bash
+"<skill-base-dir>/scripts/styleguide-submodule.zsh" --repo "<repo-path>" [--url "<url>"]
+```
+
+It prints exactly one status line, which the Step 5 report relays verbatim:
+
+- **exit 0, `styleguide: added <url> at <tag>`** — `styleguide/` is a new
+  submodule checked out at the commit of the remote's highest `vX.Y.Z` tag in
+  semver order (`v0.10.0` beats `v0.9.0`; pre-release and other tags are
+  ignored). `.gitmodules` carries `[submodule "styleguide"]` with
+  `path = styleguide` and `url = <url>` and no `branch` line. The gitlink and
+  `.gitmodules` are **staged, never committed**: they land in bootstrap's one
+  commit (4d), which goes out through `/development:open-pr` (4e).
+- **exit 0, `styleguide: present`** — `.gitmodules` already declares the
+  submodule. The script contacts no remote, ignores `--url` and leaves the pin
+  where it is; it only fills a missing `CLAUDE.md` section. Ask no question.
+- **exit 0, `styleguide: skipped — no repository supplied; pass --styleguide-repo <url>`**
+  — no URL. The Step 5 report says so in that one line.
+- **exit 1, `styleguide: failed — <url>: <reason>`** — the URL is relative, the
+  URL is unreachable, the remote has no `vX.Y.Z` tag, `styleguide/` exists and
+  is not a submodule, or a git step failed. The step fails **as a unit**: the script has undone
+  everything it did, so no `.gitmodules` entry, no gitlink and no `CLAUDE.md`
+  section is left, and no `styleguide/` directory was created or changed. It
+  never falls back to the default branch head. Relay the line as a Step 5 item
+  and **continue the rest of bootstrap**. On a repo that already has the
+  submodule the line is `styleguide: failed — CLAUDE.md: <reason>` instead: the
+  missing section could not be appended, and the submodule stays mounted.
+- **exit 2** — your own malformed call: fix it and re-run.
+
+**`CLAUDE.md`.** The section `## Read the styleguide before UI changes` tells
+every session to read `styleguide/STYLEGUIDE.md` before a UI change and to check
+`styleguide/CHECKLIST.md` before declaring UI work done. An existing `CLAUDE.md`
+gets it from the script, appended only when the heading is absent as its own
+line, with every existing byte unchanged — the rule `claude-md-decision-rights.zsh`
+applies to `## Who decides what`. A `CLAUDE.md` this run creates gets it from
+the template's `STYLEGUIDE` block (§3a), so it appears exactly once either way.
+
+**The Dependabot entry.** Render §3a's `.github/dependabot.yml` with
+`--styleguide true` exactly when `.gitmodules` declares the `styleguide`
+submodule after this step, and `--styleguide false` otherwise, so it carries
+one `gitsubmodule` entry (directory `/`, weekly) for a mounted styleguide and
+none otherwise. Bootstrap pins only
+the first checkout; later bumps are the PRs Dependabot proposes against the
+styleguide's default branch, which that repository keeps at released states.
+**A repo that keeps its own Renovate config** renders no
+`.github/dependabot.yml` (§3a): add no Dependabot entry, leave the Renovate
+config alone, and on `added` or `present` print one Step 5 line,
+`styleguide: submodule bumps are not configured — this repo keeps its own Renovate config`.
+
+The lint and test ignores need no step of their own: every React variant
+already excludes `styleguide/` (§3k.5). Fetching the submodule in CI and failing
+early when it is missing belong to the first gate that reads it (#3017). Record
+every file this step writes under the `react_overlay` telemetry step key
+(*Keep the run's facts as you go*).
 
 ### 3k.6. React Query binding (a React repo consuming a spec — #958)
 
@@ -7381,7 +7503,12 @@ are standing in — `cd` to the main checkout, `dirname` of `git rev-parse
 
    If the worktree still holds **uncommitted changes** (there should be none
    after a clean finish), do **not** `--force` silently — report them and let
-   the user decide. Report the closed workspace: main synced, worktree removed.
+   the user decide. If git refuses with `working trees containing submodules
+   cannot be moved or removed` — the worktree holds the `styleguide/` submodule
+   (§3k.5a) — run `git -C "<worktree-path>" status --porcelain`: when it prints
+   nothing, repeat the removal with `--force`, which only this refusal
+   sanctions; when it prints anything, report that instead.
+   Report the closed workspace: main synced, worktree removed.
 
 ## Step 4.5: Run Setup Automation (macOS + Homebrew only)
 
@@ -7730,6 +7857,14 @@ that is not sole-Go. Exit 2 is your own malformed call: fix it and re-run. On
 exit 1, say under that heading that the leftover check could not run, quoting
 its stderr.
 
+**The report relays the styleguide step's line** (§3k.5a, #3016) whenever the
+step ran: `styleguide-submodule.zsh`'s one status line, verbatim — the `added`,
+`present`, `skipped` (naming `--styleguide-repo`) or `failed` line, the last
+naming the URL and the reason — plus, on `added` or `present` in a repo that keeps its own Renovate
+config, the line `styleguide: submodule bumps are not configured — this repo keeps its own Renovate config`.
+A `skipped` or `failed` line is an outstanding item; an `added` or `present`
+line is reported once and is not a TODO.
+
 > **Key the checklist item on Step 4e's actual outcome — and always point at
 > the blessed finish (the bot PR), never a manual "push and open a PR
 > yourself."** Five cases:
@@ -7959,7 +8094,7 @@ kept since the start (*Telemetry — stamp the run's start*) to
   | `api_contracts` | 3i. API contracts machinery |
   | `anti_corruption_adapter` | 3j. Multi-major anti-corruption adapter |
   | `contract_consumer` | 3k. API contract-consumer machinery |
-  | `react_overlay` | 3k.5. React overlay, 3k.7. Shell overlay, 3k.8. Canvas overlay, 3k.9. Remote overlay, and 3k.10. MFE conformance |
+  | `react_overlay` | 3k.5. React overlay, 3k.5a. Styleguide submodule, 3k.7. Shell overlay, 3k.8. Canvas overlay, 3k.9. Remote overlay, and 3k.10. MFE conformance |
   | `react_query` | 3k.6. React Query binding |
   | `iac` | 3l. Infrastructure-as-code repos |
   | `composition` | 3m. Composition repos |

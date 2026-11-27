@@ -27,10 +27,10 @@ setup() {
   mkdir -p "$OUT"
 }
 
-# The twenty template sources, repo-relative to the react/ overlay: #957's six,
-# the four React Query binding files (#958, SKILL.md §3k.6), the seven WebUI
-# gate files (#1946) and the WCAG gate switch's three (#3018). Sorted as
-# `LC_ALL=C sort` orders them.
+# The twenty-one template sources, repo-relative to the react/ overlay: #957's
+# six, the four React Query binding files (#958, SKILL.md §3k.6), the seven WebUI
+# gate files (#1946), the WCAG gate switch's three (#3018) and the styleguide's
+# prettierignore fragment (#3016). Sorted as `LC_ALL=C sort` orders them.
 REACT_FILES=(
   .github/workflows/webui-quality-noop.yml.tmpl
   .github/workflows/webui-quality.yml.tmpl
@@ -39,6 +39,7 @@ REACT_FILES=(
   eslint.config.js
   gitignore
   lighthouserc.json
+  prettierignore
   scripts/a11y-report.mjs
   src/Greeting.test.tsx
   src/api/hooks.test.tsx
@@ -55,7 +56,8 @@ REACT_FILES=(
 )
 
 # The WebUI gate files §3k.5 renders in BOTH variants (#1946), as its render
-# blocks list them. `gitignore` is merged, never rendered, so it is not here.
+# blocks list them. `gitignore` and `prettierignore` are merged, never rendered,
+# so they are not here.
 WEBUI_FILES=(
   src/test/a11y-canary.test.tsx
   src/test/a11y-gate.ts
@@ -109,7 +111,7 @@ has() {
   grep -qF -- "$2" "$1" || { echo "missing in ${1#"$REPO_ROOT"/}: $2"; return 1; }
 }
 
-@test "react: the template tree contains exactly the twenty blessed files" {
+@test "react: the template tree contains exactly the twenty-one blessed files" {
   local expected actual
   expected="$(printf '%s\n' "${REACT_FILES[@]}")"
   # .DS_Store is Finder litter, not a template (the kubernetes skeleton false red)
@@ -301,7 +303,7 @@ react_step() {
   sed -n '/^### 3k\.5\. React overlay/,/^### /p' "$SKILL" | tr -s '[:space:]' ' '
 }
 
-STEP_END='### 3k.6. React Query binding (a React repo consuming a spec — #958) '
+STEP_END='### 3k.5a. Styleguide submodule (a React repo — #3016) '
 
 @test "react: SKILL.md carries the React step right after §3k, gated on the #956 marker" {
   local section k r l
@@ -709,9 +711,33 @@ WQN="webui-quality-noop.yml.tmpl"
 @test "webui: both vitest variants exclude tests/e2e/** on top of Vitest's defaults" {
   local f
   for f in "$RX/vitest.config.ts" "$RX/contract-consumer/vitest.config.ts"; do
-    grep -qxF '      exclude: [...configDefaults.exclude, "tests/e2e/**"],' "$f" \
-      || { echo "no tests/e2e exclude in ${f#"$REPO_ROOT"/}"; false; }
+    grep -qxF '      exclude: [...configDefaults.exclude, "tests/e2e/**", "styleguide/**"],' "$f" \
+      || { echo "no tests/e2e + styleguide exclude in ${f#"$REPO_ROOT"/}"; false; }
   done
+}
+
+@test "styleguide: both eslint variants ignore styleguide/ in a global-ignores block (#3016)" {
+  local f
+  for f in "$RX/eslint.config.js" "$RX/contract-consumer/eslint.config.js"; do
+    grep -qxF '  { ignores: ["styleguide/"] },' "$f" \
+      || { echo "no styleguide/ ignore in ${f#"$REPO_ROOT"/}"; false; }
+  done
+}
+
+@test "styleguide: the prettierignore fragment lists styleguide/, merged like the gitignore (#3016)" {
+  grep -qxF 'styleguide/' "$RX/prettierignore"
+  contains "$(react_step)" 'Merge `react/prettierignore` into `.prettierignore` the same way, with the same helper: a missing `.prettierignore` gets the fragment as-is, and an existing one keeps every line it had and gains `styleguide/` under §3d'"'"'s header only when it lacks it; when the helper prints nothing, append nothing (#3016).'
+  contains "$(react_step)" 'and `styleguide/**`, so it never collects the styleguide submodule'"'"'s `node:test` suites; both eslint variants ignore `styleguide/` (#3016). The variants carry these exclusions whether or not §3k.5a mounts the submodule.'
+  # the helper keeps an existing .prettierignore's lines and appends only the new one
+  printf 'dist/\ncoverage/\n' > "$BATS_TEST_TMPDIR/pi"
+  run bash "$REPO_ROOT/development/skills/bootstrap/scripts/merge-gitignore.sh" "$BATS_TEST_TMPDIR/pi" "$RX/prettierignore"
+  [ "$status" -eq 0 ]
+  contains "$output" 'styleguide/'
+  printf 'dist/\nstyleguide/\n' > "$BATS_TEST_TMPDIR/pi2"
+  run bash "$REPO_ROOT/development/skills/bootstrap/scripts/merge-gitignore.sh" "$BATS_TEST_TMPDIR/pi2" "$RX/prettierignore"
+  [ "$status" -eq 0 ]
+  # nothing to append: a re-run adds no line at all
+  [ -z "$output" ]
 }
 
 @test "webui: the Playwright harness serves vite preview on 4173 from tests/e2e, never tests/acceptance" {
