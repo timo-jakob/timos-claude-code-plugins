@@ -76,3 +76,13 @@ updates:
       docker-minor-patch:
         update-types: ["minor", "patch"]
   # --- DOCKER-END ------------------------------------------------------------
+
+  # --- STYLEGUIDE-START ------------------------------------------------------
+  # Tracks the styleguide/ submodule — the shared UI styleguide, mounted by
+  # /development:bootstrap at its newest release tag. Each bump is a PR moving
+  # the pin to a newer commit of the styleguide's default branch.
+  - package-ecosystem: "gitsubmodule"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+  # --- STYLEGUIDE-END --------------------------------------------------------

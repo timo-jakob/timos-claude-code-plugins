@@ -80,6 +80,21 @@ that trails it. The maintenance pipeline compares the declared containers
 against the code and flags drift, so a stale diagram is a defect it will
 surface.
 
+<!-- --- STYLEGUIDE-START --- -->
+## Read the styleguide before UI changes
+
+This repository mounts the shared UI styleguide as the `styleguide/` git
+submodule, pinned to a released version. Before a UI change — a component, a
+page, a layout, a style — read `styleguide/STYLEGUIDE.md` and build to its
+rules. Before you declare UI work done, check the change against
+`styleguide/CHECKLIST.md` and fix every item it fails.
+
+If `styleguide/` is empty, the submodule is not checked out yet: run
+`git submodule update --init styleguide` first. The styleguide is read-only
+here — a change to it belongs in its own repository, and a new version reaches
+this one as a bump of the submodule's pin.
+<!-- --- STYLEGUIDE-END --- -->
+
 ## Who decides what
 
 Before you put a question to the human, sort it:

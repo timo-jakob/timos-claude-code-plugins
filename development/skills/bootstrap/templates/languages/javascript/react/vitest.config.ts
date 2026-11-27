@@ -14,7 +14,9 @@ export default mergeConfig(
       environment: "jsdom",
       // tests/e2e/ holds the Playwright smoke specs (#1946), which Playwright runs in a real
       // browser — never Vitest, whose default include would otherwise collect *.spec.ts.
-      exclude: [...configDefaults.exclude, "tests/e2e/**"],
+      // styleguide/ is the shared UI styleguide submodule (#3016): its tests/*.test.mjs are
+      // node:test suites, which Vitest would collect and fail.
+      exclude: [...configDefaults.exclude, "tests/e2e/**", "styleguide/**"],
       setupFiles: ["./src/test/setup.ts"],
       coverage: {
         provider: "v8",

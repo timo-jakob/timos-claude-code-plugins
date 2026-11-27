@@ -84,4 +84,6 @@ export default tseslint.config(
     },
   },
   { ignores: ["dist/", "build/", "coverage/", "node_modules/", "src/api/generated/"] },
+  // styleguide/ is the shared UI styleguide submodule (#3016): its own repository lints it.
+  { ignores: ["styleguide/"] },
 );

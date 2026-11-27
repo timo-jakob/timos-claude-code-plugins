@@ -9,6 +9,7 @@ what you want to achieve.
 - [Adopt the Claude Approver on your repo](adopt-the-approver.md)
 - [Adopt the standardized ops surface on your service](adopt-the-ops-surface.md)
 - [Adopt the API styleguide (pin the org Spectral ruleset)](adopt-the-api-styleguide.md)
+- [Include a UI styleguide in a React repo (a pinned submodule)](include-a-ui-styleguide.md)
 - [Keep application repos out of the cluster (`no-cluster-deploy`)](keep-app-repos-out-of-the-cluster.md)
 - [Bootstrap a GitOps repository (one gate command)](bootstrap-a-gitops-repo.md)
 - [Bootstrap an OpenTofu repository (one gate command, no credentials)](bootstrap-an-opentofu-repo.md)

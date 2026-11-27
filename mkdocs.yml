@@ -96,6 +96,7 @@ nav:
       - Bootstrap an OpenTofu repository: how-to/bootstrap-an-opentofu-repo.md
       - Set up a composition repo: how-to/set-up-a-composition-repo.md
       - Adopt the API styleguide: how-to/adopt-the-api-styleguide.md
+      - Include a UI styleguide: how-to/include-a-ui-styleguide.md
       - Read your pipeline telemetry: how-to/read-pipeline-telemetry.md
       - Switch fable agents to opus: how-to/switch-fable-agents-to-opus.md
       - Set a corner-case risk threshold: how-to/set-a-corner-case-risk-threshold.md
