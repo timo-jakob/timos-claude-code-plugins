@@ -47,7 +47,7 @@ outcome_bullet() {
 # path into product/; prints them, exits non-zero only when git itself fails
 product_path_hits() {
   local out rc
-  out="$(git -C "$1" grep -nE -e '(^|[^A-Za-z0-9_.-])(\.\./)*product/(scripts|skills|agents|templates|\.claude-plugin)/' -- development)"
+  out="$(git -C "$1" grep -nE -e '(^|[^A-Za-z0-9_.-])(\.\./)*product/((\*|[0-9][0-9A-Za-z.+-]*)/)?(scripts|skills|agents|templates|\.claude-plugin)/' -- development)"
   rc=$?
   [ "$rc" -le 1 ] || return "$rc"
   printf '%s' "$out"
@@ -228,10 +228,11 @@ g() {
   [ -z "$output" ]
 }
 
-@test "the product-path sweep finds a planted path and spares a URL segment" {
+@test "the product-path sweep finds each planted path form and spares what is not one" {
   local d="$BATS_TEST_TMPDIR/sweep"
   mkdir -p "$d/development/agents"
   printf 'see https://example.invalid/docs/product/migration-guide/\n' > "$d/development/agents/a.md"
+  printf 'run xproduct/scripts/resolve-product-doc.zsh\n' > "$d/development/agents/x.md"
   g -C "$d" init -q
   g -C "$d" add -A
   run product_path_hits "$d"
@@ -239,9 +240,19 @@ g() {
   [ -z "$output" ]
   printf 'run ../../product/scripts/resolve-product-doc.zsh\n' > "$d/development/agents/b.md"
   printf 'read product/skills/define-personas/SKILL.md\n' > "$d/development/agents/c.md"
+  printf 'glob plugins/cache/*/product/*/scripts/resolve-product-doc.zsh\n' > "$d/development/agents/d.md"
+  printf 'glob plugins/cache/shelf/product/1.4.0/scripts/resolve-product-doc.zsh\n' > "$d/development/agents/e.md"
+  printf 'read product/agents/persona-writer.md\n' > "$d/development/agents/f.md"
+  printf 'read product/.claude-plugin/plugin.json\n' > "$d/development/agents/h.md"
   g -C "$d" add -A
   run product_path_hits "$d"
   [ "$status" -eq 0 ]
   contains "$output" 'development/agents/b.md:1:'
   contains "$output" 'development/agents/c.md:1:'
+  contains "$output" 'development/agents/d.md:1:'
+  contains "$output" 'development/agents/e.md:1:'
+  contains "$output" 'development/agents/f.md:1:'
+  contains "$output" 'development/agents/h.md:1:'
+  lacks "$output" 'development/agents/a.md'
+  lacks "$output" 'development/agents/x.md'
 }
