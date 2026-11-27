@@ -63,7 +63,7 @@ rule_block() {
 }
 
 @test "the advisories field lists implementation-pinned among its kinds (#2902)" {
-  contains "$FLAT" '{ "kind": "persona-unknown" | "persona-registry-stale" | "persona-registry-missing" | "implementation-pinned", "message": "…" }'
+  contains "$FLAT" '{ "kind": "persona-unknown" | "persona-registry-stale" | "persona-registry-missing" | "persona-registry-unreadable" | "implementation-pinned", "message": "…" }'
   contains "$FLAT" 'and acceptance criteria that pin an implementation detail (#2902).'
 }
 

@@ -94,8 +94,8 @@ authoring it. Draft it from real evidence (`Read`/`Grep`/`Glob`; `Bash` for
   `tests/acceptance/` for the real shapes.
 - **Draft `use_case`** (`actor`, `goal`, `data_sketch`) concrete enough to
   derive realistic data.
-- **Reference personas** from the target repo's `personas/v1` registry
-  (`docs/personas.md`, #665) when one fits, and **draw the drafted payloads from
+- **Reference personas** from the target repo's `personas/v1` registry (#665),
+  found with the lookup below, when one fits, and **draw the drafted payloads from
   the referenced persona's `data_traits`** (#668) — use those exact value shapes
   and examples so the `test_cases` read like real input, not `foo`/`bar`.
   Personas are **advisory** — if none fits, leave `personas: []`; never block on
@@ -104,6 +104,58 @@ authoring it. Draft it from real evidence (`Read`/`Grep`/`Glob`; `Bash` for
   the human to run **`/product:define-personas`** to add or fix it — it ships in
   the `product` plugin (the routing is a recommendation to the human — you never
   invoke that skill yourself, and its absence never blocks the turn).
+- **Find the registry with the lookup, never by a path of your own (#3352).**
+  The registry is the repo's own file, or one in a docs repository the repo
+  links as a submodule, and only the lookup knows which. Run it from the target
+  repo's root:
+
+  ```bash
+  zsh <resolved path> --repo-dir <target repo root> docs/personas.md
+  ```
+
+  It ships in this plugin, not in the target repo, so resolve its path with one
+  `Bash` call that takes the highest installed version:
+
+  ```bash
+  zsh -c 'print -r -- ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/cache/*/development/*/scripts/reference-docs/resolve-reference-doc.zsh(N.nOn[1])'
+  ```
+
+  An empty result means no installed copy; when the target repo is this
+  plugin's own repo, its working-tree copy at
+  `development/scripts/reference-docs/resolve-reference-doc.zsh`
+  serves instead. On exit 0 it prints one JSON object, and the registry is the
+  file at its `path`. Each outcome has one behaviour:
+
+  - **exit 0, `origin` `own`** — the repo's own registry: read the file at
+    `path` and reference personas from it, as above.
+  - **exit 0, `origin` `linked`** — the registry lives in the linked docs
+    repository named by `submodule`: read the file at `path` and reference
+    personas from it, as above. It is read-only here — never propose an edit to
+    it in this repo. A missing or ill-fitting persona is routed, in a
+    `recommendations` entry, to `/product:define-personas` run in that docs
+    repository; it ships in the `product` plugin.
+  - **exit 3** — the repo has no registry: leave `personas: []` and route a
+    story that needs a persona to `/product:define-personas`, as above,
+    unchanged.
+  - **exit 4 or 6** — the registry could not be read at its pinned version:
+    a `recommendations` entry that carries the fix line the script printed on
+    stderr, and no new persona reference this turn. It never says the registry
+    is absent.
+  - **exit 1, 2, 5 or any other non-zero exit**, or no copy of the lookup
+    anywhere — a `recommendations` entry that carries the script's stderr (or
+    says the lookup was not found), and no new persona reference this turn. It
+    never says the registry is absent. Only exit 3 means there is no registry.
+
+  On those last two outcomes the registry was not read, so nothing was checked.
+  Carry every persona id already in `issue.body`'s story-spec block, or named
+  by the human, unchanged, together with its accepted `persona_derivations`
+  records, and derive nothing from it this turn. Such an id is unchecked, not
+  an id that does not resolve: wherever this file routes a non-resolving id to
+  `/product:define-personas`, that routing does not apply to it, and the
+  `recommendations` entry above is the whole response.
+
+  Persona checks stay advisory in every outcome of the lookup: none of them
+  blocks the turn.
 - **Read the referenced persona's conditions, not only its data** — its `role`,
   `context`, `proficiency` and `failure_costs` (all required `personas/v1`
   fields). `data_traits` say what the persona *types*; these say what the surface
@@ -230,7 +282,7 @@ it or ignore it; that is the right cost for a case you could not derive.
 Say nothing at all when there is nothing to enumerate from — a `none`-surface
 story (`interface_surfaces: []`), `personas: []`, or every resolving persona
 carrying `data_traits: []` (legal for a pure observer). For a referenced id that
-does **not** resolve — a missing registry, a stale id — emit the
+does **not** resolve — no registry (the lookup's exit 3), a stale id — emit the
 `/product:define-personas` recommendation instead: that is a persona problem,
 not a missing-test-case problem, and it applies per id, including on a turn that
 derived cases from the personas that did resolve.
@@ -581,10 +633,16 @@ Rules for the payload:
     name the change that would close the gap, as an object of three non-blank
     strings:
     - `target` — the file the change goes in, as a **repo-relative** path: never
-      absolute, never with a `..` segment. Usually `ARCHITECTURE.md`,
-      `docs/personas.md` or the repo's requirements document wherever it lives;
-      when the repo has none, propose a new page under `docs/`. It is not a fixed
-      list, because repos place their requirements docs differently;
+      absolute, never with a `..` segment. Usually `ARCHITECTURE.md`, the
+      persona registry when the lookup above found it as the repo's own file,
+      or the repo's requirements document wherever it lives;
+      when the repo has no requirements document, propose a new page under
+      `docs/`. It is not a fixed list, because repos place their requirements
+      docs differently. On every other outcome of the lookup the registry is
+      never a target, at its printed path or as a new page: what it should say
+      is then no `gap` question at all. Route it in a `recommendations` entry
+      to `/product:define-personas`, as that outcome's bullet says, and ask the
+      human only the intent the story itself needs;
     - `section` — the heading the change goes under;
     - `wording` — the text you propose, written to stand in that document.
 
