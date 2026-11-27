@@ -134,7 +134,7 @@ to this panel's own entries.
 
 **When the styleguide agent is launched.** `react-styleguide-reviewer` is launched when **either** holds:
 
-1. the reviewed repo has `styleguide/CHECKLIST.md` at its root **and** the round's scope holds a UI file — a
+1. the reviewed tree has `styleguide/CHECKLIST.md` at its root **and** the round's scope holds a UI file — a
    `.jsx` or `.tsx` source, a stylesheet (`.css`, `.scss`) or `index.html`; or
 2. the round's carry holds a `react_styleguide` entry — on either kind of round, whatever the checklist and the
    scope, so that entry is accounted for, exactly as a carried `react_idioms` entry launches
@@ -149,11 +149,12 @@ stylesheets is not NOT APPLICABLE when this agent is launched, and `react-idioms
 the scope holds a file of its own in-scope list above or the carry holds a `react_idioms` entry. A full round
 on which neither agent is launched is NOT APPLICABLE, as above.
 
-On a standalone run the scope of condition 1 is the effective one: the whole project when `$ARGUMENTS` is empty,
-and every file under a directory or area it names. A `styleguide` submodule that `.gitmodules` declares but whose
-directory is missing or empty is not an absent checklist. Condition 1 does not launch the agent on it, and your
-report says that the styleguide submodule is not initialised (`git submodule update --init`) and that
-`react_styleguide` was not reviewed.
+The reviewed tree of condition 1 is the dispatch descriptor's `worktree_root` (in hook mode, `$REVIEW_REPO`),
+never your cwd, and the project root on a standalone run. On a standalone run the scope of condition 1 is the
+effective one: the whole project when `$ARGUMENTS` is empty, and every file under a directory or area it names.
+A `styleguide` submodule that the reviewed tree's `.gitmodules` declares but whose directory is missing or empty
+is not an absent checklist. Condition 1 does not launch the agent on it, and your report says that the styleguide
+submodule is not initialised (`git submodule update --init`) and that `react_styleguide` was not reviewed.
 
 **Where you write, beside another panel.** Every panel of a round shares one descriptor, so one `findings_path`
 — and in hook mode one `$REVIEW_FINDINGS` and one `$REVIEW_FINDINGS.carry.json` sidecar. **Every** rule in this
@@ -204,8 +205,9 @@ blockers, but the split-carry map (above) hands each agent only its own dimensio
 Fix verification line carries that path, never `fix_verification_path` itself,
 and is added only when the map holds that agent's dimension (#2010).
 
-For `react-styleguide-reviewer`, add to the scope line whether the checklist is present — `checklist:
-styleguide/CHECKLIST.md` — or absent — `checklist: absent — account for the carry only, raise no new finding`.
+For `react-styleguide-reviewer`, add to the scope line whether the checklist is present, as its absolute path in
+the reviewed tree — `checklist: <worktree_root>/styleguide/CHECKLIST.md` — or absent —
+`checklist: absent — account for the carry only, raise no new finding`.
 
 ```text
 Review scope: {the review scope}

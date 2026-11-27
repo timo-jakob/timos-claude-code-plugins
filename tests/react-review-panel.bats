@@ -263,8 +263,9 @@ react-styleguide-reviewer|opus|react_styleguide" ]
   lacks "$pre" 'On a **full** round, apply the delta-round rules'
   # the carry overrides not-applicable on BOTH round kinds, and the delta [] is
   # conditional on an empty carry
-  contains "$pre" 'write `[]` only when the carry is empty'
+  contains "$pre" 'Without launching either agent, write `[]` only when the carry is empty and the styleguide agent is not launched.'
   contains "$pre" '**On either kind of round, a carry holding a `react_idioms` entry means you launch `react-idioms-reviewer`**'
+  contains "$pre" 'so that entry is accounted for even though no file in scope is React, and you write its findings as Step 4 says'
   # the in-scope file set the not-applicable verdict is judged against — hooks
   # live in plain .js/.ts modules, so dropping them would skip real React code
   contains "$pre" '`.jsx` and `.tsx`, and `.js` and `.ts` files, because hooks live in plain modules too'
@@ -371,7 +372,8 @@ react-styleguide-reviewer|opus|react_styleguide" ]
   [ -n "$w" ]
   contains "$w" '`react-styleguide-reviewer` is launched when **either** holds:'
   # arm 1: BOTH the checklist and a UI file, with the UI file list spelled out
-  contains "$w" 'the reviewed repo has `styleguide/CHECKLIST.md` at its root **and** the round'"'"'s scope holds a UI file'
+  contains "$w" 'the reviewed tree has `styleguide/CHECKLIST.md` at its root **and** the round'"'"'s scope holds a UI file'
+  contains "$w" 'The reviewed tree of condition 1 is the dispatch descriptor'"'"'s `worktree_root` (in hook mode, `$REVIEW_REPO`), never your cwd, and the project root on a standalone run.'
   contains "$w" 'a `.jsx` or `.tsx` source, a stylesheet (`.css`, `.scss`) or `index.html`; or'
   # arm 2: its own carry, on either kind of round, whatever the checklist
   contains "$w" 'the round'"'"'s carry holds a `react_styleguide` entry — on either kind of round, whatever the checklist and the scope'
@@ -384,7 +386,7 @@ react-styleguide-reviewer|opus|react_styleguide" ]
   contains "$w" '`react-idioms-reviewer` then runs only when the scope holds a file of its own in-scope list above or the carry holds a `react_idioms` entry'
   # a standalone run: the effective scope, and an uninitialised submodule is not an absent checklist
   contains "$w" 'On a standalone run the scope of condition 1 is the effective one: the whole project when `$ARGUMENTS` is empty, and every file under a directory or area it names.'
-  contains "$w" 'A `styleguide` submodule that `.gitmodules` declares but whose directory is missing or empty is not an absent checklist.'
+  contains "$w" 'A `styleguide` submodule that the reviewed tree'"'"'s `.gitmodules` declares but whose directory is missing or empty is not an absent checklist.'
   contains "$w" 'your report says that the styleguide submodule is not initialised (`git submodule update --init`) and that `react_styleguide` was not reviewed'
   contains "$w" 'A full round on which neither agent is launched is NOT APPLICABLE, as above.'
 }
@@ -396,6 +398,7 @@ react-styleguide-reviewer|opus|react_styleguide" ]
   contains "$w" 'Launched by its carry alone without the checklist (a fix pass removed the submodule, say), the agent accounts for its carried entries — confirmed, re-raised or unconfirmed — and raises no new finding'
   s1="$(section "$PANEL" '^## Step 1' '^## Step 2')"
   [ -n "$s1" ]
+  contains "$s1" '`checklist: <worktree_root>/styleguide/CHECKLIST.md`'
   contains "$s1" '`checklist: absent — account for the carry only, raise no new finding`'
   # each agent gets only its own dimension's carry
   contains "$s1" 'hands each agent only its own dimension'"'"'s entries'
