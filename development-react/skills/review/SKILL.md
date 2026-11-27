@@ -118,9 +118,10 @@ naming the out-of-scope files, and write **nothing** to the findings path. A `[]
 CONVERGED condition over a change no agent read. Because you run as a topic panel, the driving session reads
 that verdict as a panel with nothing to add. It joins nothing for you, and the language panel's verdict alone
 decides the round (`development/skills/resolve-issue/reference/review-loop.md`, *Topic panels*). On a **delta**
-round, apply the delta-round rules above unchanged. Without launching the agent, write `[]` only when the carry
-is empty. **On either kind of round, a carry holding a `react_idioms` entry means you launch the agent**, so
-that entry is accounted for even though no file in scope is React, and you write its findings as Step 4 says.
+round, apply the delta-round rules above unchanged. Without launching either agent, write `[]` only when the
+carry is empty and the styleguide agent is not launched. **On either kind of round, a carry holding a
+`react_idioms` entry means you launch `react-idioms-reviewer`**, so that entry is accounted for even though no
+file in scope is React, and you write its findings as Step 4 says.
 The case is real: a fix pass that deleted or reverted the React file behind a blocker leaves the closing full
 sweep with no React file and that blocker still carried, and a bare not-applicable there would leave it
 unaccounted, which `review-loop.md` answers by re-dispatching you into the same verdict.
@@ -147,6 +148,12 @@ so on its scope line. A stylesheet counts as in scope for this agent only: a rou
 stylesheets is not NOT APPLICABLE when this agent is launched, and `react-idioms-reviewer` then runs only when
 the scope holds a file of its own in-scope list above or the carry holds a `react_idioms` entry. A full round
 on which neither agent is launched is NOT APPLICABLE, as above.
+
+On a standalone run the scope of condition 1 is the effective one: the whole project when `$ARGUMENTS` is empty,
+and every file under a directory or area it names. A `styleguide` submodule that `.gitmodules` declares but whose
+directory is missing or empty is not an absent checklist. Condition 1 does not launch the agent on it, and your
+report says that the styleguide submodule is not initialised (`git submodule update --init`) and that
+`react_styleguide` was not reviewed.
 
 **Where you write, beside another panel.** Every panel of a round shares one descriptor, so one `findings_path`
 — and in hook mode one `$REVIEW_FINDINGS` and one `$REVIEW_FINDINGS.carry.json` sidecar. **Every** rule in this

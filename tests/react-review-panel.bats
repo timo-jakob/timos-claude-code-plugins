@@ -264,7 +264,7 @@ react-styleguide-reviewer|opus|react_styleguide" ]
   # the carry overrides not-applicable on BOTH round kinds, and the delta [] is
   # conditional on an empty carry
   contains "$pre" 'write `[]` only when the carry is empty'
-  contains "$pre" '**On either kind of round, a carry holding a `react_idioms` entry means you launch the agent**'
+  contains "$pre" '**On either kind of round, a carry holding a `react_idioms` entry means you launch `react-idioms-reviewer`**'
   # the in-scope file set the not-applicable verdict is judged against — hooks
   # live in plain .js/.ts modules, so dropping them would skip real React code
   contains "$pre" '`.jsx` and `.tsx`, and `.js` and `.ts` files, because hooks live in plain modules too'
@@ -380,7 +380,12 @@ react-styleguide-reviewer|opus|react_styleguide" ]
   contains "$w" 'In every other case it is not launched, and the panel is unchanged: its report, its findings array and its carry accounting are what `react-idioms-reviewer` alone makes them'
   contains "$w" 'the `react_styleguide` dimension adds no finding'
   # a stylesheet-only scope is the styleguide agent's alone
-  contains "$w" 'A stylesheet counts as in scope for this agent only'
+  contains "$w" 'A stylesheet counts as in scope for this agent only: a round whose scope holds only stylesheets is not NOT APPLICABLE when this agent is launched'
+  contains "$w" '`react-idioms-reviewer` then runs only when the scope holds a file of its own in-scope list above or the carry holds a `react_idioms` entry'
+  # a standalone run: the effective scope, and an uninitialised submodule is not an absent checklist
+  contains "$w" 'On a standalone run the scope of condition 1 is the effective one: the whole project when `$ARGUMENTS` is empty, and every file under a directory or area it names.'
+  contains "$w" 'A `styleguide` submodule that `.gitmodules` declares but whose directory is missing or empty is not an absent checklist.'
+  contains "$w" 'your report says that the styleguide submodule is not initialised (`git submodule update --init`) and that `react_styleguide` was not reviewed'
   contains "$w" 'A full round on which neither agent is launched is NOT APPLICABLE, as above.'
 }
 
@@ -460,12 +465,14 @@ react-styleguide-reviewer|opus|react_styleguide" ]
   c="$(section "$STYLE" '^### The checklist' '^### WCAG')"
   contains "$c" '**Ignore `[design]` and `[mechanical]` items, wherever they appear.**'
   contains "$c" 'Report nothing against either, even when the change plainly breaks one.'
+  contains "$c" 'That bars citing either kind of item, not the WCAG row below: a WCAG 2.2 AA violation you can show in the source is still a WARNING under its success criterion when one of those items covers the same ground.'
   contains "$c" 'Never paraphrase the text and never invent an identifier'
   # the Reporting Format gives the item and the rule their own lines
   rf="$(section "$STYLE" '^## Reporting Format' 'EOF')"
   [ -n "$rf" ]
   contains "$rf" 'item: "<the item'"'"'s text, verbatim>"'
   contains "$rf" 'rule: STYLEGUIDE.md#<anchor>'
+  contains "$rf" '(the pair repeats when one location breaks several items)'
   contains "$rf" 'A violated `[review]` item is WARNING and a WCAG 2.2 AA violation you can show in the source is WARNING.'
 }
 
@@ -496,6 +503,19 @@ react-styleguide-reviewer|opus|react_styleguide" ]
   local s
   s="$(section "$STYLE" '^### What is in scope' '^## Reviewing thoroughness')"
   contains "$s" '`.jsx` and `.tsx` sources, stylesheets (`.css`, `.scss`) and `index.html`'
+}
+
+@test "#3019 the styleguide agent's Reviewing thoroughness keeps the enumerate rule and both fail-closed carve-outs" {
+  local t
+  t="$(section "$STYLE" '^## Reviewing thoroughness \(#982\)' '^## The evidence rule')"
+  [ -n "$t" ]
+  contains "$t" 'Three buttons with title-case labels are three WARNING findings.'
+  contains "$t" '**(1) A defect the change under review *introduces* is always in-scope**'
+  contains "$t" 'treat it as introduced and keep full severity (fail closed)'
+  contains "$t" '**(2) When the issue'"'"'s stated scope is not provided in your prompt**'
+  contains "$t" 'is reported at **SUGGESTION** with a Description line `follow-up: <the defect, in one line>`, and it never blocks a round.'
+  lacks "$t" 'treat it as pre-existing'
+  lacks "$t" 'spin off a follow-up issue'
 }
 
 @test "#3019 a twice-failed styleguide agent writes no findings file and the report names react_styleguide as not reviewed" {
@@ -533,13 +553,18 @@ react-styleguide-reviewer|opus|react_styleguide" ]
   contains "$c" 'Never check an item from memory, and never check an item the file no longer holds.'
   contains "$c" 'A `[design]` item is checked on the design spec before anything is built, and a `[mechanical]` item by a tool in CI.'
   contains "$c" 'A line under `## Review` that does not have the form above is not an item for you either.'
-  contains "$c" 'When `styleguide/CHECKLIST.md` is absent, or its `## Review` section holds no line of the form above, say so in your report and raise no new finding.'
+  contains "$c" 'When `styleguide/CHECKLIST.md` is absent, or your scope line says `checklist: absent`, say so in your report and raise no new finding, under either row.'
+  contains "$c" 'When the file is present but its `## Review` section holds no line of the form above, say so in your report and still check the WCAG row below.'
+  contains "$c" 'Name in your report every line under `## Review` you dropped for its form.'
+  # one location that breaks several items is one finding with a pair per item
+  contains "$c" 'file one finding there that gives every one of them as its own `item:` and `rule:` pair, never one finding per item'
   w="$(section "$STYLE" '^### WCAG 2.2 AA' '^### Only what the source shows')"
   contains "$w" 'Name the success criterion in the finding (for example `2.1.1`).'
-  contains "$w" 'cite that item as above in the same finding rather than filing a second one'
+  contains "$w" 'When `[review]` items also cover the violation, cite each of them as above in the same finding rather than filing a second one'
   # the panel launches the round's agents in parallel and joins their arrays
   s1="$(section "$PANEL" '^## Step 1' '^## Step 2')"
   contains "$s1" 'spawn the agents below that this round launches, in parallel'
+  contains "$s1" '`react-idioms-reviewer` runs as the scope and carry rules above say, and `react-styleguide-reviewer` only as *When the styleguide agent is launched* (above) says.'
   contains "$s1" 'Each is defined in this plugin'"'"'s `agents/` directory and already knows what to look for'
   s4="$(section "$PANEL" '^## Step 4' 'EOF')"
   contains "$s4" 'take each launched agent'"'"'s fenced `json` block'

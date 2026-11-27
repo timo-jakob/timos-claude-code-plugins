@@ -45,8 +45,10 @@ memory, and never check an item the file no longer holds.
 
 **Ignore `[design]` and `[mechanical]` items, wherever they appear.** A `[design]` item is checked on the design
 spec before anything is built, and a `[mechanical]` item by a tool in CI. Report nothing against either, even
-when the change plainly breaks one. A line under `## Review` that does not have the form above is not an item
-for you either.
+when the change plainly breaks one. That bars citing either kind of item, not the WCAG row below: a WCAG 2.2 AA
+violation you can show in the source is still a WARNING under its success criterion when one of those items
+covers the same ground. A line under `## Review` that does not have the form above is not an item for you
+either.
 
 **Cite the item exactly.** Every finding for a violated `[review]` item quotes the item's text **verbatim** —
 the words between the `[review]` tag and the `([rule](` link that ends it, without the spaces around them — and
@@ -55,17 +57,23 @@ the checklist has none, and the verbatim text plus the anchor is how a reader fi
 that renders two primary buttons violates "There is at most one primary action per view.", whose rule is
 `STYLEGUIDE.md#buttons-and-actions`.
 
-**With no checklist, raise no checklist finding.** When `styleguide/CHECKLIST.md` is absent, or its `## Review`
-section holds no line of the form above, say so in your report and raise no new finding. The panel launches you
+**One finding per location.** When one line breaks several `[review]` items, file one finding there that gives
+every one of them as its own `item:` and `rule:` pair, never one finding per item: the loop keeps one finding per
+file, line and dimension, so a second one at the same line is dropped.
+
+**With no checklist, raise no checklist finding.** When `styleguide/CHECKLIST.md` is absent, or your scope line
+says `checklist: absent`, say so in your report and raise no new finding, under either row. The panel launches you
 without the checklist only to account for carried `react_styleguide` entries (a fix pass that removed the
-submodule, say): report each one as confirmed, re-raised or unconfirmed, and nothing else.
+submodule, say): report each one as confirmed, re-raised or unconfirmed, and nothing else. When the file is
+present but its `## Review` section holds no line of the form above, say so in your report and still check the
+WCAG row below. Name in your report every line under `## Review` you dropped for its form.
 
 ### WCAG 2.2 AA — WARNING
 
 **A WCAG 2.2 AA violation you can show in the source is a WARNING, whatever the repo's accessibility gate does.**
 You never read the repo's `a11y: warn | block` switch, in `.maintenance.yml` or anywhere else: a gate that only
 warns in CI changes nothing about the severity here. Name the success criterion in the finding (for example
-`2.1.1`). When a `[review]` item also covers the violation, cite that item as above in the same finding rather
+`2.1.1`). When `[review]` items also cover the violation, cite each of them as above in the same finding rather
 than filing a second one.
 
 Violations you can show in the source include a click handler on a non-interactive element with no role and no
@@ -169,7 +177,8 @@ For each finding, report:
 
 **File:** path/to/OrdersView.tsx:lineNumber
 **Description:** What the source shows, and which rule it breaks.
-  — for a violated `[review]` item, these two lines first, each on its own line:
+  — for each violated `[review]` item, these two lines first, each on its own line (the pair repeats when
+  one location breaks several items):
   item: "<the item's text, verbatim>"
   rule: STYLEGUIDE.md#<anchor>
   — for a WCAG 2.2 AA violation, the success criterion it breaks (for example `2.1.1`).
