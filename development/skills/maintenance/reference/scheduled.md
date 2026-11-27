@@ -21,8 +21,9 @@ prompt and what the run did instead.
 - **A missing tool or runtime → skip the work that needed it and report.**
   That work, which its row below names, is not done this run, and nothing is
   installed.
-- **An earlier run's checkpoint → discard it, start fresh and report.** The run
-  never resumes. Of the PRs the interrupted run left open, only those Phase
+- **An earlier run's checkpoint → discard it when it is older than ~24h,
+  start fresh and report; a younger one ends the run untouched, reported.**
+  The run never resumes. Of the PRs the interrupted run left open, only those Phase
   2.5's inventory or the standing-PR slot collects are picked up; any other is
   not reconciled, and its group can be planned and opened again.
 - **Any other prompt → the choice that changes nothing, reported.**
@@ -38,7 +39,8 @@ The sites, in the order a run meets them:
 | Phase 8 pre-dispatch hook, the runtime is missing | `AskUserQuestion`: install, install it myself, skip | no question and never `install`: this group and every not-yet-started group of its concern for that target are recorded `deferred` and reported with the hook's `label` |
 
 `--scheduled` with `--resume` is refused in Phase 0, since a scheduled run never
-resumes. `--fresh` is accepted, and clears a checkpoint of any age.
+resumes itself; a `--resume` typed later restores `--scheduled` with the other
+recorded flags (SKILL.md, *Resume entry*). `--fresh` is accepted, and clears a checkpoint of any age.
 
 A prompt added to the skill later gets its row here and an "under
 `--scheduled`" clause beside it in the skill. `tests/maintenance-scheduled-prose.bats`

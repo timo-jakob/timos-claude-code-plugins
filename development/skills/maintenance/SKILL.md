@@ -97,12 +97,15 @@ Supported flags in `$ARGUMENTS`:
 - `--scheduled` — the run nobody watches (#3214). It **never asks**: every
   place this skill would ask takes the path `reference/scheduled.md` § 1 gives
   it — a missing tool or runtime skips the work that needed it and is reported
-  (nothing is installed), an earlier run's checkpoint is discarded and reported, and any
+  (nothing is installed), an earlier run's checkpoint older than ~24h is
+  discarded and reported, a younger one ends the run untouched (a run may
+  still be going), and any
   other prompt takes the choice that changes nothing, reported. It also turns
   on the whole run budget (`reference/scheduled.md` § 2): the per-concern caps,
   the open-queue cap and the cutoff. Without it only the bugs cap applies.
-  Rejected together with `--resume` — a scheduled run never resumes. Combinable
-  with every other flag.
+  Rejected together with `--resume` on one command line — a scheduled run
+  never resumes itself; a `--resume` typed later restores it with the other
+  recorded flags (*Resume entry*). Combinable with every other flag.
 - `--telemetry-file PATH` / `--telemetry-dir DIR` — where the run's one
   `telemetry/v1` record goes (#1228; see *Telemetry — stamp the run's start*
   below). Each takes a value — halt on a missing, empty or `--`-shaped one, or
@@ -166,7 +169,7 @@ worktrees, so it survives the session). Before Phase 1, check for one:
     A run resumed past `phase4-payload` reads its payloads from the
     `payload-<target>.json` copies in `checkpoint.zsh dir`, never from
     `<payload-dir>` or `/tmp`; it creates no `<payload-dir>` of its own.
-    Restore the **recorded flags**: a resumed run keeps its original
+    Restore the **recorded flags**, `--scheduled` included: a resumed run keeps its original
     scope; if this invocation passes a *different* `--tool`/`--concern`/
     `--batch`, halt — changing scope requires `--fresh`. Continue at the
     first phase not recorded; phases without a checkpoint of their own
@@ -2009,6 +2012,8 @@ says what *is*:
 - `agent_spawned` with no `pr` → the interrupted session's worktree is
   gone; re-spawn the group's agent off the current merged tip — nothing
   outward happened, so this is safe.
+- `status: deferred` (with or without `deferred_by`) → drop the record;
+  this run's budget and batch decide the group again.
 - **Never** re-open an existing PR, re-dispatch a group whose PR merged,
   or spawn a second agent for a stage that has an open PR.
 - Mark every restored stage that already **merged**, already records a
@@ -2249,7 +2254,9 @@ queue, each group given an `opens_pr`, through
 `--scheduled` only the bugs cap applies, so an attended run keeps every other
 group. Under `--scheduled` the per-concern caps, the open-queue cap
 (`scripts/count-open-queue.zsh`) and the cutoff (`MAINTENANCE_CUTOFF_EPOCH`)
-apply too. Record each deferred group as a `deferred` stage in
+apply too. On a resume, *Resuming into Phase 8* reconciles the recorded
+stages first, and only groups with no recorded stage go through the budget:
+a recorded stage is never re-split. Record each deferred group as a `deferred` stage in
 `phase8-stages`, with its `deferred_by`, for the Phase 9 *"Deferred by the
 budget"* list; the rest of this phase works `run` alone. Under `--scheduled`,
 check the budget again **before each group starts** (`reference/scheduled.md`

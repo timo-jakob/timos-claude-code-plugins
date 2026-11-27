@@ -57,10 +57,10 @@ unclaused_prompts() {
   contains "$text" "never installs a tool or a runtime"
 }
 
-@test "scheduled.md: an earlier run's checkpoint is discarded, the run starts fresh, and it is reported" {
+@test "scheduled.md: an earlier run's checkpoint is discarded when stale, the run starts fresh, and it is reported" {
   local text
   text="$(flat "$SCHEDULED")"
-  contains "$text" "**An earlier run's checkpoint → discard it, start fresh and report.**"
+  contains "$text" "**An earlier run's checkpoint → discard it when it is older than ~24h, start fresh and report; a younger one ends the run untouched, reported.**"
   contains "$text" "never resumes"
   contains "$text" '`checkpoint.zsh clear`, then Phase 1; report the discarded checkpoint'
 }
@@ -79,6 +79,9 @@ unclaused_prompts() {
   contains "$text" "| Phase 8 step 8, the post-merge pre-flight exits 1 or 2 (R.4) |"
   contains "$text" "| Phase 8 pre-dispatch hook, the runtime is missing |"
   contains "$text" "never \`install\`"
+  contains "$text" "| asks: resume or start fresh | \`age=\` beyond ~24h:"
+  contains "$text" "Younger: a run may still be going, so end this run with the checkpoint untouched and report its last phase and age."
+  contains "$text" "Under \`--dry-run\`, the checkpoint is left as it is"
 }
 
 @test "scheduled.md: approval stays whatever the repo declares" {
@@ -177,6 +180,7 @@ unclaused_prompts() {
   local text
   text="$(flat "$SKILL")"
   contains "$text" "- \`--scheduled\` — the run nobody watches (#3214). It **never asks**"
+  contains "$text" "an earlier run's checkpoint older than ~24h is discarded and reported, a younger one ends the run untouched (a run may still be going)"
   contains "$text" "When \`--scheduled\` and \`--resume\` are both passed, halt with: \"--scheduled never resumes an interrupted run; drop --resume.\""
 }
 
