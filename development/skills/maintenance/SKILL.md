@@ -1713,6 +1713,13 @@ none for a language with nothing in scope), invoke the matching
 language plugin via the Skill tool. **The payload is handed over via a temp file**, not
 inline — see ARCHITECTURE.md § "JSON schema (v2)" for the contract.
 
+Under `--scheduled`, no target is dispatched once the cutoff has passed:
+before each dispatch, check the budget with Stage 0's group, as Phase 8's
+*Stage 0* does. A target it defers by `cutoff` is not dispatched, so neither
+its improver nor its planner starts, and Phase 9's *"Deferred by the budget"*
+list names it. A `queue` deferral does not stop a dispatch, since vendor-PR
+triage goes on at the queue cap; Stage 0 checks the queue again before its push.
+
 ```bash
 # 1. Hand the kept file (Phase 4) over to a temp file. The helper sets
 #    0600 perms and prints the temp's absolute path; substitute it as
@@ -3495,6 +3502,10 @@ run start; the 🚀 PRs section below shows what was tackled.>
   - <lang or topic> [<tool>] <description> — <budget not applied: <stderr> |
     runtime <label> missing | pre-flight failed: <stderr or blockers>>
   - ...
+
+<If reference/scheduled.md § 2 left a note for the summary — a `budget:` block not read or refused, a failure arm's stderr, or the queue cap holding within this run only:>
+ℹ Run budget notes:
+  - <the note, with its stderr where § 2 reports one>
 
 <If any prompt took its --scheduled path (reference/scheduled.md § 1):>
 🌙 Scheduled run — no questions asked (K):

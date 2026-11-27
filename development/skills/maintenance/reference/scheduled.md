@@ -144,7 +144,9 @@ Under `--scheduled`, the budget is checked again before each group of `run`
 starts, because the clock moves and a PR this run opened may now be waiting.
 Count the queue afresh, as section 2 does, and pipe the one group through the
 same script. Stage 0, the coverage improver's PR, is checked the
-same way before it is pushed (SKILL.md, *Stage 0*), and so is each
+same way before it is pushed (SKILL.md, *Stage 0*), and with its group before
+each Phase 6 dispatch, which only a `cutoff` deferral stops (SKILL.md,
+*Phase 6*), and so is each
 conflicting bot PR before the standing-PR slot rebases it, with the group
 `{"tool": "conflicting_bot_pr", "concern": "codequality", "opens_pr": false}`
 (SKILL.md, *Conflicting bot-PR remediation*, which says how one the cutoff
