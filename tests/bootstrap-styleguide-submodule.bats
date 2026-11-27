@@ -365,6 +365,14 @@ assert_fails_cleanly() {
   [ ! -e "$W/app/styleguide" ]
 }
 
+@test "styleguide: an scp-style URL (git@host:org/repo.git) is an absolute URL, read as a remote" {
+  make_app "$W/app" $'# Ours\n'
+  # no network: the ssh transport is `false`, so the remote read fails at once.
+  # `unreachable` — not `not an absolute URL` — proves the form passed the check.
+  GIT_SSH_COMMAND=false assert_fails_cleanly "git@example.invalid:org/sg.git" "unreachable"
+  [ ! -e "$W/app/styleguide" ]
+}
+
 @test "styleguide: a relative URL is refused before any remote is read" {
   make_app "$W/app" $'# Ours\n'
   # a sibling the relative forms would reach from the app, were they read as paths
