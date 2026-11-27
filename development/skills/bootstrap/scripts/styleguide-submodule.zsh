@@ -27,8 +27,10 @@
 #             remote is contacted, --url is ignored and the pin stays where it is.
 #   exit 0  styleguide: skipped — no repository supplied; pass --styleguide-repo <url>
 #   exit 1  styleguide: failed — <url>: <reason>
-#             the URL is unreachable, the remote has no vX.Y.Z tag, `styleguide/`
-#             exists and is not a submodule, or a git step failed. Everything the
+#             the URL is relative (`not an absolute URL`: git resolves a relative
+#             submodule URL against the repo's own remote), the URL is unreachable,
+#             the remote has no vX.Y.Z tag, `styleguide/` exists and is not a
+#             submodule, or a git step failed. Everything the
 #             script did is undone: no `.gitmodules` entry, no gitlink, no
 #             `styleguide/` directory and no CLAUDE.md section is left, and a
 #             `styleguide/` that was already there is never touched.
@@ -94,7 +96,7 @@ template_section() {
     $0 == h { on = 1; print; next }
     on && (/^## / || /^<!-- --- STYLEGUIDE-END/) { exit }
     on { print }
-  ' "$template"
+  ' "$template" 2>/dev/null
 }
 
 # Append the section to an existing CLAUDE.md that lacks it, keeping every
@@ -121,8 +123,13 @@ ensure_claude_md() {
 
 declares_styleguide() {
   [[ -f "$repo/.gitmodules" ]] || return 1
-  git config -f "$repo/.gitmodules" --get-regexp '^submodule\..*\.path$' 2>/dev/null |
-    awk -v p="$SG" '$2 == p || $2 == p "/" { found = 1 } END { exit found ? 0 : 1 }'
+  # -z: each record is `<key>\n<value>\0`, so a name or path holding a space is
+  # compared whole, never word-split
+  local rec lf=$'\n'
+  for rec in "${(@0)$(git config -f "$repo/.gitmodules" -z --get-regexp '^submodule\..*\.path$' 2>/dev/null)}"; do
+    [[ "${rec#*$lf}" == "$SG" || "${rec#*$lf}" == "$SG/" ]] && return 0
+  done
+  return 1
 }
 
 fail() {
@@ -152,9 +159,13 @@ modules_dir="$(g rev-parse --path-format=absolute --git-path "modules/$SG" 2>/de
   fail "cannot locate the repository's git directory"
 [[ -e "$modules_dir" ]] && fail "a stale submodule git directory exists at $modules_dir; remove it and re-run"
 
+# A relative URL names two repositories: ls-remote reads it as a local path,
+# `submodule add` resolves it against the repo's own remote. Refuse it.
+[[ "$url" != (./*|../*) && "$url" == (/*|*:*) ]] || fail "not an absolute URL"
+
 # The tag: the highest vX.Y.Z in semver order. ls-remote reads the remote without
 # cloning; an unreachable URL fails here, before anything is written.
-refs="$(GIT_TERMINAL_PROMPT=0 git ls-remote --tags --refs -- "$url" 2>/dev/null)" || fail "unreachable"
+refs="$(GIT_TERMINAL_PROMPT=0 g ls-remote --tags --refs -- "$url" 2>/dev/null)" || fail "unreachable"
 tag="$(print -r -- "$refs" | awk '{ sub(/^refs\/tags\//, "", $2); print $2 }' |
   grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' |
   sed 's/^v//' | LC_ALL=C sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)"

@@ -5325,9 +5325,9 @@ It prints exactly one status line, which the Step 5 report relays verbatim:
   where it is; it only fills a missing `CLAUDE.md` section. Ask no question.
 - **exit 0, `styleguide: skipped — no repository supplied; pass --styleguide-repo <url>`**
   — no URL. The Step 5 report says so in that one line.
-- **exit 1, `styleguide: failed — <url>: <reason>`** — the URL is unreachable,
-  the remote has no `vX.Y.Z` tag, `styleguide/` exists and is not a submodule,
-  or a git step failed. The step fails **as a unit**: the script has undone
+- **exit 1, `styleguide: failed — <url>: <reason>`** — the URL is relative, the
+  URL is unreachable, the remote has no `vX.Y.Z` tag, `styleguide/` exists and
+  is not a submodule, or a git step failed. The step fails **as a unit**: the script has undone
   everything it did, so no `.gitmodules` entry, no gitlink and no `CLAUDE.md`
   section is left, and no `styleguide/` directory was created or changed. It
   never falls back to the default branch head. Relay the line as a Step 5 item

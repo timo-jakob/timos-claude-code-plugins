@@ -164,10 +164,12 @@ tagged_commit() { git -C "$1" rev-parse "refs/tags/$2^{commit}"; }
 @test "styleguide: --template supplies the appended section" {
   make_remote "$W/sg" v0.1.0
   make_app "$W/app" $'# Ours\n'
-  printf '%s\n\ncustom-template-marker\n' '## Read the styleguide before UI changes' > "$W/custom.tmpl"
+  # the section ends at the next H2: nothing after it is appended
+  printf '%s\n\ncustom-template-marker\n## Other\n\nother-marker\n' '## Read the styleguide before UI changes' > "$W/custom.tmpl"
   run zsh "$SCRIPT" --repo "$W/app" --url "$W/sg" --template "$W/custom.tmpl"
   [ "$status" -eq 0 ]
   [ "$(tail -n 1 "$W/app/CLAUDE.md")" = custom-template-marker ]
+  lacks "$(cat "$W/app/CLAUDE.md")" other-marker
 }
 
 @test "styleguide: a heading inside a fence is no section; trailing whitespace and case still match" {
@@ -277,6 +279,19 @@ tagged_commit() { git -C "$1" rev-parse "refs/tags/$2^{commit}"; }
   [ "$output" = "styleguide: present" ]
 }
 
+@test "styleguide: a submodule name or path holding a space is compared whole, never word-split" {
+  make_app "$W/app"
+  printf '[submodule "UI styleguide"]\n\tpath = styleguide\n\turl = %s\n' "$W/no-such-remote" > "$W/app/.gitmodules"
+  run zsh "$SCRIPT" --repo "$W/app" --url "$W/no-such-remote"
+  [ "$status" -eq 0 ]
+  [ "$output" = "styleguide: present" ]
+  # neither a name nor a path that merely holds the word declares the submodule
+  printf '[submodule "a styleguide b"]\n\tpath = vendor/x\n[submodule "c"]\n\tpath = styleguide extra\n' > "$W/app/.gitmodules"
+  run zsh "$SCRIPT" --repo "$W/app"
+  [ "$status" -eq 0 ]
+  starts_with "$output" "styleguide: skipped"
+}
+
 # --- skipped --------------------------------------------------------------------
 
 @test "styleguide: no URL skips the step in one line naming --styleguide-repo, writing nothing" {
@@ -322,6 +337,17 @@ assert_fails_cleanly() {
 @test "styleguide: an unreachable URL fails as a unit, naming the URL and the reason" {
   make_app "$W/app" $'# Ours\n'
   assert_fails_cleanly "$W/no-such-remote" "unreachable"
+  [ ! -e "$W/app/styleguide" ]
+}
+
+@test "styleguide: a relative URL is refused before any remote is read" {
+  make_app "$W/app" $'# Ours\n'
+  # a sibling the relative forms would reach from the app, were they read as paths
+  make_remote "$W/sg" v0.1.0
+  local rel
+  for rel in ../sg ./sg sg; do
+    (cd "$W/app" && assert_fails_cleanly "$rel" "not an absolute URL") || { echo "$rel"; false; }
+  done
   [ ! -e "$W/app/styleguide" ]
 }
 
@@ -400,6 +426,25 @@ assert_fails_cleanly() {
   [ ! -e "$W/app/styleguide" ]
 }
 
+@test "styleguide: a template section still holding a placeholder undoes the whole add" {
+  make_remote "$W/sg" v0.1.0
+  make_app "$W/app" $'# Ours\n'
+  printf '%s\n\n{{PROJECT_NAME}}\n' '## Read the styleguide before UI changes' > "$W/raw.tmpl"
+  assert_fails_cleanly "$W/sg" "the CLAUDE.md template carries no usable styleguide section" --template "$W/raw.tmpl"
+  [ ! -e "$W/app/styleguide" ]
+}
+
+@test "styleguide: a template that cannot be read undoes the whole add" {
+  [ "$(id -u)" != 0 ] || skip "root reads any file"
+  make_remote "$W/sg" v0.1.0
+  make_app "$W/app" $'# Ours\n'
+  printf '%s\n\nbody\n' '## Read the styleguide before UI changes' > "$W/t.tmpl"
+  chmod 000 "$W/t.tmpl"
+  assert_fails_cleanly "$W/sg" "cannot read the CLAUDE.md template" --template "$W/t.tmpl"
+  chmod 644 "$W/t.tmpl"
+  [ ! -e "$W/app/styleguide" ]
+}
+
 @test "styleguide: a file that cannot be snapshotted stops the run before any write" {
   [ "$(id -u)" != 0 ] || skip "root reads any file"
   make_remote "$W/sg" v0.1.0
@@ -452,6 +497,21 @@ assert_fails_cleanly() {
   [ "$(grep -c 'submodule' "$W/app/.gitmodules")" -eq 1 ]
 }
 
+@test "styleguide: a failure in a repo with no index yet leaves no index behind" {
+  make_remote "$W/sg" v0.1.0
+  # git-init'ed, files on disk, nothing added: there is no .git/index
+  git init -q "$W/app"
+  printf '{"name":"app","dependencies":{"react":"19.0.0"}}\n' > "$W/app/package.json"
+  [ ! -e "$W/app/.git/index" ]
+  local real
+  real="$(command -v git)"
+  mkdir -p "$W/bin"
+  printf '#!/bin/sh\ncase "$*" in *"fetch"*"refs/tags/"*) exit 1 ;; esac\nexec "%s" "$@"\n' "$real" > "$W/bin/git"
+  chmod +x "$W/bin/git"
+  PATH="$W/bin:$PATH" assert_fails_cleanly "$W/sg" "cannot fetch v0.1.0"
+  [ ! -e "$W/app/.git/index" ]
+}
+
 @test "styleguide: a CLAUDE.md that cannot be written undoes the whole add" {
   [ "$(id -u)" != 0 ] || skip "root writes a read-only file"
   make_remote "$W/sg" v0.1.0
@@ -497,9 +557,10 @@ assert_fails_cleanly() {
   make_remote "$W/sg" v0.1.0
   make_app "$W/app"
   mkdir -p "$W/app/.git/modules/styleguide"
-  run zsh "$SCRIPT" --repo "$W/app" --url "$W/sg"
+  run --separate-stderr zsh "$SCRIPT" --repo "$W/app" --url "$W/sg"
   [ "$status" -eq 1 ]
-  contains "$output" "a stale submodule git directory exists"
+  [ -z "$stderr" ]
+  starts_with "$output" "styleguide: failed — $W/sg: a stale submodule git directory exists at "
   [ ! -e "$W/app/styleguide" ]
   [ -d "$W/app/.git/modules/styleguide" ]
 }
@@ -657,7 +718,7 @@ styleguide_step() { awk '/^### 3k\.5a\. /{on=1} on && /^### 3k\.6\. /{exit} on' 
   contains "$s" '**exit 0, `styleguide: added <url> at <tag>`** — `styleguide/` is a new submodule checked out at the commit of the remote'"'"'s highest `vX.Y.Z` tag in semver order (`v0.10.0` beats `v0.9.0`; pre-release and other tags are ignored).'
   contains "$s" '`.gitmodules` carries `[submodule "styleguide"]` with `path = styleguide` and `url = <url>` and no `branch` line.'
   contains "$s" 'The script contacts no remote, ignores `--url` and leaves the pin where it is; it only fills a missing `CLAUDE.md` section. Ask no question.'
-  contains "$s" '**exit 1, `styleguide: failed — <url>: <reason>`** — the URL is unreachable, the remote has no `vX.Y.Z` tag, `styleguide/` exists and is not a submodule, or a git step failed.'
+  contains "$s" '**exit 1, `styleguide: failed — <url>: <reason>`** — the URL is relative, the URL is unreachable, the remote has no `vX.Y.Z` tag, `styleguide/` exists and is not a submodule, or a git step failed.'
   contains "$s" 'On a repo that already has the submodule the line is `styleguide: failed — CLAUDE.md: <reason>` instead: the missing section could not be appended, and the submodule stays mounted.'
   contains "$s" '- **exit 2** — your own malformed call: fix it and re-run.'
   contains "$s" '**Run the script** from the repository root, after §3k.5 and before §3a'"'"'s `.github/dependabot.yml` and `CLAUDE.md` renders, passing `--url` only when a URL was given:'
