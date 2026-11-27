@@ -123,6 +123,7 @@ unclaused_prompts() {
   contains "$text" "and each PR the \`Bugs\` block records and does not record as merged"
   contains "$text" "the queue cap holds within one run only; the Phase 9 summary says so"
   contains "$text" "for a refused cutoff, under \`--scheduled\`, start nothing new and record every group \`deferred\` by \`cutoff\`"
+  contains "$text" "\"<skill-base-dir>/scripts/count-open-queue.zsh\" # prints <q> jq -c '[.]' <scratch>/group.json | \"<skill-base-dir>/scripts/apply-run-budget.zsh\" --caps '{}' \\ --scheduled --queue <q> [--queue-cap <n>] [--cutoff-epoch \"\$MAINTENANCE_CUTOFF_EPOCH\"]"
 }
 
 @test "scheduled.md: under --scheduled a full queue stops a bug fix but not an analysis" {
@@ -224,6 +225,9 @@ unclaused_prompts() {
 @test "Phase 6: a full queue stops only the dispatch of a language that can start the improver" {
   local text
   text="$(flat "$SKILL")"
+  contains "$text" "Under \`--scheduled\`, no target is dispatched once the cutoff has passed: before each dispatch, check the budget with Stage 0's group, as Phase 8's *Stage 0* does."
+  contains "$text" "A target it defers by \`cutoff\` is not dispatched, so neither its improver nor its planner starts, and Phase 9's *\"Deferred by the budget\"* list names it."
+  contains "$(flat "$SCHEDULED")" "Before a Phase 6 dispatch, a \`cutoff\` deferral stops every dispatch."
   contains "$text" "A \`queue\` deferral does not stop the dispatch of a topic, or of a language whose kept payload carries \`dispatch_mode: \"auxiliary\"\`"
   contains "$text" "On a \`queue\` deferral no language dispatch that can start an improver is made: a language dispatched as \`\"primary\"\` is not dispatched"
   contains "$text" "The payload does not record whether its dispatcher's coverage pre-flight will start the improver"

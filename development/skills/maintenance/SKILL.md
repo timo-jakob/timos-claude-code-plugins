@@ -3601,11 +3601,12 @@ from facts noted where each was decided, never reconstructed at the end:
 - `languages` — Phase 2's partition; `topics` — the topic plugins that
   dispatched.
 - `payloads` — leave `[]` and pass each kept payload file as a `--v2-payload`
-  instead: `<payload-dir>/payload-<target>.json`, one per target Phase 4 wrote
-  (*Keep each payload in one file*), or — on a run resumed past
-  `phase4-payload` — the checkpoint copies in `checkpoint.zsh dir` that its
-  record names. Those are exactly the files dispatched (or printed, under
-  `--dry-run`), so `findings_by_tool` is counted from what the run actually
+  instead: `<payload-dir>/payload-<target>.json`, one per target Phase 6
+  dispatched (or printed, under `--dry-run`), never one the run budget kept
+  from its Phase 6 dispatch (*Keep each payload in one file*), or — on a run
+  resumed past `phase4-payload` — the checkpoint copies in `checkpoint.zsh dir`
+  that its record names, under the same rule. Those are exactly the files
+  dispatched, so `findings_by_tool` is counted from what the run actually
   used. Pass none only when no payload was built.
 - `groups_planned` — the planner groups the dispatchers returned, summed over
   targets (before any `--batch` cap), `0` when none returned a plan; `null`
