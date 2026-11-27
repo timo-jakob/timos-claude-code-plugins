@@ -184,7 +184,7 @@ tagged_commit() { git -C "$1" rev-parse "refs/tags/$2^{commit}"; }
     head -c "$(wc -c < "$W/prior" | tr -d ' ')" "$f" | cmp -s - "$W/prior"
   done
   local present
-  for present in '## Read the styleguide before UI changes  ' '## read the styleguide before ui changes'; do
+  for present in '## Read the styleguide before UI changes  ' '## read the styleguide before ui changes' $'## Read the styleguide before UI changes\r'; do
     printf '# Ours\n\n%s\n' "$present" > "$f"
     cp "$f" "$W/prior"
     run zsh "$SCRIPT" --repo "$W/app"
@@ -254,6 +254,19 @@ tagged_commit() { git -C "$1" rev-parse "refs/tags/$2^{commit}"; }
     cmp -s "$W/app/CLAUDE.md" "$W/cm"
     cmp -s "$W/app/.gitmodules" "$W/gm"
   done
+}
+
+@test "styleguide: present with a read-only CLAUDE.md that already has the section changes nothing" {
+  [ "$(id -u)" != 0 ] || skip "root writes a read-only file"
+  make_app "$W/app" $'# Ours\n\n## Read the styleguide before UI changes\n'
+  printf '[submodule "styleguide"]\n\tpath = styleguide\n\turl = %s\n' "$W/no-such-remote" > "$W/app/.gitmodules"
+  cp "$W/app/CLAUDE.md" "$W/cm"
+  chmod a-w "$W/app/CLAUDE.md"
+  run --separate-stderr zsh "$SCRIPT" --repo "$W/app"
+  chmod 644 "$W/app/CLAUDE.md"
+  [ "$status" -eq 0 ]
+  [ "$output" = "styleguide: present" ]
+  cmp -s "$W/app/CLAUDE.md" "$W/cm"
 }
 
 @test "styleguide: a .gitmodules declaring the submodule under another name still reads as present" {
@@ -392,17 +405,33 @@ assert_fails_cleanly() {
   make_remote "$W/sg" v0.1.0
   make_app "$W/app" $'# Ours\n'
   printf '[submodule "docs"]\n\tpath = docs\n\turl = https://example.invalid/docs.git\n' > "$W/app/.gitmodules"
-  local f
-  for f in .gitmodules CLAUDE.md; do
+  local f what
+  for f in .gitmodules CLAUDE.md .git/index; do
+    what="$f"
+    [ "$f" != .git/index ] || what="the git index"
     chmod 200 "$W/app/$f"
     run --separate-stderr zsh "$SCRIPT" --repo "$W/app" --url "$W/sg"
     chmod 644 "$W/app/$f"
     [ "$status" -eq 1 ] || { echo "$f: status $status"; false; }
-    [ "$output" = "styleguide: failed — $W/sg: cannot snapshot $f" ] || { echo "output: $output"; false; }
+    [ "$output" = "styleguide: failed — $W/sg: cannot snapshot $what" ] || { echo "output: $output"; false; }
     [ "$(grep -c 'submodule' "$W/app/.gitmodules")" -eq 1 ]
     [ "$(cat "$W/app/CLAUDE.md")" = "# Ours" ]
     [ ! -e "$W/app/styleguide" ]
   done
+}
+
+@test "styleguide: a git config that cannot be snapshotted stops the run before any write" {
+  make_remote "$W/sg" v0.1.0
+  make_app "$W/app" $'# Ours\n'
+  # a cp that refuses only the config copy; every other copy is the real cp
+  local real
+  real="$(command -v cp)"
+  mkdir -p "$W/bin"
+  printf '#!/bin/sh\ncase "$2" in */config) exit 1 ;; esac\nexec "%s" "$@"\n' "$real" > "$W/bin/cp"
+  chmod +x "$W/bin/cp"
+  PATH="$W/bin:$PATH" assert_fails_cleanly "$W/sg" "cannot snapshot the git config"
+  [ ! -e "$W/app/styleguide" ]
+  [ ! -e "$W/app/.gitmodules" ]
 }
 
 @test "styleguide: a failure after the add undoes the gitlink, .gitmodules, CLAUDE.md and the clone" {
@@ -551,7 +580,7 @@ styleguide_step() { awk '/^### 3k\.5a\. /{on=1} on && /^### 3k\.6\. /{exit} on' 
 @test "skill: the step's trigger is is_react true, and web-ui alone does not trigger it" {
   local s
   s="$(styleguide_step)"
-  contains "$s" 'Run this step exactly when the React overlay (§3k.5) applies'
+  contains "$s" 'The step applies exactly when the React overlay (§3k.5) applies'
   contains "$s" '`detect-stack.sh` reports `is_react: true`'
   contains "$s" 'A `web-ui` entry in `interfaces` alone does not trigger it'
   contains "$s" 'a repo where `is_react` is `null` get no submodule, no `CLAUDE.md` section and no `gitsubmodule` entry, and are never asked for the URL'
@@ -635,10 +664,16 @@ styleguide_step() { awk '/^### 3k\.5a\. /{on=1} on && /^### 3k\.6\. /{exit} on' 
   contains "$s" 'An existing `CLAUDE.md` gets it from the script, appended only when the heading is absent as its own line, with every existing byte unchanged'
   contains "$s" 'A `CLAUDE.md` this run creates gets it from the template'"'"'s `STYLEGUIDE` block (§3a), so it appears exactly once either way.'
   contains "$s" 'Render §3a'"'"'s `.github/dependabot.yml` with `--styleguide true` exactly when `.gitmodules` declares the `styleguide` submodule after this step, and `--styleguide false` otherwise, so it carries one `gitsubmodule` entry (directory `/`, weekly) for a mounted styleguide and none otherwise.'
-  contains "$s" '`detect-stack.sh` reports `is_react: true` and none of §3k.5'"'"'s skips holds — and the on-disk `eslint.config.js` and `vitest.config.ts` are the variants §3k.5 selects, which carry the `styleguide/` excludes. When they are not — §3k.5'"'"'s install failed, or a rule-3 prompt resolved to skip — mount nothing: §3k.5'"'"'s own Step 5 item stands.'
-  contains "$s" 'There the step is an **adoption gap** when the trigger holds and either a URL was given while `.gitmodules` declares no `styleguide` submodule, or `.gitmodules` declares it and an existing `CLAUDE.md` lacks the section'"'"'s heading or an existing `.github/dependabot.yml` lacks a `gitsubmodule` entry.'
+  contains "$s" '`detect-stack.sh` reports `is_react: true` and none of §3k.5'"'"'s skips holds. That is decided once, in Step 2, and it is what "the step would run" means for the flag, Q8, the plan and the State D gap. At its place in Step 3, after §3k.5, mount only when the on-disk `eslint.config.js` and `vitest.config.ts` are the variants §3k.5 selects, which carry the `styleguide/` excludes. When they are not — §3k.5'"'"'s install failed, or a rule-3 prompt resolved to skip — mount nothing: §3k.5'"'"'s own Step 5 item stands.'
+  contains "$s" 'There the step is an **adoption gap** when the step applies and either a URL was given while `.gitmodules` declares no `styleguide` submodule, or `.gitmodules` declares it and an existing `CLAUDE.md` lacks the section'"'"'s heading or an existing `.github/dependabot.yml` lacks a `gitsubmodule` entry.'
   contains "$s" 'State D asks Q8 under the same condition, before step 5a'"'"'s no-drift stop is decided.'
   contains "$s" 'Step 5a'"'"'s no-drift stop does not swallow it. With no URL and no submodule it is not a gap: relay the `skipped` line and let the stop stand.'
   contains "$f" 'So does a pending styleguide adoption gap (§3k.5a, #3016 — its Q8 is asked before this stop is decided): do not stop — continue to the Step 2 plan.'
   contains "$s" 'Record every file this step writes under the `react_overlay` telemetry step key'
+  contains "$s" 'complete it as a fresh bootstrap would: the script below, then `.github/dependabot.yml` re-rendered as *The Dependabot entry* below says and handed to the `bootstrap-idempotency-reviewer` as step 5b does.'
+  contains "$s" 'the script has undone everything it did, so no `.gitmodules` entry, no gitlink and no `CLAUDE.md` section is left, and no `styleguide/` directory was created or changed.'
+  contains "$s" 'Bootstrap pins only the first checkout; later bumps are the PRs Dependabot proposes against the styleguide'"'"'s default branch, which that repository keeps at released states.'
+  contains "$s" 'The lint and test ignores need no step of their own: every React variant already excludes `styleguide/` (§3k.5).'
+  contains "$s" 'Fetching the submodule in CI and failing early when it is missing belong to the first gate that reads it (#3017).'
+  contains "$f" 'If git refuses with `working trees containing submodules cannot be moved or removed` — the worktree holds the `styleguide/` submodule (§3k.5a) — run `git -C "<worktree-path>" status --porcelain`: when it prints nothing, repeat the removal with `--force`, which only this refusal sanctions; when it prints anything, report that instead.'
 }

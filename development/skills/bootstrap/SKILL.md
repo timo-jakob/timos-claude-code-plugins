@@ -5273,12 +5273,14 @@ a UI builds to — as the `styleguide/` git submodule, pinned to its newest
 release, and binds it in `CLAUDE.md`. Bootstrap ships no styleguide URL of its
 own: the plugin is public and every user has their own.
 
-**Trigger.** Run this step exactly when the React overlay (§3k.5) applies —
-`detect-stack.sh` reports `is_react: true` and none of §3k.5's skips holds —
-and the on-disk `eslint.config.js` and `vitest.config.ts` are the variants
-§3k.5 selects, which carry the `styleguide/` excludes. When they are not —
-§3k.5's install failed, or a rule-3 prompt resolved to skip — mount nothing:
-§3k.5's own Step 5 item stands. A `web-ui` entry in `interfaces`
+**Trigger.** The step applies exactly when the React overlay (§3k.5) applies —
+`detect-stack.sh` reports `is_react: true` and none of §3k.5's skips holds.
+That is decided once, in Step 2, and it is what "the step would run" means for
+the flag, Q8, the plan and the State D gap. At its place in Step 3, after
+§3k.5, mount only when the on-disk `eslint.config.js` and `vitest.config.ts`
+are the variants §3k.5 selects, which carry the `styleguide/` excludes. When
+they are not — §3k.5's install failed, or a rule-3 prompt resolved to skip —
+mount nothing: §3k.5's own Step 5 item stands. A `web-ui` entry in `interfaces`
 alone does not trigger it: a server-rendered Flask + Jinja repo, a plain
 JavaScript library with no `react` dependency and a repo where `is_react` is
 `null` get no submodule, no `CLAUDE.md` section and no `gitsubmodule` entry,
@@ -5291,13 +5293,13 @@ submodule. No URL skips the step.
 **Plan (Step 2) and State D.** List `.gitmodules`, `styleguide/` and the
 `CLAUDE.md` section in the plan whenever a URL was given. State D asks Q8 under
 the same condition, before step 5a's no-drift stop is decided. There the step
-is an **adoption gap** when the trigger holds and either a URL was given while
+is an **adoption gap** when the step applies and either a URL was given while
 `.gitmodules` declares no `styleguide` submodule, or `.gitmodules` declares it
 and an existing `CLAUDE.md` lacks the section's heading or an existing
 `.github/dependabot.yml` lacks a `gitsubmodule` entry. Offer it in the plan and
-complete it as a fresh bootstrap would: the script below, then a
-`.github/dependabot.yml` re-rendered with `--styleguide true` and handed to the
-`bootstrap-idempotency-reviewer` as step 5b does. Step 5a's no-drift stop does
+complete it as a fresh bootstrap would: the script below, then
+`.github/dependabot.yml` re-rendered as *The Dependabot entry* below says and
+handed to the `bootstrap-idempotency-reviewer` as step 5b does. Step 5a's no-drift stop does
 not swallow it. With no URL and no submodule it is not a gap: relay the
 `skipped` line and let the stop stand.
 
@@ -7405,7 +7407,12 @@ are standing in — `cd` to the main checkout, `dirname` of `git rev-parse
 
    If the worktree still holds **uncommitted changes** (there should be none
    after a clean finish), do **not** `--force` silently — report them and let
-   the user decide. Report the closed workspace: main synced, worktree removed.
+   the user decide. If git refuses with `working trees containing submodules
+   cannot be moved or removed` — the worktree holds the `styleguide/` submodule
+   (§3k.5a) — run `git -C "<worktree-path>" status --porcelain`: when it prints
+   nothing, repeat the removal with `--force`, which only this refusal
+   sanctions; when it prints anything, report that instead.
+   Report the closed workspace: main synced, worktree removed.
 
 ## Step 4.5: Run Setup Automation (macOS + Homebrew only)
 
