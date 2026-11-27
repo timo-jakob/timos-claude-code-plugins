@@ -68,7 +68,7 @@ g() {
     contains "$t" '**Find the registry with the lookup, never by a path of your own (#3352).**'
     contains "$t" 'On exit 0 it prints one JSON object, and the registry is the file at its `path`.'
     contains "$t" "plugins/cache/*/development/*/scripts/reference-docs/resolve-reference-doc.zsh(N.nOn[1])"
-    contains "$t" "its working-tree copy at \`$LOOKUP_REL\`"
+    contains "$t" "An empty result means no installed copy; when the target repo is this plugin's own repo, its working-tree copy at \`$LOOKUP_REL\`"
   done
 }
 
@@ -141,6 +141,8 @@ g() {
     other="$(outcome_bullet "$f" 'exit 1, 2, 5 or any other non-zero exit**')"
     contains "$four" 'carries the fix line the script printed on stderr'
     contains "$other" "the script's stderr"
+    contains "$other" 'or no copy of the lookup anywhere'
+    contains "$other" 'says the lookup was not found'
     contains "$other" 'Only exit 3 means there is no registry.'
   done
   contains "$(outcome_bullet "$GATE" 'exit 4 or 6**')" 'a `persona-registry-unreadable` advisory'
