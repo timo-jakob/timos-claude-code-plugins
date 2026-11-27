@@ -13,6 +13,16 @@ Among others, these helper scripts live in
 | [`refresh-local-install.zsh`](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/scripts/refresh-local-install.zsh) | Fully refreshes your local install: updates the Claude Code CLI (Homebrew cask or `claude update`), hard-purges every on-disk cache for the `timos-claude-code-plugins` marketplace (per-plugin cache, marketplace clone, plugin data dir, shared catalog cache), then re-adds the marketplace and reinstalls every plugin it publishes — so local state matches the latest published marketplace. Only the timos marketplace is touched. Destructive: prints the plan and prompts once; `-y`/`--yes` skips the prompt, `--dry-run` prints the plan and changes nothing. Restart Claude Code afterwards to apply. The closing summary reports each version transition (`old -> new`, or the bare version when this run changed nothing) plus the date **and local time** that plugin's directory was last changed in the marketplace repo, formatted per your locale. Requires `jq` + the `claude` CLI; `git` is optional (without it, or when the marketplace clone can't be deepened past its shallow single commit, the dates read `unknown`). |
 | `render-diagrams.zsh` | Renders every Mermaid source `docs/**/diagrams/<name>.mmd` to the `<name>.svg` beside it, with the pinned `minlag/mermaid-cli` image and `scripts/mermaid/config.json`. Commit both files: the site and both PDF builds embed the SVG and need no Mermaid at build time. The config keeps labels as SVG `<text>`, because `rsvg-convert` (pandoc's SVG-to-PDF step) drops the `<foreignObject>` HTML labels Mermaid emits by default; the script refuses an SVG that still carries one, and marks every `<text>` `xml:space="preserve"` so word spacing survives. Takes `.mmd` paths, or none for all of them; needs `docker`. Exits `0` when every SVG rendered clean, `1` on a failed render, `2` on usage/tooling errors. `tests/workflow-diagrams.bats` checks the committed SVGs. |
 
+## Linked reference documents
+
+The `development` plugin ships these two scripts under
+`development/scripts/reference-docs/`. ARCHITECTURE.md, *Linked reference documents*, states their contract.
+
+| Script | What it does |
+| --- | --- |
+| `resolve-product-doc.zsh` | The product-document lookup, a byte-identical copy of `product/scripts/resolve-product-doc.zsh`: the repo's own file wins, otherwise the first submodule declared in `.gitmodules` that holds the file at the same relative path. A `cmp` test keeps the two copies equal. |
+| `resolve-reference-doc.zsh` | Wraps the lookup and adds the pinned version. `resolve-reference-doc.zsh [--repo-dir <dir>] <relative-path>` prints one JSON object with `path`, `origin` (`own` or `linked`), `submodule` and `pinned_commit`, the full SHA of the gitlink `HEAD` records for that submodule. Exits `0` found, `1` internal failure (a gitlink that is not committed yet included), `2` usage, `3` not found, `4` a declared submodule is not initialised, `5` the path lies under a submodule's mount, `6` the submodule is checked out at a commit other than the pinned one. |
+
 ## Scripts bootstrap emits into a target repository
 
 The scripts above are this repository's own. `/development:bootstrap` also writes scripts
