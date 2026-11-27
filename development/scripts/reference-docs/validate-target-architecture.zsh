@@ -77,7 +77,8 @@ fi
 
 local -a violations=()
 # flag <rule> <detail> — one violation; a newline or tab in the detail is
-# flattened so each violation stays one line
+# flattened so each violation stays one line. The jq reading below flattens a
+# newline itself, since its output is split into violations by line.
 flag() {
   local detail="${2//$'\r'/}"
   detail="${detail//$'\n'/ }"
@@ -158,7 +159,7 @@ if (( block_ok )); then
     def isodate: type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
       and (split("-") | map(tonumber) as [$y, $m, $d]
            | $m >= 1 and $m <= 12 and $d >= 1 and $d <= days($y; $m));
-    def v($rule; $detail): "\($rule)\t\($detail)";
+    def v($rule; $detail): "\($rule)\t\($detail | gsub("\\n"; " "))";
     (
       # schema: the top-level shape
       (if .schema != "target-architecture/v1"
@@ -261,12 +262,12 @@ own_path() {
 
 if (( block_ok )); then
   local clause_id p
-  for line in "${(@f)$(print -r -- "$block" | jq -r '
+  # NUL-framed, so an id or a path holding a newline or a tab stays one field
+  for clause_id p in "${(@0)$(print -r -- "$block" | jq -j '
       (.clauses // []) | if type == "array" then .[] else empty end
       | select(type == "object" and (.ref | type == "object") and (.ref.path | type == "string" and . != ""))
-      | "\(.id // "?")\t\(.ref.path)"')}"; do
-    [[ -n "$line" ]] || continue
-    clause_id="${line%%$'\t'*}"; p="${line#*$'\t'}"
+      | (.id // "?" | tostring | gsub("\u0000"; "")), "\u0000", (.ref.path | gsub("\u0000"; "\ufffd")), "\u0000"')}"; do
+    [[ -n "$p" ]] || continue
     own_path "$p" || flag ref-missing "$clause_id: ref path $p: $why"
   done
 fi

@@ -332,6 +332,21 @@ only_rule() {
   contains "$stderr" 'target-architecture: bad-date: '
 }
 
+@test "one line per violation: a tab or a newline in a value does not split it" {
+  edit_block '.schema = "a\tb"'
+  run --separate-stderr zsh "$S" "$F"
+  only_rule schema
+  [ "$stderr" = 'target-architecture: schema: schema is a b, expected "target-architecture/v1"' ]
+  edit_block '.schema = "a\nb"'
+  run --separate-stderr zsh "$S" "$F"
+  only_rule schema
+  [ "$stderr" = 'target-architecture: schema: schema is a b, expected "target-architecture/v1"' ]
+  edit_block '.schema = "target-architecture/v1" | .clauses[2].ref.path = "docs/architecture/a\nb.md"'
+  run --separate-stderr zsh "$S" "$F"
+  only_rule ref-missing
+  [ "$stderr" = 'target-architecture: ref-missing: TA-3: ref path docs/architecture/a b.md: no such file in the repo' ]
+}
+
 @test "CRLF prose hashes the same as LF: a CRLF copy of the valid file is valid" {
   derive_crlf
   run grep -c $'\r$' "$F"
