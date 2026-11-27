@@ -147,7 +147,10 @@ agent accounts for its carried entries â€” confirmed, re-raised or unconfirmed â
 so on its scope line. A stylesheet counts as in scope for this agent only: a round whose scope holds only
 stylesheets is not NOT APPLICABLE when this agent is launched, and `react-idioms-reviewer` then runs only when
 the scope holds a file of its own in-scope list above or the carry holds a `react_idioms` entry. A full round
-on which neither agent is launched is NOT APPLICABLE, as above.
+on which neither agent is launched is NOT APPLICABLE, as above. Beside a language panel that verdict is this
+panel's own: on a full round that the language panel reports NOT APPLICABLE (a stylesheet or `index.html` with
+no JavaScript or TypeScript file), its verdict decides the round and the driving session joins none of this
+panel's findings (#3372).
 
 The reviewed tree of condition 1 is the dispatch descriptor's `worktree_root` (in hook mode, `$REVIEW_REPO`),
 never your cwd, and the project root on a standalone run. On a standalone run the scope of condition 1 is the

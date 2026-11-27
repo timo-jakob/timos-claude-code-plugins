@@ -32,7 +32,9 @@ capped by the evidence rule, and a scope-bounded follow-up under *Scope-bounded 
 ### The checklist's `[review]` items — WARNING
 
 **Read `styleguide/CHECKLIST.md` at the root of the reviewed tree on every run.** It is the styleguide
-repository's checklist, pinned in the reviewed repo as a submodule. Take your items from the lines under its
+repository's checklist, pinned in the reviewed repo as a submodule. When your scope line carries
+`checklist: <path>`, that path is the file: read it and no other, and judge its absence there, never at a path
+relative to your cwd. Take your items from the lines under its
 `## Review` heading, up to the next level-two heading, that have this form:
 
 ```text
@@ -59,7 +61,8 @@ that renders two primary buttons violates "There is at most one primary action p
 
 **One finding per location.** When one line breaks several `[review]` items, file one finding there that gives
 every one of them as its own `item:` and `rule:` pair, never one finding per item: the loop keeps one finding per
-file, line and dimension, so a second one at the same line is dropped.
+file, line and dimension, so a second one at the same line is dropped. The same holds when one line breaks
+several WCAG success criteria: file one finding there that names every one of them.
 
 **With no checklist, raise no checklist finding.** When `styleguide/CHECKLIST.md` is absent, or your scope line
 says `checklist: absent`, say so in your report and raise no new finding, under either row. The panel launches you
@@ -181,7 +184,7 @@ For each finding, report:
   one location breaks several items):
   item: "<the item's text, verbatim>"
   rule: STYLEGUIDE.md#<anchor>
-  — for a WCAG 2.2 AA violation, the success criterion it breaks (for example `2.1.1`).
+  — for a WCAG 2.2 AA violation, the success criterion or criteria it breaks (for example `2.1.1`).
   — and, when the claim IS a tool run's verdict, these two lines appended to the
   **Description** field above, each on its own line, with the severity set to SUGGESTION:
   decides: <the command that settles it>

@@ -389,6 +389,7 @@ react-styleguide-reviewer|opus|react_styleguide" ]
   contains "$w" 'A `styleguide` submodule that the reviewed tree'"'"'s `.gitmodules` declares but whose directory is missing or empty is not an absent checklist.'
   contains "$w" 'your report says that the styleguide submodule is not initialised (`git submodule update --init`) and that `react_styleguide` was not reviewed'
   contains "$w" 'A full round on which neither agent is launched is NOT APPLICABLE, as above.'
+  contains "$w" 'its verdict decides the round and the driving session joins none of this panel'"'"'s findings (#3372)'
 }
 
 @test "#3019 launched by its carry alone without the checklist, the agent accounts for the carry and raises nothing new" {
@@ -424,6 +425,7 @@ react-styleguide-reviewer|opus|react_styleguide" ]
   c="$(section "$STYLE" '^### The checklist' '^### WCAG')"
   [ -n "$c" ]
   contains "$c" '**Read `styleguide/CHECKLIST.md` at the root of the reviewed tree on every run.**'
+  contains "$c" 'that path is the file: read it and no other, and judge its absence there, never at a path relative to your cwd'
   contains "$c" 'Take your items from the lines under its `## Review` heading, up to the next level-two heading'
   contains "$c" '- [ ] [review] <text> ([rule](STYLEGUIDE.md#<anchor>))'
   contains "$c" '**Hard-code no item.**'
@@ -561,6 +563,7 @@ react-styleguide-reviewer|opus|react_styleguide" ]
   contains "$c" 'Name in your report every line under `## Review` you dropped for its form.'
   # one location that breaks several items is one finding with a pair per item
   contains "$c" 'file one finding there that gives every one of them as its own `item:` and `rule:` pair, never one finding per item'
+  contains "$c" 'several WCAG success criteria: file one finding there that names every one of them'
   w="$(section "$STYLE" '^### WCAG 2.2 AA' '^### Only what the source shows')"
   contains "$w" 'Name the success criterion in the finding (for example `2.1.1`).'
   contains "$w" 'When `[review]` items also cover the violation, cite each of them as above in the same finding rather than filing a second one'

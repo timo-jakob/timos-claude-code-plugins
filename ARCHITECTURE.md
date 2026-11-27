@@ -3923,7 +3923,9 @@ a Rules of Hooks violation (including a stale closure the reviewer can show) is
 fetching, or an alternative server-state library) is `WARNING`; the reviewer
 has no other check. `react_styleguide` runs only when the reviewed repo has
 `styleguide/CHECKLIST.md` at its root and the round's scope holds a UI file, or
-when the carry holds one of its entries. Its bar is one row: a violated
+when the carry holds one of its entries. On a full round that the language
+panel reports NOT APPLICABLE, the loop joins none of its findings (#3372). Its bar is
+one row: a violated
 `[review]` item of that checklist, read from the file on every run and quoted
 verbatim with its `STYLEGUIDE.md#<anchor>` rule, and a WCAG 2.2 AA violation the
 reviewer can show in the source, are each `WARNING`, whatever the repo's
