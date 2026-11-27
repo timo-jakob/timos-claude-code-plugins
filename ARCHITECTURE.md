@@ -9475,9 +9475,13 @@ returns `{run, deferred}`, each deferred group tagged with `deferred_by`:
   `development/skills/maintenance/scripts/count-open-queue.zsh`'s count: open
   PRs the Maintenance App authored with no approving review. Vendor PRs
   never count, and a group that only triages or merges vendor PRs is never
-  deferred by `queue`, though it is not planned at all for a language whose
-  Stage 0 the budget deferred (`development/skills/maintenance/SKILL.md`,
-  *Stage 0*).
+  deferred by `queue`, though it is not planned at all for a language a full
+  queue keeps from its Phase 6 dispatch: one dispatched as `"primary"`, whose
+  coverage pre-flight may start the improver while the payload does not record
+  whether it will (#3375), so its Stage 0 could not open its PR and its
+  planner would not run (`development/skills/maintenance/SKILL.md`, *Phase 6*
+  and *Stage 0*). A topic, and a language dispatched as `"auxiliary"`, which
+  skips the coverage pre-flight, are dispatched at the queue cap.
 - **`cutoff`** — under `--scheduled`, every group once the clock is at or
   past `MAINTENANCE_CUTOFF_EPOCH`, the window's cutoff the scheduler exports.
 

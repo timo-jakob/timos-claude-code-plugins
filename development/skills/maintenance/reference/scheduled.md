@@ -145,14 +145,23 @@ starts, because the clock moves and a PR this run opened may now be waiting.
 Count the queue afresh, as section 2 does, and pipe the one group through the
 same script. Stage 0, the coverage improver's PR, is checked the
 same way before it is pushed (SKILL.md, *Stage 0*), and with its group before
-each Phase 6 dispatch, which only a `cutoff` deferral stops (SKILL.md,
-*Phase 6*), and so is each
+each Phase 6 dispatch (SKILL.md, *Phase 6*), and so is each
 conflicting bot PR before the standing-PR slot rebases it, with the group
 `{"tool": "conflicting_bot_pr", "concern": "codequality", "opens_pr": false}`
 (SKILL.md, *Conflicting bot-PR remediation*, which says how one the cutoff
 stops is reported). Write the group, as
 JSON, to `<scratch>/group.json` with the Write tool first, never inline in the
 command: a group's free-text `description` can hold an apostrophe or a quote.
+
+Before a Phase 6 dispatch, a `cutoff` deferral stops every dispatch. A `queue`
+deferral does not stop the dispatch of a topic, or of a language whose kept
+payload carries `dispatch_mode: "auxiliary"`, since neither can start the
+coverage improver and its vendor-PR triage goes on at the queue cap; it stops
+the dispatch of a language dispatched as `"primary"`, which can start the
+improver: the payload does not record whether its coverage pre-flight will
+(#3375), and without Stage 0 its planner, vendor-PR triage included, would not
+run anyway. Phase 9's *"Deferred by the budget"* list names that language with
+`queue`.
 
 ```bash
 "<skill-base-dir>/scripts/count-open-queue.zsh"   # prints <q>

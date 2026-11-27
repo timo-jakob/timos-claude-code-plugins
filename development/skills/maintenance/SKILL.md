@@ -1717,8 +1717,19 @@ Under `--scheduled`, no target is dispatched once the cutoff has passed:
 before each dispatch, check the budget with Stage 0's group, as Phase 8's
 *Stage 0* does. A target it defers by `cutoff` is not dispatched, so neither
 its improver nor its planner starts, and Phase 9's *"Deferred by the budget"*
-list names it. A `queue` deferral does not stop a dispatch, since vendor-PR
-triage goes on at the queue cap; Stage 0 checks the queue again before its push.
+list names it. A `queue` deferral does not stop the dispatch of a topic, or of
+a language whose kept payload carries `dispatch_mode: "auxiliary"`: neither
+can start the coverage improver, since no topic has one and auxiliary mode
+skips the coverage pre-flight (ARCHITECTURE.md § "JSON schema (v2)"), so its
+planner, vendor-PR triage included, goes on at the queue cap. On a `queue`
+deferral no language dispatch that can start an improver is made: a language
+dispatched as `"primary"` is not dispatched, and Phase 9's *"Deferred by the
+budget"* list names it with `queue`. The payload does not record whether its
+dispatcher's coverage pre-flight will start the improver — the language
+plugin decides that from its own per-finding gates — and without Stage 0 its
+planner, and so its vendor-PR triage, would not run once the improver started
+(#3375 tracks that payload field). Stage 0 checks the queue again before its
+push.
 
 ```bash
 # 1. Hand the kept file (Phase 4) over to a temp file. The helper sets

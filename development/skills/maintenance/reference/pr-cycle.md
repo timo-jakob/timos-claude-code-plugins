@@ -169,7 +169,10 @@ own (#3214). Three limits do that, all applied by `scripts/apply-run-budget.zsh`
   Vendor PRs never count: six parked major bumps must not stop maintenance for
   good. For the same reason a full queue stops only the groups that would open
   a PR; triage and merging of standing vendor PRs go on, except for a language
-  whose Stage 0 the budget deferred (SKILL.md, *Stage 0*).
+  dispatched as `"primary"`: a full queue stops its Phase 6 dispatch, because
+  its dispatcher may start the coverage improver and the payload does not
+  record whether it will (#3375), and without Stage 0 its planner, vendor-PR
+  triage included, would not run anyway (SKILL.md, *Phase 6* and *Stage 0*).
 - **The cutoff** keeps the run inside its window. It is checked between groups,
   never inside one: a group whose agent has started finishes, its CI cycle and
   approval gate included, because a half-done stage leaves a branch or a PR

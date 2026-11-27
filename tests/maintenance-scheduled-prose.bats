@@ -221,6 +221,19 @@ unclaused_prompts() {
   contains "$text" "A group deferred with no \`deferred_by\` — here, or by § 1's missing runtime or failed pre-flight, never by \`--batch=N\` — is listed in the Phase 9 summary with its reason instead."
 }
 
+@test "Phase 6: a full queue stops only the dispatch of a language that can start the improver" {
+  local text
+  text="$(flat "$SKILL")"
+  contains "$text" "A \`queue\` deferral does not stop the dispatch of a topic, or of a language whose kept payload carries \`dispatch_mode: \"auxiliary\"\`"
+  contains "$text" "On a \`queue\` deferral no language dispatch that can start an improver is made: a language dispatched as \`\"primary\"\` is not dispatched"
+  contains "$text" "The payload does not record whether its dispatcher's coverage pre-flight will start the improver"
+  contains "$(flat "$SCHEDULED")" "it stops the dispatch of a language dispatched as \`\"primary\"\`, which can start the improver"
+  contains "$(flat "$PR_CYCLE")" "a full queue stops its Phase 6 dispatch"
+  contains "$(flat "$ARCH")" "not planned at all for a language a full queue keeps from its Phase 6 dispatch"
+  run ! grep -qF "which only a \`cutoff\` deferral stops" "$SCHEDULED"
+  run ! grep -qF "A \`queue\` deferral does not stop a dispatch," "$SKILL"
+}
+
 @test "SKILL.md: a conflicting bot PR the cutoff stops is deferred, never escalated or dropped" {
   local text
   text="$(flat "$SKILL")"
