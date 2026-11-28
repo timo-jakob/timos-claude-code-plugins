@@ -277,16 +277,18 @@ assert_stop() {
   contains "$stderr" "git@example.invalid:org/docs.git"
 }
 
-@test "stop 3: the remote read runs with the terminal prompt and askpass off" {
+@test "stop 3: the remote read runs with the terminal prompt and askpass off, and ssh in batch mode" {
   make_app "$W/app"
+  unset GIT_SSH_COMMAND GIT_SSH
+  git -C "$W/app" config core.sshCommand "ssh -i k"
   local real
   real="$(command -v git)"
   mkdir -p "$W/bin"
   # a git that records the prompt environment of its ls-remote call, then fails it
-  printf '#!/bin/sh\ncase "$*" in *ls-remote*) printf "%%s|%%s|%%s\\n" "$GIT_TERMINAL_PROMPT" "$GIT_ASKPASS" "$SSH_ASKPASS" > "%s/env"; exit 128 ;; esac\nexec "%s" "$@"\n' "$W" "$real" > "$W/bin/git"
+  printf '#!/bin/sh\ncase "$*" in *ls-remote*) printf "%%s|%%s|%%s|%%s\\n" "$GIT_TERMINAL_PROMPT" "$GIT_ASKPASS" "$SSH_ASKPASS" "$GIT_SSH_COMMAND" > "%s/env"; exit 128 ;; esac\nexec "%s" "$@"\n' "$W" "$real" > "$W/bin/git"
   chmod +x "$W/bin/git"
   PATH="$W/bin:$PATH" assert_stop 3 "$W/app" zsh "$SCRIPT" apply --repo-dir "$W/app" --url "https://example.invalid/docs.git"
-  [ "$(cat "$W/env")" = "0|false|false" ]
+  [ "$(cat "$W/env")" = "0|false|false|ssh -i k -o BatchMode=yes" ]
 }
 
 @test "stop 4: a repository with no version tag says to tag one, and never checks out the branch head" {
@@ -622,7 +624,7 @@ flat_skill() { tr '\n' ' ' < "$SKILL" | tr -s ' '; }
   s="$(flat_skill)"
   contains "$s" "A repo with a marked submodule whose \`CLAUDE.md\` lacks the section is an **adoption gap**, closed like the decision-rights one"
   contains "$s" '`link-reference-docs.zsh check-section --claude-md "<repo-path>/CLAUDE.md"` in every State D run that has a marked submodule, before any of steps 3, 4 and 5 ends the run.'
-  contains "$s" "\"\`CLAUDE.md\` lacks the linked reference documents section\""
+  contains "$s" "Exit 1 is the gap — report it in the Step 2 plan as \"\`CLAUDE.md\` lacks the linked reference documents section\" and, on confirmation, run \`apply-section\` as above."
   contains "$s" "So does a pending linked-docs gap (§3a.1, #3355 — its checks run before this stop is decided): do not stop — continue to the Step 2 plan."
 }
 
@@ -638,6 +640,7 @@ flat_skill() { tr '\n' ' ' < "$SKILL" | tr -s ' '; }
   s="$(flat_skill)"
   contains "$s" '`--docs-repo <url>` — a docs repository you control, such as the one holding your target architecture, linked as the `linked-docs/` submodule pinned to its newest version tag and bound in `CLAUDE.md` (§3a.1, #3355).'
   contains "$s" '**Trigger.** `--docs-repo <url>`.'
+  contains "$s" "A marked submodule is one whose key git reads as true in \`git config -f .gitmodules --type=bool --get-regexp '^submodule\\..*\\.reference-docs\$'\`."
   contains "$s" 'With `--docs-repo <url>` the plan'"'"'s `Linked docs:` line lists the link (`.gitmodules` and `linked-docs/`) and the `CLAUDE.md` section.'
   contains "$s" 'the submodule is at the mount, checked out at the newest version tag, `.gitmodules` carries the key and no `branch` line, and both are **staged, never committed**: they land in bootstrap'"'"'s one commit (4d). A re-run, or a submodule of that URL that only lacked the key, contacts no remote and keeps its pin. Then run `apply-section` — only after `apply` printed `linked`, never in the same shell call as `apply`:'
   contains "$s" '**exit 2** — a usage error. A `--docs-repo` value that is not absolute is the user'"'"'s and is never rewritten: it is the stop above, its reason the first stderr line. Any other exit 2 is your own malformed call: fix it and re-run.'
