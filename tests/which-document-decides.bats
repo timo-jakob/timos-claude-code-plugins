@@ -198,6 +198,7 @@ see `reference/ask-branches.md` § Which document decides (#3354)'
   [ "$(grep -cx '## Which document decides (#3354)' "$ASK")" -eq 1 ]
   contains "$(flat "$SKILL")" 'Then run §1'"'"'s target-architecture lookup (#3354), which the skip of §1 does not leave out.'
   contains "$(flat "$CKPT")" 'The skip of §1 does not leave out its target-architecture lookup (#3354): run it right after `init-submodules.zsh`.'
+  contains "$(flat "$REPO_ROOT/development/skills/resolve-issue/reference/escalation.md")" 'The skip of §1 leaves out neither its `init-submodules.zsh` (#3080) nor its target-architecture lookup (#3354): it runs both on that checkout, in that order, before the fix pass.'
   contains "$(flat "$ASK")" 'A resumed run is a run of its own: it skips §1 but runs this lookup again, right after its `init-submodules.zsh` re-run. Its stop keeps the branch the stopped run pushed, pushes nothing new and records the run `failed`.'
 }
 
@@ -265,6 +266,12 @@ see `reference/ask-branches.md` § Which document decides (#3354)'
   contains "$b" '**A tooling stop is never stamped (#3354).** A verdict that carries `tooling_stop: true` is the gate'"'"'s own target-architecture lookup failing'
   contains "$b" 'Write no stamp for it, so the next run gates the story fresh. Post no label and no comment, and start no chained refinement: relay its `summary`, emit the run'"'"'s record as `failed` and stop.'
   contains "$b" 'At E1b one such verdict stops the epic run the same way, and no child is labelled for it.'
+  contains "$b" 'A cached verdict that carries `tooling_stop: true` is never a hit: gate that story fresh, as a miss.'
+  contains "$b" 'On a miss, at step 0b and at E1b alike, make the work tree'"'"'s submodules ready before spawning the gate: run `"<skill-base-dir>/scripts/init-submodules.zsh" --repo-dir .` (#3080).'
+  b="$(flat "$REPO_ROOT/development/skills/refine-issue/SKILL.md")"
+  contains "$b" 'Never stamp it, never take its `refinement_questions` as objections and never loop back on it: relay its `summary` to the human, change no label and end this issue'"'"'s flow.'
+  contains "$b" 'A stamp hit that carries it is a miss: spawn the gate.'
+  contains "$b" 'A re-gate verdict carrying `tooling_stop: true` ends here, as Step 1'"'"'s *A tooling stop is no diagnosis* says: it is not stamped and Step 5 does not run.'
   contains "$(flat "$SKILL")" 'A verdict carrying `tooling_stop: true` is no refinement case: it ends as that reference'"'"'s *Stamping a fresh verdict* says (#3354).'
 }
 

@@ -167,7 +167,10 @@ itself never asks: its root does, when the root is attended.
   grant, and its exit 3 or 4 ends the step `stopped` with cause `tooling`. It
   moves no kept state aside. It notes `resumed_from: clean_stop`, runs §0a's
   precheck, checks out the marker's `branch` from `origin`, runs §1b, skips
-  §0b, §1, §2 and §3, and records `gate_verdict: READY`. Then it continues at
+  §0b, §1, §2 and §3, and records `gate_verdict: READY`. The skip of §1 leaves
+  out neither its `init-submodules.zsh` (#3080) nor its target-architecture
+  lookup (#3354): it runs both on that checkout, in that order, before the fix
+  pass. Then it continues at
   the extension's step 5 (`reference/interactive/extension-grant.md`), with the
   grant already recorded and any guidance already posted: one fix pass that
   reads the issue's comments, the next round's boundary, and the loop's
