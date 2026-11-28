@@ -54,8 +54,11 @@ diagnostic when the GitHub App's check is erroring.
 Under `--scheduled` every ending leaves a `maintenance-run/v1` record and one
 comment on the repo's standing *Maintenance log* issue: the normal ending, a
 cut-off run, and a stop before Phase 2's gate, which emits no telemetry record.
-It is the run's last act — after Phase 10's report, after the Phase 9 emit when
-Phase 10 is skipped, or where an earlier stop stops. ARCHITECTURE.md,
+Under `--dry-run` neither script runs: a dry run performs no outward actions.
+The summary below is written before *Run complete — clear the checkpoint*,
+since it reads the checkpoint; the two script calls are the run's last act —
+after Phase 10's report, after the Phase 9 emit when Phase 10 is skipped, or
+where an earlier stop stops. ARCHITECTURE.md,
 *Maintenance run record (`maintenance-run/v1`)*, is the record's contract; the
 two scripts' headers state their exit codes.
 
@@ -75,20 +78,23 @@ stop's reason as `--reason` whenever the run did not end normally.
 **The summary.** Write `<scratch>/run-summary.json` with the Write tool from
 facts noted where each was decided — `phase8-stages`, the budget's `deferred`
 list and the `Bugs` block (`reference/bugs.md` § 5) — never reconstructed from
-the rendered summary. It holds `started_at` (the time Phase 0 began),
-`concerns` and `bugs`; each item is `{number, title, url, note}`:
+the rendered summary. It holds `started_at` (the start stamp's time, `jq -r
+'.ts | todate' <scratch>/maintenance-run.json`), `concerns` and `bugs`; each
+item is `{number, title, url, note}`:
 
 - per concern (`security`, `dependencies`, `bugs`, `codequality`, `topic`):
   `merged` — PRs merged this run; `opened` — PRs this run opened that are still
   open and not waiting for a human; `waiting` — open PRs waiting for a human's
-  approval or decision; `parked` — escalated or held stages, the reason in
-  `note`; `deferred` — groups not started, `note` naming the `deferred_by` or
-  the reason;
+  approval or decision; `parked` — escalated or held stages and bugs, and bug
+  fixes that did not merge, the reason in `note`; `deferred` — groups and bugs
+  not started, `note` naming the `deferred_by` or the reason;
 - `bugs`: `analysed`, `awaiting_confirmation`, `fixed`, `not_a_bug`,
   `not_eligible` and `not_reproducing` (a fix stopped with
   `spec-does-not-reproduce`).
 
-A stop before Phase 2 writes no summary and passes no `--from`.
+A stop before Phase 2 writes no summary, passes no `--from`, and takes a fresh
+`mktemp -d` as `<scratch>`. `<owner/name>` is the last two path segments of
+`git remote get-url origin`, `.git` dropped, so it needs no network.
 
 ```bash
 export MAINTENANCE_RUN_DIR="${MAINTENANCE_RUN_DIR:-<scratch>}"
@@ -104,4 +110,5 @@ summary was refused, so a record exists. Its exit 2 is your own malformed call:
 fix it and re-run once. A `post-maintenance-log.zsh` exit 1 leaves the record
 valid with `log_comment_url: null`: report its stderr, and retry nothing — the
 next run's comment is the next attempt. Neither script ever closes the log
-issue. The Phase 9 summary names the record's path and the comment's URL.
+issue. Once both have run, relay the record's path and the comment's URL, or
+the failure, as the run's final output.

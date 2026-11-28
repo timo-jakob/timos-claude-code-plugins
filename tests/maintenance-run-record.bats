@@ -31,23 +31,26 @@ setup() {
 
 # gh: logs argv. `issue list` serves $FIX/issues.json; `issue create` adds
 # issue 77 to it and prints its URL; `issue comment` keeps the --body in
-# $FIX/comment-<n>.md and prints the comment's URL. GH_FAIL=list|comment fails
-# that call, GH_FAIL=all fails every call (GitHub unreachable).
+# $FIX/comment-<n>.md and prints the comment's URL. GH_FAIL=list|create|comment
+# fails that call, GH_FAIL=all fails every call (GitHub unreachable); a failing
+# call prints `gh: offline` on stderr.
 stub_gh() {
   local bin="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$bin"
   cat > "$bin/gh" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >> "$GH_LOG"
-[ "${GH_FAIL:-}" != all ] || exit 1
+fail() { [ "${GH_FAIL:-}" != "$1" ] || { echo "gh: offline" >&2; exit 1; }; }
+fail all
 case "$1 $2" in
-  "issue list") [ "${GH_FAIL:-}" != list ] || exit 1; cat "$FIX/issues.json" ;;
+  "issue list") fail list; cat "$FIX/issues.json" ;;
   "label create") exit 0 ;;
   "issue create")
+    fail create
     printf '[{"number":77,"title":"Maintenance log"}]\n' > "$FIX/issues.json"
     echo "https://github.com/acme/widgets/issues/77" ;;
   "issue comment")
-    [ "${GH_FAIL:-}" != comment ] || exit 1
+    fail comment
     n=$(( $(ls "$FIX" | grep -c '^comment-') + 1 ))
     while [ $# -gt 0 ]; do
       [ "$1" != --body ] || printf '%s\n' "$2" > "$FIX/comment-$n.md"
@@ -130,7 +133,8 @@ write_record() {
   cp "$REC" "$BATS_TEST_TMPDIR/before.json"
   local bad
   for bad in 'not json' '[]' '{"concerns": {"style": {}}}' '{"concerns": {"security": {"merged": {}}}}' \
-             '{"concerns": {"security": {"won": []}}}' '{"bugs": {"fixed": ["#9"]}}' '{"started_at": "last night"}'; do
+             '{"concerns": {"security": {"won": []}}}' '{"bugs": {"fixed": ["#9"]}}' '{"started_at": "last night"}' \
+             '{"bugs": {"fixed": [{"number": "#12", "title": "x"}]}}' '{"bugs": {"fixed": [{"pr": 12, "title": "x"}]}}'; do
     printf '%s\n' "$bad" > "$BATS_TEST_TMPDIR/bad.json"
     write_record --repo acme/widgets --outcome completed --from "$BATS_TEST_TMPDIR/bad.json"
     [ "$status" -eq 1 ]
@@ -221,14 +225,18 @@ Waiting for a human:
   lacks "$c" "Not a bug:"
 }
 
-@test "post: a title with a pipe, a backtick or brackets stays literal text on one line" {
-  summary
-  write_record --repo acme/widgets --outcome completed --from "$BATS_TEST_TMPDIR/summary.json"
+@test "post: markdown and @mentions in a title, note or reason stay literal text on one line" {
+  printf '%s\n' '{"concerns": {"security": {"merged": [{"number": 12, "title": "Bump | `left-pad` [x]\nby @alice *_<>#~\\",
+    "url": "https://github.com/acme/widgets/pull/12", "note": "a | b `c`"}]}}}' > "$BATS_TEST_TMPDIR/s.json"
+  write_record --repo acme/widgets --outcome cut-off --reason $'window [x]\nclosed' --from "$BATS_TEST_TMPDIR/s.json"
   run --separate-stderr zsh "$POST" "$REC"
   [ "$status" -eq 0 ]
-  local c
+  local c zw
   c="$(cat "$FIX/comment-1.md")"
-  contains "$c" '- [#12](https://github.com/acme/widgets/pull/12) Bump \| \`left-pad\` \[x\] — green'
+  zw="$(printf '\342\200\213')"   # U+200B, the zero-width space that defuses a mention
+  contains "$c" '- [#12](https://github.com/acme/widgets/pull/12) Bump \| \`left-pad\` \[x\] by @'"$zw"'alice \*\_\<\>\#\~\\ — a \| b \`c\`'
+  contains "$c" 'Reason: window \[x\] closed'
+  lacks "$c" "@alice"
   [ "$(grep -c 'left-pad' "$FIX/comment-1.md")" = "1" ]
 }
 
@@ -248,14 +256,22 @@ Waiting for a human:
   write_record --repo acme/widgets --outcome completed --from "$BATS_TEST_TMPDIR/summary.json"
   cp "$REC" "$BATS_TEST_TMPDIR/before.json"
   local f
-  for f in all list comment; do
+  for f in all list create comment; do
     GH_FAIL="$f" run --separate-stderr zsh "$POST" "$REC"
     [ "$status" -eq 1 ]
-    contains "$stderr" "GitHub unreachable?"
+    contains "$stderr" ": gh: offline"
     [ "$output" = "" ]
     cmp -s "$REC" "$BATS_TEST_TMPDIR/before.json"
     [ "$(jq -c '[.schema, .log_comment_url, (.concerns.security.merged | length)]' "$REC")" = '["maintenance-run/v1",null,1]' ]
   done
+  [ "$(id -u)" -ne 0 ] || skip "root writes into a read-only directory"
+  chmod a-w "$MAINTENANCE_RUN_DIR"
+  run --separate-stderr zsh "$POST" "$REC"
+  chmod u+w "$MAINTENANCE_RUN_DIR"
+  [ "$status" -eq 1 ]
+  [ "$output" = "" ]
+  contains "$stderr" "comment posted (https://github.com/acme/widgets/issues/77#issuecomment-1) but cannot rewrite"
+  cmp -s "$REC" "$BATS_TEST_TMPDIR/before.json"
 }
 
 @test "post: anything but one maintenance-run/v1 record is a usage error" {
@@ -283,7 +299,8 @@ flat() {
   contains "$s" "**Under \`--scheduled\` — the run record and the Maintenance log (#3215).**"
   contains "$s" "every ending writes the run's \`maintenance-run/v1\` record with \`write-run-record.zsh\` and posts it to the repo's standing *Maintenance log* issue with \`post-maintenance-log.zsh\`, as the run's **last act** — a cut-off run and a stop before Phase 2's gate included."
   contains "$s" "\`reference/report.md\` § The scheduled run's record and the Maintenance log (#3215)"
-  contains "$s" "Without \`--scheduled\`, neither script runs."
+  contains "$s" "Without \`--scheduled\`, or under \`--dry-run\`, neither script runs."
+  contains "$s" "Any stop from here on, under it, still writes and posts the run record (Phase 9, *Under \`--scheduled\` — the run record and the Maintenance log*)."
   local emit sub p10
   emit=$(grep -n "^### Emit the run's record" "$skill" | cut -d: -f1)
   sub=$(grep -n '^\*\*Under `--scheduled` — the run record' "$skill" | cut -d: -f1)
@@ -297,7 +314,23 @@ flat() {
   r="$(flat development/skills/maintenance/reference/report.md)"
   contains "$r" "## The scheduled run's record and the Maintenance log (#3215)"
   contains "$r" "the normal ending, a cut-off run, and a stop before Phase 2's gate, which emits no telemetry record."
-  contains "$r" "It is the run's last act — after Phase 10's report, after the Phase 9 emit when Phase 10 is skipped, or where an earlier stop stops."
+  contains "$r" "Under \`--dry-run\` neither script runs: a dry run performs no outward actions."
+  contains "$r" "The summary below is written before *Run complete — clear the checkpoint*, since it reads the checkpoint; the two script calls are the run's last act — after Phase 10's report, after the Phase 9 emit when Phase 10 is skipped, or where an earlier stop stops."
+  contains "$r" "**The outcome.** Take the first that holds:"
+  local f="$REPO_ROOT/development/skills/maintenance/reference/report.md" row prev=0
+  for row in '`skipped-running` |' '`could-not-start` |' '`cut-off` |' '`completed` |'; do
+    row=$(grep -nF "$row" "$f" | head -n 1 | cut -d: -f1)
+    [ "$row" -gt "$prev" ]
+    prev=$row
+  done
+  contains "$r" "\`started_at\` (the start stamp's time, \`jq -r '.ts | todate' <scratch>/maintenance-run.json\`)"
+  contains "$r" "\`parked\` — escalated or held stages and bugs, and bug fixes that did not merge, the reason in \`note\`; \`deferred\` — groups and bugs not started, \`note\` naming the \`deferred_by\` or the reason;"
+  contains "$r" "A stop before Phase 2 writes no summary, passes no \`--from\`, and takes a fresh \`mktemp -d\` as \`<scratch>\`. \`<owner/name>\` is the last two path segments of \`git remote get-url origin\`, \`.git\` dropped"
+  contains "$r" "--repo <owner/name> --outcome <outcome>"
+  contains "$r" "post-maintenance-log.zsh\" <record>"
+  contains "$r" "Its exit 2 is your own malformed call: fix it and re-run once."
+  contains "$r" "the next run's comment is the next attempt."
+  contains "$r" "Once both have run, relay the record's path and the comment's URL, or the failure, as the run's final output."
   contains "$r" "| ended at the resume entry because a younger checkpoint says a run may still be going (\`reference/scheduled.md\` § 1) | \`skipped-running\` |"
   contains "$r" "| stopped in Phase 0, 1 or 2, before any work | \`could-not-start\` |"
   contains "$r" "| deferred any group, stage or bug by \`cutoff\` | \`cut-off\` |"
@@ -305,7 +338,6 @@ flat() {
   contains "$r" "\`outside-window\` is never a session's: the wave that starts the run writes it, with the same script, for a repo it did not start before the cutoff."
   contains "$r" "Pass the stop's reason as \`--reason\` whenever the run did not end normally."
   contains "$r" "never reconstructed from the rendered summary."
-  contains "$r" "A stop before Phase 2 writes no summary and passes no \`--from\`."
   contains "$r" "The scheduler exports \`MAINTENANCE_RUN_DIR\`; a \`--scheduled\` run typed by hand keeps its record in \`<scratch>\`."
   contains "$r" "A \`write-run-record.zsh\` exit 1 on the summary: report its stderr and write again without \`--from\`, the reason saying the summary was refused, so a record exists."
   contains "$r" "A \`post-maintenance-log.zsh\` exit 1 leaves the record valid with \`log_comment_url: null\`: report its stderr, and retry nothing"
@@ -316,7 +348,7 @@ flat() {
   local a o
   a="$(flat ARCHITECTURE.md)"
   contains "$a" "### Maintenance run record (\`maintenance-run/v1\`) (#3215)"
-  contains "$a" "\`\$MAINTENANCE_RUN_DIR/<owner>__<name>.json\`"
+  contains "$a" "Every \`--scheduled\` run but a \`--dry-run\` leaves one record per repo per wave, at \`\$MAINTENANCE_RUN_DIR/<owner>__<name>.json\`"
   contains "$a" "\`concerns\` always holds all five concerns in concern order, each with all five lists, and \`bugs\` all six lists; a list with nothing in it is \`[]\`, never absent."
   for o in completed cut-off could-not-start outside-window skipped-running; do
     contains "$a" "\`$o\`"

@@ -105,7 +105,9 @@ Supported flags in `$ARGUMENTS`:
   the open-queue cap and the cutoff. Without it only the bugs cap applies.
   Rejected together with `--resume` on one command line — a scheduled run
   never resumes itself; a `--resume` typed later restores it with the other
-  recorded flags (*Resume entry*). Combinable with every other flag.
+  recorded flags (*Resume entry*). Combinable with every other flag. Any stop
+  from here on, under it, still writes and posts the run record (Phase 9,
+  *Under `--scheduled` — the run record and the Maintenance log*).
 - `--telemetry-file PATH` / `--telemetry-dir DIR` — where the run's one
   `telemetry/v1` record goes (#1228; see *Telemetry — stamp the run's start*
   below). Each takes a value — halt on a missing, empty or `--`-shaped one, or
@@ -3646,8 +3648,9 @@ with `write-run-record.zsh` and posts it to the repo's standing *Maintenance
 log* issue with `post-maintenance-log.zsh`, as the run's **last act** — a
 cut-off run and a stop before Phase 2's gate included. The outcome, the summary
 it is built from and both failure arms are in `reference/report.md`
-§ The scheduled run's record and the Maintenance log (#3215). Without
-`--scheduled`, neither script runs.
+§ The scheduled run's record and the Maintenance log (#3215), with the order
+against clearing the checkpoint. Without `--scheduled`, or under `--dry-run`,
+neither script runs.
 
 ## Phase 10 — track changes and findings as GitHub issues
 

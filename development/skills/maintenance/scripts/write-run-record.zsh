@@ -74,17 +74,22 @@ fi
 
 now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-# A summary is one object; every list it carries is an array of objects, and a
-# timestamp it carries is a UTC second. Anything else is refused, never guessed.
+# A summary is one object; every list it carries is an array of {number, title,
+# url, note} items — title a non-empty string, number a number or null, url and
+# note strings or null — and a timestamp it carries is a UTC second. Anything
+# else is refused, never guessed.
 record="$(jq -s -e --arg repo "$repo" --arg outcome "$outcome" --arg reason "$reason" \
     --argjson has_reason "$have_reason" --arg now "$now" '
   def ts: type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$");
   def item: {number: (.number // null), title: (.title // ""), url: (.url // null), note: (.note // null)};
   def lists($names; $src):
     reduce $names[] as $n ({}; . + {($n): [($src[$n] // [])[] | item]});
+  def item_ok: type == "object" and (keys - ["number", "title", "url", "note"] | length == 0)
+    and (.title | type == "string" and length > 0) and (.number | . == null or type == "number")
+    and (.url | . == null or type == "string") and (.note | . == null or type == "string");
   def list_ok($src; $names):
     ($src | type == "object") and ($src | keys - $names | length == 0)
-    and all($names[]; ($src[.] // []) | type == "array" and all(type == "object"));
+    and all($names[]; ($src[.] // []) | type == "array" and all(item_ok));
   ["merged", "opened", "waiting", "parked", "deferred"] as $cl
   | ["security", "dependencies", "bugs", "codequality", "topic"] as $cs
   | ["analysed", "awaiting_confirmation", "fixed", "not_a_bug", "not_eligible", "not_reproducing"]
@@ -95,8 +100,8 @@ record="$(jq -s -e --arg repo "$repo" --arg outcome "$outcome" --arg reason "$re
     elif ((.concerns // {}) | type != "object" or (keys - $cs | length > 0) or any(.[]; type != "object"))
       then error("concerns is not an object of the five concerns")
     elif any(((.concerns // {}) | to_entries[] | .value); list_ok(.; $cl) | not)
-      then error("a concern is not an object of merged, opened, waiting, parked, deferred lists")
-    elif ((.bugs // {}) | list_ok(.; $bl) | not) then error("bugs is not an object of the six bug lists")
+      then error("a concern is not an object of merged, opened, waiting, parked, deferred lists of items")
+    elif ((.bugs // {}) | list_ok(.; $bl) | not) then error("bugs is not an object of the six bug lists of items")
     else . end
   | {schema: "maintenance-run/v1", repo: $repo,
      started_at: (.started_at // $now), ended_at: (.ended_at // $now),

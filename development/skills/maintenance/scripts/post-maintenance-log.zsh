@@ -15,7 +15,8 @@
 # The comment names the outcome, the run's start, end and duration, the reason
 # when there is one, and then every non-empty list of the record — per concern,
 # then the bug lists. Empty lists are left out. Every title, note and reason is
-# escaped, so a pipe, a backtick or a bracket in it stays literal text.
+# escaped, so a pipe, a backtick, a bracket or an @mention in it stays literal
+# text. A failing gh call's own stderr is quoted in the failure message.
 #
 # stdout: the comment's URL.
 #
@@ -43,9 +44,13 @@ command -v gh >/dev/null 2>&1 || die "gh not found"
 
 repo="$(jq -r .repo "$record_file")"
 title="Maintenance log"
+tmp=""
+errf="$(mktemp 2>/dev/null)" || die "cannot create a temporary file"
+trap 'rm -f -- "$errf" ${tmp:+"$tmp"}' EXIT
+gh_err() { local e; e="$(tr '\n' ' ' < "$errf")"; print -r -- "${e:-gh printed no error}"; }
 
 issues="$(gh issue list --repo "$repo" --state open --label maintenance-log --limit 100 \
-  --json number,title 2>/dev/null)" || die "cannot list $repo's issues (GitHub unreachable?)"
+  --json number,title 2>"$errf")" || die "cannot list $repo's issues: $(gh_err)"
 number="$(jq -r --arg t "$title" '[.[]? | select(.title == $t) | .number] | sort | first // empty' \
   <<<"$issues" 2>/dev/null)"
 
@@ -53,14 +58,14 @@ if [[ -z "$number" ]]; then
   gh label create maintenance-log --repo "$repo" --color 0e8a16 \
     --description "The standing log of scheduled maintenance runs" >/dev/null 2>&1 || true
   intro="One comment per scheduled maintenance run. The maintenance pipeline opened this issue and never closes it."
-  url="$(gh issue create --repo "$repo" --title "$title" --label maintenance-log --body "$intro" 2>/dev/null)" ||
-    die "cannot open the Maintenance log issue in $repo"
+  url="$(gh issue create --repo "$repo" --title "$title" --label maintenance-log --body "$intro" 2>"$errf")" ||
+    die "cannot open the Maintenance log issue in $repo: $(gh_err)"
   number="${${url//[[:space:]]/}##*/}"
   [[ "$number" == <-> ]] || die "gh issue create printed no issue URL"
 fi
 
 body="$(jq -r '
-  def md: tostring | gsub("[\r\n]+"; " ") | gsub("(?<c>[\\\\`*_\\[\\]<>|#~])"; "\\\(.c)");
+  def md: tostring | gsub("[\r\n]+"; " ") | gsub("(?<c>[\\\\`*_\\[\\]<>|#~])"; "\\\(.c)") | gsub("@"; "@​");
   def entry:
     (if .number == null then "" elif (.url | type == "string" and test("^https://[^\\s()<>]+$"))
        then "[#\(.number)](\(.url)) " else "#\(.number) " end)
@@ -84,15 +89,13 @@ body="$(jq -r '
               else $parts | join("\n\n") end)
 ' "$record_file")" || die "jq could not render the comment"
 
-comment="$(gh issue comment "$number" --repo "$repo" --body "$body" 2>/dev/null)" ||
-  die "cannot comment on $repo#$number (GitHub unreachable?)"
+comment="$(gh issue comment "$number" --repo "$repo" --body "$body" 2>"$errf")" ||
+  die "cannot comment on $repo#$number: $(gh_err)"
 comment_url="$(print -r -- "$comment" | grep -Eo 'https://[^[:space:]]+' | tail -n 1)"
 [[ -n "$comment_url" ]] || die "gh issue comment printed no URL"
 
 unwritten="comment posted ($comment_url) but cannot rewrite $record_file"
 tmp="$(mktemp "${record_file:h}/.${record_file:t}.XXXXXX" 2>/dev/null)" || die "$unwritten"
-trap 'rm -f -- "$tmp"' EXIT
 jq --arg u "$comment_url" '.log_comment_url = $u' "$record_file" > "$tmp" && mv -f -- "$tmp" "$record_file" ||
   die "$unwritten"
-trap - EXIT
 print -r -- "$comment_url"

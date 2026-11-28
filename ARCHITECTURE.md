@@ -9621,7 +9621,7 @@ group it had before except bugs, since each bug fix is a whole
 
 ### Maintenance run record (`maintenance-run/v1`) (#3215)
 
-Every `--scheduled` run leaves one record per repo per wave, at
+Every `--scheduled` run but a `--dry-run` leaves one record per repo per wave, at
 `$MAINTENANCE_RUN_DIR/<owner>__<name>.json`, written by
 `development/skills/maintenance/scripts/write-run-record.zsh` to a temporary
 file in that directory and renamed over the target, so no reader sees a
