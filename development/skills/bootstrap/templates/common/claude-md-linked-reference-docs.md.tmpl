@@ -1,0 +1,11 @@
+## Linked reference documents
+
+The git submodules marked `reference-docs` in `.gitmodules` hold the reference documents this repo is built
+against, such as a target architecture or a styleguide. List them with
+`git config -f .gitmodules --get-regexp '^submodule\..*\.reference-docs$'`.
+
+- Read them before a technical decision.
+- Where they and the plugin family's defaults differ, they win. Cite the clause you follow.
+- Never edit a file under a link's mount: the documents belong to their own repository.
+- Never move a pin by hand: a link is pinned to a version tag of its repository.
+- An empty mount is fixed with `git submodule update --init`.
