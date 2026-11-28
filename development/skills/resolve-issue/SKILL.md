@@ -371,6 +371,9 @@ see `reference/checkpoint.md` § A fresh run on kept state (#2920)
 "<skill-base-dir>/scripts/init-submodules.zsh" --repo-dir .
 ```
 
+**Then look up the repo's target architecture (#3354)**, once per run, before §2 implements:
+see `reference/ask-branches.md` § Which document decides (#3354)
+
 ### 1b. Detect the repo type and load the profile
 
 The conductor is repo-type-agnostic; the rules true of **one** repo type live in

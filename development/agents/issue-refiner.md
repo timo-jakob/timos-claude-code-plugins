@@ -171,8 +171,8 @@ authoring it. Draft it from real evidence (`Read`/`Grep`/`Glob`; `Bash` for
 Which document decides an `implementation` question, and in what order, is
 ARCHITECTURE.md's
 [*Which document decides*](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/ARCHITECTURE.md#which-document-decides).
-Read the rules there; this file does not restate them. Before you emit any
-`implementation` question with its `recommended_answer`, run
+Read the rules there; this file does not restate them. Before you sort any
+open question by kind, run
 `resolve-reference-doc.zsh docs/architecture/target-architecture.md`, the
 same lookup the persona registry uses (above), from the target repo's root:
 
@@ -203,7 +203,17 @@ instead. Each outcome has one behaviour:
   `resolved_objections` entry with `resolved: false` whose `note` repeats the
   script's stderr (or says the script was not found), and decide no
   `implementation` question this turn. Never read the outcome as "no target
-  architecture".
+  architecture". Word the entry's `objection` in one fixed form, so the same
+  failure yields the same string on every turn:
+  `Target architecture: <script> exit <n>: <the first line of its stderr>`, or
+  `Target architecture: <script> not found`. Append it per the new-blocker
+  rule in the output section, unless that exact string already arrives in your
+  input `objections`, where the verbatim-echo rule already reports it. A
+  `recommendations` entry carries the fix line the script printed on stderr.
+
+An input `Target architecture:` objection that this turn does not raise again,
+because the lookup exited 3 or both scripts exited 0, is reported
+`resolved: true` with a note saying which.
 
 ## Corner cases from `data_traits` — enumerate, don't invent (#1361)
 
@@ -681,7 +691,14 @@ Rules for the payload:
       never a target, at its printed path or as a new page: what it should say
       is then no `gap` question at all. Route it in a `recommendations` entry
       to `/product:define-personas`, as that outcome's bullet says, and ask the
-      human only the intent the story itself needs;
+      human only the intent the story itself needs. The target architecture
+      follows the same split (#3354): it is a target only when its lookup
+      found it as the repo's own file, and the `wording` is then a clause,
+      landed with the file's `target-architecture/v1` block regenerated, since
+      its validator refuses a block that no longer matches the prose. A linked
+      target architecture is never a target: route what it should say in a
+      `recommendations` entry to the docs repository its lookup named in
+      `submodule`;
     - `section` — the heading the change goes under;
     - `wording` — the text you propose, written to stand in that document.
 

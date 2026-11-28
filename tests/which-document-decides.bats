@@ -30,6 +30,7 @@ setup() {
   REFINER="$REPO_ROOT/development/agents/issue-refiner.md"
   GATE="$REPO_ROOT/development/agents/story-readiness.md"
   ASK="$REPO_ROOT/development/skills/resolve-issue/reference/ask-branches.md"
+  SKILL="$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
   LOOKUP="$REPO_ROOT/development/scripts/reference-docs/resolve-reference-doc.zsh"
   VALIDATOR="$REPO_ROOT/development/scripts/reference-docs/validate-target-architecture.zsh"
   LINK='[*Which document decides*](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/ARCHITECTURE.md#which-document-decides)'
@@ -117,6 +118,13 @@ g() {
   contains "$(decides)" '3. **What a gap is then.** A `gap` is silence across the target architecture and the positions, or a contradiction inside the target architecture.'
 }
 
+@test "the rules change the question-kinds table only by adding the target architecture and by rule 2" {
+  local d
+  d="$(decides)"
+  contains "$d" 'These rules change *The three question kinds* above in two ways only: the target architecture joins the documents its `gap` row names, and rule 2 takes one difference out of that row'"'"'s contradictions.'
+  contains "$d" 'Everything else in the row stands: the requirements, the persona registry, the condition that established practice does not settle the question, and a contradiction between any other two of those documents.'
+}
+
 @test "a retired clause decides nothing and is never cited" {
   contains "$(decides)" 'A retired clause decides nothing and is never cited.'
 }
@@ -132,8 +140,8 @@ g() {
 @test "the subsection names the two commands, its three consumers and this suite" {
   local d
   d="$(decides)"
-  contains "$d" '`resolve-reference-doc.zsh docs/architecture/target-architecture.md`'
-  contains "$d" '`validate-target-architecture.zsh` on the `path` the lookup printed'
+  contains "$d" '**How a consumer finds the file.** Before it sorts a question by kind or decides an `implementation` question, a consumer runs `resolve-reference-doc.zsh docs/architecture/target-architecture.md`'
+  contains "$d" 'and, on its exit 0, `validate-target-architecture.zsh` on the `path` the lookup printed'
   contains "$d" '(`development/agents/issue-refiner.md`)'
   contains "$d" '(`development/agents/story-readiness.md`)'
   contains "$d" '(`development/skills/resolve-issue/reference/ask-branches.md`)'
@@ -167,6 +175,24 @@ g() {
     contains "$t" '`resolve-reference-doc.zsh docs/architecture/target-architecture.md`'
     contains "$t" '`validate-target-architecture.zsh` on the `path`'
   done
+}
+
+@test "each consumer states when it runs the lookup, and runs the validator only on the lookup's exit 0" {
+  local t
+  t="$(flat "$REFINER")"
+  contains "$t" 'Before you sort any open question by kind, run `resolve-reference-doc.zsh docs/architecture/target-architecture.md`'
+  contains "$t" 'On its exit 0, run `validate-target-architecture.zsh` on the `path` it printed.'
+  t="$(flat "$GATE")"
+  contains "$t" 'Before you sort what the story leaves open by kind (above), run `resolve-reference-doc.zsh docs/architecture/target-architecture.md`'
+  contains "$t" 'On its exit 0, run `validate-target-architecture.zsh` on the `path` it printed.'
+  t="$(flat "$ASK")"
+  contains "$t" 'Once per run, after §1 has readied the submodules and before §2 implements, the conductor runs `resolve-reference-doc.zsh docs/architecture/target-architecture.md` from the repo root and, on its exit 0, `validate-target-architecture.zsh` on the `path` the lookup printed.'
+}
+
+@test "the conductor's step 1 points at the lookup's section, and that section exists" {
+  contains "$(cat "$SKILL")" '**Then look up the repo'"'"'s target architecture (#3354)**, once per run, before §2 implements:
+see `reference/ask-branches.md` § Which document decides (#3354)'
+  [ "$(grep -cx '## Which document decides (#3354)' "$ASK")" -eq 1 ]
 }
 
 @test "the two agents spell the lookup call and resolve the validator from the plugin cache" {
@@ -207,6 +233,17 @@ g() {
   b="$(outcome "$REFINER" 'Any other outcome**')"
   contains "$b" "report an unresolved objection, a \`resolved_objections\` entry with \`resolved: false\` whose \`note\` repeats the script's stderr"
   contains "$b" 'decide no `implementation` question this turn.'
+  contains "$b" 'Word the entry'"'"'s `objection` in one fixed form, so the same failure yields the same string on every turn: `Target architecture: <script> exit <n>: <the first line of its stderr>`, or `Target architecture: <script> not found`.'
+  contains "$b" 'unless that exact string already arrives in your input `objections`'
+  contains "$b" 'A `recommendations` entry carries the fix line the script printed on stderr.'
+  contains "$(flat "$REFINER")" 'An input `Target architecture:` objection that this turn does not raise again, because the lookup exited 3 or both scripts exited 0, is reported `resolved: true` with a note saying which.'
+}
+
+@test "the issue refiner never names a linked target architecture as a gap's target" {
+  local t
+  t="$(flat "$REFINER")"
+  contains "$t" 'it is a target only when its lookup found it as the repo'"'"'s own file, and the `wording` is then a clause, landed with the file'"'"'s `target-architecture/v1` block regenerated'
+  contains "$t" 'A linked target architecture is never a target: route what it should say in a `recommendations` entry to the docs repository its lookup named in `submodule`;'
 }
 
 @test "the readiness gate's stop: no READY verdict, its reason repeating stderr" {
@@ -220,9 +257,10 @@ g() {
 @test "the conductor's stop: a clean stop that relays stderr and opens no PR" {
   local t
   t="$(flat "$ASK")"
-  contains "$t" "the run ends as a clean stop that relays the script's stderr: it takes no \`implementation\` default, opens no PR"
+  contains "$t" "the run ends as a clean stop that relays the script's stderr: it implements nothing, opens no PR and records the run \`failed\`;"
   contains "$t" 'a step of a human-started chain writes verdict `stopped`, cause `tooling`.'
-  contains "$t" 'and the paragraph that follows, this file states no rule of its own.'
+  contains "$t" 'That stop is a plain one: it writes no #2579 `clean-stop.zsh` marker.'
+  contains "$t" 'and the section that follows, this file states no rule of its own.'
 }
 
 @test "a found, valid file decides in both agents" {

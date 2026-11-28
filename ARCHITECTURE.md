@@ -9689,6 +9689,13 @@ this section does:
 3. **What a gap is then.** A `gap` is silence across the target architecture
    and the positions, or a contradiction inside the target architecture.
 
+These rules change *The three question kinds* above in two ways only: the
+target architecture joins the documents its `gap` row names, and rule 2 takes
+one difference out of that row's contradictions. Everything else in the row
+stands: the requirements, the persona registry, the condition that established
+practice does not settle the question, and a contradiction between any other
+two of those documents.
+
 A retired clause decides nothing and is never cited.
 
 A target architecture decides wherever the lookup finds it: its clauses come
@@ -9701,8 +9708,8 @@ other outcome that is not a found, valid file is a clean stop that repeats the
 script's stderr and is never read as "no target architecture": the lookup's
 exits 1, 2, 4, 5 and 6, and the validator's exits 1 and 2.
 
-**How a consumer finds the file.** Before it decides an `implementation`
-question, a consumer runs
+**How a consumer finds the file.** Before it sorts a question by kind or
+decides an `implementation` question, a consumer runs
 `resolve-reference-doc.zsh docs/architecture/target-architecture.md` (*Linked
 reference documents* above) and, on its exit 0,
 `validate-target-architecture.zsh` on the `path` the lookup printed. Three
