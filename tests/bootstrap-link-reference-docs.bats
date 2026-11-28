@@ -578,7 +578,7 @@ flat_tmpl() { tr '\n' ' ' < "$TMPL" | tr -s ' '; }
   contains "$t" "Where they and the plugin family's defaults differ, they win."
   contains "$t" "Cite the clause you follow."
   contains "$t" "Never edit a file under a link's mount"
-  contains "$t" "Never move a pin by hand"
+  contains "$t" "Never move a pin by hand, and close a Dependabot PR that moves one instead of merging it: a link is pinned to a version tag of its repository."
   contains "$t" 'An empty mount is fixed with `git submodule update --init`.'
 }
 

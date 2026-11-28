@@ -7587,7 +7587,8 @@ are standing in — `cd` to the main checkout, `dirname` of `git rev-parse
    cannot be moved or removed` — the worktree holds the `styleguide/` submodule
    (§3k.5a) — run `git -C "<worktree-path>" status --porcelain`: when it prints
    nothing, repeat the removal with `--force`, which only this refusal
-   sanctions; when it prints anything, report that instead.
+   sanctions; when it prints anything, report that instead. A linked docs
+   repository's submodule (§3a.1) draws the same refusal and is handled the same way.
    Report the closed workspace: main synced, worktree removed.
 
 ## Step 4.5: Run Setup Automation (macOS + Homebrew only)
