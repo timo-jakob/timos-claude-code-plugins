@@ -413,11 +413,16 @@ instead. Each outcome has one behaviour:
 - **The lookup's exit 3** — the repo has no target architecture: sort and judge
   exactly as before. Only exit 3 means there is no target architecture.
 - **Any other outcome** — the lookup's exit 1, 2, 4, 5 or 6, the validator's
-  exit 1 or 2, or no copy of either script: return no `READY` verdict. The
+  exit 1 or 2, or no copy of either script: return no `READY` verdict. An
+  exit 2 is first your own malformed call: fix it and re-run once, and only a
+  second 2 is this outcome. The
   verdict is `NEEDS_REFINEMENT` with `acceptance_testable` `false`, and its
   reason repeats the script's stderr (or says the script was not found), in
-  one `refinement_questions` entry and in the `summary`. Never read the outcome
-  as "no target architecture".
+  one `refinement_questions` entry and in the `summary`. Add
+  `"tooling_stop": true` to this verdict's JSON, and to no other verdict: the
+  stop is the tooling's and no refinement of the story clears it, so the
+  caller neither stamps the verdict nor sends the story to refinement. Never
+  read the outcome as "no target architecture".
 
 ## Risk classification
 

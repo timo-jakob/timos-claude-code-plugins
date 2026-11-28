@@ -103,3 +103,13 @@ nothing is stamped, so the next run gates it fresh. Proceed with this verdict al
 the same. When `key` failed, run `write` without `--expect-key`. Neither a failed
 `key` nor a `write` that exits nonzero is fatal: report it and go on, since the
 next run simply misses. A cached hit is never re-stamped.
+
+**A tooling stop is never stamped (#3354).** A verdict that carries
+`tooling_stop: true` is the gate's own target-architecture lookup failing
+(`development/agents/story-readiness.md`, *Decide from the target architecture
+first*), not a judgment of the story. Write no stamp for it, so the next run
+gates the story fresh. Post no label and no comment, and start no chained
+refinement: relay its `summary`, emit the run's record as `failed` and stop. A
+step of a human-started chain writes verdict `stopped`, cause `tooling`. At E1b
+one such verdict stops the epic run the same way, and no child is labelled for
+it.

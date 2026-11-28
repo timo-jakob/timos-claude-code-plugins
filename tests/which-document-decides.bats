@@ -31,6 +31,8 @@ setup() {
   GATE="$REPO_ROOT/development/agents/story-readiness.md"
   ASK="$REPO_ROOT/development/skills/resolve-issue/reference/ask-branches.md"
   SKILL="$REPO_ROOT/development/skills/resolve-issue/SKILL.md"
+  CACHE="$REPO_ROOT/development/skills/resolve-issue/reference/readiness-cache.md"
+  CKPT="$REPO_ROOT/development/skills/resolve-issue/reference/checkpoint.md"
   LOOKUP="$REPO_ROOT/development/scripts/reference-docs/resolve-reference-doc.zsh"
   VALIDATOR="$REPO_ROOT/development/scripts/reference-docs/validate-target-architecture.zsh"
   LINK='[*Which document decides*](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/ARCHITECTURE.md#which-document-decides)'
@@ -187,12 +189,16 @@ g() {
   contains "$t" 'On its exit 0, run `validate-target-architecture.zsh` on the `path` it printed.'
   t="$(flat "$ASK")"
   contains "$t" 'Once per run, after §1 has readied the submodules and before §2 implements, the conductor runs `resolve-reference-doc.zsh docs/architecture/target-architecture.md` from the repo root and, on its exit 0, `validate-target-architecture.zsh` on the `path` the lookup printed.'
+  contains "$t" 'It holds for every `implementation` question the run decides from then on, the defaults named below included.'
 }
 
 @test "the conductor's step 1 points at the lookup's section, and that section exists" {
   contains "$(cat "$SKILL")" '**Then look up the repo'"'"'s target architecture (#3354)**, once per run, before §2 implements:
 see `reference/ask-branches.md` § Which document decides (#3354)'
   [ "$(grep -cx '## Which document decides (#3354)' "$ASK")" -eq 1 ]
+  contains "$(flat "$SKILL")" 'Then run §1'"'"'s target-architecture lookup (#3354), which the skip of §1 does not leave out.'
+  contains "$(flat "$CKPT")" 'The skip of §1 does not leave out its target-architecture lookup (#3354): run it right after `init-submodules.zsh`.'
+  contains "$(flat "$ASK")" 'A resumed run is a run of its own: it skips §1 but runs this lookup again, right after its `init-submodules.zsh` re-run. Its stop keeps the branch the stopped run pushed, pushes nothing new and records the run `failed`.'
 }
 
 @test "the two agents spell the lookup call and resolve the validator from the plugin cache" {
@@ -252,6 +258,14 @@ see `reference/ask-branches.md` § Which document decides (#3354)'
   contains "$b" 'return no `READY` verdict.'
   contains "$b" 'The verdict is `NEEDS_REFINEMENT` with `acceptance_testable` `false`'
   contains "$b" "its reason repeats the script's stderr"
+  contains "$b" 'An exit 2 is first your own malformed call: fix it and re-run once, and only a second 2 is this outcome.'
+  contains "$b" 'Add `"tooling_stop": true` to this verdict'"'"'s JSON, and to no other verdict:'
+  contains "$b" 'so the caller neither stamps the verdict nor sends the story to refinement.'
+  b="$(flat "$CACHE")"
+  contains "$b" '**A tooling stop is never stamped (#3354).** A verdict that carries `tooling_stop: true` is the gate'"'"'s own target-architecture lookup failing'
+  contains "$b" 'Write no stamp for it, so the next run gates the story fresh. Post no label and no comment, and start no chained refinement: relay its `summary`, emit the run'"'"'s record as `failed` and stop.'
+  contains "$b" 'At E1b one such verdict stops the epic run the same way, and no child is labelled for it.'
+  contains "$(flat "$SKILL")" 'A verdict carrying `tooling_stop: true` is no refinement case: it ends as that reference'"'"'s *Stamping a fresh verdict* says (#3354).'
 }
 
 @test "the conductor's stop: a clean stop that relays stderr and opens no PR" {

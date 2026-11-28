@@ -32,7 +32,9 @@ run decides exactly as before. On any other outcome, the lookup's exit 1, 2,
 relays the script's stderr: it implements nothing, opens no PR and records the
 run `failed`; a step of a human-started chain writes verdict `stopped`, cause
 `tooling`. That stop is a plain one: it writes no #2579 `clean-stop.zsh`
-marker.
+marker. A resumed run is a run of its own: it skips §1 but runs this lookup
+again, right after its `init-submodules.zsh` re-run. Its stop keeps the branch
+the stopped run pushed, pushes nothing new and records the run `failed`.
 
 ## The inventory
 
