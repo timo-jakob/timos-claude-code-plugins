@@ -9,7 +9,7 @@
 #                        [--from <summary.json>]
 #
 #   --outcome  completed | cut-off | could-not-start | outside-window | skipped-running
-#   --reason   one line saying why; stored as given, `null` when left out
+#   --reason   one line saying why, each run of line breaks stored as one space; `null` when left out
 #   --from     the run's summary: one JSON object that may carry `started_at`,
 #              `ended_at` (UTC, YYYY-MM-DDTHH:MM:SSZ), `concerns` and `bugs` in
 #              the record's own shape. Every list it leaves out is written
@@ -105,7 +105,7 @@ record="$(jq -s -e --arg repo "$repo" --arg outcome "$outcome" --arg reason "$re
     else . end
   | {schema: "maintenance-run/v1", repo: $repo,
      started_at: (.started_at // $now), ended_at: (.ended_at // $now),
-     outcome: $outcome, reason: (if $has_reason == 1 then $reason else null end),
+     outcome: $outcome, reason: (if $has_reason == 1 then ($reason | gsub("[\r\n]+"; " ")) else null end),
      concerns: ((.concerns // {}) as $c | reduce $cs[] as $k ({}; . + {($k): lists($cl; $c[$k] // {})})),
      bugs: lists($bl; .bugs // {}),
      log_comment_url: null}

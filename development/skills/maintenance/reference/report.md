@@ -93,8 +93,11 @@ item is `{number, title, url, note}`:
   `spec-does-not-reproduce`).
 
 A stop before Phase 2 writes no summary, passes no `--from`, and takes a fresh
-`mktemp -d` as `<scratch>`. `<owner/name>` is the last two path segments of
-`git remote get-url origin`, `.git` dropped, so it needs no network.
+`mktemp -d` as `<scratch>`. `<owner/name>` is what follows `github.com/` or
+`github.com:` in `git remote get-url origin`, `.git` dropped, so it needs no
+network. With no git repo, no `origin`, or an origin not on github.com, never
+guess one: run neither script, and report that the run record could not be
+written.
 
 ```bash
 export MAINTENANCE_RUN_DIR="${MAINTENANCE_RUN_DIR:-<scratch>}"

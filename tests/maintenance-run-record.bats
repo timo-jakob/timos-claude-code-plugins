@@ -229,6 +229,7 @@ Waiting for a human:
   printf '%s\n' '{"concerns": {"security": {"merged": [{"number": 12, "title": "Bump | `left-pad` [x]\nby @alice *_<>#~\\",
     "url": "https://github.com/acme/widgets/pull/12", "note": "a | b `c`"}]}}}' > "$BATS_TEST_TMPDIR/s.json"
   write_record --repo acme/widgets --outcome cut-off --reason $'window [x]\nclosed' --from "$BATS_TEST_TMPDIR/s.json"
+  [ "$(jq -r .reason "$REC")" = "window [x] closed" ]
   run --separate-stderr zsh "$POST" "$REC"
   [ "$status" -eq 0 ]
   local c zw
@@ -325,7 +326,7 @@ flat() {
   done
   contains "$r" "\`started_at\` (the start stamp's time, \`jq -r '.ts | todate' <scratch>/maintenance-run.json\`)"
   contains "$r" "\`parked\` — escalated or held stages and bugs, and bug fixes that did not merge, the reason in \`note\`; \`deferred\` — groups and bugs not started, \`note\` naming the \`deferred_by\` or the reason;"
-  contains "$r" "A stop before Phase 2 writes no summary, passes no \`--from\`, and takes a fresh \`mktemp -d\` as \`<scratch>\`. \`<owner/name>\` is the last two path segments of \`git remote get-url origin\`, \`.git\` dropped"
+  contains "$r" "A stop before Phase 2 writes no summary, passes no \`--from\`, and takes a fresh \`mktemp -d\` as \`<scratch>\`. \`<owner/name>\` is what follows \`github.com/\` or \`github.com:\` in \`git remote get-url origin\`, \`.git\` dropped, so it needs no network. With no git repo, no \`origin\`, or an origin not on github.com, never guess one: run neither script, and report that the run record could not be written."
   contains "$r" "--repo <owner/name> --outcome <outcome>"
   contains "$r" "post-maintenance-log.zsh\" <record>"
   contains "$r" "Its exit 2 is your own malformed call: fix it and re-run once."
