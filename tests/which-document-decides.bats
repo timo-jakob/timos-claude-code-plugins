@@ -238,10 +238,10 @@ see `reference/ask-branches.md` § Which document decides (#3354)'
 @test "the issue refiner's stop: an unresolved objection repeating stderr, and no implementation question that turn" {
   local b
   b="$(outcome "$REFINER" 'Any other outcome**')"
-  contains "$b" "report an unresolved objection, a \`resolved_objections\` entry with \`resolved: false\` whose \`note\` repeats the script's stderr"
+  contains "$b" "report an unresolved objection, a \`resolved_objections\` entry with \`resolved: false\` whose \`note\` repeats the script's stderr (or says the script was not found)"
   contains "$b" 'decide no `implementation` question this turn.'
   contains "$b" 'Word the entry'"'"'s `objection` in one fixed form, so the same failure yields the same string on every turn: `Target architecture: <script> exit <n>: <the first line of its stderr>`, or `Target architecture: <script> not found`.'
-  contains "$b" 'unless that exact string already arrives in your input `objections`'
+  contains "$b" 'Append it per the new-blocker rule in the output section, unless that exact string already arrives in your input `objections`'
   contains "$b" 'A `recommendations` entry carries the fix line the script printed on stderr.'
   contains "$(flat "$REFINER")" 'An input `Target architecture:` objection that this turn does not raise again, because the lookup exited 3 or both scripts exited 0, is reported `resolved: true` with a note saying which.'
 }
