@@ -1,0 +1,13 @@
+## Linked reference documents
+
+The git submodules marked `reference-docs` in `.gitmodules` hold the reference documents this repo is built
+against, such as a target architecture or a styleguide. List them with
+`git config -f .gitmodules --get-regexp '^submodule\..*\.reference-docs$'`.
+
+- Read them before a technical decision.
+- Where they and the plugin family's defaults differ, they win. Cite the clause you follow.
+- Never edit a file under a link's mount: the documents belong to their own repository.
+- Never move a pin by hand, and close a Dependabot PR that moves the pin of a submodule marked `reference-docs`
+  instead of merging it: a link is pinned to a version tag of its repository. The styleguide's Dependabot PR is not
+  covered by this rule and is merged as before.
+- An empty mount is fixed with `git submodule update --init`.
