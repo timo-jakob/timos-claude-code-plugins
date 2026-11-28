@@ -373,6 +373,119 @@ The `development` side finds one in two steps (#3351).
   stdout. Exits 4 and 6 name the `git submodule update --init` line on stderr;
   exit 6 says so instead when a different pin is staged but not committed.
 
+### Target architecture contract (`target-architecture/v1`)
+
+A **target architecture** states the shape a product's systems are meant to
+have, as clauses a decision can cite, with a dated change log of how that
+shape moved (#3353). It lives at `docs/architecture/target-architecture.md`,
+found by the lookup above, so it may be the repo's own file or one in a linked
+docs repository. The `development` plugin owns it:
+`development/scripts/reference-docs/validate-target-architecture.zsh` checks
+it.
+
+**This one entry file is the only layout the contract reads.** An existing
+target architecture or an API styleguide is made citeable through `ref`
+clauses that point at its existing pages. Nothing is rewritten, and the
+contract reads no other existing layout.
+
+**The file.** The same two-layer shape as the persona registry and the product
+charter. The prose is human-authoritative and sits between
+`<!-- target-architecture:prose:start -->` and
+`<!-- target-architecture:prose:end -->`; the contract fixes no prose
+heading. It is followed by a collapsed `<details>` block holding one fenced
+`json` object, the generated mirror. Provenance is the persona contract's
+mechanism, unchanged: `provenance.prose_sha256` hashes the bytes between the
+two sentinels, normalised and compared exactly as
+[Provenance and staleness detection](#provenance-and-staleness-detection)
+states for `personas/v1`. This section does not restate it.
+
+**The block** carries `schema` (`"target-architecture/v1"`), `provenance`
+(`generated_by`, `generated_at`, `prose_sha256`, as for `personas/v1`),
+`clauses[]` and `changes[]`.
+
+- **A clause** has `id` (`TA-<n>`), `area` (a non-empty string naming the part
+  of the system it governs), `status` (`active` or `retired`) and exactly one
+  of `statement` (a string) or `ref` (`{ "path", "anchor", "title" }`: a page
+  of the file's own repository, where the clause is already stated, and the
+  link's title).
+- **A change** has `id` (`TC-<yyyy>-<mm>-<n>`, the year and month of its
+  `date`), `date` (an ISO calendar date, `YYYY-MM-DD`), `from`, `to` and
+  `rationale` (each a non-empty string; a change that introduces a clause says
+  in `from` that nothing held before), `affects[]` (the ids of the clauses it
+  introduced, changed or retired) and `evidence[]` (issue or PR references;
+  may be empty).
+
+An invented example: a ferry-booking product with three clauses and one change
+that retires one of them. TA-3 shows how a page such as an API styleguide
+becomes citeable: it is a `ref` clause pointing at the page that already
+exists (`prose_sha256` is an illustrative digest):
+
+```json
+{
+  "schema": "target-architecture/v1",
+  "provenance": {
+    "generated_by": "hand-written",
+    "generated_at": "2026-11-20T09:00:00Z",
+    "prose_sha256": "9b2e4c6a8d0f1e3c5a7b9d1f3e5c7a9b2d4f6e8c0a1b3d5f7e9c2a4b6d8f0e1c"
+  },
+  "clauses": [
+    { "id": "TA-1", "area": "services", "status": "active",
+      "statement": "Booking and boarding are separate services that talk only through the booking API." },
+    { "id": "TA-2", "area": "data", "status": "retired",
+      "statement": "Every service shares the one ticketing database." },
+    { "id": "TA-3", "area": "api", "status": "active",
+      "ref": { "path": "docs/api-styleguide.md", "anchor": "resource-naming", "title": "API styleguide" } }
+  ],
+  "changes": [
+    { "id": "TC-2026-11-1", "date": "2026-11-20",
+      "from": "Every service shares the one ticketing database.",
+      "to": "Each service owns its own database.",
+      "rationale": "A shared schema made every release wait on the others.",
+      "affects": ["TA-2"], "evidence": ["#42"] }
+  ]
+}
+```
+
+**The rules.**
+
+- **A clause is never deleted.** A clause that no longer holds becomes
+  `retired`, and a change records its retirement by naming it in `affects`.
+- **An id is unique in the file, and never reused or renumbered.**
+- Every id in `affects` names a clause of the file.
+- A `ref` path is a file of the target architecture's own repository. A path
+  found only in a linked submodule does not count. The `ref` anchor is not
+  checked.
+
+**The validator.** `validate-target-architecture.zsh <file>` checks one file.
+It exits 0 on a valid file, printing `target-architecture: valid`, and 1 on an
+invalid one, with one stderr line `target-architecture: <rule>: <detail>` for
+every violation, not only the first. It exits 2 on a usage error or an
+unreadable file; a missing `jq` and a lookup that fails internally exit 2 too,
+since neither is a verdict on the file. The prose hash is the refine-issue
+skill's `story-spec-prose-hash.zsh`. The repo is the git work tree holding the
+file, or the current directory outside git. The rules:
+
+| Rule | A violation |
+| --- | --- |
+| `schema` | the layout or the block's shape breaks the contract: sentinels, the `<details>` block, a field's type, a clause's `area` or `status` |
+| `bad-id-shape` | a clause id that is not `TA-<n>`, or a change id that is not `TC-<yyyy>-<mm>-<n>` |
+| `duplicate-id` | an id used more than once |
+| `statement-and-ref` | a clause with both |
+| `neither-statement-nor-ref` | a clause with neither |
+| `retired-unnamed` | a retired clause no change names in `affects` |
+| `unresolved-affects` | an `affects` id the file does not have |
+| `ref-missing` | a `ref` path that is not a file of the repo |
+| `bad-date` | a change whose `date` is not a calendar date, or not in the month its id names |
+| `stale-prose` | `provenance.prose_sha256` does not match the prose |
+
+**The validator checks a single file, so it cannot see an active clause
+reworded in place, a clause deleted, an id renumbered or reused, or a retired
+clause named only by the change that introduced it.** Catching
+those means comparing the file with its earlier versions, which is a different
+tool. Until one exists, they are left to the change itself: whoever changes a
+clause's meaning adds a change, and the human who approves the PR reads the
+diff for every one of them.
+
 ## Polyrepo, contracts, and the cross-repo big picture
 
 The plugin family is *about* a single repo at a time — bootstrap runs in

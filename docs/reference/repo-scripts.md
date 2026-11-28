@@ -15,13 +15,15 @@ Among others, these helper scripts live in
 
 ## Linked reference documents
 
-The `development` plugin ships these two scripts under
-`development/scripts/reference-docs/`. ARCHITECTURE.md, *Linked reference documents*, states their contract.
+The `development` plugin ships these three scripts under
+`development/scripts/reference-docs/`. ARCHITECTURE.md, *Linked reference documents* and *Target architecture
+contract*, states their contract.
 
 | Script | What it does |
 | --- | --- |
 | `resolve-product-doc.zsh` | The product-document lookup, a byte-identical copy of `product/scripts/resolve-product-doc.zsh`: the repo's own file wins, otherwise the first submodule declared in `.gitmodules` that holds the file at the same relative path. A `cmp` test keeps the two copies equal. |
 | `resolve-reference-doc.zsh` | Wraps the lookup and adds the pinned version. `resolve-reference-doc.zsh [--repo-dir <dir>] <relative-path>` prints one JSON object with `path`, `origin` (`own` or `linked`), `submodule` and `pinned_commit`, the full SHA of the gitlink `HEAD` records for that submodule. Exits `0` found, `1` internal failure (a gitlink that is not committed yet included), `2` usage, `3` not found, `4` a declared submodule is not initialised, `5` the path lies under a submodule's mount, `6` the submodule is checked out at a commit other than the pinned one. |
+| `validate-target-architecture.zsh` | Checks one `docs/architecture/target-architecture.md` against `target-architecture/v1`. `validate-target-architecture.zsh <file>` prints `target-architecture: valid` and exits `0` on a valid file; it exits `1` with one stderr line `target-architecture: <rule>: <detail>` per violation, every violation reported; `2` on a usage error, an unreadable file or a check that cannot complete. It checks one file alone, so it cannot see a clause reworded in place. |
 
 ## Scripts bootstrap emits into a target repository
 
