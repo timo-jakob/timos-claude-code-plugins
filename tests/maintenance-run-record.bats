@@ -354,8 +354,8 @@ flat() {
     prev=$row
   done
   contains "$r" "\`started_at\` (the start stamp's time, \`jq -r '.ts | todate' <scratch>/maintenance-run.json\`)"
-  contains "$r" "\`merged\` — PRs merged this run; \`opened\` — PRs this run opened that are still open and not waiting for a human; \`waiting\` — open PRs waiting for a human's approval or decision;"
-  contains "$r" "\`parked\` — escalated or held stages and bugs, bug fixes that left no open or merged PR, and failed analyses, the reason in \`note\`; \`deferred\` — groups and bugs not started, \`note\` naming the \`deferred_by\` or the reason;"
+  contains "$r" "\`merged\` — PRs merged this run; \`opened\` — PRs this run opened that are still open and not waiting for a human; \`waiting\` — open PRs and \`advisory\` stages (\`number\` null, the entries in \`note\`) waiting for a human's approval or decision;"
+  contains "$r" "\`parked\` — anything else that ended needing a human, the reason in \`note\`: escalated or held stages and bugs, bug fixes that left no open or merged PR, failed analyses, and a target Phase 7 halted or a language Phase 3 skipped (a topic's under \`topic\`, a language's under \`codequality\`); \`deferred\` — groups and bugs not started, \`note\` naming the \`deferred_by\` or the reason;"
   contains "$r" "\`fixed\` — a bug belongs here only when its fix was confirmed by its PR merging this run, never when the fix was merely attempted: an open fix PR goes under the \`bugs\` concern's \`opened\` or \`waiting\`, a \`spec-does-not-reproduce\` stop under \`not_reproducing\`, and every other ending of a fix run under the concern's \`parked\`, the ending in \`note\`;"
   contains "$(flat development/skills/maintenance/reference/bugs.md)" "called fixed only when its PR merged, never when the fix was merely attempted"
   contains "$(flat ARCHITECTURE.md)" "\`bugs.fixed\` holds a bug only when its fix PR merged this run, never a fix merely attempted;"

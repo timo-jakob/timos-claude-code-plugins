@@ -77,19 +77,23 @@ with the same script, for a repo it did not start before the cutoff. Pass the
 stop's reason as `--reason` whenever the run did not end normally.
 
 **The summary.** Write `<scratch>/run-summary.json` with the Write tool from
-facts noted where each was decided — `phase8-stages`, the budget's `deferred`
-list and the `Bugs` block (`reference/bugs.md` § 5) — never reconstructed from
-the rendered summary. It holds `started_at` (the start stamp's time, `jq -r
-'.ts | todate' <scratch>/maintenance-run.json`), `concerns` and `bugs`; each
-item is `{number, title, url, note}`:
+facts noted where each was decided — `phase8-stages`, Phase 7's halts, Phase
+3's `unsupported` notes, the budget's `deferred` list and the `Bugs` block
+(`reference/bugs.md` § 5) — never reconstructed from the rendered summary. It
+holds `started_at` (the start stamp's time, `jq -r '.ts | todate'
+<scratch>/maintenance-run.json`), `concerns` and `bugs`; each item is
+`{number, title, url, note}`:
 
 - per concern (`security`, `dependencies`, `bugs`, `codequality`, `topic`):
   `merged` — PRs merged this run; `opened` — PRs this run opened that are still
-  open and not waiting for a human; `waiting` — open PRs waiting for a human's
-  approval or decision; `parked` — escalated or held stages and bugs, bug
-  fixes that left no open or merged PR, and failed analyses, the reason in
-  `note`; `deferred` — groups and bugs not started, `note` naming the
-  `deferred_by` or the reason;
+  open and not waiting for a human; `waiting` — open PRs and `advisory` stages
+  (`number` null, the entries in `note`) waiting for a human's approval or
+  decision; `parked` — anything else that ended needing a human, the reason in
+  `note`: escalated or held stages and bugs, bug fixes that left no open or
+  merged PR, failed analyses, and a target Phase 7 halted or a language Phase 3
+  skipped (a topic's under `topic`, a language's under `codequality`);
+  `deferred` — groups and bugs not started, `note` naming the `deferred_by` or
+  the reason;
 - `bugs`: `fixed` — a bug belongs here only when its fix was confirmed by its
   PR merging this run, never when the fix was merely attempted: an open fix PR
   goes under the `bugs` concern's `opened` or `waiting`, a
