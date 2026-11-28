@@ -425,9 +425,10 @@ browser or Lighthouse. CI remediation reuses `development-javascript`'s
 `/development:resolve-issue` reviews a JavaScript repo whose `package.json` has
 `react` in its runtime dependencies, it runs this panel **beside** the JavaScript
 panel, never instead of it. The JavaScript panel keeps bugs, security, performance,
-code quality, tests and resilience; this panel adds one dimension, `react_idioms`,
-checked by `react-idioms-reviewer`. Each check has a fixed severity, so the review
-loop converges:
+code quality, tests and resilience; this panel adds two dimensions: `react_idioms`,
+checked by `react-idioms-reviewer` on every run, and `react_styleguide`, checked
+only when the styleguide check below applies. Each `react_idioms` check has a fixed
+severity, so the review loop converges:
 
 | Check | Severity |
 | --- | --- |
