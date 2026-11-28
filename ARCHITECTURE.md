@@ -9671,6 +9671,55 @@ implementation is decided silently on ground no document covers, and the next
 story meets the same silence; an implementation question misfiled as a gap costs
 one question and leaves the document change that answers it for good.
 
+### Which document decides
+
+A repo can have a **target architecture** (*Target architecture contract
+(`target-architecture/v1`)* above), and where it has one, that file is the
+first document an `implementation` question is decided from (#3354). These
+rules serve pillar 2,
+[Never asks "how"](docs/explanation/philosophy.md#pillar-2), as the rest of
+this section does:
+
+1. **The order.** An `implementation` question is decided from the target
+   architecture's active clauses, read at the pinned version when the file is
+   linked, then from the family's positions, then from established practice.
+2. **A difference is not a gap.** Where a target-architecture clause and a
+   family position differ, the target-architecture clause decides, and that
+   difference is never a `gap`.
+3. **What a gap is then.** A `gap` is silence across the target architecture
+   and the positions, or a contradiction inside the target architecture.
+
+These rules change *The three question kinds* above in two ways only: the
+target architecture joins the documents its `gap` row names, and rule 2 takes
+one difference out of that row's contradictions. Everything else in the row
+stands: the requirements, the persona registry, the condition that established
+practice does not settle the question, and a contradiction between any other
+two of those documents.
+
+A retired clause decides nothing and is never cited.
+
+A target architecture decides wherever the lookup finds it: its clauses come
+ahead of the family's positions whether the file is the repo's own or one in a
+linked docs repository. Only a repo with no target architecture, the lookup's
+exit 3, decides exactly as before.
+
+Only the lookup's exit 3 means the repo has no target architecture. Every
+other outcome that is not a found, valid file is a clean stop that repeats the
+script's stderr and is never read as "no target architecture": the lookup's
+exits 1, 2, 4, 5 and 6, and the validator's exits 1 and 2.
+
+**How a consumer finds the file.** Before it sorts a question by kind or
+decides an `implementation` question, a consumer runs
+`resolve-reference-doc.zsh docs/architecture/target-architecture.md` (*Linked
+reference documents* above) and, on its exit 0,
+`validate-target-architecture.zsh` on the `path` the lookup printed. Three
+consumers do so today, and each states its own stop: the issue refiner
+(`development/agents/issue-refiner.md`), the readiness gate
+(`development/agents/story-readiness.md`) and the resolve-issue conductor
+(`development/skills/resolve-issue/reference/ask-branches.md`). They link this
+subsection and do not restate its rules; `tests/which-document-decides.bats`
+pins both.
+
 ### The Decisions-taken record
 
 When Claude decides a question instead of asking it, it writes one entry per
@@ -9684,6 +9733,12 @@ refine-issue's **Answers taken automatically** list. Each entry carries four fie
 | choice | What Claude chose. |
 | evidence | The position, requirement or established practice the choice rests on, cited by its section or file. |
 | how to overrule | What a human does to reverse the choice after the fact. |
+
+A decision that rests on a target-architecture clause names the clause id and
+where the clause was read, and never quotes the clause's text:
+`<clause id> (<submodule path> @ <short sha>)` for a file in a linked docs
+repository, and `<clause id> (docs/architecture/target-architecture.md)` for
+the repo's own file, which has no pinned commit.
 
 The list lives in a fixed section, a `## Decisions taken` heading: in the
 **issue body** when the decision is taken before implementation (refinement,

@@ -755,6 +755,15 @@ becomes `RISK=""`. This
 gate sent it back*, which is what the metric measures, so Step 4's re-gate
 `risk` is never substituted for it.
 
+**A tooling stop is no diagnosis (#3354).** A verdict carrying
+`tooling_stop: true`, from this spawn or from Step 4's re-gate, is the gate's
+own target-architecture lookup failing (`development/agents/story-readiness.md`,
+*Decide from the target architecture first*), not an objection to the story.
+Never stamp it, never take its `refinement_questions` as objections and never
+loop back on it: relay its `summary` to the human, change no label and end this
+issue's flow. `STATE_OUTCOME` stays empty, so Step 7 skips the record. A stamp
+hit that carries it is a miss: spawn the gate.
+
 **Record the verdict's `size` object too** (#2589), into Step 7's
 `SIZE_PREFLIGHT` as `{"verdict", "triggers", "children_filed": 0}` — for example
 `SIZE_PREFLIGHT='{"verdict":"stop","triggers":["files"],"children_filed":0}'`.
@@ -1394,6 +1403,9 @@ write it as `size_preflight` into the child's state file
 authoritative — and, because a `story-spec` block now exists, its validation also
 checks the block against the prose (it will pass: you just stamped the hash over
 this exact prose).
+
+A re-gate verdict carrying `tooling_stop: true` ends here, as Step 1's *A
+tooling stop is no diagnosis* says: it is not stamped and Step 5 does not run.
 
 **Stamp the re-gate verdict**, `READY` and `NEEDS_REFINEMENT` alike, so the next
 resolve-issue run reuses it: write the verdict JSON exactly as returned to

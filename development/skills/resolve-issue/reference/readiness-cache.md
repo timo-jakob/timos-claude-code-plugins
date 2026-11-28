@@ -87,6 +87,14 @@ Keep the plan's `readiness_cache` for the epic record
 
 ## Stamping a fresh verdict
 
+On a miss, at step 0b and at E1b alike, make the work tree's submodules ready
+before spawning the gate: run
+`"<skill-base-dir>/scripts/init-submodules.zsh" --repo-dir .` (#3080). The
+gate's target-architecture lookup may read a linked docs repository, and step 1
+has not readied it yet (#3354). The script only checks out the recorded
+commits, so it is safe before the branch is cut. Its exit 3 is the environment
+error step 1 names: report it, emit the run's record as `failed` and stop.
+
 Before spawning the gate on a miss, read the issue's key:
 `"<skill-base-dir>/scripts/readiness-stamp.zsh" key --repo "$REPO" --issue <N>`
 prints it. **Stamp every fresh verdict, `READY` and `NEEDS_REFINEMENT` alike**,
@@ -103,3 +111,14 @@ nothing is stamped, so the next run gates it fresh. Proceed with this verdict al
 the same. When `key` failed, run `write` without `--expect-key`. Neither a failed
 `key` nor a `write` that exits nonzero is fatal: report it and go on, since the
 next run simply misses. A cached hit is never re-stamped.
+
+**A tooling stop is never stamped (#3354).** A verdict that carries
+`tooling_stop: true` is the gate's own target-architecture lookup failing
+(`development/agents/story-readiness.md`, *Decide from the target architecture
+first*), not a judgment of the story. Write no stamp for it, so the next run
+gates the story fresh. Post no label and no comment, and start no chained
+refinement: relay its `summary`, emit the run's record as `failed` and stop. A
+step of a human-started chain writes verdict `stopped`, cause `tooling`. At E1b
+one such verdict stops the epic run the same way, and no child is labelled for
+it. A cached verdict that carries `tooling_stop: true` is never a hit: gate
+that story fresh, as a miss.

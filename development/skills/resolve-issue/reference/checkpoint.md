@@ -76,7 +76,9 @@ stop, says so and deletes the checkpoint.
    branch (#3080): its exit 3 is an environment error, never a red gate, so
    report it as one, emit the run's record as `failed` and stop. Then run
    §1b. Skip §0b, §1, §2 and §3, and record `gate_verdict: READY`: the
-   interrupted run passed the readiness gate and implemented the story.
+   interrupted run passed the readiness gate and implemented the story. The
+   skip of §1 does not leave out its target-architecture lookup (#3354): run it
+   right after `init-submodules.zsh`.
 3. **From `last_round: 0`** (`loop_resume: false`), enter §3.5 at round 1 and
    start the loop fresh, **without** the loop's `--resume`. Round 1's boundary
    starts the gate as usual.

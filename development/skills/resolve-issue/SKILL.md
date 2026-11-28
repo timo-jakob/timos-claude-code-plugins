@@ -186,7 +186,7 @@ On exit 0, note `resumed_from: clean_stop`, run the dependency precheck below as
 marker's `branch` from `origin` and run §1b (detect the repo type and load its profile), but skip §0b, §1, §2 and §3
 (the stopped run passed the readiness gate, so record `gate_verdict: READY`). Then enter the interactive extension
 with the marker (`reference/interactive/extension.md`). Run §1's `init-submodules.zsh` on that checkout before its
-first gate (#3080).
+first gate (#3080). Then run §1's target-architecture lookup (#3354), which the skip of §1 does not leave out.
 
 **Without `--resume`**, an unattended run always runs
 `"<skill-base-dir>/scripts/clean-stop.zsh" clear --repo-dir <worktree> --issue
@@ -325,7 +325,8 @@ see `reference/readiness-cache.md` § Step 0b — gate only a stamp miss
 
 - **`READY`** → carry the `risk` field forward (it rides along to the PR body
   and the Approver) and proceed to step 1.
-- **`NEEDS_REFINEMENT`** → do **not** branch or implement. Ensure the
+- **`NEEDS_REFINEMENT`** → do **not** branch or implement. A verdict carrying `tooling_stop: true` is no refinement
+  case: it ends as that reference's *Stamping a fresh verdict* says (#3354). Otherwise ensure the
   `needs-refinement` label exists (idempotent), post the refinement questions as
   an issue comment, emit the run's record (§7), and **stop** — report that the
   story went back for refinement. In a human-started run (#2940) the step ends
@@ -370,6 +371,9 @@ see `reference/checkpoint.md` § A fresh run on kept state (#2920)
 # then ready the tree's submodules before any gate (#3080): exit 3 is an environment error, never a red gate — stop
 "<skill-base-dir>/scripts/init-submodules.zsh" --repo-dir .
 ```
+
+**Then look up the repo's target architecture (#3354)**, once per run, before §2 implements:
+see `reference/ask-branches.md` § Which document decides (#3354)
 
 ### 1b. Detect the repo type and load the profile
 

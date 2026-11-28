@@ -166,6 +166,55 @@ authoring it. Draft it from real evidence (`Read`/`Grep`/`Glob`; `Bash` for
   story on the same surface should not re-decide, and they drive the
   cross-feature consistency section below.
 
+## Decide from the target architecture first (#3354)
+
+Which document decides an `implementation` question, and in what order, is
+ARCHITECTURE.md's
+[*Which document decides*](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/ARCHITECTURE.md#which-document-decides).
+Read the rules there; this file does not restate them. Before you sort any
+open question by kind, run
+`resolve-reference-doc.zsh docs/architecture/target-architecture.md`, the
+same lookup the persona registry uses (above), from the target repo's root:
+
+```bash
+zsh <resolved path> --repo-dir <target repo root> docs/architecture/target-architecture.md
+```
+
+On its exit 0, run `validate-target-architecture.zsh` on the `path` it
+printed. It ships beside the lookup, so resolve it the same way:
+
+```bash
+zsh -c 'print -r -- ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/cache/*/development/*/scripts/reference-docs/validate-target-architecture.zsh(N.nOn[1])'
+```
+
+An empty result means no installed copy; when the target repo is this
+plugin's own repo, its working-tree copy at
+`development/scripts/reference-docs/validate-target-architecture.zsh` serves
+instead. Each outcome has one behaviour:
+
+- **The lookup's exit 0 and the validator's exit 0** — decide with the target
+  architecture as that section says; an `implementation` entry that rests on a
+  clause names it in its `rationale`, in the evidence form that section's
+  *The Decisions-taken record* gives.
+- **The lookup's exit 3** — the repo has no target architecture: decide
+  exactly as before. Only exit 3 means there is no target architecture.
+- **Any other outcome** — the lookup's exit 1, 2, 4, 5 or 6, the validator's
+  exit 1 or 2, or no copy of either script: report an unresolved objection, a
+  `resolved_objections` entry with `resolved: false` whose `note` repeats the
+  script's stderr (or says the script was not found), and decide no
+  `implementation` question this turn. Never read the outcome as "no target
+  architecture". Word the entry's `objection` in one fixed form, so the same
+  failure yields the same string on every turn:
+  `Target architecture: <script> exit <n>: <the first line of its stderr>`, or
+  `Target architecture: <script> not found`. Append it per the new-blocker
+  rule in the output section, unless that exact string already arrives in your
+  input `objections`, where the verbatim-echo rule already reports it. A
+  `recommendations` entry carries the fix line the script printed on stderr.
+
+An input `Target architecture:` objection that this turn does not raise again,
+because the lookup exited 3 or both scripts exited 0, is reported
+`resolved: true` with a note saying which.
+
 ## Corner cases from `data_traits` — enumerate, don't invent (#1361)
 
 Drawing payload values from `data_traits` makes the **happy path** realistic. It
@@ -642,7 +691,14 @@ Rules for the payload:
       never a target, at its printed path or as a new page: what it should say
       is then no `gap` question at all. Route it in a `recommendations` entry
       to `/product:define-personas`, as that outcome's bullet says, and ask the
-      human only the intent the story itself needs;
+      human only the intent the story itself needs. The target architecture
+      follows the same split (#3354): it is a target only when its lookup
+      found it as the repo's own file, and the `wording` is then a clause,
+      landed with the file's `target-architecture/v1` block regenerated, since
+      its validator refuses a block that no longer matches the prose. A linked
+      target architecture is never a target: route what it should say in a
+      `recommendations` entry to the docs repository its lookup named in
+      `submodule`;
     - `section` — the heading the change goes under;
     - `wording` — the text you propose, written to stand in that document.
 
