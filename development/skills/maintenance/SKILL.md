@@ -864,7 +864,8 @@ it reachable — the gate must not depend on the two staying in sync.
 
 If **both** `supported` (languages) and `supported_topics` are empty, halt —
 but **print every `unsupported` / `unsupported_topics` entry with its note
-verbatim first**. Phase 9 never runs on this branch, so it is the only place
+verbatim first**. Phase 9's summary never runs on this branch (under
+`--scheduled` its run-record step still does), so it is the only place
 those notes can reach a human, and a bucket nothing renders is the silent drop
 the partition step's "never silently dropped" rule forbids. Say explicitly when
 an entry is a **not-evaluated marker** — *"the kubernetes marker search did not
@@ -3646,8 +3647,8 @@ your own malformed call: fix it and re-run once; a second costs the record.
 Under `--scheduled`, every ending writes the run's `maintenance-run/v1` record
 with `write-run-record.zsh` and posts it to the repo's standing *Maintenance
 log* issue with `post-maintenance-log.zsh`, as the run's **last act** — a
-cut-off run and a stop before Phase 2's gate included. The outcome, the summary
-it is built from and both failure arms are in `reference/report.md`
+cut-off run and a stop at or before Phase 2's gate included. The outcome, the
+summary it is built from and both failure arms are in `reference/report.md`
 § The scheduled run's record and the Maintenance log (#3215), with the order
 against clearing the checkpoint. Without `--scheduled`, or under `--dry-run`,
 neither script runs.

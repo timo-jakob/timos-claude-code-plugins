@@ -9641,8 +9641,9 @@ rendered from it, never from the run's prose.
 ```
 
 - **`outcome`** — `completed`, `cut-off` (something was deferred by the
-  cutoff), `could-not-start` (stopped before any work), `outside-window`
-  (written by the wave for a repo it did not start before the cutoff) or
+  cutoff), `could-not-start` (stopped in Phase 0 or 1, or at Phase 2's
+  gate), `outside-window` (written by the wave for a repo it did not start
+  before the cutoff) or
   `skipped-running` (an earlier run may still be going). `reason` is one line,
   or `null`.
 - **The shape is fixed.** `concerns` always holds all five concerns in concern

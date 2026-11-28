@@ -53,8 +53,9 @@ diagnostic when the GitHub App's check is erroring.
 
 Under `--scheduled` every ending leaves a `maintenance-run/v1` record and one
 comment on the repo's standing *Maintenance log* issue: the normal ending, a
-cut-off run, and a stop before Phase 2's gate, which emits no telemetry record.
-Under `--dry-run` neither script runs: a dry run performs no outward actions.
+cut-off run, and a stop at or before Phase 2's gate, which emits no telemetry
+record. Under `--dry-run` neither script runs: a dry run performs no outward
+actions.
 The summary below is written before *Run complete — clear the checkpoint*,
 since it reads the checkpoint; the two script calls are the run's last act —
 after Phase 10's report, after the Phase 9 emit when Phase 10 is skipped, or
@@ -67,7 +68,7 @@ two scripts' headers state their exit codes.
 | The run … | `--outcome` |
 | --- | --- |
 | ended at the resume entry because a younger checkpoint says a run may still be going (`reference/scheduled.md` § 1) | `skipped-running` |
-| stopped in Phase 0, 1 or 2, before any work | `could-not-start` |
+| stopped in Phase 0 or 1, or at Phase 2's gate | `could-not-start` |
 | deferred any group, stage or bug by `cutoff` | `cut-off` |
 | ended any other way | `completed` |
 
@@ -92,8 +93,8 @@ item is `{number, title, url, note}`:
   `not_eligible` and `not_reproducing` (a fix stopped with
   `spec-does-not-reproduce`).
 
-A stop before Phase 2 writes no summary, passes no `--from`, and takes a fresh
-`mktemp -d` as `<scratch>`. `<owner/name>` is what follows `github.com/` or
+A stop at or before Phase 2's gate writes no summary, passes no `--from`, and
+takes a fresh `mktemp -d` as `<scratch>`. `<owner/name>` is what follows `github.com/` or
 `github.com:` in `git remote get-url origin`, `.git` dropped, so it needs no
 network. With no git repo, no `origin`, or an origin not on github.com, never
 guess one: run neither script, and report that the run record could not be
