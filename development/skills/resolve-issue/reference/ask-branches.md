@@ -10,7 +10,23 @@ named here, prints a one-line notice and records a Decisions-taken entry. An
 `intent` or `gap` branch stays with the human, and its autonomous / interactive
 split is the one its own file states, and `scripts/resolve-session.zsh` decides
 which arm a run takes. Apart from the RS-06a and RS-09 procedures, the last two
-sections below, this file states no rule of its own.
+sections below, and the paragraph that follows, this file states no rule of its
+own.
+
+**Which document decides an `implementation` branch (#3354).** Before a run
+takes any `implementation` default named here, it runs
+`resolve-reference-doc.zsh docs/architecture/target-architecture.md` from the
+repo root and, on its exit 0, `validate-target-architecture.zsh` on the `path`
+the lookup printed. Both ship in this plugin, at
+`<skill-base-dir>/../../scripts/reference-docs/`. What then decides, and in
+what order, is ARCHITECTURE.md's
+[*Which document decides*](https://github.com/timo-jakob/timos-claude-code-plugins/blob/main/ARCHITECTURE.md#which-document-decides),
+linked here and not restated. On the lookup's exit 3, the only outcome that
+means the repo has no target architecture, the run decides exactly as before.
+On any other outcome, the lookup's exit 1, 2, 4, 5 or 6 or the validator's
+exit 1 or 2, the run ends as a clean stop that relays the script's stderr: it
+takes no `implementation` default, opens no PR and records the run `failed`;
+a step of a human-started chain writes verdict `stopped`, cause `tooling`.
 
 ## The inventory
 
