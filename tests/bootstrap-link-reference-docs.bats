@@ -259,7 +259,7 @@ assert_stop() {
   [ "$status" -eq "$code" ] || { echo "status $status, want $code: $stderr"; return 1; }
   [ -z "$output" ] || { echo "stdout: $output"; return 1; }
   [ "$(printf '%s\n' "$stderr" | wc -l | tr -d ' ')" -eq 1 ] || { echo "stderr: $stderr"; return 1; }
-  starts_with "$stderr" "link-reference-docs: "
+  starts_with "$stderr" "link-reference-docs: " || return 1
   [ "$(repo_state "$repo")" = "$before" ] || { echo "the repo changed"; return 1; }
 }
 
@@ -603,18 +603,18 @@ flat_skill() { tr '\n' ' ' < "$SKILL" | tr -s ' '; }
   contains "$s" "Never asked for: without the flag nothing is linked."
   contains "$s" "**3a.1. Linked docs repository (\`--docs-repo\`, #3355).** Links a docs repository the repo owner controls"
   contains "$s" 'Linked docs: <url> → linked-docs/ at its newest version tag, and the CLAUDE.md section "## Linked reference documents" # --docs-repo only (§3a.1)'
-  contains "$s" 'The `Linked docs:` line** is shown only with `--docs-repo <url>` (§3a.1), naming the link and the section. Without the flag the plan mentions neither.'
+  contains "$s" 'The `Linked docs:` line** is shown only with `--docs-repo <url>` (§3a.1), naming the link and the section. Without the flag and with no marked submodule the plan mentions neither; a marked submodule whose `CLAUDE.md` lacks the section is reported as §3a.1'"'"'s State D gap.'
   contains "$s" "Without the flag and with no marked submodule, the plan mentions neither the link nor the section and nothing changes."
 }
 
 @test "skill: the step runs apply then apply-section once CLAUDE.md exists, and a stop continues bootstrap" {
   local s
   s="$(flat_skill)"
-  contains "$s" "**Run the script** in Step 3, once \`CLAUDE.md\` exists — after §3a's render of it"
+  contains "$s" "**Run the script** in Step 3, once \`CLAUDE.md\` exists — after §3a's render of it — from the repository root, with absolute paths:"
   contains "$s" '"<skill-base-dir>/scripts/link-reference-docs.zsh" apply --repo-dir "<repo-path>" --url "<url>"'
   contains "$s" '--template "<skill-base-dir>/templates/common/claude-md-linked-reference-docs.md.tmpl"'
   contains "$s" "The Step 5 summary names the URL and the reason (its stderr line), **no section is appended**, and the rest of bootstrap continues."
-  contains "$s" "**The report names a stopped docs link** (§3a.1, #3355): when \`link-reference-docs.zsh apply\` stopped, one outstanding item names the URL and the reason from its stderr line"
+  contains "$s" "**The report names a stopped docs link** (§3a.1, #3355): when \`link-reference-docs.zsh check\` or \`apply\` stopped, one outstanding item names the URL and the reason from its stderr line"
 }
 
 @test "skill: the State D gap is closed like the decision-rights one and keeps the no-drift stop open" {
@@ -639,9 +639,10 @@ flat_skill() { tr '\n' ' ' < "$SKILL" | tr -s ' '; }
   contains "$s" '`--docs-repo <url>` — a docs repository you control, such as the one holding your target architecture, linked as the `linked-docs/` submodule pinned to its newest version tag and bound in `CLAUDE.md` (§3a.1, #3355).'
   contains "$s" '**Trigger.** `--docs-repo <url>`.'
   contains "$s" 'With `--docs-repo <url>` the plan'"'"'s `Linked docs:` line lists the link (`.gitmodules` and `linked-docs/`) and the `CLAUDE.md` section.'
-  contains "$s" 'keeps its pin. Then run `apply-section`.'
+  contains "$s" 'the submodule is at the mount, checked out at the newest version tag, `.gitmodules` carries the key and no `branch` line, and both are **staged, never committed**: they land in bootstrap'"'"'s one commit (4d). A re-run, or a submodule of that URL that only lacked the key, contacts no remote and keeps its pin. Then run `apply-section` — only after `apply` printed `linked`, never in the same shell call as `apply`:'
+  contains "$s" '**exit 2** — a usage error. A `--docs-repo` value that is not absolute is the user'"'"'s and is never rewritten: it is the stop above, its reason the first stderr line. Any other exit 2 is your own malformed call: fix it and re-run.'
   contains "$s" '**`apply-section`** takes the exit codes of the decision-rights rule'"'"'s `apply` (*State D — the decision-rights rule'"'"'s adoption gap*, §3a): exit 0 `applied` or `present`; exit 4 or 5 is an outstanding Step 5 item.'
-  contains "$s" 'With `--docs-repo <url>`, also run `check` with the same `--repo-dir` and `--url` (it contacts no remote): exit 1 offers the link in the plan, and `apply` closes it on confirmation; exit 0 needs nothing.'
+  contains "$s" 'With `--docs-repo <url>`, also run `check` with the same `--repo-dir` and `--url` (it contacts no remote): exit 1 offers the link in the plan, and `apply` closes it on confirmation; exit 0 needs nothing; exit 5 or 6 is the same stop as `apply`'"'"'s — the link is not offered, `apply` is not run, and the URL and the reason are reported: in the Step 5 summary, or with the no-drift stop'"'"'s message when the run ends there.'
 }
 
 @test "plugin: every new file of the step lies under the bootstrap skill" {

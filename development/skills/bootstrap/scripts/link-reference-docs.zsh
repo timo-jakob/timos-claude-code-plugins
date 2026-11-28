@@ -228,7 +228,12 @@ if [[ "$state" == absent ]]; then
 
   # Never prompt: no terminal prompt, no askpass helper, ssh in batch mode, no stdin.
   export GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=false SSH_ASKPASS=false
-  [[ -n "${GIT_SSH_COMMAND-}" ]] || export GIT_SSH_COMMAND="ssh -o BatchMode=yes"
+  # The caller's own ssh choice is kept: GIT_SSH_COMMAND and GIT_SSH are left
+  # alone, and core.sshCommand (which GIT_SSH_COMMAND would override) is carried.
+  if [[ -z "${GIT_SSH_COMMAND-}" && -z "${GIT_SSH-}" ]]; then
+    ssh_cmd="$(g config --get core.sshCommand 2>/dev/null)"
+    export GIT_SSH_COMMAND="${ssh_cmd:-ssh} -o BatchMode=yes"
+  fi
 
   refs="$(g ls-remote --tags --refs -- "$url" </dev/null 2>/dev/null)" ||
     stop 3 "$url cannot be reached"

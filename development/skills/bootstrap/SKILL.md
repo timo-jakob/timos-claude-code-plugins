@@ -1234,7 +1234,9 @@ Bootstrap plan:
 ```
 
 **The `Linked docs:` line** is shown only with `--docs-repo <url>` (§3a.1),
-naming the link and the section. Without the flag the plan mentions neither.
+naming the link and the section. Without the flag and with no marked submodule
+the plan mentions neither; a marked submodule whose `CLAUDE.md` lacks the
+section is reported as §3a.1's State D gap.
 
 **The `Toolchain:` and `CI runner:` lines come from `resolve-tools.zsh`'s
 output** (*Resolve the toolchain*, #1651): name each category's value with its
@@ -1992,15 +1994,20 @@ the link (`.gitmodules` and `linked-docs/`) and the `CLAUDE.md` section.
 
 ```bash
 "<skill-base-dir>/scripts/link-reference-docs.zsh" apply --repo-dir "<repo-path>" --url "<url>"
-"<skill-base-dir>/scripts/link-reference-docs.zsh" apply-section --claude-md "<repo-path>/CLAUDE.md" \
-  --template "<skill-base-dir>/templates/common/claude-md-linked-reference-docs.md.tmpl"
 ```
 
 - **`apply` exit 0, `linked`** — the submodule is at the mount, checked out at
   the newest version tag, `.gitmodules` carries the key and no `branch` line, and
   both are **staged, never committed**: they land in bootstrap's one commit (4d).
   A re-run, or a submodule of that URL that only lacked the key, contacts no
-  remote and keeps its pin. Then run `apply-section`.
+  remote and keeps its pin. Then run `apply-section` — only after `apply`
+  printed `linked`, never in the same shell call as `apply`:
+
+  ```bash
+  "<skill-base-dir>/scripts/link-reference-docs.zsh" apply-section --claude-md "<repo-path>/CLAUDE.md" \
+    --template "<skill-base-dir>/templates/common/claude-md-linked-reference-docs.md.tmpl"
+  ```
+
 - **`apply` exit 3, 4, 5, 6 or 7** — a stop: the URL cannot be reached
   (credentials the session lacks included — the script never prompts), the
   repository has no version tag, the mount exists and is not a submodule of that
@@ -2008,8 +2015,9 @@ the link (`.gitmodules` and `linked-docs/`) and the `CLAUDE.md` section.
   was undone. The script changed nothing. The Step 5 summary names the URL and
   the reason (its stderr line), **no section is appended**, and the rest of
   bootstrap continues.
-- **exit 2** — your own malformed call, a URL that is not absolute included: fix
-  it and re-run.
+- **exit 2** — a usage error. A `--docs-repo` value that is not absolute is the
+  user's and is never rewritten: it is the stop above, its reason the first
+  stderr line. Any other exit 2 is your own malformed call: fix it and re-run.
 - **`apply-section`** takes the exit codes of the decision-rights rule's `apply`
   (*State D — the decision-rights rule's adoption gap*, §3a): exit 0 `applied` or
   `present`; exit 4 or 5 is an outstanding Step 5 item.
@@ -2022,7 +2030,10 @@ ends the run. Exit 1 is the gap — report it in the Step 2 plan as "`CLAUDE.md`
 lacks the linked reference documents section" and, on confirmation, run
 `apply-section` as above. With `--docs-repo <url>`, also run `check` with the
 same `--repo-dir` and `--url` (it contacts no remote): exit 1 offers the link in
-the plan, and `apply` closes it on confirmation; exit 0 needs nothing.
+the plan, and `apply` closes it on confirmation; exit 0 needs nothing; exit 5 or
+6 is the same stop as `apply`'s — the link is not offered, `apply` is not run,
+and the URL and the reason are reported: in the Step 5 summary, or with the
+no-drift stop's message when the run ends there.
 
 A further docs repository is linked by running `link-reference-docs.zsh apply` with `--path <mount>`. The
 `styleguide/` submodule of §3k.5a is mounted by its own script, does not carry the `reference-docs` key and is not
@@ -7935,7 +7946,7 @@ A `skipped` or `failed` line is an outstanding item; an `added` or `present`
 line is reported once and is not a TODO.
 
 **The report names a stopped docs link** (§3a.1, #3355): when
-`link-reference-docs.zsh apply` stopped, one outstanding item names the URL and
+`link-reference-docs.zsh check` or `apply` stopped, one outstanding item names the URL and
 the reason from its stderr line, and says that no `CLAUDE.md` section was
 appended.
 
