@@ -578,7 +578,8 @@ flat_tmpl() { tr '\n' ' ' < "$TMPL" | tr -s ' '; }
   contains "$t" "Where they and the plugin family's defaults differ, they win."
   contains "$t" "Cite the clause you follow."
   contains "$t" "Never edit a file under a link's mount"
-  contains "$t" "Never move a pin by hand, and close a Dependabot PR that moves one instead of merging it: a link is pinned to a version tag of its repository."
+  contains "$t" 'Never move a pin by hand, and close a Dependabot PR that moves the pin of a submodule marked `reference-docs` instead of merging it: a link is pinned to a version tag of its repository.'
+  contains "$t" "The styleguide's Dependabot PR is not covered by this rule and is merged as before."
   contains "$t" 'An empty mount is fixed with `git submodule update --init`.'
 }
 
@@ -633,6 +634,7 @@ flat_skill() { tr '\n' ' ' < "$SKILL" | tr -s ' '; }
   s="$(flat_skill)"
   contains "$s" 'A further docs repository is linked by running `link-reference-docs.zsh apply` with `--path <mount>`. The `styleguide/` submodule of §3k.5a is mounted by its own script, does not carry the `reference-docs` key and is not a linked docs repository: the `## Linked reference documents` section does not cover it.'
   contains "$s" "Where \`.github/dependabot.yml\` carries a \`gitsubmodule\` entry, Dependabot may propose a move of a linked docs repository's pin, and such a PR is closed, not merged, because the pin moves to version tags only."
+  contains "$s" "A linked docs repository's submodule (§3a.1) draws the same refusal and is handled the same way."
 }
 
 @test "skill: the step's trigger, plan, apply-section and State D link sentences are pinned whole" {
