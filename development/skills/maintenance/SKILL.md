@@ -3640,6 +3640,15 @@ prints one `maintenance record NOT emitted` advisory and appends nothing. Relay
 that line and carry on — the run's summary, exit and PRs stand. An exit 2 is
 your own malformed call: fix it and re-run once; a second costs the record.
 
+**Under `--scheduled` — the run record and the Maintenance log (#3215).**
+Under `--scheduled`, every ending writes the run's `maintenance-run/v1` record
+with `write-run-record.zsh` and posts it to the repo's standing *Maintenance
+log* issue with `post-maintenance-log.zsh`, as the run's **last act** — a
+cut-off run and a stop before Phase 2's gate included. The outcome, the summary
+it is built from and both failure arms are in `reference/report.md`
+§ The scheduled run's record and the Maintenance log (#3215). Without
+`--scheduled`, neither script runs.
+
 ## Phase 10 — track changes and findings as GitHub issues
 
 **Runs by default.** Skip this phase entirely when `--no-issues` was

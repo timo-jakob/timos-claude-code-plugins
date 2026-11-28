@@ -3387,7 +3387,8 @@ development/skills/maintenance/
                    #   per-tool override, `-f -f`, post-merge state re-check,
                    #   the concern order
     gather.md      # Phases 3–4/6: no-trim contract incidents, drift severities
-    report.md      # Phase 9: Snyk channel-naming table, cross-link examples
+    report.md      # Phase 9: Snyk channel-naming table, cross-link examples,
+                   #   the scheduled run's record and Maintenance log
   scripts/         # gather-/verify-<lang>, write-payload, token mint, …
 ```
 
@@ -9617,6 +9618,50 @@ of it, so parked major bumps never stop maintenance for good — and the
 cutoff keeps the run inside its window. A run typed by hand keeps every
 group it had before except bugs, since each bug fix is a whole
 `resolve-issue` run.
+
+### Maintenance run record (`maintenance-run/v1`) (#3215)
+
+Every `--scheduled` run leaves one record per repo per wave, at
+`$MAINTENANCE_RUN_DIR/<owner>__<name>.json`, written by
+`development/skills/maintenance/scripts/write-run-record.zsh` to a temporary
+file in that directory and renamed over the target, so no reader sees a
+partial record. The Maintenance log comment and the nightly report are
+rendered from it, never from the run's prose.
+
+```json
+{ "schema": "maintenance-run/v1", "repo": "acme/widgets",
+  "started_at": "2026-11-28T02:00:00Z", "ended_at": "2026-11-28T03:25:10Z",
+  "outcome": "completed", "reason": null,
+  "concerns": { "security": { "merged": [ { "number": 12, "title": "…", "url": "https://…", "note": null } ],
+                              "opened": [], "waiting": [], "parked": [], "deferred": [] },
+                "dependencies": { … }, "bugs": { … }, "codequality": { … }, "topic": { … } },
+  "bugs": { "analysed": [], "awaiting_confirmation": [], "fixed": [], "not_a_bug": [],
+            "not_eligible": [], "not_reproducing": [] },
+  "log_comment_url": null }
+```
+
+- **`outcome`** — `completed`, `cut-off` (something was deferred by the
+  cutoff), `could-not-start` (stopped before any work), `outside-window`
+  (written by the wave for a repo it did not start before the cutoff) or
+  `skipped-running` (an earlier run may still be going). `reason` is one line,
+  or `null`.
+- **The shape is fixed.** `concerns` always holds all five concerns in concern
+  order, each with all five lists, and `bugs` all six lists; a list with
+  nothing in it is `[]`, never absent. Every item is `{number, title, url,
+  note}`, with `number`, `url` and `note` nullable. Timestamps are UTC seconds,
+  `YYYY-MM-DDTHH:MM:SSZ`.
+- **`log_comment_url`** is `null` until
+  `development/skills/maintenance/scripts/post-maintenance-log.zsh` posts the
+  record to the repo's open issue titled `Maintenance log` (label
+  `maintenance-log`), which it opens once on first use and never closes. With
+  GitHub unreachable it stays `null` and the record is otherwise complete.
+
+*Rationale:* a night nobody watched must still be legible in the morning,
+including the nights that did nothing. A fixed shape lets the report and the
+comment render every repo the same way without guessing at missing keys, and
+the atomic rename means a wave killed mid-write never leaves a half record for
+the report to choke on. One standing issue, not one per run, keeps the history
+in one place without filling the repo's issue list.
 
 ### From worktrees to PRs
 
