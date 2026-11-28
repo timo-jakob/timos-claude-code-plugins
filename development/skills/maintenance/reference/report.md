@@ -86,12 +86,20 @@ item is `{number, title, url, note}`:
 - per concern (`security`, `dependencies`, `bugs`, `codequality`, `topic`):
   `merged` — PRs merged this run; `opened` — PRs this run opened that are still
   open and not waiting for a human; `waiting` — open PRs waiting for a human's
-  approval or decision; `parked` — escalated or held stages and bugs, and bug
-  fixes that did not merge, the reason in `note`; `deferred` — groups and bugs
-  not started, `note` naming the `deferred_by` or the reason;
-- `bugs`: `analysed`, `awaiting_confirmation`, `fixed`, `not_a_bug`,
-  `not_eligible` and `not_reproducing` (a fix stopped with
-  `spec-does-not-reproduce`).
+  approval or decision; `parked` — escalated or held stages and bugs, bug
+  fixes that left no open or merged PR, and failed analyses, the reason in
+  `note`; `deferred` — groups and bugs not started, `note` naming the
+  `deferred_by` or the reason;
+- `bugs`: `fixed` — a bug belongs here only when its fix was confirmed by its
+  PR merging this run, never when the fix was merely attempted: an open fix PR
+  goes under the `bugs` concern's `opened` or `waiting`, a
+  `spec-does-not-reproduce` stop under `not_reproducing`, and every other
+  ending of a fix run under the concern's `parked`, the ending in `note`;
+  `analysed` — bugs analysed this run, the verdict in `note`;
+  `awaiting_confirmation` — bugs whose spec waits for a code owner's
+  `confirmed` label; `not_a_bug`, `not_eligible` and `not_reproducing` (a fix
+  stopped with `spec-does-not-reproduce`) — bugs in that state, the reason in
+  `note`.
 
 A stop at or before Phase 2's gate writes no summary, passes no `--from`, and
 takes a fresh `mktemp -d` as `<scratch>`. `<owner/name>` is what follows `github.com/` or

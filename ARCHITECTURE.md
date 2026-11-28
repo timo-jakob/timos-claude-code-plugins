@@ -9650,7 +9650,9 @@ rendered from it, never from the run's prose.
   order, each with all five lists, and `bugs` all six lists; a list with
   nothing in it is `[]`, never absent. Every item is `{number, title, url,
   note}`, with `number`, `url` and `note` nullable. Timestamps are UTC seconds,
-  `YYYY-MM-DDTHH:MM:SSZ`.
+  `YYYY-MM-DDTHH:MM:SSZ`. `bugs.fixed` holds a bug only when its fix PR merged
+  this run, never a fix merely attempted;
+  `development/skills/maintenance/reference/report.md` defines every list.
 - **`log_comment_url`** is `null` until
   `development/skills/maintenance/scripts/post-maintenance-log.zsh` posts the
   record to the repo's open issue titled `Maintenance log` (label

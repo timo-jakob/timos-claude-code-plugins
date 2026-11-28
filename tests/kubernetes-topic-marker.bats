@@ -1085,8 +1085,8 @@ chart() {
 }
 
 @test "the halt branch RENDERS the unsupported bucket before halting (#1177)" {
-  # the bucket is worthless if nothing prints it. Phase 9 never runs on the halt
-  # branch, so a GitOps-only repo with no language and an unreadable subtree —
+  # the bucket is worthless if nothing prints it. Phase 9's summary never runs on
+  # the halt branch (under --scheduled only its run-record step does), so a GitOps-only repo with no language and an unreadable subtree —
   # exactly the repo this topic exists for — would otherwise be reported
   # identically to a repo that has no charts at all.
   local skill

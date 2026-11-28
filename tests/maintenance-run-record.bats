@@ -225,6 +225,35 @@ Waiting for a human:
   lacks "$c" "Not a bug:"
 }
 
+@test "post: each of the eleven list labels renders its own list" {
+  # one item per list, built from the same key=label table the assertions walk,
+  # so a dropped or misspelt row of the script's label map fails here
+  local labels=(merged=Merged opened=Opened "waiting=Waiting for a human" parked=Parked deferred=Deferred
+                analysed=Analysed "awaiting_confirmation=Awaiting confirmation" fixed=Fixed
+                "not_a_bug=Not a bug" "not_eligible=Not eligible" "not_reproducing=Not reproducing")
+  local pair key concern='{}' bugs='{}' c
+  for pair in "${labels[@]:0:5}"; do
+    key="${pair%%=*}"
+    concern="$(jq -c --arg k "$key" '. + {($k): [{number: null, title: ("item " + ($k | gsub("_"; "-")))}]}' <<<"$concern")"
+  done
+  for pair in "${labels[@]:5}"; do
+    key="${pair%%=*}"
+    bugs="$(jq -c --arg k "$key" '. + {($k): [{number: null, title: ("item " + ($k | gsub("_"; "-")))}]}' <<<"$bugs")"
+  done
+  jq -n --argjson c "$concern" --argjson b "$bugs" '{concerns: {security: $c}, bugs: $b}' > "$BATS_TEST_TMPDIR/all.json"
+  write_record --repo acme/widgets --outcome completed --from "$BATS_TEST_TMPDIR/all.json"
+  [ "$status" -eq 0 ]
+  run --separate-stderr zsh "$POST" "$REC"
+  [ "$status" -eq 0 ]
+  c="$(cat "$FIX/comment-1.md")"
+  [ "${#labels[@]}" -eq 11 ]
+  for pair in "${labels[@]}"; do
+    key="${pair%%=*}"
+    contains "$c" "${pair#*=}:
+- item ${key//_/-}"
+  done
+}
+
 @test "post: markdown and @mentions in a title, note or reason stay literal text on one line" {
   printf '%s\n' '{"concerns": {"security": {"merged": [{"number": 12, "title": "Bump | `left-pad` [x]\nby @alice *_<>#~\\",
     "url": "https://github.com/acme/widgets/pull/12", "note": "a | b `c`"}]}}}' > "$BATS_TEST_TMPDIR/s.json"
@@ -325,7 +354,11 @@ flat() {
     prev=$row
   done
   contains "$r" "\`started_at\` (the start stamp's time, \`jq -r '.ts | todate' <scratch>/maintenance-run.json\`)"
-  contains "$r" "\`parked\` — escalated or held stages and bugs, and bug fixes that did not merge, the reason in \`note\`; \`deferred\` — groups and bugs not started, \`note\` naming the \`deferred_by\` or the reason;"
+  contains "$r" "\`merged\` — PRs merged this run; \`opened\` — PRs this run opened that are still open and not waiting for a human; \`waiting\` — open PRs waiting for a human's approval or decision;"
+  contains "$r" "\`parked\` — escalated or held stages and bugs, bug fixes that left no open or merged PR, and failed analyses, the reason in \`note\`; \`deferred\` — groups and bugs not started, \`note\` naming the \`deferred_by\` or the reason;"
+  contains "$r" "\`fixed\` — a bug belongs here only when its fix was confirmed by its PR merging this run, never when the fix was merely attempted: an open fix PR goes under the \`bugs\` concern's \`opened\` or \`waiting\`, a \`spec-does-not-reproduce\` stop under \`not_reproducing\`, and every other ending of a fix run under the concern's \`parked\`, the ending in \`note\`;"
+  contains "$(flat development/skills/maintenance/reference/bugs.md)" "called fixed only when its PR merged, never when the fix was merely attempted"
+  contains "$(flat ARCHITECTURE.md)" "\`bugs.fixed\` holds a bug only when its fix PR merged this run, never a fix merely attempted;"
   contains "$r" "A stop at or before Phase 2's gate writes no summary, passes no \`--from\`, and takes a fresh \`mktemp -d\` as \`<scratch>\`. \`<owner/name>\` is what follows \`github.com/\` or \`github.com:\` in \`git remote get-url origin\`, \`.git\` dropped, so it needs no network. With no git repo, no \`origin\`, or an origin not on github.com, never guess one: run neither script, and report that the run record could not be written."
   contains "$r" "--repo <owner/name> --outcome <outcome>"
   contains "$r" "post-maintenance-log.zsh\" <record>"
@@ -354,5 +387,7 @@ flat() {
   for o in completed cut-off could-not-start outside-window skipped-running; do
     contains "$a" "\`$o\`"
   done
+  # each outcome means what report.md's outcome table says it means
+  contains "$a" "\`cut-off\` (something was deferred by the cutoff), \`could-not-start\` (stopped in Phase 0 or 1, or at Phase 2's gate), \`outside-window\` (written by the wave for a repo it did not start before the cutoff) or \`skipped-running\` (an earlier run may still be going)."
   contains "$a" "which it opens once on first use and never closes. With GitHub unreachable it stays \`null\` and the record is otherwise complete."
 }

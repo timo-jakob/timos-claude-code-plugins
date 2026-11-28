@@ -185,8 +185,9 @@ a human at the keyboard, so an attended run applies the same rule.
 
 ## 5. Report
 
-The Phase 9 summary gets one `Bugs` block: the bugs fixed this run (each with
-how its run ended, section 2), the bugs analysed this run (with their
+The Phase 9 summary gets one `Bugs` block: every bug whose fix ran this run,
+with how its run ended (section 2) — called fixed only when its PR merged,
+never when the fix was merely attempted — the bugs analysed this run (with their
 verdicts), the bugs deferred by the cap, and under `--scheduled` by the cutoff
 or the open queue, each with its `deferred_by`, and the counts and numbers of every
 other state, each with its reason. A bug whose analysis failed is listed with
